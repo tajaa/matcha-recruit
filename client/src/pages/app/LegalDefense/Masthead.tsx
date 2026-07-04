@@ -1,18 +1,22 @@
 import { useEffect, useState } from 'react'
 import { FileArchive, FileText, Loader2 } from 'lucide-react'
-import { Button } from '../../../components/ui'
-import type { EvidencePreview, Matter } from '../../../api/legalDefense'
+import { Button, Toggle } from '../../../components/ui'
+import type { EvidencePreview, Matter, ResearchRow } from '../../../api/legalDefense'
 import { LABEL, SOURCE_META, typeLabel } from './shared'
 
 /** Docket header: matter caption + the systems strip (which internal systems
  *  feed this matter, live counts) + packet-generation state. */
-export function Masthead({ matter, evidence, genKind, hasAssistant, onGenerate }: {
+export function Masthead({ matter, evidence, genKind, hasAssistant, research, onGenerate }: {
   matter: Matter
   evidence: EvidencePreview | null
   genKind: 'pdf' | 'zip' | 'both' | null
   hasAssistant: boolean
-  onGenerate: (kind: 'pdf' | 'both') => void
+  research?: ResearchRow | null
+  onGenerate: (kind: 'pdf' | 'both', includeResearch: boolean) => void
 }) {
+  const [includeResearch, setIncludeResearch] = useState(false)
+  const researchReady = research?.status === 'complete'
+
   const window =
     matter.evidence_start || matter.evidence_end
       ? `${matter.evidence_start ?? '…'} → ${matter.evidence_end ?? '…'}`
@@ -34,14 +38,21 @@ export function Masthead({ matter, evidence, genKind, hasAssistant, onGenerate }
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2 pt-1">
-          <Button size="sm" variant="secondary" disabled={!hasAssistant || genKind !== null} onClick={() => onGenerate('pdf')}>
+          <Button size="sm" variant="secondary" disabled={!hasAssistant || genKind !== null} onClick={() => onGenerate('pdf', includeResearch)}>
             {genKind === 'pdf' ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />} Memo PDF
           </Button>
-          <Button size="sm" variant="secondary" disabled={!hasAssistant || genKind !== null} onClick={() => onGenerate('both')}>
+          <Button size="sm" variant="secondary" disabled={!hasAssistant || genKind !== null} onClick={() => onGenerate('both', includeResearch)}>
             {genKind === 'both' ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileArchive className="h-4 w-4" />} PDF + ZIP
           </Button>
         </div>
       </div>
+
+      {researchReady && (
+        <div className="flex items-center gap-2 px-5 pt-2">
+          <Toggle checked={includeResearch} onChange={setIncludeResearch} />
+          <span className="text-[11px] text-zinc-400">Include legal landscape (informational)</span>
+        </div>
+      )}
 
       <SystemsStrip key={matter.id} evidence={evidence} />
 

@@ -17,10 +17,11 @@ import secrets
 import unicodedata
 from datetime import date, datetime, timedelta, timezone
 from typing import Literal, Optional
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from ...database import get_connection
 from ..dependencies import require_admin_or_client, get_client_company_id
@@ -28,6 +29,7 @@ from app.core.feature_flags import merge_company_features
 from app.core.services.redis_cache import check_rate_limit, client_ip
 from app.core.services.storage import get_storage
 from ..services import legal_defense as ld
+from ..services import legal_research
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +53,13 @@ class MatterCreate(BaseModel):
     counsel_directed: bool = False
     counsel_name: Optional[str] = Field(None, max_length=200)
     counsel_email: Optional[str] = Field(None, max_length=320)
+    location_id: Optional[UUID] = None
+    jurisdiction_state: Optional[str] = Field(None, min_length=2, max_length=2)
+
+    @field_validator("jurisdiction_state")
+    @classmethod
+    def _upper_state(cls, v):
+        return v.upper() if v else v
 
 
 class MatterUpdate(BaseModel):
@@ -63,6 +72,13 @@ class MatterUpdate(BaseModel):
     counsel_directed: Optional[bool] = None
     counsel_name: Optional[str] = Field(None, max_length=200)
     counsel_email: Optional[str] = Field(None, max_length=320)
+    location_id: Optional[UUID] = None
+    jurisdiction_state: Optional[str] = Field(None, min_length=2, max_length=2)
+
+    @field_validator("jurisdiction_state")
+    @classmethod
+    def _upper_state(cls, v):
+        return v.upper() if v else v
 
 
 class ChatIn(BaseModel):
@@ -71,6 +87,7 @@ class ChatIn(BaseModel):
 
 class PacketIn(BaseModel):
     kind: Literal["pdf", "zip", "both"] = "both"
+    include_research: bool = False
 
 
 class ShareIn(BaseModel):
@@ -99,6 +116,15 @@ async def _load_matter(conn, matter_id: str, company_id) -> dict:
     if not row:
         raise HTTPException(status_code=404, detail="Matter not found")
     return dict(row)
+
+
+async def _check_location(conn, location_id, company_id) -> None:
+    row = await conn.fetchrow(
+        "SELECT 1 FROM business_locations WHERE id = $1 AND company_id = $2",
+        location_id, company_id,
+    )
+    if not row:
+        raise HTTPException(status_code=400, detail="Location not found")
 
 
 async def _features(conn, company_id) -> dict:
@@ -149,18 +175,21 @@ async def _latest_memo(conn, matter_id: str) -> Optional[dict]:
 async def create_matter(body: MatterCreate, request: Request, current_user=Depends(require_admin_or_client)):
     company_id = await get_client_company_id(current_user)
     async with get_connection() as conn:
+        if body.location_id:
+            await _check_location(conn, body.location_id, company_id)
         row = await conn.fetchrow(
             """
             INSERT INTO legal_matters
                 (company_id, title, matter_type, allegation, defense_theory,
                  evidence_start, evidence_end, counsel_directed, counsel_name,
-                 counsel_email, created_by, status)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'active')
+                 counsel_email, created_by, location_id, jurisdiction_state, status)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'active')
             RETURNING *
             """,
             company_id, body.title, body.matter_type, body.allegation, body.defense_theory,
             body.evidence_start, body.evidence_end, body.counsel_directed,
             body.counsel_name, body.counsel_email, getattr(current_user, "id", None),
+            body.location_id, body.jurisdiction_state,
         )
         await _audit(conn, row["id"], current_user, request, "create", {"title": body.title})
     return dict(row)
@@ -221,6 +250,8 @@ async def update_matter(matter_id: str, body: MatterUpdate, request: Request, cu
         raise HTTPException(status_code=400, detail="No fields to update")
     async with get_connection() as conn:
         await _load_matter(conn, matter_id, company_id)  # ownership
+        if fields.get("location_id"):
+            await _check_location(conn, fields["location_id"], company_id)
         sets, vals = [], []
         for i, (k, v) in enumerate(fields.items(), start=1):
             sets.append(f"{k} = ${i}")
@@ -247,13 +278,14 @@ async def get_evidence(matter_id: str, current_user=Depends(require_admin_or_cli
         matter = await _load_matter(conn, matter_id, company_id)
         features = await _features(conn, company_id)
         corpus = await ld.gather_evidence(
-            conn, company_id, matter["evidence_start"], matter["evidence_end"], features
+            conn, company_id, matter["evidence_start"], matter["evidence_end"], features, matter=matter
         )
     # Return source summaries + counts (the flat index is internal).
     return {
         "sources": corpus["sources"],
         "notes": corpus["notes"],
         "total": sum(len(s["records"]) for s in corpus["sources"].values()),
+        "legal_context": corpus.get("legal_context"),
     }
 
 
@@ -266,7 +298,7 @@ async def chat(matter_id: str, body: ChatIn, request: Request, current_user=Depe
         history = await _load_messages(conn, matter_id)
         features = await _features(conn, company_id)
         corpus = await ld.gather_evidence(
-            conn, company_id, matter["evidence_start"], matter["evidence_end"], features
+            conn, company_id, matter["evidence_start"], matter["evidence_end"], features, matter=matter
         )
         await conn.execute(
             "INSERT INTO legal_matter_messages (matter_id, role, content) VALUES ($1, 'user', $2)",
@@ -311,6 +343,37 @@ async def chat(matter_id: str, body: ChatIn, request: Request, current_user=Depe
 
 
 # --------------------------------------------------------------------------- #
+# External legal research (CourtListener case search + grounded Gemini
+# guidance) — synchronous POST (worst case ~110s: 20s CourtListener + 90s
+# Gemini), acceptable behind an explicit button. The row-status design
+# supports a later move to BackgroundTasks + GET-poll with no schema change.
+# --------------------------------------------------------------------------- #
+
+@router.post("/matters/{matter_id}/research")
+async def run_matter_research(matter_id: str, request: Request, current_user=Depends(require_admin_or_client)):
+    company_id = await get_client_company_id(current_user)
+    await check_rate_limit(str(company_id), "legal_research", 10, 3600)
+    async with get_connection() as conn:
+        matter = await _load_matter(conn, matter_id, company_id)
+        row = await legal_research.run_research(conn, matter, getattr(current_user, "id", None))
+        await _audit(conn, matter_id, current_user, request, "research",
+                     {"cases": len(row.get("cases") or []), "status": row.get("status")})
+    return row
+
+
+@router.get("/matters/{matter_id}/research")
+async def list_matter_research(matter_id: str, current_user=Depends(require_admin_or_client)):
+    company_id = await get_client_company_id(current_user)
+    async with get_connection() as conn:
+        await _load_matter(conn, matter_id, company_id)  # ownership
+        rows = await conn.fetch(
+            "SELECT * FROM legal_matter_research WHERE matter_id = $1 ORDER BY created_at DESC",
+            matter_id,
+        )
+    return [legal_research.parse_research_row(dict(r)) for r in rows]
+
+
+# --------------------------------------------------------------------------- #
 # Packet generation + download + counsel share
 # --------------------------------------------------------------------------- #
 
@@ -339,11 +402,22 @@ async def generate_packet(matter_id: str, body: PacketIn, request: Request, curr
             raise HTTPException(status_code=400, detail="Discuss the matter in chat first — the packet is built from that analysis.")
         features = await _features(conn, company_id)
         corpus = await ld.gather_evidence(
-            conn, company_id, matter["evidence_start"], matter["evidence_end"], features
+            conn, company_id, matter["evidence_start"], matter["evidence_end"], features, matter=matter
         )
         company = await conn.fetchrow("SELECT name FROM companies WHERE id = $1", company_id)
+
+        research_row = None
+        if body.include_research:
+            research_row = await conn.fetchrow(
+                "SELECT * FROM legal_matter_research WHERE matter_id = $1 AND status = 'complete' "
+                "ORDER BY created_at DESC LIMIT 1",
+                matter_id,
+            )
+            research_row = legal_research.parse_research_row(dict(research_row)) if research_row else None
+
         packet = await ld.build_defense_packet(conn, matter, corpus, memo,
-                                                company_name=company["name"] if company else None)
+                                                company_name=company["name"] if company else None,
+                                                research=research_row)
 
         storage = get_storage()
         base = _safe_name(matter.get("title"))
@@ -368,7 +442,7 @@ async def generate_packet(matter_id: str, body: PacketIn, request: Request, curr
             await _store("zip", packet["zip"], "zip", "application/zip")
 
         await _audit(conn, matter_id, current_user, request, "generate_packet",
-                     {"kind": body.kind, "citations": len(packet["citations"])})
+                     {"kind": body.kind, "citations": len(packet["citations"]), "research": body.include_research})
     return {"packets": out}
 
 

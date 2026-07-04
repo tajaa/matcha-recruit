@@ -1,6 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Loader2, X } from 'lucide-react'
 import { Button, Input, Modal, Select, Textarea, Toggle, useToast } from '../../../components/ui'
+import { fetchLocations } from '../../../api/compliance'
+import type { BusinessLocation } from '../../../types/compliance'
 import { createMatter, sharePacket, type Matter, type MatterType, type Packet } from '../../../api/legalDefense'
 import { MATTER_TYPES } from './shared'
 
@@ -13,8 +15,15 @@ export function NewMatterModal({ onClose, onCreated }: { onClose: () => void; on
   const [end, setEnd] = useState('')
   const [counsel, setCounsel] = useState(false)
   const [counselName, setCounselName] = useState('')
+  const [locations, setLocations] = useState<BusinessLocation[]>([])
+  const [locationId, setLocationId] = useState('')
+  const [stateOverride, setStateOverride] = useState('')
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+
+  useEffect(() => {
+    fetchLocations().then(setLocations).catch(() => setLocations([]))
+  }, [])
 
   async function submit() {
     if (!title.trim()) { setErr('Give the matter a title.'); return }
@@ -25,6 +34,8 @@ export function NewMatterModal({ onClose, onCreated }: { onClose: () => void; on
         allegation: allegation.trim() || null, defense_theory: context.trim() || null,
         evidence_start: start || null, evidence_end: end || null,
         counsel_directed: counsel, counsel_name: counsel ? (counselName.trim() || null) : null,
+        location_id: locationId || null,
+        jurisdiction_state: locationId ? null : (stateOverride.trim().toUpperCase() || null),
       })
       onCreated(m)
     } catch (e) {
@@ -48,6 +59,22 @@ export function NewMatterModal({ onClose, onCreated }: { onClose: () => void; on
           <Input label="Evidence from" type="date" value={start} onChange={(e) => setStart(e.target.value)} />
           <Input label="Evidence to" type="date" value={end} onChange={(e) => setEnd(e.target.value)} />
         </div>
+        {locations.length > 0 ? (
+          <Select
+            label="Location (governing jurisdiction)"
+            value={locationId}
+            placeholder="No location — use state below"
+            options={locations.map((l) => ({ value: l.id, label: `${l.name || 'Location'} — ${l.city}, ${l.state}` }))}
+            onChange={(e) => setLocationId(e.target.value)}
+          />
+        ) : (
+          <Input label="Jurisdiction state (optional, e.g. CA)" value={stateOverride}
+            maxLength={2} onChange={(e) => setStateOverride(e.target.value.toUpperCase())} />
+        )}
+        {locations.length > 0 && !locationId && (
+          <Input label="Or jurisdiction state (optional, e.g. CA)" value={stateOverride}
+            maxLength={2} onChange={(e) => setStateOverride(e.target.value.toUpperCase())} />
+        )}
         <div className="flex items-center justify-between rounded-lg border border-white/[0.06] px-3 py-2">
           <div>
             <div className="text-sm text-zinc-200">Prepared at the direction of counsel</div>

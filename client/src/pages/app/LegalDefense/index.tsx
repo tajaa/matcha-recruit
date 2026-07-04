@@ -3,12 +3,14 @@ import { Loader2, Plus, Scale } from 'lucide-react'
 import { Button, useToast } from '../../../components/ui'
 import {
   listMatters, getMatter, getEvidence, generatePacket, downloadPacket, streamChat,
-  type Matter, type MatterMessage, type EvidencePreview, type Packet, type ChatResult,
+  runResearch, listResearch,
+  type Matter, type MatterMessage, type EvidencePreview, type Packet, type ChatResult, type ResearchRow,
 } from '../../../api/legalDefense'
 import { LABEL, typeLabel } from './shared'
 import { Masthead } from './Masthead'
 import { Console } from './Console'
 import { EvidencePanel } from './EvidencePanel'
+import { LegalContextPanel } from './LegalContextPanel'
 import { PacketsPanel } from './PacketsPanel'
 import { NewMatterModal, ShareModal } from './modals'
 
@@ -18,6 +20,8 @@ export default function LegalDefense() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [matter, setMatter] = useState<Matter | null>(null)
   const [evidence, setEvidence] = useState<EvidencePreview | null>(null)
+  const [research, setResearch] = useState<ResearchRow | null>(null)
+  const [researching, setResearching] = useState(false)
   const [loading, setLoading] = useState(true)
   const [showNew, setShowNew] = useState(false)
 
@@ -29,9 +33,26 @@ export default function LegalDefense() {
     setSelectedId(id)
     setMatter(null)
     setEvidence(null)
-    const [m, ev] = await Promise.all([getMatter(id), getEvidence(id).catch(() => null)])
+    setResearch(null)
+    const [m, ev, researchRows] = await Promise.all([
+      getMatter(id), getEvidence(id).catch(() => null), listResearch(id).catch(() => []),
+    ])
     setMatter(m)
     setEvidence(ev)
+    setResearch(researchRows[0] ?? null)
+  }
+
+  async function handleRunResearch() {
+    if (!selectedId || researching) return
+    setResearching(true)
+    try {
+      const row = await runResearch(selectedId)
+      setResearch(row)
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Research failed', 'error')
+    } finally {
+      setResearching(false)
+    }
   }
 
   async function onCreated(m: Matter) {
@@ -94,7 +115,10 @@ export default function LegalDefense() {
             <Loader2 className="h-6 w-6 animate-spin text-zinc-500" />
           </div>
         ) : (
-          <MatterWorkbench matter={matter} evidence={evidence} onRefresh={() => openMatter(matter.id)} toast={toast} />
+          <MatterWorkbench
+            matter={matter} evidence={evidence} research={research} researching={researching}
+            onRunResearch={handleRunResearch} onRefresh={() => openMatter(matter.id)} toast={toast}
+          />
         )}
       </div>
 
@@ -103,8 +127,9 @@ export default function LegalDefense() {
   )
 }
 
-function MatterWorkbench({ matter, evidence, onRefresh, toast }: {
-  matter: Matter; evidence: EvidencePreview | null; onRefresh: () => void
+function MatterWorkbench({ matter, evidence, research, researching, onRunResearch, onRefresh, toast }: {
+  matter: Matter; evidence: EvidencePreview | null; research: ResearchRow | null; researching: boolean
+  onRunResearch: () => void; onRefresh: () => void
   toast: ReturnType<typeof useToast>['toast']
 }) {
   const [messages, setMessages] = useState<MatterMessage[]>(matter.messages ?? [])
@@ -135,10 +160,10 @@ function MatterWorkbench({ matter, evidence, onRefresh, toast }: {
     setSending(false)
   }
 
-  async function generate(kind: 'pdf' | 'both') {
+  async function generate(kind: 'pdf' | 'both', includeResearch: boolean) {
     setGenKind(kind)
     try {
-      const { packets } = await generatePacket(matter.id, kind)
+      const { packets } = await generatePacket(matter.id, kind, includeResearch)
       toast(`Generated ${packets.length} file(s) — downloading…`, 'success')
       onRefresh()
       // Generating doesn't imply the user will hunt for the new row in the
@@ -158,12 +183,15 @@ function MatterWorkbench({ matter, evidence, onRefresh, toast }: {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <Masthead matter={matter} evidence={evidence} genKind={genKind} hasAssistant={hasAssistant} onGenerate={(k) => void generate(k)} />
+      <Masthead matter={matter} evidence={evidence} genKind={genKind} hasAssistant={hasAssistant} research={research}
+        onGenerate={(k, includeResearch) => void generate(k, includeResearch)} />
       <div className="flex min-h-0 flex-1">
         <div className="min-w-0 flex-1">
           <Console messages={messages} status={status} sending={sending} evidence={evidence} onSend={(t) => void send(t)} />
         </div>
         <div className="flex w-80 shrink-0 flex-col border-l border-white/[0.06]">
+          <LegalContextPanel legalContext={evidence?.legal_context} research={research}
+            onRunResearch={onRunResearch} researching={researching} />
           <EvidencePanel evidence={evidence} />
           <PacketsPanel matterId={matter.id} packets={matter.packets ?? []} toast={toast} onShare={setShareFor} />
         </div>

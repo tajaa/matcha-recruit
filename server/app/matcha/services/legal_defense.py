@@ -29,6 +29,8 @@ import zipfile
 from datetime import datetime, timezone
 from uuid import UUID
 
+from app.config import get_settings
+from app.core.compliance_registry import CATEGORY_KEYS
 from app.core.services.genai_client import get_genai_client
 from app.core.services.pdf import safe_url_fetcher
 from app.core.services.storage import get_storage
@@ -105,6 +107,53 @@ def _hum(s) -> str:
     return str(s).replace("_", " ").replace("-", " ").strip().title()
 
 
+async def resolve_matter_jurisdiction(conn, matter: dict) -> dict | None:
+    """Resolve a matter's governing jurisdiction chain (federal → state → …)
+    from its location or state override. Returns None when neither is set —
+    callers treat that as "no jurisdiction grounding available", not an error.
+
+    Deliberately NOT ``compliance_service.resolve_jurisdiction_stack`` — that
+    CTE drags every requirement row along; this only needs the chain."""
+    loc = None
+    jid = None
+    state = (matter.get("jurisdiction_state") or "").upper() or None
+    if matter.get("location_id"):
+        loc = await conn.fetchrow(
+            "SELECT jurisdiction_id, name, state FROM business_locations "
+            "WHERE id = $1 AND company_id = $2",
+            matter["location_id"], matter["company_id"],
+        )
+        if loc:
+            jid = loc["jurisdiction_id"]
+            state = state or ((loc["state"] or "").upper() or None)
+    if jid is None and state:
+        row = await conn.fetchrow(
+            "SELECT id FROM jurisdictions WHERE state = $1 AND level = 'state' "
+            "AND country_code = 'US' LIMIT 1",
+            state,
+        )
+        jid = row["id"] if row else None
+    if jid is None:
+        return None
+    chain = await conn.fetch(
+        """WITH RECURSIVE chain AS (
+             SELECT id, parent_id, level, display_name, 0 AS depth
+             FROM jurisdictions WHERE id = $1
+             UNION ALL
+             SELECT j.id, j.parent_id, j.level, j.display_name, c.depth + 1
+             FROM jurisdictions j JOIN chain c ON j.id = c.parent_id
+             WHERE c.depth < 6)
+           SELECT id, level, display_name FROM chain ORDER BY depth""",
+        jid,
+    )
+    return {
+        "jurisdiction_id": jid,
+        "chain": [dict(r) for r in chain],
+        "state": state,
+        "location_name": loc["name"] if loc else None,
+    }
+
+
 async def _src_incidents(conn, company_id, start, end) -> list[dict]:
     rows = await conn.fetch(
         """
@@ -153,9 +202,10 @@ async def _src_compliance(conn, company_id, start, end) -> list[dict]:
     rows = await conn.fetch(
         """
         SELECT cr.id, cr.title, cr.category, cr.current_value, cr.jurisdiction_name,
-               cr.last_changed_at, bl.name AS location_name
+               cr.last_changed_at, bl.name AS location_name, jr.statute_citation
         FROM compliance_requirements cr
         JOIN business_locations bl ON bl.id = cr.location_id
+        LEFT JOIN jurisdiction_requirements jr ON jr.id = cr.jurisdiction_requirement_id
         WHERE bl.company_id = $1
         ORDER BY cr.last_changed_at DESC NULLS LAST
         """,
@@ -167,7 +217,8 @@ async def _src_compliance(conn, company_id, start, end) -> list[dict]:
         "summary": f"{r['title']}"
                    + (f" = {r['current_value']}" if r["current_value"] else "")
                    + (f" ({r['jurisdiction_name']})" if r["jurisdiction_name"] else "")
-                   + (f" @ {r['location_name']}" if r["location_name"] else ""),
+                   + (f" @ {r['location_name']}" if r["location_name"] else "")
+                   + (f" [{r['statute_citation']}]" if r["statute_citation"] else ""),
         "when": _dt(r["last_changed_at"]),
     } for r in rows]
 
@@ -257,6 +308,181 @@ async def _src_accommodations(conn, company_id, start, end) -> list[dict]:
     } for r in rows]
 
 
+async def _src_compliance_alerts(conn, company_id, start, end) -> list[dict]:
+    # Date-filtered (unlike _src_compliance's current-posture snapshot) — this
+    # is deliberately a history: it shows the company was monitoring during
+    # the matter window, not just what it tracks today.
+    rows = await conn.fetch(
+        """
+        SELECT ca.id, ca.title, ca.severity, ca.status, ca.category, ca.deadline,
+               ca.created_at, bl.name AS location_name
+        FROM compliance_alerts ca
+        JOIN business_locations bl ON bl.id = ca.location_id
+        WHERE ca.company_id = $1
+          AND ($2::date IS NULL OR ca.created_at >= $2)
+          AND ($3::date IS NULL OR ca.created_at < ($3::date + 1))
+        ORDER BY ca.created_at DESC
+        """,
+        company_id, start, end,
+    )
+    return [{
+        "cid": f"compliance_alert:{r['id']}",
+        "ref": _hum(r["category"]) or "Alert",
+        "summary": f"{r['title']} — {_hum(r['severity'])}, {_hum(r['status'])}"
+                   + (f", deadline {_dt(r['deadline'])}" if r["deadline"] else "")
+                   + (f" @ {r['location_name']}" if r["location_name"] else ""),
+        "when": _dt(r["created_at"]),
+    } for r in rows]
+
+
+# --------------------------------------------------------------------------- #
+# Matter-scoped external legal context — jurisdiction, governing requirements,
+# pending legislation, and externally-researched case law. Only populated
+# when the matter carries a location/state (see resolve_matter_jurisdiction).
+# --------------------------------------------------------------------------- #
+
+_WAGE_HOUR = ["minimum_wage", "overtime", "meal_breaks", "pay_frequency", "final_pay",
+              "scheduling_reporting", "sick_leave", "leave", "employee_classification",
+              "equal_pay", "pay_transparency"]
+_EEO = ["anti_discrimination", "equal_pay", "pregnancy_accommodation", "eeo_reporting",
+        "background_checks", "pay_transparency", "whistleblower"]
+
+# Matter type -> compliance categories most relevant to that theory of the
+# case. None = no category filter (pull broadly across the jurisdiction).
+_MATTER_TYPE_CATEGORIES: dict[str, list[str] | None] = {
+    "class_action": _WAGE_HOUR,
+    "single_plaintiff": _WAGE_HOUR,
+    "eeoc_charge": _EEO,
+    "subpoena": None,
+    "audit": None,
+    "other": None,
+}
+assert all(
+    k in CATEGORY_KEYS for ks in _MATTER_TYPE_CATEGORIES.values() if ks for k in ks
+), "legal_defense._MATTER_TYPE_CATEGORIES references a category not in the compliance registry"
+
+
+async def _gather_law(conn, matter: dict, juris: dict) -> tuple[dict | None, dict | None]:
+    """Governing requirements + pending legislation for the matter's
+    jurisdiction chain, filtered to the matter type's relevant categories
+    when possible. Returns ``(law_source, legislation_source)``, each shaped
+    like an existing evidence source (``{"label", "records"}``) or None."""
+    jurisdiction_ids = [c["id"] for c in juris["chain"]]
+    categories = _MATTER_TYPE_CATEGORIES.get(matter.get("matter_type"))
+    rows = None
+
+    if get_settings().gemini_api_key and matter.get("allegation"):
+        try:
+            from app.core.services.compliance_rag import ComplianceRAGService
+            from app.core.services.embedding_service import EmbeddingService
+
+            es = EmbeddingService(api_key=get_settings().gemini_api_key)
+            rag = ComplianceRAGService(es)
+            query = f"{matter.get('allegation') or ''} {_hum(matter.get('matter_type'))}"
+            hits = await rag.search_requirements(
+                query=query, conn=conn, jurisdiction_ids=jurisdiction_ids,
+                categories=categories, top_k=30, min_similarity=0.25,
+            )
+            if hits:
+                rows = [{
+                    "requirement_id": h["requirement_id"], "title": h["title"],
+                    "category": h["category"], "current_value": h.get("current_value"),
+                    "statute_citation": h.get("statute_citation"),
+                    "effective_date": h.get("effective_date"),
+                    "jurisdiction_level": h.get("jurisdiction_level"),
+                    "jurisdiction_name": h.get("jurisdiction_name"),
+                } for h in hits]
+        except Exception as e:  # noqa: BLE001 — fall through to direct query
+            logger.warning("legal_defense: RAG law retrieval unavailable: %s", e)
+
+    if rows is None:
+        rows = await conn.fetch(
+            """
+            SELECT id, title, category, current_value, statute_citation, effective_date,
+                   jurisdiction_level, jurisdiction_name
+            FROM jurisdiction_requirements
+            WHERE jurisdiction_id = ANY($1::uuid[]) AND status = 'active'
+              AND ($2::text[] IS NULL OR category = ANY($2))
+            ORDER BY effective_date DESC NULLS LAST LIMIT 40
+            """,
+            jurisdiction_ids, categories,
+        )
+        if not rows and categories is not None:
+            # A wage-hour category map on a non-wage class action must not
+            # blank the source entirely — widen to the full jurisdiction.
+            rows = await conn.fetch(
+                """
+                SELECT id, title, category, current_value, statute_citation, effective_date,
+                       jurisdiction_level, jurisdiction_name
+                FROM jurisdiction_requirements
+                WHERE jurisdiction_id = ANY($1::uuid[]) AND status = 'active'
+                ORDER BY effective_date DESC NULLS LAST LIMIT 40
+                """,
+                jurisdiction_ids,
+            )
+        rows = [dict(r) for r in rows]
+
+    law_records = [{
+        "cid": f"law:{r['requirement_id'] if 'requirement_id' in r else r['id']}",
+        "ref": r.get("statute_citation") or _hum(r["category"]),
+        "summary": f"{r['title']}"
+                   + (f" = {r['current_value']}" if r.get("current_value") else "")
+                   + f" ({r.get('jurisdiction_name') or ''}, {_hum(r.get('jurisdiction_level'))})",
+        "when": _dt(r.get("effective_date")),
+    } for r in rows]
+    law_source = {"label": "Governing requirements (jurisdiction)", "records": law_records} if law_records else None
+
+    bill_rows = await conn.fetch(
+        """
+        SELECT id, title, category, current_status, expected_effective_date, impact_summary
+        FROM jurisdiction_legislation
+        WHERE jurisdiction_id = ANY($1::uuid[])
+        ORDER BY expected_effective_date ASC NULLS LAST LIMIT 15
+        """,
+        jurisdiction_ids,
+    )
+    bill_records = [{
+        "cid": f"bill:{r['id']}",
+        "ref": _hum(r["category"]) or "Legislation",
+        "summary": f"{r['title']} — {_hum(r['current_status'])}"
+                   + (f": {r['impact_summary'][:160]}" if r["impact_summary"] else ""),
+        "when": _dt(r["expected_effective_date"]),
+    } for r in bill_rows]
+    bill_source = {"label": "Pending legislation (jurisdiction)", "records": bill_records} if bill_records else None
+
+    return law_source, bill_source
+
+
+async def _gather_case_law(conn, matter_id) -> dict | None:
+    """Externally-researched case law from the most recent completed
+    ``legal_matter_research`` run (see ``services/legal_research.py``).
+    ``case:`` cids are minted only from these persisted CourtListener API
+    rows — never from model text."""
+    row = await conn.fetchrow(
+        """SELECT cases FROM legal_matter_research
+             WHERE matter_id = $1 AND status = 'complete' AND cases IS NOT NULL
+             ORDER BY created_at DESC LIMIT 1""",
+        matter_id,
+    )
+    if not row or not row["cases"]:
+        return None
+    cases = row["cases"]
+    if isinstance(cases, str):
+        try:
+            cases = json.loads(cases)
+        except Exception:
+            return None
+    records = [{
+        "cid": f"case:{c['id']}",
+        "ref": c.get("citation") or c.get("court") or "opinion",
+        "summary": f"{c['case_name']} — {c.get('court') or ''}",
+        "when": c.get("date_filed") or "",
+    } for c in cases if isinstance(c, dict) and c.get("id") and c.get("case_name")]
+    if not records:
+        return None
+    return {"label": "Case law (external research — informational)", "records": records}
+
+
 # (key, label, query-fn, enabled(features)-predicate)
 _SOURCES = [
     ("incidents", "Safety incidents (IR / OSHA)", _src_incidents,
@@ -264,6 +490,8 @@ _SOURCES = [
     ("er_cases", "Employee-relations cases", _src_er_cases,
      lambda f: True),  # er_copilot has no feature gate in defaults
     ("compliance", "Compliance requirements tracked", _src_compliance,
+     lambda f: bool(f.get("compliance") or f.get("compliance_lite"))),
+    ("compliance_alerts", "Compliance monitoring alerts", _src_compliance_alerts,
      lambda f: bool(f.get("compliance") or f.get("compliance_lite"))),
     ("discipline", "Progressive discipline", _src_discipline,
      lambda f: bool(f.get("discipline"))),
@@ -276,13 +504,17 @@ _SOURCES = [
 ]
 
 
-async def gather_evidence(conn, company_id, start, end, features: dict) -> dict:
+async def gather_evidence(conn, company_id, start, end, features: dict, matter: dict | None = None) -> dict:
     """Assemble the in-scope evidence corpus across every enabled subsystem.
 
     Each source is isolated: a failure (missing column, transient error) degrades
     that source to "unavailable" and is noted — it never aborts the whole gather.
-    Returns ``{sources, index, notes}`` where ``index`` is a flat cid→record map
-    used for citation validation and the PDF evidence index.
+    Returns ``{sources, index, notes, legal_context}`` where ``index`` is a flat
+    cid→record map used for citation validation and the PDF evidence index.
+
+    ``matter`` is optional (keyword, default None) so existing callers stay
+    source-compatible; when given, jurisdiction-grounded law/legislation/case-law
+    sources are added on top of the internal-record sources.
     """
     features = features or {}
     sources: dict = {}
@@ -304,12 +536,37 @@ async def gather_evidence(conn, company_id, start, end, features: dict) -> dict:
             recs = recs[:_PER_SOURCE_CAP]
         sources[key] = {"label": label, "records": recs}
 
+    legal_context = None
+    if matter:
+        try:
+            legal_context = await resolve_matter_jurisdiction(conn, matter)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("legal_defense: jurisdiction resolve failed: %s", e)
+            notes.append("Jurisdiction: unavailable")
+        if legal_context:
+            try:
+                law_src, bill_src = await _gather_law(conn, matter, legal_context)
+                if law_src and law_src["records"]:
+                    sources["law"] = law_src
+                if bill_src and bill_src["records"]:
+                    sources["legislation"] = bill_src
+            except Exception as e:  # noqa: BLE001
+                logger.warning("legal_defense: law source unavailable: %s", e)
+                notes.append("Governing requirements (jurisdiction): unavailable")
+        try:
+            case_src = await _gather_case_law(conn, matter.get("id"))
+            if case_src and case_src["records"]:
+                sources["case_law"] = case_src
+        except Exception as e:  # noqa: BLE001
+            logger.warning("legal_defense: case-law source unavailable: %s", e)
+            notes.append("Case law (external research): unavailable")
+
     index: dict = {}
     for key, s in sources.items():
         for r in s["records"]:
             index[r["cid"]] = {**r, "source": key, "source_label": s["label"]}
 
-    return {"sources": sources, "index": index, "notes": notes}
+    return {"sources": sources, "index": index, "notes": notes, "legal_context": legal_context}
 
 
 # --------------------------------------------------------------------------- #
@@ -326,6 +583,7 @@ HARD RULES:
 - Where the records DO NOT address a point, say so plainly and put it under open_questions — never speculate or fill gaps.
 - Be neutral, precise, and specific. Tie each observation to the records that support it.
 - This is not legal advice; frame everything for attorney review.
+- Records with `law:`, `bill:`, or `case:` IDs are LEGAL CONTEXT (governing requirements, pending legislation, externally researched case law) — they describe the legal landscape, NOT the company's conduct. You may cite them to identify which requirements or authorities appear relevant. NEVER conclude the company complied with or violated anything, and NEVER present a `case:` record as precedent analysis — flag it for counsel to evaluate.
 
 Return STRICT JSON ONLY (no markdown, no prose outside the JSON), shape:
 {"assistant_text": "<your neutral, conversational reply to the user>",
@@ -354,6 +612,7 @@ def _build_prompt(matter: dict, history: list[dict], corpus: dict, latest: str) 
 
 MATTER
 Type: {matter.get('matter_type') or 'other'}
+Jurisdiction: {" → ".join(c["display_name"] for c in (corpus.get("legal_context") or {}).get("chain", [])) or "(not specified)"}
 Allegation / what's being claimed: {matter.get('allegation') or '(not specified)'}
 Factual context the company provided: {matter.get('defense_theory') or '(not specified)'}
 
@@ -479,6 +738,7 @@ _AUDIT_ACTION_LABELS = {
     "export": "Packet downloaded",
     "share": "Share link created",
     "shared_download": "Downloaded via share link",
+    "research": "External legal research run",
 }
 
 
@@ -498,9 +758,51 @@ def _describe_audit(row: dict) -> str:
     return label
 
 
+def _research_html(research: dict | None) -> str:
+    """Legal-landscape appendix page: externally researched cases + grounded
+    guidance. Informational only — never presented as vetted precedent or
+    an assessment of the company's position."""
+    if not research:
+        return ""
+    cases = research.get("cases") or []
+    guidance = research.get("guidance") or {}
+
+    case_rows = "".join(
+        f"<tr><td>{_esc(c.get('case_name'))}</td><td>{_esc(c.get('citation'))}</td>"
+        f"<td>{_esc(c.get('court'))}</td><td>{_fmt_dt(c.get('date_filed'))}</td>"
+        f"<td>{_esc(c.get('url'))}</td></tr>"
+        for c in cases
+    ) or "<tr><td colspan='5'>No cases located.</td></tr>"
+
+    summary = _esc(guidance.get("summary") or "") or "—"
+    authorities = "".join(
+        f"<li>{_esc(a.get('name'))}"
+        + (f" — {_esc(a.get('publisher'))}" if a.get("publisher") else "")
+        + f" ({_esc(a.get('url'))})</li>"
+        for a in (guidance.get("key_authorities") or [])
+    )
+    authorities_block = f"<ul>{authorities}</ul>" if authorities else "<p>None recorded.</p>"
+
+    return f"""
+      <div class="appendix-section">
+        <h2>Legal landscape — informational; verify with counsel</h2>
+        <p style="font-weight:600">External research compiled from public sources. It is
+        informational only, is not legal advice, has not been verified by an attorney,
+        and must be independently evaluated by counsel.</p>
+        <h2>Cases located</h2>
+        <table><thead><tr><th>Name</th><th>Citation</th><th>Court</th><th>Filed</th><th>URL</th></tr></thead>
+        <tbody>{case_rows}</tbody></table>
+        <h2>Public guidance summary</h2>
+        <div class="narr">{summary}</div>
+        <h3>Key authorities</h3>
+        {authorities_block}
+      </div>
+    """
+
+
 def _memo_html(matter: dict, corpus: dict, memo: dict, details: dict, cited: list[str],
                 company_name: str | None = None, audit_log: list[dict] | None = None,
-                appendix_ids: list[str] | None = None) -> str:
+                appendix_ids: list[str] | None = None, research: dict | None = None) -> str:
     index = corpus.get("index", {})
     # Footnote-style numbering: attorneys see "[1]", "[2]" inline, not raw
     # "incident:9c2a1e40-..." record IDs — the evidence index below maps
@@ -626,6 +928,7 @@ def _memo_html(matter: dict, corpus: dict, memo: dict, details: dict, cited: lis
       {appendix}
 
       {custody_block}
+      {_research_html(research)}
 
       <div class="foot">{_esc(DISCLAIMER)}</div>
     </body></html>"""
@@ -785,11 +1088,31 @@ async def _detail_discipline(conn, disc_id: str, company_id) -> dict | None:
 
 async def _detail_compliance(conn, req_id: str, company_id) -> dict | None:
     row = await conn.fetchrow(
-        """SELECT cr.*, bl.name AS location_name
+        """SELECT cr.*, bl.name AS location_name, jr.statute_citation
              FROM compliance_requirements cr
              JOIN business_locations bl ON bl.id = cr.location_id
+             LEFT JOIN jurisdiction_requirements jr ON jr.id = cr.jurisdiction_requirement_id
             WHERE cr.id = $1 AND bl.company_id = $2""",
         req_id, company_id,
+    )
+    return dict(row) if row else None
+
+
+async def _detail_law(conn, req_id: str) -> dict | None:
+    # jurisdiction_requirements is a global repository table (no company_id) —
+    # every company can see the same governing-law text; tenant scoping isn't
+    # meaningful here the way it is for the company's own compliance rows.
+    row = await conn.fetchrow("SELECT * FROM jurisdiction_requirements WHERE id = $1", req_id)
+    return dict(row) if row else None
+
+
+async def _detail_alert(conn, alert_id: str, company_id) -> dict | None:
+    row = await conn.fetchrow(
+        """SELECT ca.*, bl.name AS location_name
+             FROM compliance_alerts ca
+             JOIN business_locations bl ON bl.id = ca.location_id
+            WHERE ca.id = $1 AND ca.company_id = $2""",
+        alert_id, company_id,
     )
     return dict(row) if row else None
 
@@ -848,8 +1171,51 @@ def _compliance_section(cid: str, d: dict) -> str:
         <div class="cell"><div class="l">Current value</div><div class="v">{_esc(d.get('current_value'))}</div></div>
         <div class="cell"><div class="l">Effective</div><div class="v">{_fmt_dt(d.get('effective_date'))}</div></div>
         <div class="cell"><div class="l">Source</div><div class="v">{_esc(d.get('source_name'))}</div></div>
+        <div class="cell"><div class="l">Statute citation</div><div class="v">{_esc(d.get('statute_citation'))}</div></div>
       </div>
       {f"<div class='narr'>{_esc(d.get('description'))}</div>" if d.get('description') else ""}
+    """
+
+
+def _law_section(cid: str, d: dict) -> str:
+    penalties_note = ""
+    meta = d.get("metadata")
+    if isinstance(meta, str):
+        try:
+            meta = json.loads(meta)
+        except Exception:
+            meta = None
+    if isinstance(meta, dict):
+        penalties = meta.get("penalties")
+        if isinstance(penalties, dict) and penalties.get("summary"):
+            penalties_note = f"<div class='narr'><b>Penalties.</b> {_esc(penalties['summary'])}</div>"
+    return f"""
+      <h2>Appendix — Governing requirement ({_esc(d.get('title'))})</h2>
+      <div class="grid">
+        <div class="cell"><div class="l">Statute citation</div><div class="v">{_esc(d.get('statute_citation'))}</div></div>
+        <div class="cell"><div class="l">Category</div><div class="v">{_hd(d.get('category'))}</div></div>
+        <div class="cell"><div class="l">Jurisdiction</div><div class="v">{_esc(d.get('jurisdiction_name'))} ({_hd(d.get('jurisdiction_level'))})</div></div>
+        <div class="cell"><div class="l">Current value</div><div class="v">{_esc(d.get('current_value'))}</div></div>
+        <div class="cell"><div class="l">Effective</div><div class="v">{_fmt_dt(d.get('effective_date'))}</div></div>
+        <div class="cell"><div class="l">Source</div><div class="v">{_esc(d.get('source_name'))}</div></div>
+      </div>
+      {f"<div class='narr'>{_esc(d.get('description'))}</div>" if d.get('description') else ""}
+      {penalties_note}
+    """
+
+
+def _alert_section(cid: str, d: dict) -> str:
+    return f"""
+      <h2>Appendix — Compliance alert ({_esc(d.get('title'))})</h2>
+      <div class="grid">
+        <div class="cell"><div class="l">Severity</div><div class="v">{_hd(d.get('severity'))}</div></div>
+        <div class="cell"><div class="l">Status</div><div class="v">{_hd(d.get('status'))}</div></div>
+        <div class="cell"><div class="l">Category</div><div class="v">{_hd(d.get('category'))}</div></div>
+        <div class="cell"><div class="l">Deadline</div><div class="v">{_fmt_dt(d.get('deadline'))}</div></div>
+        <div class="cell"><div class="l">Location</div><div class="v">{_esc(d.get('location_name'))}</div></div>
+      </div>
+      <div class="narr">{_esc(d.get('message'))}</div>
+      {f"<div class='narr'><b>Action required.</b> {_esc(d.get('action_required'))}</div>" if d.get('action_required') else ""}
     """
 
 
@@ -893,6 +1259,8 @@ _APPENDIX_SECTIONS = {
     "compliance_req": _compliance_section,
     "training": _training_section,
     "accommodation": _accommodation_section,
+    "law": _law_section,
+    "compliance_alert": _alert_section,
 }
 
 # ZIP folder per record kind — must match the arc-paths _collect_source_files
@@ -926,7 +1294,8 @@ def _case_file_html(kind: str, cid: str, detail: dict, matter: dict,
 
 
 async def build_defense_packet(conn, matter: dict, corpus: dict, memo: dict,
-                                company_name: str | None = None) -> dict:
+                                company_name: str | None = None,
+                                research: dict | None = None) -> dict:
     """Render the memo PDF and (when source docs exist) the ZIP bundle.
 
     Returns ``{pdf: bytes, zip: bytes|None, citations: [cid]}``. The narrative
@@ -974,10 +1343,21 @@ async def build_defense_packet(conn, matter: dict, corpus: dict, memo: dict,
             d = await _safe_detail(_detail_accommodation(conn, c.split(":", 1)[1], company_id))
             if d:
                 details[c] = ("accommodation", d)
+        elif c.startswith("law:"):
+            d = await _safe_detail(_detail_law(conn, c.split(":", 1)[1]))
+            if d:
+                details[c] = ("law", d)
+        elif c.startswith("compliance_alert:"):
+            d = await _safe_detail(_detail_alert(conn, c.split(":", 1)[1], company_id))
+            if d:
+                details[c] = ("compliance_alert", d)
+        # bill:/case: cids get no appendix section — they still appear in the
+        # evidence-index table; case-law informational context lives in the
+        # separate research page (see `research` below).
 
     audit_log = await _safe_detail(_fetch_audit_log(conn, matter["id"])) or []
 
-    pdf = await _render_pdf(_memo_html(matter, corpus, memo, details, cited, company_name, audit_log, appendix_ids))
+    pdf = await _render_pdf(_memo_html(matter, corpus, memo, details, cited, company_name, audit_log, appendix_ids, research))
 
     files = await _collect_source_files(conn, appendix_ids)
     fetched, skipped = [], []

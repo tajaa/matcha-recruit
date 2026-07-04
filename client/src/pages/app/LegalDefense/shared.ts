@@ -1,6 +1,7 @@
 import type { LucideIcon } from 'lucide-react'
 import {
-  Accessibility, BookOpenCheck, FileSignature, Gavel, GraduationCap, HardHat, Users,
+  Accessibility, Bell, BookMarked, BookOpenCheck, FileSignature, Gavel, GraduationCap,
+  HardHat, Landmark, ScrollText, Users,
 } from 'lucide-react'
 import type { MatterType } from '../../../api/legalDefense'
 
@@ -38,18 +39,26 @@ export const CID_KIND_LABEL: Record<string, string> = {
   training: 'Training',
   policy_ack: 'Policy ack',
   accommodation: 'Accommodation',
+  law: 'Governing law',
+  bill: 'Pending bill',
+  case: 'Case law',
+  compliance_alert: 'Compliance alert',
 }
 
-/** The 7 evidence subsystems the backend can gather from
+/** The evidence subsystems the backend can gather from
  *  (server/app/matcha/services/legal_defense.py:_SOURCES) — strip order. */
 export const SOURCE_META: { key: string; label: string; icon: LucideIcon }[] = [
   { key: 'incidents', label: 'IR / OSHA', icon: HardHat },
   { key: 'er_cases', label: 'ER cases', icon: Users },
   { key: 'compliance', label: 'Compliance', icon: BookOpenCheck },
+  { key: 'compliance_alerts', label: 'Compliance alerts', icon: Bell },
   { key: 'discipline', label: 'Discipline', icon: Gavel },
   { key: 'training', label: 'Training', icon: GraduationCap },
   { key: 'policy_ack', label: 'Policy acks', icon: FileSignature },
   { key: 'accommodations', label: 'Accommodations', icon: Accessibility },
+  { key: 'law', label: 'Governing law', icon: Landmark },
+  { key: 'legislation', label: 'Pending legislation', icon: ScrollText },
+  { key: 'case_law', label: 'Case law', icon: BookMarked },
 ]
 
 export function fmtWhen(iso: string): string {

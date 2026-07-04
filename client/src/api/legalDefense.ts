@@ -11,7 +11,19 @@ export type MatterStatus = 'draft' | 'active' | 'closed'
 
 export type EvidenceRecord = { cid: string; ref: string | null; summary: string; when: string }
 export type EvidenceSource = { label: string; records: EvidenceRecord[] }
-export type EvidencePreview = { sources: Record<string, EvidenceSource>; notes: string[]; total: number }
+export type JurisdictionChainLink = { id: string; level: string; display_name: string }
+export type LegalContext = {
+  jurisdiction_id: string
+  chain: JurisdictionChainLink[]
+  state: string | null
+  location_name: string | null
+}
+export type EvidencePreview = {
+  sources: Record<string, EvidenceSource>
+  notes: string[]
+  total: number
+  legal_context?: LegalContext | null
+}
 
 export type EvidenceMapItem = { point: string; cited_ids: string[] }
 export type MessageMeta = {
@@ -59,6 +71,8 @@ export type Matter = {
   counsel_directed: boolean
   counsel_name: string | null
   counsel_email: string | null
+  location_id: string | null
+  jurisdiction_state: string | null
   created_at: string
   updated_at: string
   closed_at: string | null
@@ -77,6 +91,8 @@ export type MatterCreate = {
   counsel_directed?: boolean
   counsel_name?: string | null
   counsel_email?: string | null
+  location_id?: string | null
+  jurisdiction_state?: string | null
 }
 
 export const listMatters = () => api.get<Matter[]>('/legal-pilot/matters')
@@ -85,8 +101,8 @@ export const getMatter = (id: string) => api.get<Matter>(`/legal-pilot/matters/$
 export const updateMatter = (id: string, body: Partial<MatterCreate> & { status?: MatterStatus }) =>
   api.patch<Matter>(`/legal-pilot/matters/${id}`, body)
 export const getEvidence = (id: string) => api.get<EvidencePreview>(`/legal-pilot/matters/${id}/evidence`)
-export const generatePacket = (id: string, kind: 'pdf' | 'zip' | 'both') =>
-  api.post<{ packets: Packet[] }>(`/legal-pilot/matters/${id}/packet`, { kind })
+export const generatePacket = (id: string, kind: 'pdf' | 'zip' | 'both', includeResearch = false) =>
+  api.post<{ packets: Packet[] }>(`/legal-pilot/matters/${id}/packet`, { kind, include_research: includeResearch })
 export const sharePacket = (matterId: string, packetId: string, body: { recipient_email?: string; expires_days?: number }) =>
   api.post<{ token: string; path: string; expires_at: string }>(
     `/legal-pilot/matters/${matterId}/packets/${packetId}/share`, body,
@@ -109,6 +125,34 @@ export async function downloadPacket(matterId: string, packet: Packet): Promise<
   a.remove()
   URL.revokeObjectURL(url)
 }
+
+export type ResearchCase = {
+  id: string
+  case_name: string
+  citation: string | null
+  court: string
+  date_filed: string | null
+  url: string
+  snippet?: string | null
+}
+export type ResearchGuidance = {
+  summary: string
+  key_authorities: { name: string; url: string; publisher?: string; relevance?: string }[]
+}
+export type ResearchRow = {
+  id: string
+  status: 'running' | 'complete' | 'failed'
+  query: string | null
+  cases: ResearchCase[] | null
+  guidance: ResearchGuidance | null
+  error: string | null
+  created_at: string
+  completed_at: string | null
+}
+export const runResearch = (matterId: string) =>
+  api.post<ResearchRow>(`/legal-pilot/matters/${matterId}/research`)
+export const listResearch = (matterId: string) =>
+  api.get<ResearchRow[]>(`/legal-pilot/matters/${matterId}/research`)
 
 export type ChatResult = {
   assistant_text: string

@@ -8,6 +8,7 @@ import asyncio
 import io
 import zipfile
 
+from app.core.compliance_registry import CATEGORY_KEYS
 from app.matcha.services import legal_defense as ld
 
 
@@ -23,6 +24,14 @@ def test_validate_citations_drops_unknown_ids():
     assert dropped == ["ghost:zzz"]
     assert clean[0]["cited_ids"] == ["incident:a"]   # hallucinated id stripped
     assert clean[1]["cited_ids"] == ["er_case:b"]
+
+
+def test_validate_citations_accepts_new_cid_kinds():
+    index = {"law:x": {}, "case:123": {}, "bill:y": {}}
+    emap = [{"point": "p", "cited_ids": ["law:x", "case:123", "bill:y", "case:999"]}]
+    clean, dropped = ld.validate_citations(emap, index)
+    assert dropped == ["case:999"]
+    assert clean[0]["cited_ids"] == ["law:x", "case:123", "bill:y"]
 
 
 def test_validate_citations_tolerates_garbage():
@@ -83,6 +92,11 @@ class _FakeConn:
             }]
         return []
 
+    async def fetchrow(self, sql, *args):
+        if self.fail and self.fail in sql:
+            raise RuntimeError("simulated jurisdiction failure")
+        return None
+
 
 _ALL_FEATURES = {
     "incidents": True, "compliance": True, "discipline": True,
@@ -108,3 +122,50 @@ def test_gather_evidence_respects_disabled_features():
     ))
     # ER has no feature gate (always attempted); incidents off → never queried.
     assert "incidents" not in corpus["sources"]
+
+
+def test_gather_evidence_without_matter_adds_no_law_source():
+    # matter=None (default) — proves the new keyword stays back-compat with
+    # every pre-existing 3-positional-arg caller.
+    corpus = asyncio.run(ld.gather_evidence(_FakeConn(), "cid", None, None, {}))
+    assert "law" not in corpus["sources"]
+    assert "legislation" not in corpus["sources"]
+    assert "case_law" not in corpus["sources"]
+    assert corpus["legal_context"] is None
+
+
+def test_gather_evidence_jurisdiction_failure_degrades():
+    matter = {"id": "m1", "company_id": "cid", "matter_type": "class_action",
+              "location_id": None, "jurisdiction_state": "CA"}
+    corpus = asyncio.run(ld.gather_evidence(
+        _FakeConn(fail_substr="jurisdictions"), "cid", None, None, {}, matter=matter,
+    ))
+    assert corpus["legal_context"] is None
+    assert any("Jurisdiction" in n for n in corpus["notes"])
+    assert "law" not in corpus["sources"]
+
+
+class _FakeAlertConn:
+    async def fetch(self, sql, *args):
+        return [{
+            "id": "a1", "title": "New law effective", "severity": "critical",
+            "status": "unread", "category": "minimum_wage", "deadline": None,
+            "created_at": None, "location_name": "HQ",
+        }]
+
+
+def test_src_compliance_alerts_shape():
+    recs = asyncio.run(ld._src_compliance_alerts(_FakeAlertConn(), "cid", None, None))
+    assert len(recs) == 1
+    r = recs[0]
+    assert r["cid"] == "compliance_alert:a1"
+    assert r["ref"] == "Minimum Wage"
+    assert r["summary"] == "New law effective — Critical, Unread @ HQ"
+
+
+def test_matter_type_categories_are_registry_keys():
+    for cats in ld._MATTER_TYPE_CATEGORIES.values():
+        if not cats:
+            continue
+        for c in cats:
+            assert c in CATEGORY_KEYS

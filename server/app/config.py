@@ -169,6 +169,7 @@ class Settings:
 
     # Government APIs
     openstates_api_key: Optional[str] = None  # OpenStates legislative tracking (free key)
+    courtlistener_api_token: Optional[str] = None  # CourtListener case-law search (optional; anonymous works at lower rate limits)
 
     # SAML SSO
     saml_sp_entity_id: str = "https://hey-matcha.com/api/sso/metadata"
@@ -335,6 +336,7 @@ def load_settings() -> Settings:
         gemini_hourly_limit=int(os.getenv("GEMINI_HOURLY_LIMIT", "200")),
         gemini_daily_limit=int(os.getenv("GEMINI_DAILY_LIMIT", "5000")),
         openstates_api_key=os.getenv("OPENSTATES_API_KEY"),
+        courtlistener_api_token=os.getenv("COURTLISTENER_API_TOKEN"),
         saml_sp_entity_id=os.getenv("SAML_SP_ENTITY_ID", "https://hey-matcha.com/api/sso/metadata"),
         saml_sp_acs_url=os.getenv("SAML_SP_ACS_URL", "https://hey-matcha.com/api/sso/acs"),
         master_admin_email=os.getenv("MASTER_ADMIN_EMAIL", "tajatheprince@gmail.com"),
