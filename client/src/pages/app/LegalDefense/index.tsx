@@ -50,12 +50,12 @@ export default function LegalDefense() {
     setResearch(researchRows[0] ?? null)
   }
 
-  async function handleRunResearch() {
+  async function handleRunResearch(includeGuidance = true) {
     const id = selectedId
     if (!id || researching) return
     setResearching(true)
     try {
-      const row = await runResearch(id)
+      const row = await runResearch(id, includeGuidance)
       if (activeIdRef.current === id) setResearch(row)
     } catch (e) {
       if (activeIdRef.current === id) toast(e instanceof Error ? e.message : 'Research failed', 'error')
@@ -138,7 +138,7 @@ export default function LegalDefense() {
 
 function MatterWorkbench({ matter, evidence, research, researching, onRunResearch, onRefresh, toast }: {
   matter: Matter; evidence: EvidencePreview | null; research: ResearchRow | null; researching: boolean
-  onRunResearch: () => void; onRefresh: () => void
+  onRunResearch: (includeGuidance?: boolean) => void; onRefresh: () => void
   toast: ReturnType<typeof useToast>['toast']
 }) {
   const [messages, setMessages] = useState<MatterMessage[]>(matter.messages ?? [])

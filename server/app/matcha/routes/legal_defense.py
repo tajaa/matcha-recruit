@@ -80,6 +80,12 @@ class MatterUpdate(_JurisdictionStateMixin):
     jurisdiction_state: Optional[str] = Field(None, min_length=2, max_length=2)
 
 
+class ResearchOptions(BaseModel):
+    # False skips the ~90s grounded-Gemini synthesis call — just the
+    # CourtListener case search, for a fast case-law-only refresh.
+    include_guidance: bool = True
+
+
 class ChatIn(BaseModel):
     message: str = Field(..., min_length=1, max_length=5_000)
 
@@ -349,7 +355,10 @@ async def chat(matter_id: str, body: ChatIn, request: Request, current_user=Depe
 # --------------------------------------------------------------------------- #
 
 @router.post("/matters/{matter_id}/research")
-async def run_matter_research(matter_id: str, request: Request, current_user=Depends(require_admin_or_client)):
+async def run_matter_research(
+    matter_id: str, request: Request, body: ResearchOptions = ResearchOptions(),
+    current_user=Depends(require_admin_or_client),
+):
     company_id = await get_client_company_id(current_user)
     # Load (and 404) BEFORE consuming the rate budget — a typo'd matter id
     # must not burn the company's 10/hour research allowance.
@@ -359,10 +368,13 @@ async def run_matter_research(matter_id: str, request: Request, current_user=Dep
     # run_research manages its own short-lived connections so no pooled
     # connection is held across the ~110s of external CourtListener + Gemini
     # calls (same discipline as chat()'s pre-work/release pattern).
-    row = await legal_research.run_research(matter, getattr(current_user, "id", None))
+    row = await legal_research.run_research(
+        matter, getattr(current_user, "id", None), include_guidance=body.include_guidance,
+    )
     async with get_connection() as conn:
         await _audit(conn, matter_id, current_user, request, "research",
-                     {"cases": len(row.get("cases") or []), "status": row.get("status")})
+                     {"cases": len(row.get("cases") or []), "status": row.get("status"),
+                      "include_guidance": body.include_guidance})
     return row
 
 

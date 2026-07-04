@@ -9,7 +9,7 @@ import { LABEL } from './shared'
 export function LegalContextPanel({ legalContext, research, onRunResearch, researching }: {
   legalContext: LegalContext | null | undefined
   research: ResearchRow | null
-  onRunResearch: () => void
+  onRunResearch: (includeGuidance?: boolean) => void
   researching: boolean
 }) {
   if (!legalContext) {
@@ -25,12 +25,23 @@ export function LegalContextPanel({ legalContext, research, onRunResearch, resea
 
   return (
     <div className="border-b border-white/[0.06] px-4 py-3">
-      <div className="flex items-baseline justify-between">
+      <div className="flex items-baseline justify-between gap-2">
         <span className={LABEL}>Legal landscape</span>
-        <Button size="sm" variant="secondary" disabled={researching} onClick={onRunResearch}>
-          {researching ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
-          Research
-        </Button>
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            disabled={researching}
+            onClick={() => onRunResearch(false)}
+            className="text-[11px] text-zinc-500 underline decoration-dotted underline-offset-2 transition-colors hover:text-zinc-300 disabled:opacity-50"
+            title="Case law only — skips the slower AI guidance summary"
+          >
+            Case law only
+          </button>
+          <Button size="sm" variant="secondary" disabled={researching} onClick={() => onRunResearch(true)}>
+            {researching ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
+            Research
+          </Button>
+        </div>
       </div>
 
       <div className="mt-2 flex flex-wrap items-center gap-1.5">

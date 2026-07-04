@@ -150,8 +150,8 @@ export type ResearchRow = {
   created_at: string
   completed_at: string | null
 }
-export const runResearch = (matterId: string) =>
-  api.post<ResearchRow>(`/legal-pilot/matters/${matterId}/research`)
+export const runResearch = (matterId: string, includeGuidance = true) =>
+  api.post<ResearchRow>(`/legal-pilot/matters/${matterId}/research`, { include_guidance: includeGuidance })
 export const listResearch = (matterId: string) =>
   api.get<ResearchRow[]>(`/legal-pilot/matters/${matterId}/research`)
 

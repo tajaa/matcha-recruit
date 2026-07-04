@@ -12,6 +12,7 @@ persisted here) — the Gemini guidance text is never cited, per
 import asyncio
 import json
 import logging
+import re
 
 import httpx
 from google.genai import types
@@ -49,6 +50,20 @@ _STATE_NAMES = {
     "VT": "Vermont", "VA": "Virginia", "WA": "Washington", "WV": "West Virginia",
     "WI": "Wisconsin", "WY": "Wyoming", "DC": "District Of Columbia",
 }
+
+
+_RESERVED_QUERY_CHARS_RE = re.compile(r'[\[\]{}()"~^:/&|]')
+
+
+def _sanitize_query(query: str) -> str:
+    """Neutralize CourtListener/Lucene query-syntax reserved characters that
+    crash v4 search (500) or are rejected (400) — confirmed via direct
+    probing of the live API. This is meant to be plain free-text keyword
+    search; we never rely on CourtListener's operator syntax. Replaces with a
+    space (never deletes, so word boundaries survive) then collapses
+    whitespace. Pure, no I/O."""
+    cleaned = _RESERVED_QUERY_CHARS_RE.sub(" ", query or "")
+    return " ".join(cleaned.split())
 
 
 def _parse_search_results(payload: dict, limit: int = _MAX_CASES) -> list[dict]:
@@ -92,7 +107,7 @@ def _parse_search_results(payload: dict, limit: int = _MAX_CASES) -> list[dict]:
 async def search_case_law(query: str, state: str | None = None, limit: int = _MAX_CASES) -> list[dict]:
     """GET CourtListener opinion search. Raises on transport/HTTP failure —
     callers isolate this (see ``run_research``)."""
-    q = query
+    q = _sanitize_query(query)
     if state:
         state_name = _STATE_NAMES.get(state.upper())
         if state_name:
@@ -185,11 +200,15 @@ async def _resolve_state(conn, matter: dict) -> str | None:
     return (matter.get("jurisdiction_state") or "").upper() or None
 
 
-async def run_research(matter: dict, created_by) -> dict:
-    """Orchestrate one research run: persist a row, gather cases + guidance
-    (each isolated), finalize status. Never raises on partial failure —
-    only a total failure (both case search and guidance synthesis) marks
-    the row ``failed``.
+async def run_research(matter: dict, created_by, include_guidance: bool = True) -> dict:
+    """Orchestrate one research run: persist a row, gather cases + (optionally)
+    guidance, each isolated, finalize status. Never raises on partial failure —
+    the row is only marked ``failed`` when nothing attempted succeeded (case
+    search failed, and guidance either wasn't attempted or also failed).
+
+    ``include_guidance=False`` skips the ~90s grounded-Gemini synthesis call
+    entirely — just the CourtListener case search — for callers who only
+    want a fast case-law refresh.
 
     Acquires its own short-lived pool connections around the DB phases so
     that NO pooled connection is held across the external CourtListener +
@@ -217,24 +236,29 @@ async def run_research(matter: dict, created_by) -> dict:
 
     guidance: dict | None = None
     guid_err: str | None = None
-    try:
-        juris_display = _STATE_NAMES.get(state) if state else None
-        guidance = await synthesize_guidance(matter, juris_display, cases)
-    except Exception as e:  # noqa: BLE001
-        logger.warning("legal_research: guidance synthesis failed: %s", e)
-        guid_err = str(e)
+    if include_guidance:
+        try:
+            juris_display = _STATE_NAMES.get(state) if state else None
+            guidance = await synthesize_guidance(matter, juris_display, cases)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("legal_research: guidance synthesis failed: %s", e)
+            guid_err = str(e)
 
     async with get_connection() as conn:
-        if case_err and guid_err:
+        nothing_succeeded = bool(case_err) and (not include_guidance or bool(guid_err))
+        if nothing_succeeded:
+            error = f"Case search failed: {case_err}"
+            if include_guidance:
+                error += f"; guidance synthesis failed: {guid_err}"
             await conn.execute(
                 "UPDATE legal_matter_research SET status='failed', error=$1, completed_at=NOW() WHERE id=$2",
-                f"Case search failed: {case_err}; guidance synthesis failed: {guid_err}", research_id,
+                error, research_id,
             )
         else:
             error = None
             if case_err:
                 error = f"Case search unavailable: {case_err}"
-            elif guid_err:
+            elif include_guidance and guid_err:
                 error = f"Guidance synthesis unavailable: {guid_err}"
             await conn.execute(
                 """UPDATE legal_matter_research

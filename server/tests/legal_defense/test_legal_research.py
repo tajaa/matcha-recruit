@@ -41,6 +41,66 @@ def test_parse_search_results_tolerates_missing_keys():
     assert lr._parse_search_results({"results": [{"caseName": "X"}]}) == []
 
 
+# --- query sanitization (CourtListener 500s on reserved chars) -------------
+
+def test_sanitize_query_strips_confirmed_crash_chars():
+    for ch in "/:[]{}~^":
+        assert ch not in lr._sanitize_query(f"foo{ch}bar")
+
+
+def test_sanitize_query_strips_operator_chars():
+    for ch in '()"&|':
+        assert ch not in lr._sanitize_query(f"foo{ch}bar")
+
+
+def test_sanitize_query_preserves_low_risk_chars():
+    out = lr._sanitize_query("at-will e-verify? really! co+op x\\y overtime*")
+    for ch in "-?!+\\*":
+        assert ch in out
+
+
+def test_sanitize_query_collapses_whitespace():
+    assert lr._sanitize_query("  meal   /  rest  ") == "meal rest"
+
+
+def test_sanitize_query_handles_empty():
+    assert lr._sanitize_query("") == ""
+    assert lr._sanitize_query(None) == ""
+
+
+def test_search_case_law_sanitizes_query_before_request(monkeypatch):
+    captured = {}
+
+    class _FakeResponse:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {}
+
+    class _FakeAsyncClient:
+        def __init__(self, *a, **kw):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def get(self, url, params=None, headers=None):
+            captured["params"] = params
+            return _FakeResponse()
+
+    class _FakeSettings:
+        courtlistener_api_token = None
+
+    monkeypatch.setattr(lr, "get_settings", lambda: _FakeSettings())
+    monkeypatch.setattr(lr.httpx, "AsyncClient", _FakeAsyncClient)
+    asyncio.run(lr.search_case_law("meal/rest breaks"))
+    assert captured["params"]["q"] == "meal rest breaks"
+
+
 # --- run_research orchestration ---------------------------------------------
 
 class _FakeResearchConn:
@@ -161,6 +221,49 @@ def test_run_research_total_failure_marks_failed(monkeypatch):
 
     assert result["status"] == "failed"
     assert result["error"]
+
+
+def test_run_research_skips_guidance_when_disabled(monkeypatch):
+    called = {"guidance": False}
+
+    async def fake_search(query, state=None, limit=8):
+        return _CASES
+
+    async def fake_guidance(matter, juris_display, cases):
+        called["guidance"] = True
+        return _GUIDANCE
+
+    monkeypatch.setattr(lr, "search_case_law", fake_search)
+    monkeypatch.setattr(lr, "synthesize_guidance", fake_guidance)
+
+    conn = _FakeResearchConn()
+    _patch_conn(monkeypatch, conn)
+    result = asyncio.run(lr.run_research(_MATTER, created_by=None, include_guidance=False))
+
+    assert called["guidance"] is False
+    assert result["status"] == "complete"
+    assert result["cases"] == _CASES
+    assert result["guidance"] is None
+    assert result["error"] is None
+
+
+def test_run_research_case_failure_marks_failed_when_guidance_skipped(monkeypatch):
+    async def failing_search(query, state=None, limit=8):
+        raise RuntimeError("courtlistener down")
+
+    async def fake_guidance(matter, juris_display, cases):
+        raise AssertionError("guidance must not be attempted when include_guidance=False")
+
+    monkeypatch.setattr(lr, "search_case_law", failing_search)
+    monkeypatch.setattr(lr, "synthesize_guidance", fake_guidance)
+
+    conn = _FakeResearchConn()
+    _patch_conn(monkeypatch, conn)
+    result = asyncio.run(lr.run_research(_MATTER, created_by=None, include_guidance=False))
+
+    # case search is the only thing attempted — its failure is total failure
+    assert result["status"] == "failed"
+    assert "courtlistener down" in result["error"]
 
 
 # --- state precedence --------------------------------------------------------
