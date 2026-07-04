@@ -1,4 +1,5 @@
 import BrokerRiskAlerts from './BrokerRiskAlerts'
+import IntakeStatusPanel from '../../components/broker/action-center/IntakeStatusPanel'
 import { HelpHint } from '../../components/broker/HelpHint'
 
 // Renewals + Eligibility tabs paused 2026-06-08 — geared to EB brokers, low value.
@@ -21,6 +22,7 @@ export default function BrokerActionCenter() {
       </div>
 
       <BrokerRiskAlerts />
+      <IntakeStatusPanel />
     </div>
   )
 }
