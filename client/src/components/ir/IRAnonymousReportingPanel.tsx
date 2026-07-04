@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, type CSSProperties } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
 import { Copy, QrCode, RefreshCw, X, History, Download } from 'lucide-react'
 import { api } from '../../api/client'
@@ -53,6 +53,76 @@ function locationLabel(loc: LocationRow): string {
   return name || place || loc.id.slice(0, 8)
 }
 
+// --- QR poster branding -----------------------------------------------------
+
+type Branding = { primary: string; secondary: string }
+const DEFAULT_BRAND: Branding = { primary: '#4f9d72', secondary: '#f5a623' }
+
+// Mirrors the server's WCAG auto-contrast pick (ir_report_poster._text_on) so the
+// live preview shows the same title/footer color the PDF will use.
+function relLum(hex: string): number {
+  const [r, g, b] = [1, 3, 5].map((i) => {
+    const c = parseInt(hex.slice(i, i + 2), 16) / 255
+    return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)
+  })
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b
+}
+function contrastRatio(a: string, b: string): number {
+  const la = relLum(a), lb = relLum(b)
+  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05)
+}
+function textOn(primary: string): string {
+  return contrastRatio(primary, '#0c1f16') >= contrastRatio(primary, '#ffffff') ? '#0c1f16' : '#ffffff'
+}
+
+function ColorField({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+  return (
+    <label className="flex items-center gap-3">
+      <input
+        type="color"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="h-8 w-10 shrink-0 rounded border border-white/10 bg-transparent cursor-pointer p-0"
+      />
+      <span className="flex-1 text-[11px] text-zinc-400">{label}</span>
+      <span className="text-[11px] font-mono text-zinc-500 uppercase">{value}</span>
+    </label>
+  )
+}
+
+// Live poster mock — same layout as ir_report_poster.build_report_poster_pdf:
+// primary background, secondary corner brackets, white QR card, fixed Matcha wordmark.
+function PosterPreview({ primary, secondary }: Branding) {
+  const text = textOn(primary)
+  const corner = (pos: CSSProperties): CSSProperties => ({
+    position: 'absolute', height: 14, width: 14, ...pos,
+  })
+  return (
+    <div
+      className="relative rounded-lg overflow-hidden"
+      style={{ background: primary, width: 150, height: 194, color: text, fontFamily: 'Georgia, serif' }}
+    >
+      <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-2 text-center">
+        <div className="text-[9px] font-bold tracking-wide leading-tight">SUBMIT AN INCIDENT</div>
+        <div className="relative" style={{ width: 78, height: 78 }}>
+          <span style={corner({ top: 0, left: 0, borderTop: `2px solid ${secondary}`, borderLeft: `2px solid ${secondary}`, borderTopLeftRadius: 3 })} />
+          <span style={corner({ top: 0, right: 0, borderTop: `2px solid ${secondary}`, borderRight: `2px solid ${secondary}`, borderTopRightRadius: 3 })} />
+          <span style={corner({ bottom: 0, left: 0, borderBottom: `2px solid ${secondary}`, borderLeft: `2px solid ${secondary}`, borderBottomLeftRadius: 3 })} />
+          <span style={corner({ bottom: 0, right: 0, borderBottom: `2px solid ${secondary}`, borderRight: `2px solid ${secondary}`, borderBottomRightRadius: 3 })} />
+          <div className="absolute inset-[7px] bg-white rounded flex items-center justify-center">
+            <QrCode className="w-8 h-8 text-zinc-900" />
+          </div>
+        </div>
+        <div className="leading-tight">
+          <div className="text-[10px] font-bold tracking-wider">SCAN ME</div>
+          <div className="text-[7px] font-bold tracking-wide">HEY-MATCHA.COM</div>
+          <div className="text-[5px] uppercase tracking-wider" style={{ opacity: 0.7 }}>Powered by Matcha</div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export function IRAnonymousReportingPanel() {
   const [status, setStatus] = useState<{ enabled: boolean; link?: string } | null>(null)
   const [loading, setLoading] = useState(false)
@@ -68,6 +138,14 @@ export function IRAnonymousReportingPanel() {
   const [histOpen, setHistOpen] = useState<string | null>(null)
   const [histData, setHistData] = useState<Record<string, LinkHistoryEntry[]>>({})
 
+  // QR poster branding — client-customizable primary/secondary; Matcha stays fixed.
+  const [branding, setBranding] = useState<Branding>(DEFAULT_BRAND)
+  const [brandDefault, setBrandDefault] = useState<Branding>(DEFAULT_BRAND)
+  const [brandingLoading, setBrandingLoading] = useState(true)
+  const [brandingSaving, setBrandingSaving] = useState(false)
+  const [brandingDirty, setBrandingDirty] = useState(false)
+  const [brandingSaved, setBrandingSaved] = useState(false)
+
   // Always-on panel (not collapsible — admins must not miss it). Load on mount.
   useEffect(() => {
     api.get<{ enabled: boolean; link?: string }>('/ir/incidents/anonymous-reporting/status')
@@ -79,6 +157,10 @@ export function IRAnonymousReportingPanel() {
     api.get<LocationLink[]>('/ir/incidents/anonymous-reporting/location-links')
       .then((rows) => setLinks(rows || []))
       .catch(() => setLinks([]))
+    api.get<{ branding: Branding; default: Branding }>('/ir/incidents/anonymous-reporting/branding')
+      .then((r) => { setBranding(r.branding); setBrandDefault(r.default) })
+      .catch(() => { /* pre-migration or transient — keep defaults */ })
+      .finally(() => setBrandingLoading(false))
   }, [])
 
   async function generateLink() {
@@ -159,6 +241,19 @@ export function IRAnonymousReportingPanel() {
     } catch { /* ignore */ }
   }
 
+  const updateBrand = (k: keyof Branding, v: string) => {
+    setBranding((b) => ({ ...b, [k]: v })); setBrandingDirty(true); setBrandingSaved(false)
+  }
+  const resetBranding = () => { setBranding(brandDefault); setBrandingDirty(true); setBrandingSaved(false) }
+  async function saveBranding() {
+    setBrandingSaving(true)
+    try {
+      const r = await api.put<{ branding: Branding }>('/ir/incidents/anonymous-reporting/branding', branding)
+      setBranding(r.branding); setBrandingDirty(false); setBrandingSaved(true)
+      setTimeout(() => setBrandingSaved(false), 2000)
+    } catch { /* ignore */ } finally { setBrandingSaving(false) }
+  }
+
   const linkedIds = new Set(links.map((l) => l.location_id))
   const pickable = locations.filter((l) => !linkedIds.has(l.id))
 
@@ -205,6 +300,41 @@ export function IRAnonymousReportingPanel() {
                 </div>
                 <p className="text-[11px] text-zinc-500">Anonymous — no name collected, single-use.</p>
               </>
+            )}
+          </div>
+
+          <div className="border-t border-white/5" />
+
+          {/* QR poster branding — customize colors; Matcha branding stays fixed */}
+          <div className="space-y-3">
+            <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">QR poster branding</p>
+            <p className="text-[11px] text-zinc-500">
+              Recolor the printable QR poster to match your brand. Matcha branding stays on every poster.
+            </p>
+            {brandingLoading ? (
+              <p className="text-xs text-zinc-500 uppercase tracking-widest font-mono animate-pulse">Loading…</p>
+            ) : (
+              <div className="flex flex-col sm:flex-row gap-4">
+                <div className="flex-1 space-y-3">
+                  <ColorField label="Primary (background)" value={branding.primary} onChange={(v) => updateBrand('primary', v)} />
+                  <ColorField label="Secondary (accents)" value={branding.secondary} onChange={(v) => updateBrand('secondary', v)} />
+                  <div className="flex items-center gap-2 pt-1">
+                    <Button size="sm" disabled={brandingSaving || !brandingDirty} onClick={saveBranding}>
+                      {brandingSaved ? 'Saved' : 'Save branding'}
+                    </Button>
+                    <Button size="sm" variant="ghost" disabled={brandingSaving} onClick={resetBranding}>
+                      Reset to default
+                    </Button>
+                  </div>
+                  <p className="text-[11px] text-zinc-600">
+                    "HEY-MATCHA.COM" and "Powered by Matcha" always appear; title text auto-adjusts for contrast.
+                  </p>
+                </div>
+                <div className="flex flex-col items-center gap-1">
+                  <PosterPreview primary={branding.primary} secondary={branding.secondary} />
+                  <span className="text-[10px] text-zinc-600 uppercase tracking-widest">Preview</span>
+                </div>
+              </div>
             )}
           </div>
 

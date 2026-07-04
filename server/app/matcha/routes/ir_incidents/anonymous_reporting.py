@@ -3,19 +3,44 @@
 Backs the public `/report/{token}` form. Token CRUD is per-company, gated
 to admin/client. The form itself lives in `inbound_email.py`.
 """
+import json
 import secrets
 from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
+import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from app.database import get_connection
 from app.matcha.dependencies import require_admin_or_client, get_client_company_id
-from app.matcha.services.ir_report_poster import build_report_poster_pdf
+from app.matcha.services.ir_report_poster import (
+    build_report_poster_pdf, resolve_branding, DEFAULT_BRANDING,
+)
 
 from ._shared import _build_public_link, _location_label
+
+_HEX = r"^#[0-9a-fA-F]{6}$"
+
+
+async def _load_poster_branding(conn, company_id) -> Optional[dict]:
+    """Raw stored poster branding for a company, or None (→ Matcha defaults).
+    Best-effort: tolerates the column not existing yet (deployed before the
+    posterbrand01 migration) so poster downloads never 500 on migration lag.
+    JSONB comes back as a str (no pool codec) → parse it."""
+    try:
+        raw = await conn.fetchval(
+            "SELECT report_poster_branding FROM companies WHERE id = $1", company_id
+        )
+    except asyncpg.exceptions.UndefinedColumnError:
+        return None
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except (ValueError, TypeError):
+            return None
+    return raw if isinstance(raw, dict) else None
 
 
 router = APIRouter()
@@ -98,6 +123,47 @@ async def disable_anonymous_reporting(
     return {"token": None, "enabled": False}
 
 
+class PosterBrandingBody(BaseModel):
+    primary: str = Field(..., pattern=_HEX)
+    secondary: str = Field(..., pattern=_HEX)
+
+
+@router.get("/anonymous-reporting/branding")
+async def get_poster_branding(current_user=Depends(require_admin_or_client)):
+    """Current QR-poster palette (defaults-merged) + the Matcha default to reset to."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Company not found")
+    async with get_connection() as conn:
+        stored = await _load_poster_branding(conn, company_id)
+    return {"branding": resolve_branding(stored), "default": DEFAULT_BRANDING}
+
+
+@router.put("/anonymous-reporting/branding")
+async def set_poster_branding(
+    body: PosterBrandingBody,
+    current_user=Depends(require_admin_or_client),
+):
+    """Store the client's QR-poster palette. Only primary/secondary are
+    configurable — Matcha branding on the poster is fixed and always rendered."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Company not found")
+    branding = resolve_branding(body.model_dump())
+    async with get_connection() as conn:
+        try:
+            await conn.execute(
+                "UPDATE companies SET report_poster_branding = $1::jsonb WHERE id = $2",
+                json.dumps(branding), company_id,
+            )
+        except asyncpg.exceptions.UndefinedColumnError:
+            raise HTTPException(
+                status_code=503,
+                detail="Poster branding storage is being provisioned. Try again shortly.",
+            )
+    return {"branding": branding, "default": DEFAULT_BRANDING}
+
+
 @router.get("/anonymous-reporting/poster.pdf")
 async def get_anonymous_reporting_poster(
     request: Request,
@@ -112,10 +178,11 @@ async def get_anonymous_reporting_poster(
             "SELECT report_email_token FROM companies WHERE id = $1",
             company_id,
         )
+        branding = await _load_poster_branding(conn, company_id)
     if not row or not row["report_email_token"]:
         raise HTTPException(status_code=404, detail="Anonymous reporting is not enabled")
     link = _public_report_link(request, row["report_email_token"])
-    pdf = build_report_poster_pdf(link)
+    pdf = build_report_poster_pdf(link, branding=branding)
     return Response(
         content=pdf,
         media_type="application/pdf",
@@ -427,11 +494,12 @@ async def get_location_link_poster(
             link_id,
             company_id,
         )
+        branding = await _load_poster_branding(conn, company_id)
     if not row:
         raise HTTPException(status_code=404, detail="Link not found")
     link = _build_public_link(request, row["token"], "intake")
     subtitle = _location_label(row["location_name"], row["city"], row["state"])
-    pdf = build_report_poster_pdf(link, subtitle=subtitle)
+    pdf = build_report_poster_pdf(link, subtitle=subtitle, branding=branding)
     return Response(
         content=pdf,
         media_type="application/pdf",
