@@ -1,19 +1,31 @@
 import { useState, useEffect } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Loader2 } from 'lucide-react'
+import { ArrowLeft, Loader2, MessageSquare, Kanban as KanbanIcon, Files } from 'lucide-react'
 import { getProjectDetail } from '../../api/matchaWork'
 import { useWorkBase } from '../../routes/WorkSurfaceContext'
 import ProjectKanbanBoard from '../../components/work/ProjectKanbanBoard'
+import BoardChatTab from '../../components/work/BoardChatTab'
+import BoardFilesTab from '../../components/work/BoardFilesTab'
 
-// A werk-lite "Board" is a matcha-work project under the hood, rendering the
-// collaborative 5-column kanban. Thin page: resolves the project title for the
-// header, then mounts the board full-pane.
+type BoardTab = 'chat' | 'kanban' | 'files'
+
+const TABS: { key: BoardTab; label: string; icon: typeof KanbanIcon }[] = [
+  { key: 'chat', label: 'Chat', icon: MessageSquare },
+  { key: 'kanban', label: 'Kanban', icon: KanbanIcon },
+  { key: 'files', label: 'Files', icon: Files },
+]
+
+// A werk-lite "Board" is a matcha-work project under the hood — the kanban is
+// the primary surface, but every project also gets an AI chat thread and file
+// storage for free, so this page tabs between the three (mirrors the desktop
+// Werk collab project's tab strip, minus the tabs with no web surface yet).
 export default function BoardView() {
   const { projectId } = useParams<{ projectId: string }>()
   const base = useWorkBase()
 
   const [title, setTitle] = useState<string | null>(null)
   const [titleLoading, setTitleLoading] = useState(true)
+  const [tab, setTab] = useState<BoardTab>('kanban')
 
   useEffect(() => {
     if (!projectId) return
@@ -65,9 +77,33 @@ export default function BoardView() {
         </h1>
       </div>
 
-      {/* Board */}
+      {/* Tab strip */}
+      <div className="flex items-center gap-1 border-b border-zinc-800 px-3">
+        {TABS.map((t) => {
+          const Icon = t.icon
+          const active = tab === t.key
+          return (
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key)}
+              className={`flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-medium transition-colors ${
+                active
+                  ? 'border-emerald-500 text-emerald-400'
+                  : 'border-transparent text-zinc-500 hover:text-zinc-300'
+              }`}
+            >
+              <Icon className="h-3.5 w-3.5" />
+              {t.label}
+            </button>
+          )
+        })}
+      </div>
+
+      {/* Tab content */}
       <div className="min-h-0 flex-1">
-        <ProjectKanbanBoard projectId={projectId} />
+        {tab === 'chat' && <BoardChatTab projectId={projectId} />}
+        {tab === 'kanban' && <ProjectKanbanBoard projectId={projectId} />}
+        {tab === 'files' && <BoardFilesTab projectId={projectId} />}
       </div>
     </div>
   )
