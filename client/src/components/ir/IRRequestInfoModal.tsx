@@ -130,7 +130,7 @@ export function IRRequestInfoModal({
             {questions.map((q, i) => (
               <div
                 key={i}
-                className="flex items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2"
+                className="flex items-center gap-2 rounded-lg border border-white/[0.08] bg-zinc-900 px-3 py-2"
               >
                 <Badge variant={q.source === 'copilot' ? 'warning' : 'neutral'}>
                   {q.source === 'copilot' ? 'Copilot' : 'You'}
@@ -163,7 +163,7 @@ export function IRRequestInfoModal({
               }}
               placeholder="Add a question…"
               maxLength={1000}
-              className="flex-1 rounded-lg border border-zinc-700 bg-zinc-900 px-3.5 py-2 text-sm text-zinc-100 placeholder-zinc-500 outline-none focus:border-zinc-500 focus:ring-1 focus:ring-zinc-500"
+              className="flex-1 rounded-lg border border-white/[0.08] bg-zinc-900 px-3.5 py-2 text-sm text-zinc-100 placeholder-zinc-500 outline-none transition-colors focus:border-emerald-500/50"
             />
             <Button variant="ghost" size="sm" onClick={addQuestion} disabled={!newQuestion.trim()}>
               <Plus className="w-3.5 h-3.5" />
@@ -181,13 +181,13 @@ export function IRRequestInfoModal({
         />
 
         {error && (
-          <div className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
+          <div className="text-xs text-red-400 bg-red-500/5 border border-red-500/30 rounded-lg px-3 py-2">
             {error}
           </div>
         )}
 
         {sendFailedLink && (
-          <div className="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2 space-y-1.5">
+          <div className="text-xs text-amber-300 bg-amber-500/5 border border-amber-500/30 rounded-lg px-3 py-2 space-y-1.5">
             <div>Request created, but the invite email failed to send. Share this link with the recipient directly, or use Resend later.</div>
             <div className="select-all text-zinc-300 break-all">{sendFailedLink}</div>
           </div>

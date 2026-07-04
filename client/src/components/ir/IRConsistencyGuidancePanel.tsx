@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '../../api/client'
-import { Card } from '../ui'
+import { Card, LABEL } from '../ui'
 import type { IRConsistencyGuidance, IRActionProbability } from '../../types/ir'
 import { typeLabel } from '../../types/ir'
 
@@ -27,8 +27,8 @@ export function IRConsistencyGuidancePanel({ incidentId, status }: Props) {
 
   return (
     <Card className="p-0 overflow-hidden">
-      <div className="px-5 py-3 border-b border-zinc-800/60 bg-zinc-900/40">
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-400">Consistency Guidance</h3>
+      <div className="px-5 py-3 border-b border-white/[0.06] bg-white/[0.02]">
+        <h3 className={LABEL}>Consistency Guidance</h3>
       </div>
       <div className="px-5 py-4">
         {loading && !guidance ? (
@@ -41,7 +41,7 @@ export function IRConsistencyGuidancePanel({ incidentId, status }: Props) {
           <div className="space-y-3">
             {guidance.action_distribution && guidance.action_distribution.length > 0 && (
               <div className="space-y-1.5">
-                <p className="text-[11px] text-zinc-500 uppercase tracking-wide">Actions Taken</p>
+                <p className={LABEL}>Actions Taken</p>
                 {(() => {
                   const max = Math.max(...guidance.action_distribution!.map((a: IRActionProbability) => a.probability), 0.01)
                   return guidance.action_distribution!.map((a: IRActionProbability) => (
@@ -50,7 +50,7 @@ export function IRConsistencyGuidancePanel({ incidentId, status }: Props) {
                       <div className="flex-1 h-1.5 rounded-full bg-zinc-800 overflow-hidden">
                         <div className="h-full rounded-full bg-emerald-500/60" style={{ width: `${(a.probability / max) * 100}%` }} />
                       </div>
-                      <span className="text-[11px] text-zinc-600 w-8 text-right">{Math.round(a.probability * 100)}%</span>
+                      <span className="font-mono text-[11px] tabular-nums text-zinc-600 w-8 text-right">{Math.round(a.probability * 100)}%</span>
                     </div>
                   ))
                 })()}
@@ -59,13 +59,13 @@ export function IRConsistencyGuidancePanel({ incidentId, status }: Props) {
             <div className="grid grid-cols-2 gap-3">
               {guidance.weighted_effectiveness_rate != null && (
                 <div className="text-center">
-                  <p className="text-sm font-semibold text-zinc-100">{Math.round(guidance.weighted_effectiveness_rate * 100)}%</p>
+                  <p className="font-mono text-sm font-semibold tabular-nums text-zinc-100">{Math.round(guidance.weighted_effectiveness_rate * 100)}%</p>
                   <p className="text-[11px] text-zinc-500">Effectiveness</p>
                 </div>
               )}
               {guidance.weighted_avg_resolution_days != null && (
                 <div className="text-center">
-                  <p className="text-sm font-semibold text-zinc-100">{Math.round(guidance.weighted_avg_resolution_days)}d</p>
+                  <p className="font-mono text-sm font-semibold tabular-nums text-zinc-100">{Math.round(guidance.weighted_avg_resolution_days)}d</p>
                   <p className="text-[11px] text-zinc-500">Avg Resolution</p>
                 </div>
               )}

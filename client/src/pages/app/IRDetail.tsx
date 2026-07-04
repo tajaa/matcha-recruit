@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Download } from 'lucide-react'
-import { Badge, Button, Card, Select } from '../../components/ui'
+import { Badge, Button, Card, Select, LABEL } from '../../components/ui'
 import { EmployeeMultiSelect } from '../../components/employees/EmployeeMultiSelect'
 import { api } from '../../api/client'
 import { useIRIncident } from '../../hooks/ir/useIRIncident'
@@ -372,20 +372,20 @@ export default function IRDetail() {
         {/* Sidebar */}
         <div className="space-y-4">
           <Card className="p-0 overflow-hidden">
-            <div className="px-5 py-3 border-b border-zinc-800/60 bg-zinc-900/40">
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-400">Incident Details</h3>
+            <div className="px-5 py-3 border-b border-white/[0.06] bg-white/[0.02]">
+              <h3 className={LABEL}>Incident Details</h3>
             </div>
             <div className="px-5 py-4 space-y-4">
               <div>
-                <dt className="text-[11px] font-medium uppercase tracking-wide text-zinc-500 mb-1.5">Status</dt>
+                <dt className={`${LABEL} mb-1.5`}>Status</dt>
                 <Select label="" options={STATUS_OPTIONS} value={incident.status} onChange={(e) => updateIncident({ status: e.target.value } as never)} />
               </div>
               <div>
-                <dt className="text-[11px] font-medium uppercase tracking-wide text-zinc-500 mb-1.5">Severity</dt>
+                <dt className={`${LABEL} mb-1.5`}>Severity</dt>
                 <Select label="" options={SEVERITY_OPTIONS} value={incident.severity} onChange={(e) => updateIncident({ severity: e.target.value } as never)} />
               </div>
               <div>
-                <dt className="text-[11px] font-medium uppercase tracking-wide text-zinc-500 mb-1">Type</dt>
+                <dt className={`${LABEL} mb-1`}>Type</dt>
                 <dd className="text-sm text-zinc-200">{typeLabel(incident.incident_type)}</dd>
               </div>
             </div>
@@ -395,16 +395,16 @@ export default function IRDetail() {
             <div className="px-5 py-4">
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <dt className="text-[11px] font-medium uppercase tracking-wide text-zinc-500 mb-1">Created</dt>
+                  <dt className={`${LABEL} mb-1`}>Created</dt>
                   <dd className="text-sm text-zinc-200">{new Date(incident.created_at).toLocaleDateString()}</dd>
                 </div>
                 <div>
-                  <dt className="text-[11px] font-medium uppercase tracking-wide text-zinc-500 mb-1">Updated</dt>
+                  <dt className={`${LABEL} mb-1`}>Updated</dt>
                   <dd className="text-sm text-zinc-200">{new Date(incident.updated_at).toLocaleDateString()}</dd>
                 </div>
               </div>
               <div className="mt-4 flex items-center justify-between">
-                <dt className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">Documents</dt>
+                <dt className={LABEL}>Documents</dt>
                 <dd className="text-sm font-medium text-zinc-200">{incident.document_count}</dd>
               </div>
             </div>

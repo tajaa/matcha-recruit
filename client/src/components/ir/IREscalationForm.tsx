@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { api } from '../../api/client'
-import { Button, Card, Input, Select } from '../ui'
+import { Button, Card, Input, Select, LABEL } from '../ui'
 import type { IRIncident } from '../../types/ir'
 import { IR_TYPE_TO_ER_CATEGORY } from '../../types/ir'
 
@@ -77,10 +77,10 @@ export function IREscalationForm({ incidentId, incident, onEscalated }: Props) {
   return (
     <Card className="p-4">
       <form onSubmit={handleSubmit} className="space-y-3">
-        <p className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Create ER Case</p>
+        <p className={LABEL}>Create ER Case</p>
         <Input label="Title" required value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
         <textarea
-          className="w-full bg-zinc-900 border border-zinc-800 rounded-lg text-sm text-zinc-200 px-3 py-2 min-h-[60px] focus:outline-none focus:border-zinc-600"
+          className="w-full bg-zinc-900 border border-white/[0.08] rounded-lg text-sm text-zinc-200 px-3 py-2 min-h-[60px] focus:outline-none focus:border-emerald-500/50"
           value={form.description}
           onChange={(e) => setForm({ ...form, description: e.target.value })}
           placeholder="Description..."

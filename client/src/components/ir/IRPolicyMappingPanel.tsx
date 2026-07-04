@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '../../api/client'
-import { Badge, Button, Card } from '../ui'
+import { Badge, Button, Card, LABEL } from '../ui'
 import type { IRPolicyMappingAnalysis } from '../../types/ir'
 import { RELEVANCE_BADGE } from '../../types/ir'
 
@@ -26,8 +26,8 @@ export function IRPolicyMappingPanel({ incidentId }: { incidentId: string }) {
 
   return (
     <Card className="p-0 overflow-hidden">
-      <div className="px-5 py-3 border-b border-zinc-800/60 bg-zinc-900/40 flex items-center justify-between">
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-400">Policy Mapping</h3>
+      <div className="px-5 py-3 border-b border-white/[0.06] bg-white/[0.02] flex items-center justify-between">
+        <h3 className={LABEL}>Policy Mapping</h3>
         <Button variant="ghost" size="sm" disabled={loading} onClick={refresh}>
           {loading ? '...' : 'Refresh'}
         </Button>
@@ -41,7 +41,7 @@ export function IRPolicyMappingPanel({ incidentId }: { incidentId: string }) {
           <div className="space-y-3">
             <p className="text-xs text-zinc-400">{mapping.summary}</p>
             {mapping.matches.map((m) => (
-              <div key={m.policy_id} className="border border-zinc-800 rounded-lg p-3 space-y-1.5">
+              <div key={m.policy_id} className="border border-white/[0.08] rounded-lg p-3 space-y-1.5">
                 <div className="flex items-center justify-between">
                   <span className="text-sm font-medium text-zinc-200">{m.policy_title}</span>
                   <Badge variant={RELEVANCE_BADGE[m.relevance] ?? 'neutral'}>{m.relevance}</Badge>
@@ -50,7 +50,7 @@ export function IRPolicyMappingPanel({ incidentId }: { incidentId: string }) {
                   <div className="flex-1 h-1.5 rounded-full bg-zinc-800 overflow-hidden">
                     <div className="h-full rounded-full bg-emerald-500/60" style={{ width: `${m.confidence * 100}%` }} />
                   </div>
-                  <span className="text-[11px] text-zinc-500">{Math.round(m.confidence * 100)}%</span>
+                  <span className="font-mono text-[11px] tabular-nums text-zinc-500">{Math.round(m.confidence * 100)}%</span>
                 </div>
                 <p className="text-xs text-zinc-500">{m.reasoning}</p>
               </div>
