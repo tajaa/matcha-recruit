@@ -316,6 +316,8 @@ Retired/backup configs go to `/etc/nginx/conf.d/archive/` (nginx only globs `*.c
 
 **Primary script**: `./scripts/dev-remote.sh` — SSH-tunnels the **dev** Postgres container from EC2 (`3.101.83.217:5432` → `matcha-postgres`, not prod), starts Redis tunnel, backend on `:8001`, frontend on `:5174`, local chat model on `:8080`. Requires `secrets/roonMT-arm.pem`. To sync dev/prod see the Database section + `docs/ops/DB_WORKFLOW.md`.
 
+**⚠️ `dev-remote.sh`'s frontend runs on `:5174` (tmux session `matcha-dev-remote`) — it is almost always already running.** If you spin up your own throwaway `npm run dev` (e.g. to screenshot-verify a change), do NOT clean it up with a port-pattern `pkill -f "vite --port ..."` — that regex also matches the user's real dev-remote.sh frontend process (same command line) and kills it. Track your own process by PID (`$!` / a pidfile) and `kill` that PID specifically instead.
+
 **Alternative**: `./scripts/dev.sh` — references a discontinued sister product; do not use.
 
 ```bash
