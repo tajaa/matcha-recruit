@@ -323,6 +323,19 @@ extension MatchaWorkService {
         )
     }
 
+    /// Weekly Work Replay: board-column snapshot as of `weekStart` (Monday
+    /// 00:00 Pacific) plus every history event through the following Sunday
+    /// 11:59:59pm, ascending. `weekStart` must be ISO8601 UTC.
+    func fetchWeeklyReplay(projectId: String, weekStart: String) async throws -> MWWeeklyReplay {
+        guard let encoded = weekStart.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else {
+            throw URLError(.badURL)
+        }
+        return try await client.request(
+            method: "GET",
+            path: "\(basePath)/projects/\(projectId)/history/replay?week_start=\(encoded)"
+        )
+    }
+
     // MARK: - Task file attachments
 
     func listTaskFiles(projectId: String, taskId: String) async throws -> [MWProjectFile] {

@@ -8,7 +8,7 @@ import asyncio
 import json
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from uuid import UUID
 
@@ -731,6 +731,117 @@ async def get_task_history_endpoint(
             task_id,
         )
     return [_serialize_history_row(r) for r in rows]
+
+@router.get("/projects/{project_id}/history/replay")
+async def get_project_history_replay_endpoint(
+    project_id: UUID,
+    week_start: datetime = Query(...),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Weekly Work Replay data: the board's column state as of `week_start`
+    (Monday 00:00 Pacific, computed client-side) plus every history event
+    within that 7-day window, ascending — enough for the client to fold
+    forward and animate a time-lapse. `week_end` is always exactly 7 days
+    after `week_start`.
+
+    Only 'created'/'column_change'/'review_rejected'/'review_approved' are
+    board-column-mutating events (verified: reject/approve are logged by
+    dedicated code paths that don't also emit a separate column_change, so
+    these 4 are the complete non-overlapping set — see project_task_service.py
+    reject_project_task/approve_project_task). Non-board events (comments,
+    subtasks, etc.) are still returned in `events` for potential future
+    flavor text, but the replay engine only acts on the 5 above (+ 'deleted').
+    """
+    await _verify_project_access(project_id, current_user)
+    week_end = week_start + timedelta(days=7)
+
+    _COLUMN_EVENTS = "'created', 'column_change', 'review_rejected', 'review_approved'"
+
+    # Group by the durable text copy, falling back to the live FK for any
+    # pre-migration row that predates task_id_text being stamped. Once a task
+    # is hard-deleted, task_id (the FK) is nulled on EVERY row for that task
+    # (ON DELETE SET NULL cascades across all referencing rows at once, not
+    # just the delete event) — with 2+ deleted tasks that collapses them all
+    # into one indistinguishable NULL bucket. task_id_text has no FK so it
+    # survives deletion and keeps each task's timeline separate.
+    _task_key = "COALESCE(h.task_id_text, h.task_id::text)"
+
+    async with get_connection() as conn:
+        starting_rows = await conn.fetch(
+            f"""
+            SELECT DISTINCT ON ({_task_key})
+                   {_task_key} AS task_key, h.to_value AS column_key,
+                   COALESCE(t.title, h.metadata->>'title') AS title,
+                   COALESCE(ac.name, CONCAT(ae.first_name, ' ', ae.last_name), aa.name) AS assignee_name,
+                   au.avatar_url AS assignee_avatar_url
+            FROM mw_task_history h
+            LEFT JOIN mw_tasks t ON t.id = h.task_id
+            LEFT JOIN users au ON au.id = t.assigned_to
+            LEFT JOIN clients ac ON ac.user_id = t.assigned_to
+            LEFT JOIN employees ae ON ae.user_id = t.assigned_to
+            LEFT JOIN admins aa ON aa.user_id = t.assigned_to
+            WHERE h.project_id = $1
+              AND h.created_at < $2
+              AND h.event_type IN ({_COLUMN_EVENTS})
+            ORDER BY {_task_key}, h.created_at DESC
+            """,
+            project_id, week_start,
+        )
+        event_rows = await conn.fetch(
+            f"""
+            SELECT h.id, {_task_key} AS task_key, h.event_type, h.from_value, h.to_value,
+                   h.created_at, h.actor_user_id,
+                   COALESCE(t.title, h.metadata->>'title') AS title,
+                   COALESCE(c.name, CONCAT(e.first_name, ' ', e.last_name), a.name, u.email) AS actor_name,
+                   u.avatar_url AS actor_avatar_url
+            FROM mw_task_history h
+            LEFT JOIN mw_tasks t ON t.id = h.task_id
+            LEFT JOIN users u ON u.id = h.actor_user_id
+            LEFT JOIN clients c ON c.user_id = h.actor_user_id
+            LEFT JOIN employees e ON e.user_id = h.actor_user_id
+            LEFT JOIN admins a ON a.user_id = h.actor_user_id
+            WHERE h.project_id = $1
+              AND h.created_at >= $2 AND h.created_at < $3
+            ORDER BY h.created_at ASC
+            """,
+            project_id, week_start, week_end,
+        )
+
+    starting_state = [
+        {
+            "task_id": r["task_key"],
+            "title": r["title"] or "Untitled",
+            "column": r["column_key"],
+            "assignee_name": r["assignee_name"],
+            "assignee_avatar_url": r["assignee_avatar_url"],
+        }
+        for r in starting_rows
+        # A task whose latest pre-week event was 'deleted' shouldn't seed the
+        # board — but 'deleted' isn't in _COLUMN_EVENTS so it never wins the
+        # DISTINCT ON in the first place; this filter is a no-op safeguard.
+        if r["column_key"] is not None
+    ]
+    events = [
+        {
+            "id": str(r["id"]),
+            "task_id": r["task_key"],
+            "event_type": r["event_type"],
+            "from_column": r["from_value"],
+            "to_column": r["to_value"],
+            "actor_id": str(r["actor_user_id"]) if r["actor_user_id"] else None,
+            "actor_name": r["actor_name"],
+            "actor_avatar_url": r["actor_avatar_url"],
+            "title": r["title"] or "Untitled",
+            "created_at": r["created_at"].isoformat(),
+        }
+        for r in event_rows
+    ]
+    return {
+        "week_start": week_start.isoformat(),
+        "week_end": week_end.isoformat(),
+        "starting_state": starting_state,
+        "events": events,
+    }
 
 @router.post("/projects/{project_id}/tasks/{task_id}/summarize")
 async def summarize_task_endpoint(

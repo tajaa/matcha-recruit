@@ -52,6 +52,7 @@
 		3F3EE5D89655DDC22EABC2E7 /* BroadcastService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC01DD22EE33FF445566BB02 /* BroadcastService.swift */; };
 		40F17B25ABA40FB35E5E99A3 /* Avatar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68C842A8326844CF8A15C2B9 /* Avatar.swift */; };
 		419E73DB667CB1835333F7E8 /* ProjectDetailViewModel+Tasks.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F19096AF0EF70CF44025297 /* ProjectDetailViewModel+Tasks.swift */; };
+		BADA5500000000000000B002 /* WeeklyReplayViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = BADA5500000000000000F002 /* WeeklyReplayViewModel.swift */; };
 		48C216A1C92E1717B236961D /* NewThreadView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1768B8AD82B9DE8709D0ADF7 /* NewThreadView.swift */; };
 		4AE084C390D04987CC53601E /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7C07C71E59F24539F32D490 /* LoginView.swift */; };
 		4B0CC54DFCC04BB4A902EDDE /* MessageRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19237D0949B1CA295E4112E5 /* MessageRow.swift */; };
@@ -191,6 +192,7 @@
 		D1A2B3C4E5F60718A9B0C1D2 /* UsageSummaryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2B3C4D5F6071829A0B1C2D3 /* UsageSummaryView.swift */; };
 		D4A29278ECC3366A13089D39 /* ServiceCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5ADDBEAEEBA9E4439ECD6181 /* ServiceCache.swift */; };
 		D66A23402900CA7D8B4894A9 /* ProjectTaskModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = E489FA155C69897ED38F5DF8 /* ProjectTaskModels.swift */; };
+		BADA5500000000000000B001 /* ReplayModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = BADA5500000000000000F001 /* ReplayModels.swift */; };
 		D971A1ADE8ED1446A42571C5 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9075AAFE4AF48A587F51D6A1 /* AppDelegate.swift */; };
 		DC44609C9239E0EA71044BCE /* MultipartUploadBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5C3CE5229A938126E840ABD /* MultipartUploadBuilder.swift */; };
 		DC5FC5F0860C7CE84C540658 /* MatchaWorkService+Recruiting.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB1D4FD42916C537D5075185 /* MatchaWorkService+Recruiting.swift */; };
@@ -215,6 +217,9 @@
 		DEADBEEF000000000000B005 /* DealCompose.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEADBEEF000000000000F005 /* DealCompose.swift */; };
 		DEADBEEF000000000000B006 /* TaskEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEADBEEF000000000000F006 /* TaskEditor.swift */; };
 		DEADBEEF000000000000B007 /* KanbanCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEADBEEF000000000000F007 /* KanbanCard.swift */; };
+		BADA5500000000000000B003 /* ReplayCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = BADA5500000000000000F003 /* ReplayCard.swift */; };
+		BADA5500000000000000B004 /* ReplayBoardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BADA5500000000000000F004 /* ReplayBoardView.swift */; };
+		BADA5500000000000000B005 /* WeeklyReplayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BADA5500000000000000F005 /* WeeklyReplayView.swift */; };
 		DEADBEEF000000000000B008 /* KanbanSearch.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEADBEEF000000000000F008 /* KanbanSearch.swift */; };
 		DEADBEEF000000000000B0E1 /* ReviewGuideWizard.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEADBEEF000000000000F0E1 /* ReviewGuideWizard.swift */; };
 		DETA11PANE000000000000B1 /* DetailPanes.swift in Sources */ = {isa = PBXBuildFile; fileRef = DETA11PANE000000000000F2 /* DetailPanes.swift */; };
@@ -317,6 +322,9 @@
 		7A5C0000000000000000F002 /* RoundView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoundView.swift; sourceTree = "<group>"; };
 		7A5C0000000000000000F003 /* EventRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventRow.swift; sourceTree = "<group>"; };
 		7A5C0000000000000000F004 /* TaskViewerGraph.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskViewerGraph.swift; sourceTree = "<group>"; };
+		BADA5500000000000000F003 /* ReplayCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReplayCard.swift; sourceTree = "<group>"; };
+		BADA5500000000000000F004 /* ReplayBoardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReplayBoardView.swift; sourceTree = "<group>"; };
+		BADA5500000000000000F005 /* WeeklyReplayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeeklyReplayView.swift; sourceTree = "<group>"; };
 		7A5C0000000000000000F005 /* PendingAttachment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendingAttachment.swift; sourceTree = "<group>"; };
 		7A5C0000000000000000F006 /* NoteRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteRow.swift; sourceTree = "<group>"; };
 		7A5C0000000000000000F007 /* SubtaskRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubtaskRow.swift; sourceTree = "<group>"; };
@@ -329,6 +337,7 @@
 		7A5C0000000000000000F0C1 /* CommitSuggestionChip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommitSuggestionChip.swift; sourceTree = "<group>"; };
 		7A5C0000000000000000F0D1 /* PropsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Props/PropsView.swift; sourceTree = "<group>"; };
 		7F19096AF0EF70CF44025297 /* ProjectDetailViewModel+Tasks.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "ProjectDetailViewModel+Tasks.swift"; sourceTree = "<group>"; };
+		BADA5500000000000000F002 /* WeeklyReplayViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeeklyReplayViewModel.swift; sourceTree = "<group>"; };
 		7F303BA427EBBADC56AFF031 /* PushService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PushService.swift; sourceTree = "<group>"; };
 		86F9C67C0E32966EBAB0BD94 /* ProjectElementModels.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProjectElementModels.swift; sourceTree = "<group>"; };
 		87CD3FA8F0164D2F29731B2D /* KeychainHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainHelper.swift; sourceTree = "<group>"; };
@@ -448,6 +457,7 @@
 		E2A1B0C0D0E0F00100000006 /* EmailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailView.swift; sourceTree = "<group>"; };
 		E2B3C4D5F6071829A0B1C2D3 /* UsageSummaryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageSummaryView.swift; sourceTree = "<group>"; };
 		E489FA155C69897ED38F5DF8 /* ProjectTaskModels.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProjectTaskModels.swift; sourceTree = "<group>"; };
+		BADA5500000000000000F001 /* ReplayModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReplayModels.swift; sourceTree = "<group>"; };
 		E4E073C9506CA7C7E73D9062 /* DMThreadView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DMThreadView.swift; sourceTree = "<group>"; };
 		E5C3CE5229A938126E840ABD /* MultipartUploadBuilder.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MultipartUploadBuilder.swift; sourceTree = "<group>"; };
 		E69B46E3D51B945B783AF591 /* MessageComposer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MessageComposer.swift; sourceTree = "<group>"; };
@@ -702,6 +712,7 @@
 				C17C03E9AEF2444962BCA6E4 /* Previews */,
 				8646470B8A128EECBD15D889 /* ProjectDetail */,
 				7A5C0000000000000000A001 /* TaskViewer */,
+				BADA5500000000000000A001 /* Replay */,
 				8C6DBB713CC058B000C80ADB /* ProjectMediaView.swift */,
 				038BF0DE631CE5E12A4B6A83 /* ProjectElementsView.swift */,
 			);
@@ -802,6 +813,17 @@
 			path = TaskViewer;
 			sourceTree = "<group>";
 		};
+		BADA5500000000000000A001 /* Replay */ = {
+			isa = PBXGroup;
+			children = (
+				BADA5500000000000000F005 /* WeeklyReplayView.swift */,
+				BADA5500000000000000F004 /* ReplayBoardView.swift */,
+				BADA5500000000000000F003 /* ReplayCard.swift */,
+			);
+			name = Replay;
+			path = Replay;
+			sourceTree = "<group>";
+		};
 		7EBA95D28F6C8D70B4F456C1 /* iOS */ = {
 			isa = PBXGroup;
 			children = (
@@ -849,6 +871,7 @@
 				B06A176992AA39C8E304EFD0 /* BillingUsageModels.swift */,
 				94FBACAA706BADE04CF26DE2 /* DashboardModels.swift */,
 				E489FA155C69897ED38F5DF8 /* ProjectTaskModels.swift */,
+				BADA5500000000000000F001 /* ReplayModels.swift */,
 				86F9C67C0E32966EBAB0BD94 /* ProjectElementModels.swift */,
 				5C6EEE903BD7EDAD4CB23C91 /* ProjectBizModels.swift */,
 			);
@@ -946,6 +969,7 @@
 				E2A1B0C0D0E0F00100000004 /* EmailViewModel.swift */,
 				CBAE334A7AAA459BAEE4E4F8 /* ProjectDetailViewModel+Core.swift */,
 				7F19096AF0EF70CF44025297 /* ProjectDetailViewModel+Tasks.swift */,
+				BADA5500000000000000F002 /* WeeklyReplayViewModel.swift */,
 				4CD4A9D11B1B6EBD173C43B5 /* ProjectDetailViewModel+Elements.swift */,
 				E93689D55183E3174B00BDD9 /* ProjectDetailViewModel+Files.swift */,
 				603136FE150BA8CD056B028C /* ProjectDetailViewModel+Biz.swift */,
@@ -1235,6 +1259,9 @@
 				DEADBEEF000000000000B005 /* DealCompose.swift in Sources */,
 				DEADBEEF000000000000B006 /* TaskEditor.swift in Sources */,
 				DEADBEEF000000000000B007 /* KanbanCard.swift in Sources */,
+				BADA5500000000000000B003 /* ReplayCard.swift in Sources */,
+				BADA5500000000000000B004 /* ReplayBoardView.swift in Sources */,
+				BADA5500000000000000B005 /* WeeklyReplayView.swift in Sources */,
 				DEADBEEF000000000000B0E1 /* ReviewGuideWizard.swift in Sources */,
 				DEADBEEF000000000000B008 /* KanbanSearch.swift in Sources */,
 				AA11BB22CC33DD44EE55000C /* ProjectFilesView.swift in Sources */,
@@ -1338,10 +1365,12 @@
 				286D1C1EC6A72DE82EF6E765 /* ProjectMediaView.swift in Sources */,
 				6A029A351EBB310BD348B013 /* ProjectElementsView.swift in Sources */,
 				D66A23402900CA7D8B4894A9 /* ProjectTaskModels.swift in Sources */,
+				BADA5500000000000000B001 /* ReplayModels.swift in Sources */,
 				C40604AE06F74A358E7B37E0 /* ProjectElementModels.swift in Sources */,
 				E5594BCA329F0F5EC6CD4484 /* ProjectBizModels.swift in Sources */,
 				177C0859669D81A618CBABFE /* ProjectDetailViewModel+Core.swift in Sources */,
 				419E73DB667CB1835333F7E8 /* ProjectDetailViewModel+Tasks.swift in Sources */,
+				BADA5500000000000000B002 /* WeeklyReplayViewModel.swift in Sources */,
 				B66274A51FD5BFEC6FC84CDC /* ProjectDetailViewModel+Elements.swift in Sources */,
 				63AAB332DC7A629087AAE04F /* ProjectDetailViewModel+Files.swift in Sources */,
 				0C8B6F21E815D47AF2A01A7D /* ProjectDetailViewModel+Biz.swift in Sources */,

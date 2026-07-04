@@ -47,10 +47,10 @@ async def _log_task_history(
         await conn.execute(
             """
             INSERT INTO mw_task_history
-                (task_id, project_id, actor_user_id, event_type, from_value, to_value, metadata)
-            VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+                (task_id, task_id_text, project_id, actor_user_id, event_type, from_value, to_value, metadata)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
             """,
-            task_id, project_id, actor_user_id, event_type,
+            task_id, str(task_id) if task_id is not None else None, project_id, actor_user_id, event_type,
             from_value, to_value, json.dumps(metadata or {}),
         )
     except Exception as e:

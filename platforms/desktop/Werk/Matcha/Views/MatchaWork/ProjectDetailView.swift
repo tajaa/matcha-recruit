@@ -504,6 +504,8 @@ struct ProjectDetailView: View {
                 collabThreads
             case .overview:
                 collabOverview
+            case .history:
+                WeeklyReplayView(viewModel: viewModel)
             }
         }
         .background(ThemeRadialBackground())

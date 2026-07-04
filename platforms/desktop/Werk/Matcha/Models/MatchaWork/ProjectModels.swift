@@ -506,6 +506,17 @@ enum PacificDateFormatter {
     private static let shortFmt = makeFormatter("MMM d")
     private static let absoluteFmt = makeFormatter("MMM d, h:mm a")
     private static let dateTimeFmt = makeFormatter("MMM d 'at' h:mm a")
+    private static let timeOnlyFmt = makeFormatter("h:mm a")
+
+    /// Monday-first Pacific calendar, shared by the week-boundary helpers
+    /// below. A fresh `Calendar` per call is cheap (unlike DateFormatter,
+    /// no ICU pattern compilation) so this isn't cached as a static.
+    private static var pacificCalendar: Calendar {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = pacific
+        cal.firstWeekday = 2 // Monday
+        return cal
+    }
 
     /// Parse an ISO8601 string, tolerating both fractional-seconds and plain
     /// internet-datetime variants (mirrors TaskClipboardExporter.formatHistoryDate).
@@ -543,5 +554,29 @@ enum PacificDateFormatter {
         if secs < 86400 { return "\(secs / 3600)h ago" }
         if secs < 7 * 86400 { return "\(secs / 86400)d ago" }
         return shortFmt.string(from: date)
+    }
+
+    /// Time only, e.g. "2:14 PM". Used for the replay scrub-position label.
+    static func timeOnly(_ iso: String?) -> String? {
+        guard let date = parse(iso) else { return nil }
+        return timeOnlyFmt.string(from: date)
+    }
+
+    /// Monday 12:00am Pacific of the week containing `date` — the Weekly
+    /// Replay boundary. Sunday 11:59:59pm is implicitly `startOfWeek + 7 days`
+    /// (the server derives `week_end` the same way; nothing computes it here).
+    static func startOfWeek(containing date: Date) -> Date {
+        let cal = pacificCalendar
+        let comps = cal.dateComponents([.yearForWeekOfYear, .weekOfYear], from: date)
+        return cal.date(from: comps) ?? date
+    }
+
+    /// "Jun 30 – Jul 6" for the week-picker header. Both ends computed from
+    /// the same Pacific calendar as `startOfWeek` so they never drift a day
+    /// apart across a DST transition.
+    static func weekLabel(_ start: Date) -> String {
+        let cal = pacificCalendar
+        let end = cal.date(byAdding: .day, value: 6, to: start) ?? start
+        return "\(shortFmt.string(from: start)) – \(shortFmt.string(from: end))"
     }
 }
