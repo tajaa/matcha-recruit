@@ -24,7 +24,7 @@ export const STARTERS = [
 ]
 
 /** Label voice — docket micro-caption. */
-export const LABEL = 'text-[10px] font-medium uppercase tracking-[0.15em] text-zinc-500'
+export { LABEL } from '../../../components/ui'
 
 export type CidInfo = { ref: string | null; label: string; summary: string }
 
