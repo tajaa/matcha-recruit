@@ -9,6 +9,9 @@ interface KanbanCardProps {
   onDragStart: (e: React.DragEvent) => void
   onDragEnd: () => void
   dragging?: boolean
+  /** Moved or created since this user last looked at the board — draws a gold
+   *  ring, cleared when the card is opened. */
+  ringed?: boolean
 }
 
 /** Human-readable assignee, mirroring the desktop `displayAssignee`: prefer a
@@ -51,7 +54,7 @@ function aging(task: MWProjectTask): 'none' | 'warn' | 'overdue' {
   return 'none'
 }
 
-export default function KanbanCard({ task, onClick, onDragStart, onDragEnd, dragging }: KanbanCardProps) {
+export default function KanbanCard({ task, onClick, onDragStart, onDragEnd, dragging, ringed }: KanbanCardProps) {
   const assignee = displayAssignee(task)
   const completed = task.status === 'completed'
 
@@ -76,9 +79,11 @@ export default function KanbanCard({ task, onClick, onDragStart, onDragEnd, drag
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
       onClick={onClick}
-      className={`group relative cursor-pointer overflow-hidden rounded-lg border border-zinc-800 bg-zinc-900 p-3 transition-all hover:scale-[1.01] hover:border-zinc-700 ${
-        dragging ? 'opacity-40' : ''
-      }`}
+      className={`group relative cursor-pointer overflow-hidden rounded-lg border bg-zinc-900 p-3 transition-all hover:scale-[1.01] ${
+        ringed
+          ? 'border-yellow-400/75 shadow-[0_0_10px_rgba(250,204,21,0.35)]'
+          : 'border-zinc-800 hover:border-zinc-700'
+      } ${dragging ? 'opacity-40' : ''}`}
     >
       {edgeColor && <span className={`absolute inset-y-1.5 left-0 w-[3px] rounded-full ${edgeColor}`} />}
 

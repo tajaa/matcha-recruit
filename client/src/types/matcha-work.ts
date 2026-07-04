@@ -148,6 +148,26 @@ export interface MWProjectTaskCreate {
   assigned_to?: string | null
   due_date?: string | null
   category?: string | null
+  element_id?: string | null
+  /** Checklist titles created alongside the task (e.g. AI-drafted steps). */
+  subtasks?: string[]
+}
+
+/** Response of `POST /projects/{id}/tasks/ai-draft` — a structured ticket draft
+ *  from a natural-language prompt. No DB write; the caller reviews/edits, then
+ *  creates via the normal `createProjectTask` call. Mirrors the desktop
+ *  `MWTaskDraft`. */
+export interface MWTaskDraft {
+  title: string
+  description: string | null
+  priority: TaskPriority
+  category: string
+  board_column: BoardColumn
+  assigned_to: string | null
+  assigned_name: string | null
+  element_id: string | null
+  element_name: string | null
+  subtasks: string[]
 }
 
 /** Partial patch for `PATCH /projects/{id}/tasks/{taskId}`. Send ONLY the keys

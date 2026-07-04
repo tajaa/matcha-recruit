@@ -1,5 +1,16 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
-import { Loader2, Plus, X, Trash2, ListChecks, Undo2, CheckCircle2 } from 'lucide-react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import {
+  Loader2,
+  Plus,
+  X,
+  Trash2,
+  ListChecks,
+  Undo2,
+  CheckCircle2,
+  Search,
+  LayoutGrid,
+  List,
+} from 'lucide-react'
 import {
   listProjectTasks,
   createProjectTask,
@@ -11,32 +22,39 @@ import {
   createSubtask,
   updateSubtask,
   deleteSubtask,
+  draftTaskFromPrompt,
+  listCollaborators,
 } from '../../api/matchaWork'
 import type {
   MWProjectTask,
   MWSubtask,
   BoardColumn,
   TaskPriority,
+  MWTaskDraft,
+  MWProjectTaskCreate,
+  ProjectCollaborator,
 } from '../../types/matcha-work'
 import { ProjectSocket } from '../../api/projectSocket'
 import { useMe } from '../../hooks/useMe'
 import KanbanCard from './KanbanCard'
+import TaskProgressBar from './TaskProgressBar'
+import AiDraftBar from './AiDraftBar'
+import AiDraftReviewModal from './AiDraftReviewModal'
+import TemplateComposeModal from './TemplateComposeModal'
+import KanbanListView from './KanbanListView'
+import { KANBAN_COLUMNS } from '../../utils/kanbanColumns'
+import { searchTokens, taskMatches } from '../../utils/kanbanSearch'
+import { KANBAN_TEMPLATES, type KanbanTemplate } from '../../utils/kanbanTemplates'
 
 interface ProjectKanbanBoardProps {
   projectId: string
 }
 
-// Board lane order — matches the desktop `kanbanColumns` (todo → in_progress →
-// review → changes_requested → done).
-const COLUMNS: { key: BoardColumn; label: string }[] = [
-  { key: 'todo', label: 'Todo' },
-  { key: 'in_progress', label: 'In Progress' },
-  { key: 'review', label: 'Review' },
-  { key: 'changes_requested', label: 'Changes Requested' },
-  { key: 'done', label: 'Done' },
-]
-
 const PRIORITIES: TaskPriority[] = ['critical', 'high', 'medium', 'low']
+
+function lastSeenKey(userId: string, projectId: string): string {
+  return `kanban-lastseen-${userId}-${projectId}`
+}
 
 export default function ProjectKanbanBoard({ projectId }: ProjectKanbanBoardProps) {
   const [tasks, setTasks] = useState<MWProjectTask[]>([])
@@ -54,6 +72,31 @@ export default function ProjectKanbanBoard({ projectId }: ProjectKanbanBoardProp
 
   // Card detail side panel.
   const [selectedId, setSelectedId] = useState<string | null>(null)
+
+  // Search / view mode / done-lane collapse.
+  const [searchText, setSearchText] = useState('')
+  const [showList, setShowList] = useState(() => localStorage.getItem('mw-kanban-list-layout') === '1')
+  const [doneExpanded, setDoneExpanded] = useState(false)
+
+  // Dynamic (empty-collapsing) columns + the "+" template menu.
+  const [hoveredEmptyColumn, setHoveredEmptyColumn] = useState<BoardColumn | null>(null)
+  const [menuColumn, setMenuColumn] = useState<BoardColumn | null>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  // AI draft + template compose modals (share the same lazily-fetched
+  // collaborator list for the assignee picker).
+  const [templateCompose, setTemplateCompose] = useState<{ template: KanbanTemplate; column: BoardColumn } | null>(null)
+  const [aiDrafting, setAiDrafting] = useState(false)
+  const [aiError, setAiError] = useState<string | null>(null)
+  const [aiDraft, setAiDraft] = useState<MWTaskDraft | null>(null)
+  const [collaborators, setCollaborators] = useState<ProjectCollaborator[]>([])
+  const collabLoadedRef = useRef(false)
+  const [modalBusy, setModalBusy] = useState(false)
+
+  // Gold "changed since you last looked" ring, keyed off a per-user localStorage
+  // baseline (mirrors the desktop's per-user UserDefaults last-seen snapshot).
+  const [changedIds, setChangedIds] = useState<Set<string>>(new Set())
+  const didBaselineRef = useRef(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -73,37 +116,148 @@ export default function ProjectKanbanBoard({ projectId }: ProjectKanbanBoardProp
   }, [load])
 
   // ── Realtime: another collaborator's create/move/delete shows up live ──
-  // Mirrors useProjectPresence.ts's subscribe-on-mount pattern. A ref for the
-  // current user id (not a plain closure var) so the socket callbacks — bound
-  // once at connect time — always read the latest value instead of whatever
-  // `me` was on first render.
+  // Mirrors useProjectPresence.ts's subscribe-on-mount pattern. Refs (not plain
+  // closure vars) for the current user id and the latest tasks — the socket
+  // callbacks are bound once at connect time and would otherwise read whatever
+  // `me`/`tasks` were on first render.
   const { me } = useMe()
   const meIdRef = useRef<string | null>(null)
   useEffect(() => {
     meIdRef.current = me?.user.id ?? null
   }, [me])
+  const tasksRef = useRef<MWProjectTask[]>([])
+  useEffect(() => {
+    tasksRef.current = tasks
+  }, [tasks])
 
   useEffect(() => {
     const socket = new ProjectSocket()
     socket.onTaskCreated = (raw) => {
-      if (raw.actor_id && raw.actor_id === meIdRef.current) return
+      const actorId = (raw as { actor_id?: string | null }).actor_id ?? null
+      if (actorId && actorId === meIdRef.current) return
       const task = raw as unknown as MWProjectTask
       setTasks((prev) => (prev.some((t) => t.id === task.id) ? prev : [...prev, task]))
+      setChangedIds((prev) => {
+        const next = new Set(prev)
+        next.add(task.id)
+        return next
+      })
     }
     socket.onTaskUpdated = (raw) => {
       const task = raw as unknown as MWProjectTask
+      const actorId = (raw as { actor_id?: string | null }).actor_id ?? null
+      const isSelf = !!actorId && actorId === meIdRef.current
+      const local = tasksRef.current.find((t) => t.id === task.id)
+      const columnChanged = !!local && task.board_column !== local.board_column
       setTasks((prev) => prev.map((t) => (t.id === task.id ? mergeTask(t, task) : t)))
+      if (!isSelf && columnChanged) {
+        setChangedIds((prev) => {
+          const next = new Set(prev)
+          next.add(task.id)
+          return next
+        })
+      }
     }
     socket.onTaskDeleted = (taskId) => {
       setTasks((prev) => prev.filter((t) => t.id !== taskId))
       setSelectedId((id) => (id === taskId ? null : id))
+      setChangedIds((prev) => {
+        if (!prev.has(taskId)) return prev
+        const next = new Set(prev)
+        next.delete(taskId)
+        return next
+      })
     }
     socket.connect()
     socket.joinProject(projectId, 'board')
     return () => socket.disconnect()
   }, [projectId])
 
+  // ── Gold ring — baseline once per mount, then diff against it ──
+  useEffect(() => {
+    if (didBaselineRef.current) return
+    if (loading || tasks.length === 0 || !me?.user.id) return
+    didBaselineRef.current = true
+    const key = lastSeenKey(me.user.id, projectId)
+    let map: Record<string, string> = {}
+    try {
+      const raw = localStorage.getItem(key)
+      map = raw ? JSON.parse(raw) : {}
+    } catch {
+      map = {}
+    }
+    if (Object.keys(map).length === 0) {
+      // First-ever open on this device — baseline silently, no rings.
+      const fresh: Record<string, string> = {}
+      tasks.forEach((t) => {
+        fresh[t.id] = t.board_column
+      })
+      try {
+        localStorage.setItem(key, JSON.stringify(fresh))
+      } catch {
+        /* best-effort */
+      }
+      return
+    }
+    const changed = tasks.filter((t) => map[t.id] === undefined || map[t.id] !== t.board_column).map((t) => t.id)
+    if (changed.length) setChangedIds(new Set(changed))
+  }, [loading, tasks, me, projectId])
+
+  function writeLastSeen(taskId: string, column: BoardColumn) {
+    if (!me?.user.id) return
+    try {
+      const key = lastSeenKey(me.user.id, projectId)
+      const raw = localStorage.getItem(key)
+      const map = raw ? JSON.parse(raw) : {}
+      map[taskId] = column
+      localStorage.setItem(key, JSON.stringify(map))
+    } catch {
+      /* best-effort */
+    }
+  }
+
+  function clearRing(taskId: string) {
+    setChangedIds((prev) => {
+      if (!prev.has(taskId)) return prev
+      const next = new Set(prev)
+      next.delete(taskId)
+      return next
+    })
+  }
+
+  /** Opening a card acknowledges it — clears its ring and advances its
+   *  baseline entry to the current column. */
+  function acknowledge(taskId: string) {
+    clearRing(taskId)
+    const task = tasks.find((t) => t.id === taskId)
+    if (task) writeLastSeen(taskId, task.board_column)
+  }
+
+  /** A move/edit *I* made should never leave a ring on my own screen. */
+  function noteSelfMove(taskId: string, column: BoardColumn) {
+    clearRing(taskId)
+    writeLastSeen(taskId, column)
+  }
+
   const selectedTask = selectedId ? tasks.find((t) => t.id === selectedId) ?? null : null
+
+  // ── Search filter ──
+  const tokens = useMemo(() => searchTokens(searchText), [searchText])
+  const visible = useMemo(
+    () => (tokens.length ? tasks.filter((t) => taskMatches(t, tokens)) : tasks),
+    [tasks, tokens],
+  )
+
+  const role = me?.user?.role
+  const canAiDraft = role === 'admin' || role === 'client' || role === 'individual'
+
+  function ensureCollaborators() {
+    if (collabLoadedRef.current) return
+    collabLoadedRef.current = true
+    listCollaborators(projectId)
+      .then(setCollaborators)
+      .catch(() => {})
+  }
 
   // ── Drag to move ──
   // Optimistic: move the card locally, PATCH only { board_column }, revert on
@@ -129,9 +283,7 @@ export default function ProjectKanbanBoard({ projectId }: ProjectKanbanBoardProp
     )
     try {
       const updated = await updateProjectTask(projectId, taskId, { board_column: toColumn })
-      // Merge the server row, but preserve list-only aggregates the PATCH
-      // RETURNING clause doesn't carry (subtask counts, attachments, etc.).
-      setTasks((prev) => prev.map((t) => (t.id === taskId ? mergeTask(t, updated) : t)))
+      patchLocal(taskId, updated)
     } catch (e) {
       // Revert BOTH the column and the optimistic status flip — reverting only
       // the column leaves the card in its lane with the wrong status.
@@ -168,10 +320,67 @@ export default function ProjectKanbanBoard({ projectId }: ProjectKanbanBoardProp
     }
   }
 
-  // Patch a single task in place (used by the detail panel for field edits).
+  // Patch a single task in place (used by the detail panel for field edits,
+  // and by moveTask above). Notes a self-move when the column actually
+  // changed, so the gold ring never lands on a change I made myself.
   function patchLocal(taskId: string, updated: MWProjectTask) {
+    const local = tasks.find((t) => t.id === taskId)
+    if (local && updated.board_column && updated.board_column !== local.board_column) {
+      noteSelfMove(taskId, updated.board_column)
+    }
     setTasks((prev) => prev.map((t) => (t.id === taskId ? mergeTask(t, updated) : t)))
   }
+
+  // ── AI draft + template compose ──
+  async function handleAiDraft(prompt: string) {
+    setAiDrafting(true)
+    setAiError(null)
+    try {
+      const draft = await draftTaskFromPrompt(projectId, prompt)
+      ensureCollaborators()
+      setAiDraft(draft)
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : ''
+      setAiError(
+        /429|limit/i.test(msg)
+          ? 'Daily AI limit reached (50 per 24 hours). Create tickets manually or try again later.'
+          : "Couldn't draft that — try rephrasing.",
+      )
+    } finally {
+      setAiDrafting(false)
+    }
+  }
+
+  async function handleCreateFromPayload(payload: MWProjectTaskCreate) {
+    setModalBusy(true)
+    try {
+      const created = await createProjectTask(projectId, payload)
+      setTasks((prev) => [...prev, created])
+      setAiDraft(null)
+      setTemplateCompose(null)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to create task')
+    } finally {
+      setModalBusy(false)
+    }
+  }
+
+  // Close the "+" template menu on outside click / Escape.
+  useEffect(() => {
+    if (!menuColumn) return
+    function onDocClick(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuColumn(null)
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setMenuColumn(null)
+    }
+    document.addEventListener('mousedown', onDocClick)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDocClick)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [menuColumn])
 
   if (loading) {
     return (
@@ -192,98 +401,215 @@ export default function ProjectKanbanBoard({ projectId }: ProjectKanbanBoardProp
         </div>
       )}
 
-      <div className="flex flex-1 gap-3 overflow-x-auto p-4">
-        {COLUMNS.map((col) => {
-          const colTasks = tasks.filter((t) => t.board_column === col.key)
-          const isDropTarget = dragOverColumn === col.key
-          return (
-            <div
-              key={col.key}
-              onDragOver={(e) => {
-                e.preventDefault()
-                if (dragOverColumn !== col.key) setDragOverColumn(col.key)
-              }}
-              onDragLeave={(e) => {
-                // Only clear when the pointer actually leaves the column subtree.
-                if (!e.currentTarget.contains(e.relatedTarget as Node)) {
-                  setDragOverColumn((c) => (c === col.key ? null : c))
-                }
-              }}
-              onDrop={(e) => {
-                e.preventDefault()
-                setDragOverColumn(null)
-                if (draggingId) moveTask(draggingId, col.key)
-              }}
-              className={`flex w-72 shrink-0 flex-col rounded-xl border bg-zinc-900/40 transition-colors ${
-                isDropTarget ? 'border-emerald-600/60 bg-emerald-950/10' : 'border-zinc-800'
-              }`}
-            >
-              {/* Column header */}
-              <div className="flex items-center justify-between px-3 py-2.5">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
-                    {col.label}
-                  </span>
-                  <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-400">
-                    {colTasks.length}
-                  </span>
+      {tasks.length > 0 && (
+        <div className="flex items-center gap-2 px-3 pt-2">
+          <Search className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
+          <input
+            value={searchText}
+            onChange={(e) => setSearchText(e.target.value)}
+            placeholder="Search tasks…"
+            title='space = AND, "quotes" = exact phrase'
+            className="min-w-0 flex-1 bg-transparent text-xs text-zinc-200 placeholder-zinc-600 outline-none"
+          />
+          {searchText && (
+            <button onClick={() => setSearchText('')} className="shrink-0 text-zinc-500 hover:text-zinc-300">
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+      )}
+
+      {tasks.length > 0 && <TaskProgressBar tasks={tasks} />}
+
+      <div className="flex items-center gap-1 px-3 pb-1">
+        <button
+          onClick={() => {
+            setShowList(false)
+            localStorage.setItem('mw-kanban-list-layout', '0')
+          }}
+          className={`flex items-center gap-1 rounded px-2 py-1 text-[11px] font-medium transition-colors ${
+            !showList ? 'bg-emerald-500/15 text-emerald-400' : 'text-zinc-500 hover:text-zinc-300'
+          }`}
+        >
+          <LayoutGrid className="h-3 w-3" />
+          Board
+        </button>
+        <button
+          onClick={() => {
+            setShowList(true)
+            localStorage.setItem('mw-kanban-list-layout', '1')
+          }}
+          className={`flex items-center gap-1 rounded px-2 py-1 text-[11px] font-medium transition-colors ${
+            showList ? 'bg-emerald-500/15 text-emerald-400' : 'text-zinc-500 hover:text-zinc-300'
+          }`}
+        >
+          <List className="h-3 w-3" />
+          List
+        </button>
+      </div>
+
+      {canAiDraft && <AiDraftBar drafting={aiDrafting} error={aiError} onDraft={handleAiDraft} />}
+
+      {showList ? (
+        <KanbanListView
+          tasks={visible}
+          searchTokens={tokens}
+          myUserId={me?.user.id ?? null}
+          changedIds={changedIds}
+          onOpen={(t) => {
+            acknowledge(t.id)
+            setSelectedId(t.id)
+          }}
+        />
+      ) : (
+        <div className="flex flex-1 gap-2 overflow-x-auto p-2.5 max-sm:flex-col max-sm:overflow-y-auto">
+          {KANBAN_COLUMNS.map((col) => {
+            let colTasks = visible.filter((t) => t.board_column === col.key)
+            if (col.key === 'done') {
+              colTasks = [...colTasks].sort((a, b) => (b.completed_at ?? '').localeCompare(a.completed_at ?? ''))
+            }
+            const totalInColumn = colTasks.length
+            const shownTasks = col.key === 'done' && !doneExpanded && totalInColumn > 5 ? colTasks.slice(0, 5) : colTasks
+            const isEmpty = totalInColumn === 0
+            const isDropTarget = dragOverColumn === col.key
+            const collapsed =
+              isEmpty && addingColumn !== col.key && hoveredEmptyColumn !== col.key && !isDropTarget
+
+            return (
+              <div
+                key={col.key}
+                onMouseEnter={() => {
+                  if (isEmpty) setHoveredEmptyColumn(col.key)
+                }}
+                onMouseLeave={() => setHoveredEmptyColumn((c) => (c === col.key ? null : c))}
+                onDragOver={(e) => {
+                  e.preventDefault()
+                  if (dragOverColumn !== col.key) setDragOverColumn(col.key)
+                }}
+                onDragLeave={(e) => {
+                  // Only clear when the pointer actually leaves the column subtree.
+                  if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                    setDragOverColumn((c) => (c === col.key ? null : c))
+                  }
+                }}
+                onDrop={(e) => {
+                  e.preventDefault()
+                  setDragOverColumn(null)
+                  if (draggingId) moveTask(draggingId, col.key)
+                }}
+                className={`flex shrink-0 flex-col rounded-lg border bg-zinc-900/40 transition-[width] duration-150 ease-out max-sm:w-full ${
+                  collapsed ? 'w-[100px]' : 'w-[240px]'
+                } ${isDropTarget ? 'border-emerald-600/60 bg-emerald-950/10' : 'border-zinc-800'}`}
+              >
+                {/* Column header */}
+                <div className="relative flex items-center justify-between px-2.5 py-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
+                      {col.label}
+                    </span>
+                    <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-400">
+                      {totalInColumn}
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => setMenuColumn((c) => (c === col.key ? null : col.key))}
+                    className="text-zinc-500 transition-colors hover:text-zinc-300"
+                    title="Add card"
+                  >
+                    <Plus className="h-4 w-4" />
+                  </button>
+
+                  {menuColumn === col.key && (
+                    <div
+                      ref={menuRef}
+                      className="absolute right-0 top-full z-20 mt-1 w-44 rounded-lg border border-zinc-800 bg-zinc-900 py-1 shadow-xl"
+                    >
+                      <button
+                        onClick={() => {
+                          setAddingColumn(col.key)
+                          setNewTitle('')
+                          setMenuColumn(null)
+                        }}
+                        className="block w-full px-3 py-1.5 text-left text-xs text-zinc-200 hover:bg-zinc-800"
+                      >
+                        Blank task
+                      </button>
+                      <div className="my-1 border-t border-zinc-800" />
+                      {KANBAN_TEMPLATES.map((t) => {
+                        const TIcon = t.icon
+                        return (
+                          <button
+                            key={t.key}
+                            onClick={() => {
+                              ensureCollaborators()
+                              setTemplateCompose({ template: t, column: col.key })
+                              setMenuColumn(null)
+                            }}
+                            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-zinc-200 hover:bg-zinc-800"
+                          >
+                            <TIcon className={`h-3.5 w-3.5 shrink-0 ${t.colorClass}`} />
+                            {t.displayName}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
                 </div>
-                <button
-                  onClick={() => {
-                    setAddingColumn(col.key)
-                    setNewTitle('')
-                  }}
-                  className="text-zinc-500 transition-colors hover:text-zinc-300"
-                  title="Add card"
-                >
-                  <Plus className="h-4 w-4" />
-                </button>
-              </div>
 
-              {/* Cards */}
-              <div className="flex flex-1 flex-col gap-2 px-2 pb-2">
-                {addingColumn === col.key && (
-                  <AddCardInput
-                    value={newTitle}
-                    onChange={setNewTitle}
-                    onSubmit={() => handleCreate(col.key)}
-                    onCancel={() => {
-                      setAddingColumn(null)
-                      setNewTitle('')
-                    }}
-                    busy={creating}
-                  />
-                )}
+                {/* Cards — collapsed empty columns show header only */}
+                {!collapsed && (
+                  <div className="flex flex-1 flex-col gap-2 px-2 pb-2">
+                    {addingColumn === col.key && (
+                      <AddCardInput
+                        value={newTitle}
+                        onChange={setNewTitle}
+                        onSubmit={() => handleCreate(col.key)}
+                        onCancel={() => {
+                          setAddingColumn(null)
+                          setNewTitle('')
+                        }}
+                        busy={creating}
+                      />
+                    )}
 
-                {colTasks.map((task) => (
-                  <KanbanCard
-                    key={task.id}
-                    task={task}
-                    dragging={draggingId === task.id}
-                    onClick={() => setSelectedId(task.id)}
-                    onDragStart={(e) => {
-                      setDraggingId(task.id)
-                      e.dataTransfer.effectAllowed = 'move'
-                      // Some browsers require data to be set for a drag to start.
-                      e.dataTransfer.setData('text/plain', task.id)
-                    }}
-                    onDragEnd={() => {
-                      setDraggingId(null)
-                      setDragOverColumn(null)
-                    }}
-                  />
-                ))}
+                    {shownTasks.map((task) => (
+                      <KanbanCard
+                        key={task.id}
+                        task={task}
+                        ringed={changedIds.has(task.id)}
+                        dragging={draggingId === task.id}
+                        onClick={() => {
+                          acknowledge(task.id)
+                          setSelectedId(task.id)
+                        }}
+                        onDragStart={(e) => {
+                          setDraggingId(task.id)
+                          e.dataTransfer.effectAllowed = 'move'
+                          // Some browsers require data to be set for a drag to start.
+                          e.dataTransfer.setData('text/plain', task.id)
+                        }}
+                        onDragEnd={() => {
+                          setDraggingId(null)
+                          setDragOverColumn(null)
+                        }}
+                      />
+                    ))}
 
-                {colTasks.length === 0 && addingColumn !== col.key && (
-                  <div className="rounded-lg border border-dashed border-zinc-800 py-6 text-center text-xs text-zinc-600">
-                    No cards
+                    {col.key === 'done' && totalInColumn > 5 && (
+                      <button
+                        onClick={() => setDoneExpanded((v) => !v)}
+                        className="w-full rounded bg-zinc-800/50 py-1 text-[10px] font-medium text-zinc-500 transition-colors hover:text-zinc-300"
+                      >
+                        {doneExpanded ? 'Show less' : `Show ${totalInColumn - 5} more`}
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
-            </div>
-          )
-        })}
-      </div>
+            )
+          })}
+        </div>
+      )}
 
       {selectedTask && (
         <TaskDetailPanel
@@ -299,6 +625,27 @@ export default function ProjectKanbanBoard({ projectId }: ProjectKanbanBoardProp
               ),
             )
           }
+        />
+      )}
+
+      {aiDraft && (
+        <AiDraftReviewModal
+          draft={aiDraft}
+          collaborators={collaborators}
+          busy={modalBusy}
+          onCreate={handleCreateFromPayload}
+          onClose={() => setAiDraft(null)}
+        />
+      )}
+
+      {templateCompose && (
+        <TemplateComposeModal
+          template={templateCompose.template}
+          column={templateCompose.column}
+          collaborators={collaborators}
+          busy={modalBusy}
+          onCreate={handleCreateFromPayload}
+          onClose={() => setTemplateCompose(null)}
         />
       )}
     </div>
@@ -534,7 +881,7 @@ function TaskDetailPanel({
                 onChange={(e) => patchField({ board_column: e.target.value as BoardColumn })}
                 className="w-full rounded-lg border border-zinc-800 bg-zinc-900 px-2.5 py-1.5 text-sm text-zinc-200 outline-none focus:border-zinc-700"
               >
-                {COLUMNS.map((c) => (
+                {KANBAN_COLUMNS.map((c) => (
                   <option key={c.key} value={c.key}>
                     {c.label}
                   </option>

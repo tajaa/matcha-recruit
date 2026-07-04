@@ -1220,6 +1220,7 @@ import type {
   MWProjectTaskCreate,
   MWProjectTaskPatch,
   MWSubtask,
+  MWTaskDraft,
 } from '../types/matcha-work'
 
 export function listProjectTasks(projectId: string) {
@@ -1228,6 +1229,13 @@ export function listProjectTasks(projectId: string) {
 
 export function createProjectTask(projectId: string, body: MWProjectTaskCreate) {
   return api.post<MWProjectTask>(`/matcha-work/projects/${projectId}/tasks`, body)
+}
+
+/** Turn a natural-language prompt into a structured ticket draft (no DB write —
+ *  the caller reviews/edits, then creates via `createProjectTask`). 50/24h
+ *  Redis rate limit per user; gated `require_admin_or_client` server-side. */
+export function draftTaskFromPrompt(projectId: string, prompt: string) {
+  return api.post<MWTaskDraft>(`/matcha-work/projects/${projectId}/tasks/ai-draft`, { prompt })
 }
 
 /**

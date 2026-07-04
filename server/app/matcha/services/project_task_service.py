@@ -842,11 +842,12 @@ async def reject_project_task(
     actor_user_id: Optional[UUID] = None,
     project_title: Optional[str] = None,
 ) -> Optional[dict]:
-    """Reviewer sends a task back: bounce review → todo, store the reason in
-    review_note, auto-open the next round (roll unfixed checklist items forward,
-    archive accepted ones), log a `review_rejected` history event, and email the
-    assignee. Only valid from the `review` column. Returns the updated task row
-    (same shape as `update_project_task`) or None if not found.
+    """Reviewer sends a task back: bounce review → changes_requested, store the
+    reason in review_note, auto-open the next round (roll unfixed checklist
+    items forward, archive accepted ones), log a `review_rejected` history
+    event, and email the assignee. Only valid from the `review` column.
+    Returns the updated task row (same shape as `update_project_task`) or None
+    if not found.
     """
     note = (note or "").strip()
     async with get_connection() as conn:
@@ -865,7 +866,7 @@ async def reject_project_task(
         row = await conn.fetchrow(
             """
             UPDATE mw_tasks SET
-                board_column = 'todo',
+                board_column = 'changes_requested',
                 status = 'pending',
                 completed_at = NULL,
                 review_note = $3::text,
@@ -921,7 +922,7 @@ async def reject_project_task(
                 actor_user_id=actor_user_id,
                 event_type="review_rejected",
                 from_value="review",
-                to_value="todo",
+                to_value="changes_requested",
                 metadata={"note": note[:500]},
             )
             # Count includes the bounce we just logged, so the card's churn chip
