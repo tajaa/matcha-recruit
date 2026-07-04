@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '../../api/client'
-import { Badge, Button, Card, LABEL } from '../ui'
+import { Badge, Button, LABEL } from '../ui'
 import type { IRPolicyMappingAnalysis } from '../../types/ir'
 import { RELEVANCE_BADGE } from '../../types/ir'
 
@@ -25,7 +25,7 @@ export function IRPolicyMappingPanel({ incidentId }: { incidentId: string }) {
   }
 
   return (
-    <Card className="p-0 overflow-hidden">
+    <div className="border-t border-white/[0.06]">
       <div className="px-5 py-3 border-b border-white/[0.06] bg-white/[0.02] flex items-center justify-between">
         <h3 className={LABEL}>Policy Mapping</h3>
         <Button variant="ghost" size="sm" disabled={loading} onClick={refresh}>
@@ -58,6 +58,6 @@ export function IRPolicyMappingPanel({ incidentId }: { incidentId: string }) {
           </div>
         )}
       </div>
-    </Card>
+    </div>
   )
 }

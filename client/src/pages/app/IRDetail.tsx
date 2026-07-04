@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Download } from 'lucide-react'
-import { Badge, Button, Card, Select, LABEL } from '../../components/ui'
+import { Badge, Button, Select, LABEL, PillTabs } from '../../components/ui'
 import { EmployeeMultiSelect } from '../../components/employees/EmployeeMultiSelect'
 import { api } from '../../api/client'
 import { useIRIncident } from '../../hooks/ir/useIRIncident'
@@ -57,6 +57,10 @@ export default function IRDetail() {
   // Matcha-X is at Lite parity for IR — same restricted tab set.
   const liteTier = isIrOnlyTier(me?.profile) || isMatchaX(me?.profile)
   const tabs: readonly Tab[] = liteTier ? LITE_TABS : FULL_TABS
+  const tabOptions = tabs.map((t) => ({
+    value: t,
+    label: t === 'analysis' ? 'AI Analysis' : t === 'copilot' ? 'Copilot' : t.charAt(0).toUpperCase() + t.slice(1),
+  }))
   const navigate = useNavigate()
   const { incident, loading, error, updateIncident, deleteIncident, refetch } = useIRIncident(incidentId!)
   const [tab, setTab] = useState<Tab>('copilot')
@@ -147,40 +151,35 @@ export default function IRDetail() {
   if (!incident) return <p className="text-sm text-zinc-500">Incident not found.</p>
 
   return (
-    <div>
+    <div className="flex h-[calc(100vh-4rem)] flex-col overflow-hidden rounded-xl border border-white/[0.06] bg-zinc-950">
       {/* Header */}
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mb-6">
-        <Link to="/app/ir" className="text-zinc-500 hover:text-zinc-300 transition-colors">&larr;</Link>
-        <span className="text-xs text-zinc-500 font-mono">{incident.incident_number}</span>
-        <h1 className="text-xl font-semibold text-zinc-100 min-w-0">{incident.title}</h1>
-        <Badge variant={SEVERITY_BADGE[incident.severity] ?? 'neutral'}>{severityLabel(incident.severity)}</Badge>
-        <Badge variant={STATUS_BADGE[incident.status] ?? 'neutral'}>{statusLabel(incident.status)}</Badge>
+      <div className="shrink-0 border-b border-white/[0.06] px-5 pt-4 pb-3">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <Link to="/app/ir" className="text-zinc-500 hover:text-zinc-300 transition-colors">&larr;</Link>
+          <span className="text-xs text-zinc-500 font-mono">{incident.incident_number}</span>
+          <h1 className="text-xl font-semibold text-zinc-100 min-w-0">{incident.title}</h1>
+          <Badge variant={SEVERITY_BADGE[incident.severity] ?? 'neutral'}>{severityLabel(incident.severity)}</Badge>
+          <Badge variant={STATUS_BADGE[incident.status] ?? 'neutral'}>{statusLabel(incident.status)}</Badge>
+        </div>
+        <div className="mt-3">
+          <PillTabs options={tabOptions} value={tab} onChange={setTab} />
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+      <div className="flex min-h-0 flex-1">
         {/* Main */}
-        <div className="col-span-2">
-          <div className="flex gap-1 mb-4">
-            {tabs.map((t) => (
-              <Button key={t} variant={tab === t ? 'secondary' : 'ghost'} size="sm" onClick={() => setTab(t)}>
-                {t === 'analysis' ? 'AI Analysis' : t === 'copilot' ? 'Copilot' : t.charAt(0).toUpperCase() + t.slice(1)}
-              </Button>
-            ))}
-          </div>
-
-          <Card className="p-5">
-            {/* Copilot */}
-            {tab === 'copilot' && (
-              <IRCopilotPanel
-                incidentId={incidentId!}
-                incidentStatus={incident.status}
-                reportedByName={incident.reported_by_name}
-                reportedByEmail={incident.reported_by_email}
-                onIncidentChanged={refetch}
-                onOpenDocuments={() => setTab('documents')}
-              />
-            )}
-
+        <div className="min-w-0 flex-1">
+          {tab === 'copilot' ? (
+            <IRCopilotPanel
+              incidentId={incidentId!}
+              incidentStatus={incident.status}
+              reportedByName={incident.reported_by_name}
+              reportedByEmail={incident.reported_by_email}
+              onIncidentChanged={refetch}
+              onOpenDocuments={() => setTab('documents')}
+            />
+          ) : (
+            <div className="h-full overflow-y-auto px-5 py-4">
             {/* Overview */}
             {tab === 'overview' && (
               <div className="space-y-5">
@@ -366,12 +365,13 @@ export default function IRDetail() {
             {tab === 'interviews' && (
               <IRInterviewScheduler incidentId={incidentId!} witnesses={incident.witnesses} />
             )}
-          </Card>
+            </div>
+          )}
         </div>
 
         {/* Sidebar */}
-        <div className="space-y-4">
-          <Card className="p-0 overflow-hidden">
+        <div className="flex w-80 shrink-0 flex-col overflow-y-auto border-l border-white/[0.06]">
+          <div>
             <div className="px-5 py-3 border-b border-white/[0.06] bg-white/[0.02]">
               <h3 className={LABEL}>Incident Details</h3>
             </div>
@@ -389,26 +389,24 @@ export default function IRDetail() {
                 <dd className="text-sm text-zinc-200">{typeLabel(incident.incident_type)}</dd>
               </div>
             </div>
-          </Card>
+          </div>
 
-          <Card className="p-0 overflow-hidden">
-            <div className="px-5 py-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <dt className={`${LABEL} mb-1`}>Created</dt>
-                  <dd className="text-sm text-zinc-200">{new Date(incident.created_at).toLocaleDateString()}</dd>
-                </div>
-                <div>
-                  <dt className={`${LABEL} mb-1`}>Updated</dt>
-                  <dd className="text-sm text-zinc-200">{new Date(incident.updated_at).toLocaleDateString()}</dd>
-                </div>
+          <div className="border-t border-white/[0.06] px-5 py-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <dt className={`${LABEL} mb-1`}>Created</dt>
+                <dd className="text-sm text-zinc-200">{new Date(incident.created_at).toLocaleDateString()}</dd>
               </div>
-              <div className="mt-4 flex items-center justify-between">
-                <dt className={LABEL}>Documents</dt>
-                <dd className="text-sm font-medium text-zinc-200">{incident.document_count}</dd>
+              <div>
+                <dt className={`${LABEL} mb-1`}>Updated</dt>
+                <dd className="text-sm text-zinc-200">{new Date(incident.updated_at).toLocaleDateString()}</dd>
               </div>
             </div>
-          </Card>
+            <div className="mt-4 flex items-center justify-between">
+              <dt className={LABEL}>Documents</dt>
+              <dd className="text-sm font-medium text-zinc-200">{incident.document_count}</dd>
+            </div>
+          </div>
 
           {showPolicyMapping && <IRPolicyMappingPanel incidentId={incidentId!} />}
           {showERFeatures && (
@@ -426,7 +424,7 @@ export default function IRDetail() {
             />
           )}
 
-          <div className="space-y-2 pt-2">
+          <div className="border-t border-white/[0.06] px-5 py-4 space-y-2">
             <Button size="sm" variant="secondary" className="w-full" onClick={handleExport}>
               <Download size={12} className="mr-1.5" /> Export PDF
             </Button>

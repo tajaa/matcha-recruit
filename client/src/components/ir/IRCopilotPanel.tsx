@@ -356,56 +356,60 @@ export default function IRCopilotPanel({
 
   if (loading) {
     return (
-      <div className="flex items-center gap-2 text-sm text-zinc-500">
+      <div className="flex h-full items-center justify-center gap-2 text-sm text-zinc-500">
         <Loader2 className="w-4 h-4 animate-spin" /> Loading…
       </div>
     )
   }
 
   return (
-    <div className="max-w-3xl mx-auto">
-      <div className="flex items-center gap-2 mb-4">
-        <Sparkles className="w-4 h-4 text-emerald-400" />
-        <h2 className="text-base font-semibold text-zinc-100">Copilot</h2>
-        {streaming && (
-          <span className="text-xs text-zinc-500 flex items-center gap-1">
-            <Loader2 className="w-3 h-3 animate-spin" /> Thinking…
-          </span>
-        )}
-        <div className="ml-auto flex items-center gap-2">
-          {!incidentIsClosed && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setRequestInfoOpen(true)}
-            >
-              <Mail className="w-3.5 h-3.5" />
-              <span className="ml-1.5">Request more info</span>
-            </Button>
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="shrink-0 border-b border-white/[0.06] px-5 py-3">
+        <div className="flex items-center gap-2">
+          <Sparkles className="w-4 h-4 text-emerald-400" />
+          <h2 className="text-base font-semibold text-zinc-100">Copilot</h2>
+          {streaming && (
+            <span className="text-xs text-zinc-500 flex items-center gap-1">
+              <Loader2 className="w-3 h-3 animate-spin" /> Thinking…
+            </span>
           )}
-          {!incidentIsClosed && (
-            <Button
-              variant="ghost"
-              size="sm"
-              disabled={closingIncident || streaming || emergencyAlertActive}
-              title={emergencyAlertActive ? 'Acknowledge the OSHA reporting alert first.' : undefined}
-              onClick={() => { void handleCloseIncident() }}
-            >
-              {closingIncident ? (
-                <span className="flex items-center gap-1">
-                  <Loader2 className="w-3 h-3 animate-spin" />
-                  Closing…
-                </span>
-              ) : (
-                'Close incident'
-              )}
-            </Button>
-          )}
+          <div className="ml-auto flex items-center gap-2">
+            {!incidentIsClosed && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setRequestInfoOpen(true)}
+              >
+                <Mail className="w-3.5 h-3.5" />
+                <span className="ml-1.5">Request more info</span>
+              </Button>
+            )}
+            {!incidentIsClosed && (
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={closingIncident || streaming || emergencyAlertActive}
+                title={emergencyAlertActive ? 'Acknowledge the OSHA reporting alert first.' : undefined}
+                onClick={() => { void handleCloseIncident() }}
+              >
+                {closingIncident ? (
+                  <span className="flex items-center gap-1">
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                    Closing…
+                  </span>
+                ) : (
+                  'Close incident'
+                )}
+              </Button>
+            )}
+          </div>
         </div>
       </div>
 
+      <div className="flex-1 overflow-y-auto px-5 py-4">
+
       {infoRequests.length > 0 && (
-        <div className="mb-4 rounded-lg border border-white/[0.08] bg-zinc-900/60 divide-y divide-white/[0.06]">
+        <div className="mb-4 max-w-[65ch] rounded-lg border border-white/[0.08] bg-zinc-900/60 divide-y divide-white/[0.06]">
           {infoRequests.map((r) => (
             <div key={r.id} className="px-3 py-2 text-sm">
               <div className="flex items-center gap-2">
@@ -458,14 +462,14 @@ export default function IRCopilotPanel({
       />
 
       {busyStage && (
-        <div className="mb-4 rounded-md border border-emerald-500/30 bg-emerald-500/5 px-3 py-2 text-sm text-emerald-200 flex items-center gap-2">
+        <div className="mb-4 max-w-[65ch] rounded-md border border-emerald-500/30 bg-emerald-500/5 px-3 py-2 text-sm text-emerald-200 flex items-center gap-2">
           <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
           <span className="leading-snug">{busyStage}</span>
         </div>
       )}
 
       {error && (
-        <div className="mb-4 rounded-md border border-red-500/30 bg-red-500/5 p-3 text-sm text-red-300">
+        <div className="mb-4 max-w-[65ch] rounded-md border border-red-500/30 bg-red-500/5 p-3 text-sm text-red-300">
           {error}
         </div>
       )}
@@ -518,7 +522,7 @@ export default function IRCopilotPanel({
               return (
                 <div
                   key={m.id}
-                  className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-3 py-2.5"
+                  className="max-w-[65ch] rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-3 py-2.5"
                 >
                   <div className="flex items-center gap-2 text-[10px] font-medium uppercase tracking-[0.15em] text-emerald-400 mb-1">
                     <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M16.704 5.29a1 1 0 010 1.42l-8 8a1 1 0 01-1.42 0l-4-4a1 1 0 011.42-1.42L8 12.585l7.29-7.295a1 1 0 011.414 0z" clipRule="evenodd"/></svg>
@@ -540,7 +544,7 @@ export default function IRCopilotPanel({
               return (
                 <div
                   key={m.id}
-                  className="rounded-lg border border-sky-500/30 bg-sky-500/5 px-3 py-2.5"
+                  className="max-w-[65ch] rounded-lg border border-sky-500/30 bg-sky-500/5 px-3 py-2.5"
                 >
                   <div className="flex items-center gap-2 text-[10px] font-medium uppercase tracking-[0.15em] text-sky-400 mb-1.5">
                     <Mail className="w-3.5 h-3.5" />
@@ -569,7 +573,7 @@ export default function IRCopilotPanel({
 
         {/* Current actionable cards */}
         {currentCards.length > 0 && (
-          <div className="space-y-2">
+          <div className="max-w-[65ch] space-y-2">
             {currentCards.map((c) => {
               const mid = cardsByMessageId.get(c.id) || ''
               const accepted = acceptedCardIds.has(c.id)
@@ -590,7 +594,7 @@ export default function IRCopilotPanel({
         )}
 
         {openQuestions.length > 0 && (
-          <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-sm">
+          <div className="max-w-[65ch] rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-sm">
             <div className="text-[10px] font-medium uppercase tracking-[0.15em] text-amber-400/80 mb-1.5">
               Open questions
             </div>
@@ -604,9 +608,10 @@ export default function IRCopilotPanel({
 
         <div ref={bottomRef} />
       </div>
+      </div>
 
       {/* Input */}
-      <div className="mt-6 sticky bottom-0 bg-zinc-950 pt-3 pb-2 -mx-6 px-6 border-t border-white/[0.06]">
+      <div className="shrink-0 border-t border-white/[0.06] px-5 pb-2 pt-3">
         <div className="flex items-end gap-2 rounded-md border border-white/[0.08] bg-zinc-900/60 px-3 transition-colors focus-within:border-emerald-500/50">
           <span className="select-none pb-[9px] font-mono text-sm text-emerald-500/80">›</span>
           <input
@@ -642,3 +647,4 @@ export default function IRCopilotPanel({
     </div>
   )
 }
+

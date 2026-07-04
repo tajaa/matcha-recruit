@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '../../api/client'
-import { Card, LABEL } from '../ui'
+import { LABEL } from '../ui'
 import type { IRConsistencyGuidance, IRActionProbability } from '../../types/ir'
 import { typeLabel } from '../../types/ir'
 
@@ -26,7 +26,7 @@ export function IRConsistencyGuidancePanel({ incidentId, status }: Props) {
   if (status !== 'investigating' && status !== 'action_required') return null
 
   return (
-    <Card className="p-0 overflow-hidden">
+    <div className="border-t border-white/[0.06]">
       <div className="px-5 py-3 border-b border-white/[0.06] bg-white/[0.02]">
         <h3 className={LABEL}>Consistency Guidance</h3>
       </div>
@@ -79,6 +79,6 @@ export function IRConsistencyGuidancePanel({ incidentId, status }: Props) {
           </div>
         )}
       </div>
-    </Card>
+    </div>
   )
 }
