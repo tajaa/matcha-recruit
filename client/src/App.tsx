@@ -16,14 +16,9 @@ const CappeRoutes = lazy(() => import('./routes/CappeRoutes')) // Cappe — webs
 
 // Public / marketing / auth-funnel pages — lazy so marketing visitors only
 // pull what they land on (Home + Login stay eager: first paint + funnel).
-const Landing = lazy(() => import('./pages/Landing')) // the Platform page, now at /platform
 const MatchaWorkPage = lazy(() => import('./pages/landing/MatchaWorkPage'))
-const MatchaLitePage = lazy(() => import('./pages/landing/MatchaLitePage'))
-const CompliancePage = lazy(() => import('./pages/landing/CompliancePage'))
 const ServicesPage = lazy(() => import('./pages/landing/ServicesPage'))
-// Trial simpler marketing pages — copies of the /platform, /matcha-daily,
-// /brokers, /compliance pages restyled closer to /services. Live at their
-// own routes alongside the originals so either can be reverted to freely.
+// Marketing pages restyled closer to /services (originals retired 2026-07-05).
 const SimpleCompliancePage = lazy(() => import('./pages/simpler-pages/Compliance'))
 const SimplePlatformPage = lazy(() => import('./pages/simpler-pages/Platform'))
 const SimpleBrokersPage = lazy(() => import('./pages/simpler-pages/Brokers'))
@@ -48,8 +43,6 @@ const CalcTurnoverCost = lazy(() => import('./pages/landing/resources/calculator
 const CalcOvertime = lazy(() => import('./pages/landing/resources/calculators/Overtime'))
 const CalcTotalComp = lazy(() => import('./pages/landing/resources/calculators/TotalComp'))
 const ResourcesComplianceAudit = lazy(() => import('./pages/landing/resources/ComplianceAudit'))
-const FractionalPage = lazy(() => import('./pages/landing/FractionalPage'))
-const BrokersPage = lazy(() => import('./pages/landing/BrokersPage'))
 const SignupPicker = lazy(() => import('./pages/auth/SignupPicker'))
 const ResourcesSignup = lazy(() => import('./pages/auth/ResourcesSignup'))
 const VerifyEmail = lazy(() => import('./pages/auth/VerifyEmail'))
@@ -91,13 +84,8 @@ export default function App() {
             swap has to happen here: on the Cappe domain "/" renders the
             Gummfit landing (CappeRoutes index), everywhere else Matcha Home. */}
         <Route path="/" element={isCappeHost ? <CappeRoutes /> : <Home />} />
-        <Route path="/platform" element={<Landing />} />
         <Route path="/matcha-work" element={<MatchaWorkPage />} />
-        <Route path="/matcha-daily" element={<MatchaLitePage />} />
         <Route path="/matcha-lite" element={<SimpleLitePage />} />
-        {/* Marketing page for the standalone Compliance product (distinct from
-            /compliance/signup + /compliance/onboarding, which are exact paths). */}
-        <Route path="/compliance" element={<CompliancePage />} />
         <Route path="/matcha-compliance" element={<SimpleCompliancePage />} />
         <Route path="/matcha-platform" element={<SimplePlatformPage />} />
         <Route path="/matcha-brokers" element={<SimpleBrokersPage />} />
@@ -122,8 +110,6 @@ export default function App() {
         <Route path="/resources/calculators/overtime" element={<CalcOvertime />} />
         <Route path="/resources/calculators/total-comp" element={<CalcTotalComp />} />
         <Route path="/resources/audit" element={<RequireBusinessAccount><ResourcesComplianceAudit /></RequireBusinessAccount>} />
-        <Route path="/fractional" element={<FractionalPage />} />
-        <Route path="/brokers" element={<BrokersPage />} />
         <Route path="/signup" element={<SignupPicker />} />
         <Route path="/auth/resources-signup" element={<ResourcesSignup />} />
         <Route path="/auth/verify-email" element={<VerifyEmail />} />
