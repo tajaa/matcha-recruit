@@ -6,7 +6,7 @@ import {
   runResearch, listResearch,
   type Matter, type MatterMessage, type EvidencePreview, type Packet, type ChatResult, type ResearchRow,
 } from '../../../api/legalDefense'
-import { LABEL, typeLabel } from './shared'
+import { LABEL, seedRecap, typeLabel } from './shared'
 import { Masthead } from './Masthead'
 import { Console } from './Console'
 import { EvidencePanel } from './EvidencePanel'
@@ -24,6 +24,9 @@ export default function LegalDefense() {
   const [researching, setResearching] = useState(false)
   const [loading, setLoading] = useState(true)
   const [showNew, setShowNew] = useState(false)
+  // Matter id awaiting its auto-seeded first turn — set only on creation, so
+  // reopening an existing matter later never re-triggers the seed.
+  const [justCreatedId, setJustCreatedId] = useState<string | null>(null)
   // Which matter the async state below belongs to. Fetches and the ~2-minute
   // research call resolve long after the user may have switched matters —
   // every awaited setState checks this ref so a slow response for matter A
@@ -67,6 +70,7 @@ export default function LegalDefense() {
   async function onCreated(m: Matter) {
     setShowNew(false)
     setMatters((prev) => [m, ...prev])
+    setJustCreatedId(m.id)
     void openMatter(m.id)
   }
 
@@ -127,6 +131,7 @@ export default function LegalDefense() {
           <MatterWorkbench
             matter={matter} evidence={evidence} research={research} researching={researching}
             onRunResearch={handleRunResearch} onRefresh={() => openMatter(matter.id)} toast={toast}
+            autoSeed={matter.id === justCreatedId}
           />
         )}
       </div>
@@ -136,18 +141,35 @@ export default function LegalDefense() {
   )
 }
 
-function MatterWorkbench({ matter, evidence, research, researching, onRunResearch, onRefresh, toast }: {
+function MatterWorkbench({ matter, evidence, research, researching, onRunResearch, onRefresh, toast, autoSeed }: {
   matter: Matter; evidence: EvidencePreview | null; research: ResearchRow | null; researching: boolean
   onRunResearch: (includeGuidance?: boolean) => void; onRefresh: () => void
   toast: ReturnType<typeof useToast>['toast']
+  autoSeed: boolean
 }) {
   const [messages, setMessages] = useState<MatterMessage[]>(matter.messages ?? [])
   const [status, setStatus] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
   const [genKind, setGenKind] = useState<'pdf' | 'zip' | 'both' | null>(null)
   const [shareFor, setShareFor] = useState<Packet | null>(null)
+  const seededRef = useRef(false)
 
   useEffect(() => { setMessages(matter.messages ?? []) }, [matter.id, matter.messages])
+
+  // Auto-seed the first turn from the intake form so a just-created matter
+  // never asks the user to re-describe the claim/timeframe they just typed.
+  // Reads matter.messages (the prop), not local state — the resync setter
+  // above isn't visible via closure within the same commit. seededRef is set
+  // synchronously so StrictMode's dev double-invoke can't fire send() twice.
+  useEffect(() => {
+    if (!autoSeed || seededRef.current) return
+    if ((matter.messages ?? []).length > 0) return
+    const recap = seedRecap(matter)
+    if (!recap) return
+    seededRef.current = true
+    void send(recap)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [matter.id])
 
   async function send(text: string) {
     if (sending) return
@@ -200,7 +222,8 @@ function MatterWorkbench({ matter, evidence, research, researching, onRunResearc
         </div>
         <div className="flex w-80 shrink-0 flex-col border-l border-white/[0.06]">
           <LegalContextPanel legalContext={evidence?.legal_context} research={research}
-            onRunResearch={onRunResearch} researching={researching} />
+            onRunResearch={onRunResearch} researching={researching}
+            matterId={matter.id} onRefresh={onRefresh} />
           <EvidencePanel evidence={evidence} />
           <PacketsPanel matterId={matter.id} packets={matter.packets ?? []} toast={toast} onShare={setShareFor} />
         </div>

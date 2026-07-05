@@ -3,7 +3,7 @@ import {
   Accessibility, Bell, BookMarked, BookOpenCheck, FileSignature, Gavel, GraduationCap,
   HardHat, Landmark, ScrollText, Users,
 } from 'lucide-react'
-import type { MatterType } from '../../../api/legalDefense'
+import type { Matter, MatterType } from '../../../api/legalDefense'
 
 export const MATTER_TYPES: { value: MatterType; label: string }[] = [
   { value: 'class_action', label: 'Class action' },
@@ -14,6 +14,23 @@ export const MATTER_TYPES: { value: MatterType; label: string }[] = [
   { value: 'other', label: 'Other' },
 ]
 export const typeLabel = (t: MatterType) => MATTER_TYPES.find((m) => m.value === t)?.label ?? t
+
+/** First-turn recap synthesized from the intake form so the user never
+ *  re-types what they just entered. Null when there's nothing to seed. */
+export function seedRecap(m: Matter): string | null {
+  const allegation = m.allegation?.trim()
+  const context = m.defense_theory?.trim()
+  if (!allegation && !context) return null
+
+  const lines: string[] = []
+  if (allegation) lines.push(`What's being claimed: ${allegation}`)
+  if (context) lines.push(`Factual context: ${context}`)
+  if (m.evidence_start && m.evidence_end) lines.push(`Timeframe: ${m.evidence_start} – ${m.evidence_end}`)
+  else if (m.evidence_start) lines.push(`Timeframe: from ${m.evidence_start}`)
+  else if (m.evidence_end) lines.push(`Timeframe: through ${m.evidence_end}`)
+  lines.push('Map the records to this claim and flag what counsel should look at.')
+  return lines.join('\n')
+}
 
 export const DISCLAIMER =
   'This organizes your own records to help your attorney — it is an evidence-assembly aid, not legal advice, and renders no legal conclusion. Have counsel review before relying on it.'

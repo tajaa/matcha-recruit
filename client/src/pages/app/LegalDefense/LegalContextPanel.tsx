@@ -1,26 +1,24 @@
+import { useEffect, useState } from 'react'
 import { ExternalLink, Landmark, Loader2, Search } from 'lucide-react'
-import { Button } from '../../../components/ui'
-import type { LegalContext, ResearchRow } from '../../../api/legalDefense'
+import { Button, Input, Select } from '../../../components/ui'
+import { fetchLocations } from '../../../api/compliance'
+import type { BusinessLocation } from '../../../types/compliance'
+import { updateMatter, type LegalContext, type ResearchRow } from '../../../api/legalDefense'
 import { LABEL } from './shared'
 
 /** Jurisdiction chain + external legal research (CourtListener cases +
  *  grounded-Gemini guidance). Informational only — every surface here
  *  carries the same disclaimer: verify with counsel before relying on it. */
-export function LegalContextPanel({ legalContext, research, onRunResearch, researching }: {
+export function LegalContextPanel({ legalContext, research, onRunResearch, researching, matterId, onRefresh }: {
   legalContext: LegalContext | null | undefined
   research: ResearchRow | null
   onRunResearch: (includeGuidance?: boolean) => void
   researching: boolean
+  matterId: string
+  onRefresh: () => void
 }) {
   if (!legalContext) {
-    return (
-      <div className="border-b border-white/[0.06] px-4 py-3">
-        <div className={LABEL}>Legal landscape</div>
-        <p className="mt-1.5 text-xs leading-relaxed text-zinc-500">
-          Set a location or state on this matter to ground it in governing law.
-        </p>
-      </div>
-    )
+    return <JurisdictionSetter matterId={matterId} onRefresh={onRefresh} />
   }
 
   return (
@@ -55,6 +53,13 @@ export function LegalContextPanel({ legalContext, research, onRunResearch, resea
           </span>
         ))}
       </div>
+
+      {!research && !researching && (
+        <p className="mt-2 text-[11px] leading-relaxed text-zinc-500">
+          No case law pulled yet — <span className="text-zinc-400">Research</span> finds related court
+          decisions and public guidance for this jurisdiction (takes ~2 min).
+        </p>
+      )}
 
       {research?.status === 'failed' && (
         <p className="mt-2 text-[11px] text-red-400/90">Research failed: {research.error || 'unknown error'}</p>
@@ -115,6 +120,70 @@ export function LegalContextPanel({ legalContext, research, onRunResearch, resea
       <p className="mt-3 text-[10px] leading-relaxed text-zinc-600">
         External research is informational only — not legal advice; verify with counsel.
       </p>
+    </div>
+  )
+}
+
+/** Empty-state replacement: instead of a dead-end "set a location" message,
+ *  let the user set the matter's jurisdiction right here — that's what
+ *  unlocks governing law + the case-law Research button. */
+function JurisdictionSetter({ matterId, onRefresh }: { matterId: string; onRefresh: () => void }) {
+  const [locations, setLocations] = useState<BusinessLocation[]>([])
+  const [locationId, setLocationId] = useState('')
+  const [state, setState] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+
+  useEffect(() => {
+    fetchLocations().then(setLocations).catch(() => setLocations([]))
+  }, [])
+
+  const canSet = Boolean(locationId) || state.trim().length === 2
+
+  async function save() {
+    if (!canSet || saving) return
+    setSaving(true); setErr(null)
+    try {
+      await updateMatter(matterId, {
+        location_id: locationId || null,
+        jurisdiction_state: locationId ? null : state.trim().toUpperCase(),
+      })
+      onRefresh()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Failed to set jurisdiction')
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="border-b border-white/[0.06] px-4 py-3">
+      <div className={LABEL}>Legal landscape</div>
+      <p className="mt-1.5 text-xs leading-relaxed text-zinc-500">
+        Set a location or state — it grounds the matter in governing law and unlocks case-law research.
+      </p>
+      <div className="mt-2 space-y-2">
+        {locations.length > 0 && (
+          <Select
+            value={locationId}
+            placeholder="Pick a location…"
+            options={locations.map((l) => ({ value: l.id, label: `${l.name || 'Location'} — ${l.city}, ${l.state}` }))}
+            onChange={(e) => setLocationId(e.target.value)}
+          />
+        )}
+        {!locationId && (
+          <Input
+            value={state}
+            maxLength={2}
+            placeholder={locations.length > 0 ? 'Or a state, e.g. CA' : 'State, e.g. CA'}
+            onChange={(e) => setState(e.target.value.toUpperCase())}
+          />
+        )}
+        {err && <p className="text-[11px] text-red-400/90">{err}</p>}
+        <Button size="sm" variant="secondary" disabled={!canSet || saving} onClick={() => void save()}>
+          {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Landmark className="h-3.5 w-3.5" />}
+          Set jurisdiction
+        </Button>
+      </div>
     </div>
   )
 }

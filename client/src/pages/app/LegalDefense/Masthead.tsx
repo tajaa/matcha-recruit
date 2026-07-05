@@ -22,6 +22,11 @@ export function Masthead({ matter, evidence, genKind, hasAssistant, research, on
       ? `${matter.evidence_start ?? '…'} → ${matter.evidence_end ?? '…'}`
       : 'All records'
 
+  // Mirrors the backend's "Evidence scoped to …" note — location name lives
+  // on the evidence payload (Matter itself only carries the id).
+  const scope = evidence?.legal_context?.location_name
+    ?? (matter.location_id ? 'location set' : matter.jurisdiction_state)
+
   return (
     <div className="shrink-0 border-b border-white/[0.06]">
       <div className="flex items-start justify-between gap-4 px-5 pt-4">
@@ -32,6 +37,7 @@ export function Masthead({ matter, evidence, genKind, hasAssistant, research, on
             <span>{typeLabel(matter.matter_type)}</span>
             <span className={matter.status === 'active' ? 'text-emerald-400' : 'text-zinc-500'}>{matter.status}</span>
             <span className="normal-case text-zinc-500">window {window}</span>
+            {scope && <span className="normal-case text-zinc-500">scope {scope}</span>}
             {matter.counsel_directed && (
               <span className="text-zinc-400">at direction of counsel{matter.counsel_name ? ` · ${matter.counsel_name}` : ''}</span>
             )}
@@ -93,7 +99,10 @@ function SystemsStrip({ evidence }: { evidence: EvidencePreview | null }) {
             key={s.key}
             className={`flex shrink-0 items-center gap-2 px-4 py-2.5 transition-opacity duration-300 motion-reduce:transition-none ${shown ? 'opacity-100' : 'opacity-0'}`}
             style={{ transitionDelay: `${i * 40}ms` }}
-            title={src ? src.label : `${s.label}: no records in the matter window`}
+            title={src ? src.label
+              : ['law', 'legislation', 'case_law'].includes(s.key)
+                ? `${s.label}: set a location/state and run Research in the Legal landscape panel`
+                : `${s.label}: no records in the matter window`}
           >
             <Icon className={`h-3.5 w-3.5 ${active ? 'text-emerald-400' : 'text-zinc-700'}`} />
             <span className={`text-[10px] font-medium uppercase tracking-[0.15em] ${active ? 'text-zinc-300' : 'text-zinc-600'}`}>

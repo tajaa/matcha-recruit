@@ -160,17 +160,41 @@ async def resolve_matter_jurisdiction(conn, matter: dict) -> dict | None:
     }
 
 
-async def _src_incidents(conn, company_id, start, end) -> list[dict]:
+def _scope_direct(loc_col: str, state_col: str, n: int) -> str:
+    """Matter-scope predicate for tables carrying their own location_id.
+    ``$n`` = location uuid, ``$n+1`` = state. No scope → passes every row;
+    location scope → exact match only; state-only scope → match on the joined
+    location's state. Rows with no attributable location are excluded while a
+    scope is active — deliberate, mirrors compliance_service.get_locations."""
+    return (f" AND ((${n}::uuid IS NULL AND ${n + 1}::varchar IS NULL)"
+            f" OR (${n}::uuid IS NOT NULL AND {loc_col} = ${n})"
+            f" OR (${n}::uuid IS NULL AND UPPER({state_col}) = UPPER(${n + 1})))")
+
+
+def _scope_employee(n: int) -> str:
+    """Matter-scope predicate for tables reached via ``employees e``.
+    Exact work_location_id match preferred; work_state fallback when that FK
+    is NULL (nullable, never backfilled) — same convention as
+    compliance_service.get_locations."""
+    return (f" AND ((${n}::uuid IS NULL AND ${n + 1}::varchar IS NULL)"
+            f" OR (${n}::uuid IS NOT NULL AND (e.work_location_id = ${n}"
+            f" OR (e.work_location_id IS NULL AND UPPER(e.work_state) = UPPER(${n + 1}))))"
+            f" OR (${n}::uuid IS NULL AND UPPER(e.work_state) = UPPER(${n + 1})))")
+
+
+async def _src_incidents(conn, company_id, start, end, loc_id, state) -> list[dict]:
     rows = await conn.fetch(
-        """
-        SELECT id, incident_number, title, incident_type, severity, status, occurred_at
-        FROM ir_incidents
-        WHERE company_id = $1
-          AND ($2::date IS NULL OR occurred_at >= $2)
-          AND ($3::date IS NULL OR occurred_at < ($3::date + 1))
-        ORDER BY occurred_at DESC NULLS LAST
+        f"""
+        SELECT i.id, i.incident_number, i.title, i.incident_type, i.severity, i.status, i.occurred_at
+        FROM ir_incidents i
+        LEFT JOIN business_locations bl ON bl.id = i.location_id
+        WHERE i.company_id = $1
+          AND ($2::date IS NULL OR i.occurred_at >= $2)
+          AND ($3::date IS NULL OR i.occurred_at < ($3::date + 1))
+          {_scope_direct("i.location_id", "bl.state", 4)}
+        ORDER BY i.occurred_at DESC NULLS LAST
         """,
-        company_id, start, end,
+        company_id, start, end, loc_id, state,
     )
     return [{
         "cid": f"incident:{r['id']}",
@@ -180,7 +204,10 @@ async def _src_incidents(conn, company_id, start, end) -> list[dict]:
     } for r in rows]
 
 
-async def _src_er_cases(conn, company_id, start, end) -> list[dict]:
+async def _src_er_cases(conn, company_id, start, end, loc_id, state) -> list[dict]:
+    # loc_id/state unused: er_cases carries only a JSONB involved_employees
+    # array — no scalar employee/location link to scope on. Stays
+    # company-wide under a matter scope (known gap).
     rows = await conn.fetch(
         """
         SELECT id, case_number, title, category, status, outcome, created_at
@@ -201,21 +228,23 @@ async def _src_er_cases(conn, company_id, start, end) -> list[dict]:
     } for r in rows]
 
 
-async def _src_compliance(conn, company_id, start, end) -> list[dict]:
+async def _src_compliance(conn, company_id, start, end, loc_id, state) -> list[dict]:
     # Current requirement state per location = proof of what the company tracks /
     # the protocol it follows. Joined via business_locations (requirements carry
-    # location_id, not company_id). Not date-filtered — it's current posture.
+    # location_id, not company_id). Not date-filtered — it's current posture —
+    # so the scope params bind $2/$3 here, not $4/$5.
     rows = await conn.fetch(
-        """
+        f"""
         SELECT cr.id, cr.title, cr.category, cr.current_value, cr.jurisdiction_name,
                cr.last_changed_at, bl.name AS location_name, jr.statute_citation
         FROM compliance_requirements cr
         JOIN business_locations bl ON bl.id = cr.location_id
         LEFT JOIN jurisdiction_requirements jr ON jr.id = cr.jurisdiction_requirement_id
         WHERE bl.company_id = $1
+          {_scope_direct("cr.location_id", "bl.state", 2)}
         ORDER BY cr.last_changed_at DESC NULLS LAST
         """,
-        company_id,
+        company_id, loc_id, state,
     )
     return [{
         "cid": f"compliance_req:{r['id']}",
@@ -229,17 +258,19 @@ async def _src_compliance(conn, company_id, start, end) -> list[dict]:
     } for r in rows]
 
 
-async def _src_discipline(conn, company_id, start, end) -> list[dict]:
+async def _src_discipline(conn, company_id, start, end, loc_id, state) -> list[dict]:
     rows = await conn.fetch(
-        """
-        SELECT id, discipline_type, infraction_type, severity, status, issued_date
-        FROM progressive_discipline
-        WHERE company_id = $1
-          AND ($2::date IS NULL OR issued_date >= $2)
-          AND ($3::date IS NULL OR issued_date < ($3::date + 1))
-        ORDER BY issued_date DESC NULLS LAST
+        f"""
+        SELECT pd.id, pd.discipline_type, pd.infraction_type, pd.severity, pd.status, pd.issued_date
+        FROM progressive_discipline pd
+        JOIN employees e ON e.id = pd.employee_id
+        WHERE pd.company_id = $1
+          AND ($2::date IS NULL OR pd.issued_date >= $2)
+          AND ($3::date IS NULL OR pd.issued_date < ($3::date + 1))
+          {_scope_employee(4)}
+        ORDER BY pd.issued_date DESC NULLS LAST
         """,
-        company_id, start, end,
+        company_id, start, end, loc_id, state,
     )
     return [{
         "cid": f"discipline:{r['id']}",
@@ -252,17 +283,19 @@ async def _src_discipline(conn, company_id, start, end) -> list[dict]:
     } for r in rows]
 
 
-async def _src_training(conn, company_id, start, end) -> list[dict]:
+async def _src_training(conn, company_id, start, end, loc_id, state) -> list[dict]:
     rows = await conn.fetch(
-        """
-        SELECT id, title, training_type, status, completed_date, expiration_date
-        FROM training_records
-        WHERE company_id = $1
-          AND ($2::date IS NULL OR COALESCE(completed_date, created_at) >= $2)
-          AND ($3::date IS NULL OR COALESCE(completed_date, created_at) < ($3::date + 1))
-        ORDER BY completed_date DESC NULLS LAST
+        f"""
+        SELECT tr.id, tr.title, tr.training_type, tr.status, tr.completed_date, tr.expiration_date
+        FROM training_records tr
+        JOIN employees e ON e.id = tr.employee_id
+        WHERE tr.company_id = $1
+          AND ($2::date IS NULL OR COALESCE(tr.completed_date, tr.created_at) >= $2)
+          AND ($3::date IS NULL OR COALESCE(tr.completed_date, tr.created_at) < ($3::date + 1))
+          {_scope_employee(4)}
+        ORDER BY tr.completed_date DESC NULLS LAST
         """,
-        company_id, start, end,
+        company_id, start, end, loc_id, state,
     )
     return [{
         "cid": f"training:{r['id']}",
@@ -273,7 +306,9 @@ async def _src_training(conn, company_id, start, end) -> list[dict]:
     } for r in rows]
 
 
-async def _src_policy_ack(conn, company_id, start, end) -> list[dict]:
+async def _src_policy_ack(conn, company_id, start, end, loc_id, state) -> list[dict]:
+    # loc_id/state unused: policies are company-wide — no location concept
+    # exists anywhere in the policies schema. Stays unscoped by design.
     rows = await conn.fetch(
         """
         SELECT ps.id, ps.signer_name, ps.signed_at, p.title AS policy_title
@@ -294,17 +329,19 @@ async def _src_policy_ack(conn, company_id, start, end) -> list[dict]:
     } for r in rows]
 
 
-async def _src_accommodations(conn, company_id, start, end) -> list[dict]:
+async def _src_accommodations(conn, company_id, start, end, loc_id, state) -> list[dict]:
     rows = await conn.fetch(
-        """
-        SELECT id, case_number, title, status, disability_category, created_at
-        FROM accommodation_cases
-        WHERE org_id = $1
-          AND ($2::date IS NULL OR created_at >= $2)
-          AND ($3::date IS NULL OR created_at < ($3::date + 1))
-        ORDER BY created_at DESC NULLS LAST
+        f"""
+        SELECT ac.id, ac.case_number, ac.title, ac.status, ac.disability_category, ac.created_at
+        FROM accommodation_cases ac
+        JOIN employees e ON e.id = ac.employee_id
+        WHERE ac.org_id = $1
+          AND ($2::date IS NULL OR ac.created_at >= $2)
+          AND ($3::date IS NULL OR ac.created_at < ($3::date + 1))
+          {_scope_employee(4)}
+        ORDER BY ac.created_at DESC NULLS LAST
         """,
-        company_id, start, end,
+        company_id, start, end, loc_id, state,
     )
     return [{
         "cid": f"accommodation:{r['id']}",
@@ -314,12 +351,12 @@ async def _src_accommodations(conn, company_id, start, end) -> list[dict]:
     } for r in rows]
 
 
-async def _src_compliance_alerts(conn, company_id, start, end) -> list[dict]:
+async def _src_compliance_alerts(conn, company_id, start, end, loc_id, state) -> list[dict]:
     # Date-filtered (unlike _src_compliance's current-posture snapshot) — this
     # is deliberately a history: it shows the company was monitoring during
     # the matter window, not just what it tracks today.
     rows = await conn.fetch(
-        """
+        f"""
         SELECT ca.id, ca.title, ca.severity, ca.status, ca.category, ca.deadline,
                ca.created_at, bl.name AS location_name
         FROM compliance_alerts ca
@@ -327,10 +364,11 @@ async def _src_compliance_alerts(conn, company_id, start, end) -> list[dict]:
         WHERE ca.company_id = $1
           AND ($2::date IS NULL OR ca.created_at >= $2)
           AND ($3::date IS NULL OR ca.created_at < ($3::date + 1))
+          {_scope_direct("ca.location_id", "bl.state", 4)}
         ORDER BY ca.created_at DESC
         LIMIT 100
         """,
-        company_id, start, end,
+        company_id, start, end, loc_id, state,
     )
     return [{
         "cid": f"compliance_alert:{r['id']}",
@@ -564,18 +602,36 @@ async def gather_evidence(conn, company_id, start, end, features: dict, matter: 
     cid→record map used for citation validation and the PDF evidence index.
 
     ``matter`` is optional (keyword, default None) so existing callers stay
-    source-compatible; when given, jurisdiction-grounded law/legislation/case-law
-    sources are added on top of the internal-record sources.
+    source-compatible; when given, (a) location-capable record sources are
+    scoped to the matter's location/state (er_cases + policy acks stay
+    company-wide — no location link exists for them), and (b) jurisdiction-
+    grounded law/legislation/case-law sources are added on top.
     """
     features = features or {}
     sources: dict = {}
     notes: list[str] = []
 
+    # Resolve jurisdiction BEFORE the sources loop: the record queries scope on
+    # the matter's location/state, not just the legal-landscape extras below.
+    legal_context = None
+    if matter:
+        try:
+            legal_context = await resolve_matter_jurisdiction(conn, matter)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("legal_defense: jurisdiction resolve failed: %s", e)
+            notes.append("Jurisdiction: unavailable")
+
+    loc_id = (matter or {}).get("location_id")
+    # legal_context["state"] already encodes location-over-state precedence;
+    # fall back to the raw override so state scoping still applies when
+    # resolution fails (unknown state / location without a jurisdiction row).
+    scope_state = (legal_context or {}).get("state") or (matter or {}).get("jurisdiction_state")
+
     for key, label, fn, enabled in _SOURCES:
         if not enabled(features):
             continue
         try:
-            recs = await fn(conn, company_id, start, end)
+            recs = await fn(conn, company_id, start, end, loc_id, scope_state)
         except Exception as e:  # noqa: BLE001 — isolation is the point
             logger.warning("legal_defense: source %s unavailable: %s", key, e)
             notes.append(f"{label}: unavailable")
@@ -587,13 +643,10 @@ async def gather_evidence(conn, company_id, start, end, features: dict, matter: 
             recs = recs[:_PER_SOURCE_CAP]
         sources[key] = {"label": label, "records": recs}
 
-    legal_context = None
+    if loc_id or scope_state:
+        notes.append(f"Evidence scoped to {(legal_context or {}).get('location_name') or scope_state}.")
+
     if matter:
-        try:
-            legal_context = await resolve_matter_jurisdiction(conn, matter)
-        except Exception as e:  # noqa: BLE001
-            logger.warning("legal_defense: jurisdiction resolve failed: %s", e)
-            notes.append("Jurisdiction: unavailable")
         if legal_context:
             try:
                 law_src, bill_src = await _gather_law_cached(conn, matter, legal_context)

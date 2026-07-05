@@ -155,12 +155,83 @@ class _FakeAlertConn:
 
 
 def test_src_compliance_alerts_shape():
-    recs = asyncio.run(ld._src_compliance_alerts(_FakeAlertConn(), "cid", None, None))
+    recs = asyncio.run(ld._src_compliance_alerts(_FakeAlertConn(), "cid", None, None, None, None))
     assert len(recs) == 1
     r = recs[0]
     assert r["cid"] == "compliance_alert:a1"
     assert r["ref"] == "Minimum Wage"
     assert r["summary"] == "New law effective — Critical, Unread @ HQ"
+
+
+# --- matter scoping ----------------------------------------------------------
+
+def test_scope_fragments_use_expected_placeholders():
+    import re
+    frag = ld._scope_direct("t.location_id", "bl.state", 4)
+    assert set(re.findall(r"\$(\d+)", frag)) == {"4", "5"}
+    frag2 = ld._scope_direct("cr.location_id", "bl.state", 2)
+    assert set(re.findall(r"\$(\d+)", frag2)) == {"2", "3"}
+    emp = ld._scope_employee(4)
+    assert set(re.findall(r"\$(\d+)", emp)) == {"4", "5"}
+    assert "e.work_location_id" in emp and "e.work_state" in emp
+
+
+class _ArgCountConn:
+    """Records the positional-arg count of every fetch so scoping params are
+    provably threaded through each source query."""
+    def __init__(self):
+        self.arg_counts: dict[str, int] = {}
+
+    async def fetch(self, sql, *args):
+        for tbl in ("ir_incidents", "er_cases", "compliance_requirements",
+                    "progressive_discipline", "training_records",
+                    "policy_signatures", "accommodation_cases", "compliance_alerts"):
+            if tbl in sql:
+                self.arg_counts[tbl] = len(args)
+        return []
+
+    async def fetchrow(self, sql, *args):
+        return None  # jurisdiction unresolvable — state fallback path
+
+
+def test_gather_evidence_scopes_sources_to_matter_location():
+    conn = _ArgCountConn()
+    matter = {"id": "m1", "company_id": "cid", "matter_type": "class_action",
+              "location_id": "22222222-2222-2222-2222-222222222222",
+              "jurisdiction_state": None}
+    corpus = asyncio.run(ld.gather_evidence(
+        conn, "cid", None, None, _ALL_FEATURES, matter=matter,
+    ))
+    # every source got the two scope params on top of company/start/end
+    assert conn.arg_counts["ir_incidents"] == 5
+    assert conn.arg_counts["compliance_requirements"] == 3  # no date filter there
+    assert conn.arg_counts["progressive_discipline"] == 5
+    assert conn.arg_counts["training_records"] == 5
+    assert conn.arg_counts["accommodation_cases"] == 5
+    assert conn.arg_counts["compliance_alerts"] == 5
+    assert any(n.startswith("Evidence scoped to") for n in corpus["notes"])
+
+
+def test_gather_evidence_state_only_scope_notes():
+    class _Conn(_ArgCountConn):
+        async def fetchrow(self, sql, *args):
+            return None  # no jurisdiction row for the state — raw override used
+
+    corpus = asyncio.run(ld.gather_evidence(
+        _Conn(), "cid", None, None, {},
+        matter={"id": "m1", "company_id": "cid", "matter_type": "audit",
+                "location_id": None, "jurisdiction_state": "CA"},
+    ))
+    assert any(n == "Evidence scoped to CA." for n in corpus["notes"])
+
+
+def test_gather_evidence_unscoped_matter_has_no_scope_note():
+    corpus = asyncio.run(ld.gather_evidence(
+        _ArgCountConn(), "cid", None, None, {},
+        matter={"id": "m1", "company_id": "cid", "matter_type": "other",
+                "location_id": None, "jurisdiction_state": None},
+    ))
+    assert not any("Evidence scoped" in n for n in corpus["notes"])
 
 
 def test_matter_type_categories_are_registry_keys():
