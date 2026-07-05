@@ -17,6 +17,7 @@ import html
 import logging
 import re
 from datetime import date
+from typing import Optional
 
 from app.core.services.pdf import safe_url_fetcher
 
@@ -178,6 +179,61 @@ async def list_snapshots(conn, broker_id, subject_kind: str, subject_id) -> list
         d["id"] = str(d["id"])
         out.append(d)
     return out
+
+
+async def list_company_snapshots(conn, company_id, line: str | None = None) -> list[dict]:
+    """Broker-agnostic snapshot fetch for the tenant risk-profile path, which has
+    no ``broker_id`` (a company's loss runs may have been entered by more than one
+    broker over time) — scopes solely by ``subject_id``, unlike ``list_snapshots``'
+    broker-keyed read for the broker surface."""
+    if line:
+        rows = await conn.fetch(
+            """SELECT id, line, policy_period_label, policy_period_start, valuation_date,
+                      claim_count, open_count, paid, reserved, source, note, created_at
+               FROM wc_loss_runs
+               WHERE subject_kind = 'company' AND subject_id = $1 AND line = $2
+               ORDER BY line, policy_period_label, valuation_date""",
+            company_id, line,
+        )
+    else:
+        rows = await conn.fetch(
+            """SELECT id, line, policy_period_label, policy_period_start, valuation_date,
+                      claim_count, open_count, paid, reserved, source, note, created_at
+               FROM wc_loss_runs
+               WHERE subject_kind = 'company' AND subject_id = $1
+               ORDER BY line, policy_period_label, valuation_date""",
+            company_id,
+        )
+    out = []
+    for r in rows:
+        d = dict(r)
+        d["id"] = str(d["id"])
+        out.append(d)
+    return out
+
+
+def property_loss_signal(tri: dict) -> Optional[dict]:
+    """Property-line adverse-development penalty from a ``build_triangle()``
+    result. Pure (unit-tested). None when there's no property loss-run history
+    to judge from, or when the ramp below rounds to zero.
+
+    Linear ramp: 0 penalty at <=10% adverse development, capped at 15 points
+    around 60%+ — a judgment call (WC and other lines don't get an equivalent
+    hit; property's cat/ITV exposure already dominates that score, so this is a
+    secondary nudge, not a primary signal)."""
+    lines = {ln["line"]: ln for ln in tri.get("lines", [])}
+    line = lines.get("property")
+    if not line or not line.get("periods"):
+        return None
+    summary = line["summary"]
+    if summary.get("total_latest_incurred", 0) <= 0:
+        return None
+    adverse_pct = summary.get("adverse_pct", 0.0)
+    penalty = min(15, max(0, round((adverse_pct - 10) / 50 * 15)))
+    if penalty == 0:
+        return None
+    return {"adverse_penalty": penalty, "adverse_pct": adverse_pct,
+            "detail": f"{adverse_pct}% adverse development"}
 
 
 async def build_development(conn, broker_id, subject_kind: str, subject_id, *,

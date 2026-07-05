@@ -15,6 +15,8 @@ export interface RiskIndex {
   band: string | null
   components: RiskComponent[]
   top_fixes: string[]
+  coverage?: number
+  components_missing?: { key: string; label: string; weight: number }[]
 }
 
 export interface RiskIndexPortfolioRow {

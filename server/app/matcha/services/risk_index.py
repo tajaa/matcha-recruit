@@ -19,6 +19,15 @@ _WC_BAND_SCORE = {"good": 90, "fair": 70, "at_risk": 45, "critical": 20}
 # component weights (renormalized over whichever components have data)
 _WEIGHTS = {"wc": 40, "epl": 35, "compliance": 25, "property": 30}
 
+# (label, weight) per component key — lets _assemble name components that are
+# ABSENT (no data to score), not just report on the ones present.
+_COMPONENT_META = {
+    "wc": ("Workers' Comp", _WEIGHTS["wc"]),
+    "epl": ("EPL readiness", _WEIGHTS["epl"]),
+    "compliance": ("Compliance coverage", _WEIGHTS["compliance"]),
+    "property": ("Commercial Property", _WEIGHTS["property"]),
+}
+
 # re-export the EPL band thresholds (≥80 strong / ≥60 adequate / ≥35 developing / <35 exposed)
 band = epl_readiness.readiness_band
 
@@ -52,14 +61,21 @@ async def _wc_component(conn, company_id: UUID):
 
 
 async def _compliance_component(conn, company_id: UUID):
-    """(score, detail) = share of the company's active locations with compliance
-    tracked, or None when there are no locations."""
+    """(score, detail) = share of the company's active locations with CURRENT
+    (non-expired) compliance requirements tracked, or None when there are no
+    locations. A location whose only requirements have lapsed doesn't count as
+    covered — mirrors the expiration-filter idiom in epl_readiness's wage_hour
+    factor, generalized to all categories."""
     row = await conn.fetchrow(
         """
         SELECT COUNT(DISTINCT bl.id) AS locs,
-               COUNT(DISTINCT cr.location_id) AS covered
+               COUNT(DISTINCT bl.id) FILTER (WHERE cr.cnt > 0) AS covered
         FROM business_locations bl
-        LEFT JOIN compliance_requirements cr ON cr.location_id = bl.id
+        LEFT JOIN LATERAL (
+            SELECT COUNT(*) AS cnt FROM compliance_requirements cr
+            WHERE cr.location_id = bl.id
+              AND (cr.expiration_date IS NULL OR cr.expiration_date > CURRENT_DATE)
+        ) cr ON true
         WHERE bl.company_id = $1 AND COALESCE(bl.is_active, true) = true
         """,
         company_id,
@@ -72,25 +88,45 @@ async def _compliance_component(conn, company_id: UUID):
 
 
 def _top_fixes(components: list[dict], epl: dict) -> list[str]:
-    fixes = [
-        f"Raise {c['label'].lower()} ({c['score']}/100)"
-        for c in sorted(components, key=lambda c: c["score"]) if c["score"] < 70
-    ][:3]
+    # Rank by weight × shortfall (points actually at stake), not raw score — a
+    # heavy component barely below the bar can cost more than a light one deep in
+    # the red. Same formula as epl_readiness.top_gap.
+    weak = sorted(
+        (c for c in components if c["score"] < 70),
+        key=lambda c: c["weight"] * (100 - c["score"]),
+        reverse=True,
+    )
+    fixes = [f"Raise {c['label'].lower()} ({c['score']}/100)" for c in weak][:3]
     gap = epl_readiness.top_gap(epl)
     if gap and (msg := f"EPL: address {gap['label'].lower()}") not in fixes:
         fixes.append(msg)
     return fixes[:4]
 
 
-def _assemble(components: list[dict], epl: dict) -> dict:
-    """Renormalize whichever components have data into a composite + band + fixes."""
+def _assemble(components: list[dict], epl: dict,
+              universe: tuple[str, ...] = ("wc", "epl", "compliance", "property")) -> dict:
+    """Renormalize whichever components have data into a composite + band + fixes.
+
+    ``universe`` is the full set of components this caller could ever produce
+    (tenant vs. off-platform differ — see callers). ``coverage`` is the share of
+    that universe's weight actually present, and ``components_missing`` names
+    what's absent, so a thin index (e.g. EPL-only) isn't presented with the same
+    confidence as a fully-assessed one."""
     total_w = sum(c["weight"] for c in components)
     index = round(sum(c["score"] * c["weight"] for c in components) / total_w) if total_w else None
+    universe_weight = sum(_COMPONENT_META[k][1] for k in universe)
+    present = {c["key"] for c in components}
+    components_missing = [
+        {"key": k, "label": _COMPONENT_META[k][0], "weight": _COMPONENT_META[k][1]}
+        for k in universe if k not in present
+    ]
     return {
         "index": index,
         "band": band(index) if index is not None else None,
         "components": components,
         "top_fixes": _top_fixes(components, epl),
+        "coverage": round(total_w / universe_weight, 2) if universe_weight else None,
+        "components_missing": components_missing,
     }
 
 
@@ -141,11 +177,13 @@ def _property_score(rollup: Optional[dict], cat: Optional[dict] = None,
 
 async def _property_component(conn, company_id: UUID):
     """Tenant property sub-score from the Statement of Values. None when no buildings.
-    Catastrophe is wired in Phase 3 (``property_cat.company_cat_exposure``).
+    Catastrophe is wired via ``property_cat.company_cat_exposure``; adverse loss
+    development via the company's own property loss-run triangle.
 
     Best-effort: degrades to None if the property tables aren't present yet (migration
     lag on a server that has the code but not ``prop01``) so the composite index never
-    500s."""
+    500s. The loss-development lookup gets the same best-effort treatment — a bad
+    triangle degrades the loss signal, not the whole component."""
     import asyncpg
     from . import property_sov  # lazy: avoid import cycle
     try:
@@ -163,7 +201,14 @@ async def _property_component(conn, company_id: UUID):
         cat = await property_cat.company_cat_exposure(conn, company_id)
     except (ImportError, AttributeError, asyncpg.exceptions.UndefinedTableError):
         cat = None
-    return _property_score(rollup, cat, None)
+    loss = None
+    try:
+        from . import loss_development
+        snaps = await loss_development.list_company_snapshots(conn, company_id, line="property")
+        loss = loss_development.property_loss_signal(loss_development.build_triangle(snaps))
+    except Exception:
+        loss = None
+    return _property_score(rollup, cat, loss)
 
 
 async def compute_risk_index(conn, company_id: UUID) -> dict:
@@ -188,7 +233,8 @@ async def compute_risk_index(conn, company_id: UUID) -> dict:
         components.append({"key": "property", "label": "Commercial Property", "weight": _WEIGHTS["property"],
                            "score": prop[0], "detail": prop[1]})
 
-    return {"company_id": str(company_id), **_assemble(components, epl)}
+    return {"company_id": str(company_id),
+            **_assemble(components, epl, universe=("wc", "epl", "compliance", "property"))}
 
 
 _BANDS = ("strong", "adequate", "developing", "exposed")
@@ -255,4 +301,4 @@ def external_risk_index(wc: dict, epl: dict, prop: Optional[dict] = None) -> dic
         if ps is not None:
             components.append({"key": "property", "label": "Commercial Property",
                                "weight": _WEIGHTS["property"], "score": ps[0], "detail": ps[1]})
-    return _assemble(components, epl)
+    return _assemble(components, epl, universe=("wc", "epl", "property"))

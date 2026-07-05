@@ -24,9 +24,10 @@ const EPL_ATTEST_OPTIONS = [
 ]
 
 function EplFactorRow({ f }: { f: EplFactor }) {
+  const notAssessed = f.assessed === false
   return (
     <div className="flex items-center gap-3 py-1.5 border-b border-zinc-800/30 last:border-0">
-      <span className={`h-2 w-2 rounded-full flex-shrink-0 ${EPL_STATUS_DOT[f.status]}`} />
+      <span className={`h-2 w-2 rounded-full flex-shrink-0 ${notAssessed ? 'bg-zinc-700' : EPL_STATUS_DOT[f.status]}`} />
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
           <span className="text-sm text-zinc-200">{f.label}</span>
@@ -34,7 +35,11 @@ function EplFactorRow({ f }: { f: EplFactor }) {
         </div>
         <p className="text-[11px] text-zinc-500 truncate">{f.detail}</p>
       </div>
-      <span className="text-sm font-mono text-zinc-300 w-10 text-right">{f.score}</span>
+      {notAssessed ? (
+        <span className="text-[10px] text-zinc-500 uppercase tracking-wide shrink-0">Not assessed</span>
+      ) : (
+        <span className="text-sm font-mono text-zinc-300 w-10 text-right">{f.score}</span>
+      )}
     </div>
   )
 }

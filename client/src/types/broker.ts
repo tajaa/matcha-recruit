@@ -526,6 +526,7 @@ export interface EplFactor {
   contribution: number
   detail: string
   attestation: EplAttestation | null
+  assessed?: boolean
 }
 
 export interface EplReadiness {
@@ -538,6 +539,8 @@ export interface EplReadiness {
   derived_max?: number
   attested_max?: number
   factors: EplFactor[]
+  assessed_weight?: number
+  coverage?: number
 }
 
 export interface EplTopGap {

@@ -16,12 +16,22 @@ export default function RiskProfile() {
   const [readiness, setReadiness] = useState<SubmissionReadiness | null>(null)
   const [venue, setVenue] = useState<VenueExposure | null>(null)
   const [exclusions, setExclusions] = useState<ExclusionGap | null>(null)
+  const [profileError, setProfileError] = useState(false)
+  const [readinessError, setReadinessError] = useState(false)
+  const [venueError, setVenueError] = useState(false)
+  const [exclusionError, setExclusionError] = useState(false)
+
+  function loadRiskProfile() {
+    setLoading(true)
+    setProfileError(false)
+    fetchRiskProfile().then(setData).catch(() => setProfileError(true)).finally(() => setLoading(false))
+  }
 
   useEffect(() => {
-    fetchRiskProfile().then(setData).finally(() => setLoading(false))
-    fetchSubmissionReadiness().then(setReadiness).catch(() => { /* noop */ })
-    fetchVenueExposure().then(setVenue).catch(() => { /* noop */ })
-    fetchExclusionGap().then(setExclusions).catch(() => { /* noop */ })
+    loadRiskProfile()
+    fetchSubmissionReadiness().then(setReadiness).catch(() => setReadinessError(true))
+    fetchVenueExposure().then(setVenue).catch(() => setVenueError(true))
+    fetchExclusionGap().then(setExclusions).catch(() => setExclusionError(true))
   }, [])
 
   async function explain() {
@@ -31,6 +41,14 @@ export default function RiskProfile() {
 
   if (loading) {
     return <div className="flex items-center justify-center h-64"><Loader2 className="h-6 w-6 text-zinc-500 animate-spin" /></div>
+  }
+  if (profileError) {
+    return (
+      <div className={`${PANEL} p-6 text-center`}>
+        <p className="text-sm text-red-400">Couldn't load your risk profile.</p>
+        <button onClick={loadRiskProfile} className="mt-2 text-xs text-emerald-400 hover:text-emerald-300 underline">Try again</button>
+      </div>
+    )
   }
   if (!data) return <div className="text-sm text-zinc-500">Risk profile unavailable.</div>
 
@@ -51,6 +69,14 @@ export default function RiskProfile() {
           <div className={`text-6xl font-light font-mono ${tone}`}>{data.index ?? '—'}</div>
           <div className={`text-xs uppercase tracking-widest font-bold mt-1 ${tone}`}>{data.band ?? 'no data'}</div>
           <div className="text-[10px] text-zinc-600 mt-0.5">/ 100 risk index</div>
+          {data.coverage != null && data.coverage < 1 && (
+            <div className="text-[10px] text-zinc-600 mt-2 max-w-[11rem] mx-auto leading-relaxed">
+              Based on {data.components.length} of {data.components.length + (data.components_missing?.length ?? 0)} signals ({Math.round(data.coverage * 100)}% of weight covered)
+              {data.components_missing && data.components_missing.length > 0 && (
+                <div className="mt-0.5">Not yet measured: {data.components_missing.map((c) => c.label).join(', ')}</div>
+              )}
+            </div>
+          )}
         </div>
         <div className="flex-1 space-y-3">
           {data.components.map((c) => (
@@ -69,6 +95,11 @@ export default function RiskProfile() {
       </div>
 
       {/* Submission readiness — data→price completeness loop */}
+      {readinessError && (
+        <div className={`${PANEL} p-4`}>
+          <p className="text-xs text-zinc-500">Couldn't load submission readiness.</p>
+        </div>
+      )}
       {readiness && (
         <div className={`${PANEL} p-5`}>
           <div className="flex items-start justify-between mb-3">
@@ -103,6 +134,11 @@ export default function RiskProfile() {
       )}
 
       {/* Venue exposure — casualty severity dimension (where you operate) */}
+      {venueError && (
+        <div className={`${PANEL} p-4`}>
+          <p className="text-xs text-zinc-500">Couldn't load venue exposure.</p>
+        </div>
+      )}
       {venue && venue.locations.length > 0 && (
         <div className={`${PANEL} p-5`}>
           <div className="flex items-start justify-between mb-3">
@@ -133,6 +169,11 @@ export default function RiskProfile() {
       )}
 
       {/* Coverage exclusion exposure — emerging casualty exclusions */}
+      {exclusionError && (
+        <div className={`${PANEL} p-4`}>
+          <p className="text-xs text-zinc-500">Couldn't load coverage exclusion exposure.</p>
+        </div>
+      )}
       {exclusions && exclusions.exclusions.length > 0 && (
         <div className={`${PANEL} p-5`}>
           <div className="flex items-start justify-between mb-3">

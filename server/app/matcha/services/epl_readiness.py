@@ -43,6 +43,22 @@ BUSINESS_DERIVABLE = {"pay_transparency", "ai_hiring_audit", "biometrics_bipa", 
 ATTESTATION_STATUSES = ("in_place", "partial", "gap", "unknown")
 _ATTEST_SCORE = {"in_place": 100, "partial": 50, "gap": 0, "unknown": 0}
 
+# Derived factors that are gated behind an optional module. Zero records on one
+# of these means one of two very different things: the company doesn't track
+# it here (module off — not a gap, exclude from the score) or genuinely has
+# nothing to show for a module it's paid for (module on — a real 0, count it).
+_FEATURE_GATED_DERIVED = {
+    "harassment_training": "training",
+    "documented_discipline": "discipline",
+    "er_case_management": "er_copilot",
+}
+
+
+def _gated_assessed(count: int, feature_name: str, features: dict) -> bool:
+    """A gated derived factor is assessed once there's data, or once the gating
+    module is on (an on-but-empty module is a confirmed gap, not missing data)."""
+    return count > 0 or bool(features.get(feature_name))
+
 
 def readiness_band(score: int) -> str:
     """Composite score → band. High score = EPL-ready (low exposure)."""
@@ -110,7 +126,7 @@ async def _derived_scores(conn, company_id: UUID, features: dict) -> dict[str, d
     else:
         score = 0
         detail = "No anti-harassment/EEO policy on file"
-    out["anti_harassment_policy"] = {"score": score, "detail": detail}
+    out["anti_harassment_policy"] = {"score": score, "detail": detail, "assessed": True}
 
     # 2. Anti-harassment training completion.
     tr = await conn.fetchrow(
@@ -133,7 +149,10 @@ async def _derived_scores(conn, company_id: UUID, features: dict) -> dict[str, d
     else:
         score = 0
         detail = "No anti-harassment training" + ("" if features.get("training") else " (training not enabled)")
-    out["harassment_training"] = {"score": score, "detail": detail}
+    out["harassment_training"] = {
+        "score": score, "detail": detail,
+        "assessed": _gated_assessed(assigned, _FEATURE_GATED_DERIVED["harassment_training"], features),
+    }
 
     # 3. Documented progressive discipline (last 24mo, signed ratio).
     dis = await conn.fetchrow(
@@ -153,7 +172,10 @@ async def _derived_scores(conn, company_id: UUID, features: dict) -> dict[str, d
     else:
         score = 0
         detail = "No discipline records" + ("" if features.get("discipline") else " (discipline not enabled)")
-    out["documented_discipline"] = {"score": score, "detail": detail}
+    out["documented_discipline"] = {
+        "score": score, "detail": detail,
+        "assessed": _gated_assessed(d_cases, _FEATURE_GATED_DERIVED["documented_discipline"], features),
+    }
 
     # 4. ER case management (last 24mo, resolution rate).
     er = await conn.fetchrow(
@@ -173,7 +195,10 @@ async def _derived_scores(conn, company_id: UUID, features: dict) -> dict[str, d
     else:
         score = 0
         detail = "No ER cases" + ("" if features.get("er_copilot") else " (ER Copilot not enabled)")
-    out["er_case_management"] = {"score": score, "detail": detail}
+    out["er_case_management"] = {
+        "score": score, "detail": detail,
+        "assessed": _gated_assessed(e_cases, _FEATURE_GATED_DERIVED["er_case_management"], features),
+    }
 
     # 5. Multi-state wage & hour compliance coverage.
     wh = await conn.fetchrow(
@@ -203,7 +228,7 @@ async def _derived_scores(conn, company_id: UUID, features: dict) -> dict[str, d
     else:
         score = 0
         detail = "No business locations on file"
-    out["wage_hour_compliance"] = {"score": score, "detail": detail}
+    out["wage_hour_compliance"] = {"score": score, "detail": detail, "assessed": active_loc > 0}
 
     return out
 
@@ -224,6 +249,57 @@ async def get_attestations(conn, company_id: UUID) -> dict[str, dict]:
         company_id,
     )
     return {r["item_key"]: _serialize_attestation(r) for r in rows}
+
+
+def _assemble_epl(factor_inputs: dict[str, dict]) -> dict:
+    """Composite + per-factor breakdown from already-gathered factor inputs. Pure
+    (no DB) — mirrors ``risk_index._assemble``'s pure/DB split so this is testable
+    without a connection. ``factor_inputs`` maps factor key -> {score, detail,
+    kind ("derived"/"attested"), attestation, assessed}.
+
+    Only ``assessed`` factors contribute to the composite and to the
+    derived/attested denominators — an unassessed factor (module not bought,
+    attestation never reviewed) is excluded and the rest renormalize, instead of
+    being scored as a confirmed 0."""
+    factors: list[dict] = []
+    composite = 0.0
+    derived_total = attested_total = 0.0
+    derived_max = attested_max = 0.0
+    assessed_weight = 0.0
+    for f in FACTORS:
+        key = f["key"]
+        inp = factor_inputs[key]
+        sub, detail, actual, att, assessed = (
+            inp["score"], inp["detail"], inp["kind"], inp["attestation"], inp["assessed"],
+        )
+        contribution = f["weight"] * sub / 100.0
+        if assessed:
+            composite += contribution
+            assessed_weight += f["weight"]
+            if actual == "derived":
+                derived_total += contribution
+                derived_max += f["weight"]
+            else:
+                attested_total += contribution
+                attested_max += f["weight"]
+        factors.append({
+            "key": key, "label": f["label"], "kind": actual, "weight": f["weight"],
+            "score": sub, "status": _factor_band(sub), "contribution": round(contribution, 1),
+            "detail": detail, "attestation": att, "assessed": assessed,
+        })
+
+    score = round(100 * composite / assessed_weight) if assessed_weight else 0
+    return {
+        "score": score,
+        "band": readiness_band(score),
+        "derived_score": round(derived_total),
+        "attested_score": round(attested_total),
+        "derived_max": round(derived_max),
+        "attested_max": round(attested_max),
+        "assessed_weight": round(assessed_weight),
+        "coverage": round(assessed_weight / 100, 2),
+        "factors": factors,
+    }
 
 
 async def compute_epl_readiness(conn, company_id: UUID) -> dict:
@@ -255,16 +331,21 @@ async def compute_epl_readiness(conn, company_id: UUID) -> dict:
             if res is not None:
                 wf_derived[key] = res  # (score, detail)
 
-    factors: list[dict] = []
-    composite = 0.0
-    derived_total = attested_total = 0.0
-    derived_max = attested_max = 0.0
+    factor_inputs: dict[str, dict] = {}
     for f in FACTORS:
         key = f["key"]
         if f["kind"] == "derived":
-            sub, detail, att, actual = derived[key]["score"], derived[key]["detail"], None, "derived"
+            d = derived[key]
+            factor_inputs[key] = {
+                "score": d["score"], "detail": d["detail"], "kind": "derived",
+                "attestation": None, "assessed": d["assessed"],
+            }
         elif key in wf_derived:
-            sub, detail, att, actual = wf_derived[key][0], wf_derived[key][1], None, "derived"
+            sub, detail = wf_derived[key]
+            factor_inputs[key] = {
+                "score": sub, "detail": detail, "kind": "derived",
+                "attestation": None, "assessed": True,
+            }
         else:
             a = attestations.get(key)
             status = a["status"] if a else "unknown"
@@ -274,32 +355,12 @@ async def compute_epl_readiness(conn, company_id: UUID) -> dict:
                 "gap": "Attested: gap", "unknown": "Not yet reviewed",
             }[status]
             att = a or {"item_key": key, "status": "unknown", "note": None, "updated_at": None}
-            actual = "attested"
-        contribution = f["weight"] * sub / 100.0
-        composite += contribution
-        if actual == "derived":
-            derived_total += contribution
-            derived_max += f["weight"]
-        else:
-            attested_total += contribution
-            attested_max += f["weight"]
-        factors.append({
-            "key": key, "label": f["label"], "kind": actual, "weight": f["weight"],
-            "score": sub, "status": _factor_band(sub), "contribution": round(contribution, 1),
-            "detail": detail, "attestation": att,
-        })
+            factor_inputs[key] = {
+                "score": sub, "detail": detail, "kind": "attested",
+                "attestation": att, "assessed": status != "unknown",
+            }
 
-    score = round(composite)
-    return {
-        "company_id": str(company_id),
-        "score": score,
-        "band": readiness_band(score),
-        "derived_score": round(derived_total),
-        "attested_score": round(attested_total),
-        "derived_max": round(derived_max),
-        "attested_max": round(attested_max),
-        "factors": factors,
-    }
+    return {"company_id": str(company_id), **_assemble_epl(factor_inputs)}
 
 
 def assess_from_statuses(statuses: dict) -> dict:

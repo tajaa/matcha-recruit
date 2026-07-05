@@ -38,6 +38,19 @@ def test_property_score_cat_penalty_capped():
     assert low == base                                               # low/moderate = no penalty
 
 
+def test_property_score_applies_loss_development_penalty():
+    base = ri._property_score(_rollup(100, ratio=1.0))[0]
+    with_loss = ri._property_score(_rollup(100, ratio=1.0), loss={"adverse_penalty": 10, "adverse_pct": 40.0})
+    assert with_loss[0] == base - 10
+    assert "adverse loss dev" in with_loss[1]
+
+
+def test_property_score_loss_penalty_capped_at_15():
+    base = ri._property_score(_rollup(100, ratio=1.0))[0]
+    with_loss = ri._property_score(_rollup(100, ratio=1.0), loss={"adverse_penalty": 999})
+    assert with_loss[0] == base - 15
+
+
 # --- external_risk_index back-compat + property wiring ---------------------
 
 def _wc():

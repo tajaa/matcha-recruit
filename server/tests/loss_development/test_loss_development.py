@@ -138,3 +138,56 @@ def test_multi_line_grouping():
     assert gl["label"] == "General Liability"
     # gl 2022: 12mo 50k → 24mo 90k = atf 1.8
     assert {f["from_maturity"]: f["factor"] for f in gl["factors"]}[12] == 1.8
+
+
+# --- property_loss_signal ---------------------------------------------------
+#
+# Synthetic tri dicts (matching build_triangle's shape) rather than routing
+# through build_triangle itself — property_loss_signal only reads
+# lines[].summary/periods, so this pins the adverse_pct → penalty ramp exactly
+# without fighting chain-ladder mechanics to hit precise percentages.
+
+def _tri_with_property(adverse_pct=None, total_latest_incurred=100_000.0, periods=None, line="property"):
+    return {
+        "has_data": True,
+        "lines": [{
+            "line": line, "label": "Commercial Property",
+            "periods": periods if periods is not None else [{"period_label": "2022"}],
+            "factors": [],
+            "summary": {
+                "total_latest_incurred": total_latest_incurred,
+                "adverse_pct": adverse_pct,
+            },
+        }],
+    }
+
+
+def test_property_loss_signal_no_property_line():
+    tri = ld.build_triangle([_snap("2022", date(2022, 12, 31), 100_000, line="wc")])
+    assert ld.property_loss_signal(tri) is None
+
+
+def test_property_loss_signal_no_periods():
+    tri = _tri_with_property(adverse_pct=40.0, periods=[])
+    assert ld.property_loss_signal(tri) is None
+
+
+def test_property_loss_signal_zero_latest_incurred():
+    tri = _tri_with_property(adverse_pct=40.0, total_latest_incurred=0)
+    assert ld.property_loss_signal(tri) is None
+
+
+def test_property_loss_signal_at_or_below_threshold_returns_none():
+    assert ld.property_loss_signal(_tri_with_property(adverse_pct=10.0)) is None
+    assert ld.property_loss_signal(_tri_with_property(adverse_pct=5.0)) is None
+
+
+def test_property_loss_signal_mid_ramp():
+    result = ld.property_loss_signal(_tri_with_property(adverse_pct=35.0))
+    # (35-10)/50*15 = 7.5 -> round-half-to-even -> 8
+    assert result == {"adverse_penalty": 8, "adverse_pct": 35.0, "detail": "35.0% adverse development"}
+
+
+def test_property_loss_signal_caps_at_15():
+    result = ld.property_loss_signal(_tri_with_property(adverse_pct=100.0))
+    assert result["adverse_penalty"] == 15
