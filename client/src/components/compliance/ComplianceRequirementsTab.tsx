@@ -39,9 +39,8 @@ type Props = {
 }
 
 export function ComplianceRequirementsTab({ requirements, loading, onPin, checkMessages, facilityAttributes, readOnly, previewCategoryLimit }: Props) {
-  const isBehavioralHealth = facilityAttributes?.entity_type === 'behavioral_health'
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
-  const [groupFilter, setGroupFilter] = useState<'all' | CategoryGroup>(isBehavioralHealth ? 'behavioral_health' : 'all')
+  const [groupFilter, setGroupFilter] = useState<'all' | CategoryGroup>('all')
   const [searchQuery, setSearchQuery] = useState('')
 
   const filteredRequirements = useMemo(() => {
@@ -93,9 +92,9 @@ export function ComplianceRequirementsTab({ requirements, loading, onPin, checkM
 
   // One category accordion row — shared by the normal and lite-preview renders.
   const renderCategoryRow = (cat: string, reqs: ComplianceRequirement[]) => (
-    <div key={cat} className="border-b border-zinc-800/60 last:border-0">
+    <div key={cat} className="border-b border-white/[0.06] last:border-0">
       <button type="button" onClick={() => toggle(cat)}
-        className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-zinc-900/30 transition-colors">
+        className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-white/[0.02] transition-colors">
         <div className="flex items-center gap-3">
           <span className="text-xs font-medium text-zinc-200 uppercase tracking-wide">
             {CATEGORY_LABELS[cat] || cat}
@@ -108,7 +107,7 @@ export function ComplianceRequirementsTab({ requirements, loading, onPin, checkM
         <span className="text-xs text-zinc-600">{expanded.has(cat) ? '−' : '+'}</span>
       </button>
       {expanded.has(cat) && (
-        <div className="divide-y divide-zinc-800/40">
+        <div className="divide-y divide-white/[0.04]">
           {reqs.length === 0 ? (
             <p className="px-4 py-4 text-xs text-zinc-600">
               {missingCoverage.has(cat)
@@ -117,26 +116,26 @@ export function ComplianceRequirementsTab({ requirements, loading, onPin, checkM
             </p>
           ) : (
             reqs.map((req) => (
-              <div key={req.id} className="px-4 py-3 hover:bg-zinc-900/20 transition-colors">
+              <div key={req.id} className="px-4 py-3 hover:bg-white/[0.02] transition-colors">
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-zinc-200">{req.title}</p>
                     <div className="flex flex-wrap items-center gap-2 mt-1">
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700">
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/[0.04] text-zinc-400 border border-white/[0.08]">
                         {JURISDICTION_LEVEL_LABELS[req.jurisdiction_level] || req.jurisdiction_level}
                       </span>
                       <span className="text-[11px] text-zinc-500">{req.jurisdiction_name}</span>
                       {req.rate_type && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-500 border border-zinc-700">
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/[0.04] text-zinc-500 border border-white/[0.08]">
                           {RATE_TYPE_LABELS[req.rate_type] || req.rate_type}
                         </span>
                       )}
                       {req.applicable_industries?.includes('healthcare') && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700">Medical</span>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/[0.04] text-zinc-400 border border-white/[0.08]">Medical</span>
                       )}
                       {(req.affected_employee_count ?? 0) > 0 && (
                         <EmployeesTooltip names={req.affected_employee_names} count={req.affected_employee_count!}>
-                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700 cursor-default">
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/[0.04] text-zinc-400 border border-white/[0.08] cursor-default">
                             {req.affected_employee_count} employee{req.affected_employee_count !== 1 ? 's' : ''}
                           </span>
                         </EmployeesTooltip>
@@ -149,7 +148,7 @@ export function ComplianceRequirementsTab({ requirements, loading, onPin, checkM
                     </div>
                   </div>
                   {req.current_value && (
-                    <span className="text-sm font-mono text-zinc-200 bg-zinc-800/60 border border-zinc-700 px-2.5 py-1 rounded shrink-0">
+                    <span className="text-sm font-mono text-zinc-200 bg-white/[0.06] border border-white/[0.08] px-2.5 py-1 rounded shrink-0">
                       {req.current_value}
                     </span>
                   )}
@@ -227,7 +226,7 @@ export function ComplianceRequirementsTab({ requirements, loading, onPin, checkM
             <h3 className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider mb-2">
               {section.label}
             </h3>
-            <div className="border border-zinc-800 rounded-lg overflow-hidden">
+            <div className="border border-white/[0.06] bg-zinc-950 rounded-lg overflow-hidden">
               {section.categories.map(([cat, reqs]) => renderCategoryRow(cat, reqs))}
             </div>
           </div>
@@ -244,20 +243,20 @@ export function ComplianceRequirementsTab({ requirements, loading, onPin, checkM
             <div className="relative">
               {/* Dense blurred wall of real requirements — conveys the volume
                   behind the paywall. Tall but height-capped; fades out. */}
-              <div className="border border-zinc-800 rounded-lg overflow-hidden max-h-[640px]">
+              <div className="border border-white/[0.06] bg-zinc-950 rounded-lg overflow-hidden max-h-[640px]">
                 <div className="blur-[3px] select-none pointer-events-none" aria-hidden="true">
                   {cappedBlurRows.map((r) =>
                     r.kind === 'header' ? (
-                      <div key={r.key} className="flex items-center gap-2 px-4 py-2 bg-zinc-900/50 border-b border-zinc-800/60">
+                      <div key={r.key} className="flex items-center gap-2 px-4 py-2 bg-white/[0.03] border-b border-white/[0.06]">
                         <span className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wide">{CATEGORY_LABELS[r.cat] || r.cat}</span>
                         <span className="text-[11px] text-zinc-600">{r.n} active</span>
                       </div>
                     ) : (
-                      <div key={r.key} className="px-4 py-2.5 border-b border-zinc-800/40">
+                      <div key={r.key} className="px-4 py-2.5 border-b border-white/[0.04]">
                         <div className="flex items-start justify-between gap-3">
                           <p className="text-sm text-zinc-200 truncate">{r.req.title}</p>
                           {r.req.current_value && (
-                            <span className="text-[11px] font-mono text-zinc-200 bg-zinc-800/60 border border-zinc-700 px-2 py-0.5 rounded shrink-0">{r.req.current_value}</span>
+                            <span className="text-[11px] font-mono text-zinc-200 bg-white/[0.06] border border-white/[0.08] px-2 py-0.5 rounded shrink-0">{r.req.current_value}</span>
                           )}
                         </div>
                         {r.req.description && (
@@ -304,7 +303,7 @@ export function ComplianceRequirementsTab({ requirements, loading, onPin, checkM
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search requirements..."
-            className="w-full bg-zinc-900 border border-zinc-700 rounded-lg pl-9 pr-8 py-2.5 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-colors"
+            className="w-full bg-zinc-950 border border-white/[0.08] rounded-lg pl-9 pr-8 py-2.5 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-colors"
           />
           {searchQuery && (
             <button type="button" onClick={() => setSearchQuery('')}
@@ -319,7 +318,7 @@ export function ComplianceRequirementsTab({ requirements, loading, onPin, checkM
           <Select label="" options={GROUP_OPTIONS} value={groupFilter}
             onChange={(e) => setGroupFilter(e.target.value as 'all' | CategoryGroup)} />
         </div>
-        <span className="text-[11px] font-medium px-2 py-1 rounded-md bg-zinc-800 text-zinc-400 border border-zinc-700 shrink-0 tabular-nums">
+        <span className="font-mono text-[11px] font-medium px-2 py-1 rounded-md bg-white/[0.04] text-zinc-400 border border-white/[0.08] shrink-0 tabular-nums">
           {searchQuery ? `${filteredRequirements.length} / ${requirements.length}` : requirements.length}
         </span>
       </div>
@@ -335,13 +334,13 @@ export function ComplianceRequirementsTab({ requirements, loading, onPin, checkM
       )}
 
       {filteredSections.length === 0 && searchQuery ? (
-        <div className="border border-zinc-800 rounded-lg px-4 py-6 text-center">
+        <div className="border border-white/[0.06] bg-zinc-950 rounded-lg px-4 py-6 text-center">
           <p className="text-sm text-zinc-500">No requirements matching &ldquo;{searchQuery}&rdquo;</p>
           <button type="button" onClick={() => setSearchQuery('')}
             className="text-xs text-emerald-500 hover:text-emerald-400 mt-1 transition-colors">Clear search</button>
         </div>
       ) : filteredSections.length === 0 ? (
-        <div className="border border-zinc-800 rounded-lg px-4 py-6 text-center">
+        <div className="border border-white/[0.06] bg-zinc-950 rounded-lg px-4 py-6 text-center">
           <p className="text-sm text-zinc-600">No requirements found. Run a compliance check to populate.</p>
         </div>
       ) : (
@@ -350,11 +349,11 @@ export function ComplianceRequirementsTab({ requirements, loading, onPin, checkM
             <h3 className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider mb-2">
               {section.label} <span className="text-zinc-600 font-normal">({section.requirementCount})</span>
             </h3>
-            <div className="border border-zinc-800 rounded-lg overflow-hidden">
+            <div className="border border-white/[0.06] bg-zinc-950 rounded-lg overflow-hidden">
               {section.categories.map(([cat, reqs]) => (
-                <div key={cat} className="border-b border-zinc-800/60 last:border-0">
+                <div key={cat} className="border-b border-white/[0.06] last:border-0">
                   <button type="button" onClick={() => toggle(cat)}
-                    className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-zinc-900/30 transition-colors">
+                    className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-white/[0.02] transition-colors">
                     <div className="flex items-center gap-3">
                       <span className="text-xs font-medium text-zinc-200 uppercase tracking-wide">
                         {CATEGORY_LABELS[cat] || cat}
@@ -367,7 +366,7 @@ export function ComplianceRequirementsTab({ requirements, loading, onPin, checkM
                     <span className="text-xs text-zinc-600">{expanded.has(cat) ? '−' : '+'}</span>
                   </button>
                   {expanded.has(cat) && (
-                    <div className="divide-y divide-zinc-800/40">
+                    <div className="divide-y divide-white/[0.04]">
                       {reqs.length === 0 ? (
                         <p className="px-4 py-4 text-xs text-zinc-600">
                           {missingCoverage.has(cat)
@@ -376,26 +375,26 @@ export function ComplianceRequirementsTab({ requirements, loading, onPin, checkM
                         </p>
                       ) : (
                         reqs.map((req) => (
-                          <div key={req.id} className="px-4 py-3 hover:bg-zinc-900/20 transition-colors">
+                          <div key={req.id} className="px-4 py-3 hover:bg-white/[0.02] transition-colors">
                             <div className="flex items-start justify-between gap-3">
                               <div className="flex-1 min-w-0">
                                 <p className="text-sm font-medium text-zinc-200">{req.title}</p>
                                 <div className="flex flex-wrap items-center gap-2 mt-1">
-                                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700">
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/[0.04] text-zinc-400 border border-white/[0.08]">
                                     {JURISDICTION_LEVEL_LABELS[req.jurisdiction_level] || req.jurisdiction_level}
                                   </span>
                                   <span className="text-[11px] text-zinc-500">{req.jurisdiction_name}</span>
                                   {req.rate_type && (
-                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-500 border border-zinc-700">
+                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/[0.04] text-zinc-500 border border-white/[0.08]">
                                       {RATE_TYPE_LABELS[req.rate_type] || req.rate_type}
                                     </span>
                                   )}
                                   {req.applicable_industries?.includes('healthcare') && (
-                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700">Medical</span>
+                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/[0.04] text-zinc-400 border border-white/[0.08]">Medical</span>
                                   )}
                                   {(req.affected_employee_count ?? 0) > 0 && (
                                     <EmployeesTooltip names={req.affected_employee_names} count={req.affected_employee_count!}>
-                                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700 cursor-default">
+                                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/[0.04] text-zinc-400 border border-white/[0.08] cursor-default">
                                         {req.affected_employee_count} employee{req.affected_employee_count !== 1 ? 's' : ''}
                                       </span>
                                     </EmployeesTooltip>
@@ -408,7 +407,7 @@ export function ComplianceRequirementsTab({ requirements, loading, onPin, checkM
                                 </div>
                               </div>
                               {req.current_value && (
-                                <span className="text-sm font-mono text-zinc-200 bg-zinc-800/60 border border-zinc-700 px-2.5 py-1 rounded shrink-0">
+                                <span className="text-sm font-mono text-zinc-200 bg-white/[0.06] border border-white/[0.08] px-2.5 py-1 rounded shrink-0">
                                   {req.current_value}
                                 </span>
                               )}
