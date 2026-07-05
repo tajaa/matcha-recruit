@@ -1,5 +1,7 @@
-import { Rocket, Sparkles, ListChecks, Wrench, AlertCircle, BookOpen } from 'lucide-react'
-import { ADMIN_UPDATES, type AdminUpdate } from '../../data/adminUpdates'
+import { useEffect, useState } from 'react'
+import { Rocket, Sparkles, ListChecks, Wrench, AlertCircle, BookOpen, Loader2 } from 'lucide-react'
+import { api } from '../../api/client'
+import type { AdminUpdate } from '../../types/adminUpdates'
 
 const fmtDate = (iso: string) =>
   new Date(iso + 'T00:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
@@ -89,8 +91,17 @@ function UpdateCard({ u }: { u: AdminUpdate }) {
 }
 
 /** Master-admin changelog — what shipped + how to use it, so nothing built
- *  ever gets lost. Content is curated in src/data/adminUpdates.ts. */
+ *  ever gets lost. Content is authored in the admin_updates DB table. */
 export default function Updates() {
+  const [updates, setUpdates] = useState<AdminUpdate[] | null>(null)
+  const [error, setError] = useState(false)
+
+  useEffect(() => {
+    api.get<AdminUpdate[]>('/admin/updates')
+      .then(setUpdates)
+      .catch(() => setError(true))
+  }, [])
+
   return (
     <div>
       <div className="mb-6 flex items-center gap-3">
@@ -104,7 +115,9 @@ export default function Updates() {
       </div>
 
       <div className="max-w-3xl space-y-4">
-        {ADMIN_UPDATES.map((u) => (
+        {error && <p className="text-sm text-red-400">Couldn't load updates.</p>}
+        {!error && !updates && <Loader2 className="h-5 w-5 animate-spin text-zinc-500" />}
+        {updates?.map((u) => (
           <UpdateCard key={u.id} u={u} />
         ))}
       </div>

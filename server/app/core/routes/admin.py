@@ -155,6 +155,39 @@ async def get_api_usage():
     return await limiter.get_usage()
 
 
+# ── Product Changelog (/admin/updates) ──
+
+@router.get("/updates", dependencies=[Depends(require_admin)])
+async def list_admin_updates():
+    """Product changelog shown at /admin/updates, newest first."""
+    async with get_connection() as conn:
+        rows = await conn.fetch("""
+            SELECT id, date, category, title, summary, whats_new, how_to_use, setup, notes, tag
+            FROM admin_updates
+            ORDER BY position ASC
+        """)
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["date"] = d["date"].isoformat()
+            for col in ("whats_new", "how_to_use", "setup", "notes"):
+                if isinstance(d[col], str):
+                    d[col] = json.loads(d[col])
+            out.append({
+                "id": d["id"],
+                "date": d["date"],
+                "category": d["category"],
+                "title": d["title"],
+                "summary": d["summary"],
+                "whatsNew": d["whats_new"],
+                "howToUse": d["how_to_use"],
+                "setup": d["setup"],
+                "notes": d["notes"],
+                "tag": d["tag"],
+            })
+        return out
+
+
 # ── Token Quota Management ──
 
 @router.get("/token-quotas", dependencies=[Depends(require_admin)])
