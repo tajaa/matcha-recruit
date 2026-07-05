@@ -1,6 +1,9 @@
 import { Badge } from '../ui'
+import { LABEL } from '../ui/typography'
 import type { ComplianceSummary, ComplianceAlert, PinnedRequirement } from '../../types/compliance'
 import { CATEGORY_LABELS } from '../../types/compliance'
+
+const PANEL = 'rounded-lg border border-white/[0.06] bg-zinc-950'
 
 type Props = {
   summary: ComplianceSummary | null
@@ -25,9 +28,9 @@ export function ComplianceOverviewTab({ summary, alerts, pinnedReqs, onViewAllAl
             ['Unread Alerts', summary.unread_alerts],
             ['Critical', summary.critical_alerts],
           ] as const).map(([label, value]) => (
-            <div key={label} className="border border-zinc-800 rounded-lg px-3 py-3 text-center">
-              <p className="text-xl font-semibold text-zinc-100">{value}</p>
-              <p className="text-[11px] text-zinc-500 uppercase tracking-wide mt-0.5">{label}</p>
+            <div key={label} className={`${PANEL} px-3 py-3 text-center`}>
+              <p className="font-mono text-xl font-semibold text-zinc-100">{value}</p>
+              <p className={`${LABEL} mt-0.5`}>{label}</p>
             </div>
           ))}
         </div>
@@ -36,18 +39,18 @@ export function ComplianceOverviewTab({ summary, alerts, pinnedReqs, onViewAllAl
       {/* Recent alerts */}
       <div>
         <div className="flex items-center justify-between mb-1.5">
-          <h2 className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Recent Alerts</h2>
+          <h2 className={LABEL}>Recent Alerts</h2>
           {alerts.length > 3 && (
             <button type="button" onClick={onViewAllAlerts}
               className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors">View all alerts &rarr;</button>
           )}
         </div>
         {topAlerts.length === 0 ? (
-          <div className="border border-zinc-800 rounded-lg px-4 py-4">
+          <div className={`${PANEL} px-4 py-4`}>
             <p className="text-sm text-zinc-600">No unread alerts</p>
           </div>
         ) : (
-          <div className="border border-zinc-800 rounded-lg divide-y divide-zinc-800/60">
+          <div className={`${PANEL} divide-y divide-white/[0.06]`}>
             {topAlerts.map((alert) => (
               <div key={alert.id} className="px-4 py-2.5">
                 <div className="flex items-start justify-between gap-2">
@@ -75,8 +78,8 @@ export function ComplianceOverviewTab({ summary, alerts, pinnedReqs, onViewAllAl
       {/* Recent changes */}
       {summary && summary.recent_changes.length > 0 && (
         <div>
-          <h2 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-1.5">Recent Changes</h2>
-          <div className="border border-zinc-800 rounded-lg divide-y divide-zinc-800/60">
+          <h2 className={`${LABEL} mb-1.5`}>Recent Changes</h2>
+          <div className={`${PANEL} divide-y divide-white/[0.06]`}>
             {summary.recent_changes.slice(0, 5).map((change, i) => (
               <div key={i} className="px-4 py-2.5">
                 <div className="flex items-center gap-2">
@@ -96,8 +99,8 @@ export function ComplianceOverviewTab({ summary, alerts, pinnedReqs, onViewAllAl
       {/* Upcoming deadlines */}
       {summary && summary.upcoming_deadlines.length > 0 && (
         <div>
-          <h2 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-1.5">Upcoming Deadlines</h2>
-          <div className="border border-zinc-800 rounded-lg divide-y divide-zinc-800/60">
+          <h2 className={`${LABEL} mb-1.5`}>Upcoming Deadlines</h2>
+          <div className={`${PANEL} divide-y divide-white/[0.06]`}>
             {summary.upcoming_deadlines.map((d, i) => (
               <div key={i} className="flex items-center justify-between px-4 py-2.5">
                 <div className="min-w-0 flex-1">
@@ -115,13 +118,13 @@ export function ComplianceOverviewTab({ summary, alerts, pinnedReqs, onViewAllAl
 
       {/* Pinned requirements */}
       <div>
-        <h2 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-1.5">Pinned Requirements</h2>
+        <h2 className={`${LABEL} mb-1.5`}>Pinned Requirements</h2>
         {pinnedReqs.length === 0 ? (
-          <div className="border border-zinc-800 rounded-lg px-4 py-4">
+          <div className={`${PANEL} px-4 py-4`}>
             <p className="text-sm text-zinc-600">No pinned requirements. Pin requirements in the Locations tab.</p>
           </div>
         ) : (
-          <div className="border border-zinc-800 rounded-lg divide-y divide-zinc-800/60">
+          <div className={`${PANEL} divide-y divide-white/[0.06]`}>
             {pinnedReqs.map((req) => (
               <div key={req.id} className="px-4 py-2.5">
                 <p className="text-sm text-zinc-200">{req.title}</p>
