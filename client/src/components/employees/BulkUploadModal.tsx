@@ -78,6 +78,12 @@ export function BulkUploadModal({ open, onClose, onSuccess }: BulkUploadModalPro
               {result.failed > 0 && <span className="text-red-400 ml-2">{result.failed} failed</span>}
               <span className="text-zinc-500 ml-2">of {result.total_rows} rows</span>
             </p>
+            {result.rows_missing_work_location > 0 && (
+              <p className="text-xs text-amber-400">
+                {result.rows_missing_work_location} row{result.rows_missing_work_location === 1 ? '' : 's'} had no
+                work location (work_state) — compliance scoping won't cover {result.rows_missing_work_location === 1 ? 'that person' : 'them'} yet.
+              </p>
+            )}
             {result.errors.length > 0 && (
               <div className="max-h-32 overflow-y-auto text-xs text-red-400 space-y-1">
                 {result.errors.map((err, i) => (

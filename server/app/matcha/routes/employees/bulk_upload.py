@@ -19,6 +19,7 @@ import logging
 import re
 from datetime import datetime
 from decimal import Decimal
+from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
@@ -50,6 +51,56 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# 50 states + DC + US territories, USPS 2-letter codes. `work_state` CSV values
+# are validated against this set (case-insensitive; full state names also
+# normalized) so a typo doesn't silently create an ungrounded compliance
+# jurisdiction (Phase D2 stopgap — see COMPLIANCE_REMEDIATION_PLAN.md).
+_VALID_WORK_STATE_CODES = {
+    "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "DC", "FL", "GA", "HI", "ID",
+    "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS", "MO",
+    "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA",
+    "RI", "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY",
+    "AS", "GU", "MP", "PR", "VI",
+}
+
+_STATE_NAME_TO_CODE = {
+    "alabama": "AL", "alaska": "AK", "arizona": "AZ", "arkansas": "AR",
+    "california": "CA", "colorado": "CO", "connecticut": "CT", "delaware": "DE",
+    "district of columbia": "DC", "washington dc": "DC", "washington d.c.": "DC",
+    "florida": "FL", "georgia": "GA", "hawaii": "HI", "idaho": "ID",
+    "illinois": "IL", "indiana": "IN", "iowa": "IA", "kansas": "KS",
+    "kentucky": "KY", "louisiana": "LA", "maine": "ME", "maryland": "MD",
+    "massachusetts": "MA", "michigan": "MI", "minnesota": "MN", "mississippi": "MS",
+    "missouri": "MO", "montana": "MT", "nebraska": "NE", "nevada": "NV",
+    "new hampshire": "NH", "new jersey": "NJ", "new mexico": "NM", "new york": "NY",
+    "north carolina": "NC", "north dakota": "ND", "ohio": "OH", "oklahoma": "OK",
+    "oregon": "OR", "pennsylvania": "PA", "rhode island": "RI",
+    "south carolina": "SC", "south dakota": "SD", "tennessee": "TN", "texas": "TX",
+    "utah": "UT", "vermont": "VT", "virginia": "VA", "washington": "WA",
+    "west virginia": "WV", "wisconsin": "WI", "wyoming": "WY",
+    "american samoa": "AS", "guam": "GU", "northern mariana islands": "MP",
+    "puerto rico": "PR", "virgin islands": "VI", "us virgin islands": "VI",
+}
+
+
+def _normalize_work_state(raw: str) -> tuple[Optional[str], bool]:
+    """Normalize a CSV `work_state` value to a 2-letter USPS code.
+
+    Returns `(normalized_code_or_None, is_valid)`. Blank input is valid (no
+    work location provided — counted separately by the caller as
+    `rows_missing_work_location`, not an error). A non-blank value that isn't
+    a recognized state/territory abbreviation or full name is invalid.
+    """
+    s = raw.strip()
+    if not s:
+        return None, True
+    if len(s) == 2 and s.isalpha() and s.upper() in _VALID_WORK_STATE_CODES:
+        return s.upper(), True
+    mapped = _STATE_NAME_TO_CODE.get(s.lower())
+    if mapped:
+        return mapped, True
+    return None, False
+
 
 class BulkEmployeeCSVUpload(BaseModel):
     """Model for CSV upload response."""
@@ -59,6 +110,7 @@ class BulkEmployeeCSVUpload(BaseModel):
     errors: list[dict]  # [{row: int, email: str, error: str}]
     employee_ids: list  # list[UUID]
     credentials_created: int = 0
+    rows_missing_work_location: int = 0
 
 
 class BulkCredentialsUploadResponse(BaseModel):
@@ -154,7 +206,9 @@ async def bulk_upload_employees_csv(
 
     CSV Format (optional columns):
     - personal_email (personal/non-work email)
-    - work_state (e.g., "CA", "NY")
+    - work_state (2-letter US state/territory code or full state name, e.g.,
+      "CA" or "California"; blank is allowed but counted in
+      `rows_missing_work_location`; an unrecognized value is a per-row error)
     - employment_type (full_time, part_time, contractor)
     - start_date (YYYY-MM-DD format)
     - manager_email (must be existing employee email)
@@ -205,6 +259,7 @@ async def bulk_upload_employees_csv(
     created = 0
     failed = 0
     credentials_created = 0
+    rows_missing_work_location = 0
     errors = []
     employee_ids = []
 
@@ -306,7 +361,21 @@ async def bulk_upload_employees_csv(
                     continue
 
                 # Parse optional fields
-                work_state = row.get('work_state', '').strip() or None
+                work_state_raw = row.get('work_state', '')
+                work_state, work_state_valid = _normalize_work_state(work_state_raw)
+                if not work_state_valid:
+                    errors.append({
+                        "row": row_num,
+                        "email": email,
+                        "error": (
+                            f"Invalid work_state '{work_state_raw.strip()}' — use a 2-letter "
+                            "US state/territory code (e.g. 'CA') or the full state name"
+                        )
+                    })
+                    failed += 1
+                    continue
+                if work_state is None:
+                    rows_missing_work_location += 1
                 employment_type = row.get('employment_type', '').strip() or None
                 job_title = row.get('job_title', '').strip() or None
                 department_val = row.get('department', '').strip() or None
@@ -564,8 +633,11 @@ async def bulk_upload_employees_csv(
     if created == 0 and failed == 0:
         raise HTTPException(status_code=400, detail="No data rows found in CSV")
 
-    logger.info("[BulkUpload] Complete: %d created, %d failed, %d errors, %d background tasks queued",
-                created, failed, len(errors), len(background_tasks.tasks) if hasattr(background_tasks, 'tasks') else -1)
+    logger.info(
+        "[BulkUpload] Complete: %d created, %d failed, %d errors, %d missing work location, %d background tasks queued",
+        created, failed, len(errors), rows_missing_work_location,
+        len(background_tasks.tasks) if hasattr(background_tasks, 'tasks') else -1,
+    )
 
     return BulkEmployeeCSVUpload(
         total_rows=created + failed,
@@ -574,6 +646,7 @@ async def bulk_upload_employees_csv(
         errors=errors,
         employee_ids=employee_ids,
         credentials_created=credentials_created,
+        rows_missing_work_location=rows_missing_work_location,
     )
 
 

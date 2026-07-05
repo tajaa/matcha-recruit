@@ -369,6 +369,7 @@ class EnrichRosterResponse(BaseModel):
     covered_count: int = 0
     missing_count: int = 0
     resolved_scope: ResolvedScope = Field(default_factory=ResolvedScope)
+    skipped_no_work_state: int = 0
 
 
 # ── Gap-analysis dossier ────────────────────────────────────────────────

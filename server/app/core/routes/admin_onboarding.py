@@ -570,13 +570,17 @@ async def create_company(
 # ── Employee-sync enrichment (existing company) ─────────────────────────
 
 
-async def _collect_roster(conn, company_id: UUID) -> tuple[list[str], dict, set]:
+async def _collect_roster(conn, company_id: UUID) -> tuple[list[str], dict, set, int]:
     """Distinct active-employee work locations + roles for a company.
 
-    Returns (roles, emp_locs, existing_location_keys) where emp_locs is keyed
-    by (lower_city, upper_state) → (display_city, upper_state), and
-    existing_location_keys are the same keys already tracked as
-    business_locations (so callers know which jurisdictions are NEW).
+    Returns (roles, emp_locs, existing_location_keys, skipped_no_work_state)
+    where emp_locs is keyed by (lower_city, upper_state) → (display_city,
+    upper_state), existing_location_keys are the same keys already tracked as
+    business_locations (so callers know which jurisdictions are NEW), and
+    skipped_no_work_state is the count of active employees dropped from the
+    roster scan because they have no `work_state` on file (so callers can
+    surface that the scope may be incomplete, rather than silently missing
+    those employees' jurisdictions).
     """
     emp_rows = await conn.fetch(
         """
@@ -586,6 +590,13 @@ async def _collect_roster(conn, company_id: UUID) -> tuple[list[str], dict, set]
         """,
         company_id,
     )
+    skipped_no_work_state = await conn.fetchval(
+        """
+        SELECT COUNT(*) FROM employees
+        WHERE org_id = $1 AND termination_date IS NULL AND work_state IS NULL
+        """,
+        company_id,
+    ) or 0
     roles = sorted({
         r["job_title"].strip()
         for r in emp_rows
@@ -610,7 +621,7 @@ async def _collect_roster(conn, company_id: UUID) -> tuple[list[str], dict, set]
         ((r["city"] or "").lower(), (r["state"] or "").upper())
         for r in existing_loc_rows
     }
-    return roles, emp_locs, existing_keys
+    return roles, emp_locs, existing_keys, skipped_no_work_state
 
 
 # Company columns the enrichment loads to ground the scope analysis.
@@ -815,7 +826,7 @@ async def enrich_company_from_roster(
         if not company:
             raise HTTPException(status_code=404, detail="Company not found")
 
-        roles, emp_locs, existing_keys = await _collect_roster(conn, company_id)
+        roles, emp_locs, existing_keys, skipped_no_work_state = await _collect_roster(conn, company_id)
 
         new_jurisdictions: list[dict] = []
         for key, (city, state) in emp_locs.items():
@@ -842,6 +853,7 @@ async def enrich_company_from_roster(
         covered_count=len(resolved.existing),
         missing_count=len(resolved.missing),
         resolved_scope=resolved,
+        skipped_no_work_state=skipped_no_work_state,
     )
 
 
@@ -871,17 +883,24 @@ async def enrich_company_stream(
             if not company:
                 yield {"type": "error", "message": "Company not found"}
                 return
-            roles, emp_locs, existing_keys = await _collect_roster(conn, company_id)
+            roles, emp_locs, existing_keys, skipped_no_work_state = await _collect_roster(conn, company_id)
 
         new_keys = [k for k in emp_locs if k not in existing_keys]
+        skipped_note = (
+            f" {skipped_no_work_state} active employee(s) skipped (no work state on file)."
+            if skipped_no_work_state
+            else ""
+        )
         yield {
             "type": "roster_scanned",
             "locations_total": len(emp_locs),
             "locations_new": len(new_keys),
             "roles": roles,
+            "skipped_no_work_state": skipped_no_work_state,
             "message": (
                 f"Scanned roster — {len(emp_locs)} work location(s), "
                 f"{len(new_keys)} not yet tracked, {len(roles)} role(s)."
+                f"{skipped_note}"
             ),
         }
         if roles:
@@ -1001,6 +1020,7 @@ async def enrich_company_stream(
             "missing": len(resolved.missing),
             "existing_scope_count": result.get("existing_scope_count", 0),
             "suggestions": suggestions,
+            "skipped_no_work_state": skipped_no_work_state,
             "message": "Gap analysis complete.",
         }
 
@@ -1738,10 +1758,12 @@ async def get_company_gap_dashboard(
             "last_analyzed_at": session["updated_at"].isoformat() if session["updated_at"] else None,
             "new_locations": 0,
             "new_jurisdictions": 0,
+            "skipped_no_work_state": 0,
         }
         try:
-            _roles, emp_locs, existing_keys = await _collect_roster(conn, company_id)
+            _roles, emp_locs, existing_keys, skipped_no_work_state = await _collect_roster(conn, company_id)
             drift["new_jurisdictions"] = sum(1 for k in emp_locs if k not in existing_keys)
+            drift["skipped_no_work_state"] = skipped_no_work_state
             tracked = await conn.fetchval(
                 """
                 SELECT COUNT(*) FROM business_locations

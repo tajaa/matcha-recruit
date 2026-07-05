@@ -82,8 +82,9 @@ export default function Step3People({ onDone }: { onDone: () => void }) {
       <div>
         <h2 className="text-lg font-semibold text-zinc-100 mb-1">Add your team</h2>
         <p className="text-sm text-zinc-400">
-          Drop a CSV, add someone manually, or connect your HRIS. Their work states feed
-          straight into the compliance build. No invitations are sent during setup.
+          Drop a CSV, add someone manually, or connect your HRIS to build your roster.
+          Compliance coverage is scoped from the locations you entered in the last step —
+          adding people here won't change it yet. No invitations are sent during setup.
         </p>
       </div>
 

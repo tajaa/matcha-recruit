@@ -130,6 +130,7 @@ export type BulkUploadResponse = {
   errors: { row: number; error: string }[]
   employee_ids: string[]
   credentials_created: number
+  rows_missing_work_location: number
 }
 
 export const statusLabel: Record<string, string> = {
