@@ -23,6 +23,28 @@ export type AdminUpdate = {
 
 export const ADMIN_UPDATES: AdminUpdate[] = [
   {
+    id: 'ir-anonymous-reporting-branding-disclaimer',
+    date: '2026-07-04',
+    category: 'IR',
+    title: 'Anonymous-reporting QR poster branding + signed-submission disclaimer on info-request replies',
+    summary:
+      'Clients can now recolor the anonymous-reporting QR poster to their own brand (Matcha branding stays fixed on every poster), the poster print design got a polish pass, and the public "Request More Info" reply form now captures the responder\'s own name under the same attestation disclaimer as the /report and /intake magic links.',
+    whatsNew: [
+      'Poster branding: primary/secondary hex colors, validated against CSS injection, WCAG auto-contrast on title text, QR always on a white card for scannability. "HEY-MATCHA.COM / Powered by Matcha" always renders regardless of client branding.',
+      'Poster polish: inset frame line, QR card shadow, footer divider rule, resized title to fit the new frame.',
+      'Info-request replies now require a "Your name" field alongside the submission disclaimer — the electronic equivalent of a signature on a paper form. Admin notifications and the info-request list surface the actual signer\'s name.',
+    ],
+    howToUse: [
+      'Company → Anonymous Reporting panel: color pickers + live poster preview, with save/reset.',
+      'Poster reads survive without the migration; saving new branding needs it applied.',
+    ],
+    setup: [
+      'Apply migration posterbrand01 (companies.report_poster_branding) before clients can save custom colors.',
+      'Apply migration irinforesp01 (ir_info_requests.respondent_name) before deploying backend — the info-request reply form writes this column on submit.',
+    ],
+    tag: 'action-needed',
+  },
+  {
     id: 'compliance-audit-remediation',
     date: '2026-07-04',
     category: 'Matcha Compliance',
@@ -53,6 +75,76 @@ export const ADMIN_UPDATES: AdminUpdate[] = [
       'Why the library flip matters: research is the expensive part (Gemini + time). Research-once/store-forever means coverage compounds — tonight’s test alone permanently added 118 tagged Dallas requirements that every future Dallas customer inherits free.',
       'Why signup industry matters: the industry machinery existed but was unreachable — no self-serve company ever had an industry set, so every build ran generic labor-only research. That same gap is why the dropped industry-profiles table went unnoticed for three months.',
       'Pricing note: jurisdiction count is still collected at signup but does not affect price (headcount-only) — deliberate pre-launch decision, revisit at go-live.',
+    ],
+    tag: 'action-needed',
+  },
+  {
+    id: 'legal-pilot-jurisdiction-grounding-clickable-refs',
+    date: '2026-07-04',
+    category: 'Legal Pilot',
+    title: 'Legal Pilot — jurisdiction-grounded evidence, clickable citations, external case-law research, review-pass hardening',
+    summary:
+      'Matters can now carry a location/state so Legal Pilot pulls the governing compliance requirements and legislation into its evidence corpus, cited incident/ER references in the transcript became clickable (jump to the full record without leaving the matter), and an on-demand CourtListener case-law search was added for informational (never-cited-as-precedent) grounding. A 15-finding review pass then hardened the whole feature: repealed law no longer reads as current, stale cross-state research is filtered out of the corpus, and a raw special-character allegation (e.g. "meal/rest breaks") no longer 500s CourtListener.',
+    whatsNew: [
+      'Matters gain a jurisdiction (location/state); evidence corpus includes governing jurisdiction_requirements + jurisdiction_legislation (law:/bill: cids) plus a compliance_alerts source with statute citations.',
+      'On-demand CourtListener case search (case: cids) + grounded-Gemini guidance, split into case-law-only (fast) vs full synthesis (~90s) so the panel can offer a quick "Case law only" refresh.',
+      'Citation chips in the transcript (incidents, ER cases) are now clickable — opens the full record in a shared viewer modal in a new tab.',
+      'Packet gains an opt-in "legal landscape" appendix page.',
+      'Review-pass fixes: RAG law retrieval filters status=\'active\'; stale cross-state research runs excluded from corpus + packet; DB pool released during the long CourtListener+Gemini call (was pinning a connection for ~110s); nginx carve-out for the research route (generic 90s route timeout would 504 it); law/legislation lookups cached 300s (was a Gemini embedding call per chat turn); CourtListener query sanitized against reserved Lucene/ES characters that previously crashed the search with a raw 500.',
+    ],
+    howToUse: [
+      'Set a matter\'s location to pull in jurisdiction-grounded evidence automatically.',
+      'Click any [incident:...] / er_case:... citation chip in the transcript to open the underlying record.',
+      'Use "Case law only" for a fast CourtListener refresh without waiting on full Gemini synthesis.',
+    ],
+    notes: [
+      'Case-law research is informational only — never cited as legal precedent in generated packets.',
+      'No new migrations for this batch; backend-only except the clickable-refs feature, which is frontend-only.',
+    ],
+  },
+  {
+    id: 'werk-lite-kanban-desktop-parity',
+    date: '2026-07-04',
+    category: 'Matcha-work',
+    title: 'Werk Lite kanban reaches desktop parity — realtime sync, review flow, chat/files tabs, full chrome; calls unified on LiveKit',
+    summary:
+      'The web (werk-lite) kanban board was missing most of what desktop Werk already had: no realtime sync, no review send-back/approve UI, no search/progress-bar/board-list-toggle chrome, and no chat or file tabs on the board page. All of that shipped this batch. Separately, channel voice/video calls were unified onto the LiveKit SFU — the old P2P path silently failed whenever two participants landed on different uvicorn workers.',
+    whatsNew: [
+      'Live board sync over the existing project WebSocket — task create/update/delete now show up for collaborators without a reload (board previously had zero realtime).',
+      'Review send-back/approve wired into the detail panel (the API already existed server-side, just had no UI).',
+      'Desktop-parity chrome ported: search, progress bar, board/list toggle, AI-draft compose, "+" template menu, done-lane collapse, dynamic empty-column collapsing, gold unread ring. Scoped to skip Pipeline/Props/Elements per product decision.',
+      'Chat + Files tabs added to the board page (same backend every project already has, just never surfaced here); History stays desktop-only (no web data model yet).',
+      'Card polish: creator/assignee real photos, left-edge priority accent, aging-tinted timestamps, hover lift.',
+      'Fixed a shared-backend bug where send-back routed tickets to \'todo\' instead of \'changes_requested\', silently hiding the review-note banner and churn chip on both desktop Werk and web werk-lite.',
+      'Calls unified on LiveKit across /work, /werk, /werk-lite — the P2P mesh kept call state per-process, so participants on different uvicorn workers never exchanged SDP and calls silently failed. Also: camera-denial falls back to audio-only join, WS reconnect now refetches+merges messages, dead sockets close instead of half-muting.',
+    ],
+    howToUse: [
+      'Werk Lite board page now has the same Chat / Kanban / Files tab strip as desktop Werk.',
+      'No operator action needed — call path swap is transparent; existing call-start gating (owner + Pro) unchanged.',
+    ],
+    notes: [
+      'No new migrations in this batch.',
+    ],
+  },
+  {
+    id: 'werk-desktop-kanban-polish-weekly-replay',
+    date: '2026-07-04',
+    category: 'Matcha-work',
+    title: 'Werk desktop — kanban creator avatars, chat echo on moves, Weekly Work Replay tab, card restyle',
+    summary:
+      'Desktop Werk kanban cards now show real creator/assignee photos and post a chat bubble into the project discussion channel on every column move. A new History tab lets you scrub or play back a full Mon–Sun week of board activity as tickets appeared, moved, or were deleted. A realtime board-sync bug (WebSocket callbacks silently stolen by whichever project view attached last) was also fixed.',
+    whatsNew: [
+      'Cards show the ticket creator\'s photo as a top-right badge; assignee circle upgraded to a real photo.',
+      'Column moves auto-post a plain chat bubble into the project\'s discussion channel.',
+      'Fixed realtime sync: per-project WebSocket callbacks were single closures, stolen by the last-attached view and cleared globally on any teardown — replaced with a per-project weak-owner registry; decode failures now refetch instead of silently dropping events.',
+      'New History tab (Cmd+0): pick a week, scrub or play through kanban activity read-only, reusing the live board\'s glide animation without its drag/menu/mutation machinery.',
+      'Card restyle: priority left-edge accent, full-width subtask meter, compact timestamps, hover lift; softer unviewed ring, quieter checkbox, glass top-edge highlight on dark themes.',
+    ],
+    howToUse: [
+      'Cmd+0 (or the History tab) on any collab project opens Weekly Work Replay.',
+    ],
+    setup: [
+      'Apply migration mwtaskhtxt01 (mw_task_history.task_id_text) before the replay endpoint works — needed so a deleted ticket\'s history stays groupable instead of merging with other deleted tickets\' events once the FK is nulled.',
     ],
     tag: 'action-needed',
   },
