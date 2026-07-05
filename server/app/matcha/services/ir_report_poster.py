@@ -112,6 +112,7 @@ def build_report_poster_pdf(link: str, *, subtitle: str | None = None, branding=
     <style>
         @page {{ size: letter; margin: 0; }}
         body {{
+            position: relative;
             margin: 0;
             width: 8.5in;
             height: 11in;
@@ -122,19 +123,33 @@ def build_report_poster_pdf(link: str, *, subtitle: str | None = None, branding=
             align-items: center;
             justify-content: center;
         }}
+        /* Inset frame line — ties the page edge to the corner-bracket motif
+           around the QR code, so the whole sheet reads as one designed piece. */
+        .page-frame {{
+            position: absolute;
+            top: 0.45in;
+            right: 0.45in;
+            bottom: 0.45in;
+            left: 0.45in;
+            border: 1pt solid {secondary};
+            border-radius: 0.08in;
+            opacity: 0.5;
+        }}
         .poster {{
             width: 100%;
             height: 100%;
+            box-sizing: border-box;
+            padding: 0 0.7in;
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            gap: 0.5in;
+            gap: 0.45in;
         }}
         .title {{
-            font-size: 46pt;
+            font-size: 39pt;
             font-weight: bold;
-            letter-spacing: 2pt;
+            letter-spacing: 1.5pt;
             text-align: center;
             margin: 0;
         }}
@@ -158,10 +173,11 @@ def build_report_poster_pdf(link: str, *, subtitle: str | None = None, branding=
             width: 3.2in;
             height: 3.2in;
             background: #ffffff;
-            border-radius: 0.18in;
+            border-radius: 0.2in;
             display: flex;
             align-items: center;
             justify-content: center;
+            box-shadow: 0 0.06in 0.3in rgba(0, 0, 0, 0.22);
         }}
         .qr-card img {{
             width: 2.8in;
@@ -171,35 +187,48 @@ def build_report_poster_pdf(link: str, *, subtitle: str | None = None, branding=
             position: absolute;
             width: 0.9in;
             height: 0.9in;
-            border: 0.06in solid {secondary};
-            border-radius: 0.15in;
+            border: 0.07in solid {secondary};
+            border-radius: 0.2in;
         }}
         .corner.tl {{ top: 0; left: 0; border-right: none; border-bottom: none; }}
         .corner.tr {{ top: 0; right: 0; border-left: none; border-bottom: none; }}
         .corner.bl {{ bottom: 0; left: 0; border-right: none; border-top: none; }}
         .corner.br {{ bottom: 0; right: 0; border-left: none; border-top: none; }}
+        .footer {{
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }}
         .scan-me {{
             font-size: 30pt;
             font-weight: bold;
             letter-spacing: 3pt;
             margin: 0;
         }}
+        .rule {{
+            width: 0.9in;
+            height: 1pt;
+            background: {secondary};
+            opacity: 0.6;
+            margin: 0.16in 0;
+        }}
         .domain {{
             font-size: 14pt;
             font-weight: bold;
-            letter-spacing: 1pt;
-            margin: 0.2in 0 0 0;
+            letter-spacing: 1.5pt;
+            margin: 0;
         }}
         .powered {{
             font-size: 9pt;
             letter-spacing: 1.5pt;
             text-transform: uppercase;
-            opacity: 0.7;
-            margin: 0.08in 0 0 0;
+            opacity: 0.75;
+            margin: 0.09in 0 0 0;
         }}
     </style>
     </head>
     <body>
+        <div class="page-frame"></div>
         <div class="poster">
             <div>
                 <p class="title">SUBMIT AN INCIDENT</p>
@@ -212,8 +241,9 @@ def build_report_poster_pdf(link: str, *, subtitle: str | None = None, branding=
                 <div class="corner br"></div>
                 <div class="qr-card"><img src="{qr_src}" alt="QR code" /></div>
             </div>
-            <div>
+            <div class="footer">
                 <p class="scan-me">SCAN ME</p>
+                <div class="rule"></div>
                 <p class="domain">HEY-MATCHA.COM</p>
                 <p class="powered">Powered by Matcha</p>
             </div>
