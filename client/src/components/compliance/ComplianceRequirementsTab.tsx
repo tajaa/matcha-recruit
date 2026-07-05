@@ -39,7 +39,7 @@ type Props = {
   previewCategoryLimit?: number
 }
 
-export function ComplianceRequirementsTab({ requirements, loading, onPin, checkMessages, facilityAttributes, readOnly, previewCategoryLimit }: Props) {
+export function ComplianceRequirementsTab({ requirements, loading, onPin, checkMessages, readOnly, previewCategoryLimit }: Props) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [groupFilter, setGroupFilter] = useState<'all' | CategoryGroup>('all')
   const [searchQuery, setSearchQuery] = useState('')
