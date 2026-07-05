@@ -31,8 +31,8 @@ export function ComplianceLocationList({ locations, selectedId, onSelect, onEdit
 
   return (
     <div>
-      <h2 className={`${LABEL} mb-1.5`}>Locations</h2>
-      <div className="border border-white/[0.06] bg-zinc-950 rounded-lg divide-y divide-white/[0.06]">
+      <h2 className={`${LABEL} mb-1.5 px-1`}>Locations</h2>
+      <div className="divide-y divide-white/[0.06]">
         {locations.length === 0 && (
           <p className="px-4 py-3 text-sm text-zinc-600">No locations added yet.</p>
         )}

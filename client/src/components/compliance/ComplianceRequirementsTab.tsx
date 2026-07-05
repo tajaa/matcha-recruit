@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react'
 import { Lock } from 'lucide-react'
 import { Select } from '../ui'
+import { LABEL } from '../ui/typography'
 import { UpgradeUpsellCard } from '../UpgradeUpsellCard'
 import { EmployeesTooltip } from './EmployeesTooltip'
 import { useComplianceRequirements } from '../../hooks/compliance/useComplianceRequirements'
@@ -221,16 +222,16 @@ export function ComplianceRequirementsTab({ requirements, loading, onPin, checkM
 
     return (
       <div className="space-y-4">
-        {visibleSections.map((section) => (
-          <div key={section.id}>
-            <h3 className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider mb-2">
-              {section.label}
-            </h3>
-            <div className="border border-white/[0.06] bg-zinc-950 rounded-lg overflow-hidden">
+        <div className="overflow-hidden rounded-xl border border-white/[0.06] bg-zinc-950">
+          {visibleSections.map((section) => (
+            <div key={section.id}>
+              <div className="border-t border-white/[0.06] first:border-t-0 bg-white/[0.02] px-4 py-2">
+                <h3 className={LABEL}>{section.label}</h3>
+              </div>
               {section.categories.map(([cat, reqs]) => renderCategoryRow(cat, reqs))}
             </div>
-          </div>
-        ))}
+          ))}
+        </div>
 
         {hidden.length > 0 && (
           <div>
@@ -344,12 +345,14 @@ export function ComplianceRequirementsTab({ requirements, loading, onPin, checkM
           <p className="text-sm text-zinc-600">No requirements found. Run a compliance check to populate.</p>
         </div>
       ) : (
-        filteredSections.map((section) => (
-          <div key={section.id}>
-            <h3 className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider mb-2">
-              {section.label} <span className="text-zinc-600 font-normal">({section.requirementCount})</span>
-            </h3>
-            <div className="border border-white/[0.06] bg-zinc-950 rounded-lg overflow-hidden">
+        <div className="overflow-hidden rounded-xl border border-white/[0.06] bg-zinc-950">
+          {filteredSections.map((section) => (
+            <div key={section.id}>
+              <div className="border-t border-white/[0.06] first:border-t-0 bg-white/[0.02] px-4 py-2">
+                <h3 className={LABEL}>
+                  {section.label} <span className="normal-case text-zinc-600">({section.requirementCount})</span>
+                </h3>
+              </div>
               {section.categories.map(([cat, reqs]) => (
                 <div key={cat} className="border-b border-white/[0.06] last:border-0">
                   <button type="button" onClick={() => toggle(cat)}
@@ -442,8 +445,8 @@ export function ComplianceRequirementsTab({ requirements, loading, onPin, checkM
                 </div>
               ))}
             </div>
-          </div>
-        ))
+          ))}
+        </div>
       )}
     </div>
   )

@@ -180,9 +180,9 @@ function ComplianceFull() {
 
       {/* Location-contextual tabs */}
       {tab !== 'overview' && tab !== 'credentials' && (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="overflow-hidden rounded-xl border border-white/[0.06] bg-zinc-950 md:grid md:grid-cols-3">
           {/* Left: location list */}
-          <div className="col-span-1">
+          <div className="border-b border-white/[0.06] p-4 md:col-span-1 md:border-b-0 md:border-r">
             <ComplianceLocationList
               locations={data.locations}
               selectedId={selectedId}
@@ -195,9 +195,9 @@ function ComplianceFull() {
           </div>
 
           {/* Right: content area */}
-          <div className="col-span-2">
+          <div className="p-4 md:col-span-2">
             {!selectedId ? (
-              <div className="flex items-center justify-center h-40 rounded-lg border border-white/[0.06] bg-zinc-950">
+              <div className="flex items-center justify-center h-40">
                 <p className="text-sm text-zinc-600">Select a location to view details</p>
               </div>
             ) : (
