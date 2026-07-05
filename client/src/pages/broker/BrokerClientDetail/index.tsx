@@ -22,10 +22,11 @@ import { EplTab } from './EplTab'
 import { ControlsTab } from './ControlsTab'
 import { LimitsTab } from './LimitsTab'
 import { DefenseTab } from './DefenseTab'
+import { PilotTab } from '../BrokerPilot/PilotTab'
 
 export { LossRatioTab } from './LossRatioTab'
 
-type Tab = 'overview' | 'compliance' | 'policies' | 'ir_er' | 'wc' | 'loss_dev' | 'loss_ratio' | 'epl' | 'controls' | 'limits' | 'defense' | 'submission' | 'activity'
+type Tab = 'overview' | 'compliance' | 'policies' | 'ir_er' | 'wc' | 'loss_dev' | 'loss_ratio' | 'epl' | 'controls' | 'limits' | 'defense' | 'submission' | 'pilot' | 'activity'
 
 const tabs: { key: Tab; label: string }[] = [
   { key: 'overview', label: 'Overview' },
@@ -40,6 +41,7 @@ const tabs: { key: Tab; label: string }[] = [
   { key: 'limits', label: 'Limits' },
   { key: 'defense', label: 'Defense Files' },
   { key: 'submission', label: 'Submission' },
+  { key: 'pilot', label: 'Pilot' },
   { key: 'activity', label: 'Activity' },
 ]
 
@@ -168,6 +170,7 @@ export default function BrokerClientDetail() {
           saveNotes={(n) => saveTenantSubmissionNotes(companyId, n)}
         />
       )}
+      {activeTab === 'pilot' && companyId && <PilotTab subjectKind="company" subjectId={companyId} />}
       {activeTab === 'activity' && <ActivityTab activity={recent_activity} />}
     </div>
   )

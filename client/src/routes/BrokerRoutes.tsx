@@ -12,6 +12,7 @@ import BrokerRiskCurve from '../pages/broker/BrokerRiskCurve'
 import BrokerPropertyPortfolio from '../pages/broker/BrokerPropertyPortfolio'
 import BrokerExternalClients from '../pages/broker/BrokerExternalClients'
 import BrokerExternalClientDetail from '../pages/broker/BrokerExternalClientDetail'
+import BrokerPilot from '../pages/broker/BrokerPilot'
 
 export default function BrokerRoutes() {
   // Apply the broker light/dark preference for the lifetime of any /broker route;
@@ -46,6 +47,9 @@ export default function BrokerRoutes() {
         {/* Broker Pro — off-platform (non-tenant) clients */}
         <Route path="external" element={<BrokerExternalClients />} />
         <Route path="external/:clientId" element={<BrokerExternalClientDetail />} />
+
+        {/* Broker Pro — grounded per-client analysis chat over uploaded docs + platform data */}
+        <Route path="pilot" element={<BrokerPilot />} />
 
         {/* Legacy routes → new tabbed homes (preserve emailed links + bookmarks) */}
         <Route path="seats" element={<Navigate to="/broker/clients?tab=seats" replace />} />

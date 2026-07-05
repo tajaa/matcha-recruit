@@ -1,6 +1,6 @@
 import { useState, useEffect, type FormEvent, type ChangeEvent, type ReactNode } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Loader2, AlertCircle, Gauge, Shield, Upload, Link2 as LinkIcon, CheckCircle2, Clock, CircleDashed, Building2 } from 'lucide-react'
+import { ArrowLeft, Loader2, AlertCircle, Gauge, Shield, Upload, Link2 as LinkIcon, CheckCircle2, Clock, CircleDashed, Building2, Sparkles } from 'lucide-react'
 import { Card } from '../../components/ui'
 import { HelpHint } from '../../components/broker/HelpHint'
 import { SubmissionPanel } from '../../components/broker/SubmissionPanel'
@@ -204,12 +204,22 @@ export default function BrokerExternalClientDetail() {
           </p>
           {client.note && <p className="text-xs text-zinc-600 mt-1">{client.note}</p>}
         </div>
-        {risk?.index != null && (
-          <div className="text-right shrink-0">
-            <div className={`text-4xl font-light font-mono ${risk.band ? RISK_BAND_TONE[risk.band] ?? 'text-zinc-300' : 'text-zinc-300'}`}>{risk.index}</div>
-            <div className="text-[9px] uppercase tracking-widest font-bold text-zinc-600">Risk index{risk.band ? ` · ${risk.band}` : ''}</div>
-          </div>
-        )}
+        <div className="flex items-start gap-4 shrink-0">
+          <Link
+            to={`/broker/pilot?external=${clientId}`}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md border border-zinc-700 text-zinc-300 hover:text-zinc-100 hover:border-zinc-600 transition-colors mt-1"
+            title="Analyze this client's documents against the recorded data"
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            Broker Pilot
+          </Link>
+          {risk?.index != null && (
+            <div className="text-right">
+              <div className={`text-4xl font-light font-mono ${risk.band ? RISK_BAND_TONE[risk.band] ?? 'text-zinc-300' : 'text-zinc-300'}`}>{risk.index}</div>
+              <div className="text-[9px] uppercase tracking-widest font-bold text-zinc-600">Risk index{risk.band ? ` · ${risk.band}` : ''}</div>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Client-intake link */}
