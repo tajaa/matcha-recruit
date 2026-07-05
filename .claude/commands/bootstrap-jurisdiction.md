@@ -7,7 +7,7 @@ If the user also mentions a county (e.g. "Indianapolis IN county Marion"), pass 
 Run the script from the server directory:
 
 ```
-cd /Users/finch/Documents/github/matcha-recruit/server && ./venv/bin/python scripts/bootstrap_jurisdiction.py "<city>" "<state>"
+cd /Users/finch/Documents/github/matcha/server && ./venv/bin/python scripts/bootstrap_jurisdiction.py "<city>" "<state>"
 ```
 
 Options:

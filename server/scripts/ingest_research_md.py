@@ -198,12 +198,14 @@ async def main():
 
             inserted = 0
             skipped = 0
+            unknown_category_counts: Dict[str, int] = {}
             for r in reqs:
                 req_key = _compute_requirement_key(r)
                 category = r.get("category", "")
                 category_id = cat_id_map.get(category)
                 if not category_id:
                     print(f"  SKIP {category}:{r.get('regulation_key')}: unknown category '{category}'")
+                    unknown_category_counts[category] = unknown_category_counts.get(category, 0) + 1
                     skipped += 1
                     continue
 
@@ -291,8 +293,17 @@ async def main():
             print(f"Total requirements: {count}")
             print(f"Linked to key definitions: {linked}")
 
+            if unknown_category_counts:
+                total_unknown = sum(unknown_category_counts.values())
+                print(f"\nSKIPPED {total_unknown} row(s) for unknown categories: {sorted(unknown_category_counts)}")
+                for cat, cnt in sorted(unknown_category_counts.items()):
+                    print(f"  {cat}: {cnt} row(s) — add it to compliance_categories before re-running")
+
     finally:
         await close_pool()
+
+    if unknown_category_counts:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

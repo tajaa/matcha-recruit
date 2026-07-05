@@ -11,12 +11,12 @@ If the user provides a state/province, use it (e.g., "Mexico City CDMX MX" or "L
 Run from the server directory:
 
 ```
-cd /Users/finch/Documents/github/matcha-recruit/server && ./venv/bin/python scripts/create_jurisdiction.py "<city>" "<state_if_any>" --country "<country_code>" --county "<county if known>"
+cd /Users/finch/Documents/github/matcha/server && ./venv/bin/python scripts/create_jurisdiction.py "<city>" "<state_if_any>" --country "<country_code>" --county "<county if known>"
 ```
 
 If no state/province, omit the state argument:
 ```
-cd /Users/finch/Documents/github/matcha-recruit/server && ./venv/bin/python scripts/create_jurisdiction.py "<city>" --country "<country_code>"
+cd /Users/finch/Documents/github/matcha/server && ./venv/bin/python scripts/create_jurisdiction.py "<city>" --country "<country_code>"
 ```
 
 If the output starts with `EXISTING:`, the jurisdiction already exists — tell the user and suggest `/fill-gaps` instead.
@@ -27,7 +27,7 @@ If the output starts with `CREATED:`, continue to Step 2.
 ## Step 2: Get jurisdiction context
 
 ```
-cd /Users/finch/Documents/github/matcha-recruit/server && ./venv/bin/python scripts/jurisdiction_context.py "<city>" "<state_if_any>" --country "<country_code>"
+cd /Users/finch/Documents/github/matcha/server && ./venv/bin/python scripts/jurisdiction_context.py "<city>" "<state_if_any>" --country "<country_code>"
 ```
 
 For international jurisdictions:
@@ -121,6 +121,7 @@ Use this format — each requirement MUST use regulation keys:
 - **current_value**: <amount in local currency>/month or /hr
 - **numeric_value**: <number>
 - **effective_date**: YYYY-MM-DD
+- **expiration_date**: YYYY-MM-DD when this value is scheduled/typically due to change (e.g. minimum wage → next annual review date); null if unknown
 - **source_url**: <URL>
 - **source_name**: <source name>
 - **requires_written_policy**: false

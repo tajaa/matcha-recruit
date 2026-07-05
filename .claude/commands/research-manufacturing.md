@@ -16,7 +16,7 @@ If no industry sub-type is given, default to general manufacturing.
 Run from the server directory:
 
 ```
-cd /Users/finch/Documents/github/matcha-recruit/server && ./venv/bin/python scripts/create_jurisdiction.py "<city_or_state>" "<state_or_country>"
+cd /Users/finch/Documents/github/matcha/server && ./venv/bin/python scripts/create_jurisdiction.py "<city_or_state>" "<state_or_country>"
 ```
 
 If `EXISTING:`, continue. If `CREATED:`, continue. Note the jurisdiction ID.
@@ -26,7 +26,7 @@ If `EXISTING:`, continue. If `CREATED:`, continue. Note the jurisdiction ID.
 ## Step 2: Get jurisdiction context
 
 ```
-cd /Users/finch/Documents/github/matcha-recruit/server && ./venv/bin/python scripts/jurisdiction_context.py "<city_or_state>" "<state_or_country>"
+cd /Users/finch/Documents/github/matcha/server && ./venv/bin/python scripts/jurisdiction_context.py "<city_or_state>" "<state_or_country>"
 ```
 
 Use the `expected_regulation_keys` and `has_local_ordinance` from the output to guide research.
@@ -100,6 +100,8 @@ Use the same format as `/research-jurisdiction`:
 - **title**: <title>
 - **description**: <detailed explanation>
 - **current_value**: <summary of requirement>
+- **effective_date**: YYYY-MM-DD
+- **expiration_date**: YYYY-MM-DD when this value is scheduled/typically due to change; null if unknown
 - **source_url**: <URL>
 - **source_name**: <source>
 - **requires_written_policy**: true

@@ -11,7 +11,7 @@ Parse `$ARGUMENTS` for:
 ## Step 1: Load regulation keys for labor categories
 
 ```bash
-cd /Users/finch/Documents/github/matcha-recruit/server && ./venv/bin/python -c "
+cd /Users/finch/Documents/github/matcha/server && ./venv/bin/python -c "
 import asyncio, asyncpg, os, json
 from dotenv import load_dotenv
 load_dotenv()
@@ -51,7 +51,7 @@ Replace `<CATEGORY>` with the `--category` value or empty string for all.
 ## Step 2: Find jurisdictions and check existing coverage
 
 ```bash
-cd /Users/finch/Documents/github/matcha-recruit/server && ./venv/bin/python -c "
+cd /Users/finch/Documents/github/matcha/server && ./venv/bin/python -c "
 import asyncio, asyncpg, os, json
 from dotenv import load_dotenv
 load_dotenv()
@@ -118,6 +118,7 @@ Research each missing category per state. **Labor laws vary significantly by sta
 - **current_value**: Brief value (e.g. "$16.00/hr", "7 days accrual", "Daily overtime after 8 hours")
 - **numeric_value**: Number if applicable (wage rate, days, hours)
 - **effective_date**: YYYY-MM-DD
+- **expiration_date**: YYYY-MM-DD when this value is scheduled/typically due to change (e.g. minimum wage → next Jan 1); null if unknown
 - **source_url**: Official state labor department URL
 - **source_name**: Agency name
 - **requires_written_policy**: true if employer must maintain written policy
@@ -129,7 +130,7 @@ If `--dry-run`, write markdown to `server/scripts/<state>_labor_gaps.md` and sto
 Use the same UPSERT pattern as `/fill-gaps-environmental_compliance`. For each entry:
 
 ```bash
-cd /Users/finch/Documents/github/matcha-recruit/server && ./venv/bin/python -c "
+cd /Users/finch/Documents/github/matcha/server && ./venv/bin/python -c "
 import asyncio, asyncpg, os, json
 from dotenv import load_dotenv
 load_dotenv()

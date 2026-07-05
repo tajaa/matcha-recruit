@@ -7,7 +7,6 @@ Options the user may include:
 - `--categories general` — Only fill the 12 general labor categories
 - `--categories healthcare` — Only fill the 8 healthcare categories
 - `--categories oncology` — Only fill the 5 oncology categories
-- `--categories life_sciences` — Only fill the 6 life sciences categories
 - `--categories all` — Fill all gaps (default)
 
 ---
@@ -17,7 +16,7 @@ Options the user may include:
 Run this to discover what's already present and what's missing:
 
 ```bash
-cd /Users/finch/Documents/github/matcha-recruit/server && ./venv/bin/python -c "
+cd /Users/finch/Documents/github/matcha/server && ./venv/bin/python -c "
 import asyncio, asyncpg, os, json
 from dotenv import load_dotenv
 load_dotenv()
@@ -54,7 +53,6 @@ Replace `<CITY>` and `<STATE>` with the parsed values.
 | General labor (12) | `minimum_wage`, `overtime`, `sick_leave`, `leave`, `meal_breaks`, `final_pay`, `pay_frequency`, `scheduling_reporting`, `workers_comp`, `workplace_safety`, `anti_discrimination`, `minor_work_permit` |
 | Healthcare (8) | `hipaa_privacy`, `clinical_safety`, `billing_integrity`, `corporate_integrity`, `emergency_preparedness`, `healthcare_workforce`, `state_licensing`, `research_consent` |
 | Oncology (5) | `radiation_safety`, `chemotherapy_handling`, `tumor_registry`, `oncology_clinical_trials`, `oncology_patient_rights` |
-| Life Sciences (6) | `gmp_manufacturing`, `glp_nonclinical`, `clinical_trials_gcp`, `drug_supply_chain`, `sunshine_open_payments`, `biosafety_lab` |
 
 Based on the `--categories` flag, select the target categories. Then subtract what's already present. The remainder are the **gaps** to research.
 
@@ -63,7 +61,7 @@ If `--list-gaps` was specified, just report the gaps and stop.
 ## Step 3: Get jurisdiction context
 
 ```bash
-cd /Users/finch/Documents/github/matcha-recruit/server && ./venv/bin/python scripts/jurisdiction_context.py "<CITY>" "<STATE>"
+cd /Users/finch/Documents/github/matcha/server && ./venv/bin/python scripts/jurisdiction_context.py "<CITY>" "<STATE>"
 ```
 
 Use the output to guide research:
@@ -86,7 +84,6 @@ Use the same category research tables as `/research-jurisdiction`:
 **General Labor**: Search `"<state> <category_topic> law 2025 2026"`. Focus on state-specific laws.
 **Healthcare**: Search `"<state> <healthcare_topic> beyond federal requirements"`. Skip base HIPAA/CMS.
 **Oncology**: Search `"<state> <oncology_topic> requirements"`. Many are inherently state-specific.
-**Life Sciences**: Search `"<state> <life_sciences_topic> license requirements"`. State boards set their own rules.
 
 Key search queries:
 - `"<state> minimum wage 2025 2026 current rate"`
@@ -96,8 +93,6 @@ Key search queries:
 - `"<state> nurse staffing ratio requirements"`
 - `"<state> radiation control program NRC agreement state"`
 - `"<state> cancer registry reporting requirements"`
-- `"<state> drug manufacturer license requirements"`
-- `"<state> clinical trial registration notification requirements"`
 
 ## Step 5: Write the Markdown report
 
@@ -130,6 +125,7 @@ Use the same structured format as `/research-jurisdiction`:
 - **current_value**: <value>
 - **numeric_value**: <number if applicable>
 - **effective_date**: YYYY-MM-DD
+- **expiration_date**: YYYY-MM-DD when this value is scheduled/typically due to change (e.g. minimum wage → next Jan 1); null if unknown
 - **source_url**: <URL>
 - **source_name**: <source>
 - **requires_written_policy**: true|false

@@ -13,7 +13,7 @@ Parse `$ARGUMENTS` for:
 The 7 behavioral health categories span TWO compliance groups (healthcare + medical_compliance). Load keys from both:
 
 ```bash
-cd /Users/finch/Documents/github/matcha-recruit/server && ./venv/bin/python -c "
+cd /Users/finch/Documents/github/matcha/server && ./venv/bin/python -c "
 import asyncio, asyncpg, os, json
 from dotenv import load_dotenv
 load_dotenv()
@@ -60,7 +60,7 @@ Replace `<CATEGORY>` with the `--category` value or empty string for all 7 categ
 ## Step 2: Find jurisdictions and check existing coverage
 
 ```bash
-cd /Users/finch/Documents/github/matcha-recruit/server && ./venv/bin/python -c "
+cd /Users/finch/Documents/github/matcha/server && ./venv/bin/python -c "
 import asyncio, asyncpg, os, json
 from dotenv import load_dotenv
 load_dotenv()
@@ -127,6 +127,7 @@ Behavioral health compliance is heavily state-regulated. **States have their own
 - **current_value**: Brief value (e.g. "5150/5250 72-hr hold", "DHCS certification required", "SB 855 full parity")
 - **numeric_value**: Number if applicable
 - **effective_date**: YYYY-MM-DD
+- **expiration_date**: YYYY-MM-DD when this value is scheduled/typically due to change; null if unknown
 - **source_url**: Official state agency URL (DHCS, DOH, etc.)
 - **source_name**: Agency name
 - **requires_written_policy**: true if facility must maintain written policy
@@ -138,7 +139,7 @@ If `--dry-run`, write markdown to `server/scripts/<state>_behavioral_health_gaps
 Use the same UPSERT pattern as `/fill-gaps-labor` Step 4. Set `category` to the appropriate category slug per entry.
 
 ```bash
-cd /Users/finch/Documents/github/matcha-recruit/server && ./venv/bin/python -c "
+cd /Users/finch/Documents/github/matcha/server && ./venv/bin/python -c "
 import asyncio, asyncpg, os, json
 from dotenv import load_dotenv
 load_dotenv()

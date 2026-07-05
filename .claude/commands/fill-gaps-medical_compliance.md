@@ -11,7 +11,7 @@ Parse `$ARGUMENTS` for:
 ## Step 1: Load regulation keys for medical compliance categories
 
 ```bash
-cd /Users/finch/Documents/github/matcha-recruit/server && ./venv/bin/python -c "
+cd /Users/finch/Documents/github/matcha/server && ./venv/bin/python -c "
 import asyncio, asyncpg, os, json
 from dotenv import load_dotenv
 load_dotenv()
@@ -89,7 +89,7 @@ Medical compliance spans many specialized domains. **Many of these are primarily
 
 ### What to capture per key
 
-Same fields as `/fill-gaps-labor`: title, description, current_value, effective_date, source_url, source_name, requires_written_policy, jurisdiction_level, jurisdiction_name.
+Same fields as `/fill-gaps-labor`: title, description, current_value, effective_date, expiration_date, source_url, source_name, requires_written_policy, jurisdiction_level, jurisdiction_name.
 
 If `--dry-run`, write markdown to `server/scripts/<state>_medical_compliance_gaps.md` and stop.
 

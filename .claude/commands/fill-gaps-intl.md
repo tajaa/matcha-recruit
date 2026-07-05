@@ -24,7 +24,7 @@ International jurisdictions need a subset of healthcare categories adapted to th
 Query the database to find all international jurisdictions and their existing categories:
 
 ```bash
-cd /Users/finch/Documents/github/matcha-recruit/server && ./venv/bin/python -c "
+cd /Users/finch/Documents/github/matcha/server && ./venv/bin/python -c "
 import asyncio, asyncpg, os, json
 from dotenv import load_dotenv
 load_dotenv()
@@ -86,6 +86,7 @@ For EACH international jurisdiction with gaps, research the missing categories u
 - **description**: <detailed explanation>
 - **current_value**: <summary>
 - **effective_date**: YYYY-MM-DD
+- **expiration_date**: YYYY-MM-DD when this value is scheduled/typically due to change (e.g. next statutory review date); null if unknown
 - **source_url**: <URL>
 - **source_name**: <source>
 - **requires_written_policy**: true|false

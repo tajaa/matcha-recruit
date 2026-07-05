@@ -32,7 +32,7 @@ No arguments needed — this skill auto-discovers US West jurisdictions and fill
 Query the database to find all US West jurisdictions and their existing categories:
 
 ```bash
-cd /Users/finch/Documents/github/matcha-recruit/server && ./venv/bin/python -c "
+cd /Users/finch/Documents/github/matcha/server && ./venv/bin/python -c "
 import asyncio, asyncpg, os, json
 from dotenv import load_dotenv
 load_dotenv()
@@ -102,6 +102,7 @@ For each category, search for **state-specific** laws. These are healthcare cate
 - **description**: <detailed explanation of the state-specific rule>
 - **current_value**: <summary>
 - **effective_date**: YYYY-MM-DD
+- **expiration_date**: YYYY-MM-DD when this value is scheduled/typically due to change (e.g. next statutory review date); null if unknown
 - **source_url**: <URL>
 - **source_name**: <source>
 - **requires_written_policy**: true|false

@@ -9,7 +9,7 @@ No arguments needed — this skill auto-discovers categories without penalty dat
 Query the database to find categories missing penalty information. Use the app container or local DB:
 
 ```bash
-cd /Users/finch/Documents/github/matcha-recruit/server && ./venv/bin/python -c "
+cd /Users/finch/Documents/github/matcha/server && ./venv/bin/python -c "
 import asyncio, asyncpg, os
 async def main():
     conn = await asyncpg.connect(os.environ.get('DATABASE_URL', 'postgresql://matcha:matcha_dev@localhost:5432/matcha'))
@@ -158,7 +158,7 @@ Federal-level penalties apply to ALL requirements in that category (same enforci
 After all updates, re-embed so penalty text is searchable via RAG:
 
 ```bash
-cd /Users/finch/Documents/github/matcha-recruit/server && ./venv/bin/python -c "
+cd /Users/finch/Documents/github/matcha/server && ./venv/bin/python -c "
 import asyncio
 from app.config import load_settings
 from app.database import init_pool, close_pool, get_pool

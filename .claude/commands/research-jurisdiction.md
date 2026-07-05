@@ -10,7 +10,7 @@ If the user mentions a county, note it for the `--county` flag.
 Run from the server directory:
 
 ```
-cd /Users/finch/Documents/github/matcha-recruit/server && ./venv/bin/python scripts/create_jurisdiction.py "<city>" "<state>" --county "<county if known>"
+cd /Users/finch/Documents/github/matcha/server && ./venv/bin/python scripts/create_jurisdiction.py "<city>" "<state>" --county "<county if known>"
 ```
 
 If the output starts with `EXISTING:`, the jurisdiction already exists — tell the user and suggest `/fill-gaps` instead.
@@ -23,7 +23,7 @@ If the output starts with `CREATED:`, continue to Step 2.
 Run this to get the same context the Gemini scripts use:
 
 ```
-cd /Users/finch/Documents/github/matcha-recruit/server && ./venv/bin/python scripts/jurisdiction_context.py "<city>" "<state>"
+cd /Users/finch/Documents/github/matcha/server && ./venv/bin/python scripts/jurisdiction_context.py "<city>" "<state>"
 ```
 
 This returns JSON with:
@@ -147,6 +147,7 @@ Use this format — each requirement MUST use the regulation keys from Step 2's 
 - **current_value**: $X.XX/hr
 - **numeric_value**: X.XX
 - **effective_date**: YYYY-MM-DD
+- **expiration_date**: YYYY-MM-DD when this value is scheduled/typically due to change (e.g. minimum wage → next Jan 1); null if unknown
 - **source_url**: <URL>
 - **source_name**: <source name>
 - **requires_written_policy**: false

@@ -10,7 +10,7 @@ Parse `$ARGUMENTS` for:
 ## Step 1: Load the 8 environmental compliance regulation keys
 
 ```bash
-cd /Users/finch/Documents/github/matcha-recruit/server && ./venv/bin/python -c "
+cd /Users/finch/Documents/github/matcha/server && ./venv/bin/python -c "
 import asyncio, asyncpg, os, json
 from dotenv import load_dotenv
 load_dotenv()
@@ -39,7 +39,7 @@ Save the key list — you'll need the `id` (for `key_definition_id`) and `key` f
 ## Step 2: Find jurisdictions in the target state and check existing coverage
 
 ```bash
-cd /Users/finch/Documents/github/matcha-recruit/server && ./venv/bin/python -c "
+cd /Users/finch/Documents/github/matcha/server && ./venv/bin/python -c "
 import asyncio, asyncpg, os, json
 from dotenv import load_dotenv
 load_dotenv()
@@ -102,6 +102,7 @@ For each key where the state has specific requirements:
 - **description**: 2-3 sentences explaining what the state requires beyond federal baseline
 - **current_value**: Brief value (e.g. "State-delegated NPDES program with additional bioassay requirements")
 - **effective_date**: When the state requirement took effect (YYYY-MM-DD)
+- **expiration_date**: YYYY-MM-DD when this value is scheduled/typically due to change; null if unknown
 - **source_url**: Official state agency URL
 - **source_name**: Agency name (e.g. "California EPA / DTSC")
 - **requires_written_policy**: true if facility must maintain written compliance documents
@@ -123,7 +124,7 @@ If `--dry-run`, output a markdown summary to `server/scripts/<state>_environment
 For each researched requirement, UPSERT into `jurisdiction_requirements`. Use a script like this for each entry:
 
 ```bash
-cd /Users/finch/Documents/github/matcha-recruit/server && ./venv/bin/python -c "
+cd /Users/finch/Documents/github/matcha/server && ./venv/bin/python -c "
 import asyncio, asyncpg, os, json
 from dotenv import load_dotenv
 load_dotenv()

@@ -3341,7 +3341,13 @@ _data_overview_cache: dict | None = None
 _data_overview_cached_at: float = 0.0
 _DATA_OVERVIEW_CACHE_TTL = 3600  # 1 hour
 
-REQUIRED_CATEGORIES = [
+# Historical hardcoded list — kept ONLY as the fallback `_get_required_categories()`
+# returns when the DB query fails (e.g. connection issue). This list is why the 8
+# orphaned manufacturing categories (Phase C1) went unnoticed for as long as they did:
+# it never grew when new domains were seeded. Do not add new categories here — seed
+# them in `compliance_categories` via migration instead; `_get_required_categories()`
+# picks them up automatically.
+_REQUIRED_CATEGORIES_FALLBACK = [
     # Labor
     "minimum_wage", "overtime", "sick_leave", "meal_breaks",
     "pay_frequency", "final_pay", "minor_work_permit", "scheduling_reporting",
@@ -3361,6 +3367,38 @@ REQUIRED_CATEGORIES = [
     "tax_exempt", "language_access", "records_retention", "marketing_comms",
     "emerging_regulatory",
 ]
+
+_required_categories_cache: list[str] | None = None
+
+
+async def _get_required_categories(force_refresh: bool = False) -> list[str]:
+    """Slugs of every seeded compliance category, DB-derived and cached.
+
+    Categories only change via migration, so a simple process-lifetime cache is
+    enough — pass `force_refresh=True` (wired to the `bust` query param on
+    `/jurisdictions/data-overview`) to pick up a just-applied migration without a
+    restart. Falls back to the historical hardcoded list ONLY on a DB error, and
+    always logs a warning when that happens so the fallback going stale (as
+    `REQUIRED_CATEGORIES` silently did) is never silent again.
+    """
+    global _required_categories_cache
+    if not force_refresh and _required_categories_cache is not None:
+        return _required_categories_cache
+
+    try:
+        async with get_connection() as conn:
+            rows = await conn.fetch("SELECT slug FROM compliance_categories ORDER BY sort_order, slug")
+        slugs = [r["slug"] for r in rows]
+        if not slugs:
+            raise ValueError("compliance_categories table returned zero rows")
+        _required_categories_cache = slugs
+        return slugs
+    except Exception:
+        logger.warning(
+            "Failed to load compliance_categories from DB; falling back to hardcoded category list",
+            exc_info=True,
+        )
+        return list(_REQUIRED_CATEGORIES_FALLBACK)
 
 
 @router.get("/jurisdictions/data-overview", dependencies=[Depends(require_admin)])
@@ -3451,7 +3489,8 @@ async def jurisdiction_data_overview(bust: bool = False):
     # ── Build state → cities map ──
     from datetime import datetime as dt, timezone
     stale_cutoff = dt.now(timezone.utc).replace(tzinfo=None) - timedelta(days=90)
-    req_cats = set(REQUIRED_CATEGORIES)
+    required_categories = await _get_required_categories(force_refresh=bust)
+    req_cats = set(required_categories)
 
     states_map: dict[str, dict] = {}
     total_cities = 0
@@ -3576,7 +3615,7 @@ async def jurisdiction_data_overview(bust: bool = False):
             "tier_breakdown": tier_counts,
             "stale_count": stale_count,
             "freshness": freshness,
-            "required_categories": REQUIRED_CATEGORIES,
+            "required_categories": required_categories,
         },
         "states": states_list,
         "preemption_rules": preemption_rules,
@@ -3767,8 +3806,9 @@ async def jurisdiction_policy_overview(category: Optional[str] = Query(None)):
                 "latest_verified": r["latest_verified"].isoformat() if r["latest_verified"] else None,
             })
 
-        # Sort domains by the order they appear in REQUIRED_CATEGORIES
-        domain_order = list(dict.fromkeys(_CATEGORY_DOMAIN[c] for c in REQUIRED_CATEGORIES if c in _CATEGORY_DOMAIN))
+        # Sort domains by the order they appear in the required-categories list
+        required_categories = await _get_required_categories()
+        domain_order = list(dict.fromkeys(_CATEGORY_DOMAIN[c] for c in required_categories if c in _CATEGORY_DOMAIN))
         domains_list = []
         for d in domain_order:
             if d in domains_map:

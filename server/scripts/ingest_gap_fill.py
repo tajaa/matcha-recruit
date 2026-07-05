@@ -505,6 +505,7 @@ async def main():
             cat_id_map = {r["slug"]: r["id"] for r in cat_rows}
 
             stats = {"new": 0, "changed": 0, "unchanged": 0, "skipped": 0}
+            unknown_category_counts: Dict[str, int] = {}
 
             for state_code, reqs in sorted(all_state_reqs.items()):
                 state_name = STATE_NAMES[state_code]
@@ -526,6 +527,7 @@ async def main():
                     category_id = cat_id_map.get(category)
                     if not category_id:
                         print(f"    SKIP {category}:{r.get('regulation_key')}: unknown category slug")
+                        unknown_category_counts[category] = unknown_category_counts.get(category, 0) + 1
                         stats["skipped"] += 1
                         continue
 
@@ -669,8 +671,17 @@ async def main():
             print(f"UNCHANGED: {stats['unchanged']}")
             print(f"SKIPPED:   {stats['skipped']}")
 
+            if unknown_category_counts:
+                total_unknown = sum(unknown_category_counts.values())
+                print(f"\nSKIPPED {total_unknown} row(s) for unknown categories: {sorted(unknown_category_counts)}")
+                for cat, cnt in sorted(unknown_category_counts.items()):
+                    print(f"  {cat}: {cnt} row(s) — add it to compliance_categories before re-running")
+
     finally:
         await close_pool()
+
+    if unknown_category_counts:
+        sys.exit(1)
 
 
 if __name__ == "__main__":
