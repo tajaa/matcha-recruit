@@ -43,6 +43,7 @@ from .matcha_lite_pricing_admin import router as matcha_lite_pricing_admin_route
 from .handbook_gap_analyzer import router as handbook_gap_analyzer_router
 from .expert_advice import router as expert_advice_router
 from ...matcha.dependencies import require_feature, require_any_feature
+from ..feature_flags import COMPLIANCE_READ_FEATURES, COMPLIANCE_SHARED_FEATURES
 
 # Create main core router
 core_router = APIRouter()
@@ -68,12 +69,12 @@ core_router.include_router(
     compliance_lite_router,
     prefix="/compliance",
     tags=["compliance-lite"],
-    dependencies=[Depends(require_any_feature("compliance", "compliance_lite", "incidents"))],
+    dependencies=[Depends(require_any_feature(*COMPLIANCE_READ_FEATURES))],
 )
 # Read-only viewers (requirements, jurisdiction-stack, summary, upcoming-legislation,
 # categories) — admit full `compliance` (Pro) OR `compliance_lite` (Matcha-X taste).
 core_router.include_router(compliance_shared_router, prefix="/compliance", tags=["compliance-shared"],
-                           dependencies=[Depends(require_any_feature("compliance", "compliance_lite"))])
+                           dependencies=[Depends(require_any_feature(*COMPLIANCE_SHARED_FEATURES))])
 core_router.include_router(compliance_router, prefix="/compliance", tags=["compliance"],
                            dependencies=[Depends(require_feature("compliance"))])
 core_router.include_router(bulk_import_router, prefix="/bulk", tags=["bulk-import"])

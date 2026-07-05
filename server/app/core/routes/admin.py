@@ -3369,6 +3369,8 @@ _REQUIRED_CATEGORIES_FALLBACK = [
 ]
 
 _required_categories_cache: list[str] | None = None
+_required_categories_cached_at: float = 0.0
+_REQUIRED_CATEGORIES_CACHE_TTL = 3600  # 1 hour — mirrors _DATA_OVERVIEW_CACHE_TTL
 
 
 async def _get_required_categories(force_refresh: bool = False) -> list[str]:
@@ -3377,12 +3379,23 @@ async def _get_required_categories(force_refresh: bool = False) -> list[str]:
     Categories only change via migration, so a simple process-lifetime cache is
     enough — pass `force_refresh=True` (wired to the `bust` query param on
     `/jurisdictions/data-overview`) to pick up a just-applied migration without a
-    restart. Falls back to the historical hardcoded list ONLY on a DB error, and
-    always logs a warning when that happens so the fallback going stale (as
-    `REQUIRED_CATEGORIES` silently did) is never silent again.
+    restart. A TTL fallback also refetches once the cache is older than
+    `_REQUIRED_CATEGORIES_CACHE_TTL`, bounding staleness across uvicorn's
+    multiple worker processes even when a `bust` request lands on a different
+    worker than the one that just applied a migration. Falls back to the
+    historical hardcoded list ONLY on a DB error, and always logs a warning
+    when that happens so the fallback going stale (as `REQUIRED_CATEGORIES`
+    silently did) is never silent again.
     """
-    global _required_categories_cache
-    if not force_refresh and _required_categories_cache is not None:
+    import time
+
+    global _required_categories_cache, _required_categories_cached_at
+    now = time.monotonic()
+    if (
+        not force_refresh
+        and _required_categories_cache is not None
+        and (now - _required_categories_cached_at) < _REQUIRED_CATEGORIES_CACHE_TTL
+    ):
         return _required_categories_cache
 
     try:
@@ -3392,6 +3405,7 @@ async def _get_required_categories(force_refresh: bool = False) -> list[str]:
         if not slugs:
             raise ValueError("compliance_categories table returned zero rows")
         _required_categories_cache = slugs
+        _required_categories_cached_at = now
         return slugs
     except Exception:
         logger.warning(
@@ -3770,63 +3784,66 @@ async def jurisdiction_policy_overview(category: Optional[str] = Query(None)):
             "SELECT COUNT(DISTINCT id) FROM jurisdictions"
         )
 
-        # Build domain → categories structure
-        domains_map: dict[str, dict] = {}
-        total_requirements = 0
-        cats_with_data = 0
+    # Build domain → categories structure. Done outside the connection block —
+    # none of this needs `conn`, and `_get_required_categories()` below may hit
+    # the DB itself on a cache miss, so there's no reason to hold this
+    # connection open for it (mirrors jurisdiction_data_overview).
+    domains_map: dict[str, dict] = {}
+    total_requirements = 0
+    cats_with_data = 0
 
-        for r in cat_rows:
-            cat = r["category"]
-            domain = _CATEGORY_DOMAIN.get(cat, "unknown")
-            if domain not in domains_map:
-                domains_map[domain] = {
-                    "domain": domain,
-                    "label": _DOMAIN_LABELS.get(domain, domain.replace("_", " ").title()),
-                    "category_count": 0,
-                    "requirement_count": 0,
-                    "categories": [],
-                }
-            d = domains_map[domain]
-            req_count = r["requirement_count"]
-            d["category_count"] += 1
-            d["requirement_count"] += req_count
-            total_requirements += req_count
-            cats_with_data += 1
-            d["categories"].append({
-                "slug": cat,
-                "name": _CATEGORY_LABELS.get(cat, cat),
-                "group": domain,
-                "requirement_count": req_count,
-                "jurisdiction_count": r["jurisdiction_count"],
-                "tier_breakdown": {
-                    "tier_1_government": r["tier_1"],
-                    "tier_2_official_secondary": r["tier_2"],
-                    "tier_3_aggregator": r["tier_3"],
-                },
-                "latest_verified": r["latest_verified"].isoformat() if r["latest_verified"] else None,
-            })
-
-        # Sort domains by the order they appear in the required-categories list
-        required_categories = await _get_required_categories()
-        domain_order = list(dict.fromkeys(_CATEGORY_DOMAIN[c] for c in required_categories if c in _CATEGORY_DOMAIN))
-        domains_list = []
-        for d in domain_order:
-            if d in domains_map:
-                domains_list.append(domains_map[d])
-        # Append any extra domains not in the ordering
-        for d, val in domains_map.items():
-            if d not in domain_order:
-                domains_list.append(val)
-
-        result = {
-            "summary": {
-                "total_requirements": total_requirements,
-                "total_categories_with_data": cats_with_data,
-                "total_domains": len(domains_map),
-                "total_jurisdictions": total_jurisdictions_row or 0,
+    for r in cat_rows:
+        cat = r["category"]
+        domain = _CATEGORY_DOMAIN.get(cat, "unknown")
+        if domain not in domains_map:
+            domains_map[domain] = {
+                "domain": domain,
+                "label": _DOMAIN_LABELS.get(domain, domain.replace("_", " ").title()),
+                "category_count": 0,
+                "requirement_count": 0,
+                "categories": [],
+            }
+        d = domains_map[domain]
+        req_count = r["requirement_count"]
+        d["category_count"] += 1
+        d["requirement_count"] += req_count
+        total_requirements += req_count
+        cats_with_data += 1
+        d["categories"].append({
+            "slug": cat,
+            "name": _CATEGORY_LABELS.get(cat, cat),
+            "group": domain,
+            "requirement_count": req_count,
+            "jurisdiction_count": r["jurisdiction_count"],
+            "tier_breakdown": {
+                "tier_1_government": r["tier_1"],
+                "tier_2_official_secondary": r["tier_2"],
+                "tier_3_aggregator": r["tier_3"],
             },
-            "domains": domains_list,
-        }
+            "latest_verified": r["latest_verified"].isoformat() if r["latest_verified"] else None,
+        })
+
+    # Sort domains by the order they appear in the required-categories list
+    required_categories = await _get_required_categories()
+    domain_order = list(dict.fromkeys(_CATEGORY_DOMAIN[c] for c in required_categories if c in _CATEGORY_DOMAIN))
+    domains_list = []
+    for d in domain_order:
+        if d in domains_map:
+            domains_list.append(domains_map[d])
+    # Append any extra domains not in the ordering
+    for d, val in domains_map.items():
+        if d not in domain_order:
+            domains_list.append(val)
+
+    result = {
+        "summary": {
+            "total_requirements": total_requirements,
+            "total_categories_with_data": cats_with_data,
+            "total_domains": len(domains_map),
+            "total_jurisdictions": total_jurisdictions_row or 0,
+        },
+        "domains": domains_list,
+    }
 
     if redis:
         await cache_set(redis, admin_jurisdiction_policy_overview_key(None), result, ttl=600)

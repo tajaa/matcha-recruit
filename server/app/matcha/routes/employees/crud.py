@@ -48,6 +48,7 @@ from ._shared import (
     _employee_org_fields_available,
     _employee_status_fields_available,
     _json_object,
+    _normalize_work_state,
     _perform_oig_screening,
     _refresh_risk_assessment,
     _run_provisioning_and_notify,
@@ -478,6 +479,18 @@ async def create_employee(
             except ValueError:
                 raise HTTPException(status_code=400, detail="Invalid start_date format. Use YYYY-MM-DD")
 
+        # Validate work_state — blank/None allowed unchanged; a non-blank
+        # value that isn't a recognized state/territory is rejected so a
+        # typo doesn't silently create an ungrounded compliance jurisdiction.
+        normalized_work_state = request.work_state
+        if request.work_state is not None:
+            normalized_work_state, work_state_valid = _normalize_work_state(request.work_state)
+            if not work_state_valid:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid work_state '{request.work_state.strip()}' — use a 2-letter US state code",
+                )
+
         org_fields_available = await _employee_org_fields_available(conn)
 
         # Build dynamic INSERT columns/values based on available schema
@@ -492,7 +505,7 @@ async def create_employee(
             str(request.personal_email).strip().lower() if request.personal_email else None,
             request.first_name,
             request.last_name,
-            request.work_state,
+            normalized_work_state,
             request.employment_type,
             start_date,
             request.address.strip() if request.address else None,
@@ -836,8 +849,14 @@ async def update_employee(
             param_num += 1
 
         if request.work_state is not None:
+            normalized_work_state, work_state_valid = _normalize_work_state(request.work_state)
+            if not work_state_valid:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid work_state '{request.work_state.strip()}' — use a 2-letter US state code",
+                )
             updates.append(f"work_state = ${param_num}")
-            values.append(request.work_state)
+            values.append(normalized_work_state)
             param_num += 1
 
         if request.employment_type is not None:

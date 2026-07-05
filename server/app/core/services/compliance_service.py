@@ -48,10 +48,12 @@ def parse_date(date_str: Optional[str]) -> Optional[date]:
 
 # Library permanence (B5): stored requirements are treated as truth until a
 # future diff-scheduler exists to selectively re-check them (see
-# COMPLIANCE_REMEDIATION_PLAN.md B5/E6). While False, _is_jurisdiction_fresh
-# ignores age and reports "fresh" whenever a jurisdiction has any data at all;
-# gap-driven research (missing required categories) still fires regardless.
-REPOSITORY_TTL_ENABLED = False
+# COMPLIANCE_REMEDIATION_PLAN.md B5/E6). While settings.repository_ttl_enabled
+# is False, _is_jurisdiction_fresh ignores age and reports "fresh" whenever a
+# jurisdiction has any data at all; gap-driven research (missing required
+# categories) still fires regardless. Config-backed (REPOSITORY_TTL_ENABLED
+# env var, config.py) rather than a module constant so it can flip without a
+# redeploy.
 
 # Threshold for numeric material changes (e.g. $0.25 for wages)
 MATERIAL_CHANGE_THRESHOLDS = {
@@ -1293,13 +1295,13 @@ async def _is_jurisdiction_fresh(
 ) -> bool:
     """Check if jurisdiction data is trusted enough to skip Gemini.
 
-    Library permanence (B5, REPOSITORY_TTL_ENABLED=False): once a jurisdiction
-    has been verified at all, it stays "fresh" regardless of age — stored data
-    is truth until a future diff-scheduler selectively re-checks it. Missing
-    data (no last_verified_at) still returns False so gap-driven research
-    (via _missing_required_categories) keeps firing. The age comparison is
-    kept dormant here so re-enabling REPOSITORY_TTL_ENABLED restores selective
-    re-checks without re-plumbing callers.
+    Library permanence (B5, settings.repository_ttl_enabled=False by default):
+    once a jurisdiction has been verified at all, it stays "fresh" regardless
+    of age — stored data is truth until a future diff-scheduler selectively
+    re-checks it. Missing data (no last_verified_at) still returns False so
+    gap-driven research (via _missing_required_categories) keeps firing. The
+    age comparison is kept dormant here so re-enabling REPOSITORY_TTL_ENABLED
+    restores selective re-checks without re-plumbing callers.
     """
     row = await conn.fetchrow(
         "SELECT last_verified_at FROM jurisdictions WHERE id = $1",
@@ -1307,7 +1309,9 @@ async def _is_jurisdiction_fresh(
     )
     if not row or not row["last_verified_at"]:
         return False
-    if not REPOSITORY_TTL_ENABLED:
+
+    from ...config import get_settings as _get_settings
+    if not _get_settings().repository_ttl_enabled:
         return True
     age = datetime.utcnow() - row["last_verified_at"]
     return age < timedelta(days=threshold_days)
@@ -5597,6 +5601,21 @@ async def get_locations(company_id: UUID) -> list[dict]:
         return result
 
 
+async def verify_location_ownership(conn, location_id: UUID, company_id: UUID) -> bool:
+    """Return True iff *location_id* belongs to *company_id*.
+
+    Single source of truth for the ownership check that used to be inlined at
+    three call sites (compliance.py's legislation-assign endpoint, and the two
+    admin cherry-pick functions below) — future hardening (e.g. soft-delete
+    awareness) lands once here instead of three times.
+    """
+    owns_location = await conn.fetchval(
+        "SELECT 1 FROM business_locations WHERE id = $1 AND company_id = $2",
+        location_id, company_id,
+    )
+    return bool(owns_location)
+
+
 async def get_location(
     location_id: UUID, company_id: UUID
 ) -> Optional[BusinessLocation]:
@@ -7579,11 +7598,7 @@ async def run_compliance_check_background(
                         not in target_set
                     ]
                     requirements = preserved + requirements
-            # Repository-only mode: allow_live_research=False forbids per-company
-            # live research, but gap-driven refresh of the SHARED jurisdiction
-            # source-of-truth is intentional — it fires only for categories never
-            # researched in this jurisdiction and upserts into the shared library
-            # (library-permanence model: search on miss, store forever).
+            # Repository-only mode — see the twin branch in run_compliance_check_stream for semantics.
             elif not used_repository and not allow_live_research:
                 missing_categories = _missing_required_categories(requirements)
                 used_repository = True
@@ -9113,11 +9128,7 @@ async def admin_add_requirement_to_location(
     from ...database import get_connection
 
     async with get_connection() as conn:
-        owns_location = await conn.fetchval(
-            "SELECT 1 FROM business_locations WHERE id = $1 AND company_id = $2",
-            location_id, company_id,
-        )
-        if not owns_location:
+        if not await verify_location_ownership(conn, location_id, company_id):
             raise ValueError("Location does not belong to this company")
 
         # 1. Fetch the source row
@@ -9163,11 +9174,7 @@ async def admin_add_requirements_to_location_batch(
     location is skipped via the partial unique index. Returns
     ``{written, skipped_existing, missing_jr}``.
     """
-    owns_location = await conn.fetchval(
-        "SELECT 1 FROM business_locations WHERE id = $1 AND company_id = $2",
-        location_id, company_id,
-    )
-    if not owns_location:
+    if not await verify_location_ownership(conn, location_id, company_id):
         raise ValueError("Location does not belong to this company")
 
     written = skipped = missing = 0

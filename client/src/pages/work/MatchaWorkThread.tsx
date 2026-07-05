@@ -64,7 +64,7 @@ const TASK_LABELS: Record<string, string> = {
 }
 
 export default function MatchaWorkThread() {
-  const { me } = useMe()
+  const { me, hasFeature } = useMe()
   const isIndividual = me?.user?.role === 'individual'
   const { threadId } = useParams<{ threadId: string }>()
   const base = useWorkBase()
@@ -114,6 +114,11 @@ export default function MatchaWorkThread() {
   // Compliance locations — loaded when compliance mode is on
   const [locations, setLocations] = useState<BusinessLocation[]>([])
   const [locationsLoaded, setLocationsLoaded] = useState(false)
+  const [locationsUnavailable, setLocationsUnavailable] = useState(false)
+  // GET /compliance/locations needs any of these — matches the backend
+  // lite_router gate (same tuple as ClientSidebar's compliance-calendar gate).
+  const hasComplianceLocationAccess =
+    hasFeature('compliance') || hasFeature('compliance_lite') || hasFeature('incidents')
 
   const refreshUsage = useCallback(() => {
     Promise.all([fetchUsageSummary(30), fetchUsageSummary24h()])
@@ -123,12 +128,22 @@ export default function MatchaWorkThread() {
   useEffect(refreshUsage, [refreshUsage])
 
   useEffect(() => {
-    if (complianceMode && !locationsLoaded) {
-      fetchLocations()
-        .then((locs) => { setLocations(locs); setLocationsLoaded(true) })
-        .catch(() => setLocationsLoaded(true))
+    if (!complianceMode || locationsLoaded) return
+    if (!hasComplianceLocationAccess) {
+      // Company lost/never had compliance access — don't attempt the fetch (403),
+      // just show the unavailable hint below the toggle.
+      setLocationsUnavailable(true)
+      setLocationsLoaded(true)
+      return
     }
-  }, [complianceMode, locationsLoaded])
+    fetchLocations()
+      .then((locs) => { setLocations(locs); setLocationsLoaded(true) })
+      .catch((e) => {
+        console.warn('Failed to load compliance locations', e)
+        setLocationsUnavailable(true)
+        setLocationsLoaded(true)
+      })
+  }, [complianceMode, locationsLoaded, hasComplianceLocationAccess])
 
   // Stream status
   const [statusMessage, setStatusMessage] = useState('')
@@ -716,6 +731,11 @@ export default function MatchaWorkThread() {
         </div>
 
         {/* Jurisdiction bar — shows when compliance mode is on */}
+        {complianceMode && locationsUnavailable && locations.length === 0 && (
+          <div className={`px-4 py-2 border-b ${th.border} ${th.jurisdBar} text-[11px] text-zinc-500`}>
+            Compliance locations unavailable — check your plan or contact support.
+          </div>
+        )}
         {complianceMode && locations.length > 0 && (
           <div className={`px-4 py-2 border-b ${th.border} ${th.jurisdBar} flex items-center gap-2 overflow-x-auto`}>
             <MapPin size={12} className="text-cyan-500 shrink-0" />

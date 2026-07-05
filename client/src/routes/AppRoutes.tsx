@@ -82,7 +82,7 @@ export default function AppRoutes() {
         {/* Matcha-X read-only taste — distinct URL so it's separable from the Pro
             Compliance route; the Compliance dispatcher renders the lite view. */}
         <Route path="matcha-x/compliance" element={<FeatureGate anyOf={['compliance', 'compliance_lite']} label="Compliance"><Compliance /></FeatureGate>} />
-        <Route path="compliance-calendar" element={<ComplianceCalendar />} />
+        <Route path="compliance-calendar" element={<FeatureGate anyOf={['compliance', 'compliance_lite', 'incidents']} label="Compliance Calendar"><ComplianceCalendar /></FeatureGate>} />
         <Route path="ir" element={<FeatureGate feature="incidents" label="Incidents"><IRList /></FeatureGate>} />
         <Route path="ir/risk-insights" element={<FeatureGate feature="incidents" label="Risk Insights"><IRRiskInsights /></FeatureGate>} />
         <Route path="ir/magic-links" element={<FeatureGate feature="incidents" label="Magic Links"><IRAnonymousReporting /></FeatureGate>} />

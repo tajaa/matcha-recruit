@@ -26,6 +26,8 @@ const nav: (NavItem | NavGroup)[] = [
     label: 'Compliance',
     items: [
       { to: '/app/compliance', icon: Shield, label: 'Compliance' },
+      // No single `feature` here — gated below via COMPLIANCE_CALENDAR_FEATURES
+      // (NavItem only supports one flag; the backend accepts any of three).
       { to: '/app/compliance-calendar', icon: CalendarDays, label: 'Calendar' },
       { to: '/app/policies', icon: FileText, label: 'Policies' },
       { to: '/app/handbooks', icon: BookOpen, label: 'Handbooks' },
@@ -71,6 +73,10 @@ const nav: (NavItem | NavGroup)[] = [
   },
 ]
 
+// GET /compliance/calendar accepts any of these three flags (matches the
+// backend `lite_router` gate) — kept here since NavItem only supports one.
+const COMPLIANCE_CALENDAR_FEATURES = ['compliance', 'compliance_lite', 'incidents']
+
 // Personal accounts only see Werk — no platform/HR items
 const personalNav: (NavItem | NavGroup)[] = [
   {
@@ -90,7 +96,12 @@ export default function ClientSidebar() {
     for (const item of items) {
       if ('items' in item) {
         if (item.feature && !hasFeature(item.feature)) continue
-        const filteredItems = item.items.filter((child) => !child.feature || hasFeature(child.feature))
+        const filteredItems = item.items.filter((child) => {
+          if (child.to === '/app/compliance-calendar') {
+            return COMPLIANCE_CALENDAR_FEATURES.some((f) => hasFeature(f))
+          }
+          return !child.feature || hasFeature(child.feature)
+        })
         if (filteredItems.length === 0) continue
         out.push({ ...item, items: filteredItems })
       } else {

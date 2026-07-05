@@ -4,23 +4,9 @@ import { Loader2 } from 'lucide-react'
 import { invalidateMeCache } from '../../hooks/useMe'
 import { useMatchaLitePricing, computeLitePriceDollars } from '../../api/matchaLitePricing'
 import { Select } from '../../components/ui/Select'
+import { INDUSTRY_OPTIONS } from '../../data/industryConstants'
 
 const BASE = import.meta.env.VITE_API_URL ?? '/api'
-
-// Canonical industry profiles the compliance build understands today
-// (_INDUSTRY_ALIASES in compliance_service.py) — values resolve cleanly
-// via _resolve_industry. "other" sends the free-text entry as-is; the
-// resolver falls back to substring matching / unresolved for anything
-// it doesn't recognize.
-const INDUSTRY_OPTIONS = [
-  { value: 'healthcare', label: 'Healthcare' },
-  { value: 'hospitality', label: 'Hospitality & Food Service' },
-  { value: 'retail', label: 'Retail' },
-  { value: 'manufacturing', label: 'Manufacturing & Industrial' },
-  { value: 'technology', label: 'Technology & Professional Services' },
-  { value: 'biotech', label: 'Biotech & Pharma' },
-  { value: 'other', label: 'Other' },
-]
 
 export default function ComplianceSignup() {
   const [searchParams] = useSearchParams()

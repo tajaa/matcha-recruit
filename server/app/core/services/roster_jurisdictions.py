@@ -30,38 +30,32 @@ async def collect_roster_jurisdictions(
     where emp_locs is keyed by (lower_city, upper_state) -> (display_city,
     upper_state), existing_location_keys are the same keys already tracked as
     business_locations (so callers know which jurisdictions are NEW), and
-    skipped_no_work_state is the count of active employees dropped from the
-    roster scan because they have no `work_state` on file (so callers can
-    surface that the scope may be incomplete, rather than silently missing
-    those employees' jurisdictions).
+    skipped_no_work_state is the count of active employees (rows, not
+    distinct locations) dropped from the roster scan because they have no
+    `work_state` on file (so callers can surface that the scope may be
+    incomplete, rather than silently missing those employees' jurisdictions).
     """
     emp_rows = await conn.fetch(
         """
-        SELECT DISTINCT work_city, work_state, job_title
+        SELECT work_city, work_state, job_title
         FROM employees
-        WHERE org_id = $1 AND termination_date IS NULL AND work_state IS NOT NULL
+        WHERE org_id = $1 AND termination_date IS NULL
         """,
         company_id,
     )
-    skipped_no_work_state = await conn.fetchval(
-        """
-        SELECT COUNT(*) FROM employees
-        WHERE org_id = $1 AND termination_date IS NULL AND work_state IS NULL
-        """,
-        company_id,
-    ) or 0
-    roles = sorted({
-        r["job_title"].strip()
-        for r in emp_rows
-        if r["job_title"] and r["job_title"].strip()
-    })
+    skipped_no_work_state = 0
+    role_set: set[str] = set()
     emp_locs: dict[tuple[str, str], tuple[str, str]] = {}
     for r in emp_rows:
         state = (r["work_state"] or "").upper().strip()
         if not state:
+            skipped_no_work_state += 1
             continue
+        if r["job_title"] and r["job_title"].strip():
+            role_set.add(r["job_title"].strip())
         city = (r["work_city"] or "").strip()
         emp_locs.setdefault((city.lower(), state), (city, state))
+    roles = sorted(role_set)
 
     existing_loc_rows = await conn.fetch(
         """

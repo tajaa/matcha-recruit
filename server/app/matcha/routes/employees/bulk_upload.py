@@ -38,6 +38,7 @@ from ._shared import (
     _employee_org_fields_available,
     _exception_message,
     _json_object,
+    _normalize_work_state,
     _parse_csv_date,
     _run_provisioning_and_notify,
     _sync_employee_location_for_compliance,
@@ -51,56 +52,6 @@ from app.matcha.services.onboarding_orchestrator import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-# 50 states + DC + US territories, USPS 2-letter codes. `work_state` CSV values
-# are validated against this set (case-insensitive; full state names also
-# normalized) so a typo doesn't silently create an ungrounded compliance
-# jurisdiction (Phase D2 stopgap — see COMPLIANCE_REMEDIATION_PLAN.md).
-_VALID_WORK_STATE_CODES = {
-    "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "DC", "FL", "GA", "HI", "ID",
-    "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS", "MO",
-    "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA",
-    "RI", "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY",
-    "AS", "GU", "MP", "PR", "VI",
-}
-
-_STATE_NAME_TO_CODE = {
-    "alabama": "AL", "alaska": "AK", "arizona": "AZ", "arkansas": "AR",
-    "california": "CA", "colorado": "CO", "connecticut": "CT", "delaware": "DE",
-    "district of columbia": "DC", "washington dc": "DC", "washington d.c.": "DC",
-    "florida": "FL", "georgia": "GA", "hawaii": "HI", "idaho": "ID",
-    "illinois": "IL", "indiana": "IN", "iowa": "IA", "kansas": "KS",
-    "kentucky": "KY", "louisiana": "LA", "maine": "ME", "maryland": "MD",
-    "massachusetts": "MA", "michigan": "MI", "minnesota": "MN", "mississippi": "MS",
-    "missouri": "MO", "montana": "MT", "nebraska": "NE", "nevada": "NV",
-    "new hampshire": "NH", "new jersey": "NJ", "new mexico": "NM", "new york": "NY",
-    "north carolina": "NC", "north dakota": "ND", "ohio": "OH", "oklahoma": "OK",
-    "oregon": "OR", "pennsylvania": "PA", "rhode island": "RI",
-    "south carolina": "SC", "south dakota": "SD", "tennessee": "TN", "texas": "TX",
-    "utah": "UT", "vermont": "VT", "virginia": "VA", "washington": "WA",
-    "west virginia": "WV", "wisconsin": "WI", "wyoming": "WY",
-    "american samoa": "AS", "guam": "GU", "northern mariana islands": "MP",
-    "puerto rico": "PR", "virgin islands": "VI", "us virgin islands": "VI",
-}
-
-
-def _normalize_work_state(raw: str) -> tuple[Optional[str], bool]:
-    """Normalize a CSV `work_state` value to a 2-letter USPS code.
-
-    Returns `(normalized_code_or_None, is_valid)`. Blank input is valid (no
-    work location provided — counted separately by the caller as
-    `rows_missing_work_location`, not an error). A non-blank value that isn't
-    a recognized state/territory abbreviation or full name is invalid.
-    """
-    s = raw.strip()
-    if not s:
-        return None, True
-    if len(s) == 2 and s.isalpha() and s.upper() in _VALID_WORK_STATE_CODES:
-        return s.upper(), True
-    mapped = _STATE_NAME_TO_CODE.get(s.lower())
-    if mapped:
-        return mapped, True
-    return None, False
 
 
 class BulkEmployeeCSVUpload(BaseModel):
@@ -304,8 +255,8 @@ async def bulk_upload_employees_csv(
         for row_num, row in enumerate(rows, start=2):  # Start at 2 to account for header
             try:
                 # Validate email format
-                email = row.get('email', '').strip()
-                personal_email = row.get('personal_email', '').strip() or None
+                email = (row.get('email') or '').strip()
+                personal_email = (row.get('personal_email') or '').strip() or None
                 if not email:
                     errors.append({
                         "row": row_num,
@@ -349,8 +300,8 @@ async def bulk_upload_employees_csv(
                     continue
 
                 # Validate required fields
-                first_name = row.get('first_name', '').strip()
-                last_name = row.get('last_name', '').strip()
+                first_name = (row.get('first_name') or '').strip()
+                last_name = (row.get('last_name') or '').strip()
 
                 if not first_name or not last_name:
                     errors.append({
@@ -362,7 +313,7 @@ async def bulk_upload_employees_csv(
                     continue
 
                 # Parse optional fields
-                work_state_raw = row.get('work_state', '')
+                work_state_raw = (row.get('work_state') or '')
                 work_state, work_state_valid = _normalize_work_state(work_state_raw)
                 if not work_state_valid:
                     errors.append({
@@ -377,13 +328,13 @@ async def bulk_upload_employees_csv(
                     continue
                 if work_state is None:
                     rows_missing_work_location += 1
-                employment_type = row.get('employment_type', '').strip() or None
-                job_title = row.get('job_title', '').strip() or None
-                department_val = row.get('department', '').strip() or None
-                phone = row.get('phone', '').strip() or None
+                employment_type = (row.get('employment_type') or '').strip() or None
+                job_title = (row.get('job_title') or '').strip() or None
+                department_val = (row.get('department') or '').strip() or None
+                phone = (row.get('phone') or '').strip() or None
 
                 # Parse compensation fields
-                pay_classification = row.get('pay_classification', '').strip().lower() or None
+                pay_classification = (row.get('pay_classification') or '').strip().lower() or None
                 if pay_classification and pay_classification not in ('hourly', 'exempt'):
                     errors.append({
                         "row": row_num,
@@ -394,7 +345,7 @@ async def bulk_upload_employees_csv(
                     continue
 
                 pay_rate = None
-                pay_rate_str = row.get('pay_rate', '').strip()
+                pay_rate_str = (row.get('pay_rate') or '').strip()
                 if pay_rate_str:
                     try:
                         pay_rate = Decimal(pay_rate_str)
@@ -418,11 +369,11 @@ async def bulk_upload_employees_csv(
                     failed += 1
                     continue
 
-                work_city = row.get('work_city', '').strip() or None
+                work_city = (row.get('work_city') or '').strip() or None
 
                 # Parse start_date
                 start_date = None
-                if row.get('start_date', '').strip():
+                if (row.get('start_date') or '').strip():
                     try:
                         start_date = datetime.strptime(row['start_date'].strip(), "%Y-%m-%d").date()
                     except ValueError:
@@ -431,7 +382,7 @@ async def bulk_upload_employees_csv(
 
                 # Resolve manager_email to manager_id
                 manager_id = None
-                if row.get('manager_email', '').strip():
+                if (row.get('manager_email') or '').strip():
                     manager = await conn.fetchrow(
                         "SELECT id FROM employees WHERE org_id = $1 AND email = $2",
                         company_id, row['manager_email'].strip()
@@ -476,21 +427,21 @@ async def bulk_upload_employees_csv(
 
                 # Process credential fields if any are present in the CSV row
                 try:
-                    cred_license_type = row.get('license_type', '').strip() or None
-                    cred_license_number = row.get('license_number', '').strip() or None
-                    cred_license_state = row.get('license_state', '').strip() or None
-                    cred_license_expiration = _parse_csv_date(row.get('license_expiration', ''))
-                    cred_npi_number = row.get('npi_number', '').strip() or None
-                    cred_dea_number = row.get('dea_number', '').strip() or None
-                    cred_dea_expiration = _parse_csv_date(row.get('dea_expiration', ''))
-                    cred_board_certification = row.get('board_certification', '').strip() or None
-                    cred_board_certification_expiration = _parse_csv_date(row.get('board_certification_expiration', ''))
-                    cred_clinical_specialty = row.get('clinical_specialty', '').strip() or None
-                    cred_malpractice_carrier = row.get('malpractice_carrier', '').strip() or None
-                    cred_malpractice_policy_number = row.get('malpractice_policy_number', '').strip() or None
-                    cred_malpractice_expiration = _parse_csv_date(row.get('malpractice_expiration', ''))
+                    cred_license_type = (row.get('license_type') or '').strip() or None
+                    cred_license_number = (row.get('license_number') or '').strip() or None
+                    cred_license_state = (row.get('license_state') or '').strip() or None
+                    cred_license_expiration = _parse_csv_date((row.get('license_expiration') or ''))
+                    cred_npi_number = (row.get('npi_number') or '').strip() or None
+                    cred_dea_number = (row.get('dea_number') or '').strip() or None
+                    cred_dea_expiration = _parse_csv_date((row.get('dea_expiration') or ''))
+                    cred_board_certification = (row.get('board_certification') or '').strip() or None
+                    cred_board_certification_expiration = _parse_csv_date((row.get('board_certification_expiration') or ''))
+                    cred_clinical_specialty = (row.get('clinical_specialty') or '').strip() or None
+                    cred_malpractice_carrier = (row.get('malpractice_carrier') or '').strip() or None
+                    cred_malpractice_policy_number = (row.get('malpractice_policy_number') or '').strip() or None
+                    cred_malpractice_expiration = _parse_csv_date((row.get('malpractice_expiration') or ''))
 
-                    health_clearances_str = row.get('health_clearances', '').strip()
+                    health_clearances_str = (row.get('health_clearances') or '').strip()
                     cred_health_clearances: dict = {}
                     if health_clearances_str:
                         try:
@@ -625,7 +576,7 @@ async def bulk_upload_employees_csv(
             except Exception as e:
                 errors.append({
                     "row": row_num,
-                    "email": row.get('email', ''),
+                    "email": (row.get('email') or ''),
                     "error": str(e)
                 })
                 failed += 1
@@ -733,7 +684,7 @@ async def bulk_upload_credentials_csv(
 
     async with get_connection() as conn:
         for row_num, row in enumerate(csv_reader, start=2):
-            email = row.get('email', '').strip()
+            email = (row.get('email') or '').strip()
             if not email:
                 errors.append({"row": row_num, "email": "", "error": "Email is required"})
                 failed += 1
@@ -749,7 +700,7 @@ async def bulk_upload_credentials_csv(
                 continue
 
             try:
-                health_clearances_str = row.get('health_clearances', '').strip()
+                health_clearances_str = (row.get('health_clearances') or '').strip()
                 health_clearances: dict = {}
                 if health_clearances_str:
                     try:
@@ -759,10 +710,10 @@ async def bulk_upload_credentials_csv(
                         logger.warning("[BulkCredentials] Row %d: invalid health_clearances JSON for %s, storing {}", row_num, email)
 
                 enc_creds = encrypt_credential_fields({
-                    "license_number": row.get('license_number', '').strip() or None,
-                    "npi_number": row.get('npi_number', '').strip() or None,
-                    "dea_number": row.get('dea_number', '').strip() or None,
-                    "malpractice_policy_number": row.get('malpractice_policy_number', '').strip() or None,
+                    "license_number": (row.get('license_number') or '').strip() or None,
+                    "npi_number": (row.get('npi_number') or '').strip() or None,
+                    "dea_number": (row.get('dea_number') or '').strip() or None,
+                    "malpractice_policy_number": (row.get('malpractice_policy_number') or '').strip() or None,
                 })
                 await conn.execute("""
                     INSERT INTO employee_credentials (
@@ -806,20 +757,20 @@ async def bulk_upload_credentials_csv(
                         updated_at = NOW()
                 """,
                     emp_id, company_id,
-                    row.get('license_type', '').strip() or None,
+                    (row.get('license_type') or '').strip() or None,
                     enc_creds["license_number"],
-                    row.get('license_state', '').strip() or None,
-                    _parse_csv_date(row.get('license_expiration', '')),
+                    (row.get('license_state') or '').strip() or None,
+                    _parse_csv_date((row.get('license_expiration') or '')),
                     enc_creds["npi_number"],
                     enc_creds["dea_number"],
-                    _parse_csv_date(row.get('dea_expiration', '')),
-                    row.get('board_certification', '').strip() or None,
-                    _parse_csv_date(row.get('board_certification_expiration', '')),
-                    row.get('clinical_specialty', '').strip() or None,
+                    _parse_csv_date((row.get('dea_expiration') or '')),
+                    (row.get('board_certification') or '').strip() or None,
+                    _parse_csv_date((row.get('board_certification_expiration') or '')),
+                    (row.get('clinical_specialty') or '').strip() or None,
                     None, None,
-                    row.get('malpractice_carrier', '').strip() or None,
+                    (row.get('malpractice_carrier') or '').strip() or None,
                     enc_creds["malpractice_policy_number"],
-                    _parse_csv_date(row.get('malpractice_expiration', '')),
+                    _parse_csv_date((row.get('malpractice_expiration') or '')),
                     json.dumps(health_clearances) if health_clearances else None,
                 )
                 updated += 1

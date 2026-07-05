@@ -1,5 +1,6 @@
 import json
 from typing import Any
+from uuid import UUID
 
 DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     "handbooks": True,
@@ -262,3 +263,33 @@ def merge_company_features(
             merged[key] = value
 
     return merged
+
+
+# Named gate tuples for the Compliance feature family — mounted via
+# require_any_feature(*TUPLE) in routes/__init__.py. Named so the frontend
+# gates (FeatureGate anyOf=[...]) can be kept in sync with the backend by eye
+# instead of by re-deriving the tuple from the mount call.
+COMPLIANCE_READ_FEATURES = ("compliance", "compliance_lite", "incidents")
+COMPLIANCE_SHARED_FEATURES = ("compliance", "compliance_lite")
+
+
+async def get_company_features(company_id: UUID) -> dict:
+    """Fetch a company's row and return its merged feature flags.
+
+    Opens its own connection. Shared helper for the enabled_features +
+    signup_source fetch-then-merge pattern that was inlined at each call site
+    (compliance.py's create_location_endpoint is the first caller migrated to
+    it — channel_calls.py and legal_defense.py keep their own private copies
+    for now; migrating those is separate, lower-priority cleanup).
+    """
+    from ..database import get_connection
+
+    async with get_connection() as conn:
+        company_row = await conn.fetchrow(
+            "SELECT enabled_features, signup_source FROM companies WHERE id = $1",
+            company_id,
+        )
+    return merge_company_features(
+        company_row["enabled_features"] if company_row else None,
+        company_row["signup_source"] if company_row else None,
+    )

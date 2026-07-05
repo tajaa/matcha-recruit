@@ -9,7 +9,7 @@ from uuid import UUID
 
 from ...matcha.dependencies import require_admin_or_client, get_client_company_id
 from ...database import get_connection
-from ..feature_flags import merge_company_features
+from ..feature_flags import get_company_features
 from ..services.redis_cache import check_rate_limit
 from ..services.redis_cache import (
     get_redis_cache,
@@ -63,6 +63,7 @@ from ..services.compliance_service import (
     update_facility_attributes,
     get_facility_attributes,
     search_company_requirements,
+    verify_location_ownership,
 )
 
 router = APIRouter()
@@ -161,15 +162,7 @@ async def create_location_endpoint(
     # flag is resolved and passed explicitly as defense in depth — resolve_company_id
     # lets an admin operate on a different company_id than the gate checked).
     if not has_complete_repository_coverage:
-        async with get_connection() as conn:
-            company_row = await conn.fetchrow(
-                "SELECT enabled_features, signup_source FROM companies WHERE id = $1",
-                company_id,
-            )
-        features = merge_company_features(
-            company_row["enabled_features"] if company_row else None,
-            company_row["signup_source"] if company_row else None,
-        )
+        features = await get_company_features(company_id)
         background_tasks.add_task(
             run_compliance_check_background,
             location.id,
@@ -894,11 +887,7 @@ async def assign_legislation_endpoint(
         if not leg_row:
             raise HTTPException(status_code=404, detail="Legislation not found")
 
-        owns_location = await conn.fetchval(
-            "SELECT 1 FROM business_locations WHERE id = $1 AND company_id = $2",
-            location_id, company_id,
-        )
-        if not owns_location:
+        if not await verify_location_ownership(conn, location_id, company_id):
             raise HTTPException(status_code=404, detail="Location not found")
 
         # Find existing alert for this legislation item

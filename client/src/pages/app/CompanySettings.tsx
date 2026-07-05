@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { Button, Card, Input, Select, Badge } from '../../components/ui'
+import { Button, Card, Input, Select, Badge, useToast } from '../../components/ui'
 import { INDUSTRY_OPTIONS } from '../../data/industryConstants'
 import { api } from '../../api/client'
 import { fetchLocations, createLocation, updateLocation, deleteLocation, fetchJurisdictions } from '../../api/compliance'
@@ -188,6 +188,7 @@ function EditableSelect({ label, value, options, onSave }: EditableSelectProps) 
 
 export default function CompanySettings() {
   const { me, hasFeature } = useMe()
+  const { toast } = useToast()
   const [tab, setTab] = useState<Tab>('profile')
   // Lite-family tenants manage their paid add-ons here (/app/company#addons).
   const isLiteFamily =
@@ -283,9 +284,13 @@ export default function CompanySettings() {
   }
 
   async function handleDeleteLocation(locId: string) {
-    await deleteLocation(locId)
-    if (selectedId === locId) setSelectedId(null)
-    await loadLocations()
+    try {
+      await deleteLocation(locId)
+      if (selectedId === locId) setSelectedId(null)
+      await loadLocations()
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Failed to delete location', 'error')
+    }
   }
 
   function handleEditLocation(loc: BusinessLocation) {
@@ -484,6 +489,7 @@ export default function CompanySettings() {
                 }
               }}
               loading={locationsLoading}
+              readOnly={!hasFeature('compliance')}
             />
           </div>
 
@@ -519,6 +525,7 @@ export default function CompanySettings() {
                   onUpdated={() => loadLocations()}
                   allLocations={locations}
                   source={selectedLoc?.source}
+                  readOnly={!hasFeature('compliance')}
                 />
 
                 <Card>
