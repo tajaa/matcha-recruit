@@ -3,8 +3,24 @@ import { useSearchParams } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import { invalidateMeCache } from '../../hooks/useMe'
 import { useMatchaLitePricing, computeLitePriceDollars } from '../../api/matchaLitePricing'
+import { Select } from '../../components/ui/Select'
 
 const BASE = import.meta.env.VITE_API_URL ?? '/api'
+
+// Canonical industry profiles the compliance build understands today
+// (_INDUSTRY_ALIASES in compliance_service.py) — values resolve cleanly
+// via _resolve_industry. "other" sends the free-text entry as-is; the
+// resolver falls back to substring matching / unresolved for anything
+// it doesn't recognize.
+const INDUSTRY_OPTIONS = [
+  { value: 'healthcare', label: 'Healthcare' },
+  { value: 'hospitality', label: 'Hospitality & Food Service' },
+  { value: 'retail', label: 'Retail' },
+  { value: 'manufacturing', label: 'Manufacturing & Industrial' },
+  { value: 'technology', label: 'Technology & Professional Services' },
+  { value: 'biotech', label: 'Biotech & Pharma' },
+  { value: 'other', label: 'Other' },
+]
 
 export default function ComplianceSignup() {
   const [searchParams] = useSearchParams()
@@ -16,6 +32,8 @@ export default function ComplianceSignup() {
   const [password, setPassword] = useState('')
   const [headcount, setHeadcount] = useState('')
   const [jurisdictions, setJurisdictions] = useState('')
+  const [industry, setIndustry] = useState('')
+  const [industryOther, setIndustryOther] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [inviteInfo, setInviteInfo] = useState<
@@ -48,6 +66,8 @@ export default function ComplianceSignup() {
   const jurisdictionCount = !isNaN(jc) && jc >= 0 ? jc : 0
   const overLimit = headcountValid && !comped && hc > maxHeadcount
   const price = headcountValid && !overLimit && !comped && pricing ? computeLitePriceDollars(hc, pricing) : null
+  const industryValid = industry && (industry !== 'other' || industryOther.trim().length > 0)
+  const resolvedIndustry = industry === 'other' ? industryOther.trim() : industry
 
   const canSubmit =
     companyName.trim() &&
@@ -55,7 +75,8 @@ export default function ComplianceSignup() {
     email.trim() &&
     password.length >= 8 &&
     headcountValid &&
-    !overLimit
+    !overLimit &&
+    industryValid
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -75,6 +96,7 @@ export default function ComplianceSignup() {
           password,
           headcount: hc,
           jurisdiction_count: jurisdictionCount,
+          industry: resolvedIndustry,
           ...(brokerRef ? { lite_broker_token: brokerRef } : {}),
           ...(inviteToken ? { lite_invite_token: inviteToken } : {}),
         }),
@@ -163,6 +185,26 @@ export default function ComplianceSignup() {
                 className={`mt-1 w-full bg-zinc-900 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-emerald-700 ${seatInvite ? 'opacity-60 cursor-not-allowed' : ''}`}
               />
             </label>
+          </div>
+
+          <div>
+            <Select
+              label="Industry"
+              options={INDUSTRY_OPTIONS}
+              value={industry}
+              onChange={(e) => setIndustry(e.target.value)}
+              placeholder="Select an industry"
+              required
+            />
+            {industry === 'other' && (
+              <input
+                type="text"
+                value={industryOther}
+                onChange={(e) => setIndustryOther(e.target.value)}
+                placeholder="Describe your industry"
+                className="mt-2 w-full bg-zinc-900 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-emerald-700"
+              />
+            )}
           </div>
 
           <div>
