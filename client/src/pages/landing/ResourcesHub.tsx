@@ -69,15 +69,6 @@ const CATEGORIES: Category[] = [
     gated: true,
     icon: FileText,
   },
-  {
-    to: '/blog',
-    title: 'Blog',
-    description:
-      'Field notes from the practice — HR, compliance, GRC, and people-ops.',
-    status: 'live',
-    gated: false,
-    icon: FileText,
-  },
 ]
 
 export default function ResourcesHub() {
@@ -88,8 +79,7 @@ export default function ResourcesHub() {
   // hiding them once `me` resolves. Show them once we know auth state.
   const showGated = !loading && isSignedIn
 
-  // Guests only see ungated resources (glossary + blog). Signed-in clients
-  // see the full catalog.
+  // Guests only see ungated resources. Signed-in clients see the full catalog.
   const visible = CATEGORIES.filter(c => !c.gated || showGated)
 
   return (

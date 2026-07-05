@@ -40,7 +40,6 @@ export default function MarketingFooter({
           ]} />
           <FooterCol title="Explore" links={[
             { label: 'Resources', to: '/resources' },
-            { label: 'Blog', to: '/blog' },
             { label: 'News', to: '/news' },
           ]} />
           <FooterCol title="Company" links={[

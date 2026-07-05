@@ -30,7 +30,6 @@ function NewBadge() {
 // Content / non-offering — split into the Explore sub-nav.
 const EXPLORE_LINKS = [
   { to: "/resources", label: "Resources" },
-  { to: "/blog", label: "Blog" },
   { to: "/news", label: "News" },
 ];
 
