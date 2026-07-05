@@ -68,6 +68,9 @@ from app.core.services.onboarding_scope_ai import (
     gap_check as ai_gap_check,
     map_to_bank,
 )
+from app.core.services.roster_jurisdictions import (
+    collect_roster_jurisdictions as _collect_roster,
+)
 from app.core.services.compliance_service import (
     ensure_location_for_employee,
     run_compliance_check_stream,
@@ -570,58 +573,10 @@ async def create_company(
 # ── Employee-sync enrichment (existing company) ─────────────────────────
 
 
-async def _collect_roster(conn, company_id: UUID) -> tuple[list[str], dict, set, int]:
-    """Distinct active-employee work locations + roles for a company.
-
-    Returns (roles, emp_locs, existing_location_keys, skipped_no_work_state)
-    where emp_locs is keyed by (lower_city, upper_state) → (display_city,
-    upper_state), existing_location_keys are the same keys already tracked as
-    business_locations (so callers know which jurisdictions are NEW), and
-    skipped_no_work_state is the count of active employees dropped from the
-    roster scan because they have no `work_state` on file (so callers can
-    surface that the scope may be incomplete, rather than silently missing
-    those employees' jurisdictions).
-    """
-    emp_rows = await conn.fetch(
-        """
-        SELECT DISTINCT work_city, work_state, job_title
-        FROM employees
-        WHERE org_id = $1 AND termination_date IS NULL AND work_state IS NOT NULL
-        """,
-        company_id,
-    )
-    skipped_no_work_state = await conn.fetchval(
-        """
-        SELECT COUNT(*) FROM employees
-        WHERE org_id = $1 AND termination_date IS NULL AND work_state IS NULL
-        """,
-        company_id,
-    ) or 0
-    roles = sorted({
-        r["job_title"].strip()
-        for r in emp_rows
-        if r["job_title"] and r["job_title"].strip()
-    })
-    emp_locs: dict[tuple[str, str], tuple[str, str]] = {}
-    for r in emp_rows:
-        state = (r["work_state"] or "").upper().strip()
-        if not state:
-            continue
-        city = (r["work_city"] or "").strip()
-        emp_locs.setdefault((city.lower(), state), (city, state))
-
-    existing_loc_rows = await conn.fetch(
-        """
-        SELECT city, state FROM business_locations
-        WHERE company_id = $1 AND is_active = TRUE AND is_company_wide = FALSE
-        """,
-        company_id,
-    )
-    existing_keys = {
-        ((r["city"] or "").lower(), (r["state"] or "").upper())
-        for r in existing_loc_rows
-    }
-    return roles, emp_locs, existing_keys, skipped_no_work_state
+# `_collect_roster` (roster -> distinct work locations + roles + drop count)
+# now lives in `app.core.services.roster_jurisdictions.collect_roster_jurisdictions`
+# (Phase D3 — shared with the Matcha-X self-serve build); imported above
+# under its original name so the three call sites in this file are unchanged.
 
 
 # Company columns the enrichment loads to ground the scope analysis.

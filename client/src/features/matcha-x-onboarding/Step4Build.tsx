@@ -149,6 +149,17 @@ export default function Step4Build({ handbookUrl, onDone }: { handbookUrl: strin
               {done.jurisdictions ?? 0} jurisdiction(s)
               {done.codified_new ? `, ${done.codified_new} newly codified into your directory` : ''}
               {coveragePct !== null ? ` · ${coveragePct}% handbook coverage` : ''}.
+              {done.roster_locations_added ? (
+                <span className="block mt-1">
+                  {done.roster_locations_added} location(s) added from your employee roster.
+                </span>
+              ) : null}
+              {done.skipped_no_work_state ? (
+                <span className="block mt-1 text-amber-500">
+                  {done.skipped_no_work_state} employee(s) have no work state on file — their
+                  jurisdiction may be missing from this build.
+                </span>
+              ) : null}
             </p>
           </div>
           <button

@@ -43,6 +43,13 @@ export type BuildEvent = {
   covered?: number | HandbookGrade[]
   codified_new?: number
   researched_live?: boolean
+  // roster_scanned / jurisdiction_new / roster-tagged location_built (D3.2) —
+  // `source: "roster"` marks an event as coming from the roster union rather
+  // than a typed location.
+  source?: 'roster'
+  locations_total?: number
+  locations_new?: number
+  roles?: string[]
   // handbook_grading / handbook_coverage
   gaps?: HandbookGrade[]
   covered_count?: number
@@ -54,6 +61,8 @@ export type BuildEvent = {
   requirements?: number
   handbook_states_graded?: number
   handbook_coverage_pct?: number | null
+  roster_locations_added?: number
+  skipped_no_work_state?: number
 }
 
 // Live running totals derived from the event stream — drives the finale header.

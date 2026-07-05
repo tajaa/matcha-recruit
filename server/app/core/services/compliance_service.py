@@ -1115,12 +1115,15 @@ async def _heartbeat_while(task, *, queue=None, interval=HEARTBEAT_INTERVAL):
 
 
 async def _get_or_create_jurisdiction(
-    conn, city: str, state: str, county: Optional[str] = None
+    conn, city: str, state: str, county: Optional[str] = None, zipcode: Optional[str] = None
 ) -> UUID:
     """Find or create a jurisdiction row with hierarchy resolution.
 
-    Auto-resolves county from jurisdiction_reference when not provided,
-    then links city -> county -> state via parent_id.
+    Auto-resolves county from jurisdiction_reference when not provided; if
+    that city-name match doesn't find one either and ``zipcode`` is given,
+    falls back to `_resolve_county_from_zip` (D3.3 — zip was collected at
+    onboarding but previously only used by one unrelated endpoint). Then
+    links city -> county -> state via parent_id.
     """
     norm_state = state.upper().strip()
 
@@ -1145,6 +1148,8 @@ async def _get_or_create_jurisdiction(
     norm_city, ref_county = await _resolve_reference_city(conn, city, state)
     if not county and ref_county:
         county = ref_county
+    if not county and zipcode:
+        county = await _resolve_county_from_zip(conn, zipcode, norm_state)
 
     # 2. Get or create city jurisdiction
     city_display = f"{city.strip()}, {norm_state}"
@@ -4465,7 +4470,7 @@ async def run_compliance_check_stream(
             jurisdiction_id = location.jurisdiction_id
             if not jurisdiction_id:
                 jurisdiction_id = await _get_or_create_jurisdiction(
-                    conn, location.city, location.state, location.county
+                    conn, location.city, location.state, location.county, location.zipcode
                 )
                 await conn.execute(
                     "UPDATE business_locations SET jurisdiction_id = $1 WHERE id = $2",
@@ -7318,7 +7323,7 @@ async def run_compliance_check_background(
             jurisdiction_id = location.jurisdiction_id
             if not jurisdiction_id:
                 jurisdiction_id = await _get_or_create_jurisdiction(
-                    conn, location.city, location.state, location.county
+                    conn, location.city, location.state, location.county, location.zipcode
                 )
                 await conn.execute(
                     "UPDATE business_locations SET jurisdiction_id = $1 WHERE id = $2",

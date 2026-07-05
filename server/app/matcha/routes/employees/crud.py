@@ -37,6 +37,7 @@ from app.matcha.services.onboarding_orchestrator import (
     PROVIDER_GOOGLE_WORKSPACE,
     PROVIDER_SLACK,
 )
+from app.core.services.roster_jurisdictions import run_jurisdiction_drift_check
 
 from ._shared import (
     _auto_send_invitation,
@@ -544,6 +545,12 @@ async def create_employee(
             background_tasks=background_tasks,
         )
 
+        # D4: cheap post-onboarding drift check — does this roster now imply a
+        # jurisdiction the company's tracked locations don't cover? Alert-only,
+        # never triggers research.
+        if row["work_state"]:
+            background_tasks.add_task(run_jurisdiction_drift_check, company_id)
+
         # Auto-assign active onboarding task templates to the new employee
         try:
             template_rows = await conn.fetch(
@@ -784,13 +791,15 @@ async def update_employee(
     async with get_connection() as conn:
         compensation_fields_available = await _employee_compensation_fields_available(conn)
         org_fields_available = await _employee_org_fields_available(conn)
-        # Check employee exists
-        existing = await conn.fetchval(
-            "SELECT id FROM employees WHERE id = $1 AND org_id = $2",
+        # Check employee exists (also grab work_state so we can tell below
+        # whether this update actually changes it, for D4 drift detection).
+        existing = await conn.fetchrow(
+            "SELECT id, work_state FROM employees WHERE id = $1 AND org_id = $2",
             employee_id, company_id
         )
         if not existing:
             raise HTTPException(status_code=404, detail="Employee not found")
+        old_work_state = existing["work_state"]
 
         # Build update query dynamically
         updates = []
@@ -923,6 +932,11 @@ async def update_employee(
                 work_city=row["work_city"] if compensation_fields_available else None,
                 background_tasks=background_tasks,
             )
+
+        # D4: drift check only when work_state actually changed — alert-only,
+        # never triggers research.
+        if request.work_state is not None and (row["work_state"] or None) != (old_work_state or None):
+            background_tasks.add_task(run_jurisdiction_drift_check, company_id)
 
         # Refresh risk assessment snapshot when wage data changes
         if compensation_fields_available and (

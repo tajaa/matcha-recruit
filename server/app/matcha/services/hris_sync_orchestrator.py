@@ -9,6 +9,7 @@ from typing import Any, Optional
 from uuid import UUID
 
 from ...core.services.secret_crypto import decrypt_secret
+from ...core.services.roster_jurisdictions import run_jurisdiction_drift_check
 from ...database import get_connection
 from .hris_service import PROVIDER_HRIS, HRISProvisioningError, get_hris_service
 
@@ -422,6 +423,17 @@ async def start_hris_sync(
         "[HRIS] Sync run %s complete for company %s — %d total, %d created, %d updated, %d skipped, %d errors",
         run_id, company_id, total_records, created_count, updated_count, skipped_count, error_count,
     )
+
+    # D4: cheap post-sync drift check (own connection, self-guarded) — alert
+    # only, never triggers research. This orchestrator is called both awaited
+    # directly from a route and via BackgroundTasks (see provisioning.py), so
+    # it can't assume a BackgroundTasks is available here; awaiting a fast,
+    # self-contained check inline is simpler than a bare asyncio.create_task
+    # (which this codebase avoids for HRIS work — see the webhook re-sync
+    # comment in provisioning.py — since it can be cancelled when the
+    # request/task that spawned it returns).
+    if created_count or updated_count:
+        await run_jurisdiction_drift_check(company_id)
 
     return {
         "run_id": str(final_row["id"]),

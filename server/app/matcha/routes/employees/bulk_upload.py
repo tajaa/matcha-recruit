@@ -29,6 +29,7 @@ from app.core.models.auth import CurrentUser
 from app.core.services.credential_crypto import encrypt_credential_fields
 from app.database import get_connection
 from app.matcha.dependencies import get_client_company_id, require_admin_or_client
+from app.core.services.roster_jurisdictions import run_jurisdiction_drift_check
 
 from ._shared import (
     _coerce_bool,
@@ -632,6 +633,11 @@ async def bulk_upload_employees_csv(
     # Check if there were any rows
     if created == 0 and failed == 0:
         raise HTTPException(status_code=400, detail="No data rows found in CSV")
+
+    # D4: one cheap post-upload drift check for the whole batch (not per-row) —
+    # alert-only, never triggers research.
+    if created:
+        background_tasks.add_task(run_jurisdiction_drift_check, company_id)
 
     logger.info(
         "[BulkUpload] Complete: %d created, %d failed, %d errors, %d missing work location, %d background tasks queued",

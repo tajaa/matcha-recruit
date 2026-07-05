@@ -34,6 +34,10 @@ from ...core.services.compliance_service import (
     _get_industry_profile,
     _heartbeat_while,
 )
+from ...core.services.roster_jurisdictions import (
+    collect_roster_jurisdictions,
+    sync_and_check_roster_jurisdictions,
+)
 from ...core.services.handbook_audit_service import (
     _extract_sections_from_pdf,
     _grade_state_coverage,
@@ -302,13 +306,20 @@ async def build_compliance_baseline_stream(
                 company_id,
             )
             industry_profile = await _get_industry_profile(conn, company_id)
+            # D3.2: roster-derived work locations feed the build too — check
+            # before deciding whether there's anything to build (a CSV-only
+            # company with no typed location must still build from roster).
+            _roles, _emp_locs, _existing_keys, skipped_no_work_state = (
+                await collect_roster_jurisdictions(conn, company_id)
+            )
         industry = (industry_profile or {}).get("canonical_industry")
         company_name = company["name"] or "your company"
+        roster_new_keys = [k for k in _emp_locs if k not in _existing_keys]
 
         def _label(row) -> str:
             return row["name"] or f"{row['city']}, {row['state']}"
 
-        if not locs:
+        if not locs and not roster_new_keys:
             yield {
                 "type": "complete",
                 "locations": 0,
@@ -317,7 +328,9 @@ async def build_compliance_baseline_stream(
                 "codified_new": 0,
                 "handbook_states_graded": 0,
                 "handbook_coverage_pct": None,
-                "message": "Add a location to build your compliance baseline.",
+                "roster_locations_added": 0,
+                "skipped_no_work_state": skipped_no_work_state,
+                "message": "Add a location or an employee with a work state to build your compliance baseline.",
             }
             return
 
@@ -331,6 +344,8 @@ async def build_compliance_baseline_stream(
             "labels": [_label(l) for l in locs],
             "message": (
                 f"{len(locs)} location(s) — each gets its own local compliance."
+                if locs
+                else "No locations added yet — building from your employee roster."
             ),
         }
 
@@ -477,6 +492,30 @@ async def build_compliance_baseline_stream(
                 ),
             }
 
+        # 3b. Union roster-derived jurisdictions (D3.2) — work states the roster
+        # reports that aren't covered by a typed location yet. Same
+        # allow_live_research + categories as the typed-location loop above so
+        # roster-derived jurisdictions get identical treatment.
+        roster_locations_added = 0
+        async for ev in sync_and_check_roster_jurisdictions(
+            get_connection,
+            company_id,
+            allow_live_research=True,
+            categories=MATCHA_X_LITE_CATEGORIES,
+        ):
+            etype = ev.get("type")
+            if etype == "heartbeat":
+                yield {"type": "heartbeat"}
+                continue
+            if etype == "location_built":
+                roster_locations_added += 1
+                total_covered += ev.get("covered", 0)
+                total_codified += ev.get("codified_new", 0)
+                jid = ev.get("jurisdiction_id")
+                if jid:
+                    jurisdictions_seen.add(jid)
+            yield ev
+
         # 4. Handbook coverage overlay (per state present across locations).
         handbook_states_graded = 0
         hb_covered = 0
@@ -565,12 +604,14 @@ async def build_compliance_baseline_stream(
         coverage_pct = round(100 * hb_covered / hb_total) if hb_total else None
         yield {
             "type": "complete",
-            "locations": len(locs),
+            "locations": len(locs) + roster_locations_added,
             "jurisdictions": len(jurisdictions_seen),
             "requirements": total_covered,
             "codified_new": total_codified,
             "handbook_states_graded": handbook_states_graded,
             "handbook_coverage_pct": coverage_pct,
+            "roster_locations_added": roster_locations_added,
+            "skipped_no_work_state": skipped_no_work_state,
             "message": "Your compliance baseline is live.",
         }
 
