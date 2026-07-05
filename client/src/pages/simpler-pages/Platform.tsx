@@ -6,7 +6,7 @@ import { ShieldAlert, Scale, Users, Gavel, Activity, Brain } from 'lucide-react'
 import MarketingNav from '../landing/MarketingNav'
 import MarketingFooter from '../landing/MarketingFooter'
 import { LazyMount } from '../landing/LazyMount'
-import { EnforcementTotalsTicker } from '../../components/landing/EnforcementTotalsTicker'
+import { ComplianceTicker } from '../../components/landing/ComplianceTicker'
 import { PricingContactModal } from '../../components/PricingContactModal'
 
 const AgentReasoningAnimation = lazy(() => import('../landing/AgentReasoningAnimation'))
@@ -123,7 +123,7 @@ export default function SimplePlatformPage() {
   return (
     <div style={{ backgroundColor: BG, color: INK }} className="min-h-screen overflow-x-hidden">
       <PricingContactModal isOpen={isPricingOpen} onClose={() => setIsPricingOpen(false)} />
-      <EnforcementTotalsTicker mono />
+      <ComplianceTicker />
       <MarketingNav onDemoClick={() => setIsPricingOpen(true)} />
 
       <Hero onContactClick={() => setIsPricingOpen(true)} />
