@@ -4838,6 +4838,11 @@ async def run_compliance_check_stream(
                         still_missing,
                         threshold_days=max(location.auto_check_interval_days or 7, 90),
                     )
+            # Repository-only mode: allow_live_research=False forbids per-company
+            # live research, but gap-driven refresh of the SHARED jurisdiction
+            # source-of-truth is intentional — it fires only for categories never
+            # researched in this jurisdiction and upserts into the shared library
+            # (library-permanence model: search on miss, store forever).
             elif not used_repository and not allow_live_research:
                 missing_categories = _missing_required_categories(requirements)
                 used_repository = True
@@ -7569,6 +7574,11 @@ async def run_compliance_check_background(
                         not in target_set
                     ]
                     requirements = preserved + requirements
+            # Repository-only mode: allow_live_research=False forbids per-company
+            # live research, but gap-driven refresh of the SHARED jurisdiction
+            # source-of-truth is intentional — it fires only for categories never
+            # researched in this jurisdiction and upserts into the shared library
+            # (library-permanence model: search on miss, store forever).
             elif not used_repository and not allow_live_research:
                 missing_categories = _missing_required_categories(requirements)
                 used_repository = True
