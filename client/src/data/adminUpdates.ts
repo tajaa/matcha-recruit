@@ -23,6 +23,40 @@ export type AdminUpdate = {
 
 export const ADMIN_UPDATES: AdminUpdate[] = [
   {
+    id: 'compliance-audit-remediation',
+    date: '2026-07-04',
+    category: 'Matcha Compliance',
+    title: 'Compliance engine — security lockdown, permanent regulatory library, roster-driven jurisdictions, industry-aware signup',
+    summary:
+      'A five-pass audit of the whole compliance system (engine, routes, onboarding, data library, coverage model) followed by a same-day remediation: 11 commits. Two security holes closed (an ungated router exposing location CRUD + unlimited AI research to any logged-in tenant of any tier), a dead code branch fixed that had silently disabled the automated repository-refresh path, and the regulatory library flipped to a research-once/store-forever model — every requirement we research is tagged (category, jurisdiction, source, effective date) and stored in the shared library, so the next company in the same city gets an instant cache hit instead of a re-search. The self-serve compliance build now actually reads the employee roster (CSV/HRIS work states feed jurisdictions — previously only hand-typed office addresses counted, despite the UI claiming otherwise), signup finally asks what the business does (industry now shapes research prompts), and new hires in a state outside the covered set raise a drift alert. Live end-to-end test on dev validated the whole chain and caught one more latent crasher: the industry-profiles table had been dropped in April as "unused" while the engine still queried it.',
+    whatsNew: [
+      'Security: the compliance-lite router is now feature-gated (compliance / compliance_lite / incidents); location create/edit/delete moved behind the full compliance flag; per-company rate limits on every Gemini-calling endpoint (verified live: 10 through, 11th → 429); location-ownership checks added to legislation assignment + admin cherry-pick endpoints.',
+      'Permanent library: stored jurisdiction requirements no longer expire after 90 days — they are truth until a future diff-scheduler re-checks them (env kill-switch REPOSITORY_TTL_ENABLED). Gap-driven research still fires for never-researched categories, and research prompts now capture expiration_date (when a rule is scheduled to change) for that future scheduler.',
+      'Roster-driven build: the onboarding compliance build unions employee work states (CSV/HRIS) with typed locations — a CSV-only roster now builds. Zipcode (already collected) now resolves counties when the city-name lookup misses. New-hire drift detection alerts when the roster implies a state outside the covered jurisdiction set, and reconciles declared-vs-actual jurisdiction counts.',
+      'Industry-aware from signup: Compliance signup collects industry (canonical 15-industry list shared with Company Settings); it persists to the company and shapes research prompts (live-verified: a healthcare tenant’s Dallas build researched hospital 8/80 overtime variants).',
+      'Work-state hygiene: CSV bulk upload and single-employee create/edit all validate work_state now (full names normalize to codes, typos rejected with a clear message) — bad states can no longer silently produce bogus jurisdictions.',
+      'Data hygiene: ingest scripts fail loudly instead of silently dropping research for unseeded categories; the admin coverage dashboard derives its category list from the DB (hardcoded list was why 8 manufacturing categories went missing unnoticed); all research skill docs repaired (dead repo paths).',
+      'Post-ship review pass (8 angles, adversarially verified) caught and fixed 17 more issues, including three frontend surfaces that would have silently 403’d after the security fix.',
+    ],
+    howToUse: [
+      'Nothing new to operate day-to-day — the engine behaves the same from the admin UI, just gated, cheaper (cache-first), and honest about failures.',
+      'Watch drift: companies now accumulate "roster implies jurisdiction X not in your build" alerts on the compliance alerts surface — these are the expansion/upsell signal.',
+      'Library growth is shared: any research run (customer build, admin enrich, fill-gaps skills) lands in jurisdiction_requirements tagged with source + dates. Check coverage at Admin → Jurisdiction Data (category list is now DB-derived; use ?bust=true after seeding).',
+      'Full audit findings + remaining roadmap (coverage manifest, NAICS industry overhaul, category-domain expansion, international) live in COMPLIANCE_REMEDIATION_PLAN.md at the repo root.',
+    ],
+    setup: [
+      'Apply migration mfgcat01 (seeds the 8 orphaned manufacturing categories — until then environmental/chemical/machine-safety research is rejected loudly at ingest). Dev + prod both pending.',
+      'Apply migration indprofrestore01 (restores the industry_compliance_profiles table dropped in April while the engine + /admin/industry-profiles CRUD still referenced it; the engine has a fallback, but admin profile management 500s until restored).',
+      'Known library-quality follow-ups from the live test: Gemini occasionally files one rule under multiple categories (needs a post-research sanity validator), and expiration_date capture needs a prompt-path trace — both logged in the plan doc.',
+    ],
+    notes: [
+      'Why the library flip matters: research is the expensive part (Gemini + time). Research-once/store-forever means coverage compounds — tonight’s test alone permanently added 118 tagged Dallas requirements that every future Dallas customer inherits free.',
+      'Why signup industry matters: the industry machinery existed but was unreachable — no self-serve company ever had an industry set, so every build ran generic labor-only research. That same gap is why the dropped industry-profiles table went unnoticed for three months.',
+      'Pricing note: jurisdiction count is still collected at signup but does not affect price (headcount-only) — deliberate pre-launch decision, revisit at go-live.',
+    ],
+    tag: 'action-needed',
+  },
+  {
     id: 'lite-addons-essentials-upgrade',
     date: '2026-07-01',
     category: 'Matcha Lite',
