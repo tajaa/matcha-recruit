@@ -319,12 +319,45 @@ async def _get_industry_profile(
     if not canonical:
         return None
 
-    profile_row = await conn.fetchrow(
-        "SELECT * FROM industry_compliance_profiles WHERE LOWER(name) LIKE $1",
-        f"%{canonical}%",
-    )
+    # industry_compliance_profiles was dropped as "unused" in migration
+    # zzh8i9j0k1l2 (2026-04-07) while this lookup still referenced it — it went
+    # unnoticed because no self-serve company had an industry set until signup
+    # started collecting one. This call sits OUTSIDE the try blocks in both
+    # run_compliance_check_stream/_background, so an unguarded UndefinedTableError
+    # here kills the entire compliance check. Fall back to the code-level
+    # industry context so industry-aware prompts survive without the table
+    # (a real profile table returns with the E2 industry overhaul).
+    profile_row = None
+    try:
+        profile_row = await conn.fetchrow(
+            "SELECT * FROM industry_compliance_profiles WHERE LOWER(name) LIKE $1",
+            f"%{canonical}%",
+        )
+    except asyncpg.UndefinedTableError:
+        logger.warning(
+            "industry_compliance_profiles table missing (dropped in zzh8i9j0k1l2); "
+            "using code-level industry context for %s", canonical,
+        )
+    except Exception:
+        logger.warning(
+            "industry profile lookup failed for %s; using code-level context",
+            canonical, exc_info=True,
+        )
+
+    industry_context = _INDUSTRY_RESEARCH_CONTEXT.get(canonical, "")
     if not profile_row:
-        return None
+        if not industry_context:
+            return None
+        return {
+            "id": None,
+            "name": canonical,
+            "canonical_industry": canonical,
+            "focused_categories": [],
+            "rate_types": [],
+            "category_order": [],
+            "category_evidence": None,
+            "industry_context": industry_context,
+        }
 
     return {
         "id": str(profile_row["id"]),
@@ -334,7 +367,7 @@ async def _get_industry_profile(
         "rate_types": profile_row["rate_types"] or [],
         "category_order": profile_row["category_order"] or [],
         "category_evidence": profile_row.get("category_evidence"),
-        "industry_context": _INDUSTRY_RESEARCH_CONTEXT.get(canonical, ""),
+        "industry_context": industry_context,
     }
 
 _CATEGORY_ALIASES = {
