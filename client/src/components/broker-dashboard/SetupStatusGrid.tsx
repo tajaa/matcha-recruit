@@ -1,5 +1,7 @@
-import { Card } from '../ui'
 import { HelpHint } from '../broker/HelpHint'
+import { LABEL } from '../ui/typography'
+
+const PANEL = 'rounded-2xl border border-white/[0.06] bg-zinc-950 p-5'
 
 const statusConfig: { key: string; label: string; dot: string }[] = [
   { key: 'draft', label: 'Draft', dot: 'bg-zinc-600' },
@@ -22,8 +24,8 @@ interface SetupStatusGridProps {
 
 export function SetupStatusGrid({ counts }: SetupStatusGridProps) {
   return (
-    <Card className="p-5">
-      <h3 className="text-sm font-medium text-zinc-200 tracking-wide mb-4 flex items-center gap-1.5">Setup Pipeline <HelpHint text="Where your in-flight client setups sit — from draft/invited through to live — so you can chase what's stalled before it expires." /></h3>
+    <div className={PANEL}>
+      <h3 className={`${LABEL} mb-4 flex items-center gap-1.5 normal-case`}>Setup Pipeline <HelpHint text="Where your in-flight client setups sit — from draft/invited through to live — so you can chase what's stalled before it expires." /></h3>
 
       <div className="space-y-2">
         {statusConfig.map(({ key, label, dot }) => {
@@ -34,7 +36,7 @@ export function SetupStatusGrid({ counts }: SetupStatusGridProps) {
                 <span className={`h-2 w-2 rounded-full ${dot}`} />
                 {label}
               </span>
-              <span className="text-sm font-medium text-zinc-200 tabular-nums">
+              <span className="font-mono text-sm font-medium text-zinc-200 tabular-nums">
                 {count}
               </span>
             </div>
@@ -42,9 +44,9 @@ export function SetupStatusGrid({ counts }: SetupStatusGridProps) {
         })}
       </div>
 
-      <div className="border-t border-zinc-800 my-4" />
+      <div className="border-t border-white/[0.06] my-4" />
 
-      <h3 className="text-sm font-medium text-zinc-200 tracking-wide mb-4">Onboarding</h3>
+      <h3 className={`${LABEL} mb-4`}>Onboarding</h3>
 
       <div className="space-y-2">
         {onboardingConfig.map(({ key, label, dot }) => {
@@ -55,13 +57,13 @@ export function SetupStatusGrid({ counts }: SetupStatusGridProps) {
                 <span className={`h-2 w-2 rounded-full ${dot}`} />
                 {label}
               </span>
-              <span className="text-sm font-medium text-zinc-200 tabular-nums">
+              <span className="font-mono text-sm font-medium text-zinc-200 tabular-nums">
                 {count}
               </span>
             </div>
           )
         })}
       </div>
-    </Card>
+    </div>
   )
 }

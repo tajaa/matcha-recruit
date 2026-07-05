@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Pencil } from 'lucide-react'
 import { Button } from '../ui'
+import { LABEL } from '../ui/typography'
 import type { BusinessLocation } from '../../types/compliance'
 
 type Props = {
@@ -22,7 +23,7 @@ export function ComplianceLocationList({ locations, selectedId, onSelect, onEdit
   if (loading) {
     return (
       <div>
-        <h2 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-1.5">Locations</h2>
+        <h2 className={`${LABEL} mb-1.5`}>Locations</h2>
         <p className="text-sm text-zinc-500">Loading...</p>
       </div>
     )
@@ -30,8 +31,8 @@ export function ComplianceLocationList({ locations, selectedId, onSelect, onEdit
 
   return (
     <div>
-      <h2 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-1.5">Locations</h2>
-      <div className="border border-zinc-800 rounded-lg divide-y divide-zinc-800/60">
+      <h2 className={`${LABEL} mb-1.5`}>Locations</h2>
+      <div className="border border-white/[0.06] bg-zinc-950 rounded-lg divide-y divide-white/[0.06]">
         {locations.length === 0 && (
           <p className="px-4 py-3 text-sm text-zinc-600">No locations added yet.</p>
         )}
@@ -41,8 +42,8 @@ export function ComplianceLocationList({ locations, selectedId, onSelect, onEdit
               onClick={() => onSelect(loc.id === selectedId ? null : loc.id)}
               className={`w-full flex items-center justify-between px-3 py-2.5 text-left transition-colors border-l-2 ${
                 loc.id === selectedId
-                  ? 'bg-zinc-800/60 border-zinc-300'
-                  : 'hover:bg-zinc-800/30 border-transparent'
+                  ? 'bg-white/[0.03] border-emerald-400'
+                  : 'hover:bg-white/[0.02] border-transparent'
               }`}>
               <div className="min-w-0 flex-1">
                 <p className="text-sm text-zinc-200 truncate">
@@ -55,10 +56,10 @@ export function ComplianceLocationList({ locations, selectedId, onSelect, onEdit
                     <span className="text-[11px] text-zinc-600">{loc.employee_count} employees</span>
                   )}
                   {loc.source === 'employee_derived' && (
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700">Employee</span>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/[0.04] text-zinc-400 border border-white/[0.08]">Employee</span>
                   )}
                   {loc.has_local_ordinance && (
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700">Local</span>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/[0.04] text-zinc-400 border border-white/[0.08]">Local</span>
                   )}
                 </div>
               </div>

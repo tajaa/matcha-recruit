@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { HelpHint } from './HelpHint'
+import { LABEL } from '../ui/typography'
 import { fmtMoney } from '../../utils/brokerFormat'
 import type { WcPortfolioResponse, EplPortfolioResponse } from '../../types/broker'
 import type { RiskIndexPortfolio } from '../../types/riskIndex'
@@ -16,7 +17,7 @@ function DistributionBar({ segments }: { segments: Seg[] }) {
   const total = segments.reduce((s, x) => s + x.count, 0)
   return (
     <div className="flex flex-col gap-1.5">
-      <div className="flex h-2 w-full overflow-hidden rounded-full bg-zinc-800">
+      <div className="flex h-2 w-full overflow-hidden rounded-full bg-white/[0.06]">
         {total > 0 &&
           segments.map((s) =>
             s.count > 0 ? (
@@ -70,7 +71,7 @@ function PostureRow({
 function Headline({ label, value, tone = 'text-zinc-100' }: { label: string; value: string; tone?: string }) {
   return (
     <div className="md:text-right">
-      <div className="text-[9px] font-bold uppercase tracking-widest text-zinc-600">{label}</div>
+      <div className={LABEL}>{label}</div>
       <div className={`font-mono text-lg leading-tight tabular-nums ${tone}`}>{value}</div>
     </div>
   )
@@ -78,7 +79,7 @@ function Headline({ label, value, tone = 'text-zinc-100' }: { label: string; val
 
 function Chip({ label, value, tone = 'text-zinc-300' }: { label: string; value: number; tone?: string }) {
   return (
-    <span className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-800 bg-zinc-900/60 px-2.5 py-1.5 text-[11px]">
+    <span className="inline-flex items-center gap-1.5 rounded-lg border border-white/[0.06] bg-white/[0.03] px-2.5 py-1.5 text-[11px]">
       <span className="text-zinc-500">{label}</span>
       <span className={`font-mono tabular-nums ${value > 0 ? tone : 'text-zinc-600'}`}>{value}</span>
     </span>
@@ -109,13 +110,13 @@ export function RiskPosturePanel({
   if (!hasWc && !hasEpl && !hasRisk) return null
 
   return (
-    <section className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900/40">
-      <header className="flex items-center gap-1.5 border-b border-zinc-800/60 px-5 py-3.5">
-        <h2 className="text-[11px] font-bold uppercase tracking-widest text-zinc-500">Risk posture</h2>
+    <section className="overflow-hidden rounded-2xl border border-white/[0.06] bg-zinc-950">
+      <header className="flex items-center gap-1.5 border-b border-white/[0.06] px-5 py-3.5">
+        <h2 className={LABEL}>Risk posture</h2>
         <HelpHint text="Every client banded best→worst across the three lenses carriers price on — workers' comp safety, EPL readiness, and the composite risk index. The bar shows where your book sits; the number on the right is your headline for a renewal conversation." />
       </header>
 
-      <div className="divide-y divide-zinc-800/50 px-5">
+      <div className="divide-y divide-white/[0.06] px-5">
         {hasWc && (
           <PostureRow
             name="Workers' Comp"
@@ -172,8 +173,8 @@ export function RiskPosturePanel({
       </div>
 
       {hasWc && (
-        <div className="flex flex-wrap items-center gap-2 border-t border-zinc-800/60 px-5 py-3.5">
-          <span className="mr-1 text-[10px] font-bold uppercase tracking-widest text-zinc-600">
+        <div className="flex flex-wrap items-center gap-2 border-t border-white/[0.06] px-5 py-3.5">
+          <span className={`mr-1 ${LABEL}`}>
             WC claim depth
           </span>
           <Chip label="Cumulative trauma" value={wc!.summary.total_ct_cases ?? 0} tone="text-red-400" />

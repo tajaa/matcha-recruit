@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Button } from '../../components/ui'
+import { LABEL } from '../../components/ui/typography'
 import { useComplianceData } from '../../hooks/compliance/useComplianceData'
 import { useLocationDetail } from '../../hooks/compliance/useLocationDetail'
 import { useComplianceCheck } from '../../hooks/compliance/useComplianceCheck'
@@ -145,7 +146,7 @@ function ComplianceFull() {
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 sm:gap-0">
         <div>
           <h1 className="text-2xl font-semibold text-zinc-100">Compliance</h1>
-          <p className="mt-1 text-sm text-zinc-500">Jurisdictional requirements, alerts, and location management.</p>
+          <p className={`mt-1 ${LABEL}`}>Jurisdictional requirements, alerts, and location management.</p>
         </div>
       </div>
 
@@ -196,7 +197,7 @@ function ComplianceFull() {
           {/* Right: content area */}
           <div className="col-span-2">
             {!selectedId ? (
-              <div className="flex items-center justify-center h-40 border border-zinc-800 rounded-lg">
+              <div className="flex items-center justify-center h-40 rounded-lg border border-white/[0.06] bg-zinc-950">
                 <p className="text-sm text-zinc-600">Select a location to view details</p>
               </div>
             ) : (

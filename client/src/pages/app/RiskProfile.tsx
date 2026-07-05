@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
 import { Gauge, Loader2, ArrowUpRight, Sparkles, ListChecks, Check, Circle, MapPin, Ban } from 'lucide-react'
-import { Card } from '../../components/ui'
+import { LABEL } from '../../components/ui/typography'
 import { fetchRiskProfile, fetchRiskNarrative, fetchSubmissionReadiness, fetchVenueExposure, fetchExclusionGap } from '../../api/riskIndex'
 import type { RiskNarrative } from '../../api/riskIndex'
 import type { RiskIndex, SubmissionReadiness, VenueExposure, ExclusionGap } from '../../types/riskIndex'
 import { RISK_BAND_TONE, READINESS_BAND_TONE, VENUE_TIER_TONE, EXCLUSION_TONE } from '../../types/riskIndex'
+
+const PANEL = 'rounded-lg border border-white/[0.06] bg-zinc-950'
 
 export default function RiskProfile() {
   const [data, setData] = useState<RiskIndex | null>(null)
@@ -44,7 +46,7 @@ export default function RiskProfile() {
       </div>
 
       {/* Index hero */}
-      <Card className="p-6 flex items-center gap-8">
+      <div className={`${PANEL} p-6 flex items-center gap-8`}>
         <div className="text-center">
           <div className={`text-6xl font-light font-mono ${tone}`}>{data.index ?? '—'}</div>
           <div className={`text-xs uppercase tracking-widest font-bold mt-1 ${tone}`}>{data.band ?? 'no data'}</div>
@@ -57,21 +59,21 @@ export default function RiskProfile() {
                 <span className="text-zinc-300">{c.label} <span className="text-zinc-600">· wt {c.weight}</span></span>
                 <span className="font-mono text-zinc-200">{c.score}/100</span>
               </div>
-              <div className="h-1.5 rounded-full bg-zinc-800 overflow-hidden">
+              <div className="h-1.5 rounded-full bg-white/[0.06] overflow-hidden">
                 <div className={`h-full ${c.score >= 80 ? 'bg-emerald-500' : c.score >= 60 ? 'bg-zinc-400' : c.score >= 35 ? 'bg-amber-500' : 'bg-red-500'}`} style={{ width: `${c.score}%` }} />
               </div>
               <div className="text-[11px] text-zinc-600 mt-0.5">{c.detail}</div>
             </div>
           ))}
         </div>
-      </Card>
+      </div>
 
       {/* Submission readiness — data→price completeness loop */}
       {readiness && (
-        <Card className="p-5">
+        <div className={`${PANEL} p-5`}>
           <div className="flex items-start justify-between mb-3">
             <div>
-              <h3 className="text-sm font-medium text-zinc-200 tracking-wide flex items-center gap-2">
+              <h3 className={`${LABEL} normal-case flex items-center gap-2`}>
                 <ListChecks className="h-4 w-4 text-zinc-500" /> Submission readiness
               </h3>
               <p className="text-[11px] text-zinc-500 mt-0.5 max-w-xl">How underwriter-ready your WC + EPL data is. Completing these doesn't change your risk — it lets your broker articulate it, which is what wins tighter terms.</p>
@@ -81,12 +83,12 @@ export default function RiskProfile() {
               <div className={`text-[10px] uppercase tracking-widest font-bold ${READINESS_BAND_TONE[readiness.band] ?? 'text-zinc-500'}`}>{readiness.band}</div>
             </div>
           </div>
-          <div className="h-1.5 rounded-full bg-zinc-800 overflow-hidden mb-3">
+          <div className="h-1.5 rounded-full bg-white/[0.06] overflow-hidden mb-3">
             <div className={`h-full ${readiness.score >= 80 ? 'bg-emerald-500' : readiness.score >= 50 ? 'bg-amber-500' : 'bg-red-500'}`} style={{ width: `${readiness.score}%` }} />
           </div>
           <div className="space-y-1">
             {readiness.items.map((it) => (
-              <div key={it.key} className="flex items-start gap-2 py-1 border-b border-zinc-800/30 last:border-0">
+              <div key={it.key} className="flex items-start gap-2 py-1 border-b border-white/[0.04] last:border-0">
                 {it.done
                   ? <Check className="h-4 w-4 text-emerald-400 mt-0.5 shrink-0" />
                   : <Circle className="h-4 w-4 text-zinc-600 mt-0.5 shrink-0" />}
@@ -97,15 +99,15 @@ export default function RiskProfile() {
               </div>
             ))}
           </div>
-        </Card>
+        </div>
       )}
 
       {/* Venue exposure — casualty severity dimension (where you operate) */}
       {venue && venue.locations.length > 0 && (
-        <Card className="p-5">
+        <div className={`${PANEL} p-5`}>
           <div className="flex items-start justify-between mb-3">
             <div>
-              <h3 className="text-sm font-medium text-zinc-200 tracking-wide flex items-center gap-2">
+              <h3 className={`${LABEL} normal-case flex items-center gap-2`}>
                 <MapPin className="h-4 w-4 text-zinc-500" /> Venue exposure
               </h3>
               <p className="text-[11px] text-zinc-500 mt-0.5 max-w-xl">Where you operate drives casualty severity — underwriters weigh nuclear-verdict / plaintiff-friendly venues heavily. A directional flag, not a price.</p>
@@ -117,7 +119,7 @@ export default function RiskProfile() {
           </div>
           <div className="space-y-1">
             {venue.locations.map((l, i) => (
-              <div key={`${l.state}-${l.county || ''}-${l.city || ''}-${i}`} className="flex items-center gap-3 py-1.5 border-b border-zinc-800/30 last:border-0">
+              <div key={`${l.state}-${l.county || ''}-${l.city || ''}-${i}`} className="flex items-center gap-3 py-1.5 border-b border-white/[0.04] last:border-0">
                 <span className="text-sm text-zinc-200 flex-1">
                   {l.city || l.county || l.state}
                   {l.county && <span className="text-[11px] text-zinc-600 ml-2">{l.county}, {l.state}</span>}
@@ -127,15 +129,15 @@ export default function RiskProfile() {
             ))}
           </div>
           <p className="text-[10px] text-zinc-600 mt-2">Source: ATRA Judicial Hellholes / US Chamber ILR / nuclear-verdict reporting — directional reputational flag.</p>
-        </Card>
+        </div>
       )}
 
       {/* Coverage exclusion exposure — emerging casualty exclusions */}
       {exclusions && exclusions.exclusions.length > 0 && (
-        <Card className="p-5">
+        <div className={`${PANEL} p-5`}>
           <div className="flex items-start justify-between mb-3">
             <div>
-              <h3 className="text-sm font-medium text-zinc-200 tracking-wide flex items-center gap-2">
+              <h3 className={`${LABEL} normal-case flex items-center gap-2`}>
                 <Ban className="h-4 w-4 text-zinc-500" /> Coverage exclusion exposure
               </h3>
               <p className="text-[11px] text-zinc-500 mt-0.5 max-w-xl">Emerging exclusions carriers are adding to GL / umbrella / auto. "Mitigated" means you have the controls documented; "exposed" means address it before renewal.</p>
@@ -147,7 +149,7 @@ export default function RiskProfile() {
           </div>
           <div className="space-y-2">
             {exclusions.exclusions.map((e) => (
-              <div key={e.key} className="border-b border-zinc-800/30 last:border-0 pb-2">
+              <div key={e.key} className="border-b border-white/[0.04] last:border-0 pb-2">
                 <div className="flex items-center gap-2">
                   <span className={`text-[10px] font-semibold uppercase w-16 shrink-0 ${EXCLUSION_TONE[e.status] ?? 'text-zinc-500'}`}>{e.status}</span>
                   <span className="text-sm text-zinc-200 flex-1">{e.label}</span>
@@ -158,13 +160,13 @@ export default function RiskProfile() {
             ))}
           </div>
           <p className="text-[10px] text-zinc-600 mt-2">Directional underwriting flag — which exclusions a risk like this typically faces, not a coverage determination.</p>
-        </Card>
+        </div>
       )}
 
       {/* How to improve — AI narrative (falls back to the static fixes) */}
-      <Card className="p-5">
+      <div className={`${PANEL} p-5`}>
         <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-medium text-zinc-200 tracking-wide">How to improve your terms</h3>
+          <h3 className={LABEL}>How to improve your terms</h3>
           {!narrative && (
             <button onClick={explain} disabled={explaining} className="inline-flex items-center gap-1 text-xs text-emerald-400 hover:text-emerald-300 px-2 py-1 rounded-lg border border-emerald-900/60 hover:border-emerald-700 disabled:opacity-50">
               {explaining ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />} {explaining ? 'Thinking…' : 'Explain my risk'}
@@ -194,7 +196,7 @@ export default function RiskProfile() {
         ) : (
           <p className="text-sm text-zinc-500">You're in good shape — no priority fixes flagged.</p>
         )}
-      </Card>
+      </div>
     </div>
   )
 }

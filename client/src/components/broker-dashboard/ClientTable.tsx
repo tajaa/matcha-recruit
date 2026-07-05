@@ -1,10 +1,12 @@
 import { useNavigate } from 'react-router-dom'
 import { Sparkles } from 'lucide-react'
-import { Card } from '../ui'
 import { DeltaPill } from '../broker/DeltaPill'
 import { HelpHint } from '../broker/HelpHint'
+import { LABEL } from '../ui/typography'
 import { fmtMoney } from '../../utils/brokerFormat'
 import type { BrokerCompanyMetric, WcPortfolioRow } from '../../types/broker'
+
+const PANEL = 'rounded-2xl border border-white/[0.06] bg-zinc-950 p-5'
 
 const riskColors: Record<string, string> = {
   healthy: 'bg-emerald-500',
@@ -31,27 +33,27 @@ export function ClientTable({ companies, wcByCompany, onOutreach }: ClientTableP
   const navigate = useNavigate()
   if (companies.length === 0) {
     return (
-      <Card className="p-5">
-        <h3 className="text-sm font-medium text-zinc-200 tracking-wide mb-4 flex items-center gap-1.5">Accounts <HelpHint text="Every client with their key risk signals. Click a client to open their full WC + EPL detail, or start an AI-grounded outreach to them." /></h3>
+      <div className={PANEL}>
+        <h3 className={`${LABEL} mb-4 flex items-center gap-1.5 normal-case`}>Accounts <HelpHint text="Every client with their key risk signals. Click a client to open their full WC + EPL detail, or start an AI-grounded outreach to them." /></h3>
         <p className="text-sm text-zinc-500">No linked clients yet.</p>
-      </Card>
+      </div>
     )
   }
 
   return (
-    <Card className="p-5">
-      <h3 className="text-sm font-medium text-zinc-200 tracking-wide mb-4">Accounts</h3>
+    <div className={PANEL}>
+      <h3 className={`${LABEL} mb-4`}>Accounts</h3>
 
       <div className="overflow-x-auto">
         <table className="w-full text-left text-sm">
           <thead>
-            <tr className="border-b border-zinc-800/60">
-              <th className="pb-2 pr-4 text-[11px] font-medium text-zinc-500 uppercase tracking-wider">Account</th>
-              <th className="pb-2 pr-4 text-[11px] font-medium text-zinc-500 uppercase tracking-wider">Status</th>
-              <th className="pb-2 pr-4 text-[11px] font-medium text-zinc-500 uppercase tracking-wider text-right">FTE</th>
-              <th className="pb-2 pr-4 text-[11px] font-medium text-zinc-500 uppercase tracking-wider text-right">TRIR</th>
-              <th className="pb-2 pr-4 text-[11px] font-medium text-zinc-500 uppercase tracking-wider text-right">DART</th>
-              <th className="pb-2 text-[11px] font-medium text-zinc-500 uppercase tracking-wider text-right">Premium Δ</th>
+            <tr className="border-b border-white/[0.06]">
+              <th className={`pb-2 pr-4 ${LABEL}`}>Account</th>
+              <th className={`pb-2 pr-4 ${LABEL}`}>Status</th>
+              <th className={`pb-2 pr-4 text-right ${LABEL}`}>FTE</th>
+              <th className={`pb-2 pr-4 text-right ${LABEL}`}>TRIR</th>
+              <th className={`pb-2 pr-4 text-right ${LABEL}`}>DART</th>
+              <th className={`pb-2 text-right ${LABEL}`}>Premium Δ</th>
             </tr>
           </thead>
           <tbody>
@@ -61,7 +63,7 @@ export function ClientTable({ companies, wcByCompany, onOutreach }: ClientTableP
               return (
                 <tr
                   key={c.company_id}
-                  className="border-b border-zinc-800/30 last:border-0 cursor-pointer hover:bg-zinc-800/50 transition-colors"
+                  className="border-b border-white/[0.04] last:border-0 cursor-pointer hover:bg-white/[0.03] transition-colors"
                   onClick={() => navigate(`/broker/clients/${c.company_id}`)}
                 >
                   {/* Identity: name + industry */}
@@ -128,6 +130,6 @@ export function ClientTable({ companies, wcByCompany, onOutreach }: ClientTableP
           </tbody>
         </table>
       </div>
-    </Card>
+    </div>
   )
 }

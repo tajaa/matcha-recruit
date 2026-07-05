@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from 'react'
 import { Building2, Plus, Loader2, Send, AlertCircle, FileCheck, Upload, X, MapPin } from 'lucide-react'
 import { Button, Input, Modal, Badge } from '../../components/ui'
 import { HelpHint } from '../../components/broker/HelpHint'
+import { LABEL } from '../../components/ui/typography'
 import { api } from '../../api/client'
 import { createBatchClientSetups } from '../../api/broker'
 import type { BrokerBatchCreateResponse } from '../../types/broker'
@@ -386,7 +387,7 @@ export default function BrokerClients({ embedded = false }: { embedded?: boolean
       </div>
 
       {setups.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 text-zinc-500 border border-zinc-800 rounded-xl border-dashed">
+        <div className="flex flex-col items-center justify-center py-16 text-zinc-500 rounded-xl border border-white/[0.08] border-dashed bg-zinc-950">
           <Building2 className="h-10 w-10 mb-3 text-zinc-600" />
           <p className="text-sm font-medium text-zinc-400">No client setups yet</p>
           <p className="text-xs mt-1">Create a client setup to start onboarding a company.</p>
@@ -395,19 +396,19 @@ export default function BrokerClients({ embedded = false }: { embedded?: boolean
           </Button>
         </div>
       ) : (
-        <div className="overflow-hidden rounded-xl border border-zinc-800">
+        <div className="overflow-hidden rounded-xl border border-white/[0.06] bg-zinc-950">
           <table className="w-full text-sm text-left">
-            <thead className="bg-zinc-900/50 text-zinc-400">
-              <tr>
-                <th className="px-4 py-3 font-medium">Company</th>
-                <th className="px-4 py-3 font-medium">Contact</th>
-                <th className="px-4 py-3 font-medium">Status</th>
-                <th className="px-4 py-3 font-medium">Onboarding</th>
-                <th className="px-4 py-3 font-medium">Created</th>
-                <th className="px-4 py-3 font-medium text-right">Actions</th>
+            <thead>
+              <tr className="border-b border-white/[0.06]">
+                <th className={`px-4 py-3 ${LABEL}`}>Company</th>
+                <th className={`px-4 py-3 ${LABEL}`}>Contact</th>
+                <th className={`px-4 py-3 ${LABEL}`}>Status</th>
+                <th className={`px-4 py-3 ${LABEL}`}>Onboarding</th>
+                <th className={`px-4 py-3 ${LABEL}`}>Created</th>
+                <th className={`px-4 py-3 text-right ${LABEL}`}>Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-zinc-800">
+            <tbody className="divide-y divide-white/[0.06]">
               {setups.map((s) => {
                 const locText = locationSummary(s.locations)
                 return (

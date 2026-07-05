@@ -22,7 +22,7 @@ export function TabBar({
   onChange: (key: string) => void
 }) {
   return (
-    <div className="flex items-center gap-1 overflow-x-auto border-b border-zinc-800/70">
+    <div className="flex items-center gap-1 overflow-x-auto border-b border-white/[0.06]">
       {tabs.map((t) => {
         const isActive = t.key === active
         return (
@@ -42,12 +42,12 @@ export function TabBar({
             )}
             {t.label}
             {typeof t.count === 'number' && t.count > 0 && (
-              <span className="rounded bg-zinc-800 px-1.5 text-[10px] font-mono leading-[1.4] text-zinc-400">
+              <span className="rounded bg-white/[0.06] px-1.5 text-[10px] font-mono leading-[1.4] text-zinc-400">
                 {t.count}
               </span>
             )}
             {isActive && (
-              <span className="absolute inset-x-2 -bottom-px h-0.5 rounded-full bg-emerald-500" />
+              <span className="absolute inset-x-2 -bottom-px h-0.5 rounded-full bg-emerald-400" />
             )}
           </button>
         )

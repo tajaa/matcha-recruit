@@ -1,5 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { Button, Card, Input, Select, Badge, useToast } from '../../components/ui'
+import { Button, Input, Select, Badge, useToast } from '../../components/ui'
+import { LABEL } from '../../components/ui/typography'
+
+const PANEL = 'rounded-lg border border-white/[0.06] bg-zinc-950 p-5'
 import { INDUSTRY_OPTIONS } from '../../data/industryConstants'
 import { api } from '../../api/client'
 import { fetchLocations, createLocation, updateLocation, deleteLocation, fetchJurisdictions } from '../../api/compliance'
@@ -110,7 +113,7 @@ function EditableField({ label, value, onSave, type = 'text' }: EditableFieldPro
 
   return (
     <div
-      className="cursor-pointer group rounded-md px-2 py-1.5 -mx-2 hover:bg-zinc-800/50 transition-colors"
+      className="cursor-pointer group rounded-md px-2 py-1.5 -mx-2 hover:bg-white/[0.04] transition-colors"
       onClick={() => { setDraft(value ?? ''); setEditing(true) }}
     >
       <dt className="text-zinc-500 text-xs">{label}</dt>
@@ -172,7 +175,7 @@ function EditableSelect({ label, value, options, onSave }: EditableSelectProps) 
 
   return (
     <div
-      className="cursor-pointer group rounded-md px-2 py-1.5 -mx-2 hover:bg-zinc-800/50 transition-colors"
+      className="cursor-pointer group rounded-md px-2 py-1.5 -mx-2 hover:bg-white/[0.04] transition-colors"
       onClick={() => setEditing(true)}
     >
       <dt className="text-zinc-500 text-xs">{label}</dt>
@@ -325,13 +328,13 @@ export default function CompanySettings() {
       {/* Header */}
       <div>
         <h1 className="text-2xl font-semibold text-zinc-100">Company</h1>
-        <p className="mt-1 text-[10px] text-zinc-500 font-mono uppercase tracking-wider">
+        <p className={`mt-1 ${LABEL}`}>
           Manage your company profile and locations
         </p>
       </div>
 
       {/* Tabs — pill style */}
-      <div className="flex gap-0 border border-zinc-700 rounded-xl overflow-hidden w-fit">
+      <div className="flex gap-0 border border-white/[0.08] rounded-xl overflow-hidden w-fit">
         {(['profile', 'locations'] as const).map((t) => (
           <button
             key={t}
@@ -339,8 +342,8 @@ export default function CompanySettings() {
             onClick={() => setTab(t)}
             className={`px-5 py-2 text-[11px] uppercase tracking-widest font-bold transition-colors ${
               tab === t
-                ? 'bg-zinc-800 text-zinc-50'
-                : 'bg-zinc-900 text-zinc-500 hover:text-zinc-300'
+                ? 'bg-white/[0.08] text-zinc-50'
+                : 'bg-zinc-950 text-zinc-500 hover:text-zinc-300'
             }`}
           >
             {t === 'profile' ? 'Profile' : `Locations${locations.length > 0 ? ` (${locations.length})` : ''}`}
@@ -352,8 +355,8 @@ export default function CompanySettings() {
       {tab === 'profile' && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <div className="col-span-2 space-y-5">
-            <Card>
-              <h3 className="text-sm font-medium text-zinc-300 mb-4">Company Information</h3>
+            <div className={PANEL}>
+              <h3 className={`${LABEL} mb-4`}>Company Information</h3>
               <dl className="space-y-1">
                 <EditableField label="Company Name" value={company.name} onSave={(v) => updateField('name', v)} />
                 <EditableSelect label="Industry" value={company.industry} options={INDUSTRY_OPTIONS} onSave={(v) => updateField('industry', v)} />
@@ -363,11 +366,11 @@ export default function CompanySettings() {
                 <EditableSelect label="Work Arrangement" value={company.work_arrangement} options={ARRANGEMENT_OPTIONS} onSave={(v) => updateField('work_arrangement', v)} />
                 <EditableSelect label="Default Employment Type" value={company.default_employment_type} options={EMPLOYMENT_TYPE_OPTIONS} onSave={(v) => updateField('default_employment_type', v)} />
               </dl>
-            </Card>
+            </div>
 
             {/* OSHA / ITA Filing Identity */}
-            <Card>
-              <h3 className="text-sm font-medium text-zinc-300 mb-1">OSHA / ITA Filing Identity</h3>
+            <div className={PANEL}>
+              <h3 className={`${LABEL} mb-1`}>OSHA / ITA Filing Identity</h3>
               <p className="text-xs text-zinc-600 mb-4">
                 Employer-level defaults used on OSHA Form 300A and ITA electronic filing. Establishments
                 inherit EIN / NAICS unless overridden per location. The executive block populates the
@@ -383,17 +386,17 @@ export default function CompanySettings() {
                 <EditableField label="Executive Title" value={company.executive_title} onSave={(v) => updateField('executive_title', v)} />
                 <EditableField label="Executive Phone" value={company.executive_phone} onSave={(v) => updateField('executive_phone', v)} />
               </dl>
-            </Card>
+            </div>
 
             {/* Healthcare Specialties */}
-            <Card>
-              <h3 className="text-sm font-medium text-zinc-300 mb-3">Healthcare Specialties</h3>
+            <div className={PANEL}>
+              <h3 className={`${LABEL} mb-3`}>Healthcare Specialties</h3>
               <div className="flex flex-wrap gap-2 mb-3">
                 {(company.healthcare_specialties || []).length === 0 && (
                   <p className="text-xs text-zinc-600 italic">No specialties set</p>
                 )}
                 {(company.healthcare_specialties || []).map((s) => (
-                  <span key={s} className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-md bg-zinc-800 border border-zinc-700 text-zinc-300">
+                  <span key={s} className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-md bg-white/[0.04] border border-white/[0.08] text-zinc-300">
                     {s}
                     <button type="button" onClick={() => handleRemoveSpecialty(s)} className="text-zinc-600 hover:text-zinc-300 transition-colors ml-0.5">&times;</button>
                   </span>
@@ -416,16 +419,16 @@ export default function CompanySettings() {
               ) : (
                 <Button size="sm" variant="ghost" onClick={() => setEditingSpecialties(true)}>+ Add Specialty</Button>
               )}
-            </Card>
+            </div>
           </div>
 
           {/* Sidebar: logo */}
           <div className="space-y-5">
-            <Card className="flex flex-col items-center gap-3">
+            <div className={`${PANEL} flex flex-col items-center gap-3`}>
               {company.logo_url ? (
-                <img src={company.logo_url} alt={company.name} className="w-24 h-24 rounded-lg object-contain border border-zinc-800" />
+                <img src={company.logo_url} alt={company.name} className="w-24 h-24 rounded-lg object-contain border border-white/[0.06]" />
               ) : (
-                <div className="w-24 h-24 rounded-lg bg-zinc-800 border border-zinc-700 flex items-center justify-center">
+                <div className="w-24 h-24 rounded-lg bg-white/[0.04] border border-white/[0.08] flex items-center justify-center">
                   <span className="text-3xl font-bold text-zinc-600">{company.name.charAt(0)}</span>
                 </div>
               )}
@@ -433,10 +436,10 @@ export default function CompanySettings() {
               <Button size="sm" variant="ghost" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
                 {uploading ? 'Uploading...' : company.logo_url ? 'Change Logo' : 'Upload Logo'}
               </Button>
-            </Card>
+            </div>
 
-            <Card>
-              <h3 className="text-sm font-medium text-zinc-300 mb-2">Quick Info</h3>
+            <div className={PANEL}>
+              <h3 className={`${LABEL} mb-2`}>Quick Info</h3>
               <dl className="space-y-2 text-xs">
                 <div>
                   <dt className="text-zinc-500">Industry</dt>
@@ -455,7 +458,7 @@ export default function CompanySettings() {
                   </dd>
                 </div>
               </dl>
-            </Card>
+            </div>
           </div>
         </div>
       )}
@@ -463,7 +466,7 @@ export default function CompanySettings() {
       {/* Add-ons — Lite-family tenants only */}
       {tab === 'profile' && showAddons && (
         <div>
-          <h3 className="text-sm font-medium text-zinc-300 mb-1">Add-ons</h3>
+          <h3 className={`${LABEL} mb-1`}>Add-ons</h3>
           <p className="text-xs text-zinc-600 mb-4">
             Extend your plan — add-ons bill monthly per employee alongside your subscription.
           </p>
@@ -495,7 +498,7 @@ export default function CompanySettings() {
 
           <div className="col-span-2">
             {!selectedId ? (
-              <div className="flex items-center justify-center h-40 border border-zinc-800 rounded-lg">
+              <div className="flex items-center justify-center h-40 rounded-lg border border-white/[0.06] bg-zinc-950">
                 <p className="text-sm text-zinc-600">Select a location to view details</p>
               </div>
             ) : (
@@ -528,8 +531,8 @@ export default function CompanySettings() {
                   readOnly={!hasFeature('compliance')}
                 />
 
-                <Card>
-                  <h3 className="text-sm font-medium text-zinc-300 mb-3">Location Details</h3>
+                <div className={PANEL}>
+                  <h3 className={`${LABEL} mb-3`}>Location Details</h3>
                   <dl className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
                     <div>
                       <dt className="text-zinc-500 text-xs">City</dt>
@@ -570,13 +573,13 @@ export default function CompanySettings() {
                         <dt className="text-zinc-500 text-xs mb-1">Assigned Employees</dt>
                         <dd className="flex flex-wrap gap-1.5">
                           {selectedLoc.employee_names.map((name) => (
-                            <span key={name} className="text-xs px-2 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700/60">{name}</span>
+                            <span key={name} className="text-xs px-2 py-0.5 rounded bg-white/[0.04] text-zinc-400 border border-white/[0.08]">{name}</span>
                           ))}
                         </dd>
                       </div>
                     )}
                   </dl>
-                </Card>
+                </div>
               </div>
             )}
           </div>

@@ -31,9 +31,9 @@ export function WageGapCard({ data, onOpenDetails }: Props) {
   const accent = allCovered ? 'emerald' : below > 0 ? 'amber' : 'zinc'
 
   const accentClasses = {
-    emerald: { ring: 'border-emerald-900/40', text: 'text-emerald-400', bgIcon: 'text-emerald-700/30' },
+    emerald: { ring: 'border-emerald-900/40 ring-1 ring-emerald-500/20', text: 'text-emerald-400', bgIcon: 'text-emerald-700/30' },
     amber:   { ring: 'border-amber-900/40 ring-1 ring-amber-500/20', text: 'text-amber-400', bgIcon: 'text-amber-700/30' },
-    zinc:    { ring: 'border-zinc-800/60', text: 'text-zinc-300', bgIcon: 'text-zinc-700/30' },
+    zinc:    { ring: 'border-white/[0.08]', text: 'text-zinc-300', bgIcon: 'text-zinc-700/30' },
   }[accent]
 
   const medianPct = median_delta_percent != null ? Math.round(median_delta_percent * 100) : null
@@ -48,8 +48,8 @@ export function WageGapCard({ data, onOpenDetails }: Props) {
   return (
     <Wrapper
       {...wrapperProps}
-      className={`group relative overflow-hidden rounded-xl border bg-zinc-900/60 p-5 w-full text-left ${accentClasses.ring} ${
-        clickable ? 'cursor-pointer hover:bg-zinc-900/80 transition-colors' : ''
+      className={`group relative overflow-hidden rounded-xl border bg-zinc-950 p-5 w-full text-left ${accentClasses.ring} ${
+        clickable ? 'cursor-pointer hover:bg-white/[0.02] transition-colors' : ''
       }`}
     >
       <TrendingDown className={`absolute -top-2 -right-2 h-20 w-20 ${accentClasses.bgIcon}`} />
@@ -67,7 +67,7 @@ export function WageGapCard({ data, onOpenDetails }: Props) {
             <p className="text-xs font-medium uppercase tracking-wider text-zinc-500">
               Wage Gap vs. Market
             </p>
-            <span className="text-[9px] uppercase tracking-wider px-1.5 py-[1px] rounded bg-zinc-800/80 text-zinc-400 font-mono">
+            <span className="text-[9px] uppercase tracking-wider px-1.5 py-[1px] rounded bg-white/[0.06] text-zinc-400 font-mono">
               BLS OEWS
             </span>
           </div>
@@ -94,7 +94,7 @@ export function WageGapCard({ data, onOpenDetails }: Props) {
 
       {/* P&L math — only when there's actually a gap */}
       {below > 0 && (
-        <div className="mt-4 pt-4 border-t border-zinc-800/60 grid grid-cols-3 gap-4">
+        <div className="mt-4 pt-4 border-t border-white/[0.06] grid grid-cols-3 gap-4">
           <Stat
             label="Close the gap"
             value={`$${dollars_per_hour_to_close_gap.toFixed(2)}/hr`}

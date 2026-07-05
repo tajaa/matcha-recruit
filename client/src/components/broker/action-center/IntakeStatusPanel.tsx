@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ClipboardList, CheckCircle2, Clock, CircleDashed, Loader2 } from 'lucide-react'
-import { Card } from '../../ui'
 import TabHeader from './TabHeader'
+
+const PANEL = 'rounded-lg border border-white/[0.06] bg-zinc-950 p-5'
 import { fetchExternalClients } from '../../../api/broker'
 import type { ExternalClientRow, ExternalIntakeState } from '../../../types/broker'
 
@@ -61,11 +62,11 @@ export default function IntakeStatusPanel() {
 
   if (loading) {
     return (
-      <Card className="p-5">
+      <div className={PANEL}>
         <div className="flex items-center gap-2 text-sm text-zinc-500">
           <Loader2 className="h-4 w-4 animate-spin" /> Loading intake status…
         </div>
-      </Card>
+      </div>
     )
   }
   // No Broker-Pro external clients (or not entitled) → keep the Action Center clean.
@@ -78,7 +79,7 @@ export default function IntakeStatusPanel() {
   const needsAction = clients.filter((c) => c.intake_status !== 'submitted').length
 
   return (
-    <Card className="p-5 space-y-4">
+    <div className={`${PANEL} space-y-4`}>
       <TabHeader
         icon={ClipboardList}
         title="EPL intake status"
@@ -89,7 +90,7 @@ export default function IntakeStatusPanel() {
           <span className="text-[11px] font-medium text-emerald-400 bg-emerald-400/10 border border-emerald-400/20 rounded-full px-2 py-0.5">All current</span>
         )}
       />
-      <div className="divide-y divide-zinc-800/70">
+      <div className="divide-y divide-white/[0.06]">
         {sorted.map((c) => (
           <Link
             key={c.id}
@@ -101,6 +102,6 @@ export default function IntakeStatusPanel() {
           </Link>
         ))}
       </div>
-    </Card>
+    </div>
   )
 }

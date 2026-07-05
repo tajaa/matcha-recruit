@@ -41,17 +41,17 @@ export function RetentionExplainer() {
   }
 
   return (
-    <div className="mt-4 rounded-xl border border-zinc-800 bg-zinc-900/40 overflow-hidden">
+    <div className="mt-4 rounded-xl border border-white/[0.06] bg-zinc-950 overflow-hidden">
       <button
         onClick={() => setOpen((o) => !o)}
-        className="w-full flex items-center justify-between gap-3 px-4 py-3 text-left hover:bg-zinc-900/60 transition-colors"
+        className="w-full flex items-center justify-between gap-3 px-4 py-3 text-left hover:bg-white/[0.02] transition-colors"
       >
         <div className="flex items-center gap-2.5">
           <Info className="h-4 w-4 text-zinc-400" />
           <span className="text-sm font-medium text-zinc-200">
             How retention widgets work
           </span>
-          <span className="text-[10px] uppercase tracking-wider px-1.5 py-[1px] rounded bg-zinc-800 text-zinc-400">
+          <span className="text-[10px] uppercase tracking-wider px-1.5 py-[1px] rounded bg-white/[0.06] text-zinc-400">
             QSR retention plan §3.1 + §3.3
           </span>
         </div>
@@ -63,7 +63,7 @@ export function RetentionExplainer() {
       </button>
 
       {open && (
-        <div className="px-4 pb-4 pt-1 text-sm text-zinc-400 space-y-5 border-t border-zinc-800">
+        <div className="px-4 pb-4 pt-1 text-sm text-zinc-400 space-y-5 border-t border-white/[0.06]">
           <Section
             title="Wage Gap vs. Market"
             tagline="Are you paying competitively for the local market?"
@@ -126,7 +126,7 @@ export function RetentionExplainer() {
             </p>
           </Section>
 
-          <div className="flex items-center justify-between pt-2 border-t border-zinc-800">
+          <div className="flex items-center justify-between pt-2 border-t border-white/[0.06]">
             <button
               onClick={dismiss}
               className="inline-flex items-center gap-1.5 text-[11px] text-zinc-500 hover:text-zinc-300"

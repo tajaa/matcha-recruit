@@ -151,8 +151,8 @@ export default function BrokerRiskAlerts() {
       ) : (
         <div className="space-y-6">
           {grouped.map((g) => (
-            <div key={g.company_id} className="rounded-xl border border-white/5 bg-zinc-900/40 overflow-hidden">
-              <div className="px-4 py-3 border-b border-white/5 flex items-center justify-between">
+            <div key={g.company_id} className="rounded-xl border border-white/[0.06] bg-zinc-950 overflow-hidden">
+              <div className="px-4 py-3 border-b border-white/[0.06] flex items-center justify-between">
                 <Link
                   to={`/broker/clients/${g.company_id}`}
                   className="text-sm font-medium text-zinc-100 hover:text-emerald-400"
@@ -161,7 +161,7 @@ export default function BrokerRiskAlerts() {
                 </Link>
                 <span className="text-xs text-zinc-600">{g.rows.length} alert{g.rows.length !== 1 ? 's' : ''}</span>
               </div>
-              <div className="divide-y divide-white/5">
+              <div className="divide-y divide-white/[0.06]">
                 {g.rows.map((a) => {
                   const tone = SEVERITY_TONE[a.severity] ?? SEVERITY_TONE.warning
                   return (
@@ -179,7 +179,7 @@ export default function BrokerRiskAlerts() {
                             {metricLabel(a)}
                           </span>
                           {metricCategory(a) && (
-                            <span className="px-1.5 py-0.5 rounded bg-white/5 text-[9px] uppercase tracking-wider text-zinc-500">
+                            <span className="px-1.5 py-0.5 rounded bg-white/[0.06] text-[9px] uppercase tracking-wider text-zinc-500">
                               {metricCategory(a)}
                             </span>
                           )}

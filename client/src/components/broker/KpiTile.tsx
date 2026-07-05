@@ -1,4 +1,5 @@
 import type { LucideIcon } from 'lucide-react'
+import { LABEL } from '../ui/typography'
 
 /**
  * Compact portfolio KPI tile — label, big value, optional sub-line. Deliberately
@@ -27,17 +28,17 @@ export function KpiTile({
 }) {
   return (
     <div
-      className={`rounded-2xl border bg-zinc-900/50 px-5 py-4 ${
-        urgent ? 'border-red-900/50 ring-1 ring-red-500/20' : 'border-zinc-800'
+      className={`rounded-2xl border bg-zinc-950 px-5 py-4 ${
+        urgent ? 'border-red-900/50 ring-1 ring-red-500/20' : 'border-white/[0.06]'
       }`}
     >
       <div className="flex items-center gap-1.5">
         {Icon && <Icon className="h-3.5 w-3.5 text-zinc-600" strokeWidth={1.6} />}
-        <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">{label}</span>
+        <span className={LABEL}>{label}</span>
       </div>
       <div className="mt-2 flex items-center gap-2">
         {dot && <span className={`h-2 w-2 shrink-0 rounded-full ${dot}`} />}
-        <span className={`text-[28px] font-semibold leading-none tabular-nums ${tone}`}>{value}</span>
+        <span className={`font-mono text-[28px] font-semibold leading-none tabular-nums ${tone}`}>{value}</span>
       </div>
       {sub && <p className="mt-1.5 text-[11px] text-zinc-500">{sub}</p>}
     </div>

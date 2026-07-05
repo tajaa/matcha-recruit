@@ -10,6 +10,7 @@ import { WageGapCard, WageGapDrawer, FlightRiskCard, FlightRiskDrawer, Retention
 import { fetchDashboardStats } from '../../api/dashboard'
 import { useEmployees } from '../../hooks/employees/useEmployees'
 import { typeLabel } from '../../types/employee'
+import { LABEL } from '../../components/ui/typography'
 import type { WageGapSummary, FlightRiskWidgetSummary } from '../../types/dashboard'
 
 export default function Employees() {
@@ -93,8 +94,9 @@ export default function Employees() {
           <h1 className="text-2xl font-semibold text-zinc-100">
             Employees
           </h1>
-          <p className="mt-2 text-sm text-zinc-500">
-            {employees.length} total employee{employees.length !== 1 ? 's' : ''}
+          <p className={`mt-2 flex items-center gap-1.5 ${LABEL}`}>
+            <span className="font-mono text-xs font-semibold normal-case tracking-normal text-emerald-400">{employees.length}</span>
+            total employee{employees.length !== 1 ? 's' : ''}
           </p>
         </div>
         <div className="flex gap-2 w-full sm:w-auto flex-wrap">
@@ -209,26 +211,26 @@ export default function Employees() {
         ) : employees.length === 0 ? (
           <p className="text-sm text-zinc-500">No employees found.</p>
         ) : (
-          <div className="overflow-x-auto rounded-xl border border-zinc-800">
+          <div className="overflow-x-auto rounded-xl border border-white/[0.06] bg-zinc-950">
             <table className="w-full text-sm text-left min-w-[800px]">
-              <thead className="bg-zinc-900/50 text-zinc-400">
-                <tr>
-                  <th className="px-4 py-3 font-medium">Name</th>
-                  <th className="px-4 py-3 font-medium">Title</th>
-                  <th className="px-4 py-3 font-medium">Department</th>
-                  <th className="px-4 py-3 font-medium">Type</th>
-                  <th className="px-4 py-3 font-medium">Status</th>
-                  <th className="px-4 py-3 font-medium">Onboarding</th>
-                  <th className="px-4 py-3 font-medium">Start Date</th>
+              <thead>
+                <tr className="border-b border-white/[0.06]">
+                  <th className={`px-4 py-3 ${LABEL}`}>Name</th>
+                  <th className={`px-4 py-3 ${LABEL}`}>Title</th>
+                  <th className={`px-4 py-3 ${LABEL}`}>Department</th>
+                  <th className={`px-4 py-3 ${LABEL}`}>Type</th>
+                  <th className={`px-4 py-3 ${LABEL}`}>Status</th>
+                  <th className={`px-4 py-3 ${LABEL}`}>Onboarding</th>
+                  <th className={`px-4 py-3 ${LABEL}`}>Start Date</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-zinc-800">
+              <tbody className="divide-y divide-white/[0.06]">
                 {employees.map((e) => {
                   const progress = onboardingProgress[e.id]
                   return (
                     <tr
                       key={e.id}
-                      className="text-zinc-300 hover:bg-zinc-900/30 transition-colors cursor-pointer"
+                      className="text-zinc-300 hover:bg-white/[0.02] transition-colors cursor-pointer"
                       onClick={() => navigate(`/app/employees/${e.id}`)}
                     >
                       <td className="px-4 py-3">
@@ -248,7 +250,7 @@ export default function Employees() {
                       <td className="px-4 py-3">
                         {progress?.has_onboarding ? (
                           <div className="flex items-center gap-2">
-                            <div className="h-1.5 w-16 rounded-full bg-zinc-800 overflow-hidden">
+                            <div className="h-1.5 w-16 rounded-full bg-white/[0.06] overflow-hidden">
                               <div
                                 className="h-full rounded-full bg-emerald-500"
                                 style={{ width: `${progress.total ? (progress.completed / progress.total) * 100 : 0}%` }}

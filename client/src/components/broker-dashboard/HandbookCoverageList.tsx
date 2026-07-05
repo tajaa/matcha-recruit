@@ -1,6 +1,8 @@
-import { Card } from '../ui'
 import { HelpHint } from '../broker/HelpHint'
+import { LABEL } from '../ui/typography'
 import type { BrokerHandbookCoverage } from '../../types/broker'
+
+const PANEL = 'rounded-2xl border border-white/[0.06] bg-zinc-950 p-5'
 
 const dotColors: Record<string, string> = {
   Strong: 'bg-zinc-300',
@@ -21,16 +23,16 @@ interface HandbookCoverageListProps {
 export function HandbookCoverageList({ handbooks }: HandbookCoverageListProps) {
   if (handbooks.length === 0) {
     return (
-      <Card className="p-5">
-        <h3 className="text-sm font-medium text-zinc-200 tracking-wide mb-4 flex items-center gap-1.5">Handbook Coverage <HelpHint text="How complete each client's handbook is. Thin coverage is real EPL exposure — and a concrete remediation you can sell ahead of renewal." /></h3>
+      <div className={PANEL}>
+        <h3 className={`${LABEL} mb-4 flex items-center gap-1.5 normal-case`}>Handbook Coverage <HelpHint text="How complete each client's handbook is. Thin coverage is real EPL exposure — and a concrete remediation you can sell ahead of renewal." /></h3>
         <p className="text-sm text-zinc-500">No handbooks found across your clients.</p>
-      </Card>
+      </div>
     )
   }
 
   return (
-    <Card className="p-5">
-      <h3 className="text-sm font-medium text-zinc-200 tracking-wide mb-4">Handbook Coverage</h3>
+    <div className={PANEL}>
+      <h3 className={`${LABEL} mb-4`}>Handbook Coverage</h3>
 
       <div className="space-y-3">
         {handbooks.map((h) => (
@@ -40,7 +42,7 @@ export function HandbookCoverageList({ handbooks }: HandbookCoverageListProps) {
                 <span className="text-sm text-zinc-200 truncate">{h.company_name}</span>
                 <span className="text-[11px] text-zinc-500 truncate">{h.handbook_title}</span>
               </div>
-              <div className="h-1.5 rounded-full bg-zinc-800">
+              <div className="h-1.5 rounded-full bg-white/[0.06]">
                 <div
                   className={`h-1.5 rounded-full transition-all duration-500 ${dotColors[h.strength_label] ?? 'bg-zinc-600'}`}
                   style={{ width: `${h.strength_score}%` }}
@@ -49,7 +51,7 @@ export function HandbookCoverageList({ handbooks }: HandbookCoverageListProps) {
             </div>
 
             <div className="flex items-center gap-3 flex-shrink-0">
-              <span className={`text-sm font-medium tabular-nums ${textColors[h.strength_label] ?? 'text-zinc-400'}`}>
+              <span className={`font-mono text-sm font-medium tabular-nums ${textColors[h.strength_label] ?? 'text-zinc-400'}`}>
                 {h.strength_score}%
               </span>
               {h.missing_section_count > 0 && (
@@ -61,6 +63,6 @@ export function HandbookCoverageList({ handbooks }: HandbookCoverageListProps) {
           </div>
         ))}
       </div>
-    </Card>
+    </div>
   )
 }

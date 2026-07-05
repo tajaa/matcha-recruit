@@ -40,7 +40,7 @@ export function FlightRiskCard({ data, onOpenDetails }: Props) {
   const accent = flagged === 0 ? 'emerald' : critical > 0 ? 'red' : 'amber'
 
   const accentClasses = {
-    emerald: { ring: 'border-emerald-900/40', text: 'text-emerald-400', bgIcon: 'text-emerald-700/30' },
+    emerald: { ring: 'border-emerald-900/40 ring-1 ring-emerald-500/20', text: 'text-emerald-400', bgIcon: 'text-emerald-700/30' },
     amber: { ring: 'border-amber-900/40 ring-1 ring-amber-500/20', text: 'text-amber-400', bgIcon: 'text-amber-700/30' },
     red: { ring: 'border-red-900/50 ring-1 ring-red-500/30', text: 'text-red-400', bgIcon: 'text-red-700/30' },
   }[accent]
@@ -57,8 +57,8 @@ export function FlightRiskCard({ data, onOpenDetails }: Props) {
   return (
     <Wrapper
       {...wrapperProps}
-      className={`group relative overflow-hidden rounded-xl border bg-zinc-900/60 p-5 w-full text-left ${accentClasses.ring} ${
-        clickable ? 'cursor-pointer hover:bg-zinc-900/80 transition-colors' : ''
+      className={`group relative overflow-hidden rounded-xl border bg-zinc-950 p-5 w-full text-left ${accentClasses.ring} ${
+        clickable ? 'cursor-pointer hover:bg-white/[0.02] transition-colors' : ''
       }`}
     >
       <Users className={`absolute -top-2 -right-2 h-20 w-20 ${accentClasses.bgIcon}`} />
@@ -75,7 +75,7 @@ export function FlightRiskCard({ data, onOpenDetails }: Props) {
             <p className="text-xs font-medium uppercase tracking-wider text-zinc-500">
               Flight Risk
             </p>
-            <span className="text-[9px] uppercase tracking-wider px-1.5 py-[1px] rounded bg-zinc-800/80 text-zinc-400 font-mono">
+            <span className="text-[9px] uppercase tracking-wider px-1.5 py-[1px] rounded bg-white/[0.06] text-zinc-400 font-mono">
               6-signal composite
             </span>
           </div>
@@ -97,7 +97,7 @@ export function FlightRiskCard({ data, onOpenDetails }: Props) {
       </div>
 
       {flagged > 0 && (
-        <div className="mt-4 pt-4 border-t border-zinc-800/60 grid grid-cols-3 gap-4">
+        <div className="mt-4 pt-4 border-t border-white/[0.06] grid grid-cols-3 gap-4">
           <Stat
             label="Critical"
             value={String(critical)}
@@ -118,7 +118,7 @@ export function FlightRiskCard({ data, onOpenDetails }: Props) {
       )}
 
       {flagged > 0 && hotspots.length > 0 && (
-        <div className="mt-4 pt-4 border-t border-zinc-800/60">
+        <div className="mt-4 pt-4 border-t border-white/[0.06]">
           <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-500 mb-2">
             Manager hot-spots
           </p>
@@ -126,7 +126,7 @@ export function FlightRiskCard({ data, onOpenDetails }: Props) {
             {hotspots.slice(0, 4).map((h) => (
               <span
                 key={h.manager_id}
-                className="text-[11px] text-zinc-300 px-2 py-0.5 rounded-full bg-zinc-800/80"
+                className="text-[11px] text-zinc-300 px-2 py-0.5 rounded-full bg-white/[0.06]"
               >
                 {h.manager_name} <span className="text-zinc-500">· {h.flagged_count}</span>
               </span>
