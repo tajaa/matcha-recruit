@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { Mic, Square, Loader2, Sparkles, AlertTriangle } from 'lucide-react'
-import { api } from '../../api/client'
+import { api, ApiError } from '../../api/client'
 import { Button, Modal, Select } from '../ui'
 import { IRPersonMultiSelect } from './IRPersonMultiSelect'
 import { EmployeeMultiSelect } from '../employees/EmployeeMultiSelect'
@@ -81,6 +81,9 @@ export function IRCreateIncidentModal({ open, onClose, onCreated }: Props) {
   const [transcribing, setTranscribing] = useState(false)
   const [voiceMsg, setVoiceMsg] = useState<string | null>(null)
   const [voiceHint, setVoiceHint] = useState<{ type?: string; severity?: string } | null>(null)
+  // Verbatim transcript from the last successful dictation — carried into the
+  // incident's category_data as evidence of what was spoken.
+  const [voiceTranscript, setVoiceTranscript] = useState<string | null>(null)
   // Set when dictation finished but didn't capture a location and there's more than
   // one to choose from — we ask the reporter to pick (or re-dictate saying it).
   const [locationMissing, setLocationMissing] = useState(false)
@@ -96,6 +99,7 @@ export function IRCreateIncidentModal({ open, onClose, onCreated }: Props) {
       fd.append('file', wav, 'dictation.wav')
       const p = await api.upload<VoicePrefill>('/ir/incidents/voice/parse', fd)
       if (!p.available) { setVoiceMsg("Couldn't understand the audio — please type the details."); return }
+      setVoiceTranscript(p.transcript ?? null)
       const voiceLoc = p.location_id && (locations || []).some((l) => l.id === p.location_id) ? p.location_id : null
       setForm((f) => ({
         ...f,
@@ -112,7 +116,7 @@ export function IRCreateIncidentModal({ open, onClose, onCreated }: Props) {
       // only meaningful when there's a choice to make.
       setLocationMissing(!voiceLoc && !form.location_id && (locations?.length ?? 0) > 1)
     } catch (err) {
-      const tooMany = err instanceof Error && err.message.startsWith('429')
+      const tooMany = err instanceof ApiError && err.status === 429
       setVoiceMsg(tooMany
         ? 'Too many dictation attempts — wait a moment, or just type the details.'
         : 'Transcription failed — please type the details.')
@@ -170,8 +174,10 @@ export function IRCreateIncidentModal({ open, onClose, onCreated }: Props) {
         reported_by_name: form.reported_by_name.trim() || 'Unknown',
         witnesses,
         involved_employee_ids: form.involved_employee_ids,
+        category_data: voiceTranscript ? { voice_transcript: voiceTranscript } : undefined,
       })
       setForm(EMPTY_FORM)
+      setVoiceTranscript(null)
       onCreated(created)
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to submit incident'
@@ -208,7 +214,7 @@ export function IRCreateIncidentModal({ open, onClose, onCreated }: Props) {
                 <Loader2 className="h-4 w-4 animate-spin text-emerald-400" /> Transcribing & filling the form…
               </div>
             ) : (
-              <button type="button" onClick={() => { setVoiceMsg(null); setVoiceHint(null); setLocationMissing(false); void dictation.start() }}
+              <button type="button" onClick={() => { setVoiceMsg(null); setVoiceHint(null); setLocationMissing(false); setVoiceTranscript(null); void dictation.start() }}
                 className="group flex w-full items-center gap-3 rounded-xl border border-emerald-500/25 bg-emerald-500/[0.06] px-4 py-3 text-left transition-colors hover:border-emerald-500/40 hover:bg-emerald-500/[0.1]">
                 <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-300 transition-colors group-hover:bg-emerald-500/25">
                   <Mic className="h-4 w-4" />

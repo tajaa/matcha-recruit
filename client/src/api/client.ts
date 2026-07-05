@@ -69,6 +69,20 @@ function _buildHeaders(init?: RequestInit, token?: string | null): HeadersInit {
   }
 }
 
+/** Thrown on any non-ok response from request(). Carries the HTTP status
+ *  alongside the message so callers can branch on status (e.g. 429) instead
+ *  of pattern-matching the message string. */
+export class ApiError extends Error {
+  status: number
+  body: unknown
+  constructor(message: string, status: number, body: unknown) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+    this.body = body
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const token = localStorage.getItem('matcha_access_token')
   const res = await fetch(`${BASE}${path}`, {
@@ -105,7 +119,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
         if (path !== '/client-errors' && retry.status !== 401 && retry.status !== 403) {
           reportApiError({ endpoint: path, status: retry.status, message: msg, body: retryBody })
         }
-        throw new Error(msg)
+        throw new ApiError(msg, retry.status, retryBody)
       }
       return retry.json()
     }
@@ -134,7 +148,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     if (path !== '/client-errors' && res.status !== 401 && res.status !== 403) {
       reportApiError({ endpoint: path, status: res.status, message: msg, body: errBody })
     }
-    throw new Error(msg)
+    throw new ApiError(msg, res.status, errBody)
   }
   if (res.status === 204) return null as T
   return res.json()

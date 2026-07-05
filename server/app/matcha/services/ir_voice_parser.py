@@ -1,6 +1,6 @@
 """Voice incident-intake parse — Gemini transcribes a spoken incident report and
-extracts the create-form fields in ONE multimodal call, so a reporter can "talk it
-in" instead of typing.
+extracts the create-form fields in one multimodal call (plus one retry on a
+timeout or bad JSON response), so a reporter can "talk it in" instead of typing.
 
 Mirrors ``wc_mod_parser`` / ``loss_run_parser``: a cached IRAnalyzer, the audio sent
 to Gemini as an inline part, JSON parsed back into the IR create-form shape.
@@ -14,6 +14,8 @@ import asyncio
 import json
 import logging
 from typing import Optional
+
+from google.genai import types
 
 from app.config import get_settings
 from app.matcha.services.ir_analysis import IRAnalyzer, VALID_INCIDENT_TYPES, VALID_SEVERITIES
@@ -116,26 +118,55 @@ def _coerce_voice_fields(
     }
 
 
+# Incident narrations legitimately describe violence, harassment, injury, and
+# similar — Gemini's default safety thresholds can block the response outright on
+# exactly the audio we most need transcribed, which looks to the reporter like
+# "couldn't understand the audio". This is a bounded, purpose-built extraction
+# (not open-ended generation), so blocking is disabled for the categories a
+# workplace-incident account would plausibly trip.
+_VOICE_PARSE_SAFETY_SETTINGS = [
+    types.SafetySetting(category=category, threshold=types.HarmBlockThreshold.BLOCK_NONE)
+    for category in (
+        types.HarmCategory.HARM_CATEGORY_HARASSMENT,
+        types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+        types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+        types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+    )
+]
+
+
 async def parse_voice_incident(audio_bytes: bytes, mime_type: str, *, location_options: list[dict]) -> dict:
-    """Best-effort: ONE Gemini call transcribes + extracts the create-form fields from
-    spoken audio. Never raises. ``available`` is False (with empty fields) on any
-    failure so the UI can fall back to manual entry."""
+    """Gemini transcribes + extracts the create-form fields from spoken audio, with
+    one retry (fresh timeout) on a transient timeout or unparsable JSON response.
+    Never raises. ``available`` is False (with empty fields) on any failure so the
+    UI can fall back to manual entry."""
     analyzer = _get_analyzer()
     valid_loc_ids = {str(o["id"]) for o in location_options}
+    part = types.Part.from_bytes(data=audio_bytes, mime_type=mime_type)
+    prompt = _build_prompt(location_options)
+    config = types.GenerateContentConfig(
+        response_mime_type="application/json",
+        safety_settings=_VOICE_PARSE_SAFETY_SETTINGS,
+    )
+
     payload: dict = {}
-    try:
-        from google.genai import types
-        part = types.Part.from_bytes(data=audio_bytes, mime_type=mime_type)
-        prompt = _build_prompt(location_options)
-        response = await asyncio.wait_for(
-            analyzer.client.aio.models.generate_content(model=analyzer.model, contents=[prompt, part]),
-            timeout=VOICE_PARSE_TIMEOUT,
-        )
-        raw = (getattr(response, "text", None) or "").strip()
-        payload = analyzer._parse_json_response(raw) or {}
-    except (asyncio.TimeoutError, json.JSONDecodeError, Exception) as exc:  # never-raises contract
-        logger.warning("IR voice parse failed: %s", exc)
-        payload = {}
+    for attempt in range(1, 3):  # one retry on timeout / bad JSON
+        try:
+            response = await asyncio.wait_for(
+                analyzer.client.aio.models.generate_content(
+                    model=analyzer.model, contents=[prompt, part], config=config,
+                ),
+                timeout=VOICE_PARSE_TIMEOUT,
+            )
+            raw = (getattr(response, "text", None) or "").strip()
+            payload = analyzer._parse_json_response(raw) or {}
+            break
+        except (asyncio.TimeoutError, json.JSONDecodeError) as exc:
+            if attempt == 2:
+                logger.warning("IR voice parse failed (attempt %d/2): %s", attempt, exc)
+        except Exception as exc:  # never-raises contract — anything else, no retry
+            logger.warning("IR voice parse failed (attempt %d/2): %s", attempt, exc)
+            break
     fields = _coerce_voice_fields(payload, valid_loc_ids, VALID_INCIDENT_TYPES, VALID_SEVERITIES)
     fields["available"] = bool(fields.get("description") or fields.get("transcript"))
     fields["model"] = analyzer.model

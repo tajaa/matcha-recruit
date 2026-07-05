@@ -60,7 +60,7 @@ Sidebar dispatch in `client/src/components/TenantSidebar.tsx`. Tier-check helper
 - **Admin** — `AdminSidebar`, `/admin/*` routes; internal tooling (companies, jurisdiction data, payer data, broker mgmt).
 - **Broker** — `BrokerSidebar`, `/broker/*` routes; HR brokers managing multiple client companies.
 - **Candidate / Employee portals** — public-token routes (`/candidate-interview/:token`, `/s/:token`); employee self-service through `employee_portal_router`.
-- **Public anonymous report** — `/report/:token` (`server/app/matcha/routes/inbound_email.py`); per-company token-gated single-use form.
+- **Public anonymous report** — `/report/:token` (`server/app/matcha/routes/inbound_email.py`); per-company token-gated, reusable form (poster-friendly — not single-use; `/request-info` stays single-use).
 
 ## Repo layout — products map
 

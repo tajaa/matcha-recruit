@@ -7,6 +7,7 @@ interface AnonymousStatus {
   link?: string | null
   enabled: boolean
   used: boolean
+  last_used_at?: string | null
 }
 
 const PUBLIC_REPORT_BASE = `${window.location.origin}/report`

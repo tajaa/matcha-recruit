@@ -8,11 +8,11 @@ import json
 import logging
 import re
 import secrets
-from datetime import datetime, timezone
+from datetime import datetime, time, timedelta, timezone
 from typing import Literal, Optional
 from uuid import UUID
 
-from fastapi import HTTPException, Request
+from fastapi import HTTPException, Request, UploadFile
 
 from app.core.services.email import get_email_service
 from app.database import get_connection
@@ -100,6 +100,34 @@ def _build_public_link(request: Request, token: str, segment: str) -> str:
     proto = request.headers.get("x-forwarded-proto") or request.url.scheme
     host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc
     return f"{proto}://{host}/{segment}/{token}"
+
+
+# Voice dictation upload validation — shared by the authed endpoint (voice.py)
+# and the public token forms (inbound_email.py) so both enforce the same
+# WAV-only contract. The RIFF/WAVE magic-byte check matters most for the
+# unauthenticated callers (a forged content-type header could otherwise reach
+# the expensive Gemini call), but there's no reason to make the authed path
+# any looser, so both share this one implementation.
+_ALLOWED_AUDIO_MIME = {"audio/wav", "audio/x-wav", "audio/wave"}
+_MAX_AUDIO_BYTES = 25 * 1024 * 1024  # ~13 min of 16kHz mono 16-bit WAV
+
+
+async def _read_audio_or_400(file: UploadFile) -> bytes:
+    """Validate the upload content-type/size/structure and return the bytes.
+
+    content_type is client-controlled, so it is a hint, not a guarantee — the
+    RIFF/WAVE magic-byte check is the real gate before spending a Gemini call.
+    """
+    if (file.content_type or "").lower() not in _ALLOWED_AUDIO_MIME:
+        raise HTTPException(status_code=400, detail="Unsupported audio format — expected WAV.")
+    audio = await file.read()
+    if not audio:
+        raise HTTPException(status_code=400, detail="Empty audio upload.")
+    if len(audio) > _MAX_AUDIO_BYTES:
+        raise HTTPException(status_code=413, detail="Audio too large (max 25MB).")
+    if len(audio) < 12 or audio[:4] != b"RIFF" or audio[8:12] != b"WAVE":
+        raise HTTPException(status_code=400, detail="Unsupported audio format — expected WAV.")
+    return audio
 
 
 def _info_request_effective_status(row) -> str:
@@ -388,6 +416,65 @@ def _utc_now_naive() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
+# dateutil's fuzzy=True has NO relative-date support — parsing "yesterday
+# around 3pm" silently drops "yesterday" and returns TODAY at 3pm, which is
+# silently wrong on an OSHA/legal record. This pre-pass strips a relative-day
+# term out of the text and computes its date ourselves; dateutil only ever
+# sees the remainder (typically just a clock time). Checked in order so
+# "day before yesterday" isn't shadowed by the "yesterday" pattern matching
+# first. Each entry is (pattern, day_offset_from_today, default_hour) — the
+# default_hour is used when the remainder has no clock time of its own;
+# "last night" gets an evening default (21:00) since it implies a specific
+# part of the day, unlike a bare "yesterday".
+_RELATIVE_DAY_TERMS: tuple[tuple[re.Pattern, int, int], ...] = (
+    (re.compile(r"\bday before yesterday\b", re.IGNORECASE), -2, 12),
+    (re.compile(r"\byesterday\b", re.IGNORECASE), -1, 12),
+    (re.compile(r"\blast night\b", re.IGNORECASE), -1, 21),
+    (re.compile(r"\b(?:today|tonight|this morning|this afternoon|this evening)\b", re.IGNORECASE), 0, 12),
+)
+_DAYS_AGO_RE = re.compile(r"\b(\d+)\s+days?\s+ago\b", re.IGNORECASE)
+_EXPLICIT_YEAR_RE = re.compile(r"\b\d{4}\b")
+
+
+def _relative_day_match(text: str) -> Optional[tuple[int, int, str]]:
+    """Find a relative-day term in ``text``. Returns (day_offset, default_hour,
+    remainder) for the first match, or None. ``remainder`` is ``text`` with the
+    matched term blanked out, whitespace collapsed — fed to dateutil so a
+    spoken clock time ("...around 3pm") still lands on the right day."""
+    m = _DAYS_AGO_RE.search(text)
+    if m:
+        offset = -int(m.group(1))
+        remainder = re.sub(r"\s+", " ", _DAYS_AGO_RE.sub(" ", text, count=1)).strip()
+        return offset, 12, remainder
+    for pattern, offset, default_hour in _RELATIVE_DAY_TERMS:
+        if pattern.search(text):
+            remainder = re.sub(r"\s+", " ", pattern.sub(" ", text, count=1)).strip()
+            return offset, default_hour, remainder
+    return None
+
+
+def _clamp_future_occurred_at(parsed: datetime, original_text: str) -> datetime:
+    """Guard against dateutil defaulting a yearless date into the future.
+
+    "Dec 30" parsed in mid-2026 with no default year defaults to the current
+    year, landing months ahead — an incident can't have occurred in the
+    future. If the parse lands more than 26h ahead of now AND the original
+    text had no explicit 4-digit year, retry a year earlier; if it's still in
+    the future (or the retry itself fails), fall back to NOW() rather than
+    ever returning/raising on a bad future date.
+    """
+    now = _utc_now_naive()
+    if parsed <= now + timedelta(hours=26):
+        return parsed
+    if _EXPLICIT_YEAR_RE.search(original_text):
+        return now
+    try:
+        retried = parsed.replace(year=parsed.year - 1)
+    except ValueError:  # e.g. Feb 29 in a non-leap year
+        retried = parsed - timedelta(days=365)
+    return retried if retried <= now + timedelta(hours=26) else now
+
+
 def _parse_occurred_at(value) -> datetime:
     """Coerce IR submit `occurred_at` to a naive UTC datetime.
 
@@ -406,10 +493,23 @@ def _parse_occurred_at(value) -> datetime:
             return _utc_now_naive()
         try:
             from dateutil import parser as _date_parser
-            parsed = _date_parser.parse(text, fuzzy=True)
+            relative = _relative_day_match(text)
+            if relative is not None:
+                offset, default_hour, remainder = relative
+                base_date = (datetime.now(timezone.utc) + timedelta(days=offset)).date()
+                default_dt = datetime.combine(base_date, time(default_hour, 0))
+                if remainder:
+                    try:
+                        parsed = _date_parser.parse(remainder, fuzzy=True, default=default_dt)
+                    except (ValueError, OverflowError, TypeError):
+                        parsed = default_dt
+                else:
+                    parsed = default_dt
+            else:
+                parsed = _date_parser.parse(text, fuzzy=True)
             if parsed.tzinfo:
                 parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
-            return parsed
+            return _clamp_future_occurred_at(parsed, text)
         except (ValueError, OverflowError, TypeError):
             return _utc_now_naive()
     return _utc_now_naive()
@@ -1467,14 +1567,26 @@ async def create_incident_core(
     actor_email: Optional[str] = None,
     actor_ip: Optional[str] = None,
     current_user=None,
+    index_people: bool = True,
 ) -> tuple[dict, list]:
     """Insert an incident + run the shared post-insert mechanics.
 
-    Shared by the authenticated create route (`crud.create_incident`) and the
-    public location magic-link intake (`inbound_email.submit_location_report`)
-    so both paths produce identical-quality incidents: real `location_id`,
-    witnesses, the per-person identity index, OSHA emergency detection, and the
-    same AI auto-classify + policy-map + notification background jobs.
+    Shared by the authenticated create route (`crud.create_incident`), the
+    public location magic-link intake (`inbound_email.submit_location_report`),
+    and the truly-anonymous `/report` intake (`inbound_email.submit_anonymous_report`)
+    so every path produces an incident of the same quality: real `location_id`
+    (where applicable), witnesses, the per-person identity index, OSHA
+    emergency detection, and the same AI auto-classify + policy-map +
+    notification background jobs.
+
+    ``index_people=False`` skips the per-person identity index — required for
+    the anonymous `/report` intake, which per design must NOT mint `ir_people`
+    rows (there's no reporter name or roster to attach them to; see
+    `ir_incidents/CLAUDE.md`). In practice the anonymous form's "Anonymous"
+    reporter name and lack of an `involved_parties` category key already make
+    `_gather_incident_people` a no-op there, but the explicit flag makes that
+    guaranteed rather than incidental, so it can't silently start indexing
+    people if either of those inputs changes later.
 
     The CALLER owns the connection and its tenant scoping — the authed path uses
     `get_connection()`; the public token path uses
@@ -1569,7 +1681,7 @@ async def create_incident_core(
         )
 
     # Per-person identity index (best-effort; never blocks submit).
-    if company_id:
+    if company_id and index_people:
         try:
             people = _gather_incident_people(
                 reported_by_name=row.get("reported_by_name"),

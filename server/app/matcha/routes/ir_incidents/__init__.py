@@ -81,6 +81,7 @@ from .analytics import compute_behavioral_friction  # noqa: F401  (used by broke
 from ._shared import (  # noqa: F401  (used by inbound_email.py)
     _location_label,
     _parse_occurred_at,
+    _read_audio_or_400,
     _safe_json_loads,
     _info_request_effective_status,
     create_incident_core,

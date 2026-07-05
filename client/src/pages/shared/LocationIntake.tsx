@@ -35,6 +35,10 @@ export default function LocationIntake() {
   const [witnesses, setWitnesses] = useState<string[]>([])
   const [nextSteps, setNextSteps] = useState('')
   const [honeypot, setHoneypot] = useState('')
+  // Verbatim transcript from the last successful dictation — rides along to
+  // the submission as evidence of what was spoken, regardless of edits made
+  // to the (AI-prefilled) form fields afterward.
+  const [voiceTranscript, setVoiceTranscript] = useState<string | null>(null)
 
   useEffect(() => {
     if (!token) {
@@ -74,6 +78,7 @@ export default function LocationIntake() {
           witnesses,
           corrective_actions: nextSteps.trim() || null,
           company_name: honeypot,
+          ...(voiceTranscript ? { voice_transcript: voiceTranscript } : {}),
         }),
       })
       if (!res.ok) {
@@ -155,6 +160,7 @@ export default function LocationIntake() {
               if (p.witnesses?.length) {
                 setWitnesses((w) => Array.from(new Set([...w, ...p.witnesses.map((x) => x.name)])))
               }
+              setVoiceTranscript(p.transcript ?? null)
             }}
           />
         )}

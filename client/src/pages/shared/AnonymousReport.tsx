@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { Loader2, CheckCircle2, XCircle, AlertTriangle, ShieldCheck } from 'lucide-react'
+import { Loader2, CheckCircle2, XCircle, ShieldCheck } from 'lucide-react'
 import { IRPublicDictate } from '../../components/ir/IRPublicDictate'
 import { SubmissionDisclaimer } from '../../components/ir/SubmissionDisclaimer'
 
 const BASE = import.meta.env.VITE_API_URL ?? '/api'
 
-type Stage = 'validating' | 'invalid' | 'used' | 'form' | 'submitting' | 'submitted' | 'error'
+type Stage = 'validating' | 'invalid' | 'form' | 'submitting' | 'submitted' | 'error'
 
 export default function AnonymousReport() {
   const { token } = useParams<{ token: string }>()
@@ -19,6 +19,10 @@ export default function AnonymousReport() {
   const [contactInfo, setContactInfo] = useState('')
   const [honeypot, setHoneypot] = useState('')
   const [voiceEnabled, setVoiceEnabled] = useState(false)
+  // Verbatim transcript from the last successful dictation — rides along to
+  // the submission as evidence of what was spoken, regardless of edits made
+  // to the (AI-prefilled) form fields afterward.
+  const [voiceTranscript, setVoiceTranscript] = useState<string | null>(null)
 
   useEffect(() => {
     if (!token) {
@@ -33,8 +37,7 @@ export default function AnonymousReport() {
           setStage('form')
           return
         }
-        if (res.status === 410) setStage('used')
-        else setStage('invalid')
+        setStage('invalid')
       })
       .catch(() => setStage('invalid'))
   }, [token])
@@ -55,6 +58,7 @@ export default function AnonymousReport() {
           involved_parties: involvedParties.trim() || null,
           contact_info: contactInfo.trim() || null,
           company_name: honeypot,
+          ...(voiceTranscript ? { voice_transcript: voiceTranscript } : {}),
         }),
       })
       if (!res.ok) {
@@ -84,16 +88,6 @@ export default function AnonymousReport() {
         <XCircle className="w-10 h-10 text-red-400 mx-auto mb-3" />
         <h1 className="text-lg font-semibold text-zinc-100 mb-2">Invalid link</h1>
         <p className="text-sm text-zinc-400">This reporting link is not valid. Contact your HR team for a new one.</p>
-      </Shell>
-    )
-  }
-
-  if (stage === 'used') {
-    return (
-      <Shell>
-        <AlertTriangle className="w-10 h-10 text-amber-400 mx-auto mb-3" />
-        <h1 className="text-lg font-semibold text-zinc-100 mb-2">Link already used</h1>
-        <p className="text-sm text-zinc-400">This reporting link has already been submitted. Contact your HR team for a new one.</p>
       </Shell>
     )
   }
@@ -132,6 +126,7 @@ export default function AnonymousReport() {
                 const names = p.witnesses.map((x) => x.name).join(', ')
                 setInvolvedParties((cur) => (cur.trim() ? `${cur}, ${names}` : names))
               }
+              setVoiceTranscript(p.transcript ?? null)
             }}
           />
         )}

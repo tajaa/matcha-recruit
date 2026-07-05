@@ -124,7 +124,7 @@ function PosterPreview({ primary, secondary }: Branding) {
 }
 
 export function IRAnonymousReportingPanel() {
-  const [status, setStatus] = useState<{ enabled: boolean; link?: string } | null>(null)
+  const [status, setStatus] = useState<{ enabled: boolean; link?: string; used?: boolean; last_used_at?: string | null } | null>(null)
   const [loading, setLoading] = useState(false)
 
   // Per-location magic links (attributed intake at /intake/:token)
@@ -148,7 +148,7 @@ export function IRAnonymousReportingPanel() {
 
   // Always-on panel (not collapsible — admins must not miss it). Load on mount.
   useEffect(() => {
-    api.get<{ enabled: boolean; link?: string }>('/ir/incidents/anonymous-reporting/status')
+    api.get<{ enabled: boolean; link?: string; used?: boolean; last_used_at?: string | null }>('/ir/incidents/anonymous-reporting/status')
       .then(setStatus)
       .catch(() => setStatus({ enabled: false }))
     api.get<LocationRow[]>('/ir-onboarding/locations')
@@ -167,7 +167,7 @@ export function IRAnonymousReportingPanel() {
     setLoading(true)
     try {
       const res = await api.post<{ link: string }>('/ir/incidents/anonymous-reporting/generate')
-      setStatus({ enabled: true, link: res.link })
+      setStatus({ enabled: true, link: res.link, used: false, last_used_at: null })
     } catch { /* ignore */ }
     finally { setLoading(false) }
   }
@@ -298,7 +298,10 @@ export function IRAnonymousReportingPanel() {
                     </Button>
                   )}
                 </div>
-                <p className="text-[11px] text-zinc-500">Anonymous — no name collected, single-use.</p>
+                <p className="text-[11px] text-zinc-500">
+                  Anonymous — no name collected. Reusable until regenerated.
+                  {status.used && ` Last used ${status.last_used_at ? new Date(status.last_used_at).toLocaleDateString() : 'recently'}.`}
+                </p>
               </>
             )}
           </div>

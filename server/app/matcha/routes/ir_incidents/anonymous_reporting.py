@@ -63,7 +63,11 @@ async def get_anonymous_reporting_status(
     request: Request,
     current_user=Depends(require_admin_or_client),
 ):
-    """Get the company's anonymous reporting token (or null if disabled)."""
+    """Get the company's anonymous reporting token (or null if disabled).
+
+    The link is reusable, so ``used`` means "used at least once", not
+    "burned" — ``last_used_at`` gives the FE something to show alongside it.
+    """
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         raise HTTPException(status_code=404, detail="Company not found")
@@ -73,13 +77,15 @@ async def get_anonymous_reporting_status(
             company_id,
         )
     if not row or not row["report_email_token"]:
-        return {"token": None, "link": None, "enabled": False, "used": False}
+        return {"token": None, "link": None, "enabled": False, "used": False, "last_used_at": None}
     token = row["report_email_token"]
+    used_at = row["report_token_used_at"]
     return {
         "token": token,
         "link": _public_report_link(request, token),
         "enabled": True,
-        "used": row["report_token_used_at"] is not None,
+        "used": used_at is not None,
+        "last_used_at": used_at.isoformat() if used_at else None,
     }
 
 
@@ -104,6 +110,7 @@ async def generate_anonymous_reporting_token(
         "link": _public_report_link(request, token),
         "enabled": True,
         "used": False,
+        "last_used_at": None,
     }
 
 
