@@ -19,7 +19,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Literal, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Request, Response, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
@@ -64,6 +64,8 @@ class MatterCreate(_JurisdictionStateMixin):
     counsel_email: Optional[str] = Field(None, max_length=320)
     location_id: Optional[UUID] = None
     jurisdiction_state: Optional[str] = Field(None, min_length=2, max_length=2)
+    response_deadline: Optional[date] = None
+    deadline_note: Optional[str] = Field(None, max_length=300)
 
 
 class MatterUpdate(_JurisdictionStateMixin):
@@ -78,6 +80,8 @@ class MatterUpdate(_JurisdictionStateMixin):
     counsel_email: Optional[str] = Field(None, max_length=320)
     location_id: Optional[UUID] = None
     jurisdiction_state: Optional[str] = Field(None, min_length=2, max_length=2)
+    response_deadline: Optional[date] = None
+    deadline_note: Optional[str] = Field(None, max_length=300)
 
 
 class ResearchOptions(BaseModel):
@@ -173,6 +177,28 @@ async def _latest_memo(conn, matter_id: str) -> Optional[dict]:
 
 
 # --------------------------------------------------------------------------- #
+# Intake document parse — complaint/subpoena PDF → draft matter fields.
+# Returns a DRAFT for the intake form; never creates the matter itself
+# (legal records require human confirmation, same rule as ir_voice_intake).
+# --------------------------------------------------------------------------- #
+
+@router.post("/intake/parse")
+async def parse_intake(file: UploadFile = File(...), current_user=Depends(require_admin_or_client)):
+    company_id = await get_client_company_id(current_user)
+    await check_rate_limit(str(company_id), "legal_intake_parse", 10, 3600)
+    is_pdf = (file.content_type == "application/pdf") or (file.filename or "").lower().endswith(".pdf")
+    if not is_pdf:
+        raise HTTPException(status_code=400, detail="Upload the served document as a PDF")
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty file")
+    if len(data) > 15_000_000:
+        raise HTTPException(status_code=413, detail="PDF too large (max 15 MB)")
+    from ..services import legal_intake_parser
+    return await legal_intake_parser.parse_intake_document(data)
+
+
+# --------------------------------------------------------------------------- #
 # Matters CRUD
 # --------------------------------------------------------------------------- #
 
@@ -187,14 +213,16 @@ async def create_matter(body: MatterCreate, request: Request, current_user=Depen
             INSERT INTO legal_matters
                 (company_id, title, matter_type, allegation, defense_theory,
                  evidence_start, evidence_end, counsel_directed, counsel_name,
-                 counsel_email, created_by, location_id, jurisdiction_state, status)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'active')
+                 counsel_email, created_by, location_id, jurisdiction_state,
+                 response_deadline, deadline_note, status)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'active')
             RETURNING *
             """,
             company_id, body.title, body.matter_type, body.allegation, body.defense_theory,
             body.evidence_start, body.evidence_end, body.counsel_directed,
             body.counsel_name, body.counsel_email, getattr(current_user, "id", None),
             body.location_id, body.jurisdiction_state,
+            body.response_deadline, body.deadline_note,
         )
         await _audit(conn, row["id"], current_user, request, "create", {"title": body.title})
     return dict(row)
@@ -519,13 +547,17 @@ async def share_packet(matter_id: str, packet_id: str, body: ShareIn, request: R
 # --------------------------------------------------------------------------- #
 
 @public_router.get("/legal-pilot/share/{token}")
-async def download_shared_packet(token: str, request: Request):
+async def download_shared_packet(token: str, request: Request, background_tasks: BackgroundTasks):
     await check_rate_limit(client_ip(request), "legal_share_dl", 30, 3600)
     async with get_connection() as conn:
         row = await conn.fetchrow(
-            """SELECT s.id, s.revoked, s.expires_at, p.storage_path, p.filename, p.kind, s.matter_id
+            """SELECT s.id, s.revoked, s.expires_at, s.download_count, s.recipient_email,
+                      p.storage_path, p.filename, p.kind, s.matter_id,
+                      m.title AS matter_title, u.email AS owner_email
                FROM legal_matter_share_links s
                JOIN legal_matter_packets p ON p.id = s.packet_id
+               JOIN legal_matters m ON m.id = s.matter_id
+               LEFT JOIN users u ON u.id = m.created_by
                WHERE s.token = $1""",
             token,
         )
@@ -543,6 +575,19 @@ async def download_shared_packet(token: str, request: Request):
         await conn.execute(
             "INSERT INTO legal_matter_audit_log (matter_id, action, details, ip_address) VALUES ($1,$2,$3,$4)",
             row["matter_id"], "shared_download", json.dumps({"token_id": str(row["id"])}), client_ip(request),
+        )
+    # First open only (download_count read pre-increment): tell the matter
+    # owner counsel actually received it. After the response — never blocks
+    # or fails the download.
+    if row["download_count"] == 0 and row["owner_email"]:
+        from app.core.services.email import get_email_service
+
+        background_tasks.add_task(
+            get_email_service().send_legal_packet_opened_email,
+            to_email=row["owner_email"],
+            matter_title=row["matter_title"] or "your matter",
+            filename=row["filename"] or "packet",
+            recipient_email=row["recipient_email"],
         )
     data = await get_storage().download_file(row["storage_path"])
     mime = "application/zip" if row["kind"] == "zip" else "application/pdf"

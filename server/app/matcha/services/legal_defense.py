@@ -98,6 +98,17 @@ def _dt(v) -> str:
     return _fmt_dt(v)
 
 
+def _iso(v) -> str | None:
+    """Machine-sortable companion to the display-formatted ``when`` — the
+    chronology (UI tab + PDF section) sorts on this, never on display strings."""
+    if v is None:
+        return None
+    try:
+        return v.isoformat()
+    except AttributeError:
+        return str(v) or None
+
+
 def _hum(s) -> str:
     """Humanize a raw db enum/snake_case value for display — 'in_review' ->
     'In Review'. Feeds both the AI corpus text and the PDF, so the model's
@@ -182,6 +193,31 @@ def _scope_employee(n: int) -> str:
             f" OR (${n}::uuid IS NULL AND UPPER(e.work_state) = UPPER(${n + 1})))")
 
 
+_UUID_RE_SQL = "'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'"
+
+
+def _scope_er_involved(n: int) -> str:
+    """Matter-scope predicate for er_cases (alias ``ec``), whose only employee
+    link is the JSONB ``involved_employees`` array (elements carry an
+    ``employee_id`` key — see er_copilot._resolve_involved_parties).
+
+    A case naming NO employees stays IN scope — opposite default from the
+    employee-linked tables (where every row names an employee): an
+    unattributable ER case silently dropped from a legal corpus is worse than
+    over-inclusion. The regex guard keeps a malformed employee_id string from
+    crashing the uuid cast."""
+    return (
+        f" AND ((${n}::uuid IS NULL AND ${n + 1}::varchar IS NULL)"
+        f" OR jsonb_array_length(COALESCE(ec.involved_employees, '[]'::jsonb)) = 0"
+        f" OR EXISTS ("
+        f"   SELECT 1 FROM jsonb_array_elements(COALESCE(ec.involved_employees, '[]'::jsonb)) ie"
+        f"   JOIN employees e ON (ie->>'employee_id') ~ {_UUID_RE_SQL}"
+        f"                   AND e.id = (ie->>'employee_id')::uuid"
+        f"   WHERE (${n}::uuid IS NOT NULL AND (e.work_location_id = ${n}"
+        f"          OR (e.work_location_id IS NULL AND UPPER(e.work_state) = UPPER(${n + 1}))))"
+        f"      OR (${n}::uuid IS NULL AND UPPER(e.work_state) = UPPER(${n + 1}))))")
+
+
 async def _src_incidents(conn, company_id, start, end, loc_id, state) -> list[dict]:
     rows = await conn.fetch(
         f"""
@@ -201,23 +237,22 @@ async def _src_incidents(conn, company_id, start, end, loc_id, state) -> list[di
         "ref": r["incident_number"],
         "summary": f"{r['title']} — type {_hum(r['incident_type'])}, severity {_hum(r['severity'])}, status {_hum(r['status'])}",
         "when": _dt(r["occurred_at"]),
+        "when_iso": _iso(r["occurred_at"]),
     } for r in rows]
 
 
 async def _src_er_cases(conn, company_id, start, end, loc_id, state) -> list[dict]:
-    # loc_id/state unused: er_cases carries only a JSONB involved_employees
-    # array — no scalar employee/location link to scope on. Stays
-    # company-wide under a matter scope (known gap).
     rows = await conn.fetch(
-        """
-        SELECT id, case_number, title, category, status, outcome, created_at
-        FROM er_cases
-        WHERE company_id = $1
-          AND ($2::date IS NULL OR created_at >= $2)
-          AND ($3::date IS NULL OR created_at < ($3::date + 1))
-        ORDER BY created_at DESC NULLS LAST
+        f"""
+        SELECT ec.id, ec.case_number, ec.title, ec.category, ec.status, ec.outcome, ec.created_at
+        FROM er_cases ec
+        WHERE ec.company_id = $1
+          AND ($2::date IS NULL OR ec.created_at >= $2)
+          AND ($3::date IS NULL OR ec.created_at < ($3::date + 1))
+          {_scope_er_involved(4)}
+        ORDER BY ec.created_at DESC NULLS LAST
         """,
-        company_id, start, end,
+        company_id, start, end, loc_id, state,
     )
     return [{
         "cid": f"er_case:{r['id']}",
@@ -225,6 +260,7 @@ async def _src_er_cases(conn, company_id, start, end, loc_id, state) -> list[dic
         "summary": f"{r['title']} — {_hum(r['category'])}, status {_hum(r['status'])}"
                    + (f", outcome {_hum(r['outcome'])}" if r["outcome"] else ""),
         "when": _dt(r["created_at"]),
+        "when_iso": _iso(r["created_at"]),
     } for r in rows]
 
 
@@ -255,6 +291,7 @@ async def _src_compliance(conn, company_id, start, end, loc_id, state) -> list[d
                    + (f" @ {r['location_name']}" if r["location_name"] else "")
                    + (f" [{r['statute_citation']}]" if r["statute_citation"] else ""),
         "when": _dt(r["last_changed_at"]),
+        "when_iso": _iso(r["last_changed_at"]),
     } for r in rows]
 
 
@@ -280,6 +317,7 @@ async def _src_discipline(conn, company_id, start, end, loc_id, state) -> list[d
                    + (f", severity {_hum(r['severity'])}" if r["severity"] else "")
                    + f", status {_hum(r['status'])}",
         "when": _dt(r["issued_date"]),
+        "when_iso": _iso(r["issued_date"]),
     } for r in rows]
 
 
@@ -303,6 +341,7 @@ async def _src_training(conn, company_id, start, end, loc_id, state) -> list[dic
         "summary": f"{r['title']} — status {_hum(r['status'])}"
                    + (f", expires {_dt(r['expiration_date'])}" if r["expiration_date"] else ""),
         "when": _dt(r["completed_date"]),
+        "when_iso": _iso(r["completed_date"]),
     } for r in rows]
 
 
@@ -326,6 +365,7 @@ async def _src_policy_ack(conn, company_id, start, end, loc_id, state) -> list[d
         "ref": "policy acknowledgment",
         "summary": f"{r['policy_title'] or 'Policy'} acknowledged by {r['signer_name'] or 'employee'}",
         "when": _dt(r["signed_at"]),
+        "when_iso": _iso(r["signed_at"]),
     } for r in rows]
 
 
@@ -348,6 +388,7 @@ async def _src_accommodations(conn, company_id, start, end, loc_id, state) -> li
         "ref": r["case_number"],
         "summary": f"{r['title']} — {_hum(r['disability_category'])}, status {_hum(r['status'])}",
         "when": _dt(r["created_at"]),
+        "when_iso": _iso(r["created_at"]),
     } for r in rows]
 
 
@@ -377,6 +418,7 @@ async def _src_compliance_alerts(conn, company_id, start, end, loc_id, state) ->
                    + (f", deadline {_dt(r['deadline'])}" if r["deadline"] else "")
                    + (f" @ {r['location_name']}" if r["location_name"] else ""),
         "when": _dt(r["created_at"]),
+        "when_iso": _iso(r["created_at"]),
     } for r in rows]
 
 
@@ -917,6 +959,43 @@ def _research_html(research: dict | None) -> str:
     """
 
 
+# Chronology covers company-conduct EVENTS. compliance_req is excluded on
+# purpose: it's current tracked posture, and its last_changed_at is the LAW's
+# change date, not a company action. Jurisdiction kinds (law/bill/case) are
+# likewise not company events.
+_CHRONOLOGY_KINDS = ("incident:", "er_case:", "compliance_alert:", "discipline:",
+                     "training:", "policy_ack:", "accommodation:")
+
+
+def _chronology_rows(index: dict) -> list[dict]:
+    """Company-record events oldest-first, undated last. Pure (unit-tested)."""
+    recs = [r for cid, r in index.items() if cid.startswith(_CHRONOLOGY_KINDS)]
+    dated = sorted((r for r in recs if r.get("when_iso")), key=lambda r: r["when_iso"])
+    undated = [r for r in recs if not r.get("when_iso")]
+    return dated + undated
+
+
+def _chronology_html(index: dict) -> str:
+    rows = _chronology_rows(index)
+    if not rows:
+        return ""
+    trs = "".join(
+        f"<tr><td>{_esc((r.get('when_iso') or '')[:10]) if r.get('when_iso') else '—'}</td>"
+        f"<td>{_esc(r.get('source_label', ''))}</td>"
+        f"<td>{_esc(r.get('summary', ''))}</td></tr>"
+        for r in rows
+    )
+    return f"""
+      <div class="appendix-section">
+        <h2>Chronology of records</h2>
+        <p style="font-size:9px;color:#888;margin:0 0 4px">Every dated company record in the
+        evidence scope, oldest first — rendered directly from system records, not model output.</p>
+        <table><thead><tr><th>Date</th><th>Source</th><th>Record</th></tr></thead>
+        <tbody>{trs}</tbody></table>
+      </div>
+    """
+
+
 def _memo_html(matter: dict, corpus: dict, memo: dict, details: dict, cited: list[str],
                 company_name: str | None = None, audit_log: list[dict] | None = None,
                 appendix_ids: list[str] | None = None, research: dict | None = None) -> str:
@@ -1051,6 +1130,7 @@ def _memo_html(matter: dict, corpus: dict, memo: dict, details: dict, cited: lis
       <tbody>{idx_rows}</tbody></table>
 
       {notes_block}
+      {_chronology_html(index)}
       {appendix}
 
       {custody_block}

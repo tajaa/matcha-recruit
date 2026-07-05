@@ -1,18 +1,19 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Loader2, Scale, Send, ShieldAlert } from 'lucide-react'
-import type { EvidencePreview, MatterMessage } from '../../../api/legalDefense'
-import { CID_KIND_LABEL, DISCLAIMER, LABEL, STARTERS, fmtWhen, type CidInfo } from './shared'
+import type { EvidencePreview, MatterMessage, MatterType } from '../../../api/legalDefense'
+import { CID_KIND_LABEL, DISCLAIMER, LABEL, startersFor, fmtWhen, type CidInfo } from './shared'
 import { RecordViewer, type ViewerTarget } from './RecordViewer'
 
 /** Analyst console: full-width transcript rows (no chat bubbles), bottom-
  *  anchored so a short exchange sits next to the composer instead of leaving
  *  a void, with grounded observations rendered as cited evidence blocks. */
-export function Console({ messages, status, sending, evidence, onSend }: {
+export function Console({ messages, status, sending, evidence, onSend, matterType }: {
   messages: MatterMessage[]
   status: string | null
   sending: boolean
   evidence: EvidencePreview | null
   onSend: (text: string) => void
+  matterType: MatterType
 }) {
   const [input, setInput] = useState('')
   const [view, setView] = useState<ViewerTarget | null>(null)
@@ -63,7 +64,7 @@ export function Console({ messages, status, sending, evidence, onSend }: {
                 Describe what's being claimed and the timeframe; the analyst maps your own records to it and flags what counsel should look at.
               </p>
               <div className="mt-4 max-w-[60ch]">
-                {STARTERS.map((s) => (
+                {startersFor(matterType).map((s) => (
                   <button key={s}
                     onClick={() => { setInput(s); inputRef.current?.focus() }}
                     className="group flex w-full items-start gap-2.5 border-t border-white/[0.06] py-2.5 text-left text-[13px] text-zinc-500 transition-colors last:border-b last:border-white/[0.06] hover:text-zinc-200"

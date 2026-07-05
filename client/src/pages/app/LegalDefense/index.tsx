@@ -9,6 +9,7 @@ import {
 import { LABEL, seedRecap, typeLabel } from './shared'
 import { Masthead } from './Masthead'
 import { Console } from './Console'
+import { Chronology } from './Chronology'
 import { EvidencePanel } from './EvidencePanel'
 import { LegalContextPanel } from './LegalContextPanel'
 import { PacketsPanel } from './PacketsPanel'
@@ -152,6 +153,7 @@ function MatterWorkbench({ matter, evidence, research, researching, onRunResearc
   const [sending, setSending] = useState(false)
   const [genKind, setGenKind] = useState<'pdf' | 'zip' | 'both' | null>(null)
   const [shareFor, setShareFor] = useState<Packet | null>(null)
+  const [tab, setTab] = useState<'console' | 'chronology'>('console')
   const seededRef = useRef(false)
 
   useEffect(() => { setMessages(matter.messages ?? []) }, [matter.id, matter.messages])
@@ -217,8 +219,22 @@ function MatterWorkbench({ matter, evidence, research, researching, onRunResearc
       <Masthead matter={matter} evidence={evidence} genKind={genKind} hasAssistant={hasAssistant} research={research}
         onGenerate={(k, includeResearch) => void generate(k, includeResearch)} />
       <div className="flex min-h-0 flex-1">
-        <div className="min-w-0 flex-1">
-          <Console messages={messages} status={status} sending={sending} evidence={evidence} onSend={(t) => void send(t)} />
+        <div className="flex min-w-0 flex-1 flex-col">
+          <div className="flex shrink-0 items-center gap-1 border-b border-white/[0.06] px-5 py-1.5">
+            {(['console', 'chronology'] as const).map((t) => (
+              <button key={t} onClick={() => setTab(t)}
+                className={`rounded px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.15em] transition-colors ${
+                  tab === t ? 'bg-white/[0.06] text-zinc-200' : 'text-zinc-500 hover:text-zinc-300'}`}>
+                {t === 'console' ? 'Analyst console' : 'Chronology'}
+              </button>
+            ))}
+          </div>
+          <div className="min-h-0 flex-1">
+            {tab === 'console'
+              ? <Console messages={messages} status={status} sending={sending} evidence={evidence}
+                  onSend={(t) => void send(t)} matterType={matter.matter_type} />
+              : <Chronology evidence={evidence} />}
+          </div>
         </div>
         <div className="flex w-80 shrink-0 flex-col border-l border-white/[0.06]">
           <LegalContextPanel legalContext={evidence?.legal_context} research={research}

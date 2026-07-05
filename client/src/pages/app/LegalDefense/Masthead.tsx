@@ -27,6 +27,18 @@ export function Masthead({ matter, evidence, genKind, hasAssistant, research, on
   const scope = evidence?.legal_context?.location_name
     ?? (matter.location_id ? 'location set' : matter.jurisdiction_state)
 
+  // Response-deadline countdown: amber within 7 days, red within 3 or overdue.
+  // Math.round, not floor — a DST-shortened day is 23h and floor would show
+  // the deadline a day early.
+  const daysLeft = matter.response_deadline
+    ? Math.round((new Date(`${matter.response_deadline}T00:00:00`).getTime() - new Date(new Date().toDateString()).getTime()) / 86_400_000)
+    : null
+  const deadlineTone = daysLeft === null ? '' : daysLeft <= 3 ? 'text-red-400' : daysLeft <= 7 ? 'text-amber-400' : 'text-zinc-400'
+  const deadlineText = daysLeft === null ? null
+    : daysLeft < 0 ? `response overdue ${-daysLeft}d`
+    : daysLeft === 0 ? 'response due today'
+    : `response due in ${daysLeft}d`
+
   return (
     <div className="shrink-0 border-b border-white/[0.06]">
       <div className="flex items-start justify-between gap-4 px-5 pt-4">
@@ -38,6 +50,7 @@ export function Masthead({ matter, evidence, genKind, hasAssistant, research, on
             <span className={matter.status === 'active' ? 'text-emerald-400' : 'text-zinc-500'}>{matter.status}</span>
             <span className="normal-case text-zinc-500">window {window}</span>
             {scope && <span className="normal-case text-zinc-500">scope {scope}</span>}
+            {deadlineText && <span className={`normal-case ${deadlineTone}`}>{deadlineText}</span>}
             {matter.counsel_directed && (
               <span className="text-zinc-400">at direction of counsel{matter.counsel_name ? ` · ${matter.counsel_name}` : ''}</span>
             )}

@@ -29,6 +29,7 @@ celery_app = Celery(
         "app.workers.tasks.leave_agent_tasks",
         "app.workers.tasks.onboarding_reminders",
         "app.workers.tasks.compliance_action_reminders",
+        "app.workers.tasks.legal_deadline_reminders",
         "app.workers.tasks.handbook_freshness",
         "app.workers.tasks.risk_assessment",
         "app.workers.tasks.healthcare_research",
@@ -177,6 +178,13 @@ def on_worker_ready(**kwargs):
         run_compliance_action_reminders.delay()
     else:
         print("[Worker] Compliance action reminders scheduler is disabled, skipping.")
+
+    from app.workers.tasks.legal_deadline_reminders import run_legal_deadline_reminders
+
+    if _is_scheduler_enabled("legal_deadline_reminders"):
+        run_legal_deadline_reminders.delay()
+    else:
+        print("[Worker] Legal deadline reminders scheduler is disabled, skipping.")
 
     from app.workers.tasks.handbook_freshness import run_handbook_freshness_checks
 

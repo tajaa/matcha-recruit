@@ -35,11 +35,38 @@ export function seedRecap(m: Matter): string | null {
 export const DISCLAIMER =
   'This organizes your own records to help your attorney — it is an evidence-assembly aid, not legal advice, and renders no legal conclusion. Have counsel review before relying on it.'
 
-export const STARTERS = [
-  'We were served a class action alleging employees worked off the clock in 2025.',
-  'What do our records show about overtime or wage disputes?',
-  'Summarize all discipline and ER cases related to timekeeping.',
-]
+/** Starter prompts are the soft-mode surface (LEGAL_PILOT_ROADMAP.md design
+ *  decision — no chat modes): shaped by matter type, zero mode state. */
+const STARTER_CLOSER = 'What do the records NOT establish that counsel will ask about?'
+const STARTERS_BY_TYPE: Record<MatterType, string[]> = {
+  class_action: [
+    'What do our records show about overtime, breaks, or wage disputes in the window?',
+    'Summarize all discipline and ER cases related to timekeeping or pay.',
+  ],
+  single_plaintiff: [
+    'Pull everything involving the claimant — incidents, ER cases, discipline, acknowledgments.',
+    'What does the discipline trail show, and was our own process followed?',
+  ],
+  eeoc_charge: [
+    'What documentation exists around the complaints and our responses?',
+    'Show training completions and policy acknowledgments relevant to this charge.',
+  ],
+  subpoena: [
+    'Inventory what we hold that matches the subpoena scope and window.',
+    'Which records have supporting documents attached, and which are summary-only?',
+  ],
+  audit: [
+    'Summarize our compliance posture and monitoring history for the window.',
+    'Show what we tracked, what alerts fired, and how they were resolved.',
+  ],
+  other: [
+    'Organize the records most relevant to this matter and flag anything unusual.',
+    'Summarize incidents, ER cases, and discipline in the evidence window.',
+  ],
+}
+export function startersFor(t: MatterType): string[] {
+  return [...(STARTERS_BY_TYPE[t] ?? STARTERS_BY_TYPE.other), STARTER_CLOSER]
+}
 
 /** Label voice — docket micro-caption. */
 export { LABEL } from '../../../components/ui'

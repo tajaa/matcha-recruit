@@ -9,7 +9,7 @@ const BASE = import.meta.env.VITE_API_URL ?? '/api'
 export type MatterType = 'subpoena' | 'class_action' | 'eeoc_charge' | 'single_plaintiff' | 'audit' | 'other'
 export type MatterStatus = 'draft' | 'active' | 'closed'
 
-export type EvidenceRecord = { cid: string; ref: string | null; summary: string; when: string }
+export type EvidenceRecord = { cid: string; ref: string | null; summary: string; when: string; when_iso?: string | null }
 export type EvidenceSource = { label: string; records: EvidenceRecord[] }
 export type JurisdictionChainLink = { id: string; level: string; display_name: string }
 export type LegalContext = {
@@ -73,6 +73,8 @@ export type Matter = {
   counsel_email: string | null
   location_id: string | null
   jurisdiction_state: string | null
+  response_deadline: string | null
+  deadline_note: string | null
   created_at: string
   updated_at: string
   closed_at: string | null
@@ -93,6 +95,26 @@ export type MatterCreate = {
   counsel_email?: string | null
   location_id?: string | null
   jurisdiction_state?: string | null
+  response_deadline?: string | null
+  deadline_note?: string | null
+}
+
+export type IntakeDraft = {
+  matter_type: MatterType
+  title: string | null
+  allegation: string | null
+  plaintiff: string | null
+  defendant: string | null
+  jurisdiction_state: string | null
+  evidence_start: string | null
+  evidence_end: string | null
+  response_deadline: string | null
+  available: boolean
+}
+export const parseIntakeDocument = (file: File) => {
+  const fd = new FormData()
+  fd.append('file', file)
+  return api.upload<IntakeDraft>('/legal-pilot/intake/parse', fd)
 }
 
 export const listMatters = () => api.get<Matter[]>('/legal-pilot/matters')

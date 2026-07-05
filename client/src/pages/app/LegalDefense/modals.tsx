@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react'
-import { Loader2, X } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { FileUp, Loader2, X } from 'lucide-react'
 import { Button, Input, Modal, Select, Textarea, Toggle, useToast } from '../../../components/ui'
 import { fetchLocations } from '../../../api/compliance'
 import type { BusinessLocation } from '../../../types/compliance'
-import { createMatter, sharePacket, type Matter, type MatterType, type Packet } from '../../../api/legalDefense'
+import { createMatter, parseIntakeDocument, sharePacket, type Matter, type MatterType, type Packet } from '../../../api/legalDefense'
 import { MATTER_TYPES } from './shared'
 
 export function NewMatterModal({ onClose, onCreated }: { onClose: () => void; onCreated: (m: Matter) => void }) {
@@ -13,6 +13,7 @@ export function NewMatterModal({ onClose, onCreated }: { onClose: () => void; on
   const [context, setContext] = useState('')
   const [start, setStart] = useState('')
   const [end, setEnd] = useState('')
+  const [deadline, setDeadline] = useState('')
   const [counsel, setCounsel] = useState(false)
   const [counselName, setCounselName] = useState('')
   const [locations, setLocations] = useState<BusinessLocation[]>([])
@@ -20,10 +21,38 @@ export function NewMatterModal({ onClose, onCreated }: { onClose: () => void; on
   const [stateOverride, setStateOverride] = useState('')
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  const [parsing, setParsing] = useState(false)
+  const [parsedFrom, setParsedFrom] = useState<string | null>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     fetchLocations().then(setLocations).catch(() => setLocations([]))
   }, [])
+
+  async function parseDocument(file: File) {
+    setParsing(true); setErr(null)
+    try {
+      const d = await parseIntakeDocument(file)
+      if (!d.available) {
+        setErr('Could not read that document — fill the form manually.')
+        return
+      }
+      // Prefill only; everything stays editable. Extracted values overwrite
+      // empty fields but never text the user already typed.
+      setType(d.matter_type)
+      if (d.title && !title.trim()) setTitle(d.title)
+      if (d.allegation && !allegation.trim()) setAllegation(d.allegation)
+      if (d.evidence_start && !start) setStart(d.evidence_start)
+      if (d.evidence_end && !end) setEnd(d.evidence_end)
+      if (d.response_deadline && !deadline) setDeadline(d.response_deadline)
+      if (d.jurisdiction_state && !locationId && !stateOverride) setStateOverride(d.jurisdiction_state)
+      setParsedFrom(file.name)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Failed to read the document')
+    } finally {
+      setParsing(false)
+    }
+  }
 
   async function submit() {
     if (!title.trim()) { setErr('Give the matter a title.'); return }
@@ -33,6 +62,7 @@ export function NewMatterModal({ onClose, onCreated }: { onClose: () => void; on
         title: title.trim(), matter_type: type,
         allegation: allegation.trim() || null, defense_theory: context.trim() || null,
         evidence_start: start || null, evidence_end: end || null,
+        response_deadline: deadline || null,
         counsel_directed: counsel, counsel_name: counsel ? (counselName.trim() || null) : null,
         location_id: locationId || null,
         jurisdiction_state: locationId ? null : (stateOverride.trim().toUpperCase() || null),
@@ -48,6 +78,18 @@ export function NewMatterModal({ onClose, onCreated }: { onClose: () => void; on
   return (
     <Modal open onClose={onClose} title="New legal matter">
       <div className="space-y-3">
+        <input ref={fileRef} type="file" accept="application/pdf,.pdf" className="hidden"
+          onChange={(e) => { const f = e.target.files?.[0]; if (f) void parseDocument(f); e.target.value = '' }} />
+        <button type="button" disabled={parsing} onClick={() => fileRef.current?.click()}
+          className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-white/[0.12] px-3 py-2.5 text-sm text-zinc-400 transition-colors hover:border-emerald-500/40 hover:text-zinc-200 disabled:opacity-60">
+          {parsing ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileUp className="h-4 w-4" />}
+          {parsing ? 'Reading the document…' : parsedFrom ? `Prefilled from ${parsedFrom} — review below` : 'Upload the served document (PDF) to prefill'}
+        </button>
+        {parsedFrom && (
+          <p className="text-[11px] text-zinc-500">
+            Extracted fields are drafts — review and edit everything before creating the matter.
+          </p>
+        )}
         <Input label="Title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Doe v. Acme — class action" />
         <Select label="Type" value={type} options={MATTER_TYPES}
           onChange={(e) => setType(e.target.value as MatterType)} />
@@ -59,6 +101,13 @@ export function NewMatterModal({ onClose, onCreated }: { onClose: () => void; on
           <Input label="Evidence from" type="date" value={start} onChange={(e) => setStart(e.target.value)} />
           <Input label="Evidence to" type="date" value={end} onChange={(e) => setEnd(e.target.value)} />
         </div>
+        <Input label="Response deadline (optional)" type="date" value={deadline}
+          onChange={(e) => setDeadline(e.target.value)} />
+        {deadline && (
+          <p className="text-[11px] text-zinc-500">
+            You'll be reminded 14, 7, 3, and 1 days before the deadline.
+          </p>
+        )}
         {locations.length > 0 && (
           <Select
             label="Location (governing jurisdiction)"

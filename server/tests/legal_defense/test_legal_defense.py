@@ -174,6 +174,34 @@ def test_scope_fragments_use_expected_placeholders():
     emp = ld._scope_employee(4)
     assert set(re.findall(r"\$(\d+)", emp)) == {"4", "5"}
     assert "e.work_location_id" in emp and "e.work_state" in emp
+    er = ld._scope_er_involved(4)
+    assert set(re.findall(r"\$(\d+)", er)) == {"4", "5"}
+    # no-employees ER cases stay IN scope; malformed ids can't crash the cast
+    assert "jsonb_array_length" in er
+    assert "~" in er and "::uuid" in er
+
+
+def test_chronology_rows_sorted_and_filtered():
+    index = {
+        "incident:a": {"cid": "incident:a", "summary": "s1", "when_iso": "2025-06-01"},
+        "discipline:b": {"cid": "discipline:b", "summary": "s2", "when_iso": "2025-01-15T10:00:00"},
+        "er_case:c": {"cid": "er_case:c", "summary": "s3", "when_iso": None},
+        "compliance_req:d": {"cid": "compliance_req:d", "summary": "posture", "when_iso": "2020-01-01"},
+        "law:e": {"cid": "law:e", "summary": "law", "when_iso": "2019-01-01"},
+    }
+    rows = ld._chronology_rows(index)
+    # posture + jurisdiction context excluded; dated events oldest first; undated last
+    assert [r["cid"] for r in rows] == ["discipline:b", "incident:a", "er_case:c"]
+
+
+def test_chronology_html_renders_dates_and_escapes():
+    index = {"incident:a": {"cid": "incident:a", "summary": "<b>x</b>", "when_iso": "2025-06-01",
+                            "source_label": "Safety incidents (IR / OSHA)"}}
+    html = ld._chronology_html(index)
+    assert "Chronology of records" in html
+    assert "2025-06-01" in html
+    assert "&lt;b&gt;" in html          # summaries are escaped
+    assert ld._chronology_html({}) == ""  # empty corpus renders nothing
 
 
 class _ArgCountConn:
@@ -276,3 +304,46 @@ def test_dt_date_normalizes_str_and_date():
     assert ld._dt_date("2024-01-15") == "2024-01-15"
     assert ld._dt_date(datetime.date(2024, 1, 15)) == "2024-01-15"
     assert ld._dt_date(None) == "—"
+
+
+# --- intake parser coercion ---------------------------------------------------
+
+def test_coerce_draft_clamps_garbage():
+    from app.matcha.services.legal_intake_parser import coerce_draft
+    d = coerce_draft({
+        "matter_type": "lawsuit-of-doom", "title": "  T  " + "x" * 300,
+        "allegation": None, "jurisdiction_state": "Nevada",
+        "evidence_start": "not-a-date", "evidence_end": "2025-12-31",
+        "response_deadline": "2026-02-30",  # invalid calendar date
+    })
+    assert d["matter_type"] == "other"          # unknown type → other
+    assert len(d["title"]) <= 120
+    assert d["jurisdiction_state"] is None      # "Nevada" is not a 2-letter code
+    assert d["evidence_start"] is None
+    assert d["evidence_end"] == "2025-12-31"
+    assert d["response_deadline"] is None       # Feb 30 rejected
+    assert coerce_draft("not-a-dict")["matter_type"] == "other"
+
+
+def test_coerce_draft_swaps_inverted_window_and_uppercases_state():
+    from app.matcha.services.legal_intake_parser import coerce_draft
+    d = coerce_draft({
+        "matter_type": "eeoc_charge", "jurisdiction_state": "nv",
+        "evidence_start": "2025-12-01", "evidence_end": "2025-01-01",
+    })
+    assert d["matter_type"] == "eeoc_charge"
+    assert d["jurisdiction_state"] == "NV"
+    assert d["evidence_start"] == "2025-01-01" and d["evidence_end"] == "2025-12-01"
+
+
+# --- deadline reminder buckets -------------------------------------------------
+
+def test_deadline_bucket_boundaries():
+    from app.workers.tasks.legal_deadline_reminders import bucket_for
+    assert bucket_for(0) == 1
+    assert bucket_for(1) == 1
+    assert bucket_for(2) == 3
+    assert bucket_for(6) == 7      # worker down on day 7 still catches day 6
+    assert bucket_for(14) == 14
+    assert bucket_for(15) is None  # beyond lookahead
+    assert bucket_for(-1) is None  # overdue — no nag, UI shows red

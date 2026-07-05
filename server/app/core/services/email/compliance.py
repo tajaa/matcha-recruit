@@ -796,3 +796,126 @@ Please log in and review your handbook:
             text_content=text_content,
         )
 
+
+    async def send_legal_packet_opened_email(
+        self,
+        to_email: str,
+        matter_title: str,
+        filename: str,
+        recipient_email: Optional[str] = None,
+    ) -> bool:
+        """Notify the matter owner the first time counsel opens a shared
+        Legal Pilot packet — closes the loop on "Send to counsel". Fired only
+        on a share link's first download (route debounces on download_count).
+        """
+        if not self.is_configured():
+            logger.warning("Gmail not configured, skipping legal packet opened email")
+            return False
+
+        title_safe = html.escape(matter_title or "your matter")
+        file_safe = html.escape(filename or "packet")
+        who_safe = html.escape(recipient_email) if recipient_email else "The recipient"
+
+        html_content = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; }}
+        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+        .logo {{ color: #22c55e; font-size: 22px; font-weight: bold; letter-spacing: 2px; }}
+        .card {{ background: #f8fafc; border-left: 4px solid #22c55e; border-radius: 8px; padding: 16px; margin: 16px 0; }}
+        .footer {{ text-align: center; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 12px; margin-top: 24px; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">MATCHA</div>
+        <h2 style="font-size:18px;color:#111;">Counsel opened your evidence packet</h2>
+        <div class="card">
+            <p style="margin:0;"><strong>{who_safe}</strong> downloaded
+            <strong>{file_safe}</strong> for the matter <strong>{title_safe}</strong>.</p>
+        </div>
+        <p style="font-size:12px;color:#6b7280;">Every download of a shared packet is
+        recorded in the matter's chain-of-custody log.</p>
+        <div class="footer">Legal Pilot — evidence assembly, not legal advice.</div>
+    </div>
+</body>
+</html>
+"""
+        text_content = (
+            f"{recipient_email or 'The recipient'} downloaded {filename} "
+            f"for the matter \"{matter_title}\".\n\n"
+            "Every download of a shared packet is recorded in the matter's "
+            "chain-of-custody log.\n"
+        )
+
+        return await self.send_email(
+            to_email=to_email,
+            to_name=None,
+            subject=f"Counsel opened the packet for \"{matter_title}\"",
+            html_content=html_content,
+            text_content=text_content,
+        )
+
+    async def send_legal_deadline_reminder(
+        self,
+        to_email: str,
+        matter_title: str,
+        matter_type: str,
+        deadline: date,
+        days_until: int,
+        note: Optional[str] = None,
+    ) -> bool:
+        """Legal Pilot response-deadline nudge (14/7/3/1 days out) — sent by
+        the legal_deadline_reminders worker to the matter owner."""
+        if not self.is_configured():
+            logger.warning("Gmail not configured, skipping legal deadline reminder")
+            return False
+
+        title_safe = html.escape(matter_title or "Legal matter")
+        type_safe = html.escape((matter_type or "matter").replace("_", " ").title())
+        note_safe = html.escape(note) if note else None
+        when = deadline.strftime("%B %d, %Y")
+        urgency = "today" if days_until == 0 else (
+            "tomorrow" if days_until == 1 else f"in {days_until} days")
+
+        html_content = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; }}
+        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+        .logo {{ color: #22c55e; font-size: 22px; font-weight: bold; letter-spacing: 2px; }}
+        .card {{ background: #fffbeb; border-left: 4px solid #f59e0b; border-radius: 8px; padding: 16px; margin: 16px 0; }}
+        .footer {{ text-align: center; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 12px; margin-top: 24px; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">MATCHA</div>
+        <h2 style="font-size:18px;color:#111;">Response deadline {html.escape(urgency)}</h2>
+        <div class="card">
+            <p style="margin:0;"><strong>{title_safe}</strong> ({type_safe})<br>
+            Response due <strong>{when}</strong>{f"<br>{note_safe}" if note_safe else ""}</p>
+        </div>
+        <p>Generate and send the evidence packet to counsel well before the due date.</p>
+        <div class="footer">Legal Pilot — evidence assembly, not legal advice.</div>
+    </div>
+</body>
+</html>
+"""
+        text_content = (
+            f"Response deadline {urgency}: {matter_title} ({type_safe})\n"
+            f"Due {when}." + (f"\nNote: {note}" if note else "") + "\n\n"
+            "Generate and send the evidence packet to counsel well before the due date.\n"
+        )
+
+        return await self.send_email(
+            to_email=to_email,
+            to_name=None,
+            subject=f"Legal matter deadline {urgency}: {matter_title}",
+            html_content=html_content,
+            text_content=text_content,
+        )

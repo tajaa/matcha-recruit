@@ -7,6 +7,8 @@ Feature flag: `legal_defense` · Routes: `/legal-pilot/*` · Frontend: `client/s
 
 Product stance (unchanged, load-bearing): the AI is an **organizer, not an advocate**. Everything below stays on the "what the records show" side of the line — no liability opinions, no advocacy drafting. Grounding invariants (citation gate `validate_citations`, deterministic PDF appendix from DB rows) apply to every new surface.
 
+**Design decision — no chat modes.** The chat stays a single freeform surface; the model intuits intent (same call as IR Copilot: LLM drives intent, hard gates only where consequences are real — see the `ir_flow.py` precedent and the reverted deterministic-march commit). Rule of thumb: **toggles for consequences** ("Case law only" cost, "Include legal landscape" packet contents, hold on/off), **intuition for conversational intent**, **tabs/panels for deterministic views** (chronology, checklist, evidence, hold manifest — SQL surfaces, never model-routed). Matter type is the de-facto mode, set once at intake and already threaded through `_MATTER_TYPE_CATEGORIES`, the checklist registry, and the seeded recap. Soft-mode discoverability comes from starters, not state: see 1.6.
+
 ---
 
 ## Current architecture (for orientation)
@@ -90,6 +92,12 @@ AND (
 ```
 
 Last branch is deliberate: an ER case naming **no** employees can't be attributed to any location — keep it in scope rather than silently dropping it (opposite default from the employee-linked tables, where every row names an employee; comment this). Guard `(ie->>'employee_id')` NULL/garbage with a `WHERE ie ? 'employee_id'` filter. Unit-test the fragment placeholders like the existing `_scope_*` tests.
+
+### 1.6 Matter-type-aware starters
+
+**Why.** The three `STARTERS` in `shared.ts` are static and wage-biased ("class action alleging employees worked off the clock…"); on an EEOC or subpoena matter they read as noise. Starters are the soft-mode surface (see design decision above) — make them fit the matter.
+
+**Frontend only.** `shared.ts`: `STARTERS` becomes `startersFor(matterType: MatterType): string[]` — 3 per type (e.g. `eeoc_charge`: "What documentation exists around the complainant's complaints and our responses?", "Show training and policy acknowledgments relevant to this charge", "What do the records NOT establish that counsel will ask about?"; `subpoena`: scope-inventory + custodian-shaped prompts; `audit`: posture/monitoring-shaped). `Console.tsx` takes the matter type (or the computed list) as a prop. Keep one universal closer ("What's missing?") in every set.
 
 ---
 
@@ -178,7 +186,7 @@ Persist a per-packet evidence snapshot (cid list + content hash) in `legal_matte
 
 **Gemini cost:** 1.1 adds one flash call per intake parse (rate-limited); nothing else calls the model. Checklist/chronology/hold/notifications are all deterministic SQL.
 
-**Suggested build order:** 1.5 → 1.2 → 1.3 → 1.4 → 1.1 (parser last in phase 1; it's the only model-dependent piece) → 2.1 → 2.2 → 2.3 → phase 3 re-scoped after usage feedback.
+**Suggested build order:** 1.5 → 1.6 → 1.2 → 1.3 → 1.4 → 1.1 (parser last in phase 1; it's the only model-dependent piece) → 2.1 → 2.2 → 2.3 → phase 3 re-scoped after usage feedback.
 
 **Verification per phase:** unit tests follow `tests/legal_defense/test_legal_defense.py` fake-conn style (arg-count + fragment-placeholder assertions for any new SQL); `pytest tests/legal_defense/ -q`; `npx tsc --noEmit --incremental false`; manual pass on dev-remote (`:5174`) — create matter per type, verify checklist/chronology/deadline chip/hold banner; packet regen for PDF sections. DB-mutating integration tests stay manual-run per root CLAUDE.md.
 
