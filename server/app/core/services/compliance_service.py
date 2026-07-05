@@ -3,11 +3,14 @@ from uuid import UUID
 from datetime import date, datetime, timedelta
 import asyncio
 import json
+import logging
 import re
 
 import asyncpg
 import httpx
 from fastapi import HTTPException
+
+logger = logging.getLogger(__name__)
 
 from .jurisdiction_context import (
     get_known_sources,
@@ -42,6 +45,13 @@ def parse_date(date_str: Optional[str]) -> Optional[date]:
     except (ValueError, AttributeError):
         return None
 
+
+# Library permanence (B5): stored requirements are treated as truth until a
+# future diff-scheduler exists to selectively re-check them (see
+# COMPLIANCE_REMEDIATION_PLAN.md B5/E6). While False, _is_jurisdiction_fresh
+# ignores age and reports "fresh" whenever a jurisdiction has any data at all;
+# gap-driven research (missing required categories) still fires regardless.
+REPOSITORY_TTL_ENABLED = False
 
 # Threshold for numeric material changes (e.g. $0.25 for wages)
 MATERIAL_CHANGE_THRESHOLDS = {
@@ -1276,13 +1286,24 @@ async def _lookup_has_local_ordinance(conn, city: str, state: str) -> Optional[b
 async def _is_jurisdiction_fresh(
     conn, jurisdiction_id: UUID, threshold_days: int
 ) -> bool:
-    """Check if jurisdiction was verified recently enough to skip Gemini."""
+    """Check if jurisdiction data is trusted enough to skip Gemini.
+
+    Library permanence (B5, REPOSITORY_TTL_ENABLED=False): once a jurisdiction
+    has been verified at all, it stays "fresh" regardless of age — stored data
+    is truth until a future diff-scheduler selectively re-checks it. Missing
+    data (no last_verified_at) still returns False so gap-driven research
+    (via _missing_required_categories) keeps firing. The age comparison is
+    kept dormant here so re-enabling REPOSITORY_TTL_ENABLED restores selective
+    re-checks without re-plumbing callers.
+    """
     row = await conn.fetchrow(
         "SELECT last_verified_at FROM jurisdictions WHERE id = $1",
         jurisdiction_id,
     )
     if not row or not row["last_verified_at"]:
         return False
+    if not REPOSITORY_TTL_ENABLED:
+        return True
     age = datetime.utcnow() - row["last_verified_at"]
     return age < timedelta(days=threshold_days)
 
@@ -1753,7 +1774,10 @@ async def _research_healthcare_requirements_for_jurisdiction(
         preemption_rules = {
             row["category"]: row["allows_local_override"] for row in preemption_rows
         }
-    except Exception:
+    except asyncpg.UndefinedTableError:
+        preemption_rules = {}
+    except Exception as e:
+        logger.warning(f"preemption rules lookup failed: {e}")
         preemption_rules = {}
 
     existing = await conn.fetch(
@@ -1959,7 +1983,10 @@ async def _research_oncology_requirements_for_jurisdiction(
         preemption_rules = {
             row["category"]: row["allows_local_override"] for row in preemption_rows
         }
-    except Exception:
+    except asyncpg.UndefinedTableError:
+        preemption_rules = {}
+    except Exception as e:
+        logger.warning(f"preemption rules lookup failed: {e}")
         preemption_rules = {}
 
     existing = await conn.fetch(
@@ -2084,7 +2111,10 @@ async def _research_life_sciences_requirements_for_jurisdiction(
         preemption_rules = {
             row["category"]: row["allows_local_override"] for row in preemption_rows
         }
-    except Exception:
+    except asyncpg.UndefinedTableError:
+        preemption_rules = {}
+    except Exception as e:
+        logger.warning(f"preemption rules lookup failed: {e}")
         preemption_rules = {}
 
     existing = await conn.fetch(
@@ -2212,7 +2242,10 @@ async def _research_medical_compliance_for_jurisdiction(
         preemption_rules = {
             row["category"]: row["allows_local_override"] for row in preemption_rows
         }
-    except Exception:
+    except asyncpg.UndefinedTableError:
+        preemption_rules = {}
+    except Exception as e:
+        logger.warning(f"preemption rules lookup failed: {e}")
         preemption_rules = {}
 
     existing = await conn.fetch(
@@ -3957,16 +3990,26 @@ async def _filter_with_preemption(conn, requirements, state: str):
                 # a labeling issue from research and promote the strongest row to state.
                 fallback = _pick_best_by_priority(reqs)
                 if fallback:
+                    original_level = (
+                        fallback["jurisdiction_level"]
+                        if isinstance(fallback, dict)
+                        else getattr(fallback, "jurisdiction_level", None)
+                    )
                     if isinstance(fallback, dict):
                         fallback["jurisdiction_level"] = "state"
                         fallback["jurisdiction_name"] = state_name
+                        fallback["promoted_from_level"] = original_level
+                        fallback["promotion_reason"] = "state_preemption_no_state_row"
                     else:
                         fallback.jurisdiction_level = "state"
                         fallback.jurisdiction_name = state_name
+                        fallback.promoted_from_level = original_level
+                        fallback.promotion_reason = "state_preemption_no_state_row"
                     filtered.append(fallback)
-                    print(
-                        f"[Compliance] WARNING: Category '{category}' is preempted in {norm_state} "
-                        f"but had no state-level requirement — promoting local fallback to state."
+                    logger.warning(
+                        "Category '%s' is preempted in %s but had no state-level "
+                        "requirement — promoting local fallback (from '%s') to state.",
+                        category, norm_state, original_level,
                     )
             continue
 
@@ -4795,7 +4838,7 @@ async def run_compliance_check_stream(
                         still_missing,
                         threshold_days=max(location.auto_check_interval_days or 7, 90),
                     )
-            elif not used_repository and allow_live_research:
+            elif not used_repository and not allow_live_research:
                 missing_categories = _missing_required_categories(requirements)
                 used_repository = True
                 if missing_categories:
@@ -5422,14 +5465,6 @@ async def run_compliance_check_stream(
         "updated": updated_count,
         "alerts": alert_count,
     }
-
-
-async def run_compliance_check(location_id: UUID, company_id: UUID):
-    """Repository-sync wrapper for background tasks on company locations."""
-    async for _ in run_compliance_check_stream(
-        location_id, company_id, allow_live_research=False
-    ):
-        pass
 
 
 async def get_location_counts(location_id: UUID) -> dict:
@@ -7534,7 +7569,7 @@ async def run_compliance_check_background(
                         not in target_set
                     ]
                     requirements = preserved + requirements
-            elif not used_repository and allow_live_research:
+            elif not used_repository and not allow_live_research:
                 missing_categories = _missing_required_categories(requirements)
                 used_repository = True
                 if missing_categories:
@@ -8871,7 +8906,10 @@ async def research_specialization_for_jurisdiction(
             state.upper(),
         )
         preemption_rules = {row["category"]: row["allows_local_override"] for row in preemption_rows}
-    except Exception:
+    except asyncpg.UndefinedTableError:
+        preemption_rules = {}
+    except Exception as e:
+        logger.warning(f"preemption rules lookup failed: {e}")
         preemption_rules = {}
 
     # Check which categories this specialization has already researched.
@@ -9060,6 +9098,13 @@ async def admin_add_requirement_to_location(
     from ...database import get_connection
 
     async with get_connection() as conn:
+        owns_location = await conn.fetchval(
+            "SELECT 1 FROM business_locations WHERE id = $1 AND company_id = $2",
+            location_id, company_id,
+        )
+        if not owns_location:
+            raise ValueError("Location does not belong to this company")
+
         # 1. Fetch the source row
         jr = await conn.fetchrow(
             "SELECT * FROM jurisdiction_requirements WHERE id = $1",
@@ -9100,10 +9145,16 @@ async def admin_add_requirements_to_location_batch(
     transaction — e.g. onboarding finalize).
 
     Idempotent: a row already linked to a given catalog requirement at this
-    location is skipped via the partial unique index. *company_id* is accepted for
-    API symmetry / future tenant assertions; location ownership is the caller's
-    responsibility. Returns ``{written, skipped_existing, missing_jr}``.
+    location is skipped via the partial unique index. Returns
+    ``{written, skipped_existing, missing_jr}``.
     """
+    owns_location = await conn.fetchval(
+        "SELECT 1 FROM business_locations WHERE id = $1 AND company_id = $2",
+        location_id, company_id,
+    )
+    if not owns_location:
+        raise ValueError("Location does not belong to this company")
+
     written = skipped = missing = 0
     for jr_id in jr_ids:
         jr = await conn.fetchrow(

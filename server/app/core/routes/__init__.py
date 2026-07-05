@@ -59,9 +59,17 @@ core_router.include_router(handbooks_router, tags=["handbooks"],
                            dependencies=[Depends(require_feature("handbooks"))])
 core_router.include_router(public_signatures_router, tags=["public-signatures"])
 # Lite-friendly subset (calendar, locations-read, alert read/dismiss) is mounted
-# first WITHOUT the compliance feature gate so matcha-lite tenants can use the
-# Compliance Calendar even though the full Compliance feature is off.
-core_router.include_router(compliance_lite_router, prefix="/compliance", tags=["compliance-lite"])
+# with a broad gate — any of compliance / compliance_lite / incidents (matcha-lite's
+# paid flag) — so matcha-lite tenants can use the Compliance Calendar even though
+# the full Compliance feature is off. All mutating location endpoints (create/
+# update/delete/facility-attributes PATCH) live on the full-compliance-gated
+# `router` below, not here.
+core_router.include_router(
+    compliance_lite_router,
+    prefix="/compliance",
+    tags=["compliance-lite"],
+    dependencies=[Depends(require_any_feature("compliance", "compliance_lite", "incidents"))],
+)
 # Read-only viewers (requirements, jurisdiction-stack, summary, upcoming-legislation,
 # categories) — admit full `compliance` (Pro) OR `compliance_lite` (Matcha-X taste).
 core_router.include_router(compliance_shared_router, prefix="/compliance", tags=["compliance-shared"],

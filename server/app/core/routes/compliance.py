@@ -9,6 +9,8 @@ from uuid import UUID
 
 from ...matcha.dependencies import require_admin_or_client, get_client_company_id
 from ...database import get_connection
+from ..feature_flags import merge_company_features
+from ..services.redis_cache import check_rate_limit
 from ..services.redis_cache import (
     get_redis_cache,
     cache_get,
@@ -138,7 +140,7 @@ async def list_jurisdictions(
     return result
 
 
-@lite_router.post("/locations", response_model=dict)
+@router.post("/locations", response_model=dict)
 async def create_location_endpoint(
     data: LocationCreate,
     background_tasks: BackgroundTasks,
@@ -149,12 +151,30 @@ async def create_location_endpoint(
     if company_id is None:
         raise HTTPException(status_code=400, detail="No company found")
 
+    await check_rate_limit(str(company_id), "compliance_create_location", 30, 3600)
+
     location, has_complete_repository_coverage = await create_location(company_id, data)
 
     # Trigger background research when repository coverage is missing/partial.
+    # Live Gemini research only for tenants with the full `compliance` feature
+    # (this route sits behind require_feature("compliance") already, but the
+    # flag is resolved and passed explicitly as defense in depth — resolve_company_id
+    # lets an admin operate on a different company_id than the gate checked).
     if not has_complete_repository_coverage:
+        async with get_connection() as conn:
+            company_row = await conn.fetchrow(
+                "SELECT enabled_features, signup_source FROM companies WHERE id = $1",
+                company_id,
+            )
+        features = merge_company_features(
+            company_row["enabled_features"] if company_row else None,
+            company_row["signup_source"] if company_row else None,
+        )
         background_tasks.add_task(
-            run_compliance_check_background, location.id, company_id
+            run_compliance_check_background,
+            location.id,
+            company_id,
+            allow_live_research=features.get("compliance", False),
         )
 
     return {
@@ -181,6 +201,8 @@ async def check_location_compliance_endpoint(
     company_id = await resolve_company_id(current_user, company_id)
     if company_id is None:
         raise HTTPException(status_code=403, detail="Access denied")
+
+    await check_rate_limit(str(company_id), "compliance_location_check", 10, 3600)
 
     try:
         loc_uuid = UUID(location_id)
@@ -330,7 +352,7 @@ async def get_location_endpoint(
     }
 
 
-@lite_router.put("/locations/{location_id}", response_model=dict)
+@router.put("/locations/{location_id}", response_model=dict)
 async def update_location_endpoint(
     location_id: str,
     data: LocationUpdate,
@@ -367,7 +389,7 @@ async def update_location_endpoint(
     }
 
 
-@lite_router.delete("/locations/{location_id}")
+@router.delete("/locations/{location_id}")
 async def delete_location_endpoint(
     location_id: str,
     company_id: Optional[str] = Query(None),
@@ -872,6 +894,13 @@ async def assign_legislation_endpoint(
         if not leg_row:
             raise HTTPException(status_code=404, detail="Legislation not found")
 
+        owns_location = await conn.fetchval(
+            "SELECT 1 FROM business_locations WHERE id = $1 AND company_id = $2",
+            location_id, company_id,
+        )
+        if not owns_location:
+            raise HTTPException(status_code=404, detail="Location not found")
+
         # Find existing alert for this legislation item
         alert_id = await conn.fetchval(
             """
@@ -1097,7 +1126,7 @@ async def list_company_licenses(
         return await _fetch_company_credentials(conn, cid, kind="license")
 
 
-@lite_router.patch("/locations/{location_id}/facility-attributes")
+@router.patch("/locations/{location_id}/facility-attributes")
 async def update_facility_attributes_endpoint(
     location_id: str,
     data: FacilityAttributesUpdate,
@@ -1172,6 +1201,8 @@ async def ask_regulatory_question(
     if company_id is None:
         raise HTTPException(status_code=400, detail="No company found")
 
+    await check_rate_limit(str(company_id), "compliance_ask", 10, 3600)
+
     location_id = None
     if data.location_id:
         try:
@@ -1232,6 +1263,8 @@ async def ask_payer_policy_question(
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         raise HTTPException(status_code=400, detail="No company found")
+
+    await check_rate_limit(str(company_id), "compliance_payer_ask", 10, 3600)
 
     location_id = None
     if data.location_id:
@@ -1434,6 +1467,8 @@ async def research_payer_policy_endpoint(
     if company_id is None:
         raise HTTPException(status_code=400, detail="No company found")
 
+    await check_rate_limit(str(company_id), "compliance_payer_research", 10, 3600)
+
     async with get_connection() as conn:
         result = await research_payer_policy(data.payer_name, data.procedure, conn)
         if not result:
@@ -1552,6 +1587,8 @@ async def protocol_analysis(
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         raise HTTPException(status_code=400, detail="No company found")
+
+    await check_rate_limit(str(company_id), "compliance_protocol_analysis", 10, 3600)
 
     # Resolve optional location_id
     location_id = None
