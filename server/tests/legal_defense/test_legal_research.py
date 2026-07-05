@@ -134,7 +134,8 @@ class _FakeResearchConn:
             self.updates.append({"status": "failed", "error": args[0]})
         elif "status='complete'" in sql:
             self.updates.append({
-                "status": "complete", "cases": args[0], "guidance": args[1], "error": args[2],
+                "status": "complete", "cases": args[0], "guidance": args[1],
+                "error": args[2], "query": args[3],
             })
 
 
@@ -264,6 +265,78 @@ def test_run_research_case_failure_marks_failed_when_guidance_skipped(monkeypatc
     # case search is the only thing attempted — its failure is total failure
     assert result["status"] == "failed"
     assert "courtlistener down" in result["error"]
+
+
+# --- query ladder (empty-result fix) -----------------------------------------
+
+def test_keywords_drop_stopwords_and_digits():
+    kws = lr._keywords(
+        "our employees were required to work off the clock during 2025 at the facility", 10)
+    assert "our" not in kws and "the" not in kws and "were" not in kws
+    assert "2025" not in " ".join(kws)  # digit tokens never match opinions
+    assert "employees" in kws and "clock" in kws
+
+
+def test_build_query_ladder_narrow_to_broad_distinct():
+    ladder = lr.build_query_ladder(
+        "class_action",
+        "employees were required to work off the clock during meal breaks and were not paid overtime wages",
+    )
+    assert len(ladder) == 3
+    assert ladder[-1] == "Class Action"                 # broadest = type label alone
+    assert all(q.startswith("Class Action") for q in ladder)
+    assert len(ladder) == len(set(ladder))              # distinct tiers
+    # tiers strictly shrink
+    assert len(ladder[0].split()) > len(ladder[1].split()) > len(ladder[2].split())
+
+
+def test_build_query_ladder_empty_allegation_single_tier():
+    assert lr.build_query_ladder("eeoc_charge", "") == ["Eeoc Charge"]
+    assert lr.build_query_ladder(None, None) == ["Employment matter"]
+
+
+def test_run_research_broadens_until_cases_found(monkeypatch):
+    calls: list[str] = []
+
+    async def fake_search(query, state=None, limit=8):
+        calls.append(query)
+        return _CASES if len(calls) == 3 else []   # only the broadest tier hits
+
+    monkeypatch.setattr(lr, "search_case_law", fake_search)
+
+    conn = _FakeResearchConn()
+    _patch_conn(monkeypatch, conn)
+    result = asyncio.run(lr.run_research(
+        {**_MATTER, "allegation": "employees required to work off the clock during meal breaks unpaid overtime"},
+        created_by=None, include_guidance=False,
+    ))
+
+    assert len(calls) == 3
+    assert calls == lr.build_query_ladder("class_action",
+        "employees required to work off the clock during meal breaks unpaid overtime")
+    assert result["status"] == "complete"
+    assert result["cases"] == _CASES
+    # the tier that actually matched is persisted with the row
+    assert conn.updates[-1]["query"] == calls[-1]
+
+
+def test_run_research_all_tiers_empty_completes_with_empty_cases(monkeypatch):
+    calls: list[str] = []
+
+    async def fake_search(query, state=None, limit=8):
+        calls.append(query)
+        return []
+
+    monkeypatch.setattr(lr, "search_case_law", fake_search)
+
+    conn = _FakeResearchConn()
+    _patch_conn(monkeypatch, conn)
+    result = asyncio.run(lr.run_research(_MATTER, created_by=None, include_guidance=False))
+
+    assert len(calls) == len(lr.build_query_ladder("class_action", _MATTER["allegation"]))
+    assert result["status"] == "complete"       # ran fine, genuinely nothing matched
+    assert result["cases"] == []
+    assert result["error"] is None
 
 
 # --- state precedence --------------------------------------------------------

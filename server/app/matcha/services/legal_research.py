@@ -54,6 +54,52 @@ _STATE_NAMES = {
 
 _RESERVED_QUERY_CHARS_RE = re.compile(r'[\[\]{}()"~^:/&|]')
 
+# CourtListener's v4 search effectively ANDs free-text terms: feeding the raw
+# 300-char allegation in returns zero (or one irrelevant) hit — confirmed by
+# probing the live API (full-sentence EEOC allegation + "Nevada" → count:0;
+# "class action overtime wages Nevada" → count:425). So the query is built
+# from KEYWORDS, and run_research broadens through a ladder until something
+# matches.
+_QUERY_STOPWORDS = frozenset("""
+a about after all also an and any are as at be because been before being but
+by can could did do does during each for from had has have he her hers him his
+how i if in into is it its just may me might most must my no nor not of on or
+our ours out over she should so some such than that the their theirs them then
+there these they this those through to too under until up very was we were
+what when where which while who whom why will with would you your yours
+""".split())
+_WORD_RE = re.compile(r"[a-zA-Z][a-zA-Z'-]+")
+
+
+def _keywords(text: str, limit: int) -> list[str]:
+    """Significant search terms from free text: alphabetic tokens, stopwords
+    and 1-char fragments dropped, order preserved, deduped. Pure."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for tok in _WORD_RE.findall(text or ""):
+        low = tok.lower()
+        if low in _QUERY_STOPWORDS or len(low) < 2 or low in seen:
+            continue
+        seen.add(low)
+        out.append(low)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def build_query_ladder(matter_type: str | None, allegation: str | None) -> list[str]:
+    """Ordered narrow→broad CourtListener queries: matter-type label + 6
+    allegation keywords, then + 3, then the label alone. Distinct, never
+    empty. Pure (unit-tested)."""
+    label = _hum(matter_type) or "Employment matter"
+    kws = _keywords(allegation or "", 6)
+    ladder: list[str] = []
+    for n in (6, 3, 0):
+        q = " ".join([label, *kws[:n]]).strip()
+        if q and q not in ladder:
+            ladder.append(q)
+    return ladder
+
 
 def _sanitize_query(query: str) -> str:
     """Neutralize CourtListener/Lucene query-syntax reserved characters that
@@ -217,7 +263,8 @@ async def run_research(matter: dict, created_by, include_guidance: bool = True) 
     async with get_connection() as conn:
         state = await _resolve_state(conn, matter)
         allegation = (matter.get("allegation") or "")[:300]
-        query = f"{_hum(matter.get('matter_type'))} {allegation}".strip()
+        ladder = build_query_ladder(matter.get("matter_type"), allegation)
+        query = ladder[0]
         row = await conn.fetchrow(
             """INSERT INTO legal_matter_research
                    (matter_id, company_id, query, created_by, jurisdiction_state)
@@ -229,7 +276,14 @@ async def run_research(matter: dict, created_by, include_guidance: bool = True) 
     cases: list[dict] = []
     case_err: str | None = None
     try:
-        cases = await search_case_law(query, state=state)
+        # Broaden until something matches: a specific allegation can AND the
+        # free-text search down to zero hits. A transport/HTTP failure aborts
+        # the whole ladder — retrying broader terms won't fix a dead API.
+        for q in ladder:
+            cases = await search_case_law(q, state=state)
+            query = q
+            if cases:
+                break
     except Exception as e:  # noqa: BLE001 — isolation is the point
         logger.warning("legal_research: case search failed: %s", e)
         case_err = str(e)
@@ -263,9 +317,10 @@ async def run_research(matter: dict, created_by, include_guidance: bool = True) 
             await conn.execute(
                 """UPDATE legal_matter_research
                        SET status='complete', cases=$1::jsonb, guidance=$2::jsonb,
-                           error=$3, completed_at=NOW()
-                     WHERE id=$4""",
-                json.dumps(cases), json.dumps(guidance) if guidance else None, error, research_id,
+                           error=$3, query=$4, completed_at=NOW()
+                     WHERE id=$5""",
+                json.dumps(cases), json.dumps(guidance) if guidance else None, error,
+                query, research_id,  # query = the ladder tier actually used
             )
 
         result = await conn.fetchrow("SELECT * FROM legal_matter_research WHERE id = $1", research_id)

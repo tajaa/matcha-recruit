@@ -79,6 +79,15 @@ export function LegalContextPanel({ legalContext, research, onRunResearch, resea
           {research.error && (
             <p className="text-[10px] text-amber-500/80">{research.error}</p>
           )}
+          {/* Complete-but-empty must say so — a silent blank here reads as
+              "the request did nothing" (it did run; nothing matched). */}
+          {(research.cases?.length ?? 0) === 0 && !research.guidance?.summary && !research.error && (
+            <p className="text-[11px] leading-relaxed text-zinc-500">
+              Research ran, but no matching cases were found
+              {research.query ? <> (searched “{research.query}”)</> : null}.
+              Refine the allegation on the matter and run it again.
+            </p>
+          )}
           {(research.cases?.length ?? 0) > 0 && (
             <div className="space-y-1.5">
               <div className="text-[10px] uppercase tracking-wide text-zinc-600">Cases located</div>
