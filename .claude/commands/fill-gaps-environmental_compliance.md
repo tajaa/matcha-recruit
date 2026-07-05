@@ -141,10 +141,10 @@ async def main():
             INSERT INTO jurisdiction_requirements
                 (jurisdiction_id, requirement_key, category, jurisdiction_level, jurisdiction_name,
                  title, description, current_value, source_url, source_name,
-                 effective_date, last_verified_at, requires_written_policy,
+                 effective_date, expiration_date, last_verified_at, requires_written_policy,
                  regulation_key, key_definition_id, category_id, source_tier)
-            VALUES (\$1, \$2, '\''environmental_compliance'\'', \$3, \$4, \$5, \$6, \$7, \$8, \$9, \$10::date, NOW(), \$11,
-                    \$12, \$13, \$14, '\''tier_3_aggregator'\''::source_tier_enum)
+            VALUES (\$1, \$2, '\''environmental_compliance'\'', \$3, \$4, \$5, \$6, \$7, \$8, \$9, \$10::date, \$11::date, NOW(), \$12,
+                    \$13, \$14, \$15, '\''tier_3_aggregator'\''::source_tier_enum)
             ON CONFLICT (jurisdiction_id, requirement_key) DO UPDATE SET
                 title = EXCLUDED.title,
                 description = EXCLUDED.description,
@@ -153,6 +153,7 @@ async def main():
                 source_url = EXCLUDED.source_url,
                 source_name = EXCLUDED.source_name,
                 effective_date = EXCLUDED.effective_date,
+                expiration_date = EXCLUDED.expiration_date,
                 last_verified_at = NOW(),
                 requires_written_policy = EXCLUDED.requires_written_policy,
                 regulation_key = EXCLUDED.regulation_key,
@@ -175,10 +176,11 @@ async def main():
             e['source_url'],             # $8
             e['source_name'],            # $9
             e.get('effective_date'),      # $10
-            e.get('requires_written_policy', False),  # $11
-            e['regulation_key'],         # $12
-            e['key_definition_id'],      # $13
-            cat_id,                      # $14
+            e.get('expiration_date'),     # $11
+            e.get('requires_written_policy', False),  # $12
+            e['regulation_key'],         # $13
+            e['key_definition_id'],      # $14
+            cat_id,                      # $15
         )
         inserted += 1
         print(f\"  ✓ {e['jurisdiction_name']}: {e['regulation_key']} — {e['title']}\")
@@ -202,6 +204,7 @@ Build the `ENTRIES` list as a JSON array. Each entry needs:
   "source_url": "<url>",
   "source_name": "<agency>",
   "effective_date": "YYYY-MM-DD",
+  "expiration_date": "YYYY-MM-DD when this value is scheduled/typically due to change; null if unknown",
   "requires_written_policy": true
 }
 ```

@@ -157,16 +157,17 @@ async def main():
             INSERT INTO jurisdiction_requirements
                 (jurisdiction_id, requirement_key, category, jurisdiction_level, jurisdiction_name,
                  title, description, current_value, numeric_value, source_url, source_name,
-                 effective_date, last_verified_at, requires_written_policy,
+                 effective_date, expiration_date, last_verified_at, requires_written_policy,
                  regulation_key, key_definition_id, category_id, source_tier)
-            VALUES (\$1, \$2, \$3, \$4, \$5, \$6, \$7, \$8, \$9, \$10, \$11, \$12::date, NOW(), \$13,
-                    \$14, \$15, \$16, 'tier_3_aggregator'::source_tier_enum)
+            VALUES (\$1, \$2, \$3, \$4, \$5, \$6, \$7, \$8, \$9, \$10, \$11, \$12::date, \$13::date, NOW(), \$14,
+                    \$15, \$16, \$17, 'tier_3_aggregator'::source_tier_enum)
             ON CONFLICT (jurisdiction_id, requirement_key) DO UPDATE SET
                 title = EXCLUDED.title, description = EXCLUDED.description,
                 previous_value = jurisdiction_requirements.current_value,
                 current_value = EXCLUDED.current_value, numeric_value = EXCLUDED.numeric_value,
                 source_url = EXCLUDED.source_url, source_name = EXCLUDED.source_name,
-                effective_date = EXCLUDED.effective_date, last_verified_at = NOW(),
+                effective_date = EXCLUDED.effective_date, expiration_date = EXCLUDED.expiration_date,
+                last_verified_at = NOW(),
                 requires_written_policy = EXCLUDED.requires_written_policy,
                 regulation_key = EXCLUDED.regulation_key, key_definition_id = EXCLUDED.key_definition_id,
                 last_changed_at = CASE WHEN jurisdiction_requirements.current_value IS DISTINCT FROM EXCLUDED.current_value
@@ -179,7 +180,7 @@ async def main():
             e['jurisdiction_level'], e['jurisdiction_name'],
             e['title'], e['description'], e['current_value'],
             e.get('numeric_value'), e['source_url'], e['source_name'],
-            e.get('effective_date'), e.get('requires_written_policy', False),
+            e.get('effective_date'), e.get('expiration_date'), e.get('requires_written_policy', False),
             e['regulation_key'], e['key_definition_id'], cat_id,
         )
         inserted += 1
