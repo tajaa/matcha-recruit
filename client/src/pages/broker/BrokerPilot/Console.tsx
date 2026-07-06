@@ -96,7 +96,8 @@ export function Console({ session, context, onTurnComplete }: ConsoleProps) {
                 {context && context.total > 0
                   ? <>The record is assembled — <span className="font-mono tabular-nums text-zinc-200">{context.total}</span> records across <span className="font-mono tabular-nums text-zinc-200">{sourceCount}</span> systems are in scope.</>
                   : 'The record is being assembled.'}{' '}
-                Ask what the documents and platform data show — every answer cites the records behind it.
+                Ask what the record shows — broker-entered data, platform-generated operational
+                history, and uploaded documents in one picture; every answer cites the records behind it.
               </p>
               <div className="mt-4 max-w-[60ch]">
                 {STARTERS.map((s) => (

@@ -115,6 +115,39 @@ def test_build_corpus_every_record_is_indexed():
             assert corpus["index"][r["cid"]]["source"] == key
 
 
+_NATIVE = {
+    "sources": {
+        "incidents": {"label": "Safety incidents (IR / OSHA)", "records": [
+            {"cid": "incident:aaaa", "ref": "IR-2024-003", "summary": "Slip in kitchen", "when": "2024-03-01"},
+        ]},
+        "er_cases": {"label": "Employee-relations cases", "records": [
+            {"cid": "er_case:bbbb", "ref": "ER-12", "summary": "Wage complaint", "when": "2024-05-10"},
+        ]},
+    },
+    "notes": ["Safety incidents (IR / OSHA): showing 50 most recent of 61"],
+}
+
+
+def test_build_corpus_merges_native_sources_and_indexes_them():
+    corpus = bp.build_corpus("Hillcrest", _CTX, _docs(), native=_NATIVE)
+    assert "incidents" in corpus["sources"] and "er_cases" in corpus["sources"]
+    assert corpus["index"]["incident:aaaa"]["source"] == "incidents"
+    assert corpus["index"]["er_case:bbbb"]["source_label"] == "Employee-relations cases"
+    # native truncation notes carry through
+    assert any("showing 50 most recent" in n for n in corpus["notes"])
+    # on-platform sessions must NOT get the off-platform upsell note
+    assert not any("Off-platform client" in n for n in corpus["notes"])
+    # source ordering: native sits between platform and documents
+    keys = list(corpus["sources"])
+    assert keys.index("platform") < keys.index("incidents") < keys.index("documents")
+
+
+def test_build_corpus_external_gets_upsell_note():
+    corpus = bp.build_corpus("Hillcrest", _CTX, _docs(), native=None)
+    assert any("Off-platform client" in n for n in corpus["notes"])
+    assert "incidents" not in corpus["sources"]
+
+
 def test_platform_records_expected_cids():
     cids = {r["cid"] for r in bp._platform_records(_CTX)}
     assert "platform:profile" in cids

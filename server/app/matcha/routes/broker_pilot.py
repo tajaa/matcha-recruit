@@ -112,6 +112,16 @@ async def _build_ctx(conn, user_id, session: dict) -> dict:
         return {}
 
 
+async def _native_for(conn, session: dict) -> dict | None:
+    """Platform-generated operational corpus (incidents, ER, compliance,
+    discipline, training, policy acks) — company subjects only. None for
+    off-platform clients, which makes build_corpus surface the on-platform
+    upsell note instead."""
+    if session["subject_kind"] != "company":
+        return None
+    return await bp.gather_native_sources(conn, session["subject_id"])
+
+
 async def _load_messages(conn, session_id: str) -> list[dict]:
     rows = await conn.fetch(
         "SELECT role, content, metadata, created_at FROM broker_pilot_messages "
@@ -433,7 +443,8 @@ async def get_context(session_id: str, current_user=Depends(require_broker_pro))
                                              session["subject_kind"], session["subject_id"])
         ctx = await _build_ctx(conn, current_user.id, session)
         docs = await _load_docs(conn, session_id)
-    corpus = bp.build_corpus(subject_name, ctx, docs)
+        native = await _native_for(conn, session)
+    corpus = bp.build_corpus(subject_name, ctx, docs, native)
     # Source summaries + counts only — the flat index is internal.
     return {
         "sources": corpus["sources"],
@@ -455,13 +466,14 @@ async def chat(session_id: str, body: ChatIn, request: Request,
         history = await _load_messages(conn, session_id)
         ctx = await _build_ctx(conn, current_user.id, session)
         docs = await _load_docs(conn, session_id, with_text=True)
+        native = await _native_for(conn, session)
         await conn.execute(
             "INSERT INTO broker_pilot_messages (session_id, role, content) VALUES ($1, 'user', $2)",
             session_id, body.message,
         )
         await _audit(conn, session_id, current_user, request, "message", {"role": "user"})
 
-    corpus = bp.build_corpus(subject_name, ctx, docs)
+    corpus = bp.build_corpus(subject_name, ctx, docs, native)
 
     async def event_stream():
         result_payload = None
@@ -519,9 +531,10 @@ async def generate_memo(session_id: str, request: Request,
                                              session["subject_kind"], session["subject_id"])
         ctx = await _build_ctx(conn, current_user.id, session)
         docs = await _load_docs(conn, session_id)
+        native = await _native_for(conn, session)
         broker_name = await conn.fetchval("SELECT name FROM brokers WHERE id = $1", broker_id)
 
-        corpus = bp.build_corpus(subject_name, ctx, docs)
+        corpus = bp.build_corpus(subject_name, ctx, docs, native)
         packet = await bp.build_memo_pdf(session, subject_name, corpus, memo, docs,
                                          broker_name=broker_name)
 

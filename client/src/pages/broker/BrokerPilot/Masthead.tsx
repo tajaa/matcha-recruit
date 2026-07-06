@@ -5,7 +5,7 @@ import {
   updatePilotSession, generatePilotMemo, downloadPilotPacket,
   type ContextPreview, type PilotSession,
 } from '../../../api/brokerPilot'
-import { LABEL, SOURCE_META, deriveSystems, fmtWhen } from './shared'
+import { LABEL, NATIVE_KEYS, SOURCE_META, deriveSystems, fmtWhen } from './shared'
 
 interface MastheadProps {
   session: PilotSession
@@ -140,7 +140,11 @@ function SystemsStrip({ context }: { context: ContextPreview | null }) {
             key={s.key}
             className={`flex shrink-0 items-center gap-2 px-4 py-2.5 transition-opacity duration-300 motion-reduce:transition-none ${shown ? 'opacity-100' : 'opacity-0'}`}
             style={{ transitionDelay: `${i * 40}ms` }}
-            title={active ? `${s.label}: ${records.length} record(s)` : `${s.label}: none on file`}
+            title={active
+              ? `${s.label}: ${records.length} record(s)`
+              : NATIVE_KEYS.has(s.key)
+                ? `${s.label}: generated natively once this client operates on Matcha`
+                : `${s.label}: none on file`}
           >
             <Icon className={`h-3.5 w-3.5 ${active ? 'text-emerald-400' : 'text-zinc-700'}`} />
             <span className={`text-[10px] font-medium uppercase tracking-[0.15em] ${active ? 'text-zinc-300' : 'text-zinc-600'}`}>

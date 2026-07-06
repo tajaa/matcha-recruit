@@ -1,7 +1,8 @@
 import type { LucideIcon } from 'lucide-react'
 import {
-  AlertTriangle, Building2, ClipboardCheck, FileText, Gauge, HardHat, Hash,
-  MapPin, Scale, ShieldCheck, TrendingUp, Warehouse,
+  Accessibility, AlertTriangle, Bell, BookOpenCheck, Building2, ClipboardCheck,
+  FileSignature, FileText, Gauge, Gavel, GraduationCap, HardHat, Hash, MapPin,
+  Scale, ShieldCheck, Siren, TrendingUp, Users, Warehouse,
 } from 'lucide-react'
 import type { ContextPreview, CorpusRecord, DocStatus, DocType } from '../../../api/brokerPilot'
 
@@ -33,12 +34,16 @@ export const DOC_STATUS_CLASS: Record<DocStatus, string> = {
   failed: 'bg-red-500/10 text-red-400 border-red-500/20',
 }
 
-/** The evidence subsystems Broker Pilot grounds on. The backend corpus is three
- *  flat sources (`platform` / `documents` / `doc_figures`), but every platform
- *  record's cid carries a subsystem prefix — `platform:wc`,
- *  `platform:lossdev.wc.PY2024`, `platform:epl.harassment`, `platform:property`
- *  — so we split those into their own systems for the strip + evidence panel,
- *  mirroring Legal Pilot's per-source view. Order = strip order. */
+/** The evidence subsystems Broker Pilot grounds on, in strip order.
+ *
+ *  Analytics systems come from the flat `platform` source — every platform
+ *  record's cid carries a subsystem prefix (`platform:wc`,
+ *  `platform:lossdev.wc.PY2024`, `platform:epl.harassment`) that we split on.
+ *
+ *  Native systems (incidents … accommodations) arrive as their own corpus
+ *  sources — the operational records Matcha generates for ON-platform clients.
+ *  They stay dark for off-platform clients: that's the visual incentive to
+ *  bring the client onto the platform. */
 export const SOURCE_META: { key: string; label: string; icon: LucideIcon }[] = [
   { key: 'profile', label: 'Profile', icon: Building2 },
   { key: 'wc', label: "Workers' Comp", icon: HardHat },
@@ -50,9 +55,24 @@ export const SOURCE_META: { key: string; label: string; icon: LucideIcon }[] = [
   { key: 'controls', label: 'Controls', icon: ClipboardCheck },
   { key: 'exclusions', label: 'Exclusions', icon: AlertTriangle },
   { key: 'readiness', label: 'Readiness', icon: Gauge },
+  { key: 'incidents', label: 'IR / OSHA', icon: Siren },
+  { key: 'er_cases', label: 'ER cases', icon: Users },
+  { key: 'compliance', label: 'Compliance', icon: BookOpenCheck },
+  { key: 'compliance_alerts', label: 'Alerts', icon: Bell },
+  { key: 'discipline', label: 'Discipline', icon: Gavel },
+  { key: 'training', label: 'Training', icon: GraduationCap },
+  { key: 'policy_ack', label: 'Policy acks', icon: FileSignature },
+  { key: 'accommodations', label: 'Accommodations', icon: Accessibility },
   { key: 'documents', label: 'Documents', icon: FileText },
   { key: 'doc_figures', label: 'Doc figures', icon: Hash },
 ]
+
+/** Systems generated natively by the platform — only on-platform clients have
+ *  them; the strip advertises them ("on Matcha") when dark. */
+export const NATIVE_KEYS = new Set([
+  'incidents', 'er_cases', 'compliance', 'compliance_alerts',
+  'discipline', 'training', 'policy_ack', 'accommodations',
+])
 
 /** Fuller labels for the evidence-panel accordion rows. */
 export const SYSTEM_LABEL: Record<string, string> = {
@@ -66,6 +86,14 @@ export const SYSTEM_LABEL: Record<string, string> = {
   controls: 'Controls evidence',
   exclusions: 'Emerging exclusions',
   readiness: 'Submission readiness',
+  incidents: 'Safety incidents (IR / OSHA)',
+  er_cases: 'Employee-relations cases',
+  compliance: 'Compliance requirements tracked',
+  compliance_alerts: 'Compliance monitoring alerts',
+  discipline: 'Progressive discipline',
+  training: 'Training completions',
+  policy_ack: 'Policy / handbook acknowledgments',
+  accommodations: 'Accommodation cases',
   documents: 'Uploaded documents',
   doc_figures: 'Extracted document figures',
 }

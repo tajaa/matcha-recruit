@@ -418,19 +418,79 @@ def _doc_records(docs: list[dict]) -> tuple[list[dict], list[dict], list[str]]:
     return doc_recs, fig_recs, notes
 
 
-def build_corpus(subject_name: str, ctx: dict, docs: list[dict]) -> dict:
+# Native operational records are leaner than Legal Pilot's 100/source — this
+# corpus also carries the analytics aggregates and uploaded documents.
+_NATIVE_PER_SOURCE_CAP = 50
+
+
+async def gather_native_sources(conn, company_id) -> dict:
+    """The operational records the platform natively generates for an
+    on-platform company — IR/OSHA incidents, ER cases, compliance, discipline,
+    training, policy acks, accommodations — reusing Legal Pilot's per-subsystem
+    gatherers (same record shape, whole-company scope, feature-gated).
+
+    Returns ``{"sources": {key: {label, records}}, "notes": [...]}``.
+    Best-effort at every level: a failed gatherer degrades to a note, a total
+    failure returns empty — the chat still grounds on analytics + documents.
+    """
+    from app.core.feature_flags import merge_company_features
+    from . import legal_defense as ldef  # lazy: heavy module, no cycle at import time
+
+    sources: dict = {}
+    notes: list[str] = []
+    try:
+        row = await conn.fetchrow(
+            "SELECT enabled_features, signup_source FROM companies WHERE id = $1", company_id
+        )
+        features = merge_company_features(row["enabled_features"], row["signup_source"]) if row else {}
+        for key, label, fn, enabled in ldef._SOURCES:
+            if not enabled(features):
+                continue
+            try:
+                recs = await fn(conn, company_id, None, None, None, None)
+            except Exception as e:  # noqa: BLE001 — isolation is the point
+                logger.warning("broker_pilot: native source %s unavailable: %s", key, e)
+                notes.append(f"{label}: unavailable")
+                continue
+            if not recs:
+                continue
+            if len(recs) > _NATIVE_PER_SOURCE_CAP:
+                notes.append(f"{label}: showing {_NATIVE_PER_SOURCE_CAP} most recent of {len(recs)}")
+                recs = recs[:_NATIVE_PER_SOURCE_CAP]
+            sources[key] = {"label": label, "records": recs}
+    except Exception:  # noqa: BLE001 - degrade to analytics-only grounding
+        logger.exception("broker_pilot: native gather failed for company %s", company_id)
+        return {"sources": {}, "notes": ["Platform operational records: unavailable"]}
+    return {"sources": sources, "notes": notes}
+
+
+def build_corpus(subject_name: str, ctx: dict, docs: list[dict], native: dict | None = None) -> dict:
     """Assemble the grounding corpus: `{sources, index, notes}` — the same shape
     Legal Pilot's `gather_evidence` returns, so `validate_citations` and the
-    memo renderer work unchanged."""
+    memo renderer work unchanged.
+
+    ``native`` is the platform-generated operational corpus from
+    ``gather_native_sources`` (company subjects only); None for off-platform
+    clients, which instead get a note naming what an on-platform client adds.
+    """
     platform = _platform_records(ctx)
     doc_recs, fig_recs, notes = _doc_records(docs)
     sources = {
         "platform": {"label": "Platform data on file", "records": platform},
-        "documents": {"label": "Uploaded documents", "records": doc_recs},
-        "doc_figures": {"label": "Key figures extracted from documents", "records": fig_recs},
     }
+    if native is not None:
+        sources.update(native.get("sources") or {})
+        notes.extend(native.get("notes") or [])
+    sources["documents"] = {"label": "Uploaded documents", "records": doc_recs}
+    sources["doc_figures"] = {"label": "Key figures extracted from documents", "records": fig_recs}
     if not platform:
         notes.append("No platform data on file for this client yet.")
+    if native is None:
+        notes.append(
+            "Off-platform client: only broker-entered records ground this analysis. "
+            "On-platform clients add native operational history — incidents, ER cases, "
+            "compliance, discipline, training, policy acknowledgments."
+        )
     index: dict = {}
     for key, s in sources.items():
         for r in s["records"]:
@@ -442,7 +502,7 @@ def build_corpus(subject_name: str, ctx: dict, docs: list[dict]) -> dict:
 # Grounded AI turn (analyst, not advisor)
 # --------------------------------------------------------------------------- #
 
-_SYSTEM = """You are a commercial P&C insurance analysis assistant working for a licensed insurance broker who is preparing analysis for a client. You ground EVERY statement in the EVIDENCE CORPUS below: the client's platform records (`platform:` IDs) and the broker's uploaded documents (`doc:` / `docfig:` IDs).
+_SYSTEM = """You are a commercial P&C insurance analysis assistant working for a licensed insurance broker who is preparing analysis for a client. You ground EVERY statement in the EVIDENCE CORPUS below: the client's platform records (`platform:` IDs), the company's operational records generated natively on the platform (`incident:` / `er_case:` / `compliance_req:` / `compliance_alert:` / `discipline:` / `training:` / `policy_ack:` / `accommodation:` IDs — present only for on-platform clients), and the broker's uploaded documents (`doc:` / `docfig:` IDs).
 
 HARD RULES:
 - Cite ONLY the bracketed IDs that appear in the EVIDENCE CORPUS. NEVER invent a figure, carrier, date, limit, premium, or ID.
