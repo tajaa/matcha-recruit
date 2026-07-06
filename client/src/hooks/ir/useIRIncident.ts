@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../../api/client'
 import type { IRIncident } from '../../types/ir'
 
@@ -7,13 +7,17 @@ export function useIRIncident(incidentId: string) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
+  const reqId = useRef(0)
+  useEffect(() => () => { reqId.current++ }, [])
+
   const fetch_ = useCallback(() => {
+    const id = ++reqId.current
     setLoading(true)
     setError('')
     api.get<IRIncident>(`/ir/incidents/${incidentId}`)
-      .then(setIncident)
-      .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load incident'))
-      .finally(() => setLoading(false))
+      .then((d) => { if (id === reqId.current) setIncident(d) })
+      .catch((e) => { if (id === reqId.current) setError(e instanceof Error ? e.message : 'Failed to load incident') })
+      .finally(() => { if (id === reqId.current) setLoading(false) })
   }, [incidentId])
 
   useEffect(() => { fetch_() }, [fetch_])

@@ -29,10 +29,22 @@ export function isStaleChunkError(error: unknown): boolean {
 // Reload at most once per RELOAD_WINDOW_MS so a genuinely broken/missing asset
 // surfaces normally instead of looping reloads. Returns true if a reload was
 // triggered (caller should stop further handling).
+// In-memory fallback guard for contexts where sessionStorage throws
+// (storage-partitioned iframes, some privacy modes) — this runs inside error
+// handlers, so an escaping exception would mask the original chunk error.
+let _reloadedAt = 0
+
 export function reloadForStaleChunk(): boolean {
-  const last = Number(sessionStorage.getItem(RELOAD_KEY) ?? 0)
-  if (Date.now() - last < RELOAD_WINDOW_MS) return false
-  sessionStorage.setItem(RELOAD_KEY, String(Date.now()))
+  const now = Date.now()
+  let last = _reloadedAt
+  try {
+    last = Math.max(last, Number(sessionStorage.getItem(RELOAD_KEY) ?? 0))
+  } catch { /* storage unavailable — fall back to the in-memory guard */ }
+  if (now - last < RELOAD_WINDOW_MS) return false
+  _reloadedAt = now
+  try {
+    sessionStorage.setItem(RELOAD_KEY, String(now))
+  } catch { /* ignore */ }
   window.location.reload()
   return true
 }

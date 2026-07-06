@@ -114,7 +114,7 @@ export default function PresentationPanel({
     setDownloadingPdf(true)
     try {
       const { pdf_url } = await getPresentationPdf(threadId)
-      window.open(pdf_url, '_blank')
+      window.open(pdf_url, '_blank', 'noopener')
     } catch {
       // silent — user can retry
     }

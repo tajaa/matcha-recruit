@@ -38,24 +38,38 @@ export function useComplianceData(selectedLocationId?: string | null, lite = fal
   const locationRef = useRef(selectedLocationId)
   locationRef.current = selectedLocationId
 
+  // Per-loader request ids drop stale responses (e.g. rapid location switches
+  // reordering loadAlerts). Each source needs its own id because refreshAll
+  // fires them concurrently.
+  const locReq = useRef(0)
+  const sumReq = useRef(0)
+  const alertReq = useRef(0)
+  const pinReq = useRef(0)
+  const jurReq = useRef(0)
+
   const loadLocations = useCallback(async () => {
-    try { setLocations(await fetchLocations()) } catch { setLocations([]) }
+    const id = ++locReq.current
+    try { const d = await fetchLocations(); if (id === locReq.current) setLocations(d) } catch { if (id === locReq.current) setLocations([]) }
   }, [])
 
   const loadSummary = useCallback(async () => {
-    try { setSummary(await fetchSummary()) } catch { setSummary(null) }
+    const id = ++sumReq.current
+    try { const d = await fetchSummary(); if (id === sumReq.current) setSummary(d) } catch { if (id === sumReq.current) setSummary(null) }
   }, [])
 
   const loadAlerts = useCallback(async (status?: string) => {
-    try { setAlerts(await fetchAlerts(status, undefined, locationRef.current ?? undefined)) } catch { setAlerts([]) }
+    const id = ++alertReq.current
+    try { const d = await fetchAlerts(status, undefined, locationRef.current ?? undefined); if (id === alertReq.current) setAlerts(d) } catch { if (id === alertReq.current) setAlerts([]) }
   }, [])
 
   const loadPinnedRequirements = useCallback(async () => {
-    try { setPinnedRequirements(await fetchPinnedRequirements()) } catch { setPinnedRequirements([]) }
+    const id = ++pinReq.current
+    try { const d = await fetchPinnedRequirements(); if (id === pinReq.current) setPinnedRequirements(d) } catch { if (id === pinReq.current) setPinnedRequirements([]) }
   }, [])
 
   const loadJurisdictions = useCallback(async () => {
-    try { setJurisdictions(await fetchJurisdictions()) } catch { setJurisdictions([]) }
+    const id = ++jurReq.current
+    try { const d = await fetchJurisdictions(); if (id === jurReq.current) setJurisdictions(d) } catch { if (id === jurReq.current) setJurisdictions([]) }
   }, [])
 
   const refreshAll = useCallback(async () => {

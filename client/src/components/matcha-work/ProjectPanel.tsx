@@ -285,7 +285,7 @@ export default function ProjectPanel(props: ProjectPanelProps) {
         } else {
           const result = await exportProjectNew(projectId, fmt)
           const url = result.pdf_url || result.docx_url
-          if (url) window.open(url, '_blank')
+          if (url) window.open(url, '_blank', 'noopener')
         }
       } else {
         if (fmt === 'md') {
@@ -302,7 +302,7 @@ export default function ProjectPanel(props: ProjectPanelProps) {
         } else {
           const result = await exportProject(threadId, fmt)
           const url = result.pdf_url || result.docx_url
-          if (url) window.open(url, '_blank')
+          if (url) window.open(url, '_blank', 'noopener')
         }
       }
     } catch {}

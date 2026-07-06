@@ -85,7 +85,9 @@ export class ProjectSocket {
     if (!token) return
 
     try {
-      this.ws = new WebSocket(`${WS_BASE}/ws/projects?token=${token}`)
+      // Token rides the Sec-WebSocket-Protocol header, not the URL — query
+      // strings land in nginx/proxy access logs. Server echoes 'bearer'.
+      this.ws = new WebSocket(`${WS_BASE}/ws/projects`, ['bearer', token])
     } catch {
       this._scheduleReconnect()
       return

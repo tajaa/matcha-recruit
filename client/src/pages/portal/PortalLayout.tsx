@@ -25,9 +25,10 @@ export default function PortalLayout() {
     return <Navigate to={`/login?next=${encodeURIComponent(pathname)}`} replace />
   }
 
-  // Employees only — others get redirected to their tenant root.
+  // Employees only — others get redirected to their tenant root. Fail-closed:
+  // a missing/blank role must not fall through into the portal.
   const role = me.user?.role
-  if (role && role !== 'employee') {
+  if (role !== 'employee') {
     const fallback =
       role === 'admin' ? '/admin' :
       role === 'broker' ? '/broker' :

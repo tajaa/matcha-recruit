@@ -2,7 +2,7 @@
 // generation/download/share. The chat stream is a raw fetch (like
 // IRCopilotPanel) since api/client.ts doesn't stream; everything else goes
 // through the typed `api` helper.
-import { api } from './client'
+import { api, authStreamHeaders } from './client'
 
 const BASE = import.meta.env.VITE_API_URL ?? '/api'
 
@@ -131,21 +131,12 @@ export const sharePacket = (matterId: string, packetId: string, body: { recipien
   )
 
 // Authed blob download → browser save (keeps the server filename).
-export async function downloadPacket(matterId: string, packet: Packet): Promise<void> {
-  const token = localStorage.getItem('matcha_access_token')
-  const res = await fetch(`${BASE}/legal-pilot/matters/${matterId}/packets/${packet.id}/download`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-  })
-  if (!res.ok) throw new Error(`Download failed (${res.status})`)
-  const blob = await res.blob()
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = packet.filename
-  document.body.appendChild(a)
-  a.click()
-  a.remove()
-  URL.revokeObjectURL(url)
+// api.download handles proactive refresh + 401 retry.
+export function downloadPacket(matterId: string, packet: Packet): Promise<void> {
+  return api.download(
+    `/legal-pilot/matters/${matterId}/packets/${packet.id}/download`,
+    packet.filename,
+  )
 }
 
 export type ResearchCase = {
@@ -192,13 +183,10 @@ export type ChatHandlers = {
 // Grounded chat turn over SSE — raw fetch + ReadableStream (api/client.ts can't
 // stream). Mirrors the IRCopilotPanel consumption pattern.
 export async function streamChat(matterId: string, message: string, h: ChatHandlers): Promise<void> {
-  const token = localStorage.getItem('matcha_access_token')
+  // Streams can't replay a 401 refresh-and-retry — refresh proactively.
   const res = await fetch(`${BASE}/legal-pilot/matters/${matterId}/chat`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
+    headers: await authStreamHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ message }),
   })
   if (!res.ok || !res.body) {

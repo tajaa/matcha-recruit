@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 
+import { onAuthReset } from '../api/authReset'
 import {
   type ResourceKind,
   type ResourcePin,
@@ -52,6 +53,10 @@ export function invalidatePinsCache() {
   _cache = null
   _broadcast()
 }
+
+// Pins are per-user: drop the cache on logout so the next login on the same
+// tab (SPA-navigate logout paths don't reload the page) refetches.
+onAuthReset(invalidatePinsCache)
 
 export function usePinnedResources() {
   const [pins, setPins] = useState<ResourcePin[] | null>(_cache)

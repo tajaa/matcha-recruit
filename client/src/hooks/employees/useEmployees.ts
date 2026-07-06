@@ -19,6 +19,10 @@ export function useEmployees(filters: Filters = {}) {
   const filtersRef = useRef(filters)
   filtersRef.current = filters
 
+  // Drops out-of-order employee-list responses (search-driven refetch reorders).
+  const reqId = useRef(0)
+  useEffect(() => () => { reqId.current++ }, [])
+
   // Fetch departments + onboarding progress once on mount
   useEffect(() => {
     api.get<string[]>('/employees/departments').then(setDepartments).catch(() => {})
@@ -27,6 +31,7 @@ export function useEmployees(filters: Filters = {}) {
   }, [])
 
   const fetchEmployees = useCallback(() => {
+    const id = ++reqId.current
     setLoading(true)
     setError('')
 
@@ -40,12 +45,26 @@ export function useEmployees(filters: Filters = {}) {
     const qs = params.toString() ? `?${params}` : ''
 
     api.get<Employee[]>(`/employees${qs}`)
-      .then(setEmployees)
-      .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load employees'))
-      .finally(() => setLoading(false))
+      .then((d) => { if (id === reqId.current) setEmployees(d) })
+      .catch((e) => { if (id === reqId.current) setError(e instanceof Error ? e.message : 'Failed to load employees') })
+      .finally(() => { if (id === reqId.current) setLoading(false) })
   }, [])
 
-  useEffect(() => { fetchEmployees() }, [fetchEmployees, filters.status, filters.search, filters.department, filters.employment_type])
+  // First load fires immediately; search-driven refetches debounce 300ms so
+  // typing doesn't fire a request per keystroke.
+  const firstLoad = useRef(true)
+  const prevSearch = useRef(filters.search)
+  useEffect(() => {
+    const searchChanged = filters.search !== prevSearch.current
+    prevSearch.current = filters.search
+    if (firstLoad.current || !searchChanged) {
+      firstLoad.current = false
+      fetchEmployees()
+      return
+    }
+    const t = setTimeout(fetchEmployees, 300)
+    return () => clearTimeout(t)
+  }, [fetchEmployees, filters.status, filters.search, filters.department, filters.employment_type])
 
   const refetch = useCallback(() => {
     fetchEmployees()

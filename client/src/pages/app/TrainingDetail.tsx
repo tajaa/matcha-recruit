@@ -43,7 +43,7 @@ export default function TrainingDetail() {
   async function downloadCert(recordId: string) {
     try {
       const { url } = await trainingApi.certificateUrl(recordId)
-      window.open(url, '_blank')
+      window.open(url, '_blank', 'noopener')
     } catch (e) {
       alert(e instanceof Error ? e.message : 'Failed to load certificate')
     }

@@ -12,11 +12,11 @@ export function fetchCoverage() {
 export type CoveragePayload = Partial<Omit<CoverageRow, 'line' | 'updated_at'>>
 
 export function upsertCoverage(line: string, payload: CoveragePayload) {
-  return api.put<LimitReview>(`/limit-adequacy/coverage/${line}`, payload)
+  return api.put<LimitReview>(`/limit-adequacy/coverage/${encodeURIComponent(line)}`, payload)
 }
 
 export function deleteCoverage(line: string) {
-  return api.delete<LimitReview>(`/limit-adequacy/coverage/${line}`)
+  return api.delete<LimitReview>(`/limit-adequacy/coverage/${encodeURIComponent(line)}`)
 }
 
 export function fetchContracts() {

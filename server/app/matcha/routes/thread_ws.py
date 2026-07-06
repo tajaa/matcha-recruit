@@ -46,8 +46,10 @@ class ThreadConnectionManager:
         self.user_rooms: Dict[UUID, Set[str]] = {}
         self.lock = asyncio.Lock()
 
-    async def connect(self, websocket: WebSocket, user: ThreadUser):
-        await websocket.accept()
+    async def connect(
+        self, websocket: WebSocket, user: ThreadUser, subprotocol: Optional[str] = None
+    ):
+        await websocket.accept(subprotocol=subprotocol)
         async with self.lock:
             if user.id not in self.active_connections:
                 self.active_connections[user.id] = set()
@@ -240,18 +242,49 @@ async def _can_access_thread(conn, user: ThreadUser, thread_id: UUID) -> bool:
 # WebSocket endpoint
 # ---------------------------------------------------------------------------
 
+def _token_from_request(
+    websocket: WebSocket, query_token: Optional[str]
+) -> tuple[Optional[str], Optional[str]]:
+    """Extract the JWT from the handshake. Sources, in preference order:
+
+    1. ``Sec-WebSocket-Protocol: bearer, <token>`` — web clients; keeps the
+       token out of the URL so it never lands in nginx/proxy access logs.
+    2. ``?token=`` query param — legacy web clients / pre-deploy tabs.
+    3. ``Authorization: Bearer`` header — native clients.
+
+    Returns ``(token, subprotocol_to_echo)`` — when the token came in via
+    subprotocol the accept() MUST echo ``"bearer"`` or browsers fail the
+    handshake.
+    """
+    proto = websocket.headers.get("sec-websocket-protocol")
+    if proto:
+        parts = [p.strip() for p in proto.split(",")]
+        if len(parts) >= 2 and parts[0] == "bearer" and parts[1]:
+            return parts[1], "bearer"
+    if query_token:
+        return query_token, None
+    auth = websocket.headers.get("authorization") or websocket.headers.get("Authorization")
+    if auth and auth.startswith("Bearer "):
+        return auth[7:], None
+    return None, None
+
+
 @router.websocket("")
 async def thread_websocket(
     websocket: WebSocket,
-    token: str = Query(...),
+    token: Optional[str] = Query(None),
 ):
     """WebSocket endpoint for real-time thread collaboration (presence + typing + message broadcast)."""
-    user = await _authenticate(token)
+    auth_token, subprotocol = _token_from_request(websocket, token)
+    if not auth_token:
+        await websocket.close(code=4001, reason="Missing token")
+        return
+    user = await _authenticate(auth_token)
     if not user:
         await websocket.close(code=4001, reason="Invalid token")
         return
 
-    await thread_manager.connect(websocket, user)
+    await thread_manager.connect(websocket, user, subprotocol=subprotocol)
 
     try:
         while True:

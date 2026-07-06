@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { applyBrokerTheme, getBrokerTheme, clearBrokerThemeAttr } from '../utils/brokerTheme'
+import RequireRole from '../components/auth/RequireRole'
 import AppLayout from '../layouts/AppLayout'
 import BrokerSidebar from '../components/BrokerSidebar'
 import BrokerDashboard from '../pages/broker/BrokerDashboard'
@@ -23,7 +24,8 @@ export default function BrokerRoutes() {
   }, [])
 
   return (
-    <Routes>
+    <RequireRole roles={['broker', 'admin']}>
+      <Routes>
       <Route element={<AppLayout sidebar={<BrokerSidebar />} logoLabel="Matcha Broker" />}>
         {/* Module 1 — Book of Business (account-performance master view) */}
         <Route index element={<BrokerDashboard />} />
@@ -62,6 +64,7 @@ export default function BrokerRoutes() {
         {/* benefits/* (Renewals + Eligibility) redirects removed 2026-06-08 — those
             EB-broker tabs were paused; the legacy URLs now fall through. */}
       </Route>
-    </Routes>
+      </Routes>
+    </RequireRole>
   )
 }

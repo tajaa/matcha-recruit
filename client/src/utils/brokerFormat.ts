@@ -30,12 +30,16 @@ export function fmtPct(n: number): string {
   return `${n.toFixed(1)}%`
 }
 
+// Hoisted: Intl.DateTimeFormat construction is expensive and fmtDate runs
+// per-row in the book-of-business tables.
+const _shortDate = new Intl.DateTimeFormat(undefined, { month: 'numeric', day: 'numeric', year: 'numeric' })
+
 /** Short locale date (M/D/YYYY) from an ISO string; em dash for null. */
 export function fmtDate(iso: string | null | undefined): string {
   if (!iso) return '—'
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return '—'
-  return d.toLocaleDateString(undefined, { month: 'numeric', day: 'numeric', year: 'numeric' })
+  return _shortDate.format(d)
 }
 
 /** Clean-streak label from days-since-last-recordable. null = "∞" (never). */

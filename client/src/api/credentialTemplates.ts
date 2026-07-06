@@ -70,7 +70,7 @@ export function rejectTemplate(id: string) {
 }
 
 export function bulkApproveTemplates(researchId: string) {
-  return api.post(`/credential-templates/bulk-approve?research_id=${researchId}`)
+  return api.post(`/credential-templates/bulk-approve?research_id=${encodeURIComponent(researchId)}`)
 }
 
 // ── Research ──
@@ -84,7 +84,7 @@ export function triggerResearch(data: {
 }
 
 export function fetchResearchLogs(state?: string) {
-  const qs = state ? `?state=${state}` : ''
+  const qs = state ? `?state=${encodeURIComponent(state)}` : ''
   return api.get<CredentialResearchLog[]>(`/credential-templates/research${qs}`)
 }
 

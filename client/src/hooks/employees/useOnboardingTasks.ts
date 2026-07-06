@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../../api/client'
 import type { OnboardingTask } from '../../types/employee'
 
@@ -6,12 +6,16 @@ export function useOnboardingTasks(employeeId: string) {
   const [tasks, setTasks] = useState<OnboardingTask[]>([])
   const [loading, setLoading] = useState(true)
 
+  const reqId = useRef(0)
+  useEffect(() => () => { reqId.current++ }, [])
+
   const fetch_ = useCallback(() => {
+    const id = ++reqId.current
     setLoading(true)
     api.get<OnboardingTask[]>(`/employees/${employeeId}/onboarding`)
-      .then(setTasks)
-      .catch(() => setTasks([]))
-      .finally(() => setLoading(false))
+      .then((d) => { if (id === reqId.current) setTasks(d) })
+      .catch(() => { if (id === reqId.current) setTasks([]) })
+      .finally(() => { if (id === reqId.current) setLoading(false) })
   }, [employeeId])
 
   useEffect(() => { fetch_() }, [fetch_])

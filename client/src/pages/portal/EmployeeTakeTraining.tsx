@@ -117,7 +117,7 @@ export default function EmployeeTakeTraining() {
     if (!recordId) return
     try {
       const { url } = await employeeTrainingApi.myCertificateUrl(recordId)
-      window.open(url, '_blank')
+      window.open(url, '_blank', 'noopener')
     } catch (e) {
       alert(e instanceof Error ? e.message : 'Failed to load certificate')
     }

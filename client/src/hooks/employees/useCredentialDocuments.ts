@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../../api/client'
 import type { CredentialDocument, EmployeeCredentials } from '../../types/employee'
 
@@ -7,20 +7,26 @@ export function useCredentialDocuments(employeeId: string) {
   const [credentials, setCredentials] = useState<EmployeeCredentials | null>(null)
   const [loading, setLoading] = useState(true)
 
+  const reqId = useRef(0)
+  useEffect(() => () => { reqId.current++ }, [])
+
   const fetchAll = useCallback(async () => {
+    const id = ++reqId.current
     setLoading(true)
     try {
       const [docs, creds] = await Promise.all([
         api.get<CredentialDocument[]>(`/employees/${employeeId}/credential-documents`),
         api.get<EmployeeCredentials>(`/employees/${employeeId}/credentials`),
       ])
+      if (id !== reqId.current) return
       setDocuments(docs)
       setCredentials(creds)
     } catch {
+      if (id !== reqId.current) return
       setDocuments([])
       setCredentials(null)
     } finally {
-      setLoading(false)
+      if (id === reqId.current) setLoading(false)
     }
   }, [employeeId])
 

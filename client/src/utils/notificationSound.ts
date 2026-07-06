@@ -26,11 +26,11 @@ function getContext(): AudioContext | null {
 
 function unlockOnce() {
   if (_unlocked) return
-  const ctx = getContext()
-  if (!ctx) return
   const resume = () => {
-    ctx.resume().catch(() => {})
     _unlocked = true
+    // Create the context inside the gesture — it starts 'running' and no
+    // autoplay-policy warning fires (constructing at import time did both).
+    getContext()?.resume().catch(() => {})
     document.removeEventListener('pointerdown', resume)
     document.removeEventListener('keydown', resume)
   }

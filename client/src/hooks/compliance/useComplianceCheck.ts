@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import { getComplianceCheckUrl } from '../../api/compliance'
 import { ensureFreshToken } from '../../api/client'
 
@@ -17,6 +17,10 @@ export function useComplianceCheck(onComplete: () => void) {
   const [scanning, setScanning] = useState(false)
   const [messages, setMessages] = useState<ComplianceCheckMessage[]>([])
   const abortRef = useRef<AbortController | null>(null)
+
+  // Abort any in-flight stream on unmount so navigation away stops the
+  // server-side generation instead of draining it into a dead component.
+  useEffect(() => () => abortRef.current?.abort(), [])
 
   const runCheck = useCallback(async (locationId: string) => {
     abortRef.current?.abort()

@@ -1,4 +1,5 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
+import RequireRole from '../components/auth/RequireRole'
 import AppLayout from '../layouts/AppLayout'
 import AdminSidebar from '../components/AdminSidebar'
 import Companies from '../pages/admin/Companies'
@@ -35,7 +36,8 @@ import PolicyDetailPage from '../pages/admin/PolicyDetailPage'
 
 export default function AdminRoutes() {
   return (
-    <Routes>
+    <RequireRole roles={['admin']}>
+      <Routes>
       <Route element={<AppLayout sidebar={<AdminSidebar />} logoLabel="Matcha Admin" />}>
         <Route index element={<Navigate to="customers" replace />} />
         <Route path="updates" element={<Updates />} />
@@ -76,6 +78,7 @@ export default function AdminRoutes() {
         <Route path="blogs" element={<Blogs />} />
         <Route path="blogs/composer" element={<Blogs />} />
       </Route>
-    </Routes>
+      </Routes>
+    </RequireRole>
   )
 }

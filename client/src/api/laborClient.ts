@@ -1,7 +1,7 @@
 // Labor Relations API client — CBA store, clause library, grievance workflow.
 // Typed wrappers over the `/labor/*` backend (gated by `labor_relations`).
 
-import { api } from './client'
+import { api, authStreamHeaders } from './client'
 
 const BASE = (import.meta.env.VITE_API_URL as string | undefined) || '/api'
 
@@ -225,10 +225,10 @@ export async function streamGrievanceMerit(
   grievanceId: string,
   handlers: { onDelta: (text: string) => void; onError?: (msg: string) => void; signal?: AbortSignal },
 ): Promise<void> {
-  const token = localStorage.getItem('matcha_access_token')
+  // Streams can't replay a 401 refresh-and-retry — refresh proactively.
   const res = await fetch(`${BASE}/labor/grievances/${grievanceId}/assess-merit`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    headers: await authStreamHeaders({ 'Content-Type': 'application/json' }),
     signal: handlers.signal,
   })
   if (!res.ok || !res.body) {

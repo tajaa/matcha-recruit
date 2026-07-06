@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../../api/client'
 import type { EmployeeDetail } from '../../types/employee'
 
@@ -7,13 +7,17 @@ export function useEmployeeDetail(employeeId: string) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
+  const reqId = useRef(0)
+  useEffect(() => () => { reqId.current++ }, [])
+
   const fetch_ = useCallback(() => {
+    const id = ++reqId.current
     setLoading(true)
     setError('')
     api.get<EmployeeDetail>(`/employees/${employeeId}`)
-      .then(setEmployee)
-      .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load employee'))
-      .finally(() => setLoading(false))
+      .then((d) => { if (id === reqId.current) setEmployee(d) })
+      .catch((e) => { if (id === reqId.current) setError(e instanceof Error ? e.message : 'Failed to load employee') })
+      .finally(() => { if (id === reqId.current) setLoading(false) })
   }, [employeeId])
 
   useEffect(() => { fetch_() }, [fetch_])

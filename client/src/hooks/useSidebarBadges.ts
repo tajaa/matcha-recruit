@@ -35,6 +35,7 @@ export function useSidebarBadges() {
   const userId = me?.user?.id
   const [badges, setBadges] = useState<SidebarBadges>(EMPTY)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const seenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const fetchBadges = useCallback(async () => {
     if (!userId) return
@@ -71,8 +72,15 @@ export function useSidebarBadges() {
   useEffect(() => {
     if (!userId) return
     fetchBadges()
-    timerRef.current = setInterval(fetchBadges, POLL_MS)
-    return () => { if (timerRef.current) clearInterval(timerRef.current) }
+    // Skip polls while the tab is backgrounded — the visible-tab refetch on
+    // the next interval tick is fresh enough for a badge count.
+    timerRef.current = setInterval(() => {
+      if (!document.hidden) fetchBadges()
+    }, POLL_MS)
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current)
+      if (seenTimerRef.current) clearTimeout(seenTimerRef.current)
+    }
   }, [userId, fetchBadges])
 
   const markSeen = useCallback((section: BadgeSection) => {
@@ -88,7 +96,8 @@ export function useSidebarBadges() {
     // For server-tracked sections (inbox, notifications), don't touch local
     // state — the badge reflects real DB state and will only drop when the
     // user actually reads the items. Just refetch to get fresh count.
-    setTimeout(fetchBadges, 300)
+    if (seenTimerRef.current) clearTimeout(seenTimerRef.current)
+    seenTimerRef.current = setTimeout(fetchBadges, 300)
   }, [userId, fetchBadges])
 
   return { badges, markSeen, refetch: fetchBadges }

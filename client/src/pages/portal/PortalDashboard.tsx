@@ -29,7 +29,7 @@ export default function PortalDashboard() {
   async function downloadCert(rid: string) {
     try {
       const { url } = await employeeTrainingApi.myCertificateUrl(rid)
-      window.open(url, '_blank')
+      window.open(url, '_blank', 'noopener')
     } catch (e) {
       alert(e instanceof Error ? e.message : 'Failed to load certificate')
     }

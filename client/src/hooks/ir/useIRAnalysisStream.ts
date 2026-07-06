@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import { authStreamHeaders } from '../../api/client'
 
 const BASE = import.meta.env.VITE_API_URL ?? '/api'
@@ -22,6 +22,10 @@ export function useIRAnalysisStream(incidentId: string) {
     analysisType: null,
   })
   const abortRef = useRef<AbortController | null>(null)
+
+  // Abort any in-flight stream on unmount so navigation away stops the
+  // server-side generation instead of draining it into a dead component.
+  useEffect(() => () => abortRef.current?.abort(), [])
 
   const runAnalysis = useCallback(
     (type: IRStreamAnalysisType) => {

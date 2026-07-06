@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import { getEnrichStreamUrl } from '../api/adminOnboarding'
 import { ensureFreshToken } from '../api/client'
 
@@ -46,6 +46,10 @@ export function useEnrichStream() {
   const [done, setDone] = useState<EnrichEvent | null>(null)
   const [error, setError] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
+
+  // Abort any in-flight stream on unmount so navigation away stops the
+  // server-side generation instead of draining it into a dead component.
+  useEffect(() => () => abortRef.current?.abort(), [])
 
   const run = useCallback(async (companyId: string) => {
     abortRef.current?.abort()

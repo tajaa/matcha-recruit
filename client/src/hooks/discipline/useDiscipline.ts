@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   disciplineApi,
   type DisciplineRecord,
@@ -16,16 +16,22 @@ export function useDisciplineList(initialStatus: DisciplineStatus | undefined = 
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
+  const reqId = useRef(0)
+  useEffect(() => () => { reqId.current++ }, [])
+
   const refetch = useCallback(async () => {
+    const id = ++reqId.current
     setLoading(true)
     setError('')
     try {
       const rows = await disciplineApi.list(status)
+      if (id !== reqId.current) return
       setRecords(rows)
     } catch (e) {
+      if (id !== reqId.current) return
       setError(e instanceof Error ? e.message : 'Failed to load discipline records')
     } finally {
-      setLoading(false)
+      if (id === reqId.current) setLoading(false)
     }
   }, [status])
 
@@ -40,8 +46,12 @@ export function useDisciplineRecord(recordId: string | undefined) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
+  const reqId = useRef(0)
+  useEffect(() => () => { reqId.current++ }, [])
+
   const refetch = useCallback(async () => {
     if (!recordId) return
+    const id = ++reqId.current
     setLoading(true)
     setError('')
     try {
@@ -49,12 +59,14 @@ export function useDisciplineRecord(recordId: string | undefined) {
         disciplineApi.get(recordId),
         disciplineApi.auditLog(recordId).catch(() => [] as DisciplineAuditEntry[]),
       ])
+      if (id !== reqId.current) return
       setRecord(r)
       setAuditLog(log)
     } catch (e) {
+      if (id !== reqId.current) return
       setError(e instanceof Error ? e.message : 'Failed to load discipline record')
     } finally {
-      setLoading(false)
+      if (id === reqId.current) setLoading(false)
     }
   }, [recordId])
 

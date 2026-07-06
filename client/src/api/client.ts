@@ -1,3 +1,4 @@
+import { resetAuthCaches } from './authReset'
 import { reportApiError } from './errorReporter'
 
 const BASE = import.meta.env.VITE_API_URL ?? '/api'
@@ -29,6 +30,7 @@ async function _tryRefresh(): Promise<boolean> {
 function _logout() {
   localStorage.removeItem('matcha_access_token')
   localStorage.removeItem('matcha_refresh_token')
+  resetAuthCaches()
   // Best-effort cleanup of the shared channel WS. Lazy-imported to avoid
   // a circular dependency between api/client.ts and api/channelSocket.ts.
   import('./channelSocket').then((m) => m.disconnectSharedChannelSocket()).catch(() => {})

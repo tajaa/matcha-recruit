@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   trainingApi,
   type TrainingComplianceRow,
@@ -13,7 +13,11 @@ export function useTrainingCompliance() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
+  const reqId = useRef(0)
+  useEffect(() => () => { reqId.current++ }, [])
+
   const refetch = useCallback(async () => {
+    const id = ++reqId.current
     setLoading(true)
     setError(null)
     try {
@@ -22,13 +26,15 @@ export function useTrainingCompliance() {
         trainingApi.overdue(),
         trainingApi.listRequirements(),
       ])
+      if (id !== reqId.current) return
       setCompliance(c)
       setOverdue(o)
       setRequirements(r)
     } catch (e) {
+      if (id !== reqId.current) return
       setError(e instanceof Error ? e.message : 'Failed to load training data')
     } finally {
-      setLoading(false)
+      if (id === reqId.current) setLoading(false)
     }
   }, [])
 

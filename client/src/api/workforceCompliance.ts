@@ -87,5 +87,5 @@ export function fetchPayTransparency() {
 export function setPayTransparency(state: string, payload: {
   status: PayTransparencyStatus; postings_include_ranges: boolean; note?: string | null
 }) {
-  return api.put<PayTransparencyRow[]>(`/workforce-compliance/pay-transparency/${state}`, payload)
+  return api.put<PayTransparencyRow[]>(`/workforce-compliance/pay-transparency/${encodeURIComponent(state)}`, payload)
 }

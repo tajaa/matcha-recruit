@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../../api/client'
 
 export type IRInfoRequestQuestion = {
@@ -24,12 +24,16 @@ export function useIRInfoRequests(incidentId: string) {
   const [requests, setRequests] = useState<IRInfoRequest[]>([])
   const [loading, setLoading] = useState(true)
 
+  const reqId = useRef(0)
+  useEffect(() => () => { reqId.current++ }, [])
+
   const refresh = useCallback(() => {
+    const id = ++reqId.current
     setLoading(true)
     return api.get<IRInfoRequest[]>(`/ir/incidents/${incidentId}/info-requests`)
-      .then(setRequests)
-      .catch(() => setRequests([]))
-      .finally(() => setLoading(false))
+      .then((d) => { if (id === reqId.current) setRequests(d) })
+      .catch(() => { if (id === reqId.current) setRequests([]) })
+      .finally(() => { if (id === reqId.current) setLoading(false) })
   }, [incidentId])
 
   useEffect(() => { void refresh() }, [refresh])

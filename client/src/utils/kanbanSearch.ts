@@ -1,14 +1,14 @@
 import type { MWProjectTask } from '../types/matcha-work'
 
-/** Tokenize a kanban search query — whitespace-split AND tokens, with
- *  `"quoted phrases"` kept as a single token. Mirrors the desktop
+/** Tokenize a kanban search query — whitespace-split AND tokens, lowercased,
+ *  with `"quoted phrases"` kept as a single token. Mirrors the desktop
  *  `KanbanSearch` tokenizer. */
 export function searchTokens(query: string): string[] {
   const tokens: string[] = []
   const re = /"([^"]+)"|(\S+)/g
   let match: RegExpExecArray | null
   while ((match = re.exec(query)) !== null) {
-    const token = (match[1] ?? match[2] ?? '').trim()
+    const token = (match[1] ?? match[2] ?? '').trim().toLowerCase()
     if (token) tokens.push(token)
   }
   return tokens
@@ -30,5 +30,5 @@ export function taskMatches(task: MWProjectTask, tokens: string[]): boolean {
   ]
     .join(' ')
     .toLowerCase()
-  return tokens.every((t) => haystack.includes(t.toLowerCase()))
+  return tokens.every((t) => haystack.includes(t))
 }

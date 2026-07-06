@@ -185,7 +185,7 @@ export const getChannel = (id: string) =>
   api.get<ChannelDetail>(`/channels/${id}`)
 
 export const getChannelMessages = (id: string, before?: string) =>
-  api.get<ChannelMessage[]>(`/channels/${id}/messages${before ? `?before=${before}` : ''}`)
+  api.get<ChannelMessage[]>(`/channels/${id}/messages${before ? `?before=${encodeURIComponent(before)}` : ''}`)
 
 export const deleteChannelMessage = (channelId: string, messageId: string) =>
   api.delete<{ ok: boolean }>(`/channels/${channelId}/messages/${messageId}`)
@@ -234,7 +234,7 @@ export const transferOwnership = (channelId: string, userId: string) =>
 
 export const searchInvitableUsers = (q: string, channelId?: string) =>
   api.get<{ id: string; name: string; email: string; role: string; avatar_url: string | null }[]>(
-    `/channels/invitable-users?q=${encodeURIComponent(q)}${channelId ? `&channel_id=${channelId}` : ''}`
+    `/channels/invitable-users?q=${encodeURIComponent(q)}${channelId ? `&channel_id=${encodeURIComponent(channelId)}` : ''}`
   )
 
 export const getChannelPaymentInfo = (id: string) =>

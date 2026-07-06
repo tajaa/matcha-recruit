@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { onAuthReset } from '../api/authReset'
 import { api } from '../api/client'
 import type { MeResponse } from '../types/dashboard'
 
@@ -6,8 +7,12 @@ let _cache: MeResponse | null = null
 let _cacheAt = 0
 let _promise: Promise<MeResponse> | null = null
 
-function _fetch(): Promise<MeResponse> {
-  if (_cache) return Promise.resolve(_cache)
+// Past this age the cache is served stale-while-revalidate: callers get the
+// cached value instantly, a background refetch picks up feature flips
+// (Stripe webhook, admin toggle) without requiring a full page reload.
+const CACHE_TTL_MS = 60_000
+
+function _revalidate(): Promise<MeResponse> {
   if (_promise) return _promise
   _promise = api.get<MeResponse>('/auth/me').then((data) => {
     _cache = data
@@ -21,11 +26,21 @@ function _fetch(): Promise<MeResponse> {
   return _promise
 }
 
+function _fetch(): Promise<MeResponse> {
+  if (_cache) {
+    if (Date.now() - _cacheAt > CACHE_TTL_MS) void _revalidate().catch(() => {})
+    return Promise.resolve(_cache)
+  }
+  return _revalidate()
+}
+
 export function invalidateMeCache() {
   _cache = null
   _cacheAt = 0
   _promise = null
 }
+
+onAuthReset(invalidateMeCache)
 
 /** Read-only accessor for callers that want to decide whether to revalidate. */
 export function getMeCacheAgeMs(): number {

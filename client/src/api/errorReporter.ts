@@ -27,6 +27,31 @@ function _fingerprint(p: ClientErrorPayload): string {
   return `${p.kind}|${p.message.slice(0, 200)}|${p.api_endpoint || ''}|${p.api_status_code || ''}`
 }
 
+// Query strings can carry secrets (/auth/beta?token=…, reset ?token=, SSO
+// ?code=) — report the path only, never the query or fragment.
+function _redactUrl(raw: string): string {
+  try {
+    const u = new URL(raw, window.location.origin)
+    return `${u.origin}${u.pathname}`
+  } catch {
+    return raw.split(/[?#]/)[0]
+  }
+}
+
+// JWTs and anything token-shaped must not be persisted to the error store.
+const JWT_RE = /eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g
+
+function _scrub(value: unknown, maxLen = 500): string | undefined {
+  if (value == null) return undefined
+  let s: string
+  try {
+    s = typeof value === 'string' ? value : JSON.stringify(value)
+  } catch {
+    return undefined
+  }
+  return s.replace(JWT_RE, '[redacted-jwt]').slice(0, maxLen)
+}
+
 let _inFlight = 0
 
 async function _send(payload: ClientErrorPayload): Promise<void> {
@@ -59,7 +84,17 @@ async function _send(payload: ClientErrorPayload): Promise<void> {
       },
       body: JSON.stringify({
         ...payload,
-        url: payload.url ?? window.location.href,
+        message: _scrub(payload.message) ?? '',
+        stack: payload.stack ? _scrub(payload.stack, 4000) : undefined,
+        url: _redactUrl(payload.url ?? window.location.href),
+        context: payload.context
+          ? Object.fromEntries(
+              Object.entries(payload.context).map(([k, v]) => [
+                k,
+                typeof v === 'number' || typeof v === 'boolean' ? v : _scrub(v),
+              ]),
+            )
+          : undefined,
       }),
       // No-await on response — fire and forget
       keepalive: true,
@@ -109,7 +144,7 @@ export function reportApiError(opts: {
     message: opts.message || `${opts.status} ${opts.endpoint}`,
     api_endpoint: opts.endpoint,
     api_status_code: opts.status,
-    context: opts.body ? { body: opts.body } : undefined,
+    context: opts.body ? { body: _scrub(opts.body) } : undefined,
   })
 }
 

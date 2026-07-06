@@ -4,7 +4,8 @@ import { LogOut, Settings, ChevronDown, Lock } from 'lucide-react'
 import { useState, useEffect, useRef } from 'react'
 import { Logo } from './ui'
 import Avatar from './Avatar'
-import { invalidateMeCache, useMe } from '../hooks/useMe'
+import { useMe } from '../hooks/useMe'
+import { resetAuthCaches } from '../api/authReset'
 import { disconnectSharedChannelSocket } from '../api/channelSocket'
 import { useLayoutContext } from '../layouts/LayoutContext'
 
@@ -184,7 +185,10 @@ export default function SidebarShell({ logoTo, logoLabel, nav, user, upgradeFoot
   function handleLogout() {
     localStorage.removeItem('matcha_access_token')
     localStorage.removeItem('matcha_refresh_token')
-    invalidateMeCache()
+    // Clears useMe, pinned resources, and every other registered per-user
+    // module cache — this SPA-navigate logout doesn't reload the page, so
+    // caches would otherwise survive into the next user's session.
+    resetAuthCaches()
     disconnectSharedChannelSocket()
     navigate('/login')
   }

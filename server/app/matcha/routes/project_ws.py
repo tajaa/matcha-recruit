@@ -101,8 +101,10 @@ class ProjectConnectionManager:
         self._local_section_locks: Dict[Tuple[UUID, str], dict] = {}
         self.lock = asyncio.Lock()
 
-    async def connect(self, websocket: WebSocket, user: ProjectUser):
-        await websocket.accept()
+    async def connect(
+        self, websocket: WebSocket, user: ProjectUser, subprotocol: Optional[str] = None
+    ):
+        await websocket.accept(subprotocol=subprotocol)
         async with self.lock:
             if user.id not in self.active_connections:
                 self.active_connections[user.id] = set()
@@ -681,14 +683,31 @@ async def broadcast_task_event(project_id: UUID, event: str, payload: dict) -> N
     })
 
 
-def _token_from_request(websocket: WebSocket, query_token: Optional[str]) -> Optional[str]:
-    """Prefer Authorization: Bearer header (native clients); fall back to ?token= (web)."""
+def _token_from_request(
+    websocket: WebSocket, query_token: Optional[str]
+) -> tuple[Optional[str], Optional[str]]:
+    """Extract the JWT from the handshake. Sources, in preference order:
+
+    1. ``Sec-WebSocket-Protocol: bearer, <token>`` — web clients; keeps the
+       token out of the URL so it never lands in nginx/proxy access logs.
+    2. ``?token=`` query param — legacy web clients / pre-deploy tabs.
+    3. ``Authorization: Bearer`` header — native clients.
+
+    Returns ``(token, subprotocol_to_echo)`` — when the token came in via
+    subprotocol the accept() MUST echo ``"bearer"`` or browsers fail the
+    handshake.
+    """
+    proto = websocket.headers.get("sec-websocket-protocol")
+    if proto:
+        parts = [p.strip() for p in proto.split(",")]
+        if len(parts) >= 2 and parts[0] == "bearer" and parts[1]:
+            return parts[1], "bearer"
     if query_token:
-        return query_token
+        return query_token, None
     auth = websocket.headers.get("authorization") or websocket.headers.get("Authorization")
     if auth and auth.startswith("Bearer "):
-        return auth[7:]
-    return None
+        return auth[7:], None
+    return None, None
 
 
 async def _authenticate(token: str) -> Optional[ProjectUser]:
@@ -760,7 +779,7 @@ async def project_websocket(
     token: Optional[str] = Query(None),
 ):
     """WebSocket for matcha-work project presence (cursor + caret + cross-tab pill)."""
-    auth_token = _token_from_request(websocket, token)
+    auth_token, subprotocol = _token_from_request(websocket, token)
     if not auth_token:
         await websocket.close(code=4001, reason="Missing token")
         return
@@ -769,7 +788,7 @@ async def project_websocket(
         await websocket.close(code=4001, reason="Invalid token")
         return
 
-    await project_manager.connect(websocket, user)
+    await project_manager.connect(websocket, user, subprotocol=subprotocol)
 
     try:
         while True:

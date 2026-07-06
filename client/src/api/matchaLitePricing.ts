@@ -23,7 +23,7 @@ export interface MatchaLitePricingConfig {
 }
 
 export function fetchMatchaLitePricing(productCode: MatchaLiteProductCode = 'matcha_lite') {
-  return api.get<MatchaLitePricingConfig>(`/resources/matcha-lite/pricing?product_code=${productCode}`)
+  return api.get<MatchaLitePricingConfig>(`/resources/matcha-lite/pricing?product_code=${encodeURIComponent(productCode)}`)
 }
 
 export function computeLitePriceDollars(headcount: number, pricing: MatchaLitePricingConfig): number {
@@ -65,12 +65,12 @@ export interface MatchaLitePricingUpdate {
 }
 
 export function fetchMatchaLitePricingAdmin(productCode: MatchaLiteProductCode = 'matcha_lite') {
-  return api.get<MatchaLitePricingAdminConfig>(`/admin/matcha-lite-pricing?product_code=${productCode}`)
+  return api.get<MatchaLitePricingAdminConfig>(`/admin/matcha-lite-pricing?product_code=${encodeURIComponent(productCode)}`)
 }
 
 export function saveMatchaLitePricingAdmin(
   update: MatchaLitePricingUpdate,
   productCode: MatchaLiteProductCode = 'matcha_lite',
 ) {
-  return api.put<MatchaLitePricingAdminConfig>(`/admin/matcha-lite-pricing?product_code=${productCode}`, update)
+  return api.put<MatchaLitePricingAdminConfig>(`/admin/matcha-lite-pricing?product_code=${encodeURIComponent(productCode)}`, update)
 }

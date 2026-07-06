@@ -13,7 +13,7 @@ export function updateControl(
   key: string,
   payload: { status?: ControlStatus | null; note?: string | null; verified?: boolean },
 ) {
-  return api.put<ControlsRegister>(`/controls-evidence/controls/${key}`, payload)
+  return api.put<ControlsRegister>(`/controls-evidence/controls/${encodeURIComponent(key)}`, payload)
 }
 
 export function downloadControlsPacket() {
