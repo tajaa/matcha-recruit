@@ -15,6 +15,7 @@ const nav: (NavItem | NavGroup)[] = [
   { to: '/app/ir/osha', icon: ClipboardList, label: 'OSHA Logs' },
   { to: '/app/handbooks', icon: FileText, label: 'Handbooks' },
   { to: '/app/resources/handbook-audit', icon: ShieldAlert, label: 'Handbook Audit', feature: 'handbook_audit' },
+  { to: '/app/handbook-pilot', icon: Sparkles, label: 'Handbook Pilot', feature: 'handbook_pilot' },
   { to: '/app/training', icon: GraduationCap, label: 'Training', feature: 'training' },
   { to: '/app/discipline', icon: Gavel, label: 'Performance Action', feature: 'discipline' },
   { to: '/app/credential-templates', icon: BadgeCheck, label: 'Credentialing', feature: 'credential_templates' },

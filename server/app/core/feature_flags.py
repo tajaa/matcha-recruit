@@ -150,6 +150,18 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     # /legal-pilot router + the /app/legal-pilot page. Default off; admin-
     # toggle; NOT bundled (paid full-platform asset).
     "legal_defense": False,
+    # Handbook Pilot builder (Pro + Matcha-X). A business admin opens a
+    # generation session and converses with a GROUNDED AI that pulls the
+    # company's handbook profile + jurisdiction/compliance requirements +
+    # existing handbooks/policies, iteratively drafting handbook sections and
+    # standalone policies. AI-authored candidates land as reviewable drafts
+    # (citation-validated — the shared legal_defense.validate_citations gate
+    # drops any uncited jurisdiction reference) that the admin then PROMOTES
+    # into the real handbooks / policies tables as drafts to edit/publish
+    # normally. Gates the /handbook-pilot router + the /app/handbook-pilot
+    # page. Default off; in the matcha_x TIER_REQUIRED overlay + stored True
+    # at Pro/bespoke signup (like handbook_audit / credential_templates).
+    "handbook_pilot": False,
     # OSHA 300/301/300A logs within IR. Default True (existing behavior for
     # every `incidents` company, unchanged) — forced False for the no-roster
     # matcha_lite_essentials config, where there's no employee roster to log
@@ -205,6 +217,10 @@ TIER_REQUIRED_FEATURES: dict[str, dict[str, bool]] = {
         # (existing + new) at read time, no per-row backfill.
         "handbook_audit": True,
         "credential_templates": True,
+        # Conversational handbook/policy generation — bundled into Matcha-X
+        # alongside the handbook audit it complements (audit finds gaps;
+        # pilot drafts the fixes). Also stored True at Pro/bespoke signup.
+        "handbook_pilot": True,
         # Read-only compliance taste — lets X view the baseline the onboarding
         # build wrote (requirements + jurisdiction stack + summary + upcoming
         # legislation). Full `compliance` (power tools) stays Pro-only.

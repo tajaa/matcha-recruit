@@ -2952,6 +2952,132 @@ class HandbookService:
         return handbook
 
     @staticmethod
+    async def create_handbook_from_sections(
+        company_id: str,
+        title: str,
+        scopes: list[dict[str, Any]],
+        sections: list[dict[str, Any]],
+        created_by: Optional[str] = None,
+    ) -> HandbookDetailResponse:
+        """Create a new draft handbook from pre-authored section bodies.
+
+        The promotion target for Handbook Pilot: sections come already-written
+        (AI-drafted + human-reviewed) instead of being assembled from the
+        template builders, but the handbook/version/scope invariants are the
+        same as ``create_handbook`` so the result edits/publishes normally.
+        Sections land as ``section_type='custom'`` unless one specifies its own.
+        """
+        # Validate + normalize scopes through the same path create_handbook uses
+        # (HandbookScopeInput enforces a 2-char state), instead of silently
+        # dropping malformed rows. Dedupe by (state, city).
+        norm_scopes: list[dict[str, Any]] = []
+        seen_scope: set[tuple] = set()
+        for s in scopes or []:
+            try:
+                normalized = _normalize_scope(HandbookScopeInput(
+                    state=s.get("state"),
+                    city=s.get("city") or None,
+                    zipcode=s.get("zipcode") or None,
+                    location_id=s.get("location_id") or None,
+                ))
+            except Exception:  # noqa: BLE001 - a bad stored scope shouldn't 500 the promote
+                logger.warning("Skipping invalid handbook-pilot scope: %r", s)
+                continue
+            key = (normalized["state"], normalized["city"])
+            if key in seen_scope:
+                continue
+            seen_scope.add(key)
+            norm_scopes.append(normalized)
+        if not norm_scopes:
+            raise ValueError(
+                "This session has no valid work locations. Add employee work "
+                "locations before promoting handbook sections."
+            )
+        # Keep the (mode, scope-count) invariant validate_shape/update_handbook
+        # enforce: single_state == exactly one scope; multi_state == >= 2 scopes.
+        if len({s["state"] for s in norm_scopes}) > 1:
+            mode = "multi_state"
+        else:
+            mode = "single_state"
+            norm_scopes = norm_scopes[:1]
+
+        try:
+            async with get_connection() as conn:
+                async with conn.transaction():
+                    handbook_id = await conn.fetchval(
+                        """
+                        INSERT INTO handbooks (
+                            company_id, title, status, mode, source_type, active_version,
+                            created_by, created_at, updated_at
+                        )
+                        VALUES ($1, $2, 'draft', $3, 'template', 1, $4, NOW(), NOW())
+                        RETURNING id
+                        """,
+                        company_id, title[:500], mode, created_by,
+                    )
+                    for scope in norm_scopes:
+                        await conn.execute(
+                            """
+                            INSERT INTO handbook_scopes (handbook_id, state, city, zipcode, location_id, created_at)
+                            VALUES ($1, $2, $3, $4, $5, NOW())
+                            """,
+                            handbook_id, scope["state"], scope["city"],
+                            scope["zipcode"], scope["location_id"],
+                        )
+                    version_id = await conn.fetchval(
+                        """
+                        INSERT INTO handbook_versions (
+                            handbook_id, version_number, summary, is_published, created_by, created_at
+                        )
+                        VALUES ($1, 1, $2, false, $3, NOW())
+                        RETURNING id
+                        """,
+                        handbook_id, "Drafted with Handbook Pilot", created_by,
+                    )
+                    seen_keys: set[str] = set()
+                    for order, section in enumerate(sections or [], start=1):
+                        base_key = _slugify_key(
+                            section.get("section_key") or section.get("title") or f"section_{order}",
+                            max_len=110,
+                        ) or f"section_{order}"
+                        # UNIQUE(handbook_version_id, section_key) — disambiguate
+                        # collisions the way _normalize_custom_sections does:
+                        # shrink the base so the suffix always fits (no infinite
+                        # loop when base_key is already at the length cap).
+                        key = base_key
+                        suffix = 2
+                        while key in seen_keys:
+                            suffix_token = f"_{suffix}"
+                            key = f"{base_key[: max(1, 120 - len(suffix_token))]}{suffix_token}"
+                            suffix += 1
+                        seen_keys.add(key)
+                        await conn.execute(
+                            """
+                            INSERT INTO handbook_sections (
+                                handbook_version_id, section_key, title, section_order,
+                                section_type, jurisdiction_scope, content, created_at, updated_at
+                            )
+                            VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, NOW(), NOW())
+                            """,
+                            version_id, key,
+                            str(section.get("title") or "Untitled Section")[:255],
+                            order,
+                            str(section.get("section_type") or "custom"),
+                            json.dumps(section.get("jurisdiction_scope") or {}),
+                            str(section.get("content") or ""),
+                        )
+        except Exception as exc:
+            translated = _translate_handbook_db_error(exc)
+            if translated:
+                raise ValueError(translated) from exc
+            raise
+
+        handbook = await HandbookService.get_handbook_by_id(str(handbook_id), company_id)
+        if handbook is None:
+            raise ValueError("Failed to create handbook")
+        return handbook
+
+    @staticmethod
     async def _get_active_version_id(conn, handbook_id: str, active_version: int) -> Optional[UUID]:
         return await conn.fetchval(
             """

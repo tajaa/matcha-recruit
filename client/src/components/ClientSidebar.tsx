@@ -32,6 +32,7 @@ const nav: (NavItem | NavGroup)[] = [
       { to: '/app/policies', icon: FileText, label: 'Policies' },
       { to: '/app/handbooks', icon: BookOpen, label: 'Handbooks' },
       { to: '/app/resources/handbook-audit', icon: ShieldAlert, label: 'Handbook Audit', feature: 'handbook_audit' },
+      { to: '/app/handbook-pilot', icon: Sparkles, label: 'Handbook Pilot', feature: 'handbook_pilot' },
       { to: '/app/training', icon: GraduationCap, label: 'Training', feature: 'training' },
       { to: '/app/credential-templates', icon: BadgeCheck, label: 'Credentialing', feature: 'credential_templates' },
       { to: '/app/workforce-compliance', icon: ShieldCheck, label: 'Workforce Compliance', feature: 'workforce_compliance' },
