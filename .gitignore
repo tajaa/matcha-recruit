@@ -151,6 +151,7 @@ seed_*_demo.sql
 # Security audit working docs (confidential, not tracked)
 security-audit-6-10.md
 docs/SECURITY_AUDIT_2026-06-10.md
+docs/plans/SECURITY_AUDIT_PLAN_2026-07-05.md
 
 # Going forward: throwaway working notes go in scratch/ (never tracked)
 # instead of new per-filename entries above.
