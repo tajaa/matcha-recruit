@@ -63,10 +63,12 @@ export type ContextPreview = {
   total: number
 }
 
+export type PromoteFailure = { draft_id: string; title: string; error: string }
 export type PromoteResult = {
   promoted: number
   handbook: { id: string; title: string } | null
   policies: Array<{ id: string; title: string }>
+  failed: PromoteFailure[]
 }
 
 export const listPilotSessions = () =>
@@ -115,13 +117,28 @@ export type ChatHandlers = {
 }
 
 // Grounded drafting turn over SSE — raw fetch + ReadableStream (api/client.ts
-// can't stream). Mirrors the brokerPilot.ts / legalDefense.ts pattern.
-export async function streamChat(sessionId: string, message: string, h: ChatHandlers): Promise<void> {
-  const res = await fetch(`${BASE}/handbook-pilot/pilot/sessions/${sessionId}/chat`, {
-    method: 'POST',
-    headers: await authStreamHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({ message }),
-  })
+// can't stream). Mirrors the brokerPilot.ts / legalDefense.ts pattern. Pass a
+// `signal` to abort the turn (e.g. when the user switches sessions mid-stream);
+// an aborted turn resolves quietly rather than surfacing an error.
+export async function streamChat(
+  sessionId: string,
+  message: string,
+  h: ChatHandlers,
+  signal?: AbortSignal,
+): Promise<void> {
+  let res: Response
+  try {
+    res = await fetch(`${BASE}/handbook-pilot/pilot/sessions/${sessionId}/chat`, {
+      method: 'POST',
+      headers: await authStreamHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ message }),
+      signal,
+    })
+  } catch (e) {
+    if (signal?.aborted) return
+    h.onError?.('Chat failed — please try again.')
+    return
+  }
   if (!res.ok || !res.body) {
     h.onError?.(`Chat failed (${res.status})`)
     return
@@ -129,24 +146,29 @@ export async function streamChat(sessionId: string, message: string, h: ChatHand
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
   let buf = ''
-  while (true) {
-    const { value, done } = await reader.read()
-    if (done) break
-    buf += decoder.decode(value, { stream: true })
-    const events = buf.split('\n\n')
-    buf = events.pop() || ''
-    for (const ev of events) {
-      if (!ev.startsWith('data: ')) continue
-      const payload = ev.slice(6)
-      if (payload === '[DONE]') return
-      try {
-        const data = JSON.parse(payload)
-        if (data.type === 'status') h.onStatus?.(data.message)
-        else if (data.type === 'result') h.onResult?.(data.data)
-        else if (data.type === 'error') h.onError?.(data.message)
-      } catch {
-        /* ignore partial/non-JSON frames */
+  try {
+    while (true) {
+      const { value, done } = await reader.read()
+      if (done) break
+      buf += decoder.decode(value, { stream: true })
+      const events = buf.split('\n\n')
+      buf = events.pop() || ''
+      for (const ev of events) {
+        if (!ev.startsWith('data: ')) continue
+        const payload = ev.slice(6)
+        if (payload === '[DONE]') return
+        try {
+          const data = JSON.parse(payload)
+          if (data.type === 'status') h.onStatus?.(data.message)
+          else if (data.type === 'result') h.onResult?.(data.data)
+          else if (data.type === 'error') h.onError?.(data.message)
+        } catch {
+          /* ignore partial/non-JSON frames */
+        }
       }
     }
+  } catch (e) {
+    if (signal?.aborted) return
+    h.onError?.('Chat connection dropped — please try again.')
   }
 }

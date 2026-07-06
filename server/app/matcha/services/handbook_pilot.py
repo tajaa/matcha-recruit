@@ -30,7 +30,7 @@ import re
 
 from app.core.services.genai_client import get_genai_client
 
-from .legal_defense import validate_citations, _parse_json  # pure, unit-tested
+from .legal_defense import _parse_json  # pure, unit-tested
 
 logger = logging.getLogger(__name__)
 
@@ -44,12 +44,6 @@ _MAX_DRAFTS_PER_TURN = 6         # candidate artifacts the model may propose per
 _CONTENT_CAP = 12_000            # generated body cap per draft
 
 DRAFT_KINDS = ("handbook_section", "policy")
-
-DISCLAIMER = (
-    "Drafted by Matcha Handbook Pilot from the company's own profile, applicable "
-    "jurisdiction requirements, and existing policies. AI-generated draft language "
-    "— review with qualified counsel before publishing or relying on it."
-)
 
 _client = None
 
@@ -82,19 +76,23 @@ async def gather_grounding(conn, company_id, session: dict) -> dict:
     the chat still grounds on whatever else is available."""
     from app.core.services import handbook_service as hb
 
-    scopes = session.get("scopes") or []
-    if isinstance(scopes, str):
+    # Always re-derive scopes from the live employee roster so a company that
+    # expands into a new state grounds on that state's requirements immediately
+    # (the session snapshot, seeded at create time, is only a fallback when
+    # derivation fails or the roster is empty).
+    snapshot = session.get("scopes") or []
+    if isinstance(snapshot, str):
         import json
         try:
-            scopes = json.loads(scopes)
+            snapshot = json.loads(snapshot)
         except Exception:
-            scopes = []
-    if not scopes:
-        try:
-            scopes = await hb.derive_handbook_scopes_from_employees(conn, str(company_id))
-        except Exception:  # noqa: BLE001
-            logger.warning("handbook_pilot: scope derivation failed for %s", company_id)
-            scopes = []
+            snapshot = []
+    try:
+        derived = await hb.derive_handbook_scopes_from_employees(conn, str(company_id))
+    except Exception:  # noqa: BLE001
+        logger.warning("handbook_pilot: scope derivation failed for %s", company_id)
+        derived = []
+    scopes = derived or snapshot
 
     profile = None
     try:
@@ -351,18 +349,20 @@ LATEST ADMIN MESSAGE:
 
 
 def _coerce_drafts(raw, index: dict) -> tuple[list[dict], list[str]]:
-    """Clamp the model's proposed_drafts into the stored schema and run each
-    draft's citations through the shared gate. Returns (drafts, dropped_ids)."""
+    """Clamp the model's proposed_drafts into the stored schema and filter each
+    draft's citations against the corpus index. Returns (drafts, dropped_ids).
+
+    Filters citations per-draft directly (same rule as the shared
+    ``validate_citations`` gate — keep only ids present in ``index``) rather than
+    round-tripping through an evidence_map, so the citation→draft mapping doesn't
+    depend on that function's row ordering."""
     if not isinstance(raw, list):
         return [], []
-    # Reuse validate_citations by shaping drafts as an evidence_map.
-    evidence_map = [
-        {"point": str((d or {}).get("title") or ""), "cited_ids": (d or {}).get("cited_ids")}
-        for d in raw[:_MAX_DRAFTS_PER_TURN] if isinstance(d, dict)
-    ]
-    clean_map, dropped = validate_citations(evidence_map, index)
     drafts: list[dict] = []
-    for d, cm in zip((x for x in raw[:_MAX_DRAFTS_PER_TURN] if isinstance(x, dict)), clean_map):
+    dropped: list[str] = []
+    for d in raw[:_MAX_DRAFTS_PER_TURN]:
+        if not isinstance(d, dict):
+            continue
         kind = str(d.get("kind") or "").strip().lower()
         if kind not in DRAFT_KINDS:
             kind = "handbook_section"
@@ -370,6 +370,10 @@ def _coerce_drafts(raw, index: dict) -> tuple[list[dict], list[str]]:
         content = str(d.get("content") or "").strip()[:_CONTENT_CAP]
         if not (title and content):
             continue
+        raw_ids = d.get("cited_ids")
+        ids = [c for c in raw_ids if isinstance(c, str)] if isinstance(raw_ids, list) else []
+        kept = [c for c in ids if c in index]
+        dropped.extend(c for c in ids if c not in index)
         section_key = d.get("section_key")
         section_key = _slug(section_key)[:120] if section_key else _slug(title)[:120]
         drafts.append({
@@ -377,7 +381,7 @@ def _coerce_drafts(raw, index: dict) -> tuple[list[dict], list[str]]:
             "title": title,
             "section_key": section_key,
             "content": content,
-            "cited_ids": cm["cited_ids"],
+            "cited_ids": kept,
         })
     return drafts, dropped
 

@@ -129,10 +129,12 @@ export default function HandbookPilot() {
         {active ? (
           <>
             <div className="flex-1 min-w-0 flex flex-col border border-zinc-800 rounded-xl bg-zinc-950/40">
-              <Console session={active} onTurn={reloadActive} />
+              {/* key by session id → remount (and reset transcript/abort the
+                  stream) when the user switches sessions mid-turn */}
+              <Console key={active.id} session={active} onTurn={reloadActive} />
             </div>
             <div className="w-80 shrink-0 flex flex-col gap-4 overflow-y-auto">
-              <DraftsPanel session={active} onChange={reloadActive} />
+              <DraftsPanel key={active.id} session={active} onChange={reloadActive} />
               <ContextPanel context={context} />
             </div>
           </>
@@ -164,18 +166,18 @@ export default function HandbookPilot() {
 // Console — transcript + composer with SSE streaming.
 // --------------------------------------------------------------------------- //
 
+// NB: this component is keyed by session.id in the parent, so it remounts on a
+// session switch — `session` is effectively fixed for an instance's lifetime.
 function Console({ session, onTurn }: { session: PilotSession; onTurn: () => void }) {
   const [messages, setMessages] = useState<PilotMessage[]>(session.messages ?? [])
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState<string | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
-  const sessionIdRef = useRef(session.id)
+  const abortRef = useRef<AbortController | null>(null)
 
-  useEffect(() => {
-    sessionIdRef.current = session.id
-    setMessages(session.messages ?? [])
-  }, [session.id, session.messages])
+  // Abort any in-flight turn when the user switches sessions (unmount).
+  useEffect(() => () => abortRef.current?.abort(), [])
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
@@ -184,25 +186,32 @@ function Console({ session, onTurn }: { session: PilotSession; onTurn: () => voi
   const send = async () => {
     const text = input.trim()
     if (!text || busy) return
-    const id = sessionIdRef.current
     setInput('')
     setBusy(true)
     setStatus('Thinking…')
     setMessages((m) => [...m, { role: 'user', content: text, metadata: null, created_at: new Date().toISOString() }])
-    await streamChat(id, text, {
-      onStatus: (msg) => setStatus(msg),
-      onResult: (data) => {
-        setMessages((m) => [...m, {
-          role: 'assistant', content: data.assistant_text,
-          metadata: { open_questions: data.open_questions, dropped_citations: data.dropped_citations },
-          created_at: new Date().toISOString(),
-        }])
-      },
-      onError: (msg) => setStatus(`⚠ ${msg}`),
-    })
-    setBusy(false)
-    setStatus(null)
-    if (sessionIdRef.current === id) onTurn() // pull persisted drafts
+    const controller = new AbortController()
+    abortRef.current = controller
+    let hadError = false
+    try {
+      await streamChat(session.id, text, {
+        onStatus: (msg) => setStatus(msg),
+        onResult: (data) => {
+          setMessages((m) => [...m, {
+            role: 'assistant', content: data.assistant_text,
+            metadata: { open_questions: data.open_questions, dropped_citations: data.dropped_citations },
+            created_at: new Date().toISOString(),
+          }])
+        },
+        onError: (msg) => { hadError = true; setStatus(`⚠ ${msg}`) },
+      }, controller.signal)
+    } finally {
+      if (!controller.signal.aborted) {
+        setBusy(false)
+        if (!hadError) setStatus(null)  // keep the error visible; clear only on success
+        onTurn() // pull persisted drafts
+      }
+    }
   }
 
   return (
@@ -274,6 +283,7 @@ function DraftsPanel({ session, onChange }: { session: PilotSession; onChange: (
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<PromoteResult | null>(null)
+  const [error, setError] = useState<string | null>(null)
 
   const toggle = (id: string) =>
     setSelected((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
@@ -281,11 +291,14 @@ function DraftsPanel({ session, onChange }: { session: PilotSession; onChange: (
   const promote = async () => {
     if (selected.size === 0 || busy) return
     setBusy(true)
+    setError(null)
     try {
       const res = await promotePilotDrafts(session.id, { draft_ids: [...selected] })
       setResult(res)
       setSelected(new Set())
       onChange()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Promotion failed — please try again.')
     } finally {
       setBusy(false)
     }
@@ -321,6 +334,9 @@ function DraftsPanel({ session, onChange }: { session: PilotSession; onChange: (
           </div>
         ))}
       </div>
+      {error && (
+        <div className="px-3 py-2 border-t border-zinc-800 text-xs text-amber-400">⚠ {error}</div>
+      )}
       {result && (
         <div className="px-3 py-2 border-t border-zinc-800 text-xs text-zinc-400 space-y-1">
           {result.handbook && (
@@ -330,6 +346,9 @@ function DraftsPanel({ session, onChange }: { session: PilotSession; onChange: (
           )}
           {result.policies.map((p) => (
             <a key={p.id} href="/app/policies" className="text-emerald-400 hover:underline block">→ Policy draft: {p.title}</a>
+          ))}
+          {result.failed.map((f) => (
+            <div key={f.draft_id} className="text-amber-400">⚠ Couldn't promote “{f.title}”: {f.error}</div>
           ))}
         </div>
       )}

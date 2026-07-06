@@ -136,6 +136,29 @@ async def _load_draft(conn, draft_id, company_id) -> dict:
     return dict(row)
 
 
+async def _assert_paid(conn, company_id) -> None:
+    """Block the token-burning / write endpoints for a self-serve Matcha-X
+    company that hasn't paid yet. handbook_pilot is granted to Matcha-X via the
+    tier overlay *before* checkout, and the Stripe webhook flips `incidents` on
+    payment (the X paid gate) — so an abandoned-checkout X company can reach the
+    page (FeatureGate passes) but must not run Gemini generation or promote until
+    paid. Pro/bespoke (contract-billed) has no such gate."""
+    from app.core.feature_flags import merge_company_features
+
+    row = await conn.fetchrow(
+        "SELECT signup_source, enabled_features FROM companies WHERE id = $1", company_id
+    )
+    if not row:
+        return
+    if row["signup_source"] == "matcha_x":
+        features = merge_company_features(row["enabled_features"], row["signup_source"])
+        if not features.get("incidents"):
+            raise HTTPException(
+                status_code=402,
+                detail="Subscribe to Matcha-X to use Handbook Pilot drafting.",
+            )
+
+
 # --------------------------------------------------------------------------- #
 # Sessions
 # --------------------------------------------------------------------------- #
@@ -158,6 +181,10 @@ async def create_session(body: SessionCreate, request: Request,
         industry = body.industry
         if not industry:
             industry = await conn.fetchval("SELECT industry FROM companies WHERE id = $1", company_id)
+        if industry:
+            # companies.industry is VARCHAR(100) (unvalidated free text); the
+            # session column is VARCHAR(60) — truncate so the fallback can't 500.
+            industry = industry[:60]
         row = await conn.fetchrow(
             """INSERT INTO handbook_pilot_sessions
                    (company_id, title, goal, industry, scopes, created_by)
@@ -219,7 +246,12 @@ async def update_session(session_id: UUID, body: SessionUpdate, request: Request
             sets.append(f"{k} = ${i}")
             vals.append(v)
         vals.extend([session_id, company_id])
-        closed = ", closed_at = NOW()" if fields.get("status") == "closed" else ""
+        if fields.get("status") == "closed":
+            closed = ", closed_at = NOW()"
+        elif fields.get("status") == "active":
+            closed = ", closed_at = NULL"   # reopening clears the stale timestamp
+        else:
+            closed = ""
         row = await conn.fetchrow(
             f"UPDATE handbook_pilot_sessions SET {', '.join(sets)}, updated_at = NOW(){closed} "
             f"WHERE id = ${len(vals) - 1} AND company_id = ${len(vals)} RETURNING *",
@@ -258,6 +290,7 @@ async def chat(session_id: UUID, body: ChatIn, request: Request,
     # Pre-work in one connection; release it before the long Gemini call.
     async with get_connection() as conn:
         session = await _load_session(conn, session_id, company_id)
+        await _assert_paid(conn, company_id)
         await check_rate_limit(str(company_id), "handbook_pilot_chat", 40, 3600)
         history = await _load_messages(conn, session_id)
         grounding = await hp.gather_grounding(conn, company_id, session)
@@ -270,6 +303,40 @@ async def chat(session_id: UUID, body: ChatIn, request: Request,
     corpus = hp.build_corpus(grounding)
     user_id = getattr(current_user, "id", None)
 
+    async def _persist(result_payload: dict):
+        """Persist the assistant turn + proposed drafts. Wrapped in
+        asyncio.shield by the caller so a client disconnect right after the
+        result is produced doesn't drop the (already-generated) turn."""
+        drafts = result_payload.get("proposed_drafts") or []
+        async with get_connection() as c2:
+            async with c2.transaction():
+                draft_ids = []
+                for d in drafts:
+                    new_id = await c2.fetchval(
+                        """INSERT INTO handbook_pilot_drafts
+                               (session_id, company_id, kind, title, section_key,
+                                content, citations, created_by)
+                           VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id""",
+                        session_id, company_id, d["kind"], d["title"],
+                        d.get("section_key"), d["content"],
+                        json.dumps(d.get("cited_ids") or []), user_id,
+                    )
+                    draft_ids.append(str(new_id))
+                await c2.execute(
+                    "INSERT INTO handbook_pilot_messages (session_id, role, content, metadata) "
+                    "VALUES ($1, 'assistant', $2, $3)",
+                    session_id, result_payload.get("assistant_text", ""),
+                    json.dumps({
+                        "open_questions": result_payload.get("open_questions"),
+                        "dropped_citations": result_payload.get("dropped_citations"),
+                        "draft_ids": draft_ids,
+                    }),
+                )
+                await c2.execute(
+                    "UPDATE handbook_pilot_sessions SET updated_at = NOW() WHERE id = $1",
+                    session_id,
+                )
+
     async def event_stream():
         result_payload = None
         try:
@@ -280,38 +347,11 @@ async def chat(session_id: UUID, body: ChatIn, request: Request,
         except Exception:
             logger.exception("handbook_pilot: chat stream error")
             yield f"data: {json.dumps({'type': 'error', 'message': 'Drafting failed.'})}\n\n"
-        # Persist the assistant turn + any proposed drafts after streaming.
+        # Persist after streaming. shield() so a disconnect at this point still
+        # commits the completed turn (the Gemini tokens were already spent).
         if result_payload:
             try:
-                drafts = result_payload.get("proposed_drafts") or []
-                async with get_connection() as c2:
-                    async with c2.transaction():
-                        draft_ids = []
-                        for d in drafts:
-                            new_id = await c2.fetchval(
-                                """INSERT INTO handbook_pilot_drafts
-                                       (session_id, company_id, kind, title, section_key,
-                                        content, citations, created_by)
-                                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id""",
-                                session_id, company_id, d["kind"], d["title"],
-                                d.get("section_key"), d["content"],
-                                json.dumps(d.get("cited_ids") or []), user_id,
-                            )
-                            draft_ids.append(str(new_id))
-                        await c2.execute(
-                            "INSERT INTO handbook_pilot_messages (session_id, role, content, metadata) "
-                            "VALUES ($1, 'assistant', $2, $3)",
-                            session_id, result_payload.get("assistant_text", ""),
-                            json.dumps({
-                                "open_questions": result_payload.get("open_questions"),
-                                "dropped_citations": result_payload.get("dropped_citations"),
-                                "draft_ids": draft_ids,
-                            }),
-                        )
-                        await c2.execute(
-                            "UPDATE handbook_pilot_sessions SET updated_at = NOW() WHERE id = $1",
-                            session_id,
-                        )
+                await asyncio.shield(_persist(result_payload))
             except Exception:
                 logger.exception("handbook_pilot: failed to persist assistant turn")
         yield "data: [DONE]\n\n"
@@ -378,10 +418,18 @@ async def promote(session_id: UUID, body: PromoteIn, request: Request,
     company_id = await get_client_company_id(current_user)
     user_id = getattr(current_user, "id", None)
 
-    # Pre-work: load the session + the requested pending drafts. Release the
-    # connection before the create_* service calls (they open their own).
+    # Pre-work: gate, load the requested pending drafts, and re-derive the
+    # current work locations (not the possibly-stale session snapshot) so a
+    # promoted handbook is scoped to the company's live jurisdictions.
     async with get_connection() as conn:
         session = await _load_session(conn, session_id, company_id)
+        await _assert_paid(conn, company_id)
+        try:
+            from app.core.services.handbook_service import derive_handbook_scopes_from_employees
+            scopes = await derive_handbook_scopes_from_employees(conn, str(company_id))
+        except Exception:  # noqa: BLE001
+            logger.warning("handbook_pilot: scope derivation failed for promote %s", company_id)
+            scopes = session.get("scopes") or []
         rows = await conn.fetch(
             """SELECT * FROM handbook_pilot_drafts
                WHERE session_id = $1 AND company_id = $2 AND id = ANY($3::uuid[])
@@ -395,10 +443,13 @@ async def promote(session_id: UUID, body: PromoteIn, request: Request,
     section_drafts = [d for d in drafts if d["kind"] == "handbook_section"]
     policy_drafts = [d for d in drafts if d["kind"] == "policy"]
 
-    promoted: dict[str, dict] = {}   # draft_id -> promoted_ref
-    result = {"handbook": None, "policies": []}
+    promoted: dict[str, dict] = {}      # draft_id -> promoted_ref
+    handbook_result: dict | None = None
+    policy_results: list[dict] = []
+    failed: list[dict] = []             # {draft_id, title, error}
 
-    # Handbook sections → one new draft handbook.
+    # Handbook sections → one new draft handbook (the section group is atomic:
+    # create_handbook_from_sections runs in a single transaction).
     if section_drafts:
         from app.core.services.handbook_service import HandbookService
         sections = [{
@@ -410,17 +461,18 @@ async def promote(session_id: UUID, body: PromoteIn, request: Request,
         title = (body.handbook_title or session.get("title") or "Handbook Pilot draft")[:300]
         try:
             handbook = await HandbookService.create_handbook_from_sections(
-                str(company_id), title, session.get("scopes") or [], sections, str(user_id) if user_id else None,
+                str(company_id), title, scopes, sections, str(user_id) if user_id else None,
             )
-        except Exception as exc:
+            hb_id = str(handbook.id)
+            handbook_result = {"id": hb_id, "title": title}
+            for d in section_drafts:
+                promoted[str(d["id"])] = {"kind": "handbook", "handbook_id": hb_id}
+        except Exception as exc:  # noqa: BLE001 - surface as a per-draft failure, not a 500
             logger.exception("handbook_pilot: handbook promotion failed")
-            raise HTTPException(status_code=500, detail=f"Handbook promotion failed: {exc}") from exc
-        hb_id = str(handbook.id)
-        result["handbook"] = {"id": hb_id, "title": title}
-        for d in section_drafts:
-            promoted[str(d["id"])] = {"kind": "handbook", "handbook_id": hb_id}
+            for d in section_drafts:
+                failed.append({"draft_id": str(d["id"]), "title": d["title"], "error": str(exc)})
 
-    # Policies → one draft policy each.
+    # Policies → one draft policy each (independent; a failure doesn't block the rest).
     if policy_drafts:
         from app.core.services.policy_service import PolicyService
         from app.core.models.policy import PolicyCreate
@@ -432,17 +484,15 @@ async def promote(session_id: UUID, body: PromoteIn, request: Request,
                                  source_type="manual"),
                     str(user_id) if user_id else None,
                 )
-            except Exception:
+                pid = str(policy.id)
+                policy_results.append({"id": pid, "title": d["title"]})
+                promoted[str(d["id"])] = {"kind": "policy", "policy_id": pid}
+            except Exception as exc:  # noqa: BLE001
                 logger.exception("handbook_pilot: policy promotion failed for draft %s", d["id"])
-                continue
-            pid = str(policy.id)
-            result["policies"].append({"id": pid, "title": d["title"]})
-            promoted[str(d["id"])] = {"kind": "policy", "policy_id": pid}
+                failed.append({"draft_id": str(d["id"]), "title": d["title"], "error": str(exc)})
 
-    if not promoted:
-        raise HTTPException(status_code=500, detail="Promotion produced no records")
-
-    # Mark promoted drafts + audit, in a fresh connection.
+    # Mark whatever succeeded as promoted (each ref points at the real record so
+    # a re-promote of the rest never re-creates the succeeded ones) + audit.
     async with get_connection() as conn:
         for draft_id, ref in promoted.items():
             await conn.execute(
@@ -452,5 +502,11 @@ async def promote(session_id: UUID, body: PromoteIn, request: Request,
             )
         await conn.execute("UPDATE handbook_pilot_sessions SET updated_at = NOW() WHERE id = $1", session_id)
         await _audit(conn, session_id, current_user, request, "promote",
-                     {"draft_ids": list(promoted.keys()), "result": result})
-    return {"promoted": len(promoted), **result}
+                     {"promoted": list(promoted.keys()),
+                      "failed": [f["draft_id"] for f in failed]})
+    return {
+        "promoted": len(promoted),
+        "handbook": handbook_result,
+        "policies": policy_results,
+        "failed": failed,
+    }
