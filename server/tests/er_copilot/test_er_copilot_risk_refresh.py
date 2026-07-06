@@ -38,16 +38,25 @@ async def _fake_refresh_risk_assessment(company_id):
 employees_routes_module._refresh_risk_assessment = _fake_refresh_risk_assessment
 sys.modules.setdefault("app.matcha.routes.employees", employees_routes_module)
 
+routes_dir = Path(__file__).resolve().parents[1] / "app" / "matcha" / "routes"
+
 routes_package = types.ModuleType("app.matcha.routes")
-routes_package.__path__ = [str(Path(__file__).resolve().parents[1] / "app" / "matcha" / "routes")]
+routes_package.__path__ = [str(routes_dir)]
 sys.modules.setdefault("app.matcha.routes", routes_package)
 
+# er_copilot became a package (split from the flat er_copilot.py); register it
+# as a package so crud.py's `from ._shared import ...` resolves, then load the
+# crud submodule where create_case / update_case now live.
+er_copilot_package = types.ModuleType("app.matcha.routes.er_copilot")
+er_copilot_package.__path__ = [str(routes_dir / "er_copilot")]
+sys.modules.setdefault("app.matcha.routes.er_copilot", er_copilot_package)
+
 er_spec = importlib.util.spec_from_file_location(
-    "app.matcha.routes.er_copilot",
-    Path(__file__).resolve().parents[1] / "app" / "matcha" / "routes" / "er_copilot.py",
+    "app.matcha.routes.er_copilot.crud",
+    routes_dir / "er_copilot" / "crud.py",
 )
 er_copilot_routes = importlib.util.module_from_spec(er_spec)
-sys.modules["app.matcha.routes.er_copilot"] = er_copilot_routes
+sys.modules["app.matcha.routes.er_copilot.crud"] = er_copilot_routes
 assert er_spec.loader is not None
 er_spec.loader.exec_module(er_copilot_routes)
 
