@@ -318,6 +318,25 @@ export function recordExternalLossPremium(clientId: string, body: LossPremiumBod
   return api.put<LossRatioData>(`/broker/external-clients/${clientId}/loss-ratio/premium`, body)
 }
 
+// external-client loss-development triangle (off-platform, Broker Pro)
+export function fetchExternalLossDevelopment(clientId: string) {
+  return api.get<LossDevelopment>(`/broker/external-clients/${clientId}/loss-development`)
+}
+export function parseExternalLossRunDevelopment(clientId: string, file: File) {
+  const fd = new FormData()
+  fd.append('file', file)
+  return api.upload<LossRunDraft>(`/broker/external-clients/${clientId}/loss-runs/parse`, fd)
+}
+export function commitExternalLossRun(clientId: string, body: LossRunCommit) {
+  return api.post<LossDevelopment>(`/broker/external-clients/${clientId}/loss-runs`, body)
+}
+export function deleteExternalLossRunSnapshot(clientId: string, snapshotId: string) {
+  return api.delete<LossDevelopment>(`/broker/external-clients/${clientId}/loss-runs/${snapshotId}`)
+}
+export function downloadExternalLossDevelopment(clientId: string) {
+  return api.download(`/broker/external-clients/${clientId}/loss-development.pdf`, `loss-development-${clientId}.pdf`)
+}
+
 // --- Action Center: outreach ---
 
 export function fetchActionCenterOutreach(companyId: string, refresh = false) {

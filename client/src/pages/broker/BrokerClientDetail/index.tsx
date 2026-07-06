@@ -25,6 +25,8 @@ import { DefenseTab } from './DefenseTab'
 import { PilotTab } from '../BrokerPilot/PilotTab'
 
 export { LossRatioTab } from './LossRatioTab'
+export { LossTriangleTab } from './LossTriangleTab'
+export type { LossDevApi } from './LossTriangleTab'
 
 type Tab = 'overview' | 'compliance' | 'policies' | 'ir_er' | 'wc' | 'loss_dev' | 'loss_ratio' | 'epl' | 'controls' | 'limits' | 'defense' | 'submission' | 'pilot' | 'activity'
 

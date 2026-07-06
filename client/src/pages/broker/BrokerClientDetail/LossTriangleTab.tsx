@@ -5,11 +5,29 @@ import {
   fetchClientLossDevelopment, parseClientLossRun, commitClientLossRun,
   deleteClientLossRunSnapshot, downloadClientLossDevelopment,
 } from '../../../api/broker'
-import type { LossDevelopment, LossRunDraftPeriod } from '../../../types/lossDevelopment'
+import type { LossDevelopment, LossRunDraft, LossRunCommit, LossRunDraftPeriod } from '../../../types/lossDevelopment'
 import { LOSS_LINES } from '../../../types/lossDevelopment'
 import { fmtMoney } from '../../../types/limitAdequacy'
 
-export function LossTriangleTab({ companyId }: { companyId: string }) {
+// The triangle tab serves both on-platform (tenant) and off-platform (external)
+// clients — same view, different endpoints. Callers inject the endpoint bundle.
+export interface LossDevApi {
+  fetch: (id: string) => Promise<LossDevelopment>
+  parse: (id: string, file: File) => Promise<LossRunDraft>
+  commit: (id: string, body: LossRunCommit) => Promise<LossDevelopment>
+  remove: (id: string, snapshotId: string) => Promise<LossDevelopment>
+  download: (id: string) => Promise<void>
+}
+
+const TENANT_LOSS_DEV_API: LossDevApi = {
+  fetch: fetchClientLossDevelopment,
+  parse: parseClientLossRun,
+  commit: commitClientLossRun,
+  remove: deleteClientLossRunSnapshot,
+  download: downloadClientLossDevelopment,
+}
+
+export function LossTriangleTab({ companyId, api = TENANT_LOSS_DEV_API }: { companyId: string; api?: LossDevApi }) {
   const [dev, setDev] = useState<LossDevelopment | null>(null)
   const [loading, setLoading] = useState(true)
   const [dl, setDl] = useState(false)
@@ -17,7 +35,7 @@ export function LossTriangleTab({ companyId }: { companyId: string }) {
 
   function load() {
     setLoading(true)
-    fetchClientLossDevelopment(companyId).then(setDev).catch(() => setDev(null)).finally(() => setLoading(false))
+    api.fetch(companyId).then(setDev).catch(() => setDev(null)).finally(() => setLoading(false))
   }
   useEffect(load, [companyId])
 
@@ -34,14 +52,14 @@ export function LossTriangleTab({ companyId }: { companyId: string }) {
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <button onClick={() => setAdding((v) => !v)} className="inline-flex items-center gap-1 text-xs text-zinc-300 hover:text-zinc-100 px-2.5 py-1.5 rounded-lg border border-zinc-700"><Plus className="h-3.5 w-3.5" /> Add loss run</button>
-          <button onClick={async () => { setDl(true); try { await downloadClientLossDevelopment(companyId) } finally { setDl(false) } }} disabled={dl}
+          <button onClick={async () => { setDl(true); try { await api.download(companyId) } finally { setDl(false) } }} disabled={dl}
             className="inline-flex items-center gap-1.5 text-xs text-zinc-900 bg-zinc-100 hover:bg-white rounded-lg px-3 py-1.5 font-medium disabled:opacity-50">
             {dl ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileDown className="h-3.5 w-3.5" />} Loss-dev packet
           </button>
         </div>
       </div>
 
-      {adding && <LossRunForm companyId={companyId} onDone={(d) => { setDev(d); setAdding(false) }} onCancel={() => setAdding(false)} />}
+      {adding && <LossRunForm companyId={companyId} api={api} onDone={(d) => { setDev(d); setAdding(false) }} onCancel={() => setAdding(false)} />}
 
       {linesWithData.length === 0 ? (
         <p className="text-sm text-zinc-600">No loss runs on file. Add at least two valuations of the same policy years to build a triangle.</p>
@@ -125,7 +143,7 @@ export function LossTriangleTab({ companyId }: { companyId: string }) {
                 <span>{s.line.toUpperCase()} {s.policy_period_label}</span>
                 <span className="font-mono">{fmtMoney(s.paid + s.reserved)}</span>
                 <span className="text-zinc-700">· {s.claim_count} claims</span>
-                <button onClick={async () => setDev(await deleteClientLossRunSnapshot(companyId, s.id))} className="ml-auto text-zinc-600 hover:text-red-400"><Trash2 className="h-3.5 w-3.5" /></button>
+                <button onClick={async () => setDev(await api.remove(companyId, s.id))} className="ml-auto text-zinc-600 hover:text-red-400"><Trash2 className="h-3.5 w-3.5" /></button>
               </div>
             ))}
           </div>
@@ -139,7 +157,7 @@ function emptyLossPeriod(): LossRunDraftPeriod {
   return { policy_period_label: '', policy_period_start: null, claim_count: 0, open_count: 0, paid: 0, reserved: 0 }
 }
 
-function LossRunForm({ companyId, onDone, onCancel }: { companyId: string; onDone: (d: LossDevelopment) => void; onCancel: () => void }) {
+function LossRunForm({ companyId, api, onDone, onCancel }: { companyId: string; api: LossDevApi; onDone: (d: LossDevelopment) => void; onCancel: () => void }) {
   const fileRef = useRef<HTMLInputElement>(null)
   const [valuationDate, setValuationDate] = useState('')
   const [line, setLine] = useState('wc')
@@ -153,7 +171,7 @@ function LossRunForm({ companyId, onDone, onCancel }: { companyId: string; onDon
     if (!file) return
     setParsing(true); setMsg(null)
     try {
-      const draft = await parseClientLossRun(companyId, file)
+      const draft = await api.parse(companyId, file)
       if (!draft.available) { setMsg('Could not extract — enter the figures manually.'); return }
       if (draft.valuation_date) setValuationDate(draft.valuation_date)
       if (draft.line) setLine(draft.line)
@@ -175,7 +193,7 @@ function LossRunForm({ companyId, onDone, onCancel }: { companyId: string; onDon
     const cleaned = periods.filter((p) => p.policy_period_label.trim())
     if (!cleaned.length) { setMsg('Add at least one policy period.'); return }
     setBusy(true)
-    try { onDone(await commitClientLossRun(companyId, { valuation_date: valuationDate, line, source: 'broker-entry', periods: cleaned })) }
+    try { onDone(await api.commit(companyId, { valuation_date: valuationDate, line, source: 'broker-entry', periods: cleaned })) }
     finally { setBusy(false) }
   }
 

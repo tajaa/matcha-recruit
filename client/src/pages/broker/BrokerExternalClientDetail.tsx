@@ -10,10 +10,21 @@ import {
   fetchExternalSubmissionPreview, fetchExternalSubmissionNotes, saveExternalSubmissionNotes,
   createExternalIntakeLink, saveExternalProperty,
   fetchExternalLossRatio, recordExternalLossPremium,
+  fetchExternalLossDevelopment, parseExternalLossRunDevelopment, commitExternalLossRun,
+  deleteExternalLossRunSnapshot, downloadExternalLossDevelopment,
 } from '../../api/broker'
-import { LossRatioTab } from './BrokerClientDetail'
+import { LossRatioTab, LossTriangleTab, type LossDevApi } from './BrokerClientDetail'
 import type { ExternalClientDetail, ExternalEplFactor, EplAttestationStatus, ExternalProperty, ExternalPropertyPayload } from '../../types/broker'
 import { RISK_BAND_TONE, RISK_CONFIDENCE_TONE } from '../../types/riskIndex'
+
+// Off-platform loss-development endpoints, shaped for the shared triangle tab.
+const EXTERNAL_LOSS_DEV_API: LossDevApi = {
+  fetch: fetchExternalLossDevelopment,
+  parse: parseExternalLossRunDevelopment,
+  commit: commitExternalLossRun,
+  remove: deleteExternalLossRunSnapshot,
+  download: downloadExternalLossDevelopment,
+}
 
 const WC_TONE: Record<string, string> = {
   critical: 'text-red-400', at_risk: 'text-orange-400', fair: 'text-amber-400',
@@ -339,6 +350,8 @@ export default function BrokerExternalClientDetail() {
       </Card>
 
       <PropertyCard clientId={clientId!} property={property} onSaved={setData} />
+
+      <LossTriangleTab companyId={clientId!} api={EXTERNAL_LOSS_DEV_API} />
 
       <LossRatioTab
         subjectId={clientId!}
