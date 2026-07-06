@@ -4,7 +4,7 @@ import {
   uploadPilotDocument, deletePilotDocument, getPilotDocumentUrl,
   type PilotSession,
 } from '../../../api/brokerPilot'
-import { DOC_STATUS_CLASS, DOC_STATUS_LABEL, DOC_TYPE_LABEL, fmtSize } from './shared'
+import { DOC_STATUS_CLASS, DOC_STATUS_LABEL, DOC_TYPE_LABEL, LABEL, fmtSize } from './shared'
 
 const ACCEPT = '.pdf,.docx,.txt,.csv'
 
@@ -24,9 +24,7 @@ export function DocsPanel({ session, onChanged }: DocsPanelProps) {
     setUploading(true)
     setError(null)
     try {
-      for (const file of Array.from(files)) {
-        await uploadPilotDocument(session.id, file)
-      }
+      for (const file of Array.from(files)) await uploadPilotDocument(session.id, file)
       onChanged()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Upload failed')
@@ -47,48 +45,40 @@ export function DocsPanel({ session, onChanged }: DocsPanelProps) {
   }
 
   return (
-    <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
-      <div className="flex items-center justify-between mb-2">
-        <h3 className="text-xs uppercase tracking-wide text-zinc-500">Documents</h3>
+    <div className="flex flex-col border-b border-white/[0.06]">
+      <div className="flex items-center justify-between px-4 pb-2 pt-4">
+        <span className={LABEL}>Documents</span>
         <button
           onClick={() => inputRef.current?.click()}
           disabled={uploading}
-          className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-md border border-zinc-700 text-zinc-300 hover:text-zinc-100 hover:border-zinc-600 disabled:opacity-50 transition-colors"
+          className="inline-flex items-center gap-1.5 rounded border border-white/[0.08] px-2 py-0.5 text-[11px] text-zinc-300 transition-colors hover:border-emerald-500/40 hover:text-zinc-100 disabled:opacity-50"
         >
-          {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileUp className="h-3.5 w-3.5" />}
-          Upload
+          {uploading ? <Loader2 className="h-3 w-3 animate-spin" /> : <FileUp className="h-3 w-3" />} Upload
         </button>
-        <input
-          ref={inputRef}
-          type="file"
-          accept={ACCEPT}
-          multiple
-          className="hidden"
-          onChange={(e) => void onFiles(e.target.files)}
-        />
+        <input ref={inputRef} type="file" accept={ACCEPT} multiple className="hidden" onChange={(e) => void onFiles(e.target.files)} />
       </div>
 
-      {error && <p className="text-xs text-red-400 mb-2">{error}</p>}
+      {error && <p className="px-4 pb-2 text-[11px] text-red-400">{error}</p>}
 
       {docs.length === 0 ? (
-        <p className="text-xs text-zinc-600">
+        <p className="px-4 pb-3 text-[11px] leading-relaxed text-zinc-600">
           Upload loss runs, dec pages, quotes, or carrier letters (PDF/DOCX/TXT/CSV, 15 MB max).
           Each is analyzed once and grounds every chat turn.
         </p>
       ) : (
-        <ul className="space-y-2">
+        <div className="pb-1">
           {docs.map((d) => (
-            <li key={d.id} className="rounded-md border border-zinc-800 px-2.5 py-2">
+            <div key={d.id} className="border-t border-white/[0.04] px-4 py-2 first:border-t-0">
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
-                  <p className="text-xs text-zinc-200 truncate" title={d.filename}>{d.filename}</p>
-                  <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                  <p className="truncate text-xs text-zinc-200" title={d.filename}>{d.filename}</p>
+                  <div className="mt-1 flex flex-wrap items-center gap-1.5">
                     {d.doc_type && (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 border border-zinc-700 text-zinc-300">
+                      <span className="rounded border border-white/[0.08] bg-white/[0.03] px-1.5 py-px text-[10px] text-zinc-300">
                         {DOC_TYPE_LABEL[d.doc_type]}
                       </span>
                     )}
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded border ${DOC_STATUS_CLASS[d.status]}`}>
+                    <span className={`rounded border px-1.5 py-px text-[10px] ${DOC_STATUS_CLASS[d.status]}`}>
                       {DOC_STATUS_LABEL[d.status]}
                     </span>
                     <span className="text-[10px] text-zinc-600">{fmtSize(d.file_size)}</span>
@@ -99,29 +89,19 @@ export function DocsPanel({ session, onChanged }: DocsPanelProps) {
                     )}
                   </div>
                 </div>
-                <div className="flex items-center gap-1 flex-shrink-0">
-                  <button
-                    onClick={() => void openDoc(d.id)}
-                    className="p-1 text-zinc-500 hover:text-zinc-200 transition-colors"
-                    title="Open original"
-                  >
+                <div className="flex shrink-0 items-center gap-1">
+                  <button onClick={() => void openDoc(d.id)} className="p-1 text-zinc-500 transition-colors hover:text-zinc-200" title="Open original">
                     <ExternalLink className="h-3.5 w-3.5" />
                   </button>
-                  <button
-                    onClick={() => void removeDoc(d.id)}
-                    className="p-1 text-zinc-500 hover:text-red-400 transition-colors"
-                    title="Remove"
-                  >
+                  <button onClick={() => void removeDoc(d.id)} className="p-1 text-zinc-500 transition-colors hover:text-red-400" title="Remove">
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>
                 </div>
               </div>
-              {d.extraction?.summary && (
-                <p className="text-[11px] text-zinc-500 mt-1.5">{d.extraction.summary}</p>
-              )}
-            </li>
+              {d.extraction?.summary && <p className="mt-1.5 text-[11px] leading-snug text-zinc-500">{d.extraction.summary}</p>}
+            </div>
           ))}
-        </ul>
+        </div>
       )}
     </div>
   )

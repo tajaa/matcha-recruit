@@ -6,10 +6,12 @@ import {
   type PilotSession, type ContextPreview, type SubjectKind,
 } from '../../../api/brokerPilot'
 import { ApiError } from '../../../api/client'
+import { LABEL } from './shared'
 import { Masthead } from './Masthead'
 import { Console } from './Console'
 import { DocsPanel } from './DocsPanel'
-import { ContextPanel } from './ContextPanel'
+import { EvidencePanel } from './EvidencePanel'
+import { PacketsPanel } from './PacketsPanel'
 import { NewSessionModal } from './NewSessionModal'
 
 export default function BrokerPilot() {
@@ -110,14 +112,6 @@ export default function BrokerPilot() {
     void refreshList()
   }, [refreshList])
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <Loader2 className="h-6 w-6 text-zinc-500 animate-spin" />
-      </div>
-    )
-  }
-
   if (notPro) {
     return (
       <div className="flex flex-col items-center justify-center h-72 text-center">
@@ -141,78 +135,81 @@ export default function BrokerPilot() {
   }
 
   return (
-    <div className="flex gap-6 h-[calc(100vh-7rem)] min-h-0">
+    <div className="flex h-[calc(100vh-4rem)] overflow-hidden rounded-xl border border-white/[0.06] bg-zinc-950">
       {/* Sessions rail */}
-      <aside className="w-64 flex-shrink-0 flex flex-col min-h-0">
-        <div className="flex items-center justify-between mb-3">
-          <h1 className="text-lg font-semibold text-zinc-100 tracking-tight">Broker Pilot</h1>
+      <div className="flex w-60 shrink-0 flex-col border-r border-white/[0.06]">
+        <div className="flex items-center justify-between border-b border-white/[0.06] px-4 py-3">
+          <h1 className="flex items-center gap-2 text-sm font-semibold text-zinc-100">
+            <Sparkles className="h-4 w-4 text-emerald-400" /> Broker Pilot
+          </h1>
           <button
             onClick={() => { setPrefill(null); setShowNew(true) }}
-            className="p-1.5 rounded-md bg-zinc-800 border border-zinc-700 text-zinc-300 hover:text-zinc-100 hover:border-zinc-600 transition-colors"
-            title="New analysis session"
+            aria-label="New session"
+            className="rounded p-1 text-zinc-400 transition-colors hover:bg-white/[0.04] hover:text-zinc-100"
           >
             <Plus className="h-4 w-4" />
           </button>
         </div>
-        <div className="flex-1 overflow-y-auto space-y-4 pr-1">
-          {sessions.length === 0 && (
-            <p className="text-sm text-zinc-500">
+        <div className={`border-b border-white/[0.06] px-4 py-2 ${LABEL}`}>Sessions</div>
+        <div className="flex-1 overflow-y-auto">
+          {loading ? (
+            <p className="px-4 py-3 text-xs text-zinc-600">Loading…</p>
+          ) : sessions.length === 0 ? (
+            <p className="px-4 py-3 text-xs text-zinc-500">
               No sessions yet. Start one to analyze a client's documents against their platform data.
             </p>
-          )}
-          {[...groups.entries()].map(([client, list]) => (
+          ) : [...groups.entries()].map(([client, list]) => (
             <div key={client}>
-              <p className="text-[11px] uppercase tracking-wide text-zinc-500 mb-1.5">{client}</p>
-              <div className="space-y-1">
-                {list.map((s) => (
-                  <button
-                    key={s.id}
-                    onClick={() => void openSession(s.id)}
-                    className={`w-full text-left px-2.5 py-2 rounded-md border transition-colors ${
-                      active?.id === s.id
-                        ? 'bg-zinc-800 border-zinc-600 text-zinc-100'
-                        : 'bg-transparent border-transparent text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-200'
-                    }`}
-                  >
-                    <span className="block text-sm truncate">{s.title}</span>
-                    <span className="block text-[11px] text-zinc-500 mt-0.5">
-                      {s.document_count ?? 0} doc{(s.document_count ?? 0) === 1 ? '' : 's'} ·{' '}
-                      {s.message_count ?? 0} msg{(s.message_count ?? 0) === 1 ? '' : 's'}
-                      {s.status === 'closed' ? ' · closed' : ''}
-                    </span>
-                  </button>
-                ))}
-              </div>
+              <div className={`px-4 pb-1 pt-3 ${LABEL} truncate`} title={client}>{client}</div>
+              {list.map((s) => (
+                <button
+                  key={s.id}
+                  onClick={() => void openSession(s.id)}
+                  className={`block w-full border-b border-white/[0.04] border-l-2 px-4 py-2.5 text-left transition-colors ${
+                    active?.id === s.id
+                      ? 'border-l-emerald-400 bg-white/[0.03]'
+                      : 'border-l-transparent hover:bg-white/[0.02]'}`}
+                >
+                  <div className="truncate text-[13px] font-medium text-zinc-100">{s.title}</div>
+                  <div className="mt-0.5 flex items-center gap-2 font-mono text-[10px] uppercase tracking-wide text-zinc-500">
+                    <span>{s.document_count ?? 0} doc{(s.document_count ?? 0) === 1 ? '' : 's'}</span>
+                    <span>{s.message_count ?? 0} msg{(s.message_count ?? 0) === 1 ? '' : 's'}</span>
+                    {s.status === 'closed' && <span className="text-zinc-600">closed</span>}
+                  </div>
+                </button>
+              ))}
             </div>
           ))}
         </div>
-      </aside>
+      </div>
 
       {/* Workbench */}
-      <div className="flex-1 min-w-0 flex flex-col min-h-0">
-        {active ? (
-          <>
-            <Masthead session={active} onChanged={onSessionChanged} />
-            <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-3 gap-4 mt-4">
-              <div className="lg:col-span-2 min-h-0 flex flex-col">
+      <div className="min-w-0 flex-1">
+        {loading ? (
+          <div className="flex h-full items-center justify-center">
+            <Loader2 className="h-6 w-6 animate-spin text-zinc-500" />
+          </div>
+        ) : !active ? (
+          <div className="flex h-full flex-col items-center justify-center gap-4 px-8 text-center">
+            <Sparkles className="h-8 w-8 text-zinc-700" />
+            <p className="max-w-md text-sm leading-relaxed text-zinc-500">
+              Select or start a session. Upload a client's carrier documents — loss runs, dec
+              pages, quotes — and the analyst maps them to the platform data on file, citing every record.
+            </p>
+          </div>
+        ) : (
+          <div className="flex h-full min-h-0 flex-col">
+            <Masthead session={active} context={context} onChanged={onSessionChanged} />
+            <div className="flex min-h-0 flex-1">
+              <div className="flex min-w-0 flex-1 flex-col">
                 <Console session={active} context={context} onTurnComplete={onTurnComplete} />
               </div>
-              <div className="min-h-0 overflow-y-auto space-y-4">
+              <div className="flex w-80 shrink-0 flex-col overflow-y-auto border-l border-white/[0.06]">
+                <EvidencePanel context={context} />
                 <DocsPanel session={active} onChanged={onSessionChanged} />
-                <ContextPanel
-                  context={context}
-                  onRefresh={() => { if (activeIdRef.current) void openSession(activeIdRef.current) }}
-                />
+                <PacketsPanel session={active} />
               </div>
             </div>
-          </>
-        ) : (
-          <div className="flex-1 flex flex-col items-center justify-center text-center">
-            <Sparkles className="h-8 w-8 text-zinc-600 mb-3" />
-            <p className="text-sm text-zinc-500 max-w-sm">
-              Select a session, or start a new one to analyze a client's carrier documents
-              alongside their platform data.
-            </p>
           </div>
         )}
       </div>
