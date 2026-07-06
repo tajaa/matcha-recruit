@@ -1885,6 +1885,9 @@ async def register_business(request: BusinessRegister, http_request: Request):
                     bespoke_features["credential_templates"] = True
                     # Labor Relations (union / CBA admin) is a Pro-bundled gate.
                     bespoke_features["labor_relations"] = True
+                    # Handbook Pilot (conversational handbook/policy generation)
+                    # is a Pro-bundled gate.
+                    bespoke_features["handbook_pilot"] = True
                     enabled_features_json = json.dumps(bespoke_features)
                 else:
                     # Self-serve / broker-referred lead with no invite: stay

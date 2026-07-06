@@ -9912,9 +9912,11 @@ _TIER_FEATURE_PRESETS: dict[str, dict] = {
     # via merge_company_features, so don't add them to the preset.
     "matcha_x": {**{k: False for k in DEFAULT_COMPANY_FEATURES}, "incidents": True},
     # Bespoke / Platform: full feature set per DEFAULT_COMPANY_FEATURES, plus
-    # the Pro-bundled labor_relations gate (union / CBA admin), which defaults
-    # off so it must be force-set here for admin-created/-tier-changed Pro cos.
-    "bespoke": {**dict(DEFAULT_COMPANY_FEATURES), "labor_relations": True},
+    # the Pro-bundled gates (labor_relations union/CBA admin; handbook_pilot
+    # conversational handbook/policy generation), which default off so they
+    # must be force-set here for admin-created/-tier-changed Pro cos.
+    "bespoke": {**dict(DEFAULT_COMPANY_FEATURES), "labor_relations": True,
+                "handbook_pilot": True},
     # IR self-serve (Cap): incidents + employees + discipline.
     "ir_only_self_serve": {
         **{k: False for k in DEFAULT_COMPANY_FEATURES},

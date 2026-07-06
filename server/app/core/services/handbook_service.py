@@ -2952,6 +2952,102 @@ class HandbookService:
         return handbook
 
     @staticmethod
+    async def create_handbook_from_sections(
+        company_id: str,
+        title: str,
+        scopes: list[dict[str, Any]],
+        sections: list[dict[str, Any]],
+        created_by: Optional[str] = None,
+    ) -> HandbookDetailResponse:
+        """Create a new draft handbook from pre-authored section bodies.
+
+        The promotion target for Handbook Pilot: sections come already-written
+        (AI-drafted + human-reviewed) instead of being assembled from the
+        template builders, but the handbook/version/scope invariants are the
+        same as ``create_handbook`` so the result edits/publishes normally.
+        Sections land as ``section_type='custom'`` unless one specifies its own.
+        """
+        norm_scopes: list[dict[str, Any]] = []
+        for s in scopes or []:
+            state = str(s.get("state") or "").strip().upper()
+            if len(state) != 2:
+                continue
+            loc = s.get("location_id")
+            norm_scopes.append({
+                "state": state,
+                "city": (s.get("city") or None),
+                "zipcode": (s.get("zipcode") or None),
+                "location_id": UUID(str(loc)) if loc else None,
+            })
+        mode = "multi_state" if len({s["state"] for s in norm_scopes}) > 1 else "single_state"
+
+        async with get_connection() as conn:
+            async with conn.transaction():
+                handbook_id = await conn.fetchval(
+                    """
+                    INSERT INTO handbooks (
+                        company_id, title, status, mode, source_type, active_version,
+                        created_by, created_at, updated_at
+                    )
+                    VALUES ($1, $2, 'draft', $3, 'template', 1, $4, NOW(), NOW())
+                    RETURNING id
+                    """,
+                    company_id, title[:500], mode, created_by,
+                )
+                for scope in norm_scopes:
+                    await conn.execute(
+                        """
+                        INSERT INTO handbook_scopes (handbook_id, state, city, zipcode, location_id, created_at)
+                        VALUES ($1, $2, $3, $4, $5, NOW())
+                        """,
+                        handbook_id, scope["state"], scope["city"],
+                        scope["zipcode"], scope["location_id"],
+                    )
+                version_id = await conn.fetchval(
+                    """
+                    INSERT INTO handbook_versions (
+                        handbook_id, version_number, summary, is_published, created_by, created_at
+                    )
+                    VALUES ($1, 1, $2, false, $3, NOW())
+                    RETURNING id
+                    """,
+                    handbook_id, "Drafted with Handbook Pilot", created_by,
+                )
+                seen_keys: set[str] = set()
+                for order, section in enumerate(sections or [], start=1):
+                    key = _slugify_key(
+                        section.get("section_key") or section.get("title") or f"section-{order}",
+                        max_len=120,
+                    ) or f"section-{order}"
+                    # UNIQUE(handbook_version_id, section_key) — disambiguate collisions.
+                    base_key = key
+                    n = 2
+                    while key in seen_keys:
+                        key = f"{base_key}-{n}"[:120]
+                        n += 1
+                    seen_keys.add(key)
+                    await conn.execute(
+                        """
+                        INSERT INTO handbook_sections (
+                            handbook_version_id, section_key, title, section_order,
+                            section_type, jurisdiction_scope, content, created_at, updated_at
+                        )
+                        VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, NOW(), NOW())
+                        """,
+                        version_id, key,
+                        str(section.get("title") or "Untitled Section")[:255],
+                        order,
+                        str(section.get("section_type") or "custom"),
+                        json.dumps(section.get("jurisdiction_scope") or {}),
+                        str(section.get("content") or ""),
+                    )
+
+        handbook = await HandbookService.get_handbook_by_id(str(handbook_id), company_id)
+        if handbook is None:
+            raise ValueError("Failed to create handbook")
+        return handbook
+
+    @staticmethod
     async def _get_active_version_id(conn, handbook_id: str, active_version: int) -> Optional[UUID]:
         return await conn.fetchval(
             """
