@@ -20,6 +20,7 @@ from uuid import UUID
 from . import wc_depth
 from . import epl_readiness
 from . import risk_index
+from . import loss_development
 from .wc_benchmarks import lookup_benchmark, estimate_premium_impact, severity_band
 
 
@@ -276,6 +277,18 @@ def _compute_property(snap) -> dict:
 
 # --- assembled views -------------------------------------------------------
 
+async def _wc_reserve_confidence(conn, broker_id: UUID, client_id: UUID) -> str:
+    """Reserve confidence of this external client's WC loss-run triangle, folded
+    into the composite so a volatile/thin triangle doesn't read high-confidence.
+    "high" when there are no WC loss runs (no volatility signal). Never raises."""
+    try:
+        tri = await loss_development.build_development(conn, broker_id, "external", client_id)
+        wc_line = next((ln for ln in tri["lines"] if ln["line"] == "wc"), None)
+        return wc_line["summary"]["reserve_confidence"] if wc_line else "high"
+    except Exception:
+        return "high"
+
+
 async def client_detail(conn, broker_id: UUID, client_id: UUID) -> Optional[dict]:
     client = await get_client(conn, broker_id, client_id)
     if not client:
@@ -284,6 +297,7 @@ async def client_detail(conn, broker_id: UUID, client_id: UUID) -> Optional[dict
     state = client.get("primary_state")
     rates = await wc_depth.get_state_rates(conn, [state]) if state else {}
     wc = _compute_wc(client, snap, rates.get(state) if state else None)
+    wc["reserve_confidence"] = await _wc_reserve_confidence(conn, broker_id, client_id)
     epl = await _epl_for_client(conn, client_id)
     prop = _compute_property(await _property_snap(conn, client_id))
     intake = await intake_status(conn, client_id)
@@ -300,6 +314,7 @@ async def list_with_scores(conn, broker_id: UUID) -> list[dict]:
         cid = UUID(c["id"])
         snap = await conn.fetchrow("SELECT * FROM broker_external_wc WHERE external_client_id = $1", cid)
         wc = _compute_wc(c, snap, None)
+        wc["reserve_confidence"] = await _wc_reserve_confidence(conn, broker_id, cid)
         epl = await _epl_for_client(conn, cid)
         prop = _compute_property(await _property_snap(conn, cid))
         ri = risk_index.external_risk_index(wc, epl, prop)

@@ -143,3 +143,19 @@ def test_external_risk_index_property_absent_when_no_buildings():
     prop = {"rollup": {"building_count": 0}, "cat": None}
     withp = ri.external_risk_index(_wc(), e, prop)
     assert not any(c["key"] == "property" for c in withp["components"])
+
+
+def test_external_risk_index_wc_reserve_confidence_flows_from_wc_dict():
+    # the broker's WC loss-run triangle confidence rides on the wc dict; a
+    # volatile/thin triangle must drag the WC component (and thus the composite)
+    # down, not read high. Default (no key) stays high.
+    e = epl.assess_from_statuses({})
+    default = ri.external_risk_index(_wc(), e)
+    wc_comp = next(c for c in default["components"] if c["key"] == "wc")
+    assert wc_comp["confidence"] == "high"
+
+    low = ri.external_risk_index({**_wc(), "reserve_confidence": "low"}, e)
+    wc_low = next(c for c in low["components"] if c["key"] == "wc")
+    assert wc_low["confidence"] == "low"
+    assert "reserves low confidence" in wc_low["detail"]
+    assert low["index_confidence"] == "low"  # worst-of propagates to the composite

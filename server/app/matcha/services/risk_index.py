@@ -371,8 +371,13 @@ def external_risk_index(wc: dict, epl: dict, prop: Optional[dict] = None) -> dic
     s = _wc_score(wc.get("severity_band"), wc.get("current_emr"), ever_recordable,
                   trir=wc.get("trir")) if wc.get("has_data") else None
     if s is not None:
+        # WC reserve confidence rides on the wc dict (caller folds in the loss-run
+        # triangle's reserve_confidence); "high" when no loss runs — no volatility
+        # signal to downgrade. Same treatment as the tenant path.
+        wc_conf = wc.get("reserve_confidence") or "high"
+        detail = s[1] if wc_conf == "high" else f"{s[1]}; reserves {wc_conf} confidence"
         components.append({"key": "wc", "label": "Workers' Comp", "weight": _WEIGHTS["wc"],
-                           "score": s[0], "detail": s[1], "confidence": "high"})
+                           "score": s[0], "detail": detail, "confidence": wc_conf})
     components.append(_epl_component(epl))
     if prop is not None:
         ps = _property_score(prop.get("rollup"), prop.get("cat"), None)
