@@ -303,17 +303,6 @@ export const DIMENSION_HELP: Record<string, string> = {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-export function decodeTokenRole(): string | null {
-  const token = localStorage.getItem('matcha_access_token')
-  if (!token) return null
-  try {
-    const payload = JSON.parse(atob(token.split('.')[1]))
-    return payload.role ?? null
-  } catch {
-    return null
-  }
-}
-
 export function fmt(dateStr: string | null | undefined): string {
   if (!dateStr) return '—'
   return new Date(dateStr).toLocaleDateString()

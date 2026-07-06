@@ -1,6 +1,7 @@
 import { Link, useLocation } from 'react-router-dom'
 import { LayoutDashboard } from 'lucide-react'
 import { useMe } from '../../hooks/useMe'
+import { resetAuthCaches } from '../../api/authReset'
 import { useState } from 'react'
 
 interface NavItem {
@@ -21,6 +22,7 @@ export default function PortalSidebar() {
   function handleLogout() {
     localStorage.removeItem('matcha_access_token')
     localStorage.removeItem('matcha_refresh_token')
+    resetAuthCaches()
     window.location.href = '/login'
   }
 

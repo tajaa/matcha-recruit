@@ -8,8 +8,7 @@ import ResourcesFreeSidebar from './resources-free/ResourcesFreeSidebar'
 import { useMe } from '../hooks/useMe'
 import { isIrOnlyTier, isResourcesFreeTier, isMatchaLitePending, isMatchaX, isMatchaXPending, isMatchaCompliance, isMatchaCompliancePending } from '../utils/tier'
 import { useMatchaLitePricing, computeLitePriceDollars } from '../api/matchaLitePricing'
-
-const BASE = import.meta.env.VITE_API_URL ?? '/api'
+import { api, ApiError } from '../api/client'
 
 /**
  * Routes the tenant to the right sidebar based on signup tier:
@@ -59,26 +58,13 @@ function MatchaLitePendingSidebar({ headcount, isEssentials }: { headcount: numb
     setLoading(true)
     setError(null)
     try {
-      const token = localStorage.getItem('matcha_access_token')
-      const res = await fetch(`${BASE}/resources/checkout/lite`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({
-          success_url: `${window.location.origin}/ir/onboarding?lite=1`,
-          cancel_url: window.location.href,
-        }),
+      const { checkout_url } = await api.post<{ checkout_url: string }>('/resources/checkout/lite', {
+        success_url: `${window.location.origin}/ir/onboarding?lite=1`,
+        cancel_url: window.location.href,
       })
-      const data = await res.json()
-      if (!res.ok) {
-        setError(data.detail ?? 'Failed to start checkout')
-        return
-      }
-      window.location.href = data.checkout_url
-    } catch {
-      setError('Something went wrong. Please try again.')
+      window.location.href = checkout_url
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Something went wrong. Please try again.')
     } finally {
       setLoading(false)
     }
@@ -138,26 +124,13 @@ function CompliancePendingSidebar({ headcount, jurisdictionCount }: { headcount:
     setLoading(true)
     setError(null)
     try {
-      const token = localStorage.getItem('matcha_access_token')
-      const res = await fetch(`${BASE}/resources/checkout/compliance`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({
-          success_url: `${window.location.origin}/compliance/onboarding?compliance=1`,
-          cancel_url: window.location.href,
-        }),
+      const { checkout_url } = await api.post<{ checkout_url: string }>('/resources/checkout/compliance', {
+        success_url: `${window.location.origin}/compliance/onboarding?compliance=1`,
+        cancel_url: window.location.href,
       })
-      const data = await res.json()
-      if (!res.ok) {
-        setError(data.detail ?? 'Failed to start checkout')
-        return
-      }
-      window.location.href = data.checkout_url
-    } catch {
-      setError('Something went wrong. Please try again.')
+      window.location.href = checkout_url
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Something went wrong. Please try again.')
     } finally {
       setLoading(false)
     }
@@ -217,26 +190,13 @@ function MatchaXPendingSidebar({ headcount }: { headcount: number }) {
     setLoading(true)
     setError(null)
     try {
-      const token = localStorage.getItem('matcha_access_token')
-      const res = await fetch(`${BASE}/resources/checkout/x`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({
-          success_url: `${window.location.origin}/matcha-x/onboarding?x=1`,
-          cancel_url: window.location.href,
-        }),
+      const { checkout_url } = await api.post<{ checkout_url: string }>('/resources/checkout/x', {
+        success_url: `${window.location.origin}/matcha-x/onboarding?x=1`,
+        cancel_url: window.location.href,
       })
-      const data = await res.json()
-      if (!res.ok) {
-        setError(data.detail ?? 'Failed to start checkout')
-        return
-      }
-      window.location.href = data.checkout_url
-    } catch {
-      setError('Something went wrong. Please try again.')
+      window.location.href = checkout_url
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Something went wrong. Please try again.')
     } finally {
       setLoading(false)
     }

@@ -336,7 +336,7 @@ export const sendChannelTip = (channelId: string, amountCents: number, message?:
   })
 
 export const joinByInvite = (code: string) =>
-  api.post<{ ok?: boolean; requires_payment?: boolean; channel_id?: string; checkout_url?: string }>(`/channels/join-by-invite/${code}`)
+  api.post<{ ok?: boolean; requires_payment?: boolean; channel_id?: string; checkout_url?: string }>(`/channels/join-by-invite/${encodeURIComponent(code)}`)
 
 // ---------------------------------------------------------------------------
 // Email invites — invite people who don't have an account yet.

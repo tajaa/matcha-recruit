@@ -4,6 +4,7 @@ import { Hash, LayoutGrid, Plus, ChevronDown, PanelLeftClose, Home, Pencil, LogO
 import { listChannels, updateChannel, CHANNELS_CHANGED_EVENT } from '../../api/channels'
 import type { ChannelSummary } from '../../api/channels'
 import { disconnectSharedChannelSocket } from '../../api/channelSocket'
+import { resetAuthCaches } from '../../api/authReset'
 import { listProjects, createProjectNew, updateProjectMeta } from '../../api/matchaWork'
 import type { MWProject } from '../../types/matcha-work'
 import { useMe } from '../../hooks/useMe'
@@ -97,6 +98,7 @@ export default function WerkLiteSidebar({ open, onToggle }: Props) {
   function handleLogout() {
     localStorage.removeItem('matcha_access_token')
     localStorage.removeItem('matcha_refresh_token')
+    resetAuthCaches()
     disconnectSharedChannelSocket()
     window.location.href = '/login'
   }

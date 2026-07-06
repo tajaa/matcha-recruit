@@ -87,6 +87,12 @@ async function _send(payload: ClientErrorPayload): Promise<void> {
         message: _scrub(payload.message) ?? '',
         stack: payload.stack ? _scrub(payload.stack, 4000) : undefined,
         url: _redactUrl(payload.url ?? window.location.href),
+        // Endpoints can carry path-embedded share tokens (/s/:token,
+        // /report/:token) or a query string — drop the query/fragment and
+        // scrub before the endpoint lands in the error store.
+        api_endpoint: payload.api_endpoint
+          ? _scrub(payload.api_endpoint.split(/[?#]/)[0])
+          : undefined,
         context: payload.context
           ? Object.fromEntries(
               Object.entries(payload.context).map(([k, v]) => [

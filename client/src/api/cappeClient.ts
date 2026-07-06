@@ -160,7 +160,7 @@ export const cappeApi = {
       throw new Error(body?.detail || `${res.status} ${res.statusText || 'Download failed'}`)
     }
     const url = URL.createObjectURL(await res.blob())
-    window.open(url, '_blank')
+    window.open(url, '_blank', 'noopener')
     setTimeout(() => URL.revokeObjectURL(url), 60_000)
   },
 }

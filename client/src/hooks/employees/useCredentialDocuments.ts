@@ -65,7 +65,7 @@ export function useCredentialDocuments(employeeId: string) {
     const { url } = await api.get<{ url: string; filename: string }>(
       `/employees/${employeeId}/credential-documents/${docId}/download`,
     )
-    window.open(url, '_blank')
+    window.open(url, '_blank', 'noopener')
   }, [employeeId])
 
   return { documents, credentials, loading, upload, approve, reject, remove, download, refetch: fetchAll }

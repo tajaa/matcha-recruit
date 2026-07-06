@@ -15,6 +15,49 @@ tree. Section 3 is the actionable backlog.
 
 ---
 
+## Update (2026-07-06) — follow-up fixes applied on this branch
+
+A second commit on `claude/client-refactor-review-j1x6gu` lands the tractable, low-risk items
+from the backlog below. `npx tsc --noEmit` clean after the changes.
+
+**Applied:**
+- **§3.1 TenantSidebar checkout** — all three pending-sidebar `handleSubscribe` handlers
+  (Lite / Compliance / X) converted from raw `fetch` + `localStorage` token to
+  `api.post` (401 refresh-and-retry; `ApiError.message` surfaces the server `detail`). The
+  now-unused `BASE` const was removed. Fixes the idle-then-Subscribe dead-checkout.
+- **§2.2 / §3.2 noopener** — `useCredentialDocuments.ts:68` and `cappeClient.ts:163`
+  `window.open` now pass `'noopener'`.
+- **§3.5 invite-code encode** — `channels.ts` `joinByInvite` wraps the user-typed `code` in
+  `encodeURIComponent`.
+- **§2.3 errorReporter** — `api_endpoint` is now query/fragment-stripped and `_scrub`bed
+  before it reaches the error store.
+- **§3.3 useRiskAssessment** — added the `reqId` stale-response guard (company-switcher race)
+  and changed the catch to `e instanceof ApiError && e.status === 404` (was a brittle
+  `message.includes('404')` that missed 404s carrying a `detail` body).
+- **§3.1 decodeTokenRole removed** — its sole caller (`useRiskAssessment`) now reads the role
+  from `useMe()`; the hand-rolled JWT-decoder in `types/risk-assessment.ts` is deleted.
+- **§3.6 logout robustness** — `resetAuthCaches()` added to the three hard-navigate logouts
+  (`WorkSidebar`, `WerkLiteSidebar`, `PortalSidebar`) so the "every token-removal site resets
+  caches" invariant holds even if one is later converted to SPA `navigate()`.
+- **§3.1 uploadMedia** — `pages/admin/Newsletter/uploadMedia.ts` uses `api.upload`.
+
+**Deliberately deferred (rationale):**
+- **§3.1 `Settings.tsx`** — ~15 `authHeaders()`/`fetch` call sites, each with bespoke
+  response handling; a whole-file rewrite with real regression surface. Admin-only (low blast
+  radius). Worth a dedicated pass, not folded into this commit.
+- **§3.1 public lead-gen / newsletter fetches** (`HandbookGapAnalyzer`, `HandbookGapResult`,
+  `NewsletterSignup`, `NewsletterHeroSection`) — these are **intentionally** bare `fetch` with
+  an optional token; the client CLAUDE.md documents bare `fetch()` as the pattern for
+  public/anon endpoints. Primary users are logged-out visitors, so the token-refresh benefit
+  is marginal and converting fights the documented convention. Left as-is.
+- **§3.4 voice-WS `?token=`**, **§3.7 WS `?token=` fallback removal**, **§3.8 helper dedupe**
+  — unchanged: §3.7/§3.8 need the post-deploy soak window; §3.4 is a low-severity
+  short-lived-token parity item.
+- **§2.1 useMe broadcast**, **§2.4 kanban comment**, **§2.5 WS loop** — accept-as-is items,
+  unchanged.
+
+---
+
 ## Table of contents
 1. [Verified complete](#1-verified-complete--theme-by-theme)
 2. [Issues inside the commit](#2-issues-inside-the-commit)

@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import { Hash, FolderOpen, MessageSquare, Plus, ChevronDown, PanelLeftClose, Mail, MailOpen, Home, Pencil, LogOut, FileText, Presentation, Users, X, Compass, CreditCard, Sparkles } from 'lucide-react'
 import { listChannels, updateChannel, listPendingConnections, CHANNELS_CHANGED_EVENT } from '../../api/channels'
 import { disconnectSharedChannelSocket } from '../../api/channelSocket'
+import { resetAuthCaches } from '../../api/authReset'
 import type { ChannelSummary } from '../../api/channels'
 import { listThreads, listProjects, updateTitle, updateProjectMeta, createProjectNew, getMWSubscription, startPersonalCheckout } from '../../api/matchaWork'
 import type { MWThread, MWProject } from '../../types/matcha-work'
@@ -185,6 +186,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
   function handleLogout() {
     localStorage.removeItem('matcha_access_token')
     localStorage.removeItem('matcha_refresh_token')
+    resetAuthCaches()
     disconnectSharedChannelSocket()
     window.location.href = '/login'
   }
