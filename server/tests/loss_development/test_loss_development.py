@@ -294,6 +294,50 @@ def test_chain_hole_between_flanking_buckets_forces_low_confidence():
     assert subj["ultimate_low"] is None and subj["ultimate_high"] is None
 
 
+def test_effective_variances_extrapolates_single_obs_tail():
+    # buckets 12 (n=3) and 24 (n=2) estimable, 36 (n=1) is the tail → extrapolated
+    fs = {12: ld._factor_stats([1.5, 1.4, 1.6]),
+          24: ld._factor_stats([1.2, 1.1]),
+          36: ld._factor_stats([1.05])}
+    eff, extrap = ld._effective_variances({12: 1.5, 24: 1.15, 36: 1.05}, fs)
+    assert extrap == {36}
+    assert eff[36]["variance"] is not None            # filled
+    assert fs[36]["variance"] is None                 # original untouched
+    # Mack cap: extrapolated tail variance never exceeds the nearer prior
+    assert eff[36]["variance"] <= eff[24]["variance"]
+
+
+def test_effective_variances_no_extrapolation_without_two_lower_buckets():
+    # only ONE estimable lower bucket → tail stays unmodelable
+    fs = {12: ld._factor_stats([1.5, 1.4]), 24: ld._factor_stats([1.1])}
+    eff, extrap = ld._effective_variances({12: 1.45, 24: 1.1}, fs)
+    assert extrap == set() and eff[24]["variance"] is None
+
+
+def test_deep_triangle_with_thin_tail_gets_extrapolated_ci_not_low():
+    # A realistic deep triangle: the oldest 36->48 factor rests on one policy
+    # year (n=1), but 12->24 and 24->36 are well observed. Pre-extrapolation this
+    # collapsed the whole projection to LOW/no-CI; Mack's tail rule now yields a
+    # (widened) CI at MODERATE, and the summary flags the extrapolation.
+    snaps = [
+        _snap("2019", date(2019,12,31), 100_000), _snap("2019", date(2020,12,31), 150_000),
+        _snap("2019", date(2021,12,31), 175_000), _snap("2019", date(2022,12,31), 185_000),
+        _snap("2020", date(2020,12,31), 110_000), _snap("2020", date(2021,12,31), 168_000),
+        _snap("2020", date(2022,12,31), 192_000),
+        _snap("2021", date(2021,12,31), 120_000), _snap("2021", date(2022,12,31), 180_000),
+        _snap("2022", date(2022,12,31), 130_000),  # subject: latest at 12mo
+    ]
+    line = _wc(ld.build_triangle(snaps))
+    fac = {f["from_maturity"]: f for f in line["factors"]}
+    assert fac[36]["n"] == 1 and fac[36]["variance"] is None  # thin tail, honestly reported
+    subj = _period(line, "2022")  # chains 12->24->36->48 through the extrapolated tail
+    assert subj["reserve_confidence"] == "moderate"
+    assert subj["reserve_std_error"] is not None
+    assert subj["ultimate_low"] < subj["ultimate"] < subj["ultimate_high"]
+    assert line["summary"]["reserve_tail_extrapolated"] is True
+    assert line["summary"]["reserve_confidence"] == "moderate"
+
+
 def test_greenfield_line_no_development_factors_is_low_confidence():
     # A single loss run (one valuation per policy year, no development pairs) has
     # NO age-to-age factors at all — cdf_from returns 1.0 by default, so the

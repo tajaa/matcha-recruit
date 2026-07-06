@@ -49,6 +49,9 @@ export interface LossLineSummary {
   total_ultimate_low: number | null
   total_ultimate_high: number | null
   reserve_confidence: ReserveConfidence
+  // oldest development factor's variability was extrapolated (Mack tail rule),
+  // not directly observed — surfaced so the CI isn't over-read.
+  reserve_tail_extrapolated?: boolean
 }
 
 export interface LossLine {

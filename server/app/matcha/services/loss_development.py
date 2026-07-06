@@ -84,6 +84,44 @@ def _factor_stats(rs: list[float]) -> dict:
             "std_error": round(math.sqrt(variance / n), 6)}
 
 
+def _effective_variances(atf: dict, factor_stats: dict) -> tuple[dict, set]:
+    """Per-maturity factor stats for the variance walk, with the TAIL factor's
+    missing variance filled by Mack's-method extrapolation.
+
+    The oldest development factor almost always rests on a single observation
+    (only the oldest policy year reaches that maturity), so its sample variance
+    is undefined. Nulling the whole projection there would hide the CI on nearly
+    every realistic triangle. Mack (1993) instead continues the observed
+    sigma^2 decay for the last factor:
+
+        s2_tail = min( s2_a^2 / s2_b ,  s2_a ,  s2_b )
+
+    where s2_a, s2_b are the two nearest lower buckets with a real variance
+    (``a`` nearer the tail) — the geometric continuation of the decay, capped at
+    the smaller prior so it can't blow up. Needs >=2 estimable lower buckets;
+    otherwise the tail stays unmodelable (None). Only the single highest-maturity
+    bucket is extrapolated — an interior single-observation bucket is a genuine
+    hole, not a tail, and stays None.
+
+    Returns (effective_stats, extrapolated_maturities). ``effective_stats`` is a
+    shallow per-bucket copy; the reported ``factors[]`` variance stays the real
+    (possibly None) value — extrapolation is internal to the CI only."""
+    ms = sorted(atf)
+    eff = {m: dict(factor_stats[m]) for m in ms}
+    extrapolated: set = set()
+    if not ms:
+        return eff, extrapolated
+    tail = ms[-1]
+    if eff[tail]["variance"] is None:
+        lower = [m for m in ms[:-1] if eff[m]["variance"] is not None]
+        if len(lower) >= 2:
+            sa, sb = eff[lower[-1]]["variance"], eff[lower[-2]]["variance"]
+            s2 = min(sa * sa / sb, sa, sb) if sb > 0 else min(sa, sb)
+            eff[tail]["variance"] = s2
+            extrapolated.add(tail)
+    return eff, extrapolated
+
+
 def _mack_reserve_variance(latest_incurred: float, latest_maturity: int,
                             atf: dict, factor_stats: dict) -> float | None:
     """Mack's-method-style propagated variance of the projected ultimate (==
@@ -91,9 +129,11 @@ def _mack_reserve_variance(latest_incurred: float, latest_maturity: int,
     constant). Walks the same maturity chain as ``cdf_from``, at each step
     adding that step's factor sampling variance (sigma^2/n, from the CLT) on
     the projection accumulated so far, then compounding by the factor for the
-    next step. Returns None the moment any remaining step's factor rests on
-    fewer than 2 observations — a partial variance built on an unknown term
-    would be a fabricated number, not a conservative one."""
+    next step. Returns None the moment any remaining step's factor variance is
+    unknown — a partial variance built on an unknown term would be a fabricated
+    number, not a conservative one. (Pass the extrapolated stats from
+    ``_effective_variances`` to keep the tail factor from nulling realistic
+    triangles.)"""
     steps = sorted(m for m in atf if m >= latest_maturity)
     if not steps:
         return 0.0
@@ -164,6 +204,11 @@ def _build_line(line: str, rows: list[dict]) -> dict:
                 ratios.setdefault(a["maturity"], []).append(b["incurred"] / a["incurred"])
     atf = {m: round(sum(rs) / len(rs), 4) for m, rs in ratios.items() if rs}
     factor_stats = {m: _factor_stats(rs) for m, rs in ratios.items() if rs}
+    # Fill the single-observation tail factor's variance via Mack extrapolation
+    # so a realistic triangle yields a (widened) CI instead of collapsing to
+    # "low"; eff_stats feeds the variance walk, factor_stats stays real for the
+    # reported factors[] + the observation-count confidence read.
+    eff_stats, extrapolated = _effective_variances(atf, factor_stats)
 
     def cdf_from(maturity: int) -> float:
         f = 1.0
@@ -210,7 +255,7 @@ def _build_line(line: str, rows: list[dict]) -> dict:
         elif not chain_intact:
             var = None
         else:
-            var = _mack_reserve_variance(latest["incurred"], latest["maturity"], atf, factor_stats)
+            var = _mack_reserve_variance(latest["incurred"], latest["maturity"], atf, eff_stats)
         if var is not None:
             se = math.sqrt(var)
             ult_low, ult_high, se_out = round(max(0.0, ult - Z_75 * se), 2), round(ult + Z_75 * se, 2), round(se, 2)
@@ -220,6 +265,10 @@ def _build_line(line: str, rows: list[dict]) -> dict:
             conf = "high" if atf else "low"
         elif p["maturity_gap"] or var is None:
             conf = "low"
+        elif any(m in extrapolated for m in remaining):
+            # the tail factor's sigma was modeled, not measured — a CI shows, but
+            # never claim "high" on an extrapolated tail.
+            conf = "moderate"
         elif min(factor_stats[m]["n"] for m in remaining) < 4:
             conf = "moderate"
         else:
@@ -264,6 +313,9 @@ def _build_line(line: str, rows: list[dict]) -> dict:
             "total_ultimate_low": total_ult_low,
             "total_ultimate_high": total_ult_high,
             "reserve_confidence": worst_conf,
+            # the oldest development factor's variability was extrapolated (Mack
+            # tail rule), not measured — surface it so the CI isn't over-read.
+            "reserve_tail_extrapolated": bool(extrapolated),
         },
     }
 

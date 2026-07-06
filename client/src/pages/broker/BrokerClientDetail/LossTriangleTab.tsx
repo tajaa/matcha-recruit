@@ -60,7 +60,12 @@ export function LossTriangleTab({ companyId }: { companyId: string }) {
                 {s.reserve_confidence === 'low' ? (
                   <span className="text-amber-500/80">· low confidence (thin development history)</span>
                 ) : s.total_ultimate_low !== null && s.total_ultimate_high !== null ? (
-                  <span className="text-zinc-600">· {fmtMoney(s.total_ultimate_low)}–{fmtMoney(s.total_ultimate_high)} range ({s.reserve_confidence})</span>
+                  <span className="text-zinc-600">
+                    · {fmtMoney(s.total_ultimate_low)}–{fmtMoney(s.total_ultimate_high)} range ({s.reserve_confidence})
+                    {s.reserve_tail_extrapolated && (
+                      <span title="Oldest development factor modeled (Mack tail rule), not directly observed"> · tail est.</span>
+                    )}
+                  </span>
                 ) : null}
               </span>
             </div>
