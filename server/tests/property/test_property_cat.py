@@ -72,10 +72,35 @@ def test_summarize_rolls_up_worst_and_counts():
     s = pc.summarize(rows)
     assert s["worst_tier"] == "severe"
     assert s["worst_peril"] == "flood"
+    assert s["worst_peril_documented"] is True
     assert s["by_peril"] == {"flood": "severe", "wind": "high"}
     assert s["severe_high_count"] == 1     # only b1 reaches high+
     assert s["buildings_total"] == 2
     assert s["buildings_geocoded"] == 1    # b2 not geocoded
+
+
+def test_summarize_worst_peril_tie_break_prefers_documented_regardless_of_row_order():
+    # flood (documented) and wildfire (directional) tie at "severe" — flood must
+    # win no matter which row the (unordered) SQL happens to return first.
+    wildfire_first = [
+        {"building_id": "b1", "lat": 27.5, "peril": "wildfire", "tier": "severe", "score": 90},
+        {"building_id": "b1", "lat": 27.5, "peril": "flood", "tier": "severe", "score": 90},
+    ]
+    flood_first = list(reversed(wildfire_first))
+    for rows in (wildfire_first, flood_first):
+        s = pc.summarize(rows)
+        assert s["worst_peril"] == "flood"
+        assert s["worst_peril_documented"] is True
+
+
+def test_summarize_worst_peril_tie_break_alphabetical_when_both_undocumented():
+    rows = [
+        {"building_id": "b1", "lat": 27.5, "peril": "wind", "tier": "severe", "score": 90},
+        {"building_id": "b1", "lat": 27.5, "peril": "wildfire", "tier": "severe", "score": 90},
+    ]
+    s = pc.summarize(rows)
+    assert s["worst_peril"] == "wind"  # deterministic tie-break (max peril name), regardless of row order
+    assert s["worst_peril_documented"] is False
 
 
 # --- annual probability ------------------------------------------------------
@@ -99,25 +124,16 @@ def test_quake_probability_always_none():
 
 
 def test_peril_annual_probability_dispatch():
-    assert pc._peril_annual_probability("flood", "VE", {}) == 0.01
-    assert pc._peril_annual_probability("quake", None, {"sds": 0.85}) is None
-    assert pc._peril_annual_probability("wildfire", None, {}) is None
-    assert pc._peril_annual_probability("wind", None, {}) is None
-
-
-def test_parse_raw_handles_string_dict_and_none():
-    assert pc._parse_raw('{"sds": 0.5}') == {"sds": 0.5}
-    assert pc._parse_raw({"sds": 0.5}) == {"sds": 0.5}
-    assert pc._parse_raw(None) == {}
-    assert pc._parse_raw("not json") == {}
+    assert pc._peril_annual_probability("flood", "VE") == 0.01
+    assert pc._peril_annual_probability("quake", None) is None
+    assert pc._peril_annual_probability("wildfire", None) is None
+    assert pc._peril_annual_probability("wind", None) is None
 
 
 def test_summarize_by_peril_detail_carries_probability():
     rows = [
-        {"building_id": "b1", "lat": 27.5, "peril": "flood", "tier": "severe", "score": 90,
-         "zone": "VE", "raw": {}},
-        {"building_id": "b1", "lat": 27.5, "peril": "wildfire", "tier": "high", "score": 72,
-         "zone": None, "raw": None},
+        {"building_id": "b1", "lat": 27.5, "peril": "flood", "tier": "severe", "score": 90, "zone": "VE"},
+        {"building_id": "b1", "lat": 27.5, "peril": "wildfire", "tier": "high", "score": 72, "zone": None},
     ]
     s = pc.summarize(rows)
     assert s["by_peril_detail"]["flood"] == {"tier": "severe", "annual_probability": 0.01}

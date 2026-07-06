@@ -31,14 +31,15 @@ def test_property_score_itv_penalty_and_cap():
     assert ri._property_score(_rollup(100, ratio=0.50))[0] == 75      # capped at -25
 
 
-# documented cat (flood/quake with a hazard-agency annual probability) applies
-# the full capped penalty and reports "high" confidence.
-_DOCUMENTED_SEVERE_CAT = {"worst_tier": "severe", "worst_peril": "flood",
-                          "by_peril_detail": {"flood": {"tier": "severe", "annual_probability": 0.01}}}
-# a wildfire/wind-driven tier has no documented probability -> discounted penalty
-# and "moderate" confidence, even at the same "severe" tier.
-_DIRECTIONAL_SEVERE_CAT = {"worst_tier": "severe", "worst_peril": "wildfire",
-                          "by_peril_detail": {"wildfire": {"tier": "severe", "annual_probability": None}}}
+# documented cat (worst_peril_documented=True — flood OR quake) applies the
+# full capped penalty and reports "high" confidence.
+_DOCUMENTED_SEVERE_CAT = {"worst_tier": "severe", "worst_peril": "flood", "worst_peril_documented": True}
+# quake tiers are ALSO documented even though quake never carries a numeric
+# annual_probability — the tier itself is a real USGS reading.
+_QUAKE_SEVERE_CAT = {"worst_tier": "severe", "worst_peril": "quake", "worst_peril_documented": True}
+# a wildfire/wind-driven tier is explicitly marked directional -> discounted
+# penalty and "moderate" confidence, even at the same "severe" tier.
+_DIRECTIONAL_SEVERE_CAT = {"worst_tier": "severe", "worst_peril": "wildfire", "worst_peril_documented": False}
 
 
 def test_property_score_cat_penalty_full_weight_when_documented():
@@ -50,6 +51,15 @@ def test_property_score_cat_penalty_full_weight_when_documented():
     assert low == base                                               # low/moderate = no penalty
 
 
+def test_property_score_cat_penalty_full_weight_for_quake_despite_no_probability():
+    # quake's tier is a real USGS ASCE7-16 reading, not a directional guess, even
+    # though _quake_probability is deliberately always None — full weight, "high".
+    base = ri._property_score(_rollup(100, ratio=1.0))[0]
+    severe = ri._property_score(_rollup(100, ratio=1.0), cat=_QUAKE_SEVERE_CAT)
+    assert severe[0] == base - 15
+    assert severe[2] == "high"
+
+
 def test_property_score_cat_penalty_discounted_when_directional():
     base = ri._property_score(_rollup(100, ratio=1.0))[0]
     severe = ri._property_score(_rollup(100, ratio=1.0), cat=_DIRECTIONAL_SEVERE_CAT)
@@ -57,13 +67,24 @@ def test_property_score_cat_penalty_discounted_when_directional():
     assert severe[2] == "moderate"
 
 
-def test_property_score_cat_penalty_undocumented_missing_peril_info_discounted():
-    # a legacy/synthetic cat dict with no worst_peril/by_peril_detail (e.g. an
-    # off-platform snapshot) can't be verified as documented -> discounted too.
+def test_property_score_cat_penalty_full_weight_when_peril_info_missing():
+    # off-platform / legacy cat dicts with no worst_peril_documented signal at
+    # all (e.g. a broker-attested snapshot) trust the attested tier at full
+    # weight — the discount is for model-derived directional guesses, not for
+    # missing metadata.
     base = ri._property_score(_rollup(100, ratio=1.0))[0]
     severe = ri._property_score(_rollup(100, ratio=1.0), cat={"worst_tier": "severe"})
-    assert severe[0] == base - round(15 * 0.7)
-    assert severe[2] == "moderate"
+    assert severe[0] == base - 15
+    assert severe[2] == "high"
+
+
+def test_property_score_zero_penalty_cat_tier_does_not_drag_confidence():
+    # a "low" tier is truthy (`if worst:`) but contributes zero penalty — it
+    # must not be classified as directional/"moderate" just because it has no
+    # documented probability.
+    s, detail, conf = ri._property_score(_rollup(100, ratio=1.0), cat={"worst_tier": "low"})
+    assert conf == "high"
+    assert "directional" not in detail
 
 
 def test_property_score_applies_loss_development_penalty_full_weight_when_high_confidence():

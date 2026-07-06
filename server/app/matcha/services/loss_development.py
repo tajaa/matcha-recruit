@@ -76,7 +76,11 @@ def _factor_stats(rs: list[float]) -> dict:
     if n < 2:
         return {"mean": round(mean, 4), "n": n, "variance": None, "std_error": None}
     variance = sum((r - mean) ** 2 for r in rs) / (n - 1)
-    return {"mean": round(mean, 4), "n": n, "variance": round(variance, 6),
+    # variance stays UNROUNDED — it feeds _mack_reserve_variance arithmetic, and
+    # rounding tiny-but-real dispersion to 0.0 would fabricate a zero-width CI
+    # (the exact failure the n<2 → None guard exists to prevent). Round only at
+    # the reporting boundary (the factors[] output list).
+    return {"mean": round(mean, 4), "n": n, "variance": variance,
             "std_error": round(math.sqrt(variance / n), 6)}
 
 
@@ -174,6 +178,10 @@ def _build_line(line: str, rows: list[dict]) -> dict:
     conf_ranks: list[int] = []
     for p in periods:
         if not p["points"]:
+            # no scoreable points (unparseable period label / null valuation dates)
+            # — still counts toward the summary's worst-of, matching the "low"
+            # this row itself renders.
+            conf_ranks.append(_CONF_RANK["low"])
             p.update(latest_maturity=None, latest_incurred=0.0, cdf=1.0, ultimate=0.0, adverse_development=0.0,
                       reserve_std_error=None, ultimate_low=None, ultimate_high=None, reserve_confidence="low")
             continue
@@ -181,18 +189,30 @@ def _build_line(line: str, rows: list[dict]) -> dict:
         cdf = cdf_from(latest["maturity"])
         ult = round(latest["incurred"] * cdf, 2)
         remaining = sorted(m for m in atf if m >= latest["maturity"])
-        var = _mack_reserve_variance(latest["incurred"], latest["maturity"], atf, factor_stats) if remaining else 0.0
+        # a hole in the development chain (a factor bucket missing between the
+        # period's latest maturity and the last observed transition) means
+        # cdf_from silently treats that step as 1.0 — the projection is a floor
+        # and no CI over it is defensible.
+        chain_intact = (not remaining) or (
+            remaining[0] == latest["maturity"]
+            and all(b == a + 12 for a, b in zip(remaining, remaining[1:]))
+        )
+        if not remaining:
+            var = 0.0
+        elif not chain_intact:
+            var = None
+        else:
+            var = _mack_reserve_variance(latest["incurred"], latest["maturity"], atf, factor_stats)
         if var is not None:
             se = math.sqrt(var)
             ult_low, ult_high, se_out = round(max(0.0, ult - Z_75 * se), 2), round(ult + Z_75 * se, 2), round(se, 2)
         else:
             ult_low = ult_high = se_out = None
-        ns = [factor_stats[m]["n"] for m in remaining]
         if not remaining:
             conf = "high"
-        elif p["maturity_gap"] or var is None or min(ns) < 2:
+        elif p["maturity_gap"] or var is None:
             conf = "low"
-        elif min(ns) < 4:
+        elif min(factor_stats[m]["n"] for m in remaining) < 4:
             conf = "moderate"
         else:
             conf = "high"
@@ -222,7 +242,9 @@ def _build_line(line: str, rows: list[dict]) -> dict:
         "line": line, "label": LINE_LABELS.get(line, line.upper()),
         "periods": periods,
         "factors": [{"from_maturity": m, "to_maturity": m + 12, "factor": atf[m],
-                     "n": len(ratios[m]), "variance": factor_stats[m]["variance"]} for m in sorted(atf)],
+                     "n": len(ratios[m]),
+                     "variance": round(factor_stats[m]["variance"], 6)
+                     if factor_stats[m]["variance"] is not None else None} for m in sorted(atf)],
         "summary": {
             "total_latest_incurred": round(tot_latest, 2),
             "total_ultimate": round(tot_ult, 2),

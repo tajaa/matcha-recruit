@@ -46,11 +46,14 @@ def _worst_conf(confs: list) -> str:
 
 
 def _cat_is_documented(cat: dict) -> bool:
-    """True when the peril driving worst_tier has a hazard-agency-documented
-    annual probability (flood/quake), not a directional baseline (wildfire/wind)."""
-    peril = cat.get("worst_peril")
-    detail = (cat.get("by_peril_detail") or {}).get(peril) or {}
-    return detail.get("annual_probability") is not None
+    """False ONLY when property_cat explicitly marked the worst tier as coming
+    from a directional baseline (wildfire/wind, via ``worst_peril_documented``).
+    Hazard-agency perils (flood AND quake — quake's tier is a real USGS reading
+    even though it deliberately carries no annual probability) count at full
+    weight. So does an ABSENT signal (broker-attested off-platform snapshots,
+    legacy dicts): the discount is for model-derived guesses, not for missing
+    metadata."""
+    return cat.get("worst_peril_documented") is not False
 
 
 def _wc_score(severity_band, emr, ever_recordable, trir=None):
@@ -176,11 +179,11 @@ def _property_score(rollup: Optional[dict], cat: Optional[dict] = None,
     buildings to assess.
 
     ``confidence`` reflects how well-documented the cat/loss-dev signals are:
-    a flood/quake tier with a hazard-agency annual probability, or a loss-dev
-    reserve with a real Mack's-method CI, count at full penalty weight; a
-    directional wildfire/wind baseline or a thin loss-run history are
-    discounted (still penalized — the exposure is real — just less precisely
-    known) and drag the reported confidence down."""
+    a hazard-agency cat tier (flood/quake — see _cat_is_documented), or a
+    loss-dev reserve with a real Mack's-method CI, count at full penalty
+    weight; a directional wildfire/wind baseline or a thin loss-run history
+    are discounted (still penalized — the exposure is real — just less
+    precisely known) and drag the reported confidence down."""
     if not rollup or not rollup.get("building_count"):
         return None
     base = rollup.get("avg_cope_score")
@@ -200,11 +203,16 @@ def _property_score(rollup: Optional[dict], cat: Optional[dict] = None,
 
     worst = (cat or {}).get("worst_tier")
     if worst:
-        documented = _cat_is_documented(cat or {})
-        penalty = round(_CAT_PENALTY.get(worst, 0) * _CAT_PENALTY_WEIGHT[documented])
-        score -= penalty
-        bits.append(f"cat {worst}" + ("" if documented else " (directional)"))
-        confs.append("high" if documented else "moderate")
+        base_penalty = _CAT_PENALTY.get(worst, 0)
+        if base_penalty > 0:
+            documented = _cat_is_documented(cat or {})
+            score -= round(base_penalty * _CAT_PENALTY_WEIGHT[documented])
+            bits.append(f"cat {worst}" + ("" if documented else " (directional)"))
+            confs.append("high" if documented else "moderate")
+        else:
+            # low/moderate tiers contribute 0 points — they must not drag the
+            # component's confidence either.
+            bits.append(f"cat {worst}")
 
     if loss and loss.get("adverse_penalty"):
         loss_conf = loss.get("confidence", "low")
@@ -327,8 +335,8 @@ def weighted_book_risk(clients: list[dict], basis: str = "headcount") -> dict:
         "missing_basis_count": sum(1 for w in weights if w <= 0),
         "band_mix": band_mix,
         # share of weighted book resting on each confidence tier — clients missing
-        # a confidence signal (e.g. off-platform book entries) don't count toward
-        # any bucket, mirroring band_mix's own missing-band handling.
+        # a confidence signal don't count toward any bucket, mirroring band_mix's
+        # own missing-band handling.
         "confidence_mix": confidence_mix,
     }
 

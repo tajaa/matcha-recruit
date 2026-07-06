@@ -86,7 +86,14 @@ export function LossTriangleTab({ companyId }: { companyId: string }) {
                           {p.reserve_confidence === 'low' ? (
                             <div className="text-[9px] font-sans text-amber-500/70 normal-case">low confidence</div>
                           ) : p.ultimate_low !== null && p.ultimate_high !== null && p.ultimate_low !== p.ultimate_high ? (
-                            <div className="text-[9px] font-sans text-zinc-600 normal-case">±{fmtMoney((p.ultimate_high - p.ultimate_low) / 2)}</div>
+                            Math.abs((p.ultimate - p.ultimate_low) - (p.ultimate_high - p.ultimate)) < 1 ? (
+                              <div className="text-[9px] font-sans text-zinc-600 normal-case">±{fmtMoney((p.ultimate_high - p.ultimate_low) / 2)}</div>
+                            ) : (
+                              // low was clamped at 0 — the interval isn't symmetric around ultimate, so a
+                              // ± reading would misstate it. Show the actual range instead (matches the
+                              // summary line's own format above).
+                              <div className="text-[9px] font-sans text-zinc-600 normal-case">{fmtMoney(p.ultimate_low)}–{fmtMoney(p.ultimate_high)}</div>
+                            )
                           ) : null}
                         </td>
                         <td className={`px-2 text-right font-mono ${p.adverse_development > 0 ? 'text-red-400' : 'text-zinc-500'}`}>{p.adverse_development > 0 ? '+' : ''}{fmtMoney(p.adverse_development)}</td>

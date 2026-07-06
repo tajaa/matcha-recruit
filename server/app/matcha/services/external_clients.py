@@ -317,6 +317,7 @@ async def list_with_scores(conn, broker_id: UUID) -> list[dict]:
             "property_cat_tier": prop["worst_cat_tier"],
             "risk_index": ri["index"],
             "risk_band": ri["band"],
+            "risk_confidence": ri.get("index_confidence"),
             "intake_status": intake["status"],
             "intake_submitted_at": intake["submitted_at"],
         })

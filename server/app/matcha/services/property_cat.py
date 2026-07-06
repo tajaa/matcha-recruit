@@ -137,28 +137,16 @@ def _quake_probability(sds) -> float | None:
     return None
 
 
-def _peril_annual_probability(peril, zone, raw: dict | None) -> float | None:
+def _peril_annual_probability(peril, zone) -> float | None:
     """Dispatch to the documented-probability mapper for this peril, else
-    None. Derived at read time from data already stored in ``raw`` —
-    no schema change needed."""
+    None. Derived at read time from the stored zone — no schema change
+    needed. Quake stays wired through _quake_probability so its
+    deliberately-None judgment call remains live code, not lore."""
     if peril == "flood":
         return _flood_probability(zone)
     if peril == "quake":
-        return _quake_probability((raw or {}).get("sds"))
+        return _quake_probability(None)
     return None
-
-
-def _parse_raw(raw) -> dict:
-    """``raw`` arrives from asyncpg as a JSON string (no jsonb codec on the
-    pool) when read back from the DB, or already a dict in unit tests."""
-    if isinstance(raw, dict):
-        return raw
-    if isinstance(raw, str):
-        try:
-            return json.loads(raw)
-        except (TypeError, ValueError):
-            return {}
-    return {}
 
 
 def _wind_tier(state, county, ref_rows: list[dict]) -> tuple[str, int] | None:
@@ -395,15 +383,19 @@ async def enrich_building(conn, building_id: UUID) -> dict:
 
 
 def summarize(rows: list[dict]) -> dict:
-    """Roll up (building_id, peril, tier, score, lat[, zone, raw]) rows → company
-    cat exposure. Pure. ``zone``/``raw`` are optional — when absent (e.g. an older
-    caller), ``by_peril_detail`` entries just carry ``annual_probability: None``."""
+    """Roll up (building_id, peril, tier, score, lat[, zone]) rows → company
+    cat exposure. Pure. ``zone`` is optional — when absent (e.g. an older
+    caller), ``by_peril_detail`` entries just carry ``annual_probability: None``.
+
+    ``worst_peril`` is deterministic under rank ties: a hazard-agency-documented
+    peril (flood/quake) beats a directional baseline (wildfire/wind) at the same
+    tier, and peril name breaks any remaining tie — the SQL feeding this has no
+    ORDER BY, so first-row-wins would flap between requests."""
     buildings = {}
     by_peril: dict[str, str] = {}
     by_peril_detail: dict[str, dict] = {}
     present_ranks: list[int] = []
-    best_peril_rank = -1
-    worst_peril: str | None = None
+    worst_key: tuple | None = None  # (rank, documented, peril) — max wins
     for r in rows:
         bid = r["building_id"]
         buildings.setdefault(bid, {"geocoded": r.get("lat") is not None, "worst": 0})
@@ -413,12 +405,13 @@ def summarize(rows: list[dict]) -> dict:
             present_ranks.append(rank)
             buildings[bid]["worst"] = max(buildings[bid]["worst"], rank)
             peril = r.get("peril")
-            if rank > best_peril_rank:
-                best_peril_rank, worst_peril = rank, peril
+            key = (rank, peril in DOCUMENTED_PROBABILITY_PERILS, peril or "")
+            if worst_key is None or key > worst_key:
+                worst_key = key
             if peril and rank > TIER_RANK.get(by_peril.get(peril, "low"), 0):
                 by_peril[peril] = tier
-                ap = _peril_annual_probability(peril, r.get("zone"), _parse_raw(r.get("raw")))
-                by_peril_detail[peril] = {"tier": tier, "annual_probability": ap}
+                by_peril_detail[peril] = {"tier": tier,
+                                          "annual_probability": _peril_annual_probability(peril, r.get("zone"))}
     rank_to_tier = {v: k for k, v in TIER_RANK.items()}
     # worst_tier only from tiers actually fetched — un-geocoded buildings (no peril
     # rows) report None, not a misleading "low".
@@ -426,7 +419,8 @@ def summarize(rows: list[dict]) -> dict:
     severe_high = sum(1 for b in buildings.values() if b["worst"] >= TIER_RANK["high"])
     return {
         "worst_tier": rank_to_tier[worst_rank] if worst_rank is not None else None,
-        "worst_peril": worst_peril if worst_rank is not None else None,
+        "worst_peril": (worst_key[2] or None) if worst_key is not None else None,
+        "worst_peril_documented": worst_key[1] if worst_key is not None else None,
         "by_peril": by_peril,
         "by_peril_detail": by_peril_detail,
         "documented_probability_perils": list(DOCUMENTED_PROBABILITY_PERILS),
@@ -440,7 +434,7 @@ async def company_cat_exposure(conn, company_id: UUID) -> dict:
     """One-query catastrophe rollup for a company's whole SOV."""
     rows = await conn.fetch(
         """
-        SELECT b.id AS building_id, b.lat, p.peril, p.tier, p.score, p.zone, p.raw
+        SELECT b.id AS building_id, b.lat, p.peril, p.tier, p.score, p.zone
         FROM company_property_buildings b
         LEFT JOIN property_building_perils p
           ON p.building_id = b.id AND p.error IS NULL
@@ -459,7 +453,7 @@ async def book_cat_exposure(conn, company_ids: list) -> dict[str, dict]:
         return {}
     rows = await conn.fetch(
         """
-        SELECT b.company_id, b.id AS building_id, b.lat, p.peril, p.tier, p.score, p.zone, p.raw
+        SELECT b.company_id, b.id AS building_id, b.lat, p.peril, p.tier, p.score, p.zone
         FROM company_property_buildings b
         LEFT JOIN property_building_perils p
           ON p.building_id = b.id AND p.error IS NULL

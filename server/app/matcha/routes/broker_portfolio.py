@@ -568,6 +568,7 @@ async def get_book_risk_curve(current_user=Depends(require_broker)):
                     "id": c["id"], "source": "external",
                     "name": c["name"], "industry": c["industry"],
                     "index": c["risk_index"], "band": c["risk_band"],
+                    "confidence": c.get("risk_confidence"),
                     "headcount": c["headcount"],
                     "annual_premium": c.get("annual_premium"),
                 })

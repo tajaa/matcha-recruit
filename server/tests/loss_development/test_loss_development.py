@@ -2,6 +2,8 @@
 
 from datetime import date
 
+import pytest
+
 from app.matcha.services import loss_development as ld
 
 
@@ -215,7 +217,9 @@ def test_factor_stats_single_observation_has_no_variance():
 def test_factor_stats_multiple_observations():
     s = ld._factor_stats([1.3, 1.5])
     assert s["mean"] == 1.4 and s["n"] == 2
-    assert s["variance"] == round(((1.3 - 1.4) ** 2 + (1.5 - 1.4) ** 2) / 1, 6)
+    # variance is intentionally UNROUNDED here (it's the arithmetic input to
+    # _mack_reserve_variance) — only the reported factors[] copy is rounded.
+    assert s["variance"] == pytest.approx(((1.3 - 1.4) ** 2 + (1.5 - 1.4) ** 2) / 1)
 
 
 def test_mack_reserve_variance_none_when_any_step_underdetermined():
@@ -260,6 +264,46 @@ def test_build_triangle_period_confidence_fields():
     p2020 = _period(line, "2020")
     assert p2020["reserve_confidence"] == "high"
     assert p2020["ultimate_low"] == p2020["ultimate_high"] == p2020["ultimate"]
+
+
+def test_chain_hole_between_flanking_buckets_forces_low_confidence():
+    # A1/A2 observed 12mo->24mo (books a ratio keyed at maturity 12, n=2).
+    # B1/B2 observed 36mo->48mo (books a ratio keyed at maturity 36, n=2).
+    # No period is EVER observed across the 24->36 transition, so atf = {12, 36}
+    # with a hole at 24 — cdf_from silently treats that missing step as 1.0.
+    # The confidence ladder must catch this even though each flanking bucket
+    # individually has n=2 (which would otherwise read as "moderate").
+    snaps = [
+        _snap("A1", date(2019, 1, 1), 100_000, start=date(2018, 1, 1)),
+        _snap("A1", date(2020, 1, 1), 140_000, start=date(2018, 1, 1)),
+        _snap("A2", date(2019, 1, 1), 100_000, start=date(2018, 1, 1)),
+        _snap("A2", date(2020, 1, 1), 140_000, start=date(2018, 1, 1)),
+        _snap("B1", date(2023, 1, 1), 100_000, start=date(2020, 1, 1)),
+        _snap("B1", date(2024, 1, 1), 140_000, start=date(2020, 1, 1)),
+        _snap("B2", date(2023, 1, 1), 100_000, start=date(2020, 1, 1)),
+        _snap("B2", date(2024, 1, 1), 140_000, start=date(2020, 1, 1)),
+        _snap("SUBJ", date(2025, 1, 1), 300_000, start=date(2024, 1, 1)),
+    ]
+    line = _wc(ld.build_triangle(snaps))
+    fac = {f["from_maturity"]: f for f in line["factors"]}
+    assert set(fac) == {12, 36}  # confirms the hole at 24 exists in this fixture
+    subj = _period(line, "SUBJ")
+    assert subj["maturity_gap"] is False  # single point — no gap in ITS OWN valuations
+    assert subj["reserve_confidence"] == "low"
+    assert subj["reserve_std_error"] is None
+    assert subj["ultimate_low"] is None and subj["ultimate_high"] is None
+
+
+def test_empty_points_period_drags_summary_confidence_to_low():
+    # a period label with no parseable year and no explicit start -> every
+    # valuation fails to bucket into a maturity -> zero points. It must still
+    # count toward the summary's worst-of, matching what its own row shows.
+    snaps = list(TRIANGLE) + [_snap("Current Term", date(2024, 1, 1), 50_000)]
+    line = _wc(ld.build_triangle(snaps))
+    unparsed = _period(line, "Current Term")
+    assert unparsed["points"] == []
+    assert unparsed["reserve_confidence"] == "low"
+    assert line["summary"]["reserve_confidence"] == "low"
 
 
 def test_build_triangle_single_valuation_is_low_confidence():
