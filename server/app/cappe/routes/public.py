@@ -156,6 +156,28 @@ def _reject_reserved(email: str | None):
         )
 
 
+# Max serialized size of a public form submission's `data` blob. Public form
+# intake is unauthenticated and stored verbatim, so cap it to stop multi-MB
+# junk payloads from bloating cappe_form_submissions.
+_MAX_FORM_DATA_BYTES = 16 * 1024  # 16 KB
+
+
+async def _recipient_send_ok(email: str | None) -> bool:
+    """Per-recipient throttle for outbound transactional email on PUBLIC,
+    unauthenticated endpoints (order receipts, booking confirmations). Keyed on
+    the RECIPIENT (not the caller IP) so rotating source IPs can't flood one
+    victim's inbox from our sender. Never blocks the underlying action — the
+    order/booking is still created; only the email is skipped past the cap.
+    Returns True when it's OK to send."""
+    if not email:
+        return False
+    try:
+        await check_rate_limit(email.lower(), "cappe_recipient_email", 5, 3600)
+        return True
+    except HTTPException:
+        return False
+
+
 # --- Site render data -------------------------------------------------------
 
 async def _read_rate_limit(request: Request) -> None:
@@ -292,16 +314,30 @@ async def _resolve_booking_slot(
     if not window:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Time is outside availability")
 
-    # Overlap is scoped to this staff member AND location (both NULL-safe), so a
-    # booking at a DIFFERENT location never blocks this one (must agree with the
-    # double-book DB index). A buffer extends the window on both sides.
+    # Overlap is per shared RESOURCE, not per booking type. A staffed booking's
+    # resource is the STAFF MEMBER — a person can't be in two places at once, so
+    # they conflict with ANY overlapping booking of theirs regardless of service
+    # type (this is the bug being fixed: the old `booking_type_id = $2` narrowing
+    # let one staffer offering two types be double-booked for the same window
+    # under each type). An UNstaffed booking has no person to contend for, so it
+    # falls back to the (location, type) slot it occupies — that way two
+    # resource-less service types can still run in parallel, while a second
+    # booking of the SAME offering in the same slot is still blocked.
+    # NOTE: this app-level check is the primary guard; the DB unique index
+    # (site_id, booking_type_id, staff_id, location_id, starts_at) is only an
+    # exact-start backstop and does NOT enforce these cross-type semantics — a
+    # GiST range-exclusion constraint would be the belt-and-suspenders follow-up.
     buf_min = int(btype.get("buffer_minutes") or 0)
     overlap = await conn.fetchval(
         """SELECT 1 FROM cappe_bookings
-           WHERE site_id = $1 AND booking_type_id = $2 AND status IN ('pending', 'confirmed')
+           WHERE site_id = $1 AND status IN ('pending', 'confirmed')
              AND ($5::uuid IS NULL OR id <> $5)
-             AND (staff_id IS NOT DISTINCT FROM $6)
-             AND (location_id IS NOT DISTINCT FROM $8)
+             AND (
+                   ($6::uuid IS NOT NULL AND staff_id = $6)
+                OR ($6::uuid IS NULL AND staff_id IS NULL
+                    AND location_id IS NOT DISTINCT FROM $8
+                    AND booking_type_id = $2)
+             )
              AND tstzrange(starts_at, ends_at)
                  && tstzrange($3 - ($7 * interval '1 minute'), $4 + ($7 * interval '1 minute'))
            LIMIT 1""",
@@ -384,6 +420,11 @@ async def public_create_order(slug: str, body: CappeCheckoutRequest, request: Re
             low_stock_hits: list[tuple[str, int]] = []  # (product name, balance) for the owner alert
             # (product_id, title, unit_price, qty, fulfillment, intake_answers, booking_id)
             line_rows = []
+            # Batch-load option groups for every product in the cart once, instead
+            # of one query per line item inside the loop below (N+1).
+            opt_groups_by_product = await fetch_option_groups(
+                conn, [it.product_id for it in body.items]
+            )
             for item in body.items:
                 product = await conn.fetchrow(
                     "SELECT id, name, price_cents, currency, inventory, low_stock_threshold, "
@@ -473,10 +514,9 @@ async def public_create_order(slug: str, body: CappeCheckoutRequest, request: Re
                 # option ids against this product's live groups, fold the signed
                 # deltas into the unit price BEFORE the discount, snapshot the
                 # choice for the order line.
-                pgroups = await fetch_option_groups(conn, [item.product_id])
                 try:
                     opt_delta, opt_snapshot = validate_and_price_options(
-                        pgroups.get(item.product_id, []), item.selected_option_ids,
+                        opt_groups_by_product.get(item.product_id, []), item.selected_option_ids,
                     )
                 except ValueError as exc:
                     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
@@ -590,7 +630,10 @@ async def public_create_order(slug: str, body: CappeCheckoutRequest, request: Re
         items_summary = build_order_items_summary(
             [{"title": t, "quantity": q} for (_pid, t, _u, q, *_r) in line_rows]
         )
-        if email:
+        # Per-recipient throttle: this receipt goes to a caller-supplied address on
+        # an unauthenticated endpoint, so cap sends per recipient to stop IP-rotating
+        # email-bomb abuse. The order is created regardless; only the email is gated.
+        if email and await _recipient_send_ok(email):
             background.add_task(
                 send_cappe_order_receipt_email, email, body.customer_name, site["name"],
                 items_summary, order["subtotal_cents"], order["currency"], order["requires_approval"],
@@ -724,13 +767,15 @@ async def public_unsubscribe(slug: str, token: str, request: Request):
     await _read_rate_limit(request)
     async with get_connection() as conn:
         site = await _published_site(conn, slug)
-        res = await conn.execute(
+        await conn.execute(
             "UPDATE cappe_subscribers SET status = 'unsubscribed', unsubscribed_at = NOW(), updated_at = NOW() "
             "WHERE site_id = $1 AND unsubscribe_token = $2 AND status != 'unsubscribed'",
             site["id"], token,
         )
-    # Idempotent: a bad/used token still returns ok (don't leak token validity).
-    return {"ok": True, "updated": not res.endswith(" 0")}
+    # Idempotent: a bad/used token still returns ok. Return a constant shape so
+    # the response can't be used to distinguish a valid unsubscribe token from an
+    # invalid one (the old `updated` flag leaked exactly that).
+    return {"ok": True}
 
 
 # --- Forms ------------------------------------------------------------------
@@ -751,6 +796,16 @@ async def public_submit_form(slug: str, form_slug: str, body: dict, request: Req
         submitter_email = str(submitter_email).strip().lower()
         _reject_reserved(submitter_email)
 
+    # Cap the stored payload: this endpoint is public + unauthenticated and the
+    # blob is persisted verbatim, so reject oversized submissions rather than let
+    # them bloat the table.
+    serialized_data = json.dumps(data)
+    if len(serialized_data.encode("utf-8")) > _MAX_FORM_DATA_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="Submission is too large",
+        )
+
     async with get_connection() as conn:
         site = await _published_site(conn, slug)
         form = await conn.fetchrow(
@@ -761,7 +816,7 @@ async def public_submit_form(slug: str, form_slug: str, body: dict, request: Req
         await conn.execute(
             "INSERT INTO cappe_form_submissions (form_id, site_id, data, submitter_email) "
             "VALUES ($1, $2, $3, $4)",
-            form["id"], site["id"], json.dumps(data), submitter_email,
+            form["id"], site["id"], serialized_data, submitter_email,
         )
         owner = await _site_owner(conn, site["id"])
 

@@ -32,22 +32,31 @@ def _fmt(cents: int, currency: str) -> str:
 
 async def assign_receipt_number(conn, order_id: UUID, site_id: UUID) -> str:
     """Atomically allocate the next per-site receipt number and stamp it on the
-    order. Idempotent — returns the existing number if already assigned."""
-    existing = await conn.fetchval("SELECT receipt_number FROM cappe_orders WHERE id = $1", order_id)
-    if existing:
-        return existing
-    row = await conn.fetchrow(
-        "UPDATE cappe_sites SET receipt_seq = receipt_seq + 1 "
-        "WHERE id = $1 RETURNING receipt_seq, receipt_prefix",
-        site_id,
-    )
-    prefix = (row["receipt_prefix"] or "INV").strip() if row else "INV"
-    number = f"{prefix}-{int(row['receipt_seq']):05d}"
-    await conn.execute(
-        "UPDATE cappe_orders SET receipt_number = $1, updated_at = NOW() WHERE id = $2",
-        number, order_id,
-    )
-    return number
+    order. Idempotent — returns the existing number if already assigned.
+
+    Runs in its own transaction and takes a row lock on the order so two
+    concurrent callers (e.g. a retried/duplicate Stripe webhook) can't both read
+    receipt_number=NULL, both bump the site sequence, and burn two numbers: the
+    second caller blocks on the lock, then sees the number the first assigned.
+    """
+    async with conn.transaction():
+        existing = await conn.fetchval(
+            "SELECT receipt_number FROM cappe_orders WHERE id = $1 FOR UPDATE", order_id
+        )
+        if existing:
+            return existing
+        row = await conn.fetchrow(
+            "UPDATE cappe_sites SET receipt_seq = receipt_seq + 1 "
+            "WHERE id = $1 RETURNING receipt_seq, receipt_prefix",
+            site_id,
+        )
+        prefix = (row["receipt_prefix"] or "INV").strip() if row else "INV"
+        number = f"{prefix}-{int(row['receipt_seq']):05d}"
+        await conn.execute(
+            "UPDATE cappe_orders SET receipt_number = $1, updated_at = NOW() WHERE id = $2",
+            number, order_id,
+        )
+        return number
 
 
 def _items_rows_html(items: list[dict], currency: str) -> str:

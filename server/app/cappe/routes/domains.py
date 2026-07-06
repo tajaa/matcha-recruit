@@ -15,6 +15,7 @@ live domain is issued on-demand by Caddy, gated by GET /tls/authorize.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import secrets
 from typing import Optional
@@ -88,16 +89,24 @@ async def search_domains(
         candidates = [f"{base}.{tld}" for tld in _SEARCH_TLDS]
 
     pb = get_porkbun()
+    # Check the candidate TLDs concurrently: a bare-name search fans out to ~6
+    # TLDs, each a Porkbun round-trip with a 30s timeout, so doing them serially
+    # made a single autocomplete wait on the sum (worst case ~180s) instead of the
+    # slowest one.
+    checked = await asyncio.gather(
+        *(pb.check_domain(domain) for domain in candidates), return_exceptions=True
+    )
     results: list[dict] = []
-    for domain in candidates:
-        try:
-            r = await pb.check_domain(domain)
-            results.append(
-                {"domain": r["domain"], "available": r["available"], "price_cents": r["retail_cents"]}
-            )
-        except PorkbunError as exc:
+    for domain, r in zip(candidates, checked):
+        if isinstance(r, PorkbunError):
             # One TLD failing (rate limit / unsupported) shouldn't sink the search.
-            logger.warning("cappe domain check failed for %s: %s", domain, exc)
+            logger.warning("cappe domain check failed for %s: %s", domain, r)
+            continue
+        if isinstance(r, BaseException):
+            raise r
+        results.append(
+            {"domain": r["domain"], "available": r["available"], "price_cents": r["retail_cents"]}
+        )
     if not results and len(candidates) == 1:
         # Single exact check failed outright — surface configuration/availability errors.
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Domain lookup failed")
@@ -189,21 +198,46 @@ async def connect_domain(
     token = secrets.token_urlsafe(24)
     async with get_connection() as conn:
         await _require_owned_site(conn, account.id, body.site_id)
-        if await conn.fetchval(
-            "SELECT 1 FROM cappe_domains WHERE domain = $1 AND status = 'active'", body.domain
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT, detail="That domain is already connected"
-            )
-        # Reuse an existing pending claim for the same (account, site, domain) so
-        # repeated clicks don't pile up rows; otherwise insert a fresh pending one.
-        row = await conn.fetchrow(
-            f"""INSERT INTO cappe_domains
-                    (account_id, site_id, domain, kind, status, verification_token)
-                VALUES ($1, $2, $3, 'connect', 'pending', $4)
-                RETURNING {_DOMAIN_COLS}""",
-            account.id, body.site_id, body.domain, token,
+        # `domain` is globally unique across cappe_domains, so a plain INSERT
+        # blows up with an unhandled unique-constraint 500 whenever any row for
+        # this domain already exists (a prior connect click, a pending purchase,
+        # or another account's claim). Resolve it explicitly: reuse THIS account's
+        # own still-pending connect claim (repeat clicks become a no-op), else 409.
+        existing = await conn.fetchrow(
+            "SELECT account_id, site_id, kind, status FROM cappe_domains WHERE domain = $1",
+            body.domain,
         )
+        if existing is not None:
+            reusable = (
+                existing["account_id"] == account.id
+                and existing["site_id"] == body.site_id
+                and existing["kind"] == "connect"
+                and existing["status"] == "pending"
+            )
+            if reusable:
+                row = await conn.fetchrow(
+                    f"SELECT {_DOMAIN_COLS} FROM cappe_domains WHERE domain = $1", body.domain
+                )
+                return dict(row)
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="That domain is already connected or being set up",
+            )
+        try:
+            row = await conn.fetchrow(
+                f"""INSERT INTO cappe_domains
+                        (account_id, site_id, domain, kind, status, verification_token)
+                    VALUES ($1, $2, $3, 'connect', 'pending', $4)
+                    RETURNING {_DOMAIN_COLS}""",
+                account.id, body.site_id, body.domain, token,
+            )
+        except Exception as exc:  # lost a race to a concurrent claim on the same domain
+            if "cappe_domains_domain_key" in str(exc):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="That domain is already connected or being set up",
+                )
+            raise
     return dict(row)
 
 

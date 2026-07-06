@@ -283,7 +283,14 @@ def _design_gradient(g: Any) -> str:
 def _font_stack(name: str) -> str:
     generic = "serif" if (name or "").strip().lower() in _SERIF else "sans-serif"
     fallback = "ui-serif, Georgia," if generic == "serif" else "ui-sans-serif, system-ui, -apple-system,"
-    return f"'{_clean_css(name)}', {fallback} {generic}"
+    # Strip quotes from the font name: it is wrapped in single quotes below and
+    # then inlined into a double-quoted style="..." attribute (canvas elements) or
+    # a single-quoted CSS string (<style> theme vars). A raw " or ' in the name
+    # would break out of the attribute/string and inject markup — this is the one
+    # unvalidated free-text field that reaches a style sink. <, >, } are already
+    # dropped by _clean_css; also drop both quote styles here.
+    safe = _clean_css(name).replace('"', "").replace("'", "")
+    return f"'{safe}', {fallback} {generic}"
 
 
 def _tokens(theme: dict | None) -> dict:

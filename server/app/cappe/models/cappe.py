@@ -459,7 +459,7 @@ class CappeCartItem(BaseModel):
 class CappeCheckoutRequest(BaseModel):
     customer_email: EmailStr
     customer_name: Optional[str] = Field(default=None, max_length=255)
-    items: list[CappeCartItem] = Field(min_length=1)
+    items: list[CappeCartItem] = Field(min_length=1, max_length=100)
     note: Optional[str] = None
     # Where Stripe Checkout returns the buyer (passed by the storefront widget,
     # which knows its own published URL). Optional — absent → no card payment,

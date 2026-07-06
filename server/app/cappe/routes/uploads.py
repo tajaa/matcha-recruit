@@ -16,7 +16,10 @@ from ._shared import get_owned_site
 router = APIRouter()
 
 _MAX_BYTES = 5 * 1024 * 1024  # 5 MB
-_ALLOWED = {"image/jpeg", "image/png", "image/gif", "image/webp", "image/svg+xml"}
+# NB: no image/svg+xml — SVGs can carry <script>/onload and are served from the
+# tenant origin (*.gummfit.com / <sub>.hey-matcha.com) as product/cover images,
+# so an uploaded SVG is a stored-XSS vector. Raster formats only.
+_ALLOWED = {"image/jpeg", "image/png", "image/gif", "image/webp"}
 
 # Deliverables (digital products / service results) — larger, more types.
 _MAX_DELIVERABLE_BYTES = 25 * 1024 * 1024  # 25 MB

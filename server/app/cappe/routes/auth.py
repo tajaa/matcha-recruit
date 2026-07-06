@@ -3,6 +3,8 @@
 Fully separate from matcha's /auth/* (which is hardwired to users+clients).
 Backed by `cappe_accounts`; issues Cappe-scoped tokens.
 """
+import asyncio
+from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 import asyncpg
@@ -38,6 +40,12 @@ router = APIRouter()
 # Verification links are single-use and time-boxed.
 _VERIFY_TTL_HOURS = 24
 
+# Precomputed once at import: a throwaway hash to verify against when the login
+# email is unknown, so an unknown-email 401 costs the same bcrypt time as a
+# wrong-password 401 (closes the timing side-channel that reveals which emails
+# have accounts).
+_DUMMY_PASSWORD_HASH = hash_password("cappe-login-timing-equalizer")
+
 
 def _token_response(account: CappeAccount) -> CappeTokenResponse:
     settings = get_settings()
@@ -59,7 +67,9 @@ async def signup(body: CappeSignup, request: Request, background: BackgroundTask
     auto-verify so dev/seed flows aren't stranded."""
     await check_rate_limit(client_ip(request), "cappe_signup", 5, 3600)
     email = body.email.strip().lower()
-    password_hash = hash_password(body.password)
+    # bcrypt is CPU-blocking (~100ms); run it off the event loop so a burst of
+    # signups can't stall every other request on this worker.
+    password_hash = await asyncio.to_thread(hash_password, body.password)
 
     # No deliverable email → no link → would be unverifiable forever. Auto-verify
     # those (dev/seed only; real users are on deliverable domains).
@@ -129,8 +139,10 @@ async def verify_email(body: CappeVerifyRequest, request: Request):
             )
         sent_at = row["verification_sent_at"]
         if sent_at is not None:
-            age_hours = (await conn.fetchval("SELECT EXTRACT(EPOCH FROM (NOW() - $1))/3600", sent_at))
-            if age_hours is not None and age_hours > _VERIFY_TTL_HOURS:
+            # sent_at is TIMESTAMPTZ → tz-aware; compute the age in-process rather
+            # than paying a second round-trip just to subtract two timestamps.
+            age_hours = (datetime.now(timezone.utc) - sent_at).total_seconds() / 3600
+            if age_hours > _VERIFY_TTL_HOURS:
                 raise HTTPException(
                     status_code=status.HTTP_410_GONE,
                     detail="This confirmation link has expired. Request a new one.",
@@ -191,9 +203,17 @@ async def login(body: CappeLogin, request: Request):
             email,
         )
 
-    # Constant-ish failure: same 401 whether the email is unknown or the
-    # password is wrong.
-    if row is None or not await verify_password_async(body.password, row["password_hash"]):
+    # Constant-ish failure: same 401 AND same bcrypt cost whether the email is
+    # unknown or the password is wrong. When the account doesn't exist we still
+    # run a verify against a throwaway hash so response timing can't be used to
+    # enumerate which emails have accounts.
+    if row is None:
+        await verify_password_async(body.password, _DUMMY_PASSWORD_HASH)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password",
+        )
+    if not await verify_password_async(body.password, row["password_hash"]):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
