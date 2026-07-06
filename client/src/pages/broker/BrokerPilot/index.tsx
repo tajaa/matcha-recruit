@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Loader2, Plus, Sparkles } from 'lucide-react'
+import { HelpCircle, Loader2, Plus, Sparkles } from 'lucide-react'
 import {
   listPilotSessions, getPilotSession, getPilotContext,
   type PilotSession, type ContextPreview, type SubjectKind,
@@ -13,6 +13,7 @@ import { DocsPanel } from './DocsPanel'
 import { EvidencePanel } from './EvidencePanel'
 import { PacketsPanel } from './PacketsPanel'
 import { NewSessionModal } from './NewSessionModal'
+import { HowItWorksModal } from './HowItWorksModal'
 
 export default function BrokerPilot() {
   const [searchParams, setSearchParams] = useSearchParams()
@@ -22,6 +23,7 @@ export default function BrokerPilot() {
   const [loading, setLoading] = useState(true)
   const [notPro, setNotPro] = useState(false)
   const [showNew, setShowNew] = useState(false)
+  const [showHelp, setShowHelp] = useState(false)
   const [prefill, setPrefill] = useState<{ kind: SubjectKind; id: string } | null>(null)
   // Guards a slow getPilotSession response from clobbering a switched session.
   const activeIdRef = useRef<string | null>(null)
@@ -142,13 +144,23 @@ export default function BrokerPilot() {
           <h1 className="flex items-center gap-2 text-sm font-semibold text-zinc-100">
             <Sparkles className="h-4 w-4 text-emerald-400" /> Broker Pilot
           </h1>
-          <button
-            onClick={() => { setPrefill(null); setShowNew(true) }}
-            aria-label="New session"
-            className="rounded p-1 text-zinc-400 transition-colors hover:bg-white/[0.04] hover:text-zinc-100"
-          >
-            <Plus className="h-4 w-4" />
-          </button>
+          <div className="flex items-center gap-0.5">
+            <button
+              onClick={() => setShowHelp(true)}
+              aria-label="How Broker Pilot works"
+              title="How Broker Pilot works"
+              className="rounded p-1 text-zinc-500 transition-colors hover:bg-white/[0.04] hover:text-zinc-100"
+            >
+              <HelpCircle className="h-4 w-4" />
+            </button>
+            <button
+              onClick={() => { setPrefill(null); setShowNew(true) }}
+              aria-label="New session"
+              className="rounded p-1 text-zinc-400 transition-colors hover:bg-white/[0.04] hover:text-zinc-100"
+            >
+              <Plus className="h-4 w-4" />
+            </button>
+          </div>
         </div>
         <div className={`border-b border-white/[0.06] px-4 py-2 ${LABEL}`}>Sessions</div>
         <div className="flex-1 overflow-y-auto">
@@ -196,6 +208,12 @@ export default function BrokerPilot() {
               Select or start a session. Upload a client's carrier documents — loss runs, dec
               pages, quotes — and the analyst maps them to the platform data on file, citing every record.
             </p>
+            <button
+              onClick={() => setShowHelp(true)}
+              className="inline-flex items-center gap-1.5 text-xs text-emerald-400/90 transition-colors hover:text-emerald-300"
+            >
+              <HelpCircle className="h-3.5 w-3.5" /> How Broker Pilot works
+            </button>
           </div>
         ) : (
           <div className="flex h-full min-h-0 flex-col">
@@ -221,6 +239,7 @@ export default function BrokerPilot() {
           onCreated={onCreated}
         />
       )}
+      {showHelp && <HowItWorksModal onClose={() => setShowHelp(false)} />}
     </div>
   )
 }

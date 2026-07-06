@@ -258,7 +258,7 @@ def test_memo_html_renders_without_error():
     session = {"title": "Renewal review — 2026", "subject_kind": "company"}
     html = bp._memo_html(session, "Hillcrest Senior Living", corpus, memo, _docs(),
                          broker_name="Acme Insurance Partners")
-    assert "Broker Pilot — Client Risk Analysis" in html
+    assert "Client Risk Analysis Memo" in html
     assert "Hillcrest Senior Living" in html
     assert bp._GONE in html                       # stale cid rendered explicitly
     assert "Travelers WC loss run" in html        # doc appendix from stored extraction

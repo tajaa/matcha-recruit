@@ -4,6 +4,7 @@ import {
   uploadPilotDocument, deletePilotDocument, getPilotDocumentUrl,
   type PilotSession,
 } from '../../../api/brokerPilot'
+import { HelpHint } from '../../../components/broker/HelpHint'
 import { DOC_STATUS_CLASS, DOC_STATUS_LABEL, DOC_TYPE_LABEL, LABEL, fmtSize } from './shared'
 
 const ACCEPT = '.pdf,.docx,.txt,.csv'
@@ -47,7 +48,10 @@ export function DocsPanel({ session, onChanged }: DocsPanelProps) {
   return (
     <div className="flex flex-col border-b border-white/[0.06]">
       <div className="flex items-center justify-between px-4 pb-2 pt-4">
-        <span className={LABEL}>Documents</span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className={LABEL}>Documents</span>
+          <HelpHint text="Carrier material you upload — loss runs, dec pages, quotes, carrier letters. Each is analyzed once (key figures extracted) and grounds every answer from then on. When a document disagrees with the platform data, the analyst says so and cites both sides." />
+        </span>
         <button
           onClick={() => inputRef.current?.click()}
           disabled={uploading}

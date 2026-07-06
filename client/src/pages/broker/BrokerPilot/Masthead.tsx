@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Building2, Check, Download, FileText, Globe, Loader2, Pencil, X } from 'lucide-react'
 import { Button } from '../../../components/ui'
+import { HelpHint } from '../../../components/broker/HelpHint'
 import {
   updatePilotSession, generatePilotMemo, downloadPilotPacket,
   type ContextPreview, type PilotSession,
@@ -50,7 +51,10 @@ export function Masthead({ session, context, onChanged }: MastheadProps) {
     <div className="shrink-0 border-b border-white/[0.06]">
       <div className="flex items-start justify-between gap-4 px-5 pt-4">
         <div className="min-w-0">
-          <div className={LABEL}>Session</div>
+          <div className="inline-flex items-center gap-1.5">
+            <span className={LABEL}>Session</span>
+            <HelpHint text="Everything grounding this session shows in the strip below: the data you've entered for this client (loss runs, WC, EPL, property) plus — for on-platform clients — the operational records Matcha generates natively (incidents, ER cases, compliance, discipline, training). Dark systems have no data yet; for external clients they light up once the client operates on Matcha." />
+          </div>
           {editing ? (
             <div className="mt-0.5 flex items-center gap-2">
               <input

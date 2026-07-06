@@ -626,13 +626,31 @@ def _cited_ids(memo: dict) -> list[str]:
 
 
 _MEMO_CSS_EXTRA = """
+  @page {
+    size: Letter; margin: 20mm 16mm 18mm 16mm;
+    @bottom-left { content: "Broker Pilot analysis memo — confidential; prepared for broker use";
+      font-size: 7px; color: #9ca3af; }
+    @bottom-right { content: "Page " counter(page) " of " counter(pages);
+      font-size: 7px; color: #9ca3af; }
+  }
+  body { padding: 0; }
   .letterhead { display:flex; justify-content:space-between; align-items:flex-end;
-    border-bottom:2px solid #166534; padding-bottom:8px; margin-bottom:12px; }
+    border-bottom:2px solid #166534; padding-bottom:10px; margin-bottom:0; }
   .letterhead .company { font-size:13px; font-weight:600; color:#1a1a2e; }
   .letterhead .meta { font-size:9px; color:#888; text-align:right; line-height:1.5; }
-  h1 { border:none; }
-  tr, .cell, .narr, .obs { page-break-inside: avoid; }
-  h2 { page-break-after: avoid; }
+  .brand { font-size:8px; letter-spacing:2px; text-transform:uppercase; color:#166534;
+    font-weight:700; margin-bottom:2px; }
+  h1 { border:none; color:#14532d; font-size:19px; }
+  h2 { border-bottom:2px solid #166534; color:#14532d; page-break-after: avoid; }
+  .prep { display:flex; gap:0; border:1px solid #e5e7eb; border-radius:8px;
+    margin:12px 0 4px; overflow:hidden; }
+  .prep > div { flex:1; padding:7px 12px; border-left:1px solid #e5e7eb; }
+  .prep > div:first-child { border-left:none; }
+  .prep .l { font-size:7.5px; text-transform:uppercase; letter-spacing:.8px; color:#888; }
+  .prep .v { font-size:10.5px; font-weight:600; margin-top:2px; color:#1a1a2e; }
+  .narr { background:#f4faf6; border-left:3px solid #166534; white-space:normal; }
+  .narr p { margin:0 0 7px; } .narr p:last-child { margin-bottom:0; }
+  tr, .cell, .obs { page-break-inside: avoid; }
   .appendix-section { page-break-before: always; }
   sup.cite { color:#166534; font-weight:700; }
   .obs { display:flex; gap:10px; margin:8px 0; padding:8px 10px;
@@ -700,13 +718,40 @@ def _platform_appendix_html(section: str, corpus: dict) -> str:
     """
 
 
+def _native_appendix_html(source_key: str, cited: list[str], corpus: dict) -> str:
+    """Deterministic appendix for a cited native operational source (incidents,
+    ER cases, discipline, …): re-renders that source's CITED records as a table."""
+    src = corpus.get("sources", {}).get(source_key, {})
+    cited_set = set(cited)
+    recs = [r for r in (src.get("records") or []) if r["cid"] in cited_set]
+    rows = "".join(
+        f"<tr><td>{_esc(r.get('ref'))}</td><td>{_esc(r.get('summary'))}</td>"
+        f"<td>{_esc(r.get('when'))}</td></tr>"
+        for r in recs
+    ) or f"<tr><td colspan='3'>{_GONE}</td></tr>"
+    return f"""
+      <h2>Appendix — Platform records: {_esc(src.get('label') or _hum(source_key))}</h2>
+      <table><thead><tr><th>Ref</th><th>What the platform recorded</th><th>When</th></tr></thead>
+      <tbody>{rows}</tbody></table>
+    """
+
+
+def _narrative_html(text: str) -> str:
+    """Model narrative → escaped paragraphs (blank-line separated). Keeps the
+    memo typographically clean without trusting model markup."""
+    paras = [p.strip() for p in (text or "").split("\n\n") if p.strip()]
+    if not paras:
+        return "<p>—</p>"
+    return "".join(f"<p>{_esc(p)}</p>" for p in paras)
+
+
 def _memo_html(session: dict, subject_name: str, corpus: dict, memo: dict,
                docs: list[dict], broker_name: str | None = None) -> str:
     index = corpus.get("index", {})
     cited = _cited_ids(memo)
     fn = {c: i + 1 for i, c in enumerate(cited)}
 
-    narrative = _esc(memo.get("assistant_text") or "") or "—"
+    narrative = _narrative_html(memo.get("assistant_text") or "")
 
     points = ""
     for n, item in enumerate(memo.get("evidence_map") or [], start=1):
@@ -727,11 +772,12 @@ def _memo_html(session: dict, subject_name: str, corpus: dict, memo: dict,
     idx_rows = "".join(
         f"<tr><td>[{fn[c]}]</td><td>{_esc(index[c].get('source_label', ''))}</td>"
         f"<td>{_esc(index[c].get('ref', ''))}</td>"
+        f"<td>{_esc(index[c].get('summary', ''))}</td>"
         f"<td>{_esc(index[c].get('when', ''))}</td></tr>"
         if c in index else
-        f"<tr><td>[{fn[c]}]</td><td colspan='3'>{_GONE}</td></tr>"
+        f"<tr><td>[{fn[c]}]</td><td colspan='4'>{_GONE}</td></tr>"
         for c in cited
-    ) or "<tr><td colspan='4'>No records cited.</td></tr>"
+    ) or "<tr><td colspan='5'>No records cited.</td></tr>"
 
     # Appendix: every cited document (full extraction table) + every cited
     # platform section, each deterministic. docfig cites collapse into their
@@ -740,6 +786,7 @@ def _memo_html(session: dict, subject_name: str, corpus: dict, memo: dict,
     appendix = ""
     seen_docs: set = set()
     seen_sections: set = set()
+    seen_native: set = set()
     for c in cited:
         if c.startswith("doc:") or c.startswith("docfig:"):
             did = c.split(":", 1)[1].split(".", 1)[0]
@@ -755,6 +802,14 @@ def _memo_html(session: dict, subject_name: str, corpus: dict, memo: dict,
                 continue
             seen_sections.add(section)
             appendix += f"<div class='appendix-section'>{_platform_appendix_html(section, corpus)}</div>"
+        else:
+            # native operational record (incident:, er_case:, discipline:, …) —
+            # one appendix table per source, listing the cited records.
+            source_key = index.get(c, {}).get("source")
+            if not source_key or source_key in seen_native:
+                continue
+            seen_native.add(source_key)
+            appendix += f"<div class='appendix-section'>{_native_appendix_html(source_key, cited, corpus)}</div>"
 
     notes = "".join(f"<li>{_esc(n)}</li>" for n in corpus.get("notes") or [])
     notes_block = f"<h2>Scope notes</h2><ul>{notes}</ul>" if notes else ""
@@ -767,27 +822,32 @@ def _memo_html(session: dict, subject_name: str, corpus: dict, memo: dict,
 
     kind_label = "On-platform Matcha client" if session.get("subject_kind") == "company" \
         else "Off-platform client (broker-recorded data)"
-    generated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    generated = datetime.now(timezone.utc).strftime("%B %d, %Y · %H:%M UTC")
+    record_total = sum(len(s.get("records") or []) for s in corpus.get("sources", {}).values())
 
     return f"""<!DOCTYPE html><html><head><meta charset="utf-8">
       <style>{_PDF_CSS}{_MEMO_CSS_EXTRA}</style></head><body>
       <div class="letterhead">
         <div>
-          <h1>Broker Pilot — Client Risk Analysis</h1>
-          <p class="sub">{_esc(session.get('title'))} · {_esc(subject_name)}</p>
+          <div class="brand">Matcha · Broker Pilot</div>
+          <h1>Client Risk Analysis Memo</h1>
+          <p class="sub">{_esc(session.get('title'))}</p>
         </div>
         <div class="meta">
           {f"<div class='company'>{_esc(broker_name)}</div>" if broker_name else ""}
           <div>Generated {generated}</div>
         </div>
       </div>
-      <div class="narr"><b>What this is.</b> A sourced analysis of this client's risk material — the broker's uploaded carrier documents combined with the platform data on file. Every observation cites its underlying record. {_esc(DISCLAIMER)}</div>
 
-      <h2>Session</h2>
-      <table>
-        <tr><th>Client</th><td>{_esc(subject_name)} ({kind_label})</td></tr>
-        <tr><th>Documents on file</th><td>{len(docs or [])}</td></tr>
-      </table>
+      <div class="prep">
+        <div><div class="l">Client</div><div class="v">{_esc(subject_name)}</div></div>
+        <div><div class="l">Data basis</div><div class="v">{kind_label}</div></div>
+        <div><div class="l">Records in scope</div><div class="v">{record_total}</div></div>
+        <div><div class="l">Documents</div><div class="v">{len(docs or [])}</div></div>
+        {f"<div><div class='l'>Prepared by</div><div class='v'>{_esc(broker_name)}</div></div>" if broker_name else ""}
+      </div>
+
+      <div class="narr"><b>About this memo.</b> A sourced analysis of this client's risk material — the broker's uploaded carrier documents combined with the client's platform records{", including the operational history generated on Matcha (incidents, ER cases, compliance, discipline, training)" if session.get('subject_kind') == 'company' else ""}. Every observation cites its underlying record; the evidence index and appendices reproduce the cited records verbatim. {_esc(DISCLAIMER)}</div>
 
       <h2>Analysis narrative</h2>
       <div class="narr">{narrative}</div>
@@ -799,7 +859,7 @@ def _memo_html(session: dict, subject_name: str, corpus: dict, memo: dict,
       {oq_block}
 
       <h2>Evidence index (cited records)</h2>
-      <table><thead><tr><th>#</th><th>Source</th><th>Ref</th><th>When</th></tr></thead>
+      <table><thead><tr><th>#</th><th>Source</th><th>Ref</th><th>Record</th><th>When</th></tr></thead>
       <tbody>{idx_rows}</tbody></table>
 
       <h2>Documents in this session</h2>

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Download, FileText, Loader2 } from 'lucide-react'
 import { downloadPilotPacket, type PilotPacket, type PilotSession } from '../../../api/brokerPilot'
+import { HelpHint } from '../../../components/broker/HelpHint'
 import { LABEL, fmtSize, fmtWhen } from './shared'
 
 /** Work product: the memo PDFs generated for this session, newest first. */
@@ -17,7 +18,10 @@ export function PacketsPanel({ session }: { session: PilotSession }) {
   return (
     <div className="flex flex-col border-b border-white/[0.06]">
       <div className="flex items-baseline justify-between px-4 pb-2 pt-4">
-        <span className={LABEL}>Work product</span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className={LABEL}>Work product</span>
+          <HelpHint text="Analysis memos exported from this session — client-ready PDFs with the narrative, numbered grounded observations, an evidence index, and appendices reproducing every cited record. Click to re-download." />
+        </span>
         <span className="font-mono text-[11px] tabular-nums text-zinc-500">{packets.length}</span>
       </div>
       <div className="pb-1">

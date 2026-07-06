@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { ChevronRight } from 'lucide-react'
 import type { ContextPreview } from '../../../api/brokerPilot'
+import { HelpHint } from '../../../components/broker/HelpHint'
 import { LABEL, SOURCE_META, SYSTEM_LABEL, deriveSystems } from './shared'
 
 /** Evidence browser: every grounding subsystem expands to its records — ref,
@@ -13,7 +14,10 @@ export function EvidencePanel({ context }: { context: ContextPreview | null }) {
   return (
     <div className="flex flex-col border-b border-white/[0.06]">
       <div className="flex items-baseline justify-between px-4 pb-2 pt-4">
-        <span className={LABEL}>Evidence</span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className={LABEL}>Evidence</span>
+          <HelpHint text="Every record the analyst can cite, grouped by system. Expand a system to browse its records — the same refs appear as citations under each answer, so you can trace any claim back to its source." />
+        </span>
         <span className="font-mono text-[11px] tabular-nums text-zinc-500">
           {context ? `${context.total} records` : '…'}
         </span>
