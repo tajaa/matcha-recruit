@@ -333,6 +333,10 @@ cd server && python3 -m pytest tests/ -v
 - Before modifying any function, component, or class, you MUST identify and read all files that import or depend on it.
 - If a task involves data fetching, database schemas, or global state, you are required to load the entire schema and all relevant model files into your context *before* proposing or executing changes.
 
+## Cloud / background sessions — code + PR only, never build/deploy
+
+When run via the desktop app's cloud/background agent (branch prefix `claude/…`) for tasks like "review X and apply fixes": scope ends at **commit + open PR**. Never run `./scripts/build-and-push.sh`, `docker build`, `gh workflow run`, or otherwise trigger CI/deploy — the user reviews and merges by hand later, often after a token-window reset. `.github/workflows/deploy.yml`'s `build-and-push` job already skips for `claude/*` branches (`if: ${{ !startsWith(github.head_ref, 'claude/') }}`) so PRs from these sessions don't get auto-built either — don't undo that.
+
 ## Test Data — Email Domains (CRITICAL)
 
 NEVER invent realistic-looking fake email domains for test data (e.g. `@medcenter.com`, `@acmecorp.io`, `@somehospital.org`). These resolve in DNS, Gmail attempts delivery, and bounce-storms flood the sender mailbox for 48 hours.

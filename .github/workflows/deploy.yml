@@ -18,6 +18,9 @@ jobs:
   build-and-push:
     name: Build and Push Docker Images
     runs-on: ubuntu-latest
+    # Skip CI docker builds for cloud-agent PRs (branch prefix `claude/`) —
+    # these are code-review-only PRs, not meant to trigger build/deploy CI.
+    if: ${{ !startsWith(github.head_ref, 'claude/') }}
     permissions:
       id-token: write
       contents: read
