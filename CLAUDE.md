@@ -141,7 +141,7 @@ server/
 │   │   ├── routes/                 # Router zoo — see routes/CLAUDE.md
 │   │   │   ├── ir_incidents/       # Package (split 2026-05-16) — see ir_incidents/CLAUDE.md
 │   │   │   ├── employees/          # 13-file package (split 2026-05-16) — see employees/CLAUDE.md
-│   │   │   ├── er_copilot.py       # 4,111 lines (split candidate)
+│   │   │   ├── er_copilot/         # Package (split 2026-07-06) — see er_copilot/CLAUDE.md
 │   │   │   ├── matcha_work.py      # 8,902 lines (cohesive — not a split candidate)
 │   │   │   └── … 25 others
 │   │   ├── services/
@@ -272,7 +272,7 @@ Defined in `server/app/core/feature_flags.py` as `DEFAULT_COMPANY_FEATURES`. Per
 - **Channels** (`matcha/services/channels_service.py`, `mw_channels*` tables) — real-time WebSocket messaging, paid channels, member presence.
 - **IR Incidents** (`matcha/routes/ir_incidents/` — 10-file package since 2026-05-16; see `ir_incidents/CLAUDE.md`) — safety/behavioral incident reporting + AI analysis. Public anonymous intake at `routes/inbound_email.py`.
 - **Discipline** (`matcha/routes/discipline.py` + `services/discipline_engine.py`, signature provider abstraction in `services/signature_provider.py`).
-- **ER Copilot** (`matcha/routes/er_copilot.py`) — employment-relations case mgmt.
+- **ER Copilot** (`matcha/routes/er_copilot/` — 11-file package since 2026-07-06; see `er_copilot/CLAUDE.md`) — employment-relations case mgmt.
 - **Risk Assessment** (`matcha/routes/risk_assessment.py`).
 - **Interviews** (`matcha/services/`) — voice interviews via Gemini Live API.
 
