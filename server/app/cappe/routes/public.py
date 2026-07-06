@@ -993,16 +993,24 @@ async def public_booking_slots(
             "FROM cappe_availability WHERE site_id = $1 AND (location_id IS NULL OR location_id = $2)",
             site["id"], location_id,
         )
+        offering_staff = await _active_staff_for_type(conn, site["id"], type_id)
+        # The busy feed must match the booking-time overlap rule: a staffer is
+        # busy across ANY service type, not just this one. Keying it to
+        # booking_type_id (as it once did) meant a slot the staffer is already
+        # booked for under a DIFFERENT type rendered as open and then 409'd at
+        # booking. Staffed → any booking of an offering staffer; unstaffed/legacy
+        # → this type's shared-calendar bookings.
         booked = await conn.fetch(
             "SELECT starts_at, ends_at, staff_id FROM cappe_bookings "
-            "WHERE site_id = $1 AND booking_type_id = $2 AND status IN ('pending', 'confirmed') "
-            "AND (location_id IS NULL OR location_id = $3)",
-            site["id"], type_id, location_id,
+            "WHERE site_id = $1 AND status IN ('pending', 'confirmed') "
+            "AND (location_id IS NULL OR location_id = $3) "
+            "AND (staff_id = ANY($4::uuid[]) "
+            "     OR (staff_id IS NULL AND booking_type_id = $2))",
+            site["id"], type_id, location_id, list(offering_staff),
         )
         rules = await _site_rate_rules(conn, site["id"], type_id, location_id)
         discounts = await _active_discounts(conn, site["id"])
         now_utc = await conn.fetchval("SELECT NOW()")
-        offering_staff = await _active_staff_for_type(conn, site["id"], type_id)
 
     availability = [
         {
@@ -1128,7 +1136,10 @@ async def public_create_booking(slug: str, body: CappeBookingRequest, request: R
     # Notifications (best-effort): confirmation → customer, alert → creator.
     when_label = format_when(booking["starts_at"], loc_tz)
     needs_approval = bool(booking["requires_approval"])
-    if cust_email:
+    # Per-recipient throttle (same as the order receipt): booking intake is a
+    # public, caller-emailable endpoint, so cap confirmations per recipient to
+    # stop IP-rotating email-bomb abuse. The booking is created regardless.
+    if cust_email and await _recipient_send_ok(cust_email):
         background.add_task(
             send_cappe_booking_received_email, cust_email, body.customer_name, site["name"],
             btype["name"], when_label, needs_approval, booking_manage_url(booking["access_token"]),
