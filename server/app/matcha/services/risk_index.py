@@ -84,6 +84,24 @@ async def _wc_component(conn, company_id: UUID):
     return _wc_score(m.get("severity_band"), emr, m.get("ever_recordable"), trir=m.get("trir"))
 
 
+async def _wc_reserve_confidence(conn, company_id: UUID) -> str:
+    """Confidence of the company's WC loss-run reserve projection, folded into
+    the WC component so a client whose reserves are volatile (thin/holed
+    triangle) doesn't read high-confidence in the composite. "high" when there's
+    no loss-run triangle — no volatility signal to downgrade, same as the WC
+    metrics' own current-state read. Best-effort: never raises into the index."""
+    try:
+        from . import loss_development
+        snaps = await loss_development.list_company_snapshots(conn, company_id, line="wc")
+        if not snaps:
+            return "high"
+        wc_line = next((ln for ln in loss_development.build_triangle(snaps)["lines"]
+                        if ln["line"] == "wc"), None)
+        return wc_line["summary"]["reserve_confidence"] if wc_line else "high"
+    except Exception:
+        return "high"
+
+
 async def _compliance_component(conn, company_id: UUID):
     """(score, detail) = share of the company's active locations with CURRENT
     (non-expired) compliance requirements tracked, or None when there are no
@@ -266,8 +284,10 @@ async def compute_risk_index(conn, company_id: UUID) -> dict:
 
     wc = await _wc_component(conn, company_id)
     if wc is not None:
+        wc_conf = await _wc_reserve_confidence(conn, company_id)
+        detail = wc[1] if wc_conf == "high" else f"{wc[1]}; reserves {wc_conf} confidence"
         components.append({"key": "wc", "label": "Workers' Comp", "weight": _WEIGHTS["wc"],
-                           "score": wc[0], "detail": wc[1], "confidence": "high"})
+                           "score": wc[0], "detail": detail, "confidence": wc_conf})
 
     epl = await epl_readiness.compute_epl_readiness(conn, company_id)
     components.append(_epl_component(epl))

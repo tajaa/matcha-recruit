@@ -198,7 +198,15 @@ def _build_line(line: str, rows: list[dict]) -> dict:
             and all(b == a + 12 for a, b in zip(remaining, remaining[1:]))
         )
         if not remaining:
-            var = 0.0
+            # No development factors apply at/after this maturity. Two very
+            # different situations share this branch: (a) genuine run-off — the
+            # line HAS a triangle and this period sits at/beyond its last
+            # measured step, so cdf=1.0 is evidence-based → exact, high; (b) a
+            # greenfield line with NO factors at all (a single loss run), where
+            # cdf=1.0 is a default punt, not a measurement — the projected
+            # ultimate is just the latest reported, the LEAST certain read, so
+            # no CI and "low".
+            var = 0.0 if atf else None
         elif not chain_intact:
             var = None
         else:
@@ -209,7 +217,7 @@ def _build_line(line: str, rows: list[dict]) -> dict:
         else:
             ult_low = ult_high = se_out = None
         if not remaining:
-            conf = "high"
+            conf = "high" if atf else "low"
         elif p["maturity_gap"] or var is None:
             conf = "low"
         elif min(factor_stats[m]["n"] for m in remaining) < 4:

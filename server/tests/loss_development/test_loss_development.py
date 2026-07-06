@@ -294,6 +294,38 @@ def test_chain_hole_between_flanking_buckets_forces_low_confidence():
     assert subj["ultimate_low"] is None and subj["ultimate_high"] is None
 
 
+def test_greenfield_line_no_development_factors_is_low_confidence():
+    # A single loss run (one valuation per policy year, no development pairs) has
+    # NO age-to-age factors at all — cdf_from returns 1.0 by default, so the
+    # projected ultimate is just the latest reported. That's the LEAST certain
+    # read (most likely to develop), and must NOT report as high confidence.
+    snaps = [
+        _snap("2023", date(2023, 12, 31), 350_000),
+        _snap("2024", date(2024, 12, 31), 430_000),
+    ]
+    line = _wc(ld.build_triangle(snaps))
+    assert line["factors"] == []  # confirms zero development signal
+    for label in ("2023", "2024"):
+        p = _period(line, label)
+        assert p["cdf"] == 1.0
+        assert p["ultimate"] == p["latest_incurred"]  # undeveloped — latest = ultimate
+        assert p["reserve_confidence"] == "low"
+        assert p["ultimate_low"] is None and p["ultimate_high"] is None
+    assert line["summary"]["reserve_confidence"] == "low"
+    assert line["summary"]["total_ultimate_low"] is None
+
+
+def test_genuine_runoff_period_at_max_maturity_stays_high():
+    # Distinct from greenfield: the line HAS a triangle, and the oldest period
+    # sits beyond its last measured development step — cdf=1.0 is evidence-based
+    # (fully run off), so it legitimately reports high with an exact point.
+    line = _wc(ld.build_triangle(TRIANGLE))
+    p21 = _period(line, "2021")  # fully mature at 36mo (the max), no remaining factors
+    assert p21["latest_maturity"] == 36 and p21["cdf"] == 1.0
+    assert p21["reserve_confidence"] == "high"
+    assert p21["ultimate_low"] == p21["ultimate_high"] == p21["ultimate"]
+
+
 def test_empty_points_period_drags_summary_confidence_to_low():
     # a period label with no parseable year and no explicit start -> every
     # valuation fails to bucket into a maturity -> zero points. It must still
