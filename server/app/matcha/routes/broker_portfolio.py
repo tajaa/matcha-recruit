@@ -444,7 +444,7 @@ async def get_risk_index_portfolio(current_user=Depends(require_broker)):
             results.append({
                 "company_id": str(company_id), "company_name": meta["name"],
                 "industry": meta["industry"], "index": r["index"], "band": r["band"],
-                "components": r["components"],
+                "components": r["components"], "index_confidence": r.get("index_confidence"),
             })
     results.sort(key=lambda r: (_EPL_BAND_RANK.get(r["band"], 9), r["index"]))
     scored = [r for r in results if r["index"] is not None]
@@ -480,6 +480,8 @@ async def get_property_portfolio(current_user=Depends(require_broker)):
             "avg_cope_score": r["avg_cope_score"], "worst_cope_grade": r["worst_cope_grade"],
             "itv_ratio": r["itv"]["portfolio_ratio"], "under_insured": r["itv"]["under_count"],
             "worst_cat_tier": cat.get("worst_tier"),
+            "worst_peril": cat.get("worst_peril"),
+            "by_peril_detail": cat.get("by_peril_detail", {}),
         })
     # worst COPE + biggest TIV first (most underwriting attention)
     _grade = {"D": 0, "C": 1, "B": 2, "A": 3, None: 4}
@@ -539,7 +541,7 @@ async def get_book_risk_curve(current_user=Depends(require_broker)):
             out.append({
                 "id": str(company_id), "source": "platform",
                 "name": meta["name"], "industry": meta["industry"],
-                "index": r["index"], "band": r["band"],
+                "index": r["index"], "band": r["band"], "confidence": r.get("index_confidence"),
                 "headcount": headcount_by_id.get(company_id),
                 "annual_premium": (mods.get(str(company_id)) or {}).get("annual_premium"),
             })

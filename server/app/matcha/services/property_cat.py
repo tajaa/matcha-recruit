@@ -48,6 +48,12 @@ CAT_FETCH_ENABLED = os.getenv("CAT_FETCH_ENABLED", "true").strip().lower() in ("
 PERILS = ("flood", "quake", "wildfire", "wind")
 TIER_RANK = {"severe": 4, "high": 3, "elevated": 2, "moderate": 1, "low": 0}
 
+# Only flood and quake have a hazard-agency-documented annual-probability
+# reading (see _flood_probability / _quake_probability below). Wildfire
+# (directional state/county baseline) and wind (coarse seeded reference) have
+# no defensible probability model — they stay tier-only, deliberately.
+DOCUMENTED_PROBABILITY_PERILS = ("flood", "quake")
+
 
 # --- pure tier mappers (unit-tested, no network) ---------------------------
 
@@ -104,6 +110,55 @@ def _wildfire_tier(whp) -> tuple[str, int] | None:
     if "low" in t:
         return "moderate", 30
     return None
+
+
+def _flood_probability(zone) -> float | None:
+    """FEMA's own regulatory probability definitions — V*/A* zones ARE the
+    1%-annual-chance (100-year) special flood hazard area by definition; the
+    0.2%-annual-chance (500-year) band is literally named in the zone
+    subtype. Minimal (X/B/C) and undetermined (D) are ceilings/unknowns, not
+    point probabilities — None rather than a fabricated number."""
+    z = str(zone or "").upper().strip()
+    if z.startswith("V") or z.startswith("A"):
+        return 0.01
+    if "0.2 PCT" in z or z in ("X500", "SHADED X"):
+        return 0.002
+    return None
+
+
+def _quake_probability(sds) -> float | None:
+    """Deliberately always None (a judgment call to preserve, not a gap to
+    fix). ASCE-7 MCER design ground motion is risk-targeted — calibrated to a
+    uniform COLLAPSE-risk target and blended with deterministic caps near
+    active faults — not to a uniform ground-motion exceedance probability. A
+    single Sds value doesn't map to one annual probability without the full
+    USGS probabilistic seismic hazard curve, a different API this module
+    doesn't call."""
+    return None
+
+
+def _peril_annual_probability(peril, zone, raw: dict | None) -> float | None:
+    """Dispatch to the documented-probability mapper for this peril, else
+    None. Derived at read time from data already stored in ``raw`` —
+    no schema change needed."""
+    if peril == "flood":
+        return _flood_probability(zone)
+    if peril == "quake":
+        return _quake_probability((raw or {}).get("sds"))
+    return None
+
+
+def _parse_raw(raw) -> dict:
+    """``raw`` arrives from asyncpg as a JSON string (no jsonb codec on the
+    pool) when read back from the DB, or already a dict in unit tests."""
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str):
+        try:
+            return json.loads(raw)
+        except (TypeError, ValueError):
+            return {}
+    return {}
 
 
 def _wind_tier(state, county, ref_rows: list[dict]) -> tuple[str, int] | None:
@@ -340,10 +395,15 @@ async def enrich_building(conn, building_id: UUID) -> dict:
 
 
 def summarize(rows: list[dict]) -> dict:
-    """Roll up (building_id, peril, tier, score, lat) rows → company cat exposure. Pure."""
+    """Roll up (building_id, peril, tier, score, lat[, zone, raw]) rows → company
+    cat exposure. Pure. ``zone``/``raw`` are optional — when absent (e.g. an older
+    caller), ``by_peril_detail`` entries just carry ``annual_probability: None``."""
     buildings = {}
     by_peril: dict[str, str] = {}
+    by_peril_detail: dict[str, dict] = {}
     present_ranks: list[int] = []
+    best_peril_rank = -1
+    worst_peril: str | None = None
     for r in rows:
         bid = r["building_id"]
         buildings.setdefault(bid, {"geocoded": r.get("lat") is not None, "worst": 0})
@@ -353,8 +413,12 @@ def summarize(rows: list[dict]) -> dict:
             present_ranks.append(rank)
             buildings[bid]["worst"] = max(buildings[bid]["worst"], rank)
             peril = r.get("peril")
+            if rank > best_peril_rank:
+                best_peril_rank, worst_peril = rank, peril
             if peril and rank > TIER_RANK.get(by_peril.get(peril, "low"), 0):
                 by_peril[peril] = tier
+                ap = _peril_annual_probability(peril, r.get("zone"), _parse_raw(r.get("raw")))
+                by_peril_detail[peril] = {"tier": tier, "annual_probability": ap}
     rank_to_tier = {v: k for k, v in TIER_RANK.items()}
     # worst_tier only from tiers actually fetched — un-geocoded buildings (no peril
     # rows) report None, not a misleading "low".
@@ -362,7 +426,10 @@ def summarize(rows: list[dict]) -> dict:
     severe_high = sum(1 for b in buildings.values() if b["worst"] >= TIER_RANK["high"])
     return {
         "worst_tier": rank_to_tier[worst_rank] if worst_rank is not None else None,
+        "worst_peril": worst_peril if worst_rank is not None else None,
         "by_peril": by_peril,
+        "by_peril_detail": by_peril_detail,
+        "documented_probability_perils": list(DOCUMENTED_PROBABILITY_PERILS),
         "severe_high_count": severe_high,
         "buildings_total": len(buildings),
         "buildings_geocoded": sum(1 for b in buildings.values() if b["geocoded"]),
@@ -373,7 +440,7 @@ async def company_cat_exposure(conn, company_id: UUID) -> dict:
     """One-query catastrophe rollup for a company's whole SOV."""
     rows = await conn.fetch(
         """
-        SELECT b.id AS building_id, b.lat, p.peril, p.tier, p.score
+        SELECT b.id AS building_id, b.lat, p.peril, p.tier, p.score, p.zone, p.raw
         FROM company_property_buildings b
         LEFT JOIN property_building_perils p
           ON p.building_id = b.id AND p.error IS NULL
@@ -392,7 +459,7 @@ async def book_cat_exposure(conn, company_ids: list) -> dict[str, dict]:
         return {}
     rows = await conn.fetch(
         """
-        SELECT b.company_id, b.id AS building_id, b.lat, p.peril, p.tier, p.score
+        SELECT b.company_id, b.id AS building_id, b.lat, p.peril, p.tier, p.score, p.zone, p.raw
         FROM company_property_buildings b
         LEFT JOIN property_building_perils p
           ON p.building_id = b.id AND p.error IS NULL

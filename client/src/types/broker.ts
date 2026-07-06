@@ -588,6 +588,8 @@ export interface PropertyPortfolioRow {
   itv_ratio: number | null
   under_insured: number
   worst_cat_tier: string | null
+  worst_peril: string | null
+  by_peril_detail: Record<string, { tier: string; annual_probability: number | null }>
 }
 
 export interface PropertyPortfolioResponse {

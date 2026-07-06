@@ -185,9 +185,89 @@ def test_property_loss_signal_at_or_below_threshold_returns_none():
 def test_property_loss_signal_mid_ramp():
     result = ld.property_loss_signal(_tri_with_property(adverse_pct=35.0))
     # (35-10)/50*15 = 7.5 -> round-half-to-even -> 8
-    assert result == {"adverse_penalty": 8, "adverse_pct": 35.0, "detail": "35.0% adverse development"}
+    # synthetic fixture carries no reserve_confidence/CI fields -> defaults to "low"/None
+    assert result == {"adverse_penalty": 8, "adverse_pct": 35.0, "detail": "35.0% adverse development",
+                       "confidence": "low", "ci_width_pct": None}
 
 
 def test_property_loss_signal_caps_at_15():
     result = ld.property_loss_signal(_tri_with_property(adverse_pct=100.0))
     assert result["adverse_penalty"] == 15
+
+
+def test_property_loss_signal_carries_real_confidence_and_ci_width():
+    # a summary shaped like build_triangle's real output (post Mack's-method fields)
+    tri = _tri_with_property(adverse_pct=35.0)
+    summary = tri["lines"][0]["summary"]
+    summary.update(reserve_confidence="moderate", total_ultimate_low=90_000.0, total_ultimate_high=110_000.0)
+    result = ld.property_loss_signal(tri)
+    assert result["confidence"] == "moderate"
+    assert result["ci_width_pct"] == 20.0  # (110k-90k)/100k*100
+
+
+# --- Mack's-method reserve variance -----------------------------------------
+
+def test_factor_stats_single_observation_has_no_variance():
+    s = ld._factor_stats([1.4])
+    assert s == {"mean": 1.4, "n": 1, "variance": None, "std_error": None}
+
+
+def test_factor_stats_multiple_observations():
+    s = ld._factor_stats([1.3, 1.5])
+    assert s["mean"] == 1.4 and s["n"] == 2
+    assert s["variance"] == round(((1.3 - 1.4) ** 2 + (1.5 - 1.4) ** 2) / 1, 6)
+
+
+def test_mack_reserve_variance_none_when_any_step_underdetermined():
+    # 12->24 has 2 obs (estimable), 24->36 has 1 obs (not estimable) -> whole chain None
+    atf = {12: 1.4, 24: 1.1}
+    factor_stats = {12: ld._factor_stats([1.3, 1.5]), 24: ld._factor_stats([1.1])}
+    assert ld._mack_reserve_variance(300_000, 12, atf, factor_stats) is None
+
+
+def test_mack_reserve_variance_zero_when_no_remaining_factors():
+    # already at the max maturity -> no projection left -> exact, variance 0
+    assert ld._mack_reserve_variance(165_000, 36, {12: 1.4, 24: 1.1}, {}) == 0.0
+
+
+def test_mack_reserve_variance_positive_when_estimable():
+    atf = {12: 1.4}
+    factor_stats = {12: ld._factor_stats([1.3, 1.5])}
+    var = ld._mack_reserve_variance(200_000, 12, atf, factor_stats)
+    assert var is not None and var > 0
+
+
+def test_build_triangle_period_confidence_fields():
+    # a bigger, well-observed triangle: 4 accident years all seen at 12->24mo,
+    # 3 at 24->36mo, so the 12mo bucket has n=4 (>=4 -> "high" eligible).
+    snaps = [
+        _snap("2020", date(2020, 12, 31), 100_000), _snap("2020", date(2021, 12, 31), 140_000),
+        _snap("2020", date(2022, 12, 31), 148_000),
+        _snap("2021", date(2021, 12, 31), 110_000), _snap("2021", date(2022, 12, 31), 154_000),
+        _snap("2021", date(2023, 12, 31), 162_000),
+        _snap("2022", date(2022, 12, 31), 120_000), _snap("2022", date(2023, 12, 31), 168_000),
+        _snap("2022", date(2024, 12, 31), 176_000),
+        _snap("2023", date(2023, 12, 31), 130_000), _snap("2023", date(2024, 12, 31), 182_000),
+    ]
+    line = _wc(ld.build_triangle(snaps))
+    fac12 = {f["from_maturity"]: f for f in line["factors"]}[12]
+    assert fac12["n"] == 4 and fac12["variance"] is not None
+    p2023 = _period(line, "2023")  # latest at 12mo, needs 12->24 (n=4) and 24->36 (n=3) factors
+    assert p2023["reserve_confidence"] in ("high", "moderate")
+    assert p2023["reserve_std_error"] is not None
+    assert p2023["ultimate_low"] < p2023["ultimate"] < p2023["ultimate_high"]
+    # a fully mature period (no remaining factors) is exact
+    p2020 = _period(line, "2020")
+    assert p2020["reserve_confidence"] == "high"
+    assert p2020["ultimate_low"] == p2020["ultimate_high"] == p2020["ultimate"]
+
+
+def test_build_triangle_single_valuation_is_low_confidence():
+    # every maturity bucket has n=1 -> no variance is estimable anywhere
+    line = _wc(ld.build_triangle(TRIANGLE))
+    p23 = _period(line, "2023")  # latest at 12mo; chain needs 12->24 (n=2, ok) and 24->36 (n=1, not ok)
+    assert p23["reserve_confidence"] == "low"
+    assert p23["reserve_std_error"] is None
+    assert p23["ultimate_low"] is None and p23["ultimate_high"] is None
+    assert line["summary"]["reserve_confidence"] == "low"
+    assert line["summary"]["total_reserve_std_error"] is None

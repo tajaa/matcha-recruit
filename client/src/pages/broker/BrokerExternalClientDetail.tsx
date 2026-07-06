@@ -13,7 +13,7 @@ import {
 } from '../../api/broker'
 import { LossRatioTab } from './BrokerClientDetail'
 import type { ExternalClientDetail, ExternalEplFactor, EplAttestationStatus, ExternalProperty, ExternalPropertyPayload } from '../../types/broker'
-import { RISK_BAND_TONE } from '../../types/riskIndex'
+import { RISK_BAND_TONE, RISK_CONFIDENCE_TONE } from '../../types/riskIndex'
 
 const WC_TONE: Record<string, string> = {
   critical: 'text-red-400', at_risk: 'text-orange-400', fair: 'text-amber-400',
@@ -216,7 +216,14 @@ export default function BrokerExternalClientDetail() {
           {risk?.index != null && (
             <div className="text-right">
               <div className={`text-4xl font-light font-mono ${risk.band ? RISK_BAND_TONE[risk.band] ?? 'text-zinc-300' : 'text-zinc-300'}`}>{risk.index}</div>
-              <div className="text-[9px] uppercase tracking-widest font-bold text-zinc-600">Risk index{risk.band ? ` · ${risk.band}` : ''}</div>
+              <div className="text-[9px] uppercase tracking-widest font-bold text-zinc-600">
+                Risk index{risk.band ? ` · ${risk.band}` : ''}
+                {risk.index_confidence && risk.index_confidence !== 'high' && (
+                  <span className={`ml-1 ${RISK_CONFIDENCE_TONE[risk.index_confidence]}`} title="Some inputs behind this score rest on directional or thin data">
+                    · {risk.index_confidence} confidence
+                  </span>
+                )}
+              </div>
             </div>
           )}
         </div>

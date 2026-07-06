@@ -92,3 +92,56 @@ def test_external_risk_index_drops_wc_without_data():
     r = risk_index.external_risk_index({"has_data": False, "recordable_cases": 0}, epl)
     assert [c["key"] for c in r["components"]] == ["epl"]
     assert r["index"] == epl["score"]  # single component → index equals it
+
+
+# --- index_confidence --------------------------------------------------------
+
+def test_assemble_index_confidence_high_when_all_components_high():
+    comps = [
+        {"key": "wc", "label": "Workers' Comp", "weight": 40, "score": 80, "detail": "", "confidence": "high"},
+        {"key": "epl", "label": "EPL readiness", "weight": 35, "score": 80, "detail": "", "confidence": "high"},
+    ]
+    epl = epl_readiness.assess_from_statuses({})
+    result = risk_index._assemble(comps, epl, universe=("wc", "epl", "compliance", "property"))
+    assert result["index_confidence"] == "high"
+
+
+def test_assemble_index_confidence_worst_across_components():
+    comps = [
+        {"key": "wc", "label": "Workers' Comp", "weight": 40, "score": 80, "detail": "", "confidence": "high"},
+        {"key": "property", "label": "Commercial Property", "weight": 30, "score": 70, "detail": "", "confidence": "moderate"},
+    ]
+    epl = epl_readiness.assess_from_statuses({})
+    result = risk_index._assemble(comps, epl, universe=("wc", "epl", "compliance", "property"))
+    assert result["index_confidence"] == "moderate"
+
+
+def test_assemble_index_confidence_defaults_high_when_component_omits_it():
+    # a component dict without a "confidence" key (backward-compat) defaults high
+    comps = [{"key": "wc", "label": "Workers' Comp", "weight": 40, "score": 80, "detail": ""}]
+    epl = epl_readiness.assess_from_statuses({})
+    result = risk_index._assemble(comps, epl, universe=("wc", "epl", "compliance", "property"))
+    assert result["index_confidence"] == "high"
+
+
+# --- weighted_book_risk confidence_mix ---------------------------------------
+
+def test_weighted_book_risk_confidence_mix_sums_to_one():
+    clients = [
+        {"index": 80, "band": "strong", "headcount": 10, "confidence": "high"},
+        {"index": 60, "band": "adequate", "headcount": 10, "confidence": "moderate"},
+        {"index": 40, "band": "developing", "headcount": 20, "confidence": "low"},
+    ]
+    r = risk_index.weighted_book_risk(clients, "headcount")
+    assert abs(sum(r["confidence_mix"].values()) - 1.0) < 1e-6
+    assert r["confidence_mix"]["low"] == 0.5  # 20/40 weight
+
+
+def test_weighted_book_risk_confidence_mix_ignores_missing_confidence():
+    clients = [
+        {"index": 80, "band": "strong", "headcount": 10, "confidence": "high"},
+        {"index": 60, "band": "adequate", "headcount": 10},  # e.g. an off-platform book entry
+    ]
+    r = risk_index.weighted_book_risk(clients, "headcount")
+    assert r["confidence_mix"]["high"] == 0.5  # only the 10/20 with a confidence signal counts
+    assert sum(r["confidence_mix"].values()) == 0.5

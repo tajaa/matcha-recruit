@@ -4,8 +4,9 @@ import { describe, it, expect } from 'vitest'
 import { computeWeightedBookRisk, computeBookLoss, buildLossCurve } from './bookRisk'
 import type { BookRiskClient } from '../types/riskIndex'
 
-function c(index: number, band: string, headcount: number | null = null, premium: number | null = null): BookRiskClient {
-  return { id: `${index}-${band}`, source: 'platform', name: `c${index}`, industry: null, index, band, headcount, annual_premium: premium }
+function c(index: number, band: string, headcount: number | null = null, premium: number | null = null,
+           confidence?: 'high' | 'moderate' | 'low'): BookRiskClient {
+  return { id: `${index}-${band}`, source: 'platform', name: `c${index}`, industry: null, index, band, headcount, annual_premium: premium, confidence }
 }
 
 describe('computeWeightedBookRisk', () => {
@@ -65,6 +66,20 @@ describe('computeWeightedBookRisk', () => {
     expect(a.band_mix.strong).toBeCloseTo(0.2)
     expect(a.band_mix.exposed).toBeCloseTo(0.4)
     expect(a.band_mix.strong + a.band_mix.adequate + a.band_mix.developing + a.band_mix.exposed).toBeCloseTo(1)
+  })
+
+  it('confidence mix sums to one and weights correctly', () => {
+    const a = computeWeightedBookRisk([
+      c(80, 'strong', 10, null, 'high'), c(60, 'adequate', 10, null, 'moderate'), c(40, 'developing', 20, null, 'low'),
+    ], 'headcount')
+    expect(a.confidence_mix.low).toBeCloseTo(0.5)
+    expect(a.confidence_mix.high + a.confidence_mix.moderate + a.confidence_mix.low).toBeCloseTo(1)
+  })
+
+  it('confidence mix ignores clients missing a confidence signal', () => {
+    const a = computeWeightedBookRisk([c(80, 'strong', 10, null, 'high'), c(60, 'adequate', 10)], 'headcount')
+    expect(a.confidence_mix.high).toBeCloseTo(0.5)
+    expect(a.confidence_mix.high + a.confidence_mix.moderate + a.confidence_mix.low).toBeCloseTo(0.5)
   })
 })
 

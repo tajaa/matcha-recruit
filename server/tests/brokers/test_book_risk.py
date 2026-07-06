@@ -10,8 +10,9 @@ import pytest
 from app.matcha.services.risk_index import weighted_book_risk
 
 
-def _c(index, band, headcount=None, premium=None):
-    return {"index": index, "band": band, "headcount": headcount, "annual_premium": premium}
+def _c(index, band, headcount=None, premium=None, confidence=None):
+    return {"index": index, "band": band, "headcount": headcount, "annual_premium": premium,
+            "confidence": confidence}
 
 
 # --- empty / degenerate -----------------------------------------------------
@@ -96,3 +97,23 @@ def test_band_mix_sums_to_one():
     assert a["band_mix"]["strong"] == pytest.approx(0.2)
     assert a["band_mix"]["exposed"] == pytest.approx(0.4)
     assert sum(a["band_mix"].values()) == pytest.approx(1.0)
+
+
+# --- confidence mix (mirrors band mix; ported to bookRisk.test.ts too) -----
+
+def test_confidence_mix_sums_to_one_and_weights_correctly():
+    clients = [
+        _c(80, "strong", headcount=10, confidence="high"),
+        _c(60, "adequate", headcount=10, confidence="moderate"),
+        _c(40, "developing", headcount=20, confidence="low"),
+    ]
+    a = weighted_book_risk(clients, "headcount")
+    assert a["confidence_mix"]["low"] == pytest.approx(0.5)
+    assert sum(a["confidence_mix"].values()) == pytest.approx(1.0)
+
+
+def test_confidence_mix_ignores_clients_missing_a_confidence_signal():
+    clients = [_c(80, "strong", headcount=10, confidence="high"), _c(60, "adequate", headcount=10)]
+    a = weighted_book_risk(clients, "headcount")
+    assert a["confidence_mix"]["high"] == pytest.approx(0.5)
+    assert sum(a["confidence_mix"].values()) == pytest.approx(0.5)

@@ -9,7 +9,7 @@ import { HelpHint } from '../../components/broker/HelpHint'
 import { fetchBookRiskCurve } from '../../api/riskIndex'
 import { computeWeightedBookRisk, computeBookLoss, buildLossCurve, type LossPoint } from '../../utils/bookRisk'
 import type { BookRiskCurve, BookRiskClient, ExposureBasis } from '../../types/riskIndex'
-import { RISK_BAND_TONE, EPL_BANDS } from '../../types/riskIndex'
+import { RISK_BAND_TONE, RISK_CONFIDENCE_TONE, EPL_BANDS } from '../../types/riskIndex'
 
 const BAND_ORDER = ['strong', 'adequate', 'developing', 'exposed'] as const
 const BAND_LABEL: Record<string, string> = { strong: 'Strong', adequate: 'Adequate', developing: 'Developing', exposed: 'Exposed' }
@@ -280,6 +280,10 @@ export default function BrokerRiskCurve() {
                       <td className="px-4 py-2.5 text-zinc-500 text-xs">{c.industry ?? '—'}</td>
                       <td className={`px-4 py-2.5 text-right font-mono ${RISK_BAND_TONE[c.band] ?? 'text-zinc-400'}`}>
                         {c.index} <span className="text-[10px] uppercase">{BAND_LABEL[c.band] ?? c.band}</span>
+                        {c.confidence && c.confidence !== 'high' && (
+                          <span className={`ml-1.5 inline-block h-1.5 w-1.5 rounded-full bg-current align-middle ${RISK_CONFIDENCE_TONE[c.confidence]}`}
+                            title={`${c.confidence} confidence — some inputs rest on directional or thin data`} />
+                        )}
                       </td>
                       <td className="px-4 py-2.5 text-right font-mono text-zinc-400">
                         {missing ? <span className="text-[10px] text-zinc-600 normal-case">no {basis}</span>

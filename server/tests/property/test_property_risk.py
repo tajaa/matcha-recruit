@@ -21,8 +21,9 @@ def test_property_score_none_without_buildings():
 
 
 def test_property_score_is_cope_when_well_insured():
-    s, detail = ri._property_score(_rollup(80, ratio=1.0))
+    s, detail, conf = ri._property_score(_rollup(80, ratio=1.0))
     assert s == 80 and "COPE 80/100" in detail
+    assert conf == "high"  # no cat/loss signal present at all -> nothing to discount
 
 
 def test_property_score_itv_penalty_and_cap():
@@ -30,25 +31,69 @@ def test_property_score_itv_penalty_and_cap():
     assert ri._property_score(_rollup(100, ratio=0.50))[0] == 75      # capped at -25
 
 
-def test_property_score_cat_penalty_capped():
+# documented cat (flood/quake with a hazard-agency annual probability) applies
+# the full capped penalty and reports "high" confidence.
+_DOCUMENTED_SEVERE_CAT = {"worst_tier": "severe", "worst_peril": "flood",
+                          "by_peril_detail": {"flood": {"tier": "severe", "annual_probability": 0.01}}}
+# a wildfire/wind-driven tier has no documented probability -> discounted penalty
+# and "moderate" confidence, even at the same "severe" tier.
+_DIRECTIONAL_SEVERE_CAT = {"worst_tier": "severe", "worst_peril": "wildfire",
+                          "by_peril_detail": {"wildfire": {"tier": "severe", "annual_probability": None}}}
+
+
+def test_property_score_cat_penalty_full_weight_when_documented():
     base = ri._property_score(_rollup(100, ratio=1.0))[0]
-    severe = ri._property_score(_rollup(100, ratio=1.0), cat={"worst_tier": "severe"})[0]
+    severe = ri._property_score(_rollup(100, ratio=1.0), cat=_DOCUMENTED_SEVERE_CAT)
+    assert severe[0] == base - 15
+    assert severe[2] == "high"
     low = ri._property_score(_rollup(100, ratio=1.0), cat={"worst_tier": "low"})[0]
-    assert severe == base - 15
     assert low == base                                               # low/moderate = no penalty
 
 
-def test_property_score_applies_loss_development_penalty():
+def test_property_score_cat_penalty_discounted_when_directional():
     base = ri._property_score(_rollup(100, ratio=1.0))[0]
-    with_loss = ri._property_score(_rollup(100, ratio=1.0), loss={"adverse_penalty": 10, "adverse_pct": 40.0})
+    severe = ri._property_score(_rollup(100, ratio=1.0), cat=_DIRECTIONAL_SEVERE_CAT)
+    assert severe[0] == base - round(15 * 0.7)  # 70% weight, not the full 15
+    assert severe[2] == "moderate"
+
+
+def test_property_score_cat_penalty_undocumented_missing_peril_info_discounted():
+    # a legacy/synthetic cat dict with no worst_peril/by_peril_detail (e.g. an
+    # off-platform snapshot) can't be verified as documented -> discounted too.
+    base = ri._property_score(_rollup(100, ratio=1.0))[0]
+    severe = ri._property_score(_rollup(100, ratio=1.0), cat={"worst_tier": "severe"})
+    assert severe[0] == base - round(15 * 0.7)
+    assert severe[2] == "moderate"
+
+
+def test_property_score_applies_loss_development_penalty_full_weight_when_high_confidence():
+    base = ri._property_score(_rollup(100, ratio=1.0))[0]
+    with_loss = ri._property_score(_rollup(100, ratio=1.0),
+                                    loss={"adverse_penalty": 10, "adverse_pct": 40.0, "confidence": "high"})
     assert with_loss[0] == base - 10
     assert "adverse loss dev" in with_loss[1]
+    assert with_loss[2] == "high"
 
 
-def test_property_score_loss_penalty_capped_at_15():
+def test_property_score_applies_loss_development_penalty_discounted_when_low_confidence():
     base = ri._property_score(_rollup(100, ratio=1.0))[0]
-    with_loss = ri._property_score(_rollup(100, ratio=1.0), loss={"adverse_penalty": 999})
-    assert with_loss[0] == base - 15
+    # no "confidence" key at all -> defaults to "low" -> 60% weight
+    with_loss = ri._property_score(_rollup(100, ratio=1.0), loss={"adverse_penalty": 10, "adverse_pct": 40.0})
+    assert with_loss[0] == base - round(10 * 0.6)
+    assert with_loss[2] == "low"
+
+
+def test_property_score_loss_penalty_capped_at_15_before_weighting():
+    base = ri._property_score(_rollup(100, ratio=1.0))[0]
+    with_loss = ri._property_score(_rollup(100, ratio=1.0), loss={"adverse_penalty": 999, "confidence": "high"})
+    assert with_loss[0] == base - 15  # capped at 15 before the (here, full) confidence weight applies
+
+
+def test_property_score_worst_confidence_wins_across_cat_and_loss():
+    # documented (high) cat + low-confidence loss dev -> overall confidence is "low"
+    r = ri._property_score(_rollup(100, ratio=1.0), cat=_DOCUMENTED_SEVERE_CAT,
+                           loss={"adverse_penalty": 5, "confidence": "low"})
+    assert r[2] == "low"
 
 
 # --- external_risk_index back-compat + property wiring ---------------------

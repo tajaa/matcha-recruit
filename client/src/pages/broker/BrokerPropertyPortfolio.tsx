@@ -84,7 +84,17 @@ export default function BrokerPropertyPortfolio() {
                     <td className="px-4 py-3 text-right font-mono text-zinc-300">{fmtUsd(c.tiv)}</td>
                     <td className="px-4 py-3 text-center"><span className={`font-mono font-semibold ${c.worst_cope_grade ? COPE_TONE[c.worst_cope_grade] ?? 'text-zinc-400' : 'text-zinc-600'}`}>{c.worst_cope_grade ?? '—'}</span></td>
                     <td className={`px-4 py-3 text-right font-mono ${itv == null ? 'text-zinc-600' : itv < 90 ? 'text-amber-400' : 'text-emerald-400'}`}>{itv != null ? `${itv}%` : '—'}</td>
-                    <td className="px-4 py-3 text-center text-xs">{c.worst_cat_tier ? <span className={`uppercase font-semibold ${CAT_TONE[c.worst_cat_tier] ?? 'text-zinc-400'}`}>{c.worst_cat_tier}</span> : <span className="text-zinc-600">—</span>}</td>
+                    <td className="px-4 py-3 text-center text-xs">
+                      {c.worst_cat_tier ? (
+                        <div>
+                          <span className={`uppercase font-semibold ${CAT_TONE[c.worst_cat_tier] ?? 'text-zinc-400'}`}>{c.worst_cat_tier}</span>
+                          {(() => {
+                            const prob = c.worst_peril ? c.by_peril_detail?.[c.worst_peril]?.annual_probability : null
+                            return prob != null ? <div className="text-[9px] text-zinc-600 normal-case">{(prob * 100).toFixed(1)}% annual</div> : null
+                          })()}
+                        </div>
+                      ) : <span className="text-zinc-600">—</span>}
+                    </td>
                   </tr>
                 )
               })}

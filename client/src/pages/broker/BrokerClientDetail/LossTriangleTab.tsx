@@ -56,7 +56,12 @@ export function LossTriangleTab({ companyId }: { companyId: string }) {
                 reported {fmtMoney(s.total_latest_incurred)} → ultimate {fmtMoney(s.total_ultimate)}{' '}
                 <span className={s.total_adverse_development > 0 ? 'text-red-400' : 'text-emerald-400'}>
                   ({s.total_adverse_development > 0 ? '+' : ''}{fmtMoney(s.total_adverse_development)}, {s.adverse_pct}%)
-                </span>
+                </span>{' '}
+                {s.reserve_confidence === 'low' ? (
+                  <span className="text-amber-500/80">· low confidence (thin development history)</span>
+                ) : s.total_ultimate_low !== null && s.total_ultimate_high !== null ? (
+                  <span className="text-zinc-600">· {fmtMoney(s.total_ultimate_low)}–{fmtMoney(s.total_ultimate_high)} range ({s.reserve_confidence})</span>
+                ) : null}
               </span>
             </div>
             <div className="overflow-x-auto">
@@ -76,7 +81,14 @@ export function LossTriangleTab({ companyId }: { companyId: string }) {
                       <tr key={p.period_label} className="border-b border-zinc-800/30">
                         <td className="py-1 pr-2 text-zinc-200">{p.period_label}</td>
                         {mats.map((m) => <td key={m} className="px-2 text-right font-mono text-zinc-300">{byMat[m] ? fmtMoney(byMat[m].incurred) : ''}</td>)}
-                        <td className="px-2 text-right font-mono text-zinc-100">{fmtMoney(p.ultimate)}</td>
+                        <td className="px-2 text-right font-mono text-zinc-100">
+                          {fmtMoney(p.ultimate)}
+                          {p.reserve_confidence === 'low' ? (
+                            <div className="text-[9px] font-sans text-amber-500/70 normal-case">low confidence</div>
+                          ) : p.ultimate_low !== null && p.ultimate_high !== null && p.ultimate_low !== p.ultimate_high ? (
+                            <div className="text-[9px] font-sans text-zinc-600 normal-case">±{fmtMoney((p.ultimate_high - p.ultimate_low) / 2)}</div>
+                          ) : null}
+                        </td>
                         <td className={`px-2 text-right font-mono ${p.adverse_development > 0 ? 'text-red-400' : 'text-zinc-500'}`}>{p.adverse_development > 0 ? '+' : ''}{fmtMoney(p.adverse_development)}</td>
                       </tr>
                     )

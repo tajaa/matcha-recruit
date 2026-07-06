@@ -7,6 +7,7 @@
 import type { BookRiskClient, ExposureBasis, WeightedBookRisk } from '../types/riskIndex'
 
 const BANDS = ['strong', 'adequate', 'developing', 'exposed'] as const
+const CONFIDENCES = ['high', 'moderate', 'low'] as const
 
 const round1 = (n: number) => Math.round(n * 10) / 10
 const round2 = (n: number) => Math.round(n * 100) / 100
@@ -42,11 +43,14 @@ export function computeWeightedBookRisk(clients: BookRiskClient[], basis: Exposu
     : null
 
   const bandMix: Record<string, number> = { strong: 0, adequate: 0, developing: 0, exposed: 0 }
+  const confidenceMix: Record<string, number> = { high: 0, moderate: 0, low: 0 }
   if (totalWeight > 0) {
     scored.forEach((c, i) => {
       if (c.band in bandMix) bandMix[c.band] += weights[i] / totalWeight
+      if (c.confidence && c.confidence in confidenceMix) confidenceMix[c.confidence] += weights[i] / totalWeight
     })
     for (const b of BANDS) bandMix[b] = round4(bandMix[b])
+    for (const conf of CONFIDENCES) confidenceMix[conf] = round4(confidenceMix[conf])
   }
 
   return {
@@ -59,6 +63,7 @@ export function computeWeightedBookRisk(clients: BookRiskClient[], basis: Exposu
     weighted_count: weights.filter((w) => w > 0).length,
     missing_basis_count: weights.filter((w) => w <= 0).length,
     band_mix: bandMix,
+    confidence_mix: confidenceMix,
   }
 }
 

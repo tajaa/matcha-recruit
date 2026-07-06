@@ -31,6 +31,27 @@ _COMPONENT_META = {
 # re-export the EPL band thresholds (≥80 strong / ≥60 adequate / ≥35 developing / <35 exposed)
 band = epl_readiness.readiness_band
 
+# Confidence weighting for the property component's penalties — a cat tier or
+# loss-dev signal resting on documented/high-confidence data counts at full
+# weight; one resting on a directional baseline or thin history is discounted,
+# not dropped (the exposure is still real, just less precisely known).
+_CONF_RANK = {"low": 0, "moderate": 1, "high": 2}
+_CAT_PENALTY_WEIGHT = {True: 1.0, False: 0.7}  # keyed by "documented?"
+_LOSS_PENALTY_WEIGHT = {"high": 1.0, "moderate": 0.8, "low": 0.6}
+
+
+def _worst_conf(confs: list) -> str:
+    ranked = [c for c in confs if c in _CONF_RANK]
+    return min(ranked, key=lambda c: _CONF_RANK[c]) if ranked else "high"
+
+
+def _cat_is_documented(cat: dict) -> bool:
+    """True when the peril driving worst_tier has a hazard-agency-documented
+    annual probability (flood/quake), not a directional baseline (wildfire/wind)."""
+    peril = cat.get("worst_peril")
+    detail = (cat.get("by_peril_detail") or {}).get(peril) or {}
+    return detail.get("annual_probability") is not None
+
 
 def _wc_score(severity_band, emr, ever_recordable, trir=None):
     """Pure WC sub-score (score, detail) from band + mod, or None when it can't
@@ -127,12 +148,17 @@ def _assemble(components: list[dict], epl: dict,
         "top_fixes": _top_fixes(components, epl),
         "coverage": round(total_w / universe_weight, 2) if universe_weight else None,
         "components_missing": components_missing,
+        # Worst confidence across scored components. WC/EPL/compliance have no
+        # variance model yet (default "high"); property's flows from its own
+        # cat/loss-dev documentation. NOT an index_low/index_high range — that
+        # would need every component to carry real variance, not just property.
+        "index_confidence": _worst_conf([c.get("confidence", "high") for c in components]),
     }
 
 
 def _epl_component(epl: dict) -> dict:
     return {"key": "epl", "label": "EPL readiness", "weight": _WEIGHTS["epl"],
-            "score": epl["score"], "detail": f"{epl['score']}/100 ({epl['band']})"}
+            "score": epl["score"], "detail": f"{epl['score']}/100 ({epl['band']})", "confidence": "high"}
 
 
 # Catastrophe penalty is CAPPED (exposure leaking into posture) so a well-built
@@ -141,12 +167,20 @@ _CAT_PENALTY = {"severe": 15, "high": 10, "elevated": 5, "moderate": 0, "low": 0
 
 
 def _property_score(rollup: Optional[dict], cat: Optional[dict] = None,
-                    loss: Optional[dict] = None) -> Optional[tuple[int, str]]:
-    """Property sub-score (0-100, detail) from the SOV rollup. Pure (unit-tested).
+                    loss: Optional[dict] = None) -> Optional[tuple[int, str, str]]:
+    """Property sub-score (0-100, detail, confidence) from the SOV rollup. Pure
+    (unit-tested).
 
     Posture = COPE quality, penalized by under-insurance (ITV) and — capped — by
     catastrophe tier and adverse property-loss development. None when there are no
-    buildings to assess."""
+    buildings to assess.
+
+    ``confidence`` reflects how well-documented the cat/loss-dev signals are:
+    a flood/quake tier with a hazard-agency annual probability, or a loss-dev
+    reserve with a real Mack's-method CI, count at full penalty weight; a
+    directional wildfire/wind baseline or a thin loss-run history are
+    discounted (still penalized — the exposure is real — just less precisely
+    known) and drag the reported confidence down."""
     if not rollup or not rollup.get("building_count"):
         return None
     base = rollup.get("avg_cope_score")
@@ -154,6 +188,7 @@ def _property_score(rollup: Optional[dict], cat: Optional[dict] = None,
         return None
     score = float(base)
     bits = [f"COPE {base}/100"]
+    confs: list[str] = []
 
     itv = rollup.get("itv") or {}
     ratio = itv.get("portfolio_ratio")
@@ -165,14 +200,20 @@ def _property_score(rollup: Optional[dict], cat: Optional[dict] = None,
 
     worst = (cat or {}).get("worst_tier")
     if worst:
-        score -= _CAT_PENALTY.get(worst, 0)
-        bits.append(f"cat {worst}")
+        documented = _cat_is_documented(cat or {})
+        penalty = round(_CAT_PENALTY.get(worst, 0) * _CAT_PENALTY_WEIGHT[documented])
+        score -= penalty
+        bits.append(f"cat {worst}" + ("" if documented else " (directional)"))
+        confs.append("high" if documented else "moderate")
 
     if loss and loss.get("adverse_penalty"):
-        score -= min(15, loss["adverse_penalty"])
-        bits.append("adverse loss dev")
+        loss_conf = loss.get("confidence", "low")
+        weight = _LOSS_PENALTY_WEIGHT.get(loss_conf, _LOSS_PENALTY_WEIGHT["low"])
+        score -= round(min(15, loss["adverse_penalty"]) * weight)
+        bits.append("adverse loss dev" + ("" if loss_conf == "high" else f" ({loss_conf} confidence)"))
+        confs.append(loss_conf)
 
-    return max(0, min(100, round(score))), "; ".join(bits)
+    return max(0, min(100, round(score))), "; ".join(bits), _worst_conf(confs)
 
 
 async def _property_component(conn, company_id: UUID):
@@ -218,7 +259,7 @@ async def compute_risk_index(conn, company_id: UUID) -> dict:
     wc = await _wc_component(conn, company_id)
     if wc is not None:
         components.append({"key": "wc", "label": "Workers' Comp", "weight": _WEIGHTS["wc"],
-                           "score": wc[0], "detail": wc[1]})
+                           "score": wc[0], "detail": wc[1], "confidence": "high"})
 
     epl = await epl_readiness.compute_epl_readiness(conn, company_id)
     components.append(_epl_component(epl))
@@ -226,12 +267,12 @@ async def compute_risk_index(conn, company_id: UUID) -> dict:
     comp = await _compliance_component(conn, company_id)
     if comp is not None:
         components.append({"key": "compliance", "label": "Compliance coverage", "weight": _WEIGHTS["compliance"],
-                           "score": comp[0], "detail": comp[1]})
+                           "score": comp[0], "detail": comp[1], "confidence": "high"})
 
     prop = await _property_component(conn, company_id)
     if prop is not None:
         components.append({"key": "property", "label": "Commercial Property", "weight": _WEIGHTS["property"],
-                           "score": prop[0], "detail": prop[1]})
+                           "score": prop[0], "detail": prop[1], "confidence": prop[2]})
 
     return {"company_id": str(company_id),
             **_assemble(components, epl, universe=("wc", "epl", "compliance", "property"))}
@@ -264,11 +305,16 @@ def weighted_book_risk(clients: list[dict], basis: str = "headcount") -> dict:
     equal_weight_mean = round(sum(c["index"] for c in scored) / len(scored), 1) if scored else None
 
     band_mix = {b: 0.0 for b in _BANDS}
+    confidence_mix = {c: 0.0 for c in _CONF_RANK}
     if total_weight > 0:
         for c, w in zip(scored, weights):
             if c.get("band") in band_mix:
                 band_mix[c["band"]] += w / total_weight
+            conf = c.get("confidence") or c.get("index_confidence")
+            if conf in confidence_mix:
+                confidence_mix[conf] += w / total_weight
         band_mix = {b: round(v, 4) for b, v in band_mix.items()}
+        confidence_mix = {c: round(v, 4) for c, v in confidence_mix.items()}
 
     return {
         "basis": basis,
@@ -280,6 +326,10 @@ def weighted_book_risk(clients: list[dict], basis: str = "headcount") -> dict:
         "weighted_count": sum(1 for w in weights if w > 0),
         "missing_basis_count": sum(1 for w in weights if w <= 0),
         "band_mix": band_mix,
+        # share of weighted book resting on each confidence tier — clients missing
+        # a confidence signal (e.g. off-platform book entries) don't count toward
+        # any bucket, mirroring band_mix's own missing-band handling.
+        "confidence_mix": confidence_mix,
     }
 
 
@@ -294,11 +344,12 @@ def external_risk_index(wc: dict, epl: dict, prop: Optional[dict] = None) -> dic
                   trir=wc.get("trir")) if wc.get("has_data") else None
     if s is not None:
         components.append({"key": "wc", "label": "Workers' Comp", "weight": _WEIGHTS["wc"],
-                           "score": s[0], "detail": s[1]})
+                           "score": s[0], "detail": s[1], "confidence": "high"})
     components.append(_epl_component(epl))
     if prop is not None:
         ps = _property_score(prop.get("rollup"), prop.get("cat"), None)
         if ps is not None:
             components.append({"key": "property", "label": "Commercial Property",
-                               "weight": _WEIGHTS["property"], "score": ps[0], "detail": ps[1]})
+                               "weight": _WEIGHTS["property"], "score": ps[0], "detail": ps[1],
+                               "confidence": ps[2]})
     return _assemble(components, epl, universe=("wc", "epl", "property"))

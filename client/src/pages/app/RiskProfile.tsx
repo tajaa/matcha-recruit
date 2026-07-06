@@ -4,7 +4,7 @@ import { LABEL } from '../../components/ui/typography'
 import { fetchRiskProfile, fetchRiskNarrative, fetchSubmissionReadiness, fetchVenueExposure, fetchExclusionGap } from '../../api/riskIndex'
 import type { RiskNarrative } from '../../api/riskIndex'
 import type { RiskIndex, SubmissionReadiness, VenueExposure, ExclusionGap } from '../../types/riskIndex'
-import { RISK_BAND_TONE, READINESS_BAND_TONE, VENUE_TIER_TONE, EXCLUSION_TONE } from '../../types/riskIndex'
+import { RISK_BAND_TONE, RISK_CONFIDENCE_TONE, READINESS_BAND_TONE, VENUE_TIER_TONE, EXCLUSION_TONE } from '../../types/riskIndex'
 
 const PANEL = 'rounded-lg border border-white/[0.06] bg-zinc-950'
 
@@ -68,7 +68,14 @@ export default function RiskProfile() {
         <div className="text-center">
           <div className={`text-6xl font-light font-mono ${tone}`}>{data.index ?? '—'}</div>
           <div className={`text-xs uppercase tracking-widest font-bold mt-1 ${tone}`}>{data.band ?? 'no data'}</div>
-          <div className="text-[10px] text-zinc-600 mt-0.5">/ 100 risk index</div>
+          <div className="text-[10px] text-zinc-600 mt-0.5 flex items-center justify-center gap-1">
+            / 100 risk index
+            {data.index_confidence && data.index_confidence !== 'high' && (
+              <span className={`inline-flex items-center gap-1 ${RISK_CONFIDENCE_TONE[data.index_confidence]}`} title="Some inputs behind this score rest on directional or thin data">
+                <span className="h-1.5 w-1.5 rounded-full bg-current" /> {data.index_confidence} confidence
+              </span>
+            )}
+          </div>
           {data.coverage != null && data.coverage < 1 && (
             <div className="text-[10px] text-zinc-600 mt-2 max-w-[11rem] mx-auto leading-relaxed">
               Based on {data.components.length} of {data.components.length + (data.components_missing?.length ?? 0)} signals ({Math.round(data.coverage * 100)}% of weight covered)

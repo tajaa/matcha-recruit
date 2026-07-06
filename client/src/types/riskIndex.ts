@@ -1,11 +1,14 @@
 // Composite risk index — client portal + broker rollup.
 
+export type RiskConfidence = 'high' | 'moderate' | 'low'
+
 export interface RiskComponent {
   key: string
   label: string
   weight: number
   score: number
   detail: string
+  confidence?: RiskConfidence
 }
 
 export interface RiskIndex {
@@ -17,6 +20,7 @@ export interface RiskIndex {
   top_fixes: string[]
   coverage?: number
   components_missing?: { key: string; label: string; weight: number }[]
+  index_confidence?: RiskConfidence
 }
 
 export interface RiskIndexPortfolioRow {
@@ -26,6 +30,13 @@ export interface RiskIndexPortfolioRow {
   index: number
   band: string
   components: RiskComponent[]
+  index_confidence?: RiskConfidence
+}
+
+export const RISK_CONFIDENCE_TONE: Record<string, string> = {
+  high: 'text-zinc-500',
+  moderate: 'text-amber-500/80',
+  low: 'text-amber-500',
 }
 
 export interface RiskIndexPortfolio {
@@ -59,6 +70,7 @@ export interface BookRiskClient {
   band: string
   headcount: number | null
   annual_premium: number | null
+  confidence?: RiskConfidence
 }
 
 export interface WeightedBookRisk {
@@ -71,6 +83,7 @@ export interface WeightedBookRisk {
   weighted_count: number
   missing_basis_count: number
   band_mix: Record<string, number>
+  confidence_mix: Record<string, number>
 }
 
 export interface BookRiskCurve {

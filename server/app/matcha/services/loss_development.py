@@ -15,6 +15,7 @@ triangle from its own loss runs, no licensed benchmark data needed.
 import asyncio
 import html
 import logging
+import math
 import re
 from datetime import date
 from typing import Optional
@@ -25,6 +26,12 @@ logger = logging.getLogger(__name__)
 
 LINE_LABELS = {"wc": "Workers' Comp", "gl": "General Liability", "auto": "Commercial Auto",
                "property": "Commercial Property"}
+
+# Reserve-variance modeling (Mack's-method-style) — hand-rolled, no scipy, matching
+# the rest of this codebase's stats (see monte_carlo_service.py's own variance math).
+Z_75 = 1.15  # normal-approx two-sided z for a ~75% CI on the projected ultimate
+_CONF_RANK = {"low": 0, "moderate": 1, "high": 2}
+_RANK_TO_CONF = {v: k for k, v in _CONF_RANK.items()}
 
 
 def _period_start(label: str, explicit) -> date | None:
@@ -57,6 +64,46 @@ def _num(v) -> float:
         return float(v) if v is not None else 0.0
     except (TypeError, ValueError):
         return 0.0
+
+
+def _factor_stats(rs: list[float]) -> dict:
+    """Mean + sample variance of one maturity bucket's individual age-to-age
+    factor observations. ``variance``/``std_error`` are None below n=2 —
+    dispersion isn't estimable from a single observation, and a fabricated
+    number there would be presented with false confidence."""
+    n = len(rs)
+    mean = sum(rs) / n if n else 0.0
+    if n < 2:
+        return {"mean": round(mean, 4), "n": n, "variance": None, "std_error": None}
+    variance = sum((r - mean) ** 2 for r in rs) / (n - 1)
+    return {"mean": round(mean, 4), "n": n, "variance": round(variance, 6),
+            "std_error": round(math.sqrt(variance / n), 6)}
+
+
+def _mack_reserve_variance(latest_incurred: float, latest_maturity: int,
+                            atf: dict, factor_stats: dict) -> float | None:
+    """Mack's-method-style propagated variance of the projected ultimate (==
+    the reserve's variance, since latest incurred is treated as a known
+    constant). Walks the same maturity chain as ``cdf_from``, at each step
+    adding that step's factor sampling variance (sigma^2/n, from the CLT) on
+    the projection accumulated so far, then compounding by the factor for the
+    next step. Returns None the moment any remaining step's factor rests on
+    fewer than 2 observations — a partial variance built on an unknown term
+    would be a fabricated number, not a conservative one."""
+    steps = sorted(m for m in atf if m >= latest_maturity)
+    if not steps:
+        return 0.0
+    proj = latest_incurred
+    var = 0.0
+    for m in steps:
+        stats = factor_stats.get(m)
+        if not stats or stats["variance"] is None:
+            return None
+        f = atf[m]
+        sampling_var = stats["variance"] / stats["n"]
+        var = var * f * f + proj * proj * sampling_var
+        proj *= f
+    return var
 
 
 def _build_line(line: str, rows: list[dict]) -> dict:
@@ -112,6 +159,7 @@ def _build_line(line: str, rows: list[dict]) -> dict:
             if a["incurred"] > 0 and b["maturity"] == a["maturity"] + 12:
                 ratios.setdefault(a["maturity"], []).append(b["incurred"] / a["incurred"])
     atf = {m: round(sum(rs) / len(rs), 4) for m, rs in ratios.items() if rs}
+    factor_stats = {m: _factor_stats(rs) for m, rs in ratios.items() if rs}
 
     def cdf_from(maturity: int) -> float:
         f = 1.0
@@ -120,19 +168,52 @@ def _build_line(line: str, rows: list[dict]) -> dict:
                 f *= factor
         return round(f, 4)
 
-    # project each period to ultimate
-    tot_latest = tot_ult = 0.0
+    # project each period to ultimate, plus its Mack's-method reserve variance
+    tot_latest = tot_ult = tot_var = 0.0
+    tot_var_known = True
+    conf_ranks: list[int] = []
     for p in periods:
         if not p["points"]:
-            p.update(latest_maturity=None, latest_incurred=0.0, cdf=1.0, ultimate=0.0, adverse_development=0.0)
+            p.update(latest_maturity=None, latest_incurred=0.0, cdf=1.0, ultimate=0.0, adverse_development=0.0,
+                      reserve_std_error=None, ultimate_low=None, ultimate_high=None, reserve_confidence="low")
             continue
         latest = p["points"][-1]
         cdf = cdf_from(latest["maturity"])
         ult = round(latest["incurred"] * cdf, 2)
+        remaining = sorted(m for m in atf if m >= latest["maturity"])
+        var = _mack_reserve_variance(latest["incurred"], latest["maturity"], atf, factor_stats) if remaining else 0.0
+        if var is not None:
+            se = math.sqrt(var)
+            ult_low, ult_high, se_out = round(max(0.0, ult - Z_75 * se), 2), round(ult + Z_75 * se, 2), round(se, 2)
+        else:
+            ult_low = ult_high = se_out = None
+        ns = [factor_stats[m]["n"] for m in remaining]
+        if not remaining:
+            conf = "high"
+        elif p["maturity_gap"] or var is None or min(ns) < 2:
+            conf = "low"
+        elif min(ns) < 4:
+            conf = "moderate"
+        else:
+            conf = "high"
+        conf_ranks.append(_CONF_RANK[conf])
         p.update(latest_maturity=latest["maturity"], latest_incurred=round(latest["incurred"], 2),
-                 cdf=cdf, ultimate=ult, adverse_development=round(ult - latest["incurred"], 2))
+                 cdf=cdf, ultimate=ult, adverse_development=round(ult - latest["incurred"], 2),
+                 reserve_std_error=se_out, ultimate_low=ult_low, ultimate_high=ult_high, reserve_confidence=conf)
         tot_latest += latest["incurred"]
         tot_ult += ult
+        if var is not None:
+            tot_var += var
+        else:
+            tot_var_known = False
+
+    if conf_ranks and tot_var_known:
+        total_se = math.sqrt(tot_var)
+        total_ult_low, total_ult_high = round(max(0.0, tot_ult - Z_75 * total_se), 2), round(tot_ult + Z_75 * total_se, 2)
+        total_se = round(total_se, 2)
+    else:
+        total_se = total_ult_low = total_ult_high = None
+    worst_conf = _RANK_TO_CONF[min(conf_ranks)] if conf_ranks else "low"
 
     periods.sort(key=lambda p: p["period_label"])
     valuations = len({pt["valuation_date"] for p in periods for pt in p["points"]})
@@ -141,7 +222,7 @@ def _build_line(line: str, rows: list[dict]) -> dict:
         "line": line, "label": LINE_LABELS.get(line, line.upper()),
         "periods": periods,
         "factors": [{"from_maturity": m, "to_maturity": m + 12, "factor": atf[m],
-                     "n": len(ratios[m])} for m in sorted(atf)],
+                     "n": len(ratios[m]), "variance": factor_stats[m]["variance"]} for m in sorted(atf)],
         "summary": {
             "total_latest_incurred": round(tot_latest, 2),
             "total_ultimate": round(tot_ult, 2),
@@ -149,6 +230,10 @@ def _build_line(line: str, rows: list[dict]) -> dict:
             "adverse_pct": round(100 * (tot_ult - tot_latest) / tot_latest, 1) if tot_latest > 0 else 0.0,
             "periods": len(periods), "valuations": valuations, "max_maturity": max_mat,
             "has_maturity_gap": any(p["maturity_gap"] for p in periods),
+            "total_reserve_std_error": total_se,
+            "total_ultimate_low": total_ult_low,
+            "total_ultimate_high": total_ult_high,
+            "reserve_confidence": worst_conf,
         },
     }
 
@@ -232,8 +317,14 @@ def property_loss_signal(tri: dict) -> Optional[dict]:
     penalty = min(15, max(0, round((adverse_pct - 10) / 50 * 15)))
     if penalty == 0:
         return None
+    ult_low, ult_high = summary.get("total_ultimate_low"), summary.get("total_ultimate_high")
+    total_latest = summary.get("total_latest_incurred") or 0
+    ci_width_pct = (round((ult_high - ult_low) / total_latest * 100, 1)
+                    if ult_low is not None and ult_high is not None and total_latest > 0 else None)
     return {"adverse_penalty": penalty, "adverse_pct": adverse_pct,
-            "detail": f"{adverse_pct}% adverse development"}
+            "detail": f"{adverse_pct}% adverse development",
+            "confidence": summary.get("reserve_confidence", "low"),
+            "ci_width_pct": ci_width_pct}
 
 
 async def build_development(conn, broker_id, subject_kind: str, subject_id, *,

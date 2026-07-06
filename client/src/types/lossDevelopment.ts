@@ -10,6 +10,8 @@ export interface LossPoint {
   open_count: number
 }
 
+export type ReserveConfidence = 'high' | 'moderate' | 'low'
+
 export interface LossPeriod {
   period_label: string
   period_start: string | null
@@ -19,6 +21,12 @@ export interface LossPeriod {
   cdf: number
   ultimate: number
   adverse_development: number
+  // Mack's-method reserve variance — null when the remaining development chain
+  // has a step estimated from fewer than 2 observations (see reserve_confidence).
+  reserve_std_error: number | null
+  ultimate_low: number | null
+  ultimate_high: number | null
+  reserve_confidence: ReserveConfidence
 }
 
 export interface LossFactor {
@@ -26,6 +34,7 @@ export interface LossFactor {
   to_maturity: number
   factor: number
   n: number
+  variance: number | null
 }
 
 export interface LossLineSummary {
@@ -36,6 +45,10 @@ export interface LossLineSummary {
   periods: number
   valuations: number
   max_maturity: number
+  total_reserve_std_error: number | null
+  total_ultimate_low: number | null
+  total_ultimate_high: number | null
+  reserve_confidence: ReserveConfidence
 }
 
 export interface LossLine {
