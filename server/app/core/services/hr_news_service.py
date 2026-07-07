@@ -7,10 +7,13 @@ from typing import Optional
 from .rss_parser import fetch_feed, compute_item_hash
 
 
-# HR news RSS feeds (free, no API key needed)
+# HR news RSS feeds (free, no API key needed).
+# SHRM retired RSS on their site redesign (shrm.org/rss/news.xml now 404s,
+# confirmed no replacement path exists) — swapped for HR Executive, which
+# still serves a valid feed.
 HR_NEWS_FEEDS = [
     {"name": "HR Dive", "url": "https://www.hrdive.com/feeds/news/"},
-    {"name": "SHRM", "url": "https://www.shrm.org/rss/news.xml"},
+    {"name": "HR Executive", "url": "https://www.hrexecutive.com/feed/"},
     {"name": "HR Morning", "url": "https://www.hrmorning.com/feed/"},
 ]
 
