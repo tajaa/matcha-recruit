@@ -37,6 +37,7 @@ const FEATURE_LABELS: Record<string, string> = {
   ir_voice_intake: 'IR Voice Intake (dictate on create + magic-link forms)',
   legal_defense: 'Legal Pilot (AI litigation-evidence packets)',
   handbook_pilot: 'Handbook Pilot (AI handbook/policy generation)',
+  analysis_pilot: 'Analysis Pilot (general data-analysis chat — CSV/XLSX/PDF, deterministic metrics)',
 }
 
 type CompanyFeatures = {
