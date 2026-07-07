@@ -75,11 +75,6 @@ export function PlatformInstrument() {
   const band = riskBand(score);
   const pathLen = VBW * 1.4;
   const ticks = [0.33, 0.66, 1];
-  const pMarkers = [
-    { f: 0.18, l: "P50" },
-    { f: 0.46, l: "P90" },
-    { f: 0.74, l: "P99" },
-  ];
   const subMetrics = [
     { label: "WC", value: clampScore(score - 6) },
     { label: "EPL", value: clampScore(score + 9) },
@@ -164,30 +159,6 @@ export function PlatformInstrument() {
             strokeDasharray={pathLen}
             strokeDashoffset={pathLen * (1 - drawn)}
           />
-          {pMarkers.map((m) => (
-            <g key={m.l} opacity={0.6 * drawn}>
-              <line
-                x1={m.f * VBW}
-                x2={m.f * VBW}
-                y1={8}
-                y2={VBH}
-                stroke={BONE}
-                strokeOpacity={0.22}
-                strokeWidth={1}
-                strokeDasharray="2 3"
-              />
-              <text
-                x={m.f * VBW + 3}
-                y={16}
-                fontSize={7}
-                fontFamily="monospace"
-                fill={ASH}
-                letterSpacing={0.5}
-              >
-                {m.l}
-              </text>
-            </g>
-          ))}
           {scanX >= 0 && (
             <line
               x1={scanX * VBW}
@@ -204,9 +175,9 @@ export function PlatformInstrument() {
           className="flex justify-between mt-1 px-1 text-[9px] font-mono uppercase tracking-[0.16em]"
           style={{ color: ASH }}
         >
-          <span>$0</span>
-          <span>Annual loss exposure →</span>
-          <span>PML</span>
+          <span>Low</span>
+          <span>Risk trend →</span>
+          <span>High</span>
         </div>
       </div>
       <div className="px-5 pt-3 pb-4">

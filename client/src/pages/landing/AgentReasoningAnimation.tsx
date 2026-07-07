@@ -27,52 +27,52 @@ const DECISIONS: Decision[] = [
   {
     id: 'plan',
     label: 'Written WVP Plan',
-    weighing: ['§6401.9(a)', '§6401.9(c)(1)', 'Cal/OSHA template'],
+    weighing: ['Matching statute', 'Screening record', 'Scoring gap'],
     question: 'Plan exists, site-specific, employee-accessible?',
     result: 'GAP',
-    remediation: 'Draft plan · 8 sites × 4 risk types',
-    cite: 'CA Lab §6401.9(c)',
-    status: 'Compliance check → §6401.9 plan-component check',
+    remediation: 'Written plan drafted',
+    cite: 'CA Lab §6401.9',
+    status: 'Checking: Written Plan',
   },
   {
     id: 'training',
     label: 'Annual Training',
-    weighing: ['§6401.9(e)', '§6401.9(e)(1)', 'AB 2188 cross-ref'],
+    weighing: ['Matching statute', 'Screening record', 'Scoring gap'],
     question: 'All employees trained interactively < 12 months?',
     result: 'GAP',
-    remediation: '87 emp · interactive · bilingual',
-    cite: 'CA Lab §6401.9(e)',
-    status: 'Compliance check → §6401.9(e) effective Jul 2024',
+    remediation: 'Training program scoped',
+    cite: 'CA Lab §6401.9',
+    status: 'Checking: Annual Training',
   },
   {
     id: 'log',
     label: 'Violent Incident Log',
-    weighing: ['§6401.9(f)', 'Cal/OSHA Form 300', 'GC §6770'],
+    weighing: ['Matching statute', 'Screening record', 'Scoring gap'],
     question: 'Log incidents + threats + near-misses, retain 5y?',
     result: 'GAP',
-    remediation: 'Deploy log · 5-year retention',
-    cite: 'CA Lab §6401.9(f)',
-    status: 'Compliance check → §6401.9(f) recordkeeping',
+    remediation: 'Incident log deployed',
+    cite: 'CA Lab §6401.9',
+    status: 'Checking: Incident Log',
   },
   {
     id: 'hazard',
     label: 'Hazard Assessment',
-    weighing: ['§6401.9(c)(2)', '§3203 IIPP', 'Type 1/2/3 risk'],
+    weighing: ['Matching statute', 'Screening record', 'Scoring gap'],
     question: 'Per-site assessment with workplace-specific hazards?',
     result: 'GAP',
-    remediation: '8 sites × 2hr walkthrough',
-    cite: 'CA Lab §6401.9(c)(2)',
-    status: 'Compliance check → workplace-violence type 1/2/3 scan',
+    remediation: 'Site assessments scheduled',
+    cite: 'CA Lab §6401.9',
+    status: 'Checking: Hazard Assessment',
   },
   {
     id: 'review',
     label: 'Annual Review',
-    weighing: ['§6401.9(d)', 'Post-incident trigger', 'Procedural'],
+    weighing: ['Matching statute', 'Screening record', 'Scoring gap'],
     question: 'Annual review + post-incident review cadence in place?',
     result: 'GAP',
-    remediation: 'Schedule cadence + trigger rules',
-    cite: 'CA Lab §6401.9(d)',
-    status: 'Compliance check → §6401.9(d) review cadence',
+    remediation: 'Review cadence set',
+    cite: 'CA Lab §6401.9',
+    status: 'Checking: Annual Review',
   },
 ]
 
@@ -80,15 +80,15 @@ const SCENARIO = {
   bill: 'SB 553',
   effective: 'Effective Jul 1, 2024',
   facts: 'SF coffee chain · 8 locations · 87 employees · last audit: never',
-  exposure: '$200,000',
+  exposure: 'Six-figure',
   exposureSubtext: 'Cal/OSHA serious violation × 8 locations',
 }
 
 const SYNTHESIS = {
-  laborHours: '~120 hours',
-  timeline: '4 weeks',
-  cost: '$8,400',
-  exposureAvoided: '$200,000',
+  laborHours: 'Low',
+  timeline: 'Weeks',
+  cost: 'Modest',
+  exposureAvoided: 'Six-figure',
 }
 
 const EMERALD = '#34d399'
@@ -663,14 +663,8 @@ function SynthesisCard({ p }: { p: Palette }) {
       <div className="mt-3 pt-3 border-t flex items-center gap-3" style={{ borderColor: 'rgba(255,255,255,0.06)' }}>
         <span className="font-mono text-[8.5px]" style={{ color: '#6a737d' }}>Sources</span>
         <span className="font-mono text-[9px]" style={{ color: '#9a8a70' }}>
-          CA Lab §6401.9(a–f) · §3203 IIPP · Cal/OSHA enforcement guidance
+          CA Lab §6401.9 · Cal/OSHA enforcement guidance
         </span>
-      </div>
-
-      <div className="mt-2 flex items-center gap-3 font-mono text-[9px]" style={{ color: '#6a737d' }}>
-        <span>Human paralegal: <span style={{ color: '#cbd5e1' }}>~4 hours, 6 statutes, 2 enforcement docs</span></span>
-        <span style={{ color: '#3f3f46' }}>·</span>
-        <span>Matcha: <span style={{ color: p.live, fontWeight: 600 }}>2.1 seconds</span></span>
       </div>
     </div>
   )

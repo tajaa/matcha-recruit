@@ -1,7 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
 import { motion, useInView, useReducedMotion } from 'framer-motion'
-import { TrendingDown, HardHat, Inbox, Layers, Link2, ClipboardCheck } from 'lucide-react'
-
 import { useSEO } from '../../hooks/useSEO'
 import MarketingNav from '../landing/MarketingNav'
 import MarketingFooter from '../landing/MarketingFooter'
@@ -137,7 +135,6 @@ export default function SimpleBrokersPage() {
       <main>
         <Positioning />
         <PillarsGrid />
-        <CoverageGrid />
         <ThePoint />
       </main>
 
@@ -347,10 +344,10 @@ function Positioning() {
                 Your client sees
               </div>
               <ul className="space-y-2.5 text-[15px]" style={{ color: INK }}>
-                <li>Incidents</li>
-                <li>IR Copilot</li>
-                <li>Risk Insights</li>
-                <li>Theme Analysis</li>
+                <li>Incident reporting</li>
+                <li>Guided incident response</li>
+                <li>Risk trends &amp; insights</li>
+                <li>Pattern detection across cases</li>
               </ul>
             </div>
             <div className="p-8" style={{ backgroundColor: BG }}>
@@ -504,7 +501,7 @@ function CommandInstrument() {
     { client: 'Atlas Care Group', issue: 'Rising incident volume' },
   ]
   return (
-    <InstrumentFrame caption="Action center · queue" foot="Each flagged trend, an outreach already drafted">
+    <InstrumentFrame caption="Command center · queue" foot="Each flagged trend, an outreach already drafted">
       <div ref={ref}>
         <div key={cycle} className="flex flex-col gap-3.5">
           {alerts.map((a, i) => (
@@ -631,169 +628,6 @@ function PillarsGrid() {
         <PillarRow key={pillar.id} pillar={pillar} index={i} />
       ))}
     </>
-  )
-}
-
-// ── Coverage recap ─────────────────────────────────────────────────────────
-
-function GlyphCurve() {
-  return (
-    <svg width="40" height="22" viewBox="0 0 40 22" fill="none">
-      <path d="M1 20 C10 18 14 10 22 7 C30 4 36 3 39 2" stroke={GREEN} strokeWidth="1.4" fill="none" />
-    </svg>
-  )
-}
-function GlyphBands() {
-  return (
-    <div className="flex flex-col items-end gap-1">
-      {[16, 12, 9].map((w, i) => (
-        <span key={w} className="h-[3px] rounded-full" style={{ width: w, backgroundColor: i === 2 ? GREEN : LINE }} />
-      ))}
-    </div>
-  )
-}
-function GlyphQueue() {
-  return (
-    <div className="flex flex-col gap-1 items-end">
-      {[0, 1, 2].map((i) => (
-        <span key={i} className="flex items-center gap-1">
-          <span className="rounded-full" style={{ width: 4, height: 4, backgroundColor: i === 0 ? GREEN : MUTED }} />
-          <span className="h-[2px] rounded-full" style={{ width: i === 0 ? 16 : 12, backgroundColor: LINE }} />
-        </span>
-      ))}
-    </div>
-  )
-}
-function GlyphSeats() {
-  return (
-    <div className="grid grid-cols-3 gap-1">
-      {[0, 1, 2, 3, 4, 5].map((i) => (
-        <span key={i} className="rounded-sm" style={{ width: 5, height: 5, backgroundColor: i === 4 ? GREEN : LINE }} />
-      ))}
-    </div>
-  )
-}
-function GlyphLink() {
-  return (
-    <div className="flex items-center gap-1">
-      {[9, 7, 5].map((w, i) => (
-        <span key={i} className="rounded-full" style={{ width: w, height: w, backgroundColor: i === 2 ? GREEN : LINE }} />
-      ))}
-    </div>
-  )
-}
-function GlyphChecks() {
-  return (
-    <div className="flex flex-col gap-1 items-end">
-      {[0, 1, 2].map((i) => (
-        <span key={i} className="flex items-center gap-1">
-          <span className="h-[2px] rounded-full" style={{ width: 12, backgroundColor: LINE }} />
-          <span className="rounded-full" style={{ width: 4, height: 4, backgroundColor: i === 0 ? GREEN : MUTED }} />
-        </span>
-      ))}
-    </div>
-  )
-}
-
-const COVERAGE: { id: string; icon: typeof TrendingDown; title: string; caption: string; glyph: () => React.ReactElement }[] = [
-  {
-    id: 'curve',
-    icon: TrendingDown,
-    title: 'Book risk curve',
-    caption: 'The whole book at a glance, so deteriorating accounts surface months ahead of the re-rate.',
-    glyph: GlyphCurve,
-  },
-  {
-    id: 'wc',
-    icon: HardHat,
-    title: 'Loss control',
-    caption: 'Every client ranked by who needs a conversation now — no more chasing loss runs one at a time.',
-    glyph: GlyphBands,
-  },
-  {
-    id: 'command',
-    icon: Inbox,
-    title: 'Action center',
-    caption: 'A single queue of what needs attention, each one already drafted into client-ready outreach.',
-    glyph: GlyphQueue,
-  },
-  {
-    id: 'seats',
-    icon: Layers,
-    title: 'Flexible deployment',
-    caption: 'Roll Matcha out across your book your way — without per-account billing admin.',
-    glyph: GlyphSeats,
-  },
-  {
-    id: 'referral',
-    icon: Link2,
-    title: 'Branded referrals',
-    caption: 'Put clients on Matcha under your brand, and decide who covers the subscription.',
-    glyph: GlyphLink,
-  },
-  {
-    id: 'coverage',
-    icon: ClipboardCheck,
-    title: 'Weak-spot radar',
-    caption: 'See which clients are one incident from a claim — before they find out the hard way.',
-    glyph: GlyphChecks,
-  },
-]
-
-function CoverageGrid() {
-  return (
-    <section className="py-16 sm:py-24 md:py-28 border-t" style={{ borderColor: LINE }}>
-      <div className="max-w-[1440px] mx-auto px-5 sm:px-10">
-        <div className="max-w-2xl mb-12 sm:mb-16">
-          <div className="text-[11px] uppercase tracking-wider font-mono mb-3 sm:mb-4" style={{ color: MUTED }}>
-            The whole toolkit
-          </div>
-          <h2
-            className="tracking-tight"
-            style={{ fontFamily: DISPLAY, fontWeight: 400, color: INK, fontSize: 'clamp(1.875rem, 5vw, 3.25rem)', lineHeight: 1.05 }}
-          >
-            Deploy once. Read the book continuously.
-          </h2>
-          <p className="mt-4 sm:mt-5 text-base sm:text-lg" style={{ color: MUTED, lineHeight: 1.6 }}>
-            Six capabilities across intelligence and distribution — everything
-            you need to put your book on Matcha and read it as one portfolio.
-          </p>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-px rounded-xl overflow-hidden" style={{ backgroundColor: LINE }}>
-          {COVERAGE.map((f, i) => {
-            const Icon = f.icon
-            const Glyph = f.glyph
-            return (
-              <motion.div
-                key={f.id}
-                initial={{ opacity: 0, y: 20 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true, margin: '-60px' }}
-                transition={{ duration: 0.5, delay: (i % 3) * 0.08, ease: 'easeOut' }}
-                className="p-6 sm:p-8 flex flex-col"
-                style={{ backgroundColor: BG }}
-              >
-                <div className="flex items-start justify-between mb-5">
-                  <div className="w-10 h-10 rounded-lg flex items-center justify-center" style={{ backgroundColor: 'rgba(31,29,26,0.06)' }}>
-                    <Icon className="w-5 h-5" style={{ color: INK }} />
-                  </div>
-                  <div className="h-10 flex items-center">
-                    <Glyph />
-                  </div>
-                </div>
-                <h3 className="text-lg sm:text-xl mb-2" style={{ fontFamily: DISPLAY, color: INK, fontWeight: 500 }}>
-                  {f.title}
-                </h3>
-                <p className="text-sm" style={{ color: MUTED, lineHeight: 1.6 }}>
-                  {f.caption}
-                </p>
-              </motion.div>
-            )
-          })}
-        </div>
-      </div>
-    </section>
   )
 }
 
