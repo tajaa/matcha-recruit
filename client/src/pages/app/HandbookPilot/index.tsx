@@ -56,6 +56,14 @@ const HOW_IT_WORKS_STEPS: HowItWorksStep[] = [
   },
 ]
 
+const HANDBOOK_EXAMPLES = [
+  'Draft a remote-work policy for our California and Texas locations.',
+  'Expand our meal-and-rest-break section to cover our Illinois warehouse.',
+  'Add a bereavement leave policy consistent with our other leave sections.',
+  'Update our anti-harassment policy to reflect this year\'s law changes.',
+  'Draft a standalone pay-transparency policy for our open roles.',
+]
+
 export default function HandbookPilot() {
   const [sessions, setSessions] = useState<PilotSession[]>([])
   const [active, setActive] = useState<PilotSession | null>(null)
@@ -231,8 +239,10 @@ function Console({ session, onTurn }: { session: PilotSession; onTurn: () => voi
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState<string | null>(null)
+  const [view, setView] = useState<'chat' | 'examples'>('chat')
   const scrollRef = useRef<HTMLDivElement>(null)
   const abortRef = useRef<AbortController | null>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   // Abort any in-flight turn when the user switches sessions (unmount).
   useEffect(() => () => abortRef.current?.abort(), [])
@@ -274,10 +284,36 @@ function Console({ session, onTurn }: { session: PilotSession; onTurn: () => voi
 
   return (
     <>
-      <div className="px-4 py-3 border-b border-zinc-800">
-        <div className="text-sm font-semibold text-zinc-100">{session.title}</div>
-        {session.goal && <div className="text-xs text-zinc-500 mt-0.5">{session.goal}</div>}
+      <div className="px-4 py-3 border-b border-zinc-800 flex items-center justify-between">
+        <div className="min-w-0">
+          <div className="text-sm font-semibold text-zinc-100 truncate">{session.title}</div>
+          {session.goal && <div className="text-xs text-zinc-500 mt-0.5">{session.goal}</div>}
+        </div>
+        <div className="flex items-center gap-1 shrink-0">
+          {(['chat', 'examples'] as const).map((v) => (
+            <button key={v} onClick={() => setView(v)}
+              className={`px-2 py-1 text-[11px] rounded-md capitalize ${
+                view === v ? 'bg-zinc-800 text-emerald-400' : 'text-zinc-500 hover:text-zinc-300'}`}>
+              {v === 'chat' ? 'Chat' : 'Examples'}
+            </button>
+          ))}
+        </div>
       </div>
+      {view === 'examples' ? (
+        <div className="flex-1 overflow-y-auto p-4">
+          <p className="text-sm text-zinc-500 mb-3">Click one to drop it into the composer, then edit or send it as-is.</p>
+          <div className="space-y-1.5">
+            {HANDBOOK_EXAMPLES.map((ex) => (
+              <button key={ex}
+                onClick={() => { setInput(ex); setView('chat'); textareaRef.current?.focus() }}
+                className="block w-full text-left text-[13px] text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/60 rounded-lg px-3 py-2 transition-colors"
+              >
+                {ex}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : (
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">
         {messages.length === 0 && (
           <p className="text-sm text-zinc-600">
@@ -308,9 +344,11 @@ function Console({ session, onTurn }: { session: PilotSession; onTurn: () => voi
           </div>
         )}
       </div>
+      )}
       <div className="p-3 border-t border-zinc-800">
         <div className="flex gap-2">
           <textarea
+            ref={textareaRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send() } }}

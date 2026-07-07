@@ -7,13 +7,14 @@ import { RecordViewer, type ViewerTarget } from './RecordViewer'
 /** Analyst console: full-width transcript rows (no chat bubbles), bottom-
  *  anchored so a short exchange sits next to the composer instead of leaving
  *  a void, with grounded observations rendered as cited evidence blocks. */
-export function Console({ messages, status, sending, evidence, onSend, matterType }: {
+export function Console({ messages, status, sending, evidence, onSend, matterType, prefill }: {
   messages: MatterMessage[]
   status: string | null
   sending: boolean
   evidence: EvidencePreview | null
   onSend: (text: string) => void
   matterType: MatterType
+  prefill?: { text: string; nonce: number } | null
 }) {
   const [input, setInput] = useState('')
   const [view, setView] = useState<ViewerTarget | null>(null)
@@ -21,6 +22,15 @@ export function Console({ messages, status, sending, evidence, onSend, matterTyp
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, status])
+
+  // Examples tab hands off a prompt here — fill the composer and focus it,
+  // never auto-send (mirrors the empty-state starter chips below).
+  useEffect(() => {
+    if (!prefill) return
+    setInput(prefill.text)
+    inputRef.current?.focus()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefill?.nonce])
 
   // cid → human ref ("IR-2024-003") for citation chips.
   const cidIndex = useMemo(() => {

@@ -24,6 +24,7 @@ export function Console({ session, context, onTurnComplete }: ConsoleProps) {
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState<string | null>(null)
+  const [view, setView] = useState<'chat' | 'examples'>('chat')
   const endRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
@@ -87,6 +88,34 @@ export function Console({ session, context, onTurnComplete }: ConsoleProps) {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
+      <div className="flex shrink-0 items-center gap-1 border-b border-white/[0.06] px-5 py-1.5">
+        {(['chat', 'examples'] as const).map((v) => (
+          <button key={v} onClick={() => setView(v)}
+            className={`rounded px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.15em] transition-colors ${
+              view === v ? 'bg-white/[0.06] text-zinc-200' : 'text-zinc-500 hover:text-zinc-300'}`}>
+            {v === 'chat' ? 'Console' : 'Examples'}
+          </button>
+        ))}
+      </div>
+      {view === 'examples' ? (
+        <div className="flex-1 overflow-y-auto px-5 py-8">
+          <div className={LABEL}>Example prompts</div>
+          <p className="mt-2 max-w-[60ch] text-sm leading-relaxed text-zinc-400">
+            Click one to drop it into the composer, then edit or send it as-is.
+          </p>
+          <div className="mt-4 max-w-[60ch]">
+            {STARTERS.map((s) => (
+              <button key={s}
+                onClick={() => { setInput(s); setView('chat'); inputRef.current?.focus() }}
+                className="group flex w-full items-start gap-2.5 border-t border-white/[0.06] py-2.5 text-left text-[13px] text-zinc-500 transition-colors last:border-b last:border-white/[0.06] hover:text-zinc-200"
+              >
+                <span className="font-mono text-emerald-500/70 transition-colors group-hover:text-emerald-400">›</span>
+                {s}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : (
       <div className="flex-1 overflow-y-auto">
         <div className="flex min-h-full flex-col justify-end">
           {messages.length === 0 && !status && (
@@ -131,6 +160,7 @@ export function Console({ session, context, onTurnComplete }: ConsoleProps) {
           <div ref={endRef} />
         </div>
       </div>
+      )}
 
       {/* Composer */}
       <div className="shrink-0 border-t border-white/[0.06] px-5 pb-2 pt-3">

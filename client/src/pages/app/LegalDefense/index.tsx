@@ -9,7 +9,7 @@ import {
   runResearch, listResearch,
   type Matter, type MatterMessage, type EvidencePreview, type Packet, type ChatResult, type ResearchRow,
 } from '../../../api/legalDefense'
-import { LABEL, seedRecap, typeLabel } from './shared'
+import { LABEL, seedRecap, startersFor, typeLabel } from './shared'
 import { Masthead } from './Masthead'
 import { Console } from './Console'
 import { Chronology } from './Chronology'
@@ -179,8 +179,10 @@ function MatterWorkbench({ matter, evidence, research, researching, onRunResearc
   const [sending, setSending] = useState(false)
   const [genKind, setGenKind] = useState<'pdf' | 'zip' | 'both' | null>(null)
   const [shareFor, setShareFor] = useState<Packet | null>(null)
-  const [tab, setTab] = useState<'console' | 'chronology'>('console')
+  const [tab, setTab] = useState<'console' | 'chronology' | 'examples'>('console')
+  const [prefill, setPrefill] = useState<{ text: string; nonce: number } | null>(null)
   const seededRef = useRef(false)
+  const prefillNonceRef = useRef(0)
 
   useEffect(() => { setMessages(matter.messages ?? []) }, [matter.id, matter.messages])
 
@@ -247,19 +249,24 @@ function MatterWorkbench({ matter, evidence, research, researching, onRunResearc
       <div className="flex min-h-0 flex-1">
         <div className="flex min-w-0 flex-1 flex-col">
           <div className="flex shrink-0 items-center gap-1 border-b border-white/[0.06] px-5 py-1.5">
-            {(['console', 'chronology'] as const).map((t) => (
+            {(['console', 'chronology', 'examples'] as const).map((t) => (
               <button key={t} onClick={() => setTab(t)}
                 className={`rounded px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.15em] transition-colors ${
                   tab === t ? 'bg-white/[0.06] text-zinc-200' : 'text-zinc-500 hover:text-zinc-300'}`}>
-                {t === 'console' ? 'Analyst console' : 'Chronology'}
+                {t === 'console' ? 'Analyst console' : t === 'chronology' ? 'Chronology' : 'Examples'}
               </button>
             ))}
           </div>
           <div className="min-h-0 flex-1">
             {tab === 'console'
               ? <Console messages={messages} status={status} sending={sending} evidence={evidence}
-                  onSend={(t) => void send(t)} matterType={matter.matter_type} />
-              : <Chronology evidence={evidence} />}
+                  onSend={(t) => void send(t)} matterType={matter.matter_type} prefill={prefill} />
+              : tab === 'chronology'
+              ? <Chronology evidence={evidence} />
+              : <ExamplesPanel
+                  items={startersFor(matter.matter_type)}
+                  onUse={(t) => { setTab('console'); setPrefill({ text: t, nonce: ++prefillNonceRef.current }) }}
+                />}
           </div>
         </div>
         <div className="flex w-80 shrink-0 flex-col border-l border-white/[0.06]">
@@ -271,6 +278,33 @@ function MatterWorkbench({ matter, evidence, research, researching, onRunResearc
         </div>
       </div>
       {shareFor && <ShareModal matterId={matter.id} packet={shareFor} onClose={() => setShareFor(null)} toast={toast} />}
+    </div>
+  )
+}
+
+// --------------------------------------------------------------------------- //
+// ExamplesPanel — browsable example prompts, matches the Console's own
+// starter-row visual language so it reads as the same feature, not a bolt-on.
+// --------------------------------------------------------------------------- //
+
+function ExamplesPanel({ items, onUse }: { items: string[]; onUse: (text: string) => void }) {
+  return (
+    <div className="h-full overflow-y-auto px-5 py-8">
+      <div className={LABEL}>Example prompts</div>
+      <p className="mt-2 max-w-[60ch] text-sm leading-relaxed text-zinc-400">
+        Click one to drop it into the console composer, then edit or send it as-is.
+      </p>
+      <div className="mt-4 max-w-[60ch]">
+        {items.map((s) => (
+          <button key={s}
+            onClick={() => onUse(s)}
+            className="group flex w-full items-start gap-2.5 border-t border-white/[0.06] py-2.5 text-left text-[13px] text-zinc-500 transition-colors last:border-b last:border-white/[0.06] hover:text-zinc-200"
+          >
+            <span className="font-mono text-emerald-500/70 transition-colors group-hover:text-emerald-400">›</span>
+            {s}
+          </button>
+        ))}
+      </div>
     </div>
   )
 }

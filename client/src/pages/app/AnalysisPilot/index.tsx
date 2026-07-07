@@ -45,6 +45,14 @@ const ROLE_OPTIONS_FALLBACK = [
   'lead_time', 'return', 'price', 'score',
 ]
 
+const ANALYSIS_EXAMPLES = [
+  'Summarize this dataset and flag anything unusual.',
+  "What's the trend, and is it real or just noise?",
+  'Which series is riskiest, and why?',
+  'How volatile is this data, and has that changed recently?',
+  'Compare these two periods and explain what changed.',
+]
+
 const HOW_IT_WORKS_STEPS: HowItWorksStep[] = [
   {
     icon: FileSpreadsheet,
@@ -206,7 +214,7 @@ export default function AnalysisPilot() {
 // Workbench — datasets rail + tabbed (metrics / chat / compare) center.
 // --------------------------------------------------------------------------- //
 
-type Tab = 'metrics' | 'chat' | 'compare'
+type Tab = 'metrics' | 'chat' | 'compare' | 'examples'
 
 function Workbench({ session, onChange, onShowHelp }: { session: AnalysisSession; onChange: () => void; onShowHelp: () => void }) {
   const [tab, setTab] = useState<Tab>('metrics')
@@ -219,6 +227,9 @@ function Workbench({ session, onChange, onShowHelp }: { session: AnalysisSession
   }, [])
   const removeFocus = useCallback((cid: string) => setFocus((f) => f.filter((c) => c.cid !== cid)), [])
   const clearFocus = useCallback(() => setFocus([]), [])
+  // Examples tab hands a prompt to Console via this one-shot signal.
+  const [prefill, setPrefill] = useState<{ text: string; nonce: number } | null>(null)
+  const prefillNonceRef = useRef(0)
   const datasets = session.datasets ?? []
   const ready = datasets.filter((d) => d.status === 'ready' || d.status === 'needs_review')
 
@@ -259,12 +270,12 @@ function Workbench({ session, onChange, onShowHelp }: { session: AnalysisSession
           </div>
         </div>
         <div className="px-3 pt-2 flex gap-1 border-b border-zinc-800">
-          {(['metrics', 'chat', 'compare'] as Tab[]).map((t) => (
+          {(['metrics', 'chat', 'compare', 'examples'] as Tab[]).map((t) => (
             <button key={t} onClick={() => setTab(t)}
               className={`px-3 py-1.5 text-xs rounded-t-lg capitalize ${
                 tab === t ? 'bg-zinc-800 text-emerald-400' : 'text-zinc-500 hover:text-zinc-300'
               }`}>
-              {t === 'metrics' ? 'Metrics' : t === 'chat' ? 'Analyst Chat' : 'Compare'}
+              {t === 'metrics' ? 'Metrics' : t === 'chat' ? 'Analyst Chat' : t === 'compare' ? 'Compare' : 'Examples'}
             </button>
           ))}
         </div>
@@ -272,10 +283,38 @@ function Workbench({ session, onChange, onShowHelp }: { session: AnalysisSession
           {tab === 'metrics' && <MetricsTab datasets={ready} onFocus={addFocus} />}
           {tab === 'chat' && (
             <Console session={session} onTurn={onChange} focus={focus}
-              onRemoveFocus={removeFocus} onClearFocus={clearFocus} />
+              onRemoveFocus={removeFocus} onClearFocus={clearFocus} prefill={prefill} />
           )}
           {tab === 'compare' && <CompareTab session={session} onChange={onChange} />}
+          {tab === 'examples' && (
+            <ExamplesTab items={ANALYSIS_EXAMPLES} onUse={(ex) => {
+              setTab('chat')
+              setPrefill({ text: ex, nonce: ++prefillNonceRef.current })
+            }} />
+          )}
         </div>
+      </div>
+    </div>
+  )
+}
+
+// --------------------------------------------------------------------------- //
+// ExamplesTab — browsable example prompts. Click to prefill the chat composer.
+// --------------------------------------------------------------------------- //
+
+function ExamplesTab({ items, onUse }: { items: string[]; onUse: (text: string) => void }) {
+  return (
+    <div className="p-4">
+      <p className="text-sm text-zinc-500 mb-3">Click one to drop it into the composer, then edit or send it as-is.</p>
+      <div className="space-y-1.5">
+        {items.map((ex) => (
+          <button key={ex}
+            onClick={() => onUse(ex)}
+            className="block w-full text-left text-[13px] text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/60 rounded-lg px-3 py-2 transition-colors"
+          >
+            {ex}
+          </button>
+        ))}
       </div>
     </div>
   )
@@ -738,9 +777,10 @@ function CompareTab({ session, onChange }: { session: AnalysisSession; onChange:
 // Console — grounded chat with citation-aware observations.
 // --------------------------------------------------------------------------- //
 
-function Console({ session, onTurn, focus, onRemoveFocus, onClearFocus }: {
+function Console({ session, onTurn, focus, onRemoveFocus, onClearFocus, prefill }: {
   session: AnalysisSession; onTurn: () => void
   focus: FocusChip[]; onRemoveFocus: (cid: string) => void; onClearFocus: () => void
+  prefill?: { text: string; nonce: number } | null
 }) {
   const [messages, setMessages] = useState<AnalysisMessage[]>(session.messages ?? [])
   const [input, setInput] = useState('')
@@ -751,9 +791,19 @@ function Console({ session, onTurn, focus, onRemoveFocus, onClearFocus }: {
   const [applying, setApplying] = useState<string | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const abortRef = useRef<AbortController | null>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => () => abortRef.current?.abort(), [])
   useEffect(() => { scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight }) }, [messages, status])
+
+  // Examples tab hands off a prompt here — fill the composer and focus it,
+  // never auto-send (avoids firing a grounded turn against empty/no data).
+  useEffect(() => {
+    if (!prefill) return
+    setInput(prefill.text)
+    textareaRef.current?.focus()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefill?.nonce])
 
   const send = async () => {
     const text = input.trim()
@@ -940,7 +990,7 @@ function Console({ session, onTurn, focus, onRemoveFocus, onClearFocus }: {
           </div>
         )}
         <div className="flex gap-2">
-          <textarea value={input} onChange={(e) => setInput(e.target.value)}
+          <textarea ref={textareaRef} value={input} onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send() } }}
             placeholder={focus.length ? 'Ask about the highlighted records…' : 'Ask anything about your data…'} rows={2}
             className="flex-1 resize-none rounded-lg bg-zinc-900 border border-zinc-700 px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-emerald-500" />
