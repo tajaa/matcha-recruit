@@ -1,4 +1,4 @@
-"""Risk Pilot deterministic analysis engine.
+"""Analysis Pilot deterministic analysis engine.
 
 A pluggable registry of analyzer packs (volatility, financial ratios, insurance
 loss, inventory) over a single normalized data model, plus CSV/XLSX/document

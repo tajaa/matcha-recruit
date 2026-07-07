@@ -1,11 +1,11 @@
-"""Risk Pilot request models (Pydantic v2)."""
+"""Analysis Pilot request models (Pydantic v2)."""
 
 from typing import Literal, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
 
-from app.matcha.services.risk_analyzers.mapping import CANONICAL_ROLES
+from app.matcha.services.analysis_packs.mapping import CANONICAL_ROLES
 
 # Sentinels a caller may use to clear a heuristic role assignment.
 _ROLE_CLEARERS = {"", "none", "ignore"}
@@ -64,6 +64,9 @@ class ComparisonCreate(BaseModel):
 
 class ChatIn(BaseModel):
     message: str = Field(..., min_length=1, max_length=5000)
+    # Highlighted-record cids the turn should focus on (validated against the
+    # corpus index server-side; unknown ids are dropped, not errored).
+    focus: Optional[list[str]] = Field(None, max_length=10)
 
 
 class ReportIn(BaseModel):

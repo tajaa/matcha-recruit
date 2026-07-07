@@ -1,4 +1,4 @@
-"""Unit tests for the Risk Pilot deterministic engine (services/risk_analyzers).
+"""Unit tests for the Analysis Pilot deterministic engine (services/analysis_packs).
 
 Fast, pure, no DB / no Gemini / no app boot. The engine is the trust anchor of
 the feature — every number the AI is allowed to cite is computed here — so the
@@ -8,8 +8,8 @@ comparison, and the corpus contract are all pinned to hand-verified values.
 
 import math
 
-from app.matcha.services import risk_analyzers as R
-from app.matcha.services.risk_analyzers import base as B
+from app.matcha.services import analysis_packs as R
+from app.matcha.services.analysis_packs import base as B
 
 
 # --- pure math --------------------------------------------------------------

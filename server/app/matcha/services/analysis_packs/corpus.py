@@ -1,4 +1,4 @@
-"""Grounding corpus assembly for Risk Pilot.
+"""Grounding corpus assembly for Analysis Pilot.
 
 Flattens the session's datasets (each with its computed per-pack metrics) and
 saved comparisons into the ``{sources, index, notes}`` contract shared by every
@@ -11,7 +11,7 @@ Pure (no DB) — datasets/comparisons are already-loaded dicts.
 
 from __future__ import annotations
 
-from .base import slug, fmt_num
+from .base import slug, fmt_num, to_float
 
 _ANALYZABLE = ("ready", "needs_review")
 
@@ -131,3 +131,44 @@ def build_corpus(datasets: list[dict], comparisons: list[dict] | None = None) ->
         for r in s["records"]:
             index[r["cid"]] = {**r, "source": key, "source_label": s["label"]}
     return {"sources": sources, "index": index, "notes": notes}
+
+
+def validate_edit_proposals(proposals, datasets: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Anti-hallucination gate for chat-proposed extraction corrections — the
+    sibling of ``legal_defense.validate_citations``. Keep only proposals that
+    target a REAL figure: a pdf dataset in this session whose stored extraction
+    has exactly that line-item label and period, with a finite proposed value.
+    The AI only proposes; edits take effect solely through the user-confirmed
+    dataset PATCH → recompute path. Pure (unit-tested). Returns
+    ``(clean, dropped)``."""
+    by_id: dict[str, dict] = {}
+    for d in datasets or []:
+        if d.get("source_kind") == "pdf" and isinstance(d.get("extraction"), dict):
+            by_id[str(d.get("id"))] = d["extraction"]
+    clean, dropped = [], []
+    for p in proposals or []:
+        if not isinstance(p, dict):
+            continue
+        ds_id = str(p.get("dataset_id") or "")
+        label = str(p.get("label") or "").strip()
+        period = str(p.get("period") or "").strip()
+        proposed = to_float(p.get("proposed_value"))
+        ext = by_id.get(ds_id)
+        item = next((it for it in (ext.get("line_items") or []) if it.get("label") == label), None) \
+            if ext else None
+        periods = [str(x) for x in (ext.get("periods") or [])] if ext else []
+        if item is None or period not in periods or proposed is None:
+            dropped.append({k: p.get(k) for k in ("dataset_id", "label", "period", "proposed_value")})
+            continue
+        idx = periods.index(period)
+        vals = item.get("values") or []
+        current = vals[idx] if idx < len(vals) else None
+        clean.append({
+            "dataset_id": ds_id,
+            "label": label,
+            "period": period,
+            "current_value": current,
+            "proposed_value": proposed,
+            "reason": str(p.get("reason") or "").strip()[:300],
+        })
+    return clean, dropped

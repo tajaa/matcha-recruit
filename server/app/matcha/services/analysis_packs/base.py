@@ -1,4 +1,4 @@
-"""Risk Pilot analyzer engine — shared base: the pluggable pack registry, the
+"""Analysis Pilot analyzer engine — shared base: the pluggable pack registry, the
 unified normalized-data contract, and the pure stdlib math helpers every pack
 builds on.
 
@@ -294,11 +294,15 @@ def fmt_ratio(v, digits: int = 2) -> str:
 
 def _load_analyzers() -> list:
     # Lazy imports keep the pack modules free to import base without a cycle.
+    # `general` registers FIRST: its descriptive records (latest/trend/extremes)
+    # are the highest-value citations for generic questions and should survive
+    # the corpus per-source cap preferentially.
+    from .general import ANALYZER as general
     from .volatility import ANALYZER as volatility
     from .financial_ratios import ANALYZER as financial_ratios
     from .insurance import ANALYZER as insurance
     from .inventory import ANALYZER as inventory
-    return [volatility, financial_ratios, insurance, inventory]
+    return [general, volatility, financial_ratios, insurance, inventory]
 
 
 def run_analyzers(normalized: dict, config: dict | None, ds_key: str) -> dict:

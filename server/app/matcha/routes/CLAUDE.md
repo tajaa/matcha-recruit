@@ -21,7 +21,7 @@
 | `accommodations.py` | `/accommodations` | ADA accommodation cases (1,175 lines) |
 | `discipline.py` | `/discipline` | Progressive discipline workflow + signatures |
 | `risk_assessment.py` | `/risk` | Risk-assessment dashboard data (849 lines) |
-| `risk_pilot.py` | `/risk-pilot` | Risk Pilot — bring-your-own-data volatility & risk analysis (upload CSV/XLSX/PDF → deterministic `services/risk_analyzers` metrics → grounded SSE chat → analyst PDF). Company-scoped; `require_feature("risk_pilot")` |
+| `analysis_pilot.py` | `/analysis-pilot` | Analysis Pilot — general-purpose bring-your-own-data analysis in a chat UI (upload CSV/XLSX/PDF → deterministic `services/analysis_packs` metrics incl. volatility/risk, financial, insurance, inventory, general stats → grounded SSE chat with highlight-to-chat + proposed extraction corrections → analyst PDF). Company-scoped; `require_feature("analysis_pilot")` |
 | `pre_termination.py` | `/pre-termination` | Pre-term review packets (985 lines) |
 | `separation.py` | `/separation` | Separation agreement workflow |
 | `flight_risk.py` | `/flight-risk` | Flight-risk scoring per employee |

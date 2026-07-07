@@ -2,14 +2,14 @@
 Pilot engine — each test reproduces a bug that was CONFIRMED by execution
 during review and asserts the corrected behavior.
 
-Pure engine only (no DB / no Gemini / no app boot), like test_risk_analyzers.
+Pure engine only (no DB / no Gemini / no app boot), like test_analysis_packs.
 """
 
 import math
 
-from app.matcha.services import risk_analyzers as R
-from app.matcha.services.risk_analyzers import base as B
-from app.matcha.services.risk_analyzers import corpus as C
+from app.matcha.services import analysis_packs as R
+from app.matcha.services.analysis_packs import base as B
+from app.matcha.services.analysis_packs import corpus as C
 
 
 def _norm(csv: bytes, filename: str = "x.csv", **kw):

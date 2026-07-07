@@ -22,7 +22,7 @@ from .resident_care import router as resident_care_router
 from .controls_evidence import router as controls_evidence_router
 from .legal_defense import router as legal_defense_router, public_router as legal_defense_public_router
 from .handbook_pilot import router as handbook_pilot_router
-from .risk_pilot import router as risk_pilot_router
+from .analysis_pilot import router as analysis_pilot_router
 from .limit_adequacy import router as limit_adequacy_router
 from .property import router as property_router
 from .driver_risk import router as driver_risk_router
@@ -130,8 +130,8 @@ matcha_router.include_router(legal_defense_router, prefix="/legal-pilot", tags=[
                              dependencies=[Depends(require_feature("legal_defense"))])
 matcha_router.include_router(handbook_pilot_router, prefix="/handbook-pilot", tags=["handbook-pilot"],
                              dependencies=[Depends(require_feature("handbook_pilot"))])
-matcha_router.include_router(risk_pilot_router, prefix="/risk-pilot", tags=["risk-pilot"],
-                             dependencies=[Depends(require_feature("risk_pilot"))])
+matcha_router.include_router(analysis_pilot_router, prefix="/analysis-pilot", tags=["analysis-pilot"],
+                             dependencies=[Depends(require_feature("analysis_pilot"))])
 matcha_router.include_router(limit_adequacy_router, prefix="/limit-adequacy", tags=["limit-adequacy"],
                              dependencies=[Depends(require_feature("limit_adequacy"))])
 matcha_router.include_router(property_router, prefix="/property", tags=["property"],

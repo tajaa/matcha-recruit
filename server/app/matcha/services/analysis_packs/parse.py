@@ -99,12 +99,17 @@ def _looks_like_period_index(values: list, name: str = "") -> bool:
     if non_numeric / len(filled) >= 0.5:
         return True
     nums_ = [to_float(c) for c in filled]
-    if not (all(n is not None and float(n).is_integer() for n in nums_) and len(nums_) >= 3):
+    if not all(n is not None and float(n).is_integer() for n in nums_):
         return False
     if not all(b > a for a, b in zip(nums_, nums_[1:])):
         return False
+    # An explicitly named axis (period/date/year/index) needs no minimum run —
+    # the header says what it is. Unnamed integer runs need the ≥3 + shape
+    # checks below so cumulative counts stay data series.
     if _PERIODISH_NAME.search(name or ""):
         return True
+    if len(nums_) < 3:
+        return False
     if all(1900 <= n <= 2100 for n in nums_):       # fiscal years
         return True
     if all(b - a == 1 for a, b in zip(nums_, nums_[1:])):  # row sequence

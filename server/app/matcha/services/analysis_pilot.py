@@ -1,14 +1,19 @@
-"""Risk Pilot — grounded, deterministic data & risk analysis (bring-your-own-data).
+"""Analysis Pilot — grounded, deterministic general-purpose data analysis
+(bring-your-own-data, in a chat UI).
 
-The company uploads datasets/documents (CSV, XLSX, or a 10-K / P&L / loss-run
-PDF); a **deterministic** Python engine (``risk_analyzers``) computes the risk
-metrics; a **grounded** AI narrates over the COMPUTED numbers and exports an
-analyst report. Three-stage integrity:
+The company uploads any dataset (CSV, XLSX, or a 10-K / P&L / loss-run PDF); a
+**deterministic** Python engine (``analysis_packs``) computes the metrics —
+general descriptive stats plus volatility/risk, financial-ratio, insurance, and
+inventory packs — and a **grounded** AI answers questions over the COMPUTED
+numbers and exports an analyst report. Chat turns can FOCUS on highlighted
+records, and the AI may PROPOSE corrections to document-extracted figures
+(gated by ``validate_edit_proposals``); proposals only take effect through the
+user-confirmed dataset PATCH → recompute path. Three-stage integrity:
 
   1. Extraction  — AI, ONLY for documents. Metrics are computed eagerly for the
      review UI, but until the user confirms the figures the dataset is
      ``needs_review`` and the corpus/report EXCLUDE its computed metrics
-     (``risk_analyzers.corpus`` keeps only the raw figures, marked unverified).
+     (``analysis_packs.corpus`` keeps only the raw figures, marked unverified).
   2. Computation — deterministic Python over the FULL parsed series; a
      hallucinated figure can't enter a metric.
   3. Narration   — AI, citation-gated via legal_defense.validate_citations.
@@ -25,8 +30,9 @@ from datetime import datetime, timezone
 from app.core.services.genai_client import get_genai_client
 from app.core.services.pdf import safe_url_fetcher
 
-from . import risk_analyzers as RA
-from .risk_analyzers.base import to_float
+from . import analysis_packs as packs
+from .analysis_packs.base import to_float
+from .analysis_packs.corpus import validate_edit_proposals  # pure gate, unit-tested
 from .claims_readiness import _PDF_CSS, _esc, _fmt_dt
 from .legal_defense import validate_citations, _parse_json  # pure, unit-tested
 
@@ -136,7 +142,7 @@ async def extract_dataset(data: bytes | None, text: str | None, *, is_pdf: bool,
         )
         payload = _parse_json(getattr(resp, "text", "") or "")
     except Exception as exc:  # noqa: BLE001 - degrade, never 500 the upload
-        logger.warning("risk_pilot: extraction failed for %s: %s", filename, exc)
+        logger.warning("analysis_pilot: extraction failed for %s: %s", filename, exc)
         payload = {}
     extraction = coerce_extraction(payload)
     available = bool(extraction["line_items"])
@@ -162,7 +168,7 @@ def analyze_dataset(ds_id, source_kind: str, filename: str, *, parsed=None,
     report never presents recomputed numbers as full-resolution."""
     recomputed_on_stored = False
     if extraction is not None:
-        parsed = RA.parsed_from_extraction(extraction)
+        parsed = packs.parsed_from_extraction(extraction)
     elif parsed is None and prev_normalized is not None:
         meta = prev_normalized.get("meta") or {}
         recomputed_on_stored = bool(meta.get("truncated"))
@@ -173,16 +179,16 @@ def analyze_dataset(ds_id, source_kind: str, filename: str, *, parsed=None,
             "warnings": list(meta.get("warnings") or []),
             "provenance": meta.get("provenance"),
         }
-    normalized = RA.normalize(parsed or {"series": {}}, source_kind=source_kind,
+    normalized = packs.normalize(parsed or {"series": {}}, source_kind=source_kind,
                               filename=filename, roles_override=mapping, kind_override=kind)
     if recomputed_on_stored:
         note = "Metrics recomputed on the stored, downsampled series."
         warnings = normalized["meta"].setdefault("warnings", [])
         if note not in warnings:
             warnings.append(note)
-    metrics = RA.run_analyzers(normalized, config or {}, str(ds_id))
+    metrics = packs.run_analyzers(normalized, config or {}, str(ds_id))
     counts = _shape_counts(normalized)  # full-data counts, before downsampling
-    return RA.downsample_for_storage(normalized), metrics, counts
+    return packs.downsample_for_storage(normalized), metrics, counts
 
 
 def _shape_counts(normalized: dict) -> tuple[int, int]:
@@ -196,19 +202,24 @@ def _shape_counts(normalized: dict) -> tuple[int, int]:
 # Grounded AI turn (analyst over computed metrics, not an advisor)
 # --------------------------------------------------------------------------- #
 
-_SYSTEM = """You are a data & risk analysis assistant. You ground EVERY statement in the EVIDENCE CORPUS below, which contains ONLY figures the user provided and metrics computed DETERMINISTICALLY from them — datasets (`dataset:` ids), series and document-extracted figures (`series:` / `figure:` ids), computed metrics and ratios (`metric:` / `ratio:` ids), correlations (`corr:` ids), and cross-dataset comparisons (`compare:` ids).
+_SYSTEM = """You are a general-purpose data analysis assistant. You summarize, rank, describe trends, and explain risk in the user's data — grounding EVERY statement in the EVIDENCE CORPUS below, which contains ONLY figures the user provided and metrics computed DETERMINISTICALLY from them — datasets (`dataset:` ids), series and document-extracted figures (`series:` / `figure:` ids), computed metrics and ratios (`metric:` / `ratio:` ids), correlations (`corr:` ids), and cross-dataset comparisons (`compare:` ids).
 
 HARD RULES:
 - Cite ONLY the bracketed ids that appear in the EVIDENCE CORPUS. NEVER invent a number, ratio, percentage, date, or id.
 - Every quantitative claim MUST cite the `metric:`/`ratio:`/`corr:`/`compare:`/`figure:` id it comes from. The metrics were already computed for you — do not recompute or estimate.
-- You MAY interpret and contextualize (what a volatility, VaR, loss ratio, or drawdown implies about risk), but the underlying numbers must be cited, not restated from memory.
+- Summaries, rankings, and trend descriptions are welcome — build them from the cited `metric:` records (latest / trend / peak / low / total / share) rather than raw guesswork.
+- You MAY interpret and contextualize (what a trend, volatility, VaR, loss ratio, or drawdown implies), but the underlying numbers must be cited, not restated from memory.
 - Where the corpus does not address a point, say so plainly under open_questions — never speculate or fill gaps.
-- You are an ANALYST, not an advisor: explain what the numbers say about risk and volatility; do not give investment, actuarial, or coverage advice.
+- You are an ANALYST, not an advisor: explain what the numbers say; do not give investment, actuarial, or coverage advice.
+
+FOCUSED RECORDS: when the user has highlighted records, address them specifically. If the user is questioning a DOCUMENT-EXTRACTED figure (`figure:` ids) and the conversation establishes the stored value is wrong (mis-read units, transposed periods, typo), you MAY propose a correction in `proposed_edits` — the user reviews and applies it; you never change data yourself. Only propose edits for values you can justify from the conversation; use the exact line-item label and period shown in the corpus.
 
 Return STRICT JSON ONLY (no markdown, no prose outside the JSON), shape:
 {"assistant_text": "<your precise, conversational reply>",
  "evidence_map": [{"point": "<a factual observation grounded in the corpus>", "cited_ids": ["<id>", ...]}],
- "open_questions": ["<what the data does NOT establish / what to obtain or verify>"]}"""
+ "open_questions": ["<what the data does NOT establish / what to obtain or verify>"],
+ "proposed_edits": [{"dataset_id": "<uuid of the pdf dataset>", "label": "<exact line-item label>", "period": "<exact period label>", "current_value": <number or null>, "proposed_value": <number>, "reason": "<why the stored value is wrong>"}]}
+`proposed_edits` is OPTIONAL — omit it (or use []) unless a document figure is genuinely in question."""
 
 
 def _corpus_text(corpus: dict) -> str:
@@ -227,15 +238,23 @@ def _history_text(history: list[dict]) -> str:
     return "\n".join(f"[{m['role']}] {m.get('content', '')}" for m in msgs) or "(no prior messages)"
 
 
-def _build_prompt(session: dict, corpus: dict, history: list[dict], latest: str) -> str:
+def _focus_text(focus_records: list[dict] | None) -> str:
+    if not focus_records:
+        return ""
+    lines = "\n".join(f"- [{r['cid']}] {r.get('summary', '')}" for r in focus_records)
+    return f"\nFOCUSED RECORDS (the user highlighted these — address them specifically):\n{lines}\n"
+
+
+def _build_prompt(session: dict, corpus: dict, history: list[dict], latest: str,
+                  focus_records: list[dict] | None = None) -> str:
     return f"""{_SYSTEM}
 
-ANALYSIS SESSION: {session.get('title') or 'Risk analysis'}
+ANALYSIS SESSION: {session.get('title') or 'Data analysis'}
 DOMAIN / GOAL: {session.get('domain') or 'general'} — {session.get('goal') or '(not specified)'}
 
 EVIDENCE CORPUS (the ONLY records you may cite):
 {_corpus_text(corpus)}
-
+{_focus_text(focus_records)}
 CONVERSATION (oldest first):
 {_history_text(history)}
 
@@ -244,8 +263,9 @@ LATEST USER MESSAGE:
 """
 
 
-async def _generate(session: dict, corpus: dict, history: list[dict], latest: str) -> dict:
-    prompt = _build_prompt(session, corpus, history, latest)
+async def _generate(session: dict, corpus: dict, history: list[dict], latest: str,
+                    focus_records: list[dict] | None = None) -> dict:
+    prompt = _build_prompt(session, corpus, history, latest, focus_records)
     resp = await asyncio.wait_for(
         _genai().aio.models.generate_content(model=MODEL, contents=prompt),
         timeout=_GEMINI_TIMEOUT,
@@ -255,21 +275,24 @@ async def _generate(session: dict, corpus: dict, history: list[dict], latest: st
         "assistant_text": str(data.get("assistant_text") or "").strip(),
         "evidence_map": data.get("evidence_map") or [],
         "open_questions": [str(q) for q in (data.get("open_questions") or []) if q],
+        "proposed_edits": data.get("proposed_edits") or [],
     }
 
 
-async def run_chat_turn(session: dict, corpus: dict, history: list[dict], latest: str):
+async def run_chat_turn(session: dict, corpus: dict, history: list[dict], latest: str,
+                        focus_records: list[dict] | None = None,
+                        datasets: list[dict] | None = None):
     """Async generator of SSE-shaped dicts for one grounded turn. Status tick →
-    single validated ``result`` (citation gate runs before anything reaches the
-    user)."""
+    single validated ``result`` (both gates — citations AND edit proposals —
+    run before anything reaches the user)."""
     yield {"type": "status", "message": "Analyzing your data…"}
     try:
-        result = await _generate(session, corpus, history, latest)
+        result = await _generate(session, corpus, history, latest, focus_records)
     except asyncio.TimeoutError:
         yield {"type": "error", "message": "Analysis timed out — please try again."}
         return
     except Exception:
-        logger.exception("risk_pilot: chat turn failed")
+        logger.exception("analysis_pilot: chat turn failed")
         yield {"type": "error", "message": "Analysis failed — please try again."}
         return
 
@@ -277,7 +300,14 @@ async def run_chat_turn(session: dict, corpus: dict, history: list[dict], latest
     result["evidence_map"] = clean_map
     if dropped:
         result["dropped_citations"] = dropped
-        logger.info("risk_pilot: dropped %d hallucinated citation(s)", len(dropped))
+        logger.info("analysis_pilot: dropped %d hallucinated citation(s)", len(dropped))
+
+    clean_edits, dropped_edits = validate_edit_proposals(result.get("proposed_edits"), datasets or [])
+    result["proposed_edits"] = clean_edits
+    if dropped_edits:
+        result["dropped_edits"] = dropped_edits
+        logger.info("analysis_pilot: dropped %d invalid edit proposal(s)", len(dropped_edits))
+
     if not result["assistant_text"]:
         result["assistant_text"] = (
             "I couldn't produce an analysis from the data this time. Try rephrasing, "
@@ -294,7 +324,7 @@ async def run_chat_turn(session: dict, corpus: dict, history: list[dict], latest
 
 _REPORT_CSS = """
   @page { size: Letter; margin: 18mm 15mm 16mm 15mm;
-    @bottom-left { content: "Risk Pilot analysis — confidential"; font-size:7px; color:#9ca3af; }
+    @bottom-left { content: "Analysis Pilot analysis — confidential"; font-size:7px; color:#9ca3af; }
     @bottom-right { content: "Page " counter(page) " of " counter(pages); font-size:7px; color:#9ca3af; } }
   body { padding:0; }
   .letterhead { display:flex; justify-content:space-between; align-items:flex-end;
@@ -369,7 +399,7 @@ def _dataset_section_html(d: dict) -> str:
                 f"<p class='sub'>{kind} · source {src}</p>"
                 f"<div class='narr'>Document-extracted figures are pending review. "
                 f"Computed metrics are excluded from this report until the figures "
-                f"are confirmed in Risk Pilot.</div></div>")
+                f"are confirmed in Analysis Pilot.</div></div>")
     metrics = d.get("metrics") or {}
     blocks = "".join(_block_html(b) for pk, b in metrics.items() if pk != "_warnings" and b)
     return (f"<div class='ds'><h2>Dataset — {_esc(d.get('filename'))}</h2>"
@@ -425,8 +455,8 @@ def _report_html(session: dict, corpus: dict, memo: dict, datasets: list[dict],
     return f"""<!DOCTYPE html><html><head><meta charset="utf-8">
       <style>{_PDF_CSS}{_REPORT_CSS}</style></head><body>
       <div class="letterhead">
-        <div><div class="brand">Matcha · Risk Pilot</div>
-          <h1>Data & Risk Analysis</h1><p class="sub">{_esc(session.get('title'))}</p></div>
+        <div><div class="brand">Matcha · Analysis Pilot</div>
+          <h1>Data Analysis Report</h1><p class="sub">{_esc(session.get('title'))}</p></div>
         <div class="meta" style="font-size:9px;color:#888;text-align:right">
           {f"<div style='font-weight:600;color:#1a1a2e'>{_esc(company_name)}</div>" if company_name else ""}
           <div>Generated {generated}</div></div>
@@ -464,8 +494,8 @@ async def _render_pdf(html_str: str) -> bytes:
     return await asyncio.to_thread(_r)
 
 
-async def build_risk_report(session: dict, corpus: dict, memo: dict, datasets: list[dict],
-                            comparisons: list[dict], company_name: str | None = None) -> dict:
+async def build_analysis_report(session: dict, corpus: dict, memo: dict, datasets: list[dict],
+                                comparisons: list[dict], company_name: str | None = None) -> dict:
     """Render the analyst report. Returns ``{"pdf": bytes, "citations": [...]}``."""
     html = _report_html(session, corpus, memo, datasets, comparisons, company_name)
     pdf = await _render_pdf(html)

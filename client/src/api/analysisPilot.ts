@@ -1,7 +1,8 @@
-// Risk Pilot API client — bring-your-own-data risk analysis. Sessions +
-// datasets (CSV/XLSX/PDF upload → deterministic metrics) + saved comparisons +
-// grounded chat (SSE) + analyst report PDF. The chat stream is a raw fetch
-// (api/client.ts can't stream), mirroring handbookPilot.ts / brokerPilot.ts.
+// Analysis Pilot API client — general-purpose bring-your-own-data analysis.
+// Sessions + datasets (CSV/XLSX/PDF upload → deterministic metrics) + saved
+// comparisons + grounded chat (SSE, with highlighted-record focus and
+// AI-proposed extraction corrections) + analyst report PDF. The chat stream is
+// a raw fetch (api/client.ts can't stream), mirroring handbookPilot.ts.
 import { api, authStreamHeaders } from './client'
 
 const BASE = import.meta.env.VITE_API_URL ?? '/api'
@@ -38,7 +39,7 @@ export type Extraction = {
   notes: string[]
 }
 
-export type RiskDataset = {
+export type AnalysisDataset = {
   id: string
   filename: string
   source_kind: SourceKind
@@ -62,7 +63,7 @@ export type RiskDataset = {
   warnings: string[]
 }
 
-export type RiskComparison = {
+export type AnalysisComparison = {
   id: string
   title: string
   dataset_ids: string[]
@@ -71,20 +72,35 @@ export type RiskComparison = {
   created_at: string
 }
 
-export type RiskMessageMeta = {
+// A chat-proposed correction to a document-extracted figure. The AI only
+// proposes — applying goes through the normal confirmed PATCH → recompute.
+export type ProposedEdit = {
+  dataset_id: string
+  label: string
+  period: string
+  current_value: number | null
+  proposed_value: number
+  reason: string
+}
+
+export type AnalysisMessageMeta = {
   evidence_map?: Array<{ point: string; cited_ids: string[] }>
   open_questions?: string[]
   dropped_citations?: string[]
+  proposed_edits?: ProposedEdit[]
+  dropped_edits?: unknown[]
+  // cids the user highlighted when sending (user messages only)
+  focus?: string[]
 } | null
 
-export type RiskMessage = {
+export type AnalysisMessage = {
   role: 'user' | 'assistant' | 'system'
   content: string
-  metadata: RiskMessageMeta
+  metadata: AnalysisMessageMeta
   created_at: string
 }
 
-export type RiskPacket = {
+export type AnalysisPacket = {
   id: string
   filename: string
   citations: string[] | null
@@ -92,7 +108,7 @@ export type RiskPacket = {
   generated_at: string
 }
 
-export type RiskSession = {
+export type AnalysisSession = {
   id: string
   company_id: string
   title: string
@@ -105,10 +121,10 @@ export type RiskSession = {
   message_count?: number
   dataset_count?: number
   packet_count?: number
-  messages?: RiskMessage[]
-  datasets?: RiskDataset[]
-  comparisons?: RiskComparison[]
-  packets?: RiskPacket[]
+  messages?: AnalysisMessage[]
+  datasets?: AnalysisDataset[]
+  comparisons?: AnalysisComparison[]
+  packets?: AnalysisPacket[]
   // Role vocabulary served by the backend (single source of truth).
   canonical_roles?: string[]
 }
@@ -120,21 +136,21 @@ export type MetricsPreview = {
 }
 
 // --- Sessions ---
-export const listRiskSessions = () => api.get<RiskSession[]>('/risk-pilot/pilot/sessions')
-export const createRiskSession = (body: { title: string; domain?: string; goal?: string }) =>
-  api.post<RiskSession>('/risk-pilot/pilot/sessions', body)
-export const getRiskSession = (id: string) =>
-  api.get<RiskSession>(`/risk-pilot/pilot/sessions/${id}`)
-export const updateRiskSession = (
+export const listAnalysisSessions = () => api.get<AnalysisSession[]>('/analysis-pilot/pilot/sessions')
+export const createAnalysisSession = (body: { title: string; domain?: string; goal?: string }) =>
+  api.post<AnalysisSession>('/analysis-pilot/pilot/sessions', body)
+export const getAnalysisSession = (id: string) =>
+  api.get<AnalysisSession>(`/analysis-pilot/pilot/sessions/${id}`)
+export const updateAnalysisSession = (
   id: string,
   body: { title?: string; goal?: string; status?: SessionStatus },
-) => api.patch<RiskSession>(`/risk-pilot/pilot/sessions/${id}`, body)
+) => api.patch<AnalysisSession>(`/analysis-pilot/pilot/sessions/${id}`, body)
 
 // --- Datasets ---
 export const uploadDataset = (sessionId: string, file: File) => {
   const fd = new FormData()
   fd.append('file', file)
-  return api.upload<RiskDataset>(`/risk-pilot/pilot/sessions/${sessionId}/datasets`, fd)
+  return api.upload<AnalysisDataset>(`/analysis-pilot/pilot/sessions/${sessionId}/datasets`, fd)
 }
 export const patchDataset = (
   sessionId: string,
@@ -151,27 +167,27 @@ export const patchDataset = (
     // PDF only: re-run the Gemini extraction (recovery after a failed upload).
     reextract?: boolean
   },
-) => api.patch<RiskDataset>(`/risk-pilot/pilot/sessions/${sessionId}/datasets/${datasetId}`, body)
+) => api.patch<AnalysisDataset>(`/analysis-pilot/pilot/sessions/${sessionId}/datasets/${datasetId}`, body)
 export const deleteDataset = (sessionId: string, datasetId: string) =>
-  api.delete<{ deleted: boolean }>(`/risk-pilot/pilot/sessions/${sessionId}/datasets/${datasetId}`)
+  api.delete<{ deleted: boolean }>(`/analysis-pilot/pilot/sessions/${sessionId}/datasets/${datasetId}`)
 
 // --- Comparisons ---
 export const createComparison = (
   sessionId: string,
   body: { title: string; dataset_ids: string[]; spec?: Record<string, unknown> },
-) => api.post<RiskComparison>(`/risk-pilot/pilot/sessions/${sessionId}/comparisons`, body)
+) => api.post<AnalysisComparison>(`/analysis-pilot/pilot/sessions/${sessionId}/comparisons`, body)
 
 // --- Corpus preview ---
-export const getRiskMetrics = (sessionId: string) =>
-  api.get<MetricsPreview>(`/risk-pilot/pilot/sessions/${sessionId}/metrics`)
+export const getAnalysisMetrics = (sessionId: string) =>
+  api.get<MetricsPreview>(`/analysis-pilot/pilot/sessions/${sessionId}/metrics`)
 
 // --- Report ---
 export const generateReport = (
   sessionId: string,
   body: { comparison_id?: string } = {},
-) => api.post<RiskPacket>(`/risk-pilot/pilot/sessions/${sessionId}/report`, body)
-export const downloadPacket = (sessionId: string, packet: RiskPacket) =>
-  api.download(`/risk-pilot/pilot/sessions/${sessionId}/packets/${packet.id}/download`, packet.filename)
+) => api.post<AnalysisPacket>(`/analysis-pilot/pilot/sessions/${sessionId}/report`, body)
+export const downloadPacket = (sessionId: string, packet: AnalysisPacket) =>
+  api.download(`/analysis-pilot/pilot/sessions/${sessionId}/packets/${packet.id}/download`, packet.filename)
 
 // --- Grounded chat (SSE) ---
 export type ChatResult = {
@@ -179,6 +195,8 @@ export type ChatResult = {
   evidence_map: Array<{ point: string; cited_ids: string[] }>
   open_questions: string[]
   dropped_citations?: string[]
+  proposed_edits?: ProposedEdit[]
+  dropped_edits?: unknown[]
 }
 export type ChatHandlers = {
   onStatus?: (message: string) => void
@@ -191,13 +209,14 @@ export async function streamChat(
   message: string,
   h: ChatHandlers,
   signal?: AbortSignal,
+  focus?: string[],
 ): Promise<void> {
   let res: Response
   try {
-    res = await fetch(`${BASE}/risk-pilot/pilot/sessions/${sessionId}/chat`, {
+    res = await fetch(`${BASE}/analysis-pilot/pilot/sessions/${sessionId}/chat`, {
       method: 'POST',
       headers: await authStreamHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({ message }),
+      body: JSON.stringify(focus && focus.length ? { message, focus } : { message }),
       signal,
     })
   } catch {

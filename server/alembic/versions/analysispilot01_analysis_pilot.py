@@ -1,10 +1,10 @@
-"""Risk Pilot — bring-your-own-data risk analysis (sessions, datasets, comparisons, packets, audit)
+"""Analysis Pilot — bring-your-own-data risk analysis (sessions, datasets, comparisons, packets, audit)
 
-Revision ID: riskpilot01
+Revision ID: analysispilot01
 Revises: handbookpilot01
 Create Date: 2026-07-07
 
-Backs the company-facing "Risk Pilot" feature: a company opens an analysis
+Backs the company-facing "Analysis Pilot" feature: a company opens an analysis
 session, uploads datasets (CSV / XLSX / financial-document PDF), a deterministic
 engine computes risk/volatility metrics, and a grounded AI narrates + exports an
 analyst report. Sessions persist the transcript; datasets persist to the private
@@ -21,7 +21,7 @@ at authoring time. Confirm the correct head for your environment before
 from alembic import op
 
 
-revision = "riskpilot01"
+revision = "analysispilot01"
 down_revision = "handbookpilot01"
 branch_labels = None
 depends_on = None
@@ -30,7 +30,7 @@ depends_on = None
 def upgrade():
     op.execute(
         """
-        CREATE TABLE IF NOT EXISTS risk_pilot_sessions (
+        CREATE TABLE IF NOT EXISTS analysis_pilot_sessions (
             id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
             title      VARCHAR(300) NOT NULL,
@@ -46,15 +46,15 @@ def upgrade():
         """
     )
     op.execute(
-        "CREATE INDEX IF NOT EXISTS idx_risk_pilot_sessions_company "
-        "ON risk_pilot_sessions(company_id, updated_at DESC)"
+        "CREATE INDEX IF NOT EXISTS idx_analysis_pilot_sessions_company "
+        "ON analysis_pilot_sessions(company_id, updated_at DESC)"
     )
 
     op.execute(
         """
-        CREATE TABLE IF NOT EXISTS risk_pilot_datasets (
+        CREATE TABLE IF NOT EXISTS analysis_pilot_datasets (
             id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            session_id   UUID NOT NULL REFERENCES risk_pilot_sessions(id) ON DELETE CASCADE,
+            session_id   UUID NOT NULL REFERENCES analysis_pilot_sessions(id) ON DELETE CASCADE,
             company_id   UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
             filename     VARCHAR(300) NOT NULL,
             storage_path TEXT NOT NULL,
@@ -78,15 +78,15 @@ def upgrade():
         """
     )
     op.execute(
-        "CREATE INDEX IF NOT EXISTS idx_risk_pilot_datasets_session "
-        "ON risk_pilot_datasets(session_id, created_at)"
+        "CREATE INDEX IF NOT EXISTS idx_analysis_pilot_datasets_session "
+        "ON analysis_pilot_datasets(session_id, created_at)"
     )
 
     op.execute(
         """
-        CREATE TABLE IF NOT EXISTS risk_pilot_comparisons (
+        CREATE TABLE IF NOT EXISTS analysis_pilot_comparisons (
             id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            session_id  UUID NOT NULL REFERENCES risk_pilot_sessions(id) ON DELETE CASCADE,
+            session_id  UUID NOT NULL REFERENCES analysis_pilot_sessions(id) ON DELETE CASCADE,
             company_id  UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
             title       VARCHAR(300) NOT NULL,
             dataset_ids JSONB NOT NULL,
@@ -98,15 +98,15 @@ def upgrade():
         """
     )
     op.execute(
-        "CREATE INDEX IF NOT EXISTS idx_risk_pilot_comparisons_session "
-        "ON risk_pilot_comparisons(session_id, created_at)"
+        "CREATE INDEX IF NOT EXISTS idx_analysis_pilot_comparisons_session "
+        "ON analysis_pilot_comparisons(session_id, created_at)"
     )
 
     op.execute(
         """
-        CREATE TABLE IF NOT EXISTS risk_pilot_messages (
+        CREATE TABLE IF NOT EXISTS analysis_pilot_messages (
             id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            session_id UUID NOT NULL REFERENCES risk_pilot_sessions(id) ON DELETE CASCADE,
+            session_id UUID NOT NULL REFERENCES analysis_pilot_sessions(id) ON DELETE CASCADE,
             role       VARCHAR(16) NOT NULL CHECK (role IN ('user','assistant','system')),
             content    TEXT NOT NULL,
             metadata   JSONB,
@@ -115,15 +115,15 @@ def upgrade():
         """
     )
     op.execute(
-        "CREATE INDEX IF NOT EXISTS idx_risk_pilot_messages_session "
-        "ON risk_pilot_messages(session_id, created_at)"
+        "CREATE INDEX IF NOT EXISTS idx_analysis_pilot_messages_session "
+        "ON analysis_pilot_messages(session_id, created_at)"
     )
 
     op.execute(
         """
-        CREATE TABLE IF NOT EXISTS risk_pilot_packets (
+        CREATE TABLE IF NOT EXISTS analysis_pilot_packets (
             id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            session_id   UUID NOT NULL REFERENCES risk_pilot_sessions(id) ON DELETE CASCADE,
+            session_id   UUID NOT NULL REFERENCES analysis_pilot_sessions(id) ON DELETE CASCADE,
             company_id   UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
             kind         VARCHAR(8) NOT NULL DEFAULT 'pdf',
             storage_path TEXT NOT NULL,
@@ -136,15 +136,15 @@ def upgrade():
         """
     )
     op.execute(
-        "CREATE INDEX IF NOT EXISTS idx_risk_pilot_packets_session "
-        "ON risk_pilot_packets(session_id, generated_at DESC)"
+        "CREATE INDEX IF NOT EXISTS idx_analysis_pilot_packets_session "
+        "ON analysis_pilot_packets(session_id, generated_at DESC)"
     )
 
     op.execute(
         """
-        CREATE TABLE IF NOT EXISTS risk_pilot_audit_log (
+        CREATE TABLE IF NOT EXISTS analysis_pilot_audit_log (
             id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            session_id UUID REFERENCES risk_pilot_sessions(id) ON DELETE CASCADE,
+            session_id UUID REFERENCES analysis_pilot_sessions(id) ON DELETE CASCADE,
             user_id    UUID REFERENCES users(id) ON DELETE SET NULL,
             action     VARCHAR(50) NOT NULL,
             details    JSONB,
@@ -154,15 +154,15 @@ def upgrade():
         """
     )
     op.execute(
-        "CREATE INDEX IF NOT EXISTS idx_risk_pilot_audit_session "
-        "ON risk_pilot_audit_log(session_id, created_at)"
+        "CREATE INDEX IF NOT EXISTS idx_analysis_pilot_audit_session "
+        "ON analysis_pilot_audit_log(session_id, created_at)"
     )
 
 
 def downgrade():
-    op.execute("DROP TABLE IF EXISTS risk_pilot_audit_log")
-    op.execute("DROP TABLE IF EXISTS risk_pilot_packets")
-    op.execute("DROP TABLE IF EXISTS risk_pilot_messages")
-    op.execute("DROP TABLE IF EXISTS risk_pilot_comparisons")
-    op.execute("DROP TABLE IF EXISTS risk_pilot_datasets")
-    op.execute("DROP TABLE IF EXISTS risk_pilot_sessions")
+    op.execute("DROP TABLE IF EXISTS analysis_pilot_audit_log")
+    op.execute("DROP TABLE IF EXISTS analysis_pilot_packets")
+    op.execute("DROP TABLE IF EXISTS analysis_pilot_messages")
+    op.execute("DROP TABLE IF EXISTS analysis_pilot_comparisons")
+    op.execute("DROP TABLE IF EXISTS analysis_pilot_datasets")
+    op.execute("DROP TABLE IF EXISTS analysis_pilot_sessions")

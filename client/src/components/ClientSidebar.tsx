@@ -39,7 +39,6 @@ const nav: (NavItem | NavGroup)[] = [
       { to: '/app/risk-profile', icon: Gauge, label: 'Risk Profile', feature: 'risk_profile' },
       { to: '/app/controls-evidence', icon: FileCheck, label: 'Proof of Controls', feature: 'controls_evidence' },
       { to: '/app/limit-adequacy', icon: Scale, label: 'Limit Adequacy', feature: 'limit_adequacy' },
-      { to: '/app/risk-pilot', icon: Activity, label: 'Risk Pilot', feature: 'risk_pilot' },
       { to: '/app/driver-risk', icon: Car, label: 'Driver Risk', feature: 'driver_risk' },
       { to: '/app/property', icon: Building2, label: 'Commercial Property', feature: 'property' },
     ],
@@ -71,6 +70,7 @@ const nav: (NavItem | NavGroup)[] = [
     items: [
       { to: '/work', icon: Sparkles, label: 'Matcha-Work' },
       { to: '/werk-lite', icon: MessagesSquare, label: 'Werk Lite', feature: 'werk_lite' },
+      { to: '/app/analysis-pilot', icon: Activity, label: 'Analysis Pilot', feature: 'analysis_pilot' },
     ],
   },
 ]
