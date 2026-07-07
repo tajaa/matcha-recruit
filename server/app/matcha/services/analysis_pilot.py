@@ -129,15 +129,18 @@ async def extract_dataset(data: bytes | None, text: str | None, *, is_pdf: bool,
     returns ``{"extraction": {...}, "available": bool}``."""
     payload: dict = {}
     try:
+        from google.genai import types
         if is_pdf and data:
-            from google.genai import types
             part = types.Part.from_bytes(data=data, mime_type="application/pdf")
             contents = [f"{_EXTRACT_PROMPT}\n\nFILENAME: {filename}", part]
         else:
             contents = (f"{_EXTRACT_PROMPT}\n\nFILENAME: {filename}\n\n"
                         f"DOCUMENT TEXT:\n{(text or '')[:_STORED_TEXT_CAP]}")
         resp = await asyncio.wait_for(
-            _genai().aio.models.generate_content(model=MODEL, contents=contents),
+            _genai().aio.models.generate_content(
+                model=MODEL, contents=contents,
+                config=types.GenerateContentConfig(response_mime_type="application/json"),
+            ),
             timeout=_GEMINI_TIMEOUT,
         )
         payload = _parse_json(getattr(resp, "text", "") or "")
@@ -265,9 +268,13 @@ LATEST USER MESSAGE:
 
 async def _generate(session: dict, corpus: dict, history: list[dict], latest: str,
                     focus_records: list[dict] | None = None) -> dict:
+    from google.genai import types
     prompt = _build_prompt(session, corpus, history, latest, focus_records)
     resp = await asyncio.wait_for(
-        _genai().aio.models.generate_content(model=MODEL, contents=prompt),
+        _genai().aio.models.generate_content(
+            model=MODEL, contents=prompt,
+            config=types.GenerateContentConfig(response_mime_type="application/json"),
+        ),
         timeout=_GEMINI_TIMEOUT,
     )
     data = _parse_json(getattr(resp, "text", "") or "")
