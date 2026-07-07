@@ -36,6 +36,7 @@ import DriverRisk from '../pages/app/DriverRisk'
 import Property from '../pages/app/Property'
 import LegalDefense from '../pages/app/LegalDefense'
 import HandbookPilot from '../pages/app/HandbookPilot'
+import RiskPilot from '../pages/app/RiskPilot'
 import Inbox from '../pages/app/Inbox'
 import UserSettings from '../pages/app/UserSettings'
 import Notifications from '../pages/app/Notifications'
@@ -119,6 +120,7 @@ export default function AppRoutes() {
         <Route path="property" element={<FeatureGate feature="property" label="Commercial Property"><Property /></FeatureGate>} />
         <Route path="legal-pilot" element={<FeatureGate feature="legal_defense" label="Legal Pilot"><LegalDefense /></FeatureGate>} />
         <Route path="handbook-pilot" element={<FeatureGate feature="handbook_pilot" label="Handbook Pilot"><HandbookPilot /></FeatureGate>} />
+        <Route path="risk-pilot" element={<FeatureGate feature="risk_pilot" label="Risk Pilot"><RiskPilot /></FeatureGate>} />
         <Route path="resources" element={<AppResources />} />
         <Route path="resources/templates" element={<RequireBusinessAccount><ResourcesTemplates embedded /></RequireBusinessAccount>} />
         <Route path="resources/templates/job-descriptions" element={<ResourcesJobDescriptions embedded />} />

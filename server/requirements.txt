@@ -33,3 +33,4 @@ cachetools>=5.0
 livekit-api>=0.6
 markdown>=3.5
 segno>=1.6.0
+openpyxl>=3.1

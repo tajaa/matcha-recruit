@@ -2,7 +2,7 @@ import {
   LayoutDashboard, Users, Shield, FileText, ClipboardCheck, Scale,
   AlertTriangle, BookOpen, BarChart2, Sparkles, Building2, Accessibility,
   BadgeCheck, MessageSquareWarning, Mail, Bell, Gavel, MapPin, CalendarDays,
-  GraduationCap, TrendingUp, ClipboardList, ShieldAlert, MessagesSquare, Handshake, ShieldCheck, Gauge, HeartPulse, FileCheck, Car, Link2,
+  GraduationCap, TrendingUp, ClipboardList, ShieldAlert, MessagesSquare, Handshake, ShieldCheck, Gauge, HeartPulse, FileCheck, Car, Link2, Activity,
 } from 'lucide-react'
 import SidebarShell from './SidebarShell'
 import type { NavGroup, NavItem } from './SidebarShell'
@@ -39,6 +39,7 @@ const nav: (NavItem | NavGroup)[] = [
       { to: '/app/risk-profile', icon: Gauge, label: 'Risk Profile', feature: 'risk_profile' },
       { to: '/app/controls-evidence', icon: FileCheck, label: 'Proof of Controls', feature: 'controls_evidence' },
       { to: '/app/limit-adequacy', icon: Scale, label: 'Limit Adequacy', feature: 'limit_adequacy' },
+      { to: '/app/risk-pilot', icon: Activity, label: 'Risk Pilot', feature: 'risk_pilot' },
       { to: '/app/driver-risk', icon: Car, label: 'Driver Risk', feature: 'driver_risk' },
       { to: '/app/property', icon: Building2, label: 'Commercial Property', feature: 'property' },
     ],

@@ -162,6 +162,19 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     # page. Default off; in the matcha_x TIER_REQUIRED overlay + stored True
     # at Pro/bespoke signup (like handbook_audit / credential_templates).
     "handbook_pilot": False,
+    # Risk Pilot builder (full Matcha / Pro). A company-facing, bring-your-own-
+    # data analysis engine: the business uploads datasets (CSV / XLSX / financial-
+    # document PDF — 10-Ks, P&Ls, balance sheets, loss runs, inventory), a
+    # DETERMINISTIC Python engine (services/risk_analyzers) computes volatility &
+    # risk metrics via a pluggable analyzer-pack registry (volatility/VaR/drawdown,
+    # financial ratios, insurance loss, inventory), and a GROUNDED AI narrates over
+    # the COMPUTED numbers (citation-gated by the shared legal_defense.validate_
+    # citations). Documents are Gemini-extracted then user-confirmed before they
+    # drive metrics. Saves cross-dataset comparisons; exports an analyst report PDF
+    # with inline SVG charts. Gates the /risk-pilot router + the /app/risk-pilot
+    # page. Default off; admin-toggle; NOT bundled (paid analysis asset, like
+    # legal_defense).
+    "risk_pilot": False,
     # OSHA 300/301/300A logs within IR. Default True (existing behavior for
     # every `incidents` company, unchanged) — forced False for the no-roster
     # matcha_lite_essentials config, where there's no employee roster to log
