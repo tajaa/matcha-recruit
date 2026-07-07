@@ -362,6 +362,52 @@ async def chat(session_id: UUID, body: ChatIn, request: Request,
 
 
 # --------------------------------------------------------------------------- #
+# Handbook viewer + compliance scan
+# --------------------------------------------------------------------------- #
+
+@router.get("/pilot/sessions/{session_id}/handbook")
+async def get_handbook(session_id: UUID, current_user=Depends(require_admin_or_client)):
+    """Assemble the session's drafts into a live, cataloged handbook document
+    with each draft's citations resolved to real jurisdiction requirements and a
+    deterministic covered/uncovered coverage map. Read-only + cheap (no Gemini) —
+    safe to poll on session open and after every drafting turn. No paid gate,
+    like /context."""
+    company_id = await get_client_company_id(current_user)
+    async with get_connection() as conn:
+        session = await _load_session(conn, session_id, company_id)
+        drafts = await _load_drafts(conn, session_id)
+        grounding = await hp.gather_grounding(conn, company_id, session)
+    corpus = hp.build_corpus(grounding)
+    return hp.assemble_handbook(session, drafts, corpus)
+
+
+@router.post("/pilot/sessions/{session_id}/compliance-scan")
+async def compliance_scan(session_id: UUID, request: Request,
+                          current_user=Depends(require_admin_or_client)):
+    """On-demand deep compliance grade of the in-progress drafts: reuses the
+    handbook-audit grader to produce a per-requirement covered/gap map with
+    severities. Gemini-backed, so paid-gated + rate-limited. Computed on demand,
+    not persisted (the drafts move every turn)."""
+    company_id = await get_client_company_id(current_user)
+    async with get_connection() as conn:
+        session = await _load_session(conn, session_id, company_id)
+        await _assert_paid(conn, company_id)
+        await check_rate_limit(str(company_id), "handbook_pilot_scan", 15, 3600)
+        drafts = await _load_drafts(conn, session_id)
+        grounding = await hp.gather_grounding(conn, company_id, session)
+
+    if not any(str(d.get("content") or "").strip() and str(d.get("title") or "").strip()
+               for d in drafts):
+        raise HTTPException(status_code=400, detail="Nothing to scan yet — draft a section first.")
+
+    scan = await hp.run_compliance_scan(session, drafts, grounding)
+    async with get_connection() as conn:
+        await _audit(conn, session_id, current_user, request, "compliance_scan",
+                     {"states": scan.get("states"), "gaps": len(scan.get("gaps") or [])})
+    return scan
+
+
+# --------------------------------------------------------------------------- #
 # Drafts
 # --------------------------------------------------------------------------- #
 

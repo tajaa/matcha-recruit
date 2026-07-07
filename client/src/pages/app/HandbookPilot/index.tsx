@@ -12,6 +12,7 @@ import {
 import { HowItWorksModal, type HowItWorksStep } from '../../../components/ui/HowItWorksModal'
 import { HelpHint } from '../../../components/ui/HelpHint'
 import { useShowOnce } from '../../../hooks/useShowOnce'
+import HandbookViewer from './HandbookViewer'
 
 // ---------------------------------------------------------------------------
 // Handbook Pilot — conversational, grounded handbook/policy generation.
@@ -71,6 +72,10 @@ export default function HandbookPilot() {
   const [loading, setLoading] = useState(true)
   const [showNew, setShowNew] = useState(false)
   const [showHelp, setShowHelp] = useShowOnce('handbook-pilot')
+  const [mode, setMode] = useState<'build' | 'handbook'>('build')
+  // Bumped whenever drafts may have changed (chat turn, edit, promote) or when
+  // the viewer is (re)entered, so the read-only viewer refetches its snapshot.
+  const [viewerVersion, setViewerVersion] = useState(0)
   const activeIdRef = useRef<string | null>(null)
 
   const refreshList = useCallback(async () => {
@@ -117,8 +122,14 @@ export default function HandbookPilot() {
       const full = await getPilotSession(id)
       if (activeIdRef.current === id) setActive(full)
     } catch { /* keep current view */ }
+    setViewerVersion((v) => v + 1)
     void refreshList()
   }, [refreshList])
+
+  const showHandbook = useCallback(() => {
+    setViewerVersion((v) => v + 1)  // refetch on entry so post-edit changes show
+    setMode('handbook')
+  }, [])
 
   const onCreated = useCallback(async (s: PilotSession) => {
     setShowNew(false)
@@ -184,18 +195,44 @@ export default function HandbookPilot() {
       </aside>
 
       {/* Workbench */}
-      <main className="flex-1 min-w-0 flex gap-4">
+      <main className="flex-1 min-w-0 flex flex-col gap-3">
         {active ? (
           <>
-            <div className="flex-1 min-w-0 flex flex-col border border-zinc-800 rounded-xl bg-zinc-950/40">
-              {/* key by session id → remount (and reset transcript/abort the
-                  stream) when the user switches sessions mid-turn */}
-              <Console key={active.id} session={active} onTurn={reloadActive} />
+            <div className="flex items-center justify-end shrink-0">
+              <div className="inline-flex items-center gap-1 rounded-lg border border-zinc-800 bg-zinc-950/40 p-0.5">
+                <button
+                  onClick={() => setMode('build')}
+                  className={`px-3 py-1 text-xs rounded-md inline-flex items-center gap-1.5 ${
+                    mode === 'build' ? 'bg-zinc-800 text-emerald-400' : 'text-zinc-500 hover:text-zinc-300'}`}
+                >
+                  <MessageSquarePlus className="h-3.5 w-3.5" /> Build
+                </button>
+                <button
+                  onClick={showHandbook}
+                  className={`px-3 py-1 text-xs rounded-md inline-flex items-center gap-1.5 ${
+                    mode === 'handbook' ? 'bg-zinc-800 text-emerald-400' : 'text-zinc-500 hover:text-zinc-300'}`}
+                >
+                  <BookOpen className="h-3.5 w-3.5" /> Handbook
+                </button>
+              </div>
             </div>
-            <div className="w-80 shrink-0 flex flex-col gap-4 overflow-y-auto">
-              <DraftsPanel key={active.id} session={active} onChange={reloadActive} />
-              <ContextPanel context={context} />
-            </div>
+            {mode === 'build' ? (
+              <div className="flex-1 min-h-0 flex gap-4">
+                <div className="flex-1 min-w-0 flex flex-col border border-zinc-800 rounded-xl bg-zinc-950/40">
+                  {/* key by session id → remount (and reset transcript/abort the
+                      stream) when the user switches sessions mid-turn */}
+                  <Console key={active.id} session={active} onTurn={reloadActive} />
+                </div>
+                <div className="w-80 shrink-0 flex flex-col gap-4 overflow-y-auto">
+                  <DraftsPanel key={active.id} session={active} onChange={reloadActive} />
+                  <ContextPanel context={context} />
+                </div>
+              </div>
+            ) : (
+              <div className="flex-1 min-h-0 flex">
+                <HandbookViewer key={active.id} sessionId={active.id} refreshKey={viewerVersion} />
+              </div>
+            )}
           </>
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center text-center">

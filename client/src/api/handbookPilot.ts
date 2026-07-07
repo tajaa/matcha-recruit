@@ -97,6 +97,93 @@ export const promotePilotDrafts = (
   body: { draft_ids: string[]; handbook_title?: string },
 ) => api.post<PromoteResult>(`/handbook-pilot/pilot/sessions/${sessionId}/promote`, body)
 
+// --- Handbook viewer + compliance scan ------------------------------------
+
+// A draft's citation resolved back to the corpus record it grounds in. `source`
+// is one of law | playbook | handbook | policy | profile | unknown ("No longer
+// in scope" when the requirement aged out since the draft was proposed).
+export type ResolvedCitation = {
+  cid: string
+  ref: string
+  summary: string
+  source: string
+  source_label: string
+  when: string
+}
+
+export type AssembledSection = {
+  id: string
+  kind: DraftKind
+  title: string
+  section_key: string | null
+  content: string
+  status: DraftStatus
+  promoted_ref: { kind?: string; handbook_id?: string; policy_id?: string } | null
+  citations: ResolvedCitation[]
+  law_citation_count: number
+  grounded: boolean
+}
+
+export type CoverageEntry = { cid: string; ref: string; summary: string; source_label: string }
+
+export type AssembledHandbook = {
+  sections: AssembledSection[]
+  policies: AssembledSection[]
+  coverage: { covered: CoverageEntry[]; uncovered: CoverageEntry[] }
+  summary: {
+    section_count: number
+    policy_count: number
+    grounded_sections: number
+    law_records: number
+    covered: number
+    uncovered: number
+  }
+}
+
+export type ComplianceGap = {
+  state: string
+  requirement_key: string | null
+  requirement_title: string | null
+  covered: boolean
+  severity: 'critical' | 'important' | 'recommended'
+  citation: string | null
+  what_good_looks_like: string
+  matched_section_title: string | null
+  also_covers?: string[]
+  also_jurisdictions?: Array<Record<string, unknown>>
+}
+
+export type ComplianceMatched = {
+  state: string
+  requirement_key: string | null
+  requirement_title: string | null
+  matched_section_title: string | null
+  citation: string | null
+}
+
+export type ComplianceCounts = {
+  critical: number
+  important: number
+  recommended: number
+  covered: number
+}
+
+export type ComplianceScanResult = {
+  generated_at: string
+  by_state: Record<string, { counts: ComplianceCounts; gaps: ComplianceGap[]; matched: ComplianceMatched[] }>
+  gaps: ComplianceGap[]
+  matched: ComplianceMatched[]
+  counts: ComplianceCounts
+  states: string[]
+  sections_graded: number
+}
+
+export const getPilotHandbook = (sessionId: string) =>
+  api.get<AssembledHandbook>(`/handbook-pilot/pilot/sessions/${sessionId}/handbook`)
+
+export const runComplianceScan = (sessionId: string) =>
+  api.post<ComplianceScanResult>(`/handbook-pilot/pilot/sessions/${sessionId}/compliance-scan`, {})
+
 export type ProposedDraft = {
   kind: DraftKind
   title: string

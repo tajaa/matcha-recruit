@@ -25,8 +25,10 @@ Corpus cid scheme (one flat index; the citation gate keys on it):
 """
 
 import asyncio
+import json
 import logging
 import re
+from datetime import datetime, timezone
 
 from app.core.services.genai_client import get_genai_client
 
@@ -426,3 +428,244 @@ async def run_chat_turn(session: dict, history: list[dict], corpus: dict, latest
             "or confirm the session's work locations so the applicable requirements load."
         )
     yield {"type": "result", "data": result}
+
+
+# --------------------------------------------------------------------------- #
+# Handbook viewer — assemble the session's drafts into a live, cataloged
+# document and resolve each draft's citations back to real corpus records.
+# Pure (no DB / no Gemini); the route hands it drafts + a freshly-built corpus.
+# --------------------------------------------------------------------------- #
+
+_SEVERITY_ORDER = {"critical": 0, "important": 1, "recommended": 2}
+
+
+def _coerce_cid_list(raw) -> list[str]:
+    """Drafts loaded via the route already have `citations` JSON-parsed, but be
+    defensive: accept a list or a JSON-encoded string, keep only str cids."""
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except Exception:  # noqa: BLE001
+            return []
+    if not isinstance(raw, list):
+        return []
+    return [c for c in raw if isinstance(c, str)]
+
+
+def resolve_citations(cids, index: dict) -> list[dict]:
+    """Map each stored citation cid to its human-readable corpus record. Unknown
+    cids (a requirement that aged out of scope since the draft was proposed)
+    resolve to a minimal, clearly-flagged record so the viewer never silently
+    hides a citation. Pure."""
+    index = index or {}
+    out: list[dict] = []
+    for cid in _coerce_cid_list(cids):
+        rec = index.get(cid)
+        if rec:
+            out.append({
+                "cid": cid,
+                "ref": rec.get("ref") or cid,
+                "summary": rec.get("summary") or "",
+                "source": rec.get("source") or "unknown",
+                "source_label": rec.get("source_label") or "",
+                "when": rec.get("when") or "",
+            })
+        else:
+            out.append({
+                "cid": cid,
+                "ref": cid,
+                "summary": "",
+                "source": "unknown",
+                "source_label": "No longer in scope",
+                "when": "",
+            })
+    return out
+
+
+def _assemble_draft(d: dict, index: dict) -> dict:
+    cids = _coerce_cid_list(d.get("citations"))
+    citations = resolve_citations(cids, index)
+    law_citation_count = sum(1 for c in cids if c.startswith("law:"))
+    return {
+        "id": str(d.get("id")),
+        "kind": d.get("kind"),
+        "title": d.get("title"),
+        "section_key": d.get("section_key"),
+        "content": d.get("content") or "",
+        "status": d.get("status"),
+        "promoted_ref": d.get("promoted_ref"),
+        "citations": citations,
+        "law_citation_count": law_citation_count,
+        "grounded": law_citation_count > 0,
+    }
+
+
+def assemble_handbook(session: dict, drafts: list[dict], corpus: dict) -> dict:
+    """Assemble the session's drafts into a viewable handbook: ordered handbook
+    sections, a cataloged policy list, and a deterministic session-level
+    coverage map (which applicable `law:` requirements are cited by at least one
+    draft vs not covered by any). `uncovered` are the candidate missing /
+    non-compliant elements the free live signal surfaces. Pure — the caller
+    passes drafts already ordered by created_at and a corpus from build_corpus."""
+    drafts = drafts or []
+    index = (corpus or {}).get("index") or {}
+
+    sections = [_assemble_draft(d, index) for d in drafts if d.get("kind") == "handbook_section"]
+    policies = [_assemble_draft(d, index) for d in drafts if d.get("kind") == "policy"]
+
+    # Deterministic coverage: all applicable jurisdiction requirements in the
+    # corpus vs the set of cids cited by any draft in this session.
+    cited: set[str] = set()
+    for d in drafts:
+        for c in _coerce_cid_list(d.get("citations")):
+            cited.add(c)
+
+    law_records = [(cid, rec) for cid, rec in index.items()
+                   if isinstance(cid, str) and cid.startswith("law:")]
+    covered, uncovered = [], []
+    for cid, rec in law_records:
+        entry = {
+            "cid": cid,
+            "ref": rec.get("ref") or cid,
+            "summary": rec.get("summary") or "",
+            "source_label": rec.get("source_label") or "",
+        }
+        (covered if cid in cited else uncovered).append(entry)
+
+    return {
+        "sections": sections,
+        "policies": policies,
+        "coverage": {"covered": covered, "uncovered": uncovered},
+        "summary": {
+            "section_count": len(sections),
+            "policy_count": len(policies),
+            "grounded_sections": sum(1 for s in sections if s["grounded"]),
+            "law_records": len(law_records),
+            "covered": len(covered),
+            "uncovered": len(uncovered),
+        },
+    }
+
+
+# --------------------------------------------------------------------------- #
+# Deep compliance scan — on-demand Gemini grade of the in-progress drafts,
+# reusing the handbook-audit grader (no PDF; grades in-memory draft sections).
+# --------------------------------------------------------------------------- #
+
+def _dedupe_matched(state: str, results: list[dict]) -> list[dict]:
+    """Covered results for a state, deduped by requirement key — the grader's
+    positive signal ('this topic IS addressed, in section X')."""
+    seen: set[str] = set()
+    out: list[dict] = []
+    for r in results or []:
+        if not r.get("covered"):
+            continue
+        key = r.get("requirement_key") or r.get("requirement_title") or ""
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({
+            "state": state,
+            "requirement_key": r.get("requirement_key"),
+            "requirement_title": r.get("requirement_title"),
+            "matched_section_title": r.get("matched_section_title"),
+            "citation": r.get("citation"),
+        })
+    return out
+
+
+def _sort_gaps_by_severity(gaps: list[dict]) -> list[dict]:
+    return sorted(
+        gaps,
+        key=lambda g: (_SEVERITY_ORDER.get((g.get("severity") or "").lower(), 9),
+                       g.get("requirement_title") or ""),
+    )
+
+
+def _empty_scan(sections_graded: int) -> dict:
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "by_state": {},
+        "gaps": [],
+        "matched": [],
+        "counts": {"critical": 0, "important": 0, "recommended": 0, "covered": 0},
+        "states": [],
+        "sections_graded": sections_graded,
+    }
+
+
+async def run_compliance_scan(session: dict, drafts: list[dict], grounding: dict) -> dict:
+    """Grade the session's in-progress drafts against the applicable jurisdiction
+    requirements, per state, reusing the handbook-audit grader. Returns a
+    covered/gap map: each gap carries severity + `what_good_looks_like` (the "why
+    this element isn't compliant" copy) + `matched_section_title`. Never raises —
+    a dead grader degrades to an empty scan, matching the audit module's pattern."""
+    from app.core.services.handbook_audit_service import (
+        MAX_REQUIREMENTS_PER_STATE,
+        _collapse_same_level_jurisdictions,
+        _grade_state_coverage,
+        _merge_duplicate_gaps_for_state,
+    )
+
+    drafts = drafts or []
+    industry = session.get("industry") if session else None
+
+    draft_sections: list[dict] = []
+    for d in drafts:
+        title = str(d.get("title") or "").strip()
+        content = str(d.get("content") or "").strip()
+        if title and content:
+            draft_sections.append({"title": title[:240], "excerpt": content[:600]})
+
+    requirements_map = (grounding or {}).get("requirements") or {}
+
+    prepared: list[tuple[str, list[dict]]] = []
+    for state, reqs in requirements_map.items():
+        if not state or not reqs:
+            continue
+        collapsed = _collapse_same_level_jurisdictions(reqs)[:MAX_REQUIREMENTS_PER_STATE]
+        if collapsed:
+            prepared.append((state, collapsed))
+
+    if not draft_sections or not prepared:
+        return _empty_scan(len(draft_sections))
+
+    async def _grade(state: str, reqs: list[dict]):
+        try:
+            results = await _grade_state_coverage(
+                state=state, industry=industry, requirements=reqs, sections=draft_sections,
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning("handbook_pilot: compliance grade failed for %s", state)
+            results = None
+        return state, results
+
+    graded = await asyncio.gather(*[_grade(s, r) for s, r in prepared])
+
+    by_state: dict[str, dict] = {}
+    all_gaps: list[dict] = []
+    all_matched: list[dict] = []
+    totals = {"critical": 0, "important": 0, "recommended": 0, "covered": 0}
+
+    for state, results in graded:
+        counts = {"critical": 0, "important": 0, "recommended": 0, "covered": 0}
+        if not results:
+            by_state[state] = {"counts": counts, "gaps": [], "matched": []}
+            continue
+        gaps = _merge_duplicate_gaps_for_state(state, results, counts)
+        matched = _dedupe_matched(state, results)
+        by_state[state] = {"counts": counts, "gaps": gaps, "matched": matched}
+        all_gaps.extend(gaps)
+        all_matched.extend(matched)
+        for k in totals:
+            totals[k] += counts.get(k, 0)
+
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "by_state": by_state,
+        "gaps": _sort_gaps_by_severity(all_gaps),
+        "matched": all_matched,
+        "counts": totals,
+        "states": [s for s, _ in prepared],
+        "sections_graded": len(draft_sections),
+    }
