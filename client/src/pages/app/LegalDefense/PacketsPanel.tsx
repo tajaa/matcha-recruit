@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { ChevronDown, Download, FileArchive, FileText, Share2 } from 'lucide-react'
 import { useToast } from '../../../components/ui'
+import { HelpHint } from '../../../components/ui/HelpHint'
 import { downloadPacket, type Packet } from '../../../api/legalDefense'
 import { fmtSize } from './shared'
 
@@ -36,8 +37,9 @@ export function PacketsPanel({ matterId, packets, toast, onShare }: {
 
   return (
     <div className="max-h-[45%] shrink-0 overflow-y-auto border-t border-white/[0.06]">
-      <div className="px-4 pb-1 pt-3 text-[10px] font-medium uppercase tracking-[0.15em] text-zinc-500">
+      <div className="flex items-center gap-1.5 px-4 pb-1 pt-3 text-[10px] font-medium uppercase tracking-[0.15em] text-zinc-500">
         Work product
+        <HelpHint text="The PDF is a defense memo that cites only real records; the ZIP bundles the underlying source documents. Shared links are logged for chain of custody." />
       </div>
       {latest.map((p) => (
         <PacketRow key={p.id} matterId={matterId} packet={p} toast={toast} onShare={() => onShare(p)} />

@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
-import { Loader2, Plus, Scale } from 'lucide-react'
+import { HelpCircle, Loader2, Plus, Scale } from 'lucide-react'
 import { Button, useToast } from '../../../components/ui'
+import { HowItWorksModal } from '../../../components/ui/HowItWorksModal'
+import { useShowOnce } from '../../../hooks/useShowOnce'
+import { LEGAL_PILOT_HOW_IT_WORKS_STEPS } from './howItWorksSteps'
 import {
   listMatters, getMatter, getEvidence, generatePacket, downloadPacket, streamChat,
   runResearch, listResearch,
@@ -17,6 +20,7 @@ import { NewMatterModal, ShareModal } from './modals'
 
 export default function LegalDefense() {
   const { toast } = useToast()
+  const [showHelp, setShowHelp] = useShowOnce('legal-pilot')
   const [matters, setMatters] = useState<Matter[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [matter, setMatter] = useState<Matter | null>(null)
@@ -83,13 +87,22 @@ export default function LegalDefense() {
           <h1 className="flex items-center gap-2 text-sm font-semibold text-zinc-100">
             <Scale className="h-4 w-4 text-emerald-400" /> Legal Pilot
           </h1>
-          <button
-            onClick={() => setShowNew(true)}
-            aria-label="New matter"
-            className="rounded p-1 text-zinc-400 transition-colors hover:bg-white/[0.04] hover:text-zinc-100"
-          >
-            <Plus className="h-4 w-4" />
-          </button>
+          <div className="flex items-center gap-0.5">
+            <button
+              onClick={() => setShowHelp(true)}
+              aria-label="How Legal Pilot works"
+              className="rounded p-1 text-zinc-400 transition-colors hover:bg-white/[0.04] hover:text-zinc-100"
+            >
+              <HelpCircle className="h-4 w-4" />
+            </button>
+            <button
+              onClick={() => setShowNew(true)}
+              aria-label="New matter"
+              className="rounded p-1 text-zinc-400 transition-colors hover:bg-white/[0.04] hover:text-zinc-100"
+            >
+              <Plus className="h-4 w-4" />
+            </button>
+          </div>
         </div>
         <div className={`border-b border-white/[0.06] px-4 py-2 ${LABEL}`}>Matters</div>
         <div className="flex-1 overflow-y-auto">
@@ -123,6 +136,12 @@ export default function LegalDefense() {
               records — incidents, ER, compliance, discipline, training, policies — into a packet for your attorney.
             </p>
             <Button size="sm" onClick={() => setShowNew(true)}><Plus className="h-4 w-4" /> New matter</Button>
+            <button
+              onClick={() => setShowHelp(true)}
+              className="text-xs text-zinc-500 underline-offset-2 transition-colors hover:text-zinc-300 hover:underline"
+            >
+              How Legal Pilot works
+            </button>
           </div>
         ) : !matter ? (
           <div className="flex h-full items-center justify-center">
@@ -138,6 +157,13 @@ export default function LegalDefense() {
       </div>
 
       {showNew && <NewMatterModal onClose={() => setShowNew(false)} onCreated={onCreated} />}
+      {showHelp && (
+        <HowItWorksModal
+          title="How Legal Pilot works"
+          steps={LEGAL_PILOT_HOW_IT_WORKS_STEPS}
+          onClose={() => setShowHelp(false)}
+        />
+      )}
     </div>
   )
 }

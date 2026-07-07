@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { ChevronRight } from 'lucide-react'
+import { HelpHint } from '../../../components/ui/HelpHint'
 import type { EvidencePreview } from '../../../api/legalDefense'
 import { LABEL, SOURCE_META } from './shared'
 import { RecordViewer, type ViewerTarget } from './RecordViewer'
@@ -15,7 +16,10 @@ export function EvidencePanel({ evidence }: { evidence: EvidencePreview | null }
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex items-baseline justify-between px-4 pb-2 pt-4">
-        <span className={LABEL}>Evidence</span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className={LABEL}>Evidence</span>
+          <HelpHint text="Each record here is real data from your own systems. The record ids the analyst cites in chat trace back to one of these — click any to open it." />
+        </span>
         <span className="font-mono text-[11px] tabular-nums text-zinc-500">
           {evidence ? `${evidence.total} records` : '…'}
         </span>

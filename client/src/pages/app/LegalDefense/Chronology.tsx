@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { CalendarDays } from 'lucide-react'
+import { HelpHint } from '../../../components/ui/HelpHint'
 import type { EvidencePreview } from '../../../api/legalDefense'
 import { LABEL } from './shared'
 import { RecordViewer, type ViewerTarget } from './RecordViewer'
@@ -79,6 +80,7 @@ export function Chronology({ evidence }: { evidence: EvidencePreview | null }) {
         <div className="flex items-center gap-2">
           <CalendarDays className="h-3.5 w-3.5 text-emerald-400/80" />
           <span className={LABEL}>Chronology — oldest first</span>
+          <HelpHint text="Every dated record across your systems, merged into one timeline. It mirrors the chronology section in the exported memo." />
         </div>
         {groups.map((g) => (
           <div key={g.label} className="mt-5">

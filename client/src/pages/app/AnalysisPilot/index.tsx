@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  Activity, BarChart3, Check, Download, FileSpreadsheet, FileText, GitCompare, Loader2,
+  Activity, BarChart3, Check, Download, FileSpreadsheet, FileText, GitCompare, HelpCircle, Loader2,
   MessageSquarePlus, Plus, RefreshCw, Send, Sparkles, Trash2, Wand2, X,
 } from 'lucide-react'
 import { FileUpload } from '../../../components/ui/FileUpload'
+import { HowItWorksModal, type HowItWorksStep } from '../../../components/ui/HowItWorksModal'
+import { HelpHint } from '../../../components/ui/HelpHint'
+import { useShowOnce } from '../../../hooks/useShowOnce'
 import {
   listAnalysisSessions, getAnalysisSession, createAnalysisSession, uploadDataset, patchDataset,
   deleteDataset, createComparison, generateReport, downloadPacket, streamChat,
@@ -42,11 +45,45 @@ const ROLE_OPTIONS_FALLBACK = [
   'lead_time', 'return', 'price', 'score',
 ]
 
+const HOW_IT_WORKS_STEPS: HowItWorksStep[] = [
+  {
+    icon: FileSpreadsheet,
+    title: 'Upload your data',
+    body: 'CSV, XLSX, or a financial-document PDF — a P&L, 10-K, loss run, inventory list. If a document needs AI extraction, you confirm the extracted figures before any analysis runs.',
+    detail: "A document's extraction is parsed once and never re-guessed — you're always confirming real figures, not a fresh interpretation.",
+  },
+  {
+    icon: BarChart3,
+    title: 'Deterministic metrics, computed for you',
+    body: 'Analyzer packs — general stats, volatility & risk, financial ratios, insurance loss, inventory ops — compute real numbers from your data automatically. See them all in the Metrics tab.',
+    detail: 'Every metric is computed in Python from your values, so the same data always yields the same numbers — nothing is estimated by the AI.',
+  },
+  {
+    icon: Wand2,
+    title: 'Ask the analyst — everything is cited',
+    body: 'Every number in a reply traces back to a computed record. Click any record in the Metrics tab to focus your next question on it.',
+    detail: "Anything the pilot can't trace to a real computed record is dropped from its answer, so a cited figure is always one that exists.",
+  },
+  {
+    icon: GitCompare,
+    title: 'Compare datasets',
+    body: 'Pick two or more datasets to see side-by-side deltas, percent change, and CAGR.',
+    detail: 'Select datasets in the order you want them read — the comparison runs left-to-right from your selection, so the first is the baseline.',
+  },
+  {
+    icon: Download,
+    title: 'Export the analyst report',
+    body: 'One click renders a PDF with inline charts, built from the metrics and the conversation you have already had — not regenerated from scratch.',
+    detail: 'The report is assembled from the stored computed numbers and your chat, so what you export matches exactly what you reviewed on screen.',
+  },
+]
+
 export default function AnalysisPilot() {
   const [sessions, setSessions] = useState<AnalysisSession[]>([])
   const [active, setActive] = useState<AnalysisSession | null>(null)
   const [loading, setLoading] = useState(true)
   const [showNew, setShowNew] = useState(false)
+  const [showHelp, setShowHelp] = useShowOnce('analysis-pilot')
   const activeIdRef = useRef<string | null>(null)
 
   const refreshList = useCallback(async () => {
@@ -137,7 +174,7 @@ export default function AnalysisPilot() {
 
       <main className="flex-1 min-w-0">
         {active ? (
-          <Workbench key={active.id} session={active} onChange={reloadActive} />
+          <Workbench key={active.id} session={active} onChange={reloadActive} onShowHelp={() => setShowHelp(true)} />
         ) : (
           <div className="h-full flex flex-col items-center justify-center text-center">
             <Wand2 className="h-8 w-8 text-emerald-500 mb-3" />
@@ -151,11 +188,16 @@ export default function AnalysisPilot() {
               className="mt-5 px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium inline-flex items-center gap-2">
               <Plus className="h-4 w-4" /> New analysis
             </button>
+            <button onClick={() => setShowHelp(true)}
+              className="mt-3 text-xs text-zinc-500 hover:text-emerald-400 inline-flex items-center gap-1.5">
+              <HelpCircle className="h-3.5 w-3.5" /> How Analysis Pilot works
+            </button>
           </div>
         )}
       </main>
 
       {showNew && <NewSessionModal onClose={() => setShowNew(false)} onCreated={onCreated} />}
+      {showHelp && <HowItWorksModal title="How Analysis Pilot works" steps={HOW_IT_WORKS_STEPS} onClose={() => setShowHelp(false)} />}
     </div>
   )
 }
@@ -166,7 +208,7 @@ export default function AnalysisPilot() {
 
 type Tab = 'metrics' | 'chat' | 'compare'
 
-function Workbench({ session, onChange }: { session: AnalysisSession; onChange: () => void }) {
+function Workbench({ session, onChange, onShowHelp }: { session: AnalysisSession; onChange: () => void; onShowHelp: () => void }) {
   const [tab, setTab] = useState<Tab>('metrics')
   const [reporting, setReporting] = useState(false)
   // Highlighted records for the next chat turn — adding one jumps to the chat.
@@ -204,11 +246,17 @@ function Workbench({ session, onChange }: { session: AnalysisSession; onChange: 
             <div className="text-sm font-semibold text-zinc-100 truncate">{session.title}</div>
             {session.goal && <div className="text-xs text-zinc-500 truncate">{session.goal}</div>}
           </div>
-          <button onClick={() => void genReport()} disabled={reporting || ready.length === 0}
-            className="text-xs px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white inline-flex items-center gap-1.5 shrink-0">
-            {reporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
-            Report
-          </button>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button onClick={onShowHelp} title="How Analysis Pilot works" aria-label="How Analysis Pilot works"
+              className="p-1.5 rounded-lg text-zinc-500 hover:text-emerald-400 hover:bg-zinc-800">
+              <HelpCircle className="h-4 w-4" />
+            </button>
+            <button onClick={() => void genReport()} disabled={reporting || ready.length === 0}
+              className="text-xs px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white inline-flex items-center gap-1.5">
+              {reporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+              Report
+            </button>
+          </div>
         </div>
         <div className="px-3 pt-2 flex gap-1 border-b border-zinc-800">
           {(['metrics', 'chat', 'compare'] as Tab[]).map((t) => (
@@ -328,6 +376,7 @@ function MetricsTab({ datasets, onFocus }: { datasets: AnalysisDataset[]; onFocu
               {d.status === 'needs_review' && (
                 <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400">figures pending review</span>
               )}
+              <HelpHint text="Each bracketed id (metric:/ratio:/corr:) is a citable computed record — click one to focus your next chat question on it." />
             </div>
             {d.source_kind === 'pdf' && d.extraction && d.extraction.line_items.length > 0 && (
               <div className="mb-3">
@@ -407,7 +456,10 @@ function DatasetsPanel({ session, onChange, onFocus }: {
   return (
     <div className="border border-zinc-800 rounded-xl bg-zinc-950/40">
       <div className="px-3 py-2.5 border-b border-zinc-800 flex items-center justify-between">
-        <span className="text-sm font-semibold text-zinc-200">Datasets</span>
+        <span className="text-sm font-semibold text-zinc-200 inline-flex items-center gap-1.5">
+          Datasets
+          <HelpHint text="ready = analyzed and citable · review = confirm the extracted figures first · processing = still analyzing · failed = re-upload or check the file." />
+        </span>
         {busy && <Loader2 className="h-3.5 w-3.5 animate-spin text-emerald-500" />}
       </div>
       <div className="p-2">
@@ -647,7 +699,10 @@ function CompareTab({ session, onChange }: { session: AnalysisSession; onChange:
   return (
     <div className="p-4">
       <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3 mb-5">
-        <div className="text-xs font-medium text-zinc-300 mb-2">Compare datasets (select 2+ in order)</div>
+        <div className="text-xs font-medium text-zinc-300 mb-2 inline-flex items-center gap-1.5">
+          Compare datasets (select 2+ in order)
+          <HelpHint text="Each comparison lines up shared metrics across the selected datasets and shows the delta (absolute change), % (percent change), and CAGR (compound annual growth rate)." />
+        </div>
         <div className="space-y-1 mb-3">
           {ready.map((d) => (
             <label key={d.id} className="flex items-center gap-2 text-xs text-zinc-300">
@@ -788,6 +843,7 @@ function Console({ session, onTurn, focus, onRemoveFocus, onClearFocus }: {
             “How volatile is this?”, “Compare the two periods.” Every number the pilot cites was computed
             from your data; anything it can’t trace is dropped. Click a record in the Metrics tab to focus
             the conversation on it.
+            <HelpHint text="Each reply carries a “Grounded observations” footnote — one claim per line, with “[N cited]” showing how many real computed records back it. Uncited numbers are dropped, so every figure shown is one that exists." />
           </p>
         )}
         {messages.map((m, i) => (

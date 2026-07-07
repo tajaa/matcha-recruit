@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { FileArchive, FileText, Loader2 } from 'lucide-react'
 import { Button, Toggle } from '../../../components/ui'
+import { HelpHint } from '../../../components/ui/HelpHint'
 import type { EvidencePreview, Matter, ResearchRow } from '../../../api/legalDefense'
 import { LABEL, SOURCE_META, typeLabel } from './shared'
 
@@ -49,7 +50,12 @@ export function Masthead({ matter, evidence, genKind, hasAssistant, research, on
             <span>{typeLabel(matter.matter_type)}</span>
             <span className={matter.status === 'active' ? 'text-emerald-400' : 'text-zinc-500'}>{matter.status}</span>
             <span className="normal-case text-zinc-500">window {window}</span>
-            {scope && <span className="normal-case text-zinc-500">scope {scope}</span>}
+            {scope && (
+              <span className="inline-flex items-center gap-1 normal-case text-zinc-500">
+                scope {scope}
+                <HelpHint text="Evidence is limited to this matter's location and state — only records tied to that scope are pulled in. Clear or widen the scope when creating the matter to include more." />
+              </span>
+            )}
             {deadlineText && <span className={`normal-case ${deadlineTone}`}>{deadlineText}</span>}
             {matter.counsel_directed && (
               <span className="text-zinc-400">at direction of counsel{matter.counsel_name ? ` · ${matter.counsel_name}` : ''}</span>

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  BookOpen, CheckCircle2, FileText, Loader2, Plus, Sparkles, Send, Trash2, Wand2,
+  BookOpen, CheckCircle2, FileCheck, FileText, HelpCircle, Loader2, MessageSquarePlus,
+  Pencil, Plus, Scale, Send, Sparkles, Trash2, Wand2,
 } from 'lucide-react'
 import {
   listPilotSessions, getPilotSession, getPilotContext, createPilotSession,
@@ -8,6 +9,9 @@ import {
   type PilotSession, type PilotDraft, type PilotMessage, type ContextPreview,
   type PromoteResult,
 } from '../../../api/handbookPilot'
+import { HowItWorksModal, type HowItWorksStep } from '../../../components/ui/HowItWorksModal'
+import { HelpHint } from '../../../components/ui/HelpHint'
+import { useShowOnce } from '../../../hooks/useShowOnce'
 
 // ---------------------------------------------------------------------------
 // Handbook Pilot — conversational, grounded handbook/policy generation.
@@ -16,12 +20,49 @@ import {
 // promote into the real handbooks / policies tables.
 // ---------------------------------------------------------------------------
 
+const HOW_IT_WORKS_STEPS: HowItWorksStep[] = [
+  {
+    icon: MessageSquarePlus,
+    title: 'Start a session',
+    body: 'Describe what you need — a new policy, or expanding an existing handbook section.',
+    detail: 'Give it a clear goal up front and the first draft lands closer to final.',
+  },
+  {
+    icon: Scale,
+    title: 'Grounded on YOUR jurisdictions',
+    body: 'Pulls the actual jurisdiction requirements for your work locations, your industry baseline, '
+      + 'and your existing handbook/policies — not generic boilerplate.',
+    detail: 'Change where you operate and the grounding changes with you — no stale template library to maintain.',
+  },
+  {
+    icon: FileCheck,
+    title: 'Cited drafts',
+    body: 'Every enforceable clause traces to a real jurisdiction id; anything uncited is dropped '
+      + 'automatically before you ever see it.',
+    detail: 'A citation check runs on every turn — invented legal references never reach the draft.',
+  },
+  {
+    icon: Pencil,
+    title: 'Review & edit',
+    body: 'Tweak the drafted language before anything becomes real.',
+    detail: 'Edit the title and body inline; nothing is committed while you refine it.',
+  },
+  {
+    icon: CheckCircle2,
+    title: 'Promote',
+    body: 'Turns a reviewed draft into a real draft handbook section or standalone policy — it never '
+      + 'auto-publishes; you finish publishing through the normal Handbooks/Policies flow.',
+    detail: 'Promoted items land as drafts in Handbooks/Policies, ready for your normal review-and-publish step.',
+  },
+]
+
 export default function HandbookPilot() {
   const [sessions, setSessions] = useState<PilotSession[]>([])
   const [active, setActive] = useState<PilotSession | null>(null)
   const [context, setContext] = useState<ContextPreview | null>(null)
   const [loading, setLoading] = useState(true)
   const [showNew, setShowNew] = useState(false)
+  const [showHelp, setShowHelp] = useShowOnce('handbook-pilot')
   const activeIdRef = useRef<string | null>(null)
 
   const refreshList = useCallback(async () => {
@@ -90,17 +131,27 @@ export default function HandbookPilot() {
       {/* Sessions rail */}
       <aside className="w-64 shrink-0 flex flex-col border border-zinc-800 rounded-xl bg-zinc-950/40">
         <div className="p-3 border-b border-zinc-800 flex items-center justify-between">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
             <Sparkles className="h-4 w-4 text-emerald-500" />
             <span className="text-sm font-semibold text-zinc-200">Handbook Pilot</span>
+            <HelpHint text="Drafts cite real jurisdiction requirements for your work locations — nothing is generated from generic templates." />
           </div>
-          <button
-            onClick={() => setShowNew(true)}
-            className="p-1.5 rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-emerald-400"
-            title="New session"
-          >
-            <Plus className="h-4 w-4" />
-          </button>
+          <div className="flex items-center gap-0.5">
+            <button
+              onClick={() => setShowHelp(true)}
+              className="p-1.5 rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-emerald-400"
+              title="How it works"
+            >
+              <HelpCircle className="h-4 w-4" />
+            </button>
+            <button
+              onClick={() => setShowNew(true)}
+              className="p-1.5 rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-emerald-400"
+              title="New session"
+            >
+              <Plus className="h-4 w-4" />
+            </button>
+          </div>
         </div>
         <div className="flex-1 overflow-y-auto p-2 space-y-1">
           {sessions.length === 0 && (
@@ -158,6 +209,13 @@ export default function HandbookPilot() {
       </main>
 
       {showNew && <NewSessionModal onClose={() => setShowNew(false)} onCreated={onCreated} />}
+      {showHelp && (
+        <HowItWorksModal
+          title="How Handbook Pilot works"
+          steps={HOW_IT_WORKS_STEPS}
+          onClose={() => setShowHelp(false)}
+        />
+      )}
     </div>
   )
 }
@@ -309,14 +367,20 @@ function DraftsPanel({ session, onChange }: { session: PilotSession; onChange: (
       <div className="px-3 py-2.5 border-b border-zinc-800 flex items-center justify-between">
         <span className="text-sm font-semibold text-zinc-200">Drafts</span>
         {pending.length > 0 && (
-          <button
-            onClick={() => void promote()}
-            disabled={selected.size === 0 || busy}
-            className="text-xs px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white inline-flex items-center gap-1"
-          >
-            {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <CheckCircle2 className="h-3 w-3" />}
-            Promote{selected.size ? ` (${selected.size})` : ''}
-          </button>
+          <div className="flex items-center gap-1.5">
+            <HelpHint
+              text="Promote creates a new draft handbook section or policy for you to finish publishing — it never goes live automatically."
+              align="right"
+            />
+            <button
+              onClick={() => void promote()}
+              disabled={selected.size === 0 || busy}
+              className="text-xs px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white inline-flex items-center gap-1"
+            >
+              {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <CheckCircle2 className="h-3 w-3" />}
+              Promote{selected.size ? ` (${selected.size})` : ''}
+            </button>
+          </div>
         )}
       </div>
       <div className="p-2 space-y-2 max-h-[42vh] overflow-y-auto">
@@ -393,7 +457,22 @@ function DraftRow({ draft, selected, onToggle, onChange }: {
           <button onClick={() => void save()} disabled={busy} className="text-xs px-2 py-1 rounded bg-emerald-600 hover:bg-emerald-500 text-white">Save</button>
         </div>
       ) : (
-        <p className="px-2.5 pb-2.5 text-[11px] text-zinc-500 line-clamp-3 whitespace-pre-wrap">{draft.content}</p>
+        <div className="px-2.5 pb-2.5">
+          <p className="text-[11px] text-zinc-500 line-clamp-3 whitespace-pre-wrap">{draft.content}</p>
+          {draft.citations && draft.citations.length > 0 && (
+            <div className="mt-2 flex flex-wrap items-center gap-1">
+              <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wide text-zinc-600">
+                Cited
+                <HelpHint text="Each cited id links to a real jurisdiction requirement your company is actually subject to." />
+              </span>
+              {draft.citations.map((c) => (
+                <span key={c} className="px-1.5 py-0.5 rounded bg-zinc-800/60 border border-zinc-700/50 text-[10px] font-mono text-zinc-400">
+                  {c}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
       )}
     </div>
   )
