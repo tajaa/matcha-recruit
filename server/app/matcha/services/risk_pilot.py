@@ -5,8 +5,12 @@ PDF); a **deterministic** Python engine (``risk_analyzers``) computes the risk
 metrics; a **grounded** AI narrates over the COMPUTED numbers and exports an
 analyst report. Three-stage integrity:
 
-  1. Extraction  — AI, ONLY for documents; user confirms figures before analysis.
-  2. Computation — deterministic Python; a hallucinated figure can't enter a metric.
+  1. Extraction  — AI, ONLY for documents. Metrics are computed eagerly for the
+     review UI, but until the user confirms the figures the dataset is
+     ``needs_review`` and the corpus/report EXCLUDE its computed metrics
+     (``risk_analyzers.corpus`` keeps only the raw figures, marked unverified).
+  2. Computation — deterministic Python over the FULL parsed series; a
+     hallucinated figure can't enter a metric.
   3. Narration   — AI, citation-gated via legal_defense.validate_citations.
 
 Derived from the Broker Pilot architecture and reusing its pure gates directly.
@@ -21,6 +25,8 @@ from datetime import datetime, timezone
 from app.core.services.genai_client import get_genai_client
 from app.core.services.pdf import safe_url_fetcher
 
+from . import risk_analyzers as RA
+from .risk_analyzers.base import to_float
 from .claims_readiness import _PDF_CSS, _esc, _fmt_dt
 from .legal_defense import validate_citations, _parse_json  # pure, unit-tested
 
@@ -74,7 +80,12 @@ Rules:
 - If the document has no extractable numeric data, return empty `periods`/`line_items` and say so in `notes`.""" % (_MAX_LINE_ITEMS, _MAX_PERIODS)
 
 
-def _coerce_extraction(payload: dict) -> dict:
+def coerce_extraction(payload: dict) -> dict:
+    """Clamp an extraction (Gemini's or a user PATCH) into the stored schema.
+    Pure. Values are coerced through ``to_float`` — non-finite floats (NaN/Inf)
+    become None, since ``json.dumps`` would otherwise emit bare ``NaN`` tokens
+    that Postgres rejects on the ``::jsonb`` cast. Values arrays are capped even
+    when ``periods`` is empty (user input is otherwise unbounded)."""
     if not isinstance(payload, dict):
         payload = {}
     kind = str(payload.get("kind") or "").strip().lower()
@@ -90,9 +101,10 @@ def _coerce_extraction(payload: dict) -> dict:
         if not label:
             continue
         raw_vals = it.get("values")
-        vals = raw_vals if isinstance(raw_vals, list) else []
-        # normalize length to periods (pad/trim) so downstream alignment holds
-        vals = (list(vals) + [None] * n_periods)[:n_periods] if n_periods else list(vals)
+        vals = [to_float(v) for v in raw_vals] if isinstance(raw_vals, list) else []
+        # normalize length to periods (pad/trim) so downstream alignment holds;
+        # with no periods, still cap — never store unbounded arrays.
+        vals = (vals + [None] * n_periods)[:n_periods] if n_periods else vals[:_MAX_PERIODS]
         page = it.get("page")
         items.append({
             "label": label,
@@ -126,9 +138,58 @@ async def extract_dataset(data: bytes | None, text: str | None, *, is_pdf: bool,
     except Exception as exc:  # noqa: BLE001 - degrade, never 500 the upload
         logger.warning("risk_pilot: extraction failed for %s: %s", filename, exc)
         payload = {}
-    extraction = _coerce_extraction(payload)
+    extraction = coerce_extraction(payload)
     available = bool(extraction["line_items"])
     return {"extraction": extraction, "available": available}
+
+
+# --------------------------------------------------------------------------- #
+# Deterministic (re)analysis — normalization + analyzer packs. Pure/sync (run
+# it via asyncio.to_thread from routes: openpyxl + the N² correlation pass are
+# seconds of CPU that must not block the event loop).
+# --------------------------------------------------------------------------- #
+
+def analyze_dataset(ds_id, source_kind: str, filename: str, *, parsed=None,
+                    prev_normalized=None, extraction=None, mapping=None,
+                    config=None, kind=None) -> tuple[dict, dict, tuple[int, int]]:
+    """Build the normalized model, run every applicable analyzer pack on the
+    FULL series, then downsample what will be persisted. Returns
+    ``(storage_ready_normalized, metrics, (row_count, column_count))`` — the
+    counts describe the FULL data, not the stored sample. No DB, no Gemini.
+
+    Recompute paths reuse the STORED (possibly downsampled) series — when that
+    happens on a truncated dataset, a disclosure warning is appended so the
+    report never presents recomputed numbers as full-resolution."""
+    recomputed_on_stored = False
+    if extraction is not None:
+        parsed = RA.parsed_from_extraction(extraction)
+    elif parsed is None and prev_normalized is not None:
+        meta = prev_normalized.get("meta") or {}
+        recomputed_on_stored = bool(meta.get("truncated"))
+        parsed = {
+            "series": prev_normalized.get("series") or {},
+            "periods": prev_normalized.get("periods"),
+            "truncated": bool(meta.get("truncated")),
+            "warnings": list(meta.get("warnings") or []),
+            "provenance": meta.get("provenance"),
+        }
+    normalized = RA.normalize(parsed or {"series": {}}, source_kind=source_kind,
+                              filename=filename, roles_override=mapping, kind_override=kind)
+    if recomputed_on_stored:
+        note = "Metrics recomputed on the stored, downsampled series."
+        warnings = normalized["meta"].setdefault("warnings", [])
+        if note not in warnings:
+            warnings.append(note)
+    metrics = RA.run_analyzers(normalized, config or {}, str(ds_id))
+    counts = _shape_counts(normalized)  # full-data counts, before downsampling
+    return RA.downsample_for_storage(normalized), metrics, counts
+
+
+def _shape_counts(normalized: dict) -> tuple[int, int]:
+    series = normalized.get("series") or {}
+    periods = normalized.get("periods") or []
+    row_count = len(periods) or (max((len(v) for v in series.values()), default=0))
+    return row_count, len(series)
 
 
 # --------------------------------------------------------------------------- #
@@ -298,15 +359,21 @@ def _block_html(block: dict) -> str:
 
 
 def _dataset_section_html(d: dict) -> str:
-    metrics = d.get("metrics") or {}
-    blocks = "".join(_block_html(b) for pk, b in metrics.items() if pk != "_warnings" and b)
     norm = d.get("normalized") or {}
     kind = norm.get("kind") or "generic"
     src = (norm.get("meta") or {}).get("source_kind") or d.get("source_kind") or "?"
-    review = ("<span style='color:#b45309'> · figures pending review</span>"
-              if d.get("status") == "needs_review" else "")
+    if d.get("status") == "needs_review":
+        # Review gate: unconfirmed document extractions never present computed
+        # metrics in an exported report — only the notice that review is due.
+        return (f"<div class='ds'><h2>Dataset — {_esc(d.get('filename'))}</h2>"
+                f"<p class='sub'>{kind} · source {src}</p>"
+                f"<div class='narr'>Document-extracted figures are pending review. "
+                f"Computed metrics are excluded from this report until the figures "
+                f"are confirmed in Risk Pilot.</div></div>")
+    metrics = d.get("metrics") or {}
+    blocks = "".join(_block_html(b) for pk, b in metrics.items() if pk != "_warnings" and b)
     return (f"<div class='ds'><h2>Dataset — {_esc(d.get('filename'))}</h2>"
-            f"<p class='sub'>{kind} · source {src}{review}</p>{blocks or '<p>No metrics computed.</p>'}</div>")
+            f"<p class='sub'>{kind} · source {src}</p>{blocks or '<p>No metrics computed.</p>'}</div>")
 
 
 def _comparison_section_html(c: dict) -> str:

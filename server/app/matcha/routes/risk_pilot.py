@@ -3,17 +3,21 @@
 
 Bring-your-own-data risk analysis: the company opens a session, uploads datasets
 (CSV / XLSX / financial-document PDF), a DETERMINISTIC engine computes the risk
-metrics (`services/risk_analyzers`), and a GROUNDED AI narrates over the computed
-numbers and exports an analyst report. Documents go through a Gemini extraction
-the user CONFIRMS before analysis. Every mutation/generation/download is
-audit-logged. Tenant isolation on every route via `get_client_company_id`.
+metrics (`services/risk_analyzers`, run via asyncio.to_thread — it is seconds of
+pure CPU), and a GROUNDED AI narrates over the computed numbers and exports an
+analyst report. Documents go through a Gemini extraction the user CONFIRMS
+before the metrics enter the corpus/report (until then the dataset is
+`needs_review` and only its raw figures are citable, marked unverified).
+Every mutation/generation/download is audit-logged. Tenant isolation on every
+route via `get_client_company_id`.
 """
 
 import asyncio
 import json
 import logging
+import math
 from typing import Optional
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile
 from fastapi.responses import StreamingResponse
@@ -39,6 +43,14 @@ _MAX_UPLOAD_BYTES = 25_000_000
 _MAX_DATASETS_PER_SESSION = 20
 _EXT_TO_KIND = {".csv": "csv", ".xlsx": "xlsx", ".pdf": "pdf"}
 
+# Explicit column list — `SELECT *` would drag multi-MB `normalized` jsonb
+# through the pool on every load. Slim mode drops the heavy series values
+# (callers that only need names/roles/metrics: session GET, dataset list).
+_DATASET_COLS = ("id, session_id, company_id, filename, storage_path, source_kind, "
+                 "content_type, file_size, row_count, column_count, status, extraction, "
+                 "normalized, mapping, metrics, config, error, uploaded_by, created_at")
+_DATASET_COLS_SLIM = _DATASET_COLS.replace("normalized,", "(normalized - 'series') AS normalized,")
+
 
 # --------------------------------------------------------------------------- #
 # Helpers
@@ -51,6 +63,25 @@ def _parse_jsonb(v):
         except Exception:
             return None
     return v
+
+
+def _dump_jsonb(obj) -> Optional[str]:
+    """json.dumps that can never emit bare NaN/Infinity tokens — Postgres
+    rejects them on the ::jsonb cast, which would 500 a request from data that
+    merely contained a non-finite float."""
+    if obj is None:
+        return None
+
+    def _san(x):
+        if isinstance(x, float) and not math.isfinite(x):
+            return None
+        if isinstance(x, dict):
+            return {k: _san(v) for k, v in x.items()}
+        if isinstance(x, list):
+            return [_san(v) for v in x]
+        return x
+
+    return json.dumps(_san(obj))
 
 
 async def _audit(conn, session_id, current_user, request: Request, action: str,
@@ -82,9 +113,10 @@ async def _load_messages(conn, session_id: str) -> list[dict]:
     return [{**dict(r), "metadata": _parse_jsonb(r["metadata"])} for r in rows]
 
 
-async def _load_datasets(conn, session_id: str, *, full: bool = True) -> list[dict]:
+async def _load_datasets(conn, session_id: str, *, slim: bool = False) -> list[dict]:
+    cols = _DATASET_COLS_SLIM if slim else _DATASET_COLS
     rows = await conn.fetch(
-        "SELECT * FROM risk_pilot_datasets WHERE session_id = $1 ORDER BY created_at",
+        f"SELECT {cols} FROM risk_pilot_datasets WHERE session_id = $1 ORDER BY created_at",
         session_id,
     )
     out = []
@@ -94,6 +126,19 @@ async def _load_datasets(conn, session_id: str, *, full: bool = True) -> list[di
             d[k] = _parse_jsonb(d.get(k))
         out.append(d)
     return out
+
+
+async def _load_dataset(conn, session_id: str, dataset_id: str) -> dict:
+    row = await conn.fetchrow(
+        f"SELECT {_DATASET_COLS} FROM risk_pilot_datasets WHERE id=$1 AND session_id=$2",
+        dataset_id, session_id,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    d = dict(row)
+    for k in ("extraction", "normalized", "mapping", "metrics", "config"):
+        d[k] = _parse_jsonb(d.get(k))
+    return d
 
 
 async def _load_comparisons(conn, session_id: str) -> list[dict]:
@@ -128,10 +173,11 @@ async def _latest_memo(conn, session_id: str) -> Optional[dict]:
 
 
 def _dataset_out(d: dict) -> dict:
-    """API payload for a dataset — parsed jsonb, but the heavy series values are
-    stripped from `normalized` (the mapping UI only needs names/roles/periods)."""
-    norm = _parse_jsonb(d.get("normalized")) or {}
-    columns = list((norm.get("series") or {}).keys())
+    """API payload for a dataset — parsed jsonb, heavy series values stripped
+    (the mapping UI only needs names/roles/periods), engine warnings surfaced
+    as their own field instead of masquerading as a metrics pack."""
+    norm = d.get("normalized") or {}
+    columns = norm.get("columns") or list((norm.get("series") or {}).keys())
     slim_norm = {
         "roles": norm.get("roles") or {},
         "kind": norm.get("kind"),
@@ -139,6 +185,7 @@ def _dataset_out(d: dict) -> dict:
         "columns": columns,
         "meta": norm.get("meta") or {},
     }
+    metrics = d.get("metrics") or {}
     return {
         "id": str(d.get("id")),
         "filename": d.get("filename"),
@@ -148,40 +195,13 @@ def _dataset_out(d: dict) -> dict:
         "column_count": d.get("column_count"),
         "error": d.get("error"),
         "created_at": d.get("created_at"),
-        "extraction": _parse_jsonb(d.get("extraction")),
-        "config": _parse_jsonb(d.get("config")) or {},
-        "mapping": _parse_jsonb(d.get("mapping")) or {},
+        "extraction": d.get("extraction"),
+        "config": d.get("config") or {},
+        "mapping": d.get("mapping") or {},
         "normalized": slim_norm,
-        "metrics": _parse_jsonb(d.get("metrics")) or {},
+        "metrics": {k: v for k, v in metrics.items() if k != "_warnings"},
+        "warnings": list(metrics.get("_warnings") or []),
     }
-
-
-def _analyze(ds_id, source_kind: str, filename: str, *, parsed=None, prev_normalized=None,
-             extraction=None, mapping=None, config=None, kind=None) -> tuple[dict, dict]:
-    """Pure deterministic (re)analysis: build the normalized model and run every
-    applicable analyzer pack. No DB, no Gemini."""
-    if extraction is not None:
-        parsed = RA.parsed_from_extraction(extraction)
-    elif parsed is None and prev_normalized is not None:
-        meta = prev_normalized.get("meta") or {}
-        parsed = {
-            "series": prev_normalized.get("series") or {},
-            "periods": prev_normalized.get("periods"),
-            "truncated": bool(meta.get("truncated")),
-            "warnings": list(meta.get("warnings") or []),
-            "provenance": meta.get("provenance"),
-        }
-    normalized = RA.normalize(parsed or {"series": {}}, source_kind=source_kind,
-                              filename=filename, roles_override=mapping, kind_override=kind)
-    metrics = RA.run_analyzers(normalized, config or {}, str(ds_id))
-    return normalized, metrics
-
-
-def _shape_counts(normalized: dict) -> tuple[int, int]:
-    series = normalized.get("series") or {}
-    periods = normalized.get("periods") or []
-    row_count = len(periods) or (max((len(v) for v in series.values()), default=0))
-    return row_count, len(series)
 
 
 async def _read_upload(file: UploadFile) -> tuple[bytes, str, str]:
@@ -197,6 +217,26 @@ async def _read_upload(file: UploadFile) -> tuple[bytes, str, str]:
     if len(data) > _MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="File too large (25 MB max)")
     return data, filename, _EXT_TO_KIND[ext]
+
+
+async def _persist_dataset_analysis(ds_id, session_id: str, status: str, error,
+                                    extraction, normalized, metrics,
+                                    row_count: int, column_count: int) -> dict:
+    async with get_connection() as conn:
+        updated = await conn.fetchrow(
+            f"""UPDATE risk_pilot_datasets
+               SET status=$2, error=$3, extraction=$4::jsonb, normalized=$5::jsonb,
+                   metrics=$6::jsonb, row_count=$7, column_count=$8
+               WHERE id=$1 RETURNING {_DATASET_COLS}""",
+            ds_id, status, error,
+            _dump_jsonb(extraction), _dump_jsonb(normalized), _dump_jsonb(metrics),
+            row_count, column_count,
+        )
+        await conn.execute("UPDATE risk_pilot_sessions SET updated_at=NOW() WHERE id=$1", session_id)
+    d = dict(updated)
+    for k in ("extraction", "normalized", "mapping", "metrics", "config"):
+        d[k] = _parse_jsonb(d.get(k))
+    return d
 
 
 # --------------------------------------------------------------------------- #
@@ -240,14 +280,15 @@ async def get_session(session_id: str, current_user=Depends(require_admin_or_cli
     async with get_connection() as conn:
         session = await _load_session(conn, session_id, company_id)
         session["messages"] = await _load_messages(conn, session_id)
-        session["datasets"] = [_dataset_out(d) for d in await _load_datasets(conn, session_id)]
+        session["datasets"] = [_dataset_out(d) for d in await _load_datasets(conn, session_id, slim=True)]
         session["comparisons"] = await _load_comparisons(conn, session_id)
         packets = await conn.fetch(
-            "SELECT id, filename, scope, citations, file_size, generated_at "
+            "SELECT id, filename, citations, file_size, generated_at "
             "FROM risk_pilot_packets WHERE session_id = $1 ORDER BY generated_at DESC",
             session_id,
         )
         session["packets"] = [{**dict(p), "citations": _parse_jsonb(p["citations"])} for p in packets]
+    session["canonical_roles"] = list(RA.CANONICAL_ROLES)
     return session
 
 
@@ -318,8 +359,12 @@ async def upload_dataset(session_id: str, request: Request, file: UploadFile = F
         await _audit(conn, session_id, current_user, request, "upload",
                      {"dataset_id": str(ds_id), "filename": filename, "source_kind": source_kind})
 
-    # Analysis (connection released). Tabular is pure/fast; PDF calls Gemini.
+    # Analysis (connection released). Parsing + the analyzer packs are seconds
+    # of pure CPU — run in a worker thread, never on the event loop. The PDF
+    # branch calls Gemini; its unconfirmed metrics stay out of the corpus
+    # (`needs_review`) until the user reviews the figures.
     status, error, extraction, normalized, metrics = "ready", None, None, {}, {}
+    row_count = column_count = 0
     try:
         if source_kind == "pdf":
             result = await rp.extract_dataset(data, text, is_pdf=True, filename=filename)
@@ -327,32 +372,23 @@ async def upload_dataset(session_id: str, request: Request, file: UploadFile = F
             if not result["available"]:
                 status, error = "failed", "No numeric data could be extracted from the document."
             else:
-                normalized, metrics = _analyze(ds_id, source_kind, filename, extraction=extraction)
-                status = "needs_review"  # user confirms extracted figures before trusting metrics
+                normalized, metrics, (row_count, column_count) = await asyncio.to_thread(
+                    rp.analyze_dataset, ds_id, source_kind, filename, extraction=extraction)
+                status = "needs_review"  # figures must be confirmed before metrics count
         else:
-            parsed = RA.parse_tabular(data, source_kind)
-            normalized, metrics = _analyze(ds_id, source_kind, filename, parsed=parsed)
-            if not (normalized.get("series")):
+            parsed = await asyncio.to_thread(RA.parse_tabular, data, source_kind)
+            normalized, metrics, (row_count, column_count) = await asyncio.to_thread(
+                rp.analyze_dataset, ds_id, source_kind, filename, parsed=parsed)
+            if not normalized.get("series"):
                 status, error = "failed", "No numeric columns detected."
-    except Exception as exc:  # noqa: BLE001 - degrade, never 500 the upload
+    except Exception:  # noqa: BLE001 - degrade, never 500 the upload
         logger.exception("risk_pilot: analysis failed for %s", filename)
         status, error = "failed", "Could not analyze the file."
 
-    row_count, column_count = _shape_counts(normalized)
-    async with get_connection() as conn:
-        updated = await conn.fetchrow(
-            """UPDATE risk_pilot_datasets
-               SET status=$2, error=$3, extraction=$4::jsonb, normalized=$5::jsonb,
-                   metrics=$6::jsonb, row_count=$7, column_count=$8
-               WHERE id=$1 RETURNING *""",
-            ds_id, status, error,
-            json.dumps(extraction) if extraction else None,
-            json.dumps(normalized) if normalized else None,
-            json.dumps(metrics) if metrics else None,
-            row_count, column_count,
-        )
-        await conn.execute("UPDATE risk_pilot_sessions SET updated_at=NOW() WHERE id=$1", session_id)
-    return _dataset_out(dict(updated))
+    updated = await _persist_dataset_analysis(ds_id, session_id, status, error,
+                                              extraction, normalized, metrics,
+                                              row_count, column_count)
+    return _dataset_out(updated)
 
 
 @router.get("/pilot/sessions/{session_id}/datasets")
@@ -360,7 +396,7 @@ async def list_datasets(session_id: str, current_user=Depends(require_admin_or_c
     company_id = await get_client_company_id(current_user)
     async with get_connection() as conn:
         await _load_session(conn, session_id, company_id)
-        datasets = await _load_datasets(conn, session_id)
+        datasets = await _load_datasets(conn, session_id, slim=True)
     return [_dataset_out(d) for d in datasets]
 
 
@@ -370,58 +406,99 @@ async def patch_dataset(session_id: str, dataset_id: str, body: DatasetPatch, re
     company_id = await get_client_company_id(current_user)
     async with get_connection() as conn:
         await _load_session(conn, session_id, company_id)
-        row = await conn.fetchrow(
-            "SELECT * FROM risk_pilot_datasets WHERE id=$1 AND session_id=$2", dataset_id, session_id)
-        if not row:
-            raise HTTPException(status_code=404, detail="Dataset not found")
-        d = dict(row)
-        prev_norm = _parse_jsonb(d.get("normalized")) or {}
-        prev_mapping = _parse_jsonb(d.get("mapping")) or {}
-        prev_config = _parse_jsonb(d.get("config")) or {}
-        prev_extraction = _parse_jsonb(d.get("extraction"))
+        d = await _load_dataset(conn, session_id, dataset_id)
+
+    is_pdf = d["source_kind"] == "pdf"
+    if body.extraction is not None and not is_pdf:
+        raise HTTPException(status_code=400,
+                            detail="Extraction only applies to document (PDF) datasets.")
+    if body.reextract and not is_pdf:
+        raise HTTPException(status_code=400,
+                            detail="Re-extraction only applies to document (PDF) datasets.")
+    if body.orientation is not None and is_pdf:
+        raise HTTPException(status_code=400,
+                            detail="Orientation only applies to tabular (CSV/XLSX) datasets.")
 
     # Merge overrides.
-    mapping = {**prev_mapping, **(body.mapping or {})}
-    config = dict(prev_config)
+    mapping = {**(d.get("mapping") or {}), **(body.mapping or {})}
+    config = dict(d.get("config") or {})
     if body.column_kinds is not None:
         config["column_kinds"] = {**(config.get("column_kinds") or {}), **body.column_kinds}
     if body.periods_per_year is not None:
         config["periods_per_year"] = body.periods_per_year
     if body.risk_free is not None:
         config["risk_free"] = body.risk_free
-    extraction = body.extraction if body.extraction is not None else prev_extraction
+    if body.orientation is not None:
+        config["orientation"] = body.orientation
 
+    extraction = d.get("extraction")
+    audit_action = "confirm_mapping"
+    status = "ready"  # a confirmed/recomputed dataset is trusted
+    error = None
     try:
-        if d["source_kind"] == "pdf" and extraction is not None:
-            coerced = rp._coerce_extraction(extraction)
-            normalized, metrics = _analyze(dataset_id, d["source_kind"], d["filename"],
-                                           extraction=coerced, mapping=mapping, config=config,
-                                           kind=body.kind)
+        if body.reextract:
+            # Recovery path: transient Gemini failure at upload must not be
+            # terminal — re-run the extraction from the stored original.
+            audit_action = "reextract"
+            raw = await get_storage().download_file(d["storage_path"])
+            result = await rp.extract_dataset(raw, "", is_pdf=True, filename=d["filename"])
+            extraction = result["extraction"]
+            if not result["available"]:
+                raise HTTPException(status_code=502,
+                                    detail="Extraction failed again — try later or enter figures manually.")
+            status = "needs_review"  # fresh extraction ⇒ back through the review gate
+            normalized, metrics, counts = await asyncio.to_thread(
+                rp.analyze_dataset, dataset_id, d["source_kind"], d["filename"],
+                extraction=extraction, mapping=mapping, config=config, kind=body.kind)
+        elif body.orientation is not None:
+            # Orientation override re-parses the STORED ORIGINAL — the stored
+            # normalized series are already oriented, so they can't be reused.
+            audit_action = "reorient"
+            raw = await get_storage().download_file(d["storage_path"])
+            parsed = await asyncio.to_thread(RA.parse_tabular, raw, d["source_kind"], body.orientation)
+            normalized, metrics, counts = await asyncio.to_thread(
+                rp.analyze_dataset, dataset_id, d["source_kind"], d["filename"],
+                parsed=parsed, mapping=mapping, config=config, kind=body.kind)
+        elif is_pdf and (body.extraction is not None or extraction is not None):
+            coerced = rp.coerce_extraction(body.extraction if body.extraction is not None else extraction)
             extraction = coerced
+            normalized, metrics, counts = await asyncio.to_thread(
+                rp.analyze_dataset, dataset_id, d["source_kind"], d["filename"],
+                extraction=coerced, mapping=mapping, config=config, kind=body.kind)
         else:
-            normalized, metrics = _analyze(dataset_id, d["source_kind"], d["filename"],
-                                           prev_normalized=prev_norm, mapping=mapping,
-                                           config=config, kind=body.kind)
+            normalized, metrics, counts = await asyncio.to_thread(
+                rp.analyze_dataset, dataset_id, d["source_kind"], d["filename"],
+                prev_normalized=d.get("normalized") or {}, mapping=mapping,
+                config=config, kind=body.kind)
+    except HTTPException:
+        raise
     except Exception:  # noqa: BLE001
         logger.exception("risk_pilot: recompute failed for %s", dataset_id)
         raise HTTPException(status_code=400, detail="Could not recompute with those settings.")
 
-    row_count, column_count = _shape_counts(normalized)
-    status = "ready"  # a confirmed/recomputed dataset is trusted
+    if not normalized.get("series"):
+        # A recompute that yields nothing must NOT promote the dataset into the
+        # corpus as an empty-but-'ready' record.
+        status, error = "failed", "No numeric series after recompute."
+    row_count, column_count = counts
+
     async with get_connection() as conn:
         updated = await conn.fetchrow(
-            """UPDATE risk_pilot_datasets
-               SET status=$2, mapping=$3::jsonb, config=$4::jsonb, extraction=$5::jsonb,
-                   normalized=$6::jsonb, metrics=$7::jsonb, row_count=$8, column_count=$9, error=NULL
-               WHERE id=$1 RETURNING *""",
-            dataset_id, status, json.dumps(mapping), json.dumps(config),
-            json.dumps(extraction) if extraction else None,
-            json.dumps(normalized), json.dumps(metrics), row_count, column_count,
+            f"""UPDATE risk_pilot_datasets
+               SET status=$2, error=$3, mapping=$4::jsonb, config=$5::jsonb, extraction=$6::jsonb,
+                   normalized=$7::jsonb, metrics=$8::jsonb, row_count=$9, column_count=$10
+               WHERE id=$1 RETURNING {_DATASET_COLS}""",
+            dataset_id, status, error, _dump_jsonb(mapping), _dump_jsonb(config),
+            _dump_jsonb(extraction), _dump_jsonb(normalized), _dump_jsonb(metrics),
+            row_count, column_count,
         )
-        await _audit(conn, session_id, current_user, request, "confirm_mapping",
+        await _audit(conn, session_id, current_user, request, audit_action,
                      {"dataset_id": dataset_id})
         await conn.execute("UPDATE risk_pilot_sessions SET updated_at=NOW() WHERE id=$1", session_id)
-    return _dataset_out(dict(updated))
+    out = dict(updated)
+    for k in ("extraction", "normalized", "mapping", "metrics", "config"):
+        out[k] = _parse_jsonb(out.get(k))
+    return _dataset_out(out)
 
 
 @router.delete("/pilot/sessions/{session_id}/datasets/{dataset_id}")
@@ -444,7 +521,7 @@ async def delete_dataset(session_id: str, dataset_id: str, request: Request,
 
 
 @router.get("/pilot/sessions/{session_id}/datasets/{dataset_id}/download")
-async def download_dataset(session_id: str, dataset_id: str,
+async def download_dataset(session_id: str, dataset_id: str, request: Request,
                            current_user=Depends(require_admin_or_client)):
     company_id = await get_client_company_id(current_user)
     async with get_connection() as conn:
@@ -454,6 +531,9 @@ async def download_dataset(session_id: str, dataset_id: str,
             dataset_id, session_id)
         if not row:
             raise HTTPException(status_code=404, detail="Dataset not found")
+        # Source financial documents leaving the system must land in the trail.
+        await _audit(conn, session_id, current_user, request, "download_dataset",
+                     {"dataset_id": dataset_id, "filename": row["filename"]})
     url = get_storage().get_presigned_download_url(row["storage_path"], expires_in=900)
     if not url:
         raise HTTPException(status_code=503, detail="Storage unavailable")
@@ -472,7 +552,8 @@ async def create_comparison(session_id: str, body: ComparisonCreate, request: Re
     async with get_connection() as conn:
         await _load_session(conn, session_id, company_id)
         rows = await conn.fetch(
-            "SELECT * FROM risk_pilot_datasets WHERE session_id=$1 AND id = ANY($2::uuid[])",
+            "SELECT id, filename, metrics FROM risk_pilot_datasets "
+            "WHERE session_id=$1 AND id = ANY($2::uuid[])",
             session_id, ids)
         by_id = {str(r["id"]): dict(r) for r in rows}
         # Preserve the caller's order (the comparison axis).
@@ -481,23 +562,23 @@ async def create_comparison(session_id: str, body: ComparisonCreate, request: Re
             raise HTTPException(status_code=400, detail="Select at least two datasets in this session.")
         payload = [{"id": str(d["id"]), "label": d["filename"],
                     "metrics": _parse_jsonb(d.get("metrics")) or {}} for d in ordered]
-        result = RA.build_comparison(session_id, payload, body.spec)
+        # Mint the id first so the stored result's `compare:<id>:…` cids are
+        # keyed correctly in ONE build + ONE insert.
+        cmp_id = uuid4()
+        result = RA.build_comparison(str(cmp_id), payload)
         row = await conn.fetchrow(
-            """INSERT INTO risk_pilot_comparisons (session_id, company_id, title, dataset_ids, spec, result, created_by)
-               VALUES ($1,$2,$3,$4::jsonb,$5::jsonb,$6::jsonb,$7)
+            """INSERT INTO risk_pilot_comparisons
+                   (id, session_id, company_id, title, dataset_ids, spec, result, created_by)
+               VALUES ($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7::jsonb,$8)
                RETURNING id, title, dataset_ids, spec, result, created_at""",
-            session_id, company_id, body.title, json.dumps(ids),
-            json.dumps(body.spec or {}), json.dumps(result), getattr(current_user, "id", None),
+            cmp_id, session_id, company_id, body.title, json.dumps(ids),
+            _dump_jsonb(body.spec or {}), _dump_jsonb(result), getattr(current_user, "id", None),
         )
-        # Give the comparison its own id in the result cids so citations resolve.
-        result = RA.build_comparison(str(row["id"]), payload, body.spec)
-        await conn.execute("UPDATE risk_pilot_comparisons SET result=$2::jsonb WHERE id=$1",
-                           row["id"], json.dumps(result))
         await _audit(conn, session_id, current_user, request, "compare",
-                     {"comparison_id": str(row["id"]), "datasets": len(ordered)})
+                     {"comparison_id": str(cmp_id), "datasets": len(ordered)})
     out = dict(row)
-    out["result"] = result
-    out["dataset_ids"] = ids
+    for k in ("dataset_ids", "spec", "result"):
+        out[k] = _parse_jsonb(out.get(k))
     return out
 
 
@@ -546,6 +627,23 @@ async def chat(session_id: str, body: ChatIn, request: Request,
 
     corpus = RA.build_corpus(datasets, comparisons)
 
+    async def _persist(payload: dict):
+        """Persist the assistant turn on a fresh connection. Wrapped in
+        asyncio.shield by the caller so a client disconnect right after the
+        result is produced doesn't drop the (already-generated) turn."""
+        async with get_connection() as c2:
+            await c2.execute(
+                "INSERT INTO risk_pilot_messages (session_id, role, content, metadata) "
+                "VALUES ($1,'assistant',$2,$3)",
+                session_id, payload.get("assistant_text", ""),
+                json.dumps({
+                    "evidence_map": payload.get("evidence_map"),
+                    "open_questions": payload.get("open_questions"),
+                    "dropped_citations": payload.get("dropped_citations"),
+                }))
+            await c2.execute("UPDATE risk_pilot_sessions SET updated_at=NOW() WHERE id=$1",
+                             session_id)
+
     async def event_stream():
         result_payload = None
         try:
@@ -556,20 +654,11 @@ async def chat(session_id: str, body: ChatIn, request: Request,
         except Exception:
             logger.exception("risk_pilot: chat stream error")
             yield f"data: {json.dumps({'type': 'error', 'message': 'Analysis failed.'})}\n\n"
+        # Persist after streaming. shield() so a disconnect at this point still
+        # commits the completed turn (the Gemini tokens were already spent).
         if result_payload:
             try:
-                async with get_connection() as c2:
-                    await c2.execute(
-                        "INSERT INTO risk_pilot_messages (session_id, role, content, metadata) "
-                        "VALUES ($1,'assistant',$2,$3)",
-                        session_id, result_payload.get("assistant_text", ""),
-                        json.dumps({
-                            "evidence_map": result_payload.get("evidence_map"),
-                            "open_questions": result_payload.get("open_questions"),
-                            "dropped_citations": result_payload.get("dropped_citations"),
-                        }))
-                    await c2.execute("UPDATE risk_pilot_sessions SET updated_at=NOW() WHERE id=$1",
-                                     session_id)
+                await asyncio.shield(_persist(result_payload))
             except Exception:
                 logger.exception("risk_pilot: failed to persist assistant message")
         yield "data: [DONE]\n\n"
@@ -594,7 +683,7 @@ async def generate_report(session_id: str, body: ReportIn, request: Request,
                                 detail="Discuss your data in chat first — the report is built from that analysis.")
         datasets = await _load_datasets(conn, session_id)
         comparisons = await _load_comparisons(conn, session_id)
-        if body.scope == "comparison" and body.comparison_id:
+        if body.comparison_id:
             comparisons = [c for c in comparisons if str(c["id"]) == str(body.comparison_id)]
         company_name = await conn.fetchval("SELECT name FROM companies WHERE id=$1", company_id)
 
@@ -610,10 +699,10 @@ async def generate_report(session_id: str, body: ReportIn, request: Request,
             raise HTTPException(status_code=503, detail="Storage unavailable") from exc
         row = await conn.fetchrow(
             """INSERT INTO risk_pilot_packets
-                   (session_id, company_id, scope, storage_path, filename, citations, file_size, generated_by)
-               VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-               RETURNING id, filename, scope, citations, file_size, generated_at""",
-            session_id, company_id, body.scope, path, filename,
+                   (session_id, company_id, storage_path, filename, citations, file_size, generated_by)
+               VALUES ($1,$2,$3,$4,$5,$6,$7)
+               RETURNING id, filename, citations, file_size, generated_at""",
+            session_id, company_id, path, filename,
             json.dumps(packet["citations"]), len(packet["pdf"]), getattr(current_user, "id", None),
         )
         await _audit(conn, session_id, current_user, request, "generate_report",

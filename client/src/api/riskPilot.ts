@@ -58,6 +58,8 @@ export type RiskDataset = {
     meta: Record<string, unknown>
   }
   metrics: Record<string, MetricBlock>
+  // Analyzer-pack warnings (backend strips them out of `metrics`).
+  warnings: string[]
 }
 
 export type RiskComparison = {
@@ -85,7 +87,6 @@ export type RiskMessage = {
 export type RiskPacket = {
   id: string
   filename: string
-  scope: 'session' | 'comparison'
   citations: string[] | null
   file_size: number | null
   generated_at: string
@@ -108,6 +109,8 @@ export type RiskSession = {
   datasets?: RiskDataset[]
   comparisons?: RiskComparison[]
   packets?: RiskPacket[]
+  // Role vocabulary served by the backend (single source of truth).
+  canonical_roles?: string[]
 }
 
 export type MetricsPreview = {
@@ -143,6 +146,10 @@ export const patchDataset = (
     risk_free?: number
     kind?: string
     extraction?: Extraction
+    // Tabular only: override the layout heuristic (re-parses the stored file).
+    orientation?: 'columns' | 'rows'
+    // PDF only: re-run the Gemini extraction (recovery after a failed upload).
+    reextract?: boolean
   },
 ) => api.patch<RiskDataset>(`/risk-pilot/pilot/sessions/${sessionId}/datasets/${datasetId}`, body)
 export const deleteDataset = (sessionId: string, datasetId: string) =>
@@ -161,7 +168,7 @@ export const getRiskMetrics = (sessionId: string) =>
 // --- Report ---
 export const generateReport = (
   sessionId: string,
-  body: { scope?: 'session' | 'comparison'; comparison_id?: string } = {},
+  body: { comparison_id?: string } = {},
 ) => api.post<RiskPacket>(`/risk-pilot/pilot/sessions/${sessionId}/report`, body)
 export const downloadPacket = (sessionId: string, packet: RiskPacket) =>
   api.download(`/risk-pilot/pilot/sessions/${sessionId}/packets/${packet.id}/download`, packet.filename)

@@ -126,8 +126,6 @@ def upgrade():
             session_id   UUID NOT NULL REFERENCES risk_pilot_sessions(id) ON DELETE CASCADE,
             company_id   UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
             kind         VARCHAR(8) NOT NULL DEFAULT 'pdf',
-            scope        VARCHAR(12) NOT NULL DEFAULT 'session'
-                           CHECK (scope IN ('session','comparison')),
             storage_path TEXT NOT NULL,
             filename     VARCHAR(300) NOT NULL,
             citations    JSONB,

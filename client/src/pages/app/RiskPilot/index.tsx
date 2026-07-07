@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Activity, BarChart3, Download, FileSpreadsheet, FileText, GitCompare, Loader2,
-  Plus, Send, Sparkles, Trash2, Upload, Wand2,
+  Plus, RefreshCw, Send, Sparkles, Trash2, Wand2,
 } from 'lucide-react'
+import { FileUpload } from '../../../components/ui/FileUpload'
 import {
   listRiskSessions, getRiskSession, createRiskSession, uploadDataset, patchDataset,
   deleteDataset, createComparison, generateReport, downloadPacket, streamChat,
@@ -17,8 +18,11 @@ import {
 // report. Numbers are computed in Python — the AI can only cite, never invent.
 // ---------------------------------------------------------------------------
 
-const ROLE_OPTIONS = [
-  '', 'revenue', 'cogs', 'gross_profit', 'operating_income', 'net_income',
+// Fallback only — the authoritative role vocabulary is served by the backend
+// on the session payload (`canonical_roles`), so new analyzer packs' roles
+// appear here without a frontend change.
+const ROLE_OPTIONS_FALLBACK = [
+  'revenue', 'cogs', 'gross_profit', 'operating_income', 'net_income',
   'interest_expense', 'total_assets', 'current_assets', 'cash', 'receivables',
   'inventory_value', 'current_liabilities', 'total_liabilities', 'total_equity',
   'premium', 'exposure', 'losses_incurred', 'losses_paid', 'reserves',
@@ -272,7 +276,7 @@ function MetricsTab({ datasets }: { datasets: RiskDataset[] }) {
   return (
     <div className="p-4">
       {datasets.map((d) => {
-        const packs = Object.entries(d.metrics || {}).filter(([k]) => k !== '_warnings')
+        const packs = Object.entries(d.metrics || {})
         return (
           <div key={d.id} className="mb-6">
             <div className="flex items-center gap-2 mb-2">
@@ -298,15 +302,23 @@ function MetricsTab({ datasets }: { datasets: RiskDataset[] }) {
 
 function DatasetsPanel({ session, onChange }: { session: RiskSession; onChange: () => void }) {
   const [busy, setBusy] = useState(false)
-  const [review, setReview] = useState<RiskDataset | null>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
+  const [retrying, setRetrying] = useState<string | null>(null)
+  // Store only the id — the modal derives the dataset from the refreshed
+  // session, so a mid-review refresh can't resurrect a stale snapshot.
+  const [reviewId, setReviewId] = useState<string | null>(null)
   const datasets = session.datasets ?? []
+  const review = reviewId ? datasets.find((d) => d.id === reviewId) ?? null : null
 
-  const onFiles = async (files: FileList | null) => {
-    if (!files || files.length === 0) return
+  // Dataset deleted (or session reloaded without it) while the modal was open.
+  useEffect(() => {
+    if (reviewId && !datasets.some((d) => d.id === reviewId)) setReviewId(null)
+  }, [reviewId, datasets])
+
+  const onFiles = async (files: File[]) => {
+    if (files.length === 0) return
     setBusy(true)
     try {
-      for (const f of Array.from(files)) {
+      for (const f of files) {
         await uploadDataset(session.id, f)
       }
       onChange()
@@ -314,7 +326,18 @@ function DatasetsPanel({ session, onChange }: { session: RiskSession; onChange: 
       alert(e instanceof Error ? e.message : 'Upload failed.')
     } finally {
       setBusy(false)
-      if (inputRef.current) inputRef.current.value = ''
+    }
+  }
+
+  const retryExtraction = async (id: string) => {
+    setRetrying(id)
+    try {
+      await patchDataset(session.id, id, { reextract: true })
+      onChange()
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Re-extraction failed.')
+    } finally {
+      setRetrying(null)
     }
   }
 
@@ -322,14 +345,15 @@ function DatasetsPanel({ session, onChange }: { session: RiskSession; onChange: 
     <div className="border border-zinc-800 rounded-xl bg-zinc-950/40">
       <div className="px-3 py-2.5 border-b border-zinc-800 flex items-center justify-between">
         <span className="text-sm font-semibold text-zinc-200">Datasets</span>
-        <button onClick={() => inputRef.current?.click()} disabled={busy}
-          className="text-xs px-2 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white inline-flex items-center gap-1">
-          {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Upload className="h-3 w-3" />} Add
-        </button>
-        <input ref={inputRef} type="file" accept=".csv,.xlsx,.pdf" multiple className="hidden"
-          onChange={(e) => void onFiles(e.target.files)} />
+        {busy && <Loader2 className="h-3.5 w-3.5 animate-spin text-emerald-500" />}
       </div>
-      <div className="p-2 space-y-1.5 max-h-[70vh] overflow-y-auto">
+      <div className="p-2">
+        <FileUpload onFiles={(files) => void onFiles(files)} accept=".csv,.xlsx,.pdf"
+          multiple maxSizeMB={25} disabled={busy}>
+          <p className="text-xs">Drop CSV, XLSX, or a financial PDF here, or <span className="underline">browse</span></p>
+        </FileUpload>
+      </div>
+      <div className="p-2 pt-0 space-y-1.5 max-h-[62vh] overflow-y-auto">
         {datasets.length === 0 && (
           <p className="text-xs text-zinc-600 p-2">Upload CSV, XLSX, or a financial PDF (10-K, P&L, loss run).</p>
         )}
@@ -346,19 +370,29 @@ function DatasetsPanel({ session, onChange }: { session: RiskSession; onChange: 
               {(d.column_count ?? 0) > 0 && (
                 <span className="text-[10px] text-zinc-600">{d.column_count} series · {d.row_count} rows</span>
               )}
+              {d.status === 'failed' && d.source_kind === 'pdf' && (
+                <button onClick={() => void retryExtraction(d.id)} disabled={retrying === d.id}
+                  className="text-[10px] text-emerald-400 hover:underline ml-auto inline-flex items-center gap-1 disabled:opacity-40">
+                  {retrying === d.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+                  Retry extraction
+                </button>
+              )}
               {d.status !== 'processing' && d.status !== 'failed' && (
-                <button onClick={() => setReview(d)}
+                <button onClick={() => setReviewId(d.id)}
                   className="text-[10px] text-emerald-400 hover:underline ml-auto">Review</button>
               )}
             </div>
             {d.error && <div className="text-[10px] text-amber-400 mt-1">{d.error}</div>}
+            {(d.warnings ?? []).map((w, i) => (
+              <div key={i} className="text-[10px] text-amber-400/70 mt-0.5">{w}</div>
+            ))}
           </div>
         ))}
       </div>
       {review && (
         <MappingModal session={session} dataset={review}
-          onClose={() => setReview(null)}
-          onSaved={() => { setReview(null); onChange() }} />
+          onClose={() => setReviewId(null)}
+          onSaved={() => { setReviewId(null); onChange() }} />
       )}
     </div>
   )
@@ -382,11 +416,15 @@ function StatusPill({ status }: { status: RiskDataset['status'] }) {
 function MappingModal({ session, dataset, onClose, onSaved }: {
   session: RiskSession; dataset: RiskDataset; onClose: () => void; onSaved: () => void
 }) {
+  const roleOptions = ['', ...(session.canonical_roles ?? ROLE_OPTIONS_FALLBACK)]
   const [roles, setRoles] = useState<Record<string, string>>(() => ({ ...dataset.normalized.roles }))
   const [ppy, setPpy] = useState<string>(() => String((dataset.config?.periods_per_year as number) ?? ''))
+  const [orientation, setOrientation] = useState<'' | 'columns' | 'rows'>('')
   const [busy, setBusy] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
   const [extraction, setExtraction] = useState<Extraction | null>(dataset.extraction)
   const columns = dataset.normalized.columns
+  const isTabular = dataset.source_kind !== 'pdf'
 
   const setFigure = (row: number, col: number, v: string) => {
     setExtraction((ex) => {
@@ -399,15 +437,17 @@ function MappingModal({ session, dataset, onClose, onSaved }: {
 
   const save = async () => {
     setBusy(true)
+    setSaveError(null)
     try {
       await patchDataset(session.id, dataset.id, {
         mapping: roles,
         periods_per_year: ppy ? Number(ppy) : undefined,
         extraction: dataset.source_kind === 'pdf' && extraction ? extraction : undefined,
+        orientation: isTabular && orientation ? orientation : undefined,
       })
       onSaved()
     } catch (e) {
-      alert(e instanceof Error ? e.message : 'Could not save.')
+      setSaveError(e instanceof Error ? e.message : 'Could not save.')
     } finally {
       setBusy(false)
     }
@@ -461,17 +501,34 @@ function MappingModal({ session, dataset, onClose, onSaved }: {
               <span className="text-xs text-zinc-400 truncate flex-1" title={col}>{col}</span>
               <select value={roles[col] ?? ''} onChange={(e) => setRoles((r) => ({ ...r, [col]: e.target.value }))}
                 className="rounded bg-zinc-900 border border-zinc-700 px-1.5 py-1 text-xs text-zinc-200 w-40">
-                {ROLE_OPTIONS.map((o) => <option key={o} value={o}>{o || '(unmapped)'}</option>)}
+                {roleOptions.map((o) => <option key={o} value={o}>{o || '(unmapped)'}</option>)}
               </select>
             </div>
           ))}
         </div>
 
-        <div className="flex items-center gap-2 mb-5">
-          <label className="text-xs text-zinc-400">Periods per year (for annualized vol)</label>
-          <input value={ppy} onChange={(e) => setPpy(e.target.value.replace(/[^0-9]/g, ''))}
-            placeholder="e.g. 252, 12" className="w-24 rounded bg-zinc-900 border border-zinc-700 px-2 py-1 text-xs text-zinc-200" />
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mb-5">
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-zinc-400">Periods per year (for annualized vol)</label>
+            <input value={ppy} onChange={(e) => setPpy(e.target.value.replace(/[^0-9]/g, ''))}
+              placeholder="e.g. 252, 12" className="w-24 rounded bg-zinc-900 border border-zinc-700 px-2 py-1 text-xs text-zinc-200" />
+          </div>
+          {isTabular && (
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-zinc-400" title="If the table was read the wrong way around, force how series are taken. Re-parses the original file.">
+                Layout
+              </label>
+              <select value={orientation} onChange={(e) => setOrientation(e.target.value as '' | 'columns' | 'rows')}
+                className="rounded bg-zinc-900 border border-zinc-700 px-1.5 py-1 text-xs text-zinc-200">
+                <option value="">Auto-detected</option>
+                <option value="columns">Columns are series</option>
+                <option value="rows">Rows are series (line-items)</option>
+              </select>
+            </div>
+          )}
         </div>
+
+        {saveError && <div className="text-xs text-amber-400 mb-3">⚠ {saveError}</div>}
 
         <div className="flex justify-end gap-2">
           <button onClick={onClose} className="px-3 py-2 text-sm text-zinc-400 hover:text-zinc-200">Cancel</button>

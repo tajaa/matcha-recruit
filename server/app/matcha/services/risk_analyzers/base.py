@@ -68,11 +68,14 @@ def slug(s) -> str:
 
 def to_float(v):
     """Coerce a cell to float, tolerating $, commas, %, and (parenthesized)
-    negatives. Returns None when it isn't a number."""
+    negatives. Returns None when it isn't a FINITE number — NaN/Infinity must
+    never survive (json.dumps would emit bare tokens Postgres rejects on the
+    ::jsonb cast)."""
     if v is None:
         return None
     if isinstance(v, (int, float)):
-        return None if isinstance(v, float) and math.isnan(v) else float(v)
+        f = float(v)
+        return f if math.isfinite(f) else None
     s = str(v).strip()
     if not s:
         return None
@@ -83,6 +86,8 @@ def to_float(v):
     try:
         f = float(s)
     except (TypeError, ValueError):
+        return None
+    if not math.isfinite(f):
         return None
     return -f if neg else f
 

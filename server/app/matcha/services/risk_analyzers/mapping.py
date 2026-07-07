@@ -52,6 +52,10 @@ _LEXICON: list[tuple[str, list[str]]] = [
     ("score", ["score", "points", "rating"]),
 ]
 
+# The canonical role vocabulary, in lexicon order — the single source of truth
+# the API exposes so the frontend's role picker never drifts from the packs.
+CANONICAL_ROLES: tuple[str, ...] = tuple(role for role, _ in _LEXICON)
+
 _FINANCIAL_ROLES = {
     "revenue", "cogs", "gross_profit", "operating_income", "net_income",
     "interest_expense", "total_assets", "current_assets", "cash", "receivables",

@@ -71,20 +71,29 @@ def compute(normalized: dict, config: dict, ds_key: str) -> dict:
             "when": (periods[-1] if periods else "latest"),
         })
 
-    # Per-period loss ratio series (development) where incurred & premium align.
-    lr_series = []
-    inc_n, prem_n = nums(incurred), nums(premium)
-    if len(inc_n) == len(prem_n) and len(inc_n) >= 2:
-        lr_series = [(_div(i, p)) for i, p in zip(inc_n, prem_n)]
-        lr_clean = [x for x in lr_series if x is not None]
-        if len(lr_clean) >= 2:
-            trend = stdev(lr_clean)
+    # Per-period loss ratio (development): pair incurred and premium at the SAME
+    # period index — a period is skipped when either side is missing. Stripping
+    # Nones from each series independently would silently pair values from
+    # different periods.
+    lr_points: list[tuple[str, float]] = []  # (period label, loss ratio)
+    for idx, (inc, prem) in enumerate(zip(incurred or [], premium or [])):
+        if inc is None or prem is None:
+            continue
+        lr = _div(inc, prem)
+        if lr is None:
+            continue
+        label = periods[idx] if idx < len(periods) else str(idx + 1)
+        lr_points.append((label, lr))
+    if len(lr_points) >= 2:
+        trend = stdev([v for _, v in lr_points])
+        if trend is not None:
             records.append({"cid": f"metric:{ds_key}:insurance:loss_ratio_volatility",
                             "ref": "Loss-ratio volatility",
                             "summary": f"Loss-ratio volatility across periods: {fmt_pct(trend)}.",
                             "when": "trend"})
 
     # Incurred development (period-over-period growth of incurred losses).
+    inc_n = nums(incurred)
     if len(inc_n) >= 2:
         dev = returns(inc_n)
         if dev:
@@ -95,18 +104,15 @@ def compute(normalized: dict, config: dict, ds_key: str) -> dict:
 
     tables = [{"title": "Loss & claims metrics (latest period)",
                "columns": ["Metric", "Value"], "rows": rows}] if rows else []
-    if lr_series:
-        labels = periods[:len(lr_series)] or [str(i + 1) for i in range(len(lr_series))]
+    if lr_points:
         tables.append({"title": "Loss ratio by period",
                        "columns": ["Period", "Loss ratio"],
-                       "rows": [[labels[i] if i < len(labels) else str(i + 1), fmt_pct(v)]
-                                for i, v in enumerate(lr_series)]})
+                       "rows": [[label, fmt_pct(v)] for label, v in lr_points]})
 
     chart_blocks = []
-    lr_clean = [x for x in lr_series if x is not None]
-    if len(lr_clean) >= 2:
-        bar = charts.bar_svg(periods[:len(lr_clean)] or [str(i + 1) for i in range(len(lr_clean))],
-                             lr_clean, pct=True)
+    if len(lr_points) >= 2:
+        bar = charts.bar_svg([label for label, _ in lr_points],
+                             [v for _, v in lr_points], pct=True)
         if bar:
             chart_blocks.append({"title": "Loss ratio by period", "svg": bar})
     if len(inc_n) >= 2:

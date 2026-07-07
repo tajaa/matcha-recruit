@@ -19,6 +19,9 @@ _GRID = "#e5e7eb"
 
 
 def _esc(v) -> str:
+    # Deliberately local (NOT claims_readiness._esc, which renders None as "—"):
+    # this package stays stdlib-pure, and inside SVG markup a missing value
+    # must collapse to nothing, not an em-dash glyph.
     return html.escape(str(v)) if v is not None else ""
 
 

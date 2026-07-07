@@ -57,7 +57,10 @@ def compute(normalized: dict, config: dict, ds_key: str) -> dict:
 
     ratios = {
         "current_ratio": (_div(cur_assets, cur_liab), fmt_ratio, "Current ratio", "liquidity"),
-        "quick_ratio": (_div((cur_assets - inv) if (cur_assets is not None and inv is not None) else cur_assets, cur_liab),
+        # Without a mapped inventory line the quick ratio is UNKNOWN — falling
+        # back to unadjusted current assets would silently report it equal to
+        # the current ratio, overstating liquidity as a citable fact.
+        "quick_ratio": (_div((cur_assets - inv) if (cur_assets is not None and inv is not None) else None, cur_liab),
                         fmt_ratio, "Quick ratio", "liquidity"),
         "debt_to_equity": (_div(tot_liab, equity), fmt_ratio, "Debt-to-equity", "leverage"),
         "interest_coverage": (_div(op, interest), fmt_ratio, "Interest coverage", "leverage"),

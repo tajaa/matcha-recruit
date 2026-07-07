@@ -18,7 +18,7 @@ def _values(block) -> dict:
     return (block or {}).get("values") or {}
 
 
-def build_comparison(cmp_id: str, datasets: list[dict], spec: dict | None = None) -> dict:
+def build_comparison(cmp_id: str, datasets: list[dict]) -> dict:
     """datasets: ordered list of ``{"id", "label", "metrics": {pack: block}}``.
     Order is treated as the comparison axis (period order for CAGR)."""
     labels = [d.get("label") or f"Dataset {i + 1}" for i, d in enumerate(datasets)]
@@ -48,34 +48,37 @@ def build_comparison(cmp_id: str, datasets: list[dict], spec: dict | None = None
             continue
 
         pack_label = present[0][1].get("label") or pk
-        columns = ["Metric"] + [d.get("label") or "?" for d, _ in present] + ["Δ", "% change", "CAGR"]
+        # Values are keyed to the `present` datasets only — the table columns,
+        # chart bars, and record labels must all use the same axis, or a
+        # dataset that lacks this pack shifts every value one column over.
+        p_labels = [d.get("label") or "?" for d, _ in present]
+        columns = ["Metric"] + p_labels + ["Δ", "% change", "CAGR"]
         rows = []
         chart_groups = []
         chart_vals = []
         for key in common:
-            series_vals = []
-            for d in datasets:
-                b = (d.get("metrics") or {}).get(pk)
-                series_vals.append(_values(b).get(key) if b else None)
+            series_vals = [_values(b).get(key) for _, b in present]
             aligned = [v for v in series_vals if v is not None]
             if len(aligned) < 2:
                 continue
             first, last = aligned[0], aligned[-1]
             delta = last - first
-            pct = (delta / first) if first not in (0, None) else None
+            # abs(first): a negative baseline must not invert the direction of
+            # the change (a loss→profit swing is a positive % change).
+            pct = (delta / abs(first)) if first not in (0, None) else None
             cg = cagr(first, last, len(aligned) - 1)
             rows.append(
                 [key.replace("_", " ").title()]
-                + [fmt_num(v) if v is not None else "—" for v in series_vals[:len(present)]]
+                + [fmt_num(v) if v is not None else "—" for v in series_vals]
                 + [fmt_num(delta), fmt_pct(pct), fmt_pct(cg)]
             )
             chart_groups.append(key.replace("_", " ").title()[:12])
-            chart_vals.append([abs(v) if v is not None else None for v in series_vals[:len(present)]])
+            chart_vals.append([abs(v) if v is not None else None for v in series_vals])
             records.append({
                 "cid": f"compare:{cmp_id}:{pk}:{slug(key)}",
                 "ref": f"{pack_label}: {key} across datasets",
                 "summary": f"{pack_label} — {key.replace('_', ' ')}: "
-                           + " → ".join(f"{lab} {fmt_num(v)}" for lab, v in zip(labels, series_vals) if v is not None)
+                           + " → ".join(f"{lab} {fmt_num(v)}" for lab, v in zip(p_labels, series_vals) if v is not None)
                            + (f" ({fmt_pct(pct)} change)." if pct is not None else "."),
                 "when": "comparison",
             })

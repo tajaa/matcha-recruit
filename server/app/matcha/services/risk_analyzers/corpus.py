@@ -15,6 +15,11 @@ from .base import slug, fmt_num
 
 _ANALYZABLE = ("ready", "needs_review")
 
+# Hard ceiling on citable records per dataset source — an uncapped corpus is
+# re-serialized into EVERY chat-turn prompt (broker_pilot caps per source too).
+# Dataset + figure records rank first; pack records fill the remainder.
+_PER_SOURCE_CAP = 300
+
 
 def _dataset_record(d: dict) -> dict:
     norm = d.get("normalized") or {}
@@ -81,17 +86,34 @@ def build_corpus(datasets: list[dict], comparisons: list[dict] | None = None) ->
         if status not in _ANALYZABLE:
             continue
         recs = [_dataset_record(d)]
-        recs.extend(_figure_records(d))
-        metrics = d.get("metrics") or {}
-        for pack, block in metrics.items():
-            if pack == "_warnings":
-                notes.extend(str(w) for w in (block or []))
-                continue
-            recs.extend((block or {}).get("records") or [])
+        figures = _figure_records(d)
+        if status == "needs_review":
+            # The confirmation gate is ENFORCED here: until the user reviews the
+            # document extraction, only the raw extracted figures (marked
+            # unverified) are citable — computed metrics stay out of the corpus
+            # so the AI can't narrate risk numbers built on unconfirmed data.
+            for f in figures:
+                f = dict(f)
+                f["summary"] = f"[unverified] {f['summary']}"
+                recs.append(f)
+            notes.append(
+                f"Dataset '{name}': document-extracted figures are pending your review — "
+                "computed metrics are excluded from analysis until you confirm them."
+            )
+        else:
+            recs.extend(figures)
+            metrics = d.get("metrics") or {}
+            for pack, block in metrics.items():
+                if pack == "_warnings":
+                    notes.extend(str(w) for w in (block or []))
+                    continue
+                recs.extend((block or {}).get("records") or [])
+                notes.extend(str(n) for n in (block or {}).get("notes") or [])
         for w in ((d.get("normalized") or {}).get("meta") or {}).get("warnings") or []:
             notes.append(f"{name}: {w}")
-        if status == "needs_review":
-            notes.append(f"Dataset '{name}' has document-extracted figures pending your review — verify before relying on them.")
+        if len(recs) > _PER_SOURCE_CAP:
+            notes.append(f"{name}: showing {_PER_SOURCE_CAP} of {len(recs)} computed records.")
+            recs = recs[:_PER_SOURCE_CAP]
         sources[f"ds:{d.get('id')}"] = {"label": name, "records": recs}
 
     for c in comparisons or []:
