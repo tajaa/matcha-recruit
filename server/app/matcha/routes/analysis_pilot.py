@@ -16,6 +16,7 @@ import asyncio
 import json
 import logging
 import math
+from datetime import timedelta
 from typing import Optional
 from uuid import UUID, uuid4
 
@@ -111,6 +112,34 @@ async def _load_messages(conn, session_id: str) -> list[dict]:
         session_id,
     )
     return [{**dict(r), "metadata": _parse_jsonb(r["metadata"])} for r in rows]
+
+
+async def _maybe_compact(conn, session_id: str) -> None:
+    """Roll older turns into a summary row once enough have accrued since the
+    last one. Best-effort — runs post-stream, never raises into the request."""
+    try:
+        history = await _load_messages(conn, session_id)
+        split = ap.split_history(history)
+        if split["uncompacted_count"] <= ap._COMPACT_TRIGGER:
+            return
+        to_compact = split["recent"][:-ap._HISTORY_TURNS]
+        if not to_compact:
+            return
+        summary = await ap.summarize_history(to_compact, split["summary"])
+        if not summary:
+            return
+        # Position the summary row just AFTER the last compacted message so the
+        # newest _HISTORY_TURNS kept-live turns sort after it and stay verbatim
+        # in the prompt (split_history takes messages after the latest summary).
+        boundary = to_compact[-1].get("created_at")
+        created_at = (boundary + timedelta(microseconds=1)) if boundary else None
+        await conn.execute(
+            "INSERT INTO analysis_pilot_messages (session_id, role, content, metadata, created_at) "
+            "VALUES ($1,'system',$2,$3, COALESCE($4, NOW()))",
+            session_id, summary,
+            json.dumps({"kind": "summary", "covers": len(to_compact)}), created_at)
+    except Exception:
+        logger.exception("analysis_pilot: compaction hook failed")
 
 
 async def _load_datasets(conn, session_id: str, *, slim: bool = False) -> list[dict]:
@@ -289,6 +318,8 @@ async def get_session(session_id: str, current_user=Depends(require_admin_or_cli
         )
         session["packets"] = [{**dict(p), "citations": _parse_jsonb(p["citations"])} for p in packets]
     session["canonical_roles"] = list(packs.CANONICAL_ROLES)
+    session["message_count"] = sum(1 for m in session["messages"] if m.get("role") in ("user", "assistant"))
+    session["message_limit"] = ap._MAX_SESSION_MESSAGES
     return session
 
 
@@ -617,6 +648,14 @@ async def chat(session_id: str, body: ChatIn, request: Request,
     async with get_connection() as conn:
         session = await _load_session(conn, session_id, company_id)
         await check_rate_limit(str(company_id), "analysis_pilot_chat", 40, 3600)
+        msg_count = await conn.fetchval(
+            "SELECT count(*) FROM analysis_pilot_messages WHERE session_id=$1 AND role IN ('user','assistant')",
+            session_id)
+        if msg_count >= ap._MAX_SESSION_MESSAGES:
+            raise HTTPException(
+                status_code=400,
+                detail="This session has reached its conversation limit. Generate a report to "
+                       "capture the analysis, then start a new session.")
         history = await _load_messages(conn, session_id)
         datasets = await _load_datasets(conn, session_id)
         comparisons = await _load_comparisons(conn, session_id)
@@ -642,6 +681,7 @@ async def chat(session_id: str, body: ChatIn, request: Request,
                 "VALUES ($1,'assistant',$2,$3)",
                 session_id, payload.get("assistant_text", ""),
                 json.dumps({
+                    "analysis_plan": payload.get("analysis_plan"),
                     "evidence_map": payload.get("evidence_map"),
                     "open_questions": payload.get("open_questions"),
                     "dropped_citations": payload.get("dropped_citations"),
@@ -650,12 +690,14 @@ async def chat(session_id: str, body: ChatIn, request: Request,
                 }))
             await c2.execute("UPDATE analysis_pilot_sessions SET updated_at=NOW() WHERE id=$1",
                              session_id)
+            await _maybe_compact(c2, session_id)
 
     async def event_stream():
         result_payload = None
         try:
             async for ev in ap.run_chat_turn(session, corpus, history, body.message,
-                                             focus_records=focus_records, datasets=datasets):
+                                             focus_records=focus_records, datasets=datasets,
+                                             session_id=str(session_id)):
                 if ev.get("type") == "result":
                     result_payload = ev.get("data")
                 yield f"data: {json.dumps(ev)}\n\n"

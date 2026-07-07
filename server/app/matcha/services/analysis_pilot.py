@@ -23,6 +23,7 @@ Never raises on the analysis path — failures degrade, they don't 500.
 """
 
 import asyncio
+import hashlib
 import json
 import logging
 from datetime import datetime, timezone
@@ -42,6 +43,14 @@ MODEL = "gemini-3-flash-preview"
 _GEMINI_TIMEOUT = 90
 _HISTORY_TURNS = 12
 _MAX_LINE_ITEMS = 40
+_THINKING_BUDGET = 1024  # chat-turn reasoning budget; degrades to none if the model/SDK rejects it
+_HISTORY_CLIP = 2_000       # per-message char cap in the prompt (bounds pasted walls of text)
+_COMPACT_TRIGGER = 30       # uncompacted user/assistant msgs before a rolling summary is written
+_MAX_SESSION_MESSAGES = 240 # hard cap on user/assistant rows per session (~120 exchanges)
+_CACHE_MIN_CHARS = 20_000   # below this the stable prefix isn't worth an explicit context cache
+_CACHE_TTL_SECONDS = 1800   # Gemini cache TTL; matches the Redis handle TTL
+_CACHE_KEY = "apilot:gcache:{session_id}"
+_cache_unsupported = False   # set once if the model rejects context caching, then stop trying
 _MAX_PERIODS = 12
 _STORED_TEXT_CAP = 40_000
 
@@ -209,20 +218,71 @@ _SYSTEM = """You are a general-purpose data analysis assistant. You summarize, r
 
 HARD RULES:
 - Cite ONLY the bracketed ids that appear in the EVIDENCE CORPUS. NEVER invent a number, ratio, percentage, date, or id.
-- Every quantitative claim MUST cite the `metric:`/`ratio:`/`corr:`/`compare:`/`figure:` id it comes from. The metrics were already computed for you — do not recompute or estimate.
-- Summaries, rankings, and trend descriptions are welcome — build them from the cited `metric:` records (latest / trend / peak / low / total / share) rather than raw guesswork.
+- Every quantitative claim MUST cite the `metric:`/`ratio:`/`corr:`/`compare:`/`figure:` id it comes from. The metrics were already computed for you — do not recompute or estimate, and never re-round or restate a cited number differently than the corpus shows it.
+- Summaries, rankings, and trend descriptions are welcome — build them from the cited `metric:` records (latest / trend / peak / low / total / share / fit / seasonality / distribution) rather than raw guesswork. A `fit` record's R² tells you whether a trend is real or noise — prefer it over eyeballing first→last when both are cited.
+- A ranking or "which is highest/worst" question must rank EVERY relevant series in the corpus, not a sample of the first few you notice.
 - You MAY interpret and contextualize (what a trend, volatility, VaR, loss ratio, or drawdown implies), but the underlying numbers must be cited, not restated from memory.
-- Where the corpus does not address a point, say so plainly under open_questions — never speculate or fill gaps.
+- Where the corpus lacks a metric the question needs, say so plainly under open_questions AND name what's missing (e.g. "no `losses_incurred`-role column was found — check the dataset's column-role mapping") rather than a bare "no data". Never speculate or fill gaps.
 - You are an ANALYST, not an advisor: explain what the numbers say; do not give investment, actuarial, or coverage advice.
 
 FOCUSED RECORDS: when the user has highlighted records, address them specifically. If the user is questioning a DOCUMENT-EXTRACTED figure (`figure:` ids) and the conversation establishes the stored value is wrong (mis-read units, transposed periods, typo), you MAY propose a correction in `proposed_edits` — the user reviews and applies it; you never change data yourself. Only propose edits for values you can justify from the conversation; use the exact line-item label and period shown in the corpus.
 
-Return STRICT JSON ONLY (no markdown, no prose outside the JSON), shape:
-{"assistant_text": "<your precise, conversational reply>",
+REASONING: before answering, decompose the question into sub-questions and work each one against the corpus — fill `analysis_plan` with that breakdown FIRST, then write `assistant_text` from its findings. Skip decomposition only for a single trivial lookup (one plan step is fine then).
+
+Return STRICT JSON ONLY (no markdown, no prose outside the JSON), with fields in this order:
+{"analysis_plan": [{"step": "<a sub-question you looked into>", "finding": "<what the corpus showed, one line>", "cited_ids": ["<id>", ...]}],
+ "assistant_text": "<your precise, conversational reply, synthesized from the plan above>",
  "evidence_map": [{"point": "<a factual observation grounded in the corpus>", "cited_ids": ["<id>", ...]}],
  "open_questions": ["<what the data does NOT establish / what to obtain or verify>"],
  "proposed_edits": [{"dataset_id": "<uuid of the pdf dataset>", "label": "<exact line-item label>", "period": "<exact period label>", "current_value": <number or null>, "proposed_value": <number>, "reason": "<why the stored value is wrong>"}]}
 `proposed_edits` is OPTIONAL — omit it (or use []) unless a document figure is genuinely in question."""
+
+
+# Per-domain analyst lenses, keyed by analyzer-pack key. The shared _SYSTEM
+# grounding contract (cite-only-corpus + strict JSON) never forks; a lens only
+# ADDS domain framing, and only when its pack actually fired on a dataset in
+# the session — so a mixed session (fund prices + a loss run) gets both lenses
+# and a generic CSV gets none.
+_DOMAIN_LENSES: dict[str, str] = {
+    "volatility_risk": """QUANT / MARKET-RISK LENS (volatility metrics present):
+- Read σ and annualized vol together — flag when annualization is meaningless (too few periods, unknown frequency).
+- VaR95/VaR99 vs CVaR: CVaR materially worse than VaR implies fat tails — say so when the gap is wide.
+- Max drawdown is path risk; volatility is dispersion — a low-σ series can still carry a deep drawdown. Distinguish them.
+- Use the correlation matrix for diversification structure: highlight strongly co-moving pairs (|r| high) and any diversifiers (r near 0 or negative). Correlation ≠ causation; small-n correlations are fragile — caveat them.
+- Sharpe-like ratios on short histories are noisy; frame as directional, not conclusive.""",
+    "financial_ratios": """CORPORATE-FINANCE LENS (financial-statement ratios present):
+- Anchor on the margin ladder (gross → operating → net): where margin is lost between lines is the story, not any single margin.
+- Liquidity (current/quick ratio) and leverage (debt-to-equity, interest coverage) read together: rising leverage with thinning coverage is the risk pattern to surface.
+- Separate trend from seasonality: quarter-over-quarter swings in a seasonal business are not deterioration — compare like periods (YoY) when the data allows.
+- Growth quality: revenue growth outpaced by receivables/inventory growth is a working-capital warning worth naming.""",
+    "insurance_loss": """P&C / LOSS-RUN LENS (insurance loss metrics present):
+- Loss ratio is the headline, but decompose it: frequency (claims per exposure) vs severity (incurred per claim) — which one drives a bad year matters.
+- Paid-to-incurred is maturity, not performance: recent policy years are undeveloped, so their incurred will move. Never read an immature year's loss ratio as final.
+- Reserves + open claims signal tail exposure; a low paid ratio with high open counts means the year is still developing.
+- Year-over-year premium vs exposure growth: loss ratios shift for rate reasons as well as loss reasons — note when premium change could explain the move.""",
+    "inventory_ops": """OPERATIONS / INVENTORY LENS (inventory metrics present):
+- Turnover and days-on-hand are the same fact in two units — cite one, interpret both directions (too slow = carrying cost/obsolescence, too fast = stockout exposure).
+- Read stock levels against the reorder point where present: how close and how often the series approaches it is the service-risk story.
+- Demand variability (CV of units sold) drives safety-stock needs; high variability with thin on-hand cover is the pattern to flag.
+- Concentration (HHI): high concentration means the aggregate numbers ride on few items — say which conclusions that weakens.""",
+}
+
+
+def _lens_text(datasets: list[dict] | None) -> str:
+    """Domain lens blocks for the packs that actually fired on this session's
+    datasets. Data-driven — the stored metrics say which domains are present."""
+    fired: list[str] = []
+    for d in datasets or []:
+        for key in (d.get("metrics") or {}):
+            if key in _DOMAIN_LENSES and key not in fired:
+                fired.append(key)
+    if not fired:
+        return ""
+    blocks = "\n\n".join(_DOMAIN_LENSES[k] for k in fired)
+    return f"\nANALYST LENSES — apply the framings below where relevant (grounding rules above still bind every claim):\n{blocks}\n"
+
+
+_MAX_NOTES = 20
 
 
 def _corpus_text(corpus: dict) -> str:
@@ -236,9 +296,99 @@ def _corpus_text(corpus: dict) -> str:
     return "\n".join(out) or "(no analyzed datasets in scope)"
 
 
-def _history_text(history: list[dict]) -> str:
-    msgs = [m for m in (history or []) if m.get("role") in ("user", "assistant")][-_HISTORY_TURNS:]
-    return "\n".join(f"[{m['role']}] {m.get('content', '')}" for m in msgs) or "(no prior messages)"
+def _notes_text(corpus: dict) -> str:
+    """Data-quality notes (truncation, unverified-pending-review, per-source
+    caps) built by ``build_corpus`` but previously dropped on the floor before
+    reaching the model — the AI could not caveat what it couldn't see."""
+    seen: list[str] = []
+    for n in corpus.get("notes") or []:
+        n = str(n).strip()
+        if n and n not in seen:
+            seen.append(n)
+    if not seen:
+        return ""
+    lines = "\n".join(f"- {n}" for n in seen[:_MAX_NOTES])
+    return f"\nDATA QUALITY NOTES (weave applicable caveats into your answer):\n{lines}\n"
+
+
+def _summary_of(msg: dict) -> str | None:
+    """The summary text if this is a compaction row, else None. Tolerates
+    metadata arriving as a dict (route path) or a JSON string (defensive)."""
+    if msg.get("role") != "system":
+        return None
+    meta = msg.get("metadata")
+    if isinstance(meta, str):
+        try:
+            meta = json.loads(meta)
+        except Exception:
+            meta = None
+    if isinstance(meta, dict) and meta.get("kind") == "summary":
+        return str(msg.get("content") or "")
+    return None
+
+
+def split_history(history: list[dict]) -> dict:
+    """Split a message list at the latest compaction summary. Returns
+    ``{summary, recent, uncompacted_count}`` — ``recent`` is the user/assistant
+    messages AFTER that summary (older ones are represented by the summary);
+    ``uncompacted_count`` is how many have accrued since. Pure/unit-tested."""
+    summary = None
+    cut = -1
+    for i, m in enumerate(history or []):
+        s = _summary_of(m)
+        if s is not None:
+            summary, cut = s, i
+    recent = [m for m in (history or [])[cut + 1:] if m.get("role") in ("user", "assistant")]
+    return {"summary": summary, "recent": recent, "uncompacted_count": len(recent)}
+
+
+def _clip(text: str) -> str:
+    text = text or ""
+    return text if len(text) <= _HISTORY_CLIP else text[:_HISTORY_CLIP] + "…"
+
+
+def _conversation_text(history: list[dict]) -> str:
+    """Conversation block for the prompt: the rolling summary (when present)
+    followed by the most-recent verbatim turns, each clipped. Lives in the
+    DYNAMIC suffix so a new summary never invalidates the context cache."""
+    split = split_history(history)
+    recent = split["recent"][-_HISTORY_TURNS:]
+    convo = "\n".join(f"[{m['role']}] {_clip(m.get('content', ''))}" for m in recent) or "(no prior messages)"
+    if split["summary"]:
+        return (f"PRIOR CONVERSATION (compacted summary of older turns):\n{split['summary']}\n\n"
+                f"CONVERSATION (most recent turns, oldest first):\n{convo}")
+    return f"CONVERSATION (oldest first):\n{convo}"
+
+
+_SUMMARY_PROMPT = """You are compacting the older turns of a data-analysis conversation into a compact running summary, so the assistant keeps continuity without resending every message.
+
+Preserve, as tightly as possible (≤350 words):
+- Questions the user asked and the conclusions reached — keep the EXACT cited record ids (e.g. metric:…, ratio:…, corr:…) and the numbers attached to them; they are the evidence trail.
+- Any data-quality caveats established (unverified figures, truncated series).
+- Proposed data edits and whether they were accepted or rejected.
+- Open threads the user still wants answered, and any stated preferences (focus areas, framing).
+
+Do NOT invent facts or ids. If a prior summary is given, MERGE it in — the result supersedes it. Output plain prose (no JSON, no markdown headers)."""
+
+
+async def summarize_history(to_compact: list[dict], prior_summary: str | None = None) -> str | None:
+    """Fold older turns (+ any prior summary) into one compact summary. Best-
+    effort: returns None on any failure so the caller simply skips compaction."""
+    if not to_compact:
+        return None
+    convo = "\n".join(f"[{m.get('role')}] {_clip(m.get('content', ''))}" for m in to_compact)
+    prior = f"PRIOR SUMMARY (merge this in):\n{prior_summary}\n\n" if prior_summary else ""
+    prompt = f"{_SUMMARY_PROMPT}\n\n{prior}TURNS TO COMPACT (oldest first):\n{convo}"
+    try:
+        resp = await asyncio.wait_for(
+            _genai().aio.models.generate_content(model=MODEL, contents=prompt),
+            timeout=60,
+        )
+        text = (getattr(resp, "text", "") or "").strip()
+        return text or None
+    except Exception as exc:
+        logger.info("analysis_pilot: history compaction failed (%s) — skipping", exc)
+        return None
 
 
 def _focus_text(focus_records: list[dict] | None) -> str:
@@ -248,37 +398,132 @@ def _focus_text(focus_records: list[dict] | None) -> str:
     return f"\nFOCUSED RECORDS (the user highlighted these — address them specifically):\n{lines}\n"
 
 
-def _build_prompt(session: dict, corpus: dict, history: list[dict], latest: str,
-                  focus_records: list[dict] | None = None) -> str:
+def _stable_prefix(session: dict, corpus: dict, datasets: list[dict] | None = None) -> str:
+    """The turn-invariant head of the prompt: system contract + domain lenses +
+    session framing + evidence corpus + data-quality notes. Depends ONLY on the
+    session's datasets/metrics — byte-identical across chat turns until a dataset
+    changes — which is exactly what makes it cacheable (both Gemini's implicit
+    prefix cache and the explicit context cache below key off this stability)."""
     return f"""{_SYSTEM}
-
+{_lens_text(datasets)}
 ANALYSIS SESSION: {session.get('title') or 'Data analysis'}
 DOMAIN / GOAL: {session.get('domain') or 'general'} — {session.get('goal') or '(not specified)'}
 
 EVIDENCE CORPUS (the ONLY records you may cite):
 {_corpus_text(corpus)}
-{_focus_text(focus_records)}
-CONVERSATION (oldest first):
-{_history_text(history)}
+{_notes_text(corpus)}"""
+
+
+def _dynamic_suffix(corpus: dict, history: list[dict], latest: str,
+                    focus_records: list[dict] | None = None) -> str:
+    """The per-turn tail: highlighted records + conversation + latest message.
+    Kept strictly AFTER the stable prefix so nothing turn-specific ever splits
+    the cacheable head."""
+    return f"""{_focus_text(focus_records)}
+{_conversation_text(history)}
 
 LATEST USER MESSAGE:
 {latest}
 """
 
 
-async def _generate(session: dict, corpus: dict, history: list[dict], latest: str,
-                    focus_records: list[dict] | None = None) -> dict:
+def _build_prompt(session: dict, corpus: dict, history: list[dict], latest: str,
+                  focus_records: list[dict] | None = None,
+                  datasets: list[dict] | None = None) -> str:
+    return _stable_prefix(session, corpus, datasets) + "\n" + \
+        _dynamic_suffix(corpus, history, latest, focus_records)
+
+
+def _gen_config(cache_name: str | None = None, *, thinking: bool = True):
     from google.genai import types
-    prompt = _build_prompt(session, corpus, history, latest, focus_records)
-    resp = await asyncio.wait_for(
-        _genai().aio.models.generate_content(
-            model=MODEL, contents=prompt,
-            config=types.GenerateContentConfig(response_mime_type="application/json"),
-        ),
-        timeout=_GEMINI_TIMEOUT,
-    )
+    kw = {"response_mime_type": "application/json"}
+    if cache_name:
+        kw["cached_content"] = cache_name
+    if thinking:
+        kw["thinking_config"] = types.ThinkingConfig(thinking_budget=_THINKING_BUDGET)
+    return types.GenerateContentConfig(**kw)
+
+
+async def _generate_with_thinking(contents, cache_name: str | None = None):
+    """One chat generation. ``contents`` is the full prompt (uncached path) or
+    the dynamic suffix (when ``cache_name`` is set — the stable prefix lives in
+    the Gemini context cache). Some SDK/model combos reject thinking_config —
+    degrade to a plain call rather than fail the turn."""
+    try:
+        return await asyncio.wait_for(
+            _genai().aio.models.generate_content(
+                model=MODEL, contents=contents, config=_gen_config(cache_name, thinking=True)),
+            timeout=_GEMINI_TIMEOUT,
+        )
+    except asyncio.TimeoutError:
+        raise
+    except Exception as exc:
+        logger.info("analysis_pilot: thinking_config rejected (%s) — retrying without it", exc)
+        return await asyncio.wait_for(
+            _genai().aio.models.generate_content(
+                model=MODEL, contents=contents, config=_gen_config(cache_name, thinking=False)),
+            timeout=_GEMINI_TIMEOUT,
+        )
+
+
+async def _resolve_context_cache(session_id: str | None, stable_prefix: str) -> str | None:
+    """Return a Gemini cached-content name for this session's stable prefix,
+    creating one when absent/stale. Best-effort: any failure (Redis down, model
+    unsupported, API error) returns None → caller sends the full prompt. The
+    prefix hash is the freshness key — a dataset change rewrites the prefix,
+    misses the cache, and a fresh cache is created."""
+    global _cache_unsupported
+    if _cache_unsupported or not session_id or len(stable_prefix) < _CACHE_MIN_CHARS:
+        return None
+    from app.core.services.redis_cache import get_redis_cache, cache_get, cache_set
+    redis = get_redis_cache()
+    if redis is None:
+        return None
+    prefix_hash = hashlib.sha256(stable_prefix.encode()).hexdigest()[:16]
+    key = _CACHE_KEY.format(session_id=session_id)
+    try:
+        cached = await cache_get(redis, key)
+        if cached and cached.get("hash") == prefix_hash and cached.get("name"):
+            return cached["name"]
+    except Exception:
+        return None
+    # Miss or stale — create a new context cache from the stable prefix.
+    try:
+        from google.genai import types
+        cache = await _genai().aio.caches.create(
+            model=MODEL,
+            config=types.CreateCachedContentConfig(
+                contents=[types.Content(role="user", parts=[types.Part.from_text(text=stable_prefix)])],
+                ttl=f"{_CACHE_TTL_SECONDS}s",
+            ),
+        )
+        await cache_set(redis, key, {"name": cache.name, "hash": prefix_hash}, ttl=_CACHE_TTL_SECONDS)
+        logger.info("analysis_pilot: created context cache for session=%s (%d chars)", session_id, len(stable_prefix))
+        return cache.name
+    except Exception as exc:
+        msg = str(exc).lower()
+        if any(t in msg for t in ("not supported", "not available", "minimum", "too small", "caching")):
+            _cache_unsupported = True
+            logger.info("analysis_pilot: context caching unsupported (%s) — disabling", exc)
+        else:
+            logger.info("analysis_pilot: context cache create failed (%s) — full prompt", exc)
+        return None
+
+
+async def _generate(session: dict, corpus: dict, history: list[dict], latest: str,
+                    focus_records: list[dict] | None = None,
+                    datasets: list[dict] | None = None,
+                    session_id: str | None = None) -> dict:
+    prefix = _stable_prefix(session, corpus, datasets)
+    suffix = _dynamic_suffix(corpus, history, latest, focus_records)
+    cache_name = await _resolve_context_cache(session_id, prefix)
+    if cache_name:
+        resp = await _generate_with_thinking(suffix, cache_name=cache_name)
+    else:
+        resp = await _generate_with_thinking(prefix + "\n" + suffix)
     data = _parse_json(getattr(resp, "text", "") or "")
     return {
+        "analysis_plan": _validate_plan(data.get("analysis_plan"), corpus.get("index", {})),
         "assistant_text": str(data.get("assistant_text") or "").strip(),
         "evidence_map": data.get("evidence_map") or [],
         "open_questions": [str(q) for q in (data.get("open_questions") or []) if q],
@@ -286,15 +531,36 @@ async def _generate(session: dict, corpus: dict, history: list[dict], latest: st
     }
 
 
+def _validate_plan(plan, index: dict) -> list[dict]:
+    """Same anti-hallucination gate as ``validate_citations``, shaped for the
+    analysis_plan's {step, finding, cited_ids} records rather than evidence_map's
+    {point, cited_ids} — dropped ids are silently excluded (the plan is
+    debug/audit metadata, not user-facing prose, so no dropped-citations note)."""
+    clean = []
+    for item in plan or []:
+        if not isinstance(item, dict):
+            continue
+        raw = item.get("cited_ids")
+        ids = [c for c in raw if isinstance(c, str)] if isinstance(raw, list) else []
+        clean.append({
+            "step": str(item.get("step") or "").strip(),
+            "finding": str(item.get("finding") or "").strip(),
+            "cited_ids": [c for c in ids if c in index],
+        })
+    return clean
+
+
 async def run_chat_turn(session: dict, corpus: dict, history: list[dict], latest: str,
                         focus_records: list[dict] | None = None,
-                        datasets: list[dict] | None = None):
+                        datasets: list[dict] | None = None,
+                        session_id: str | None = None):
     """Async generator of SSE-shaped dicts for one grounded turn. Status tick →
     single validated ``result`` (both gates — citations AND edit proposals —
     run before anything reaches the user)."""
     yield {"type": "status", "message": "Analyzing your data…"}
     try:
-        result = await _generate(session, corpus, history, latest, focus_records)
+        result = await _generate(session, corpus, history, latest, focus_records, datasets,
+                                 session_id=session_id)
     except asyncio.TimeoutError:
         yield {"type": "error", "message": "Analysis timed out — please try again."}
         return

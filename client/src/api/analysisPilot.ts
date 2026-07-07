@@ -84,6 +84,7 @@ export type ProposedEdit = {
 }
 
 export type AnalysisMessageMeta = {
+  analysis_plan?: Array<{ step: string; finding: string; cited_ids: string[] }>
   evidence_map?: Array<{ point: string; cited_ids: string[] }>
   open_questions?: string[]
   dropped_citations?: string[]
@@ -119,6 +120,7 @@ export type AnalysisSession = {
   updated_at: string
   closed_at: string | null
   message_count?: number
+  message_limit?: number
   dataset_count?: number
   packet_count?: number
   messages?: AnalysisMessage[]
@@ -225,7 +227,16 @@ export async function streamChat(
     return
   }
   if (!res.ok || !res.body) {
-    h.onError?.(`Chat failed (${res.status})`)
+    // Surface the backend's message (e.g. the session conversation-limit cap)
+    // instead of a bare status code.
+    let detail = ''
+    try {
+      const body = await res.json()
+      detail = typeof body?.detail === 'string' ? body.detail : ''
+    } catch {
+      /* non-JSON error body */
+    }
+    h.onError?.(detail || `Chat failed (${res.status})`)
     return
   }
   const reader = res.body.getReader()

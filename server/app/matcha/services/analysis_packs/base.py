@@ -193,6 +193,49 @@ def max_drawdown(index_series: list[float]):
     return worst
 
 
+def max_drawdown_detail(index_series: list[float]):
+    """Like ``max_drawdown`` but also returns the peak / trough / recovery
+    positions on the index series: ``(fraction, peak_i, trough_i, recovery_i)``.
+    ``recovery_i`` is None if the series never regains the prior peak. Returns
+    ``(None, None, None, None)`` when undefined."""
+    xs = nums(index_series)
+    if len(xs) < _MIN_POINTS:
+        return None, None, None, None
+    peak = xs[0]
+    peak_i = 0
+    worst = 0.0
+    w_peak_i = w_trough_i = 0
+    for i, x in enumerate(xs):
+        if x > peak:
+            peak = x
+            peak_i = i
+        if peak > 0:
+            dd = (peak - x) / peak
+            if dd > worst:
+                worst = dd
+                w_peak_i, w_trough_i = peak_i, i
+    if worst == 0.0:
+        return 0.0, None, None, None
+    recovery_i = None
+    peak_val = xs[w_peak_i]
+    for i in range(w_trough_i + 1, len(xs)):
+        if xs[i] >= peak_val:
+            recovery_i = i
+            break
+    return worst, w_peak_i, w_trough_i, recovery_i
+
+
+def rolling_stdev(rets: list[float], window: int):
+    """(latest_window_sigma, full_sigma) — regime signal: recent dispersion vs
+    the whole sample. None-tuple when too short for a meaningful window."""
+    xs = nums(rets)
+    if window < _MIN_POINTS or len(xs) < window + _MIN_POINTS:
+        return None, None
+    latest = stdev(xs[-window:])
+    full = stdev(xs)
+    return latest, full
+
+
 def cumulative_index(rets: list[float], base: float = 1.0) -> list[float]:
     """Growth-of-1 index synthesized from a return series."""
     idx = [base]
@@ -248,6 +291,79 @@ def cagr(first: float, last: float, periods: int):
     if first is None or last is None or periods < 1 or first <= 0 or last <= 0:
         return None
     return (last / first) ** (1.0 / periods) - 1.0
+
+
+def ols_fit(values: list[float]):
+    """Least-squares line over (index, value) points. Returns
+    ``(slope_per_period, r_squared)`` or ``(None, None)`` when the fit is
+    undefined (<3 points or zero variance in either axis). The slope is in
+    value units per period; R² says how much of the movement the line explains
+    — the qualitative "is this trend real or noise" companion to first→last."""
+    xs = nums(values)
+    n = len(xs)
+    if n < 3:
+        return None, None
+    idx = list(range(n))
+    mx = statistics.fmean(idx)
+    my = statistics.fmean(xs)
+    sxx = sum((i - mx) ** 2 for i in idx)
+    syy = sum((y - my) ** 2 for y in xs)
+    if sxx == 0 or syy == 0:
+        return None, None
+    sxy = sum((i - mx) * (y - my) for i, y in zip(idx, xs))
+    slope = sxy / sxx
+    r2 = (sxy * sxy) / (sxx * syy)
+    return slope, r2
+
+
+def iqr_outliers(values: list) -> list[tuple[int, float]]:
+    """(index, value) points outside the 1.5×IQR Tukey fences, positions
+    preserved so callers can label them with periods. Empty when the sample is
+    too small (<5) or the IQR is zero (constant-ish series)."""
+    pts = [(i, float(v)) for i, v in enumerate(values or [])
+           if isinstance(v, (int, float)) and not (isinstance(v, float) and math.isnan(v))]
+    if len(pts) < 5:
+        return []
+    xs = [v for _, v in pts]
+    q1 = percentile(xs, 25)
+    q3 = percentile(xs, 75)
+    if q1 is None or q3 is None:
+        return []
+    iqr = q3 - q1
+    if iqr == 0:
+        return []
+    lo, hi = q1 - 1.5 * iqr, q3 + 1.5 * iqr
+    return [(i, v) for i, v in pts if v < lo or v > hi]
+
+
+def skewness(values: list[float]):
+    """Sample skewness (adjusted Fisher–Pearson). None below 3 points or with
+    zero variance."""
+    xs = nums(values)
+    n = len(xs)
+    if n < 3:
+        return None
+    m = statistics.fmean(xs)
+    sd = statistics.stdev(xs)
+    if sd == 0:
+        return None
+    g1 = sum(((x - m) / sd) ** 3 for x in xs) / n
+    return g1 * math.sqrt(n * (n - 1)) / (n - 2)
+
+
+def excess_kurtosis(values: list[float]):
+    """Sample excess kurtosis (0 = normal tails; positive = fat tails). None
+    below 4 points or with zero variance."""
+    xs = nums(values)
+    n = len(xs)
+    if n < 4:
+        return None
+    m = statistics.fmean(xs)
+    sd = statistics.stdev(xs)
+    if sd == 0:
+        return None
+    g2 = sum(((x - m) / sd) ** 4 for x in xs) / n - 3.0
+    return ((n - 1) / ((n - 2) * (n - 3))) * ((n + 1) * g2 + 6)
 
 
 # --------------------------------------------------------------------------- #

@@ -19,16 +19,21 @@ Pure/deterministic. Config knobs (per dataset, user-editable):
 
 from __future__ import annotations
 
+import math
+
 from . import base, charts
 from .base import (
     nums, returns, stdev, mean, coefficient_of_variation, value_at_risk,
-    expected_shortfall, max_drawdown, cumulative_index, sharpe_like,
-    downside_deviation, annualize_vol, pearson, slug, fmt_pct, fmt_num,
+    expected_shortfall, max_drawdown, max_drawdown_detail, rolling_stdev,
+    cumulative_index, sharpe_like, downside_deviation, annualize_vol, pearson,
+    skewness, excess_kurtosis, slug, fmt_pct, fmt_num,
 )
 from .mapping import _FINANCIAL_ROLES, _INSURANCE_ROLES, _INVENTORY_ROLES
 
 KEY = "volatility_risk"
 LABEL = "Volatility & Risk"
+
+_ROLL_WINDOW = 12
 
 # Correlation records grow O(N²); cap what enters the citable corpus to the
 # strongest relationships (the matrix chart still shows everything).
@@ -97,9 +102,13 @@ def _worst(per_col: dict, key: str):
 def compute(normalized: dict, config: dict, ds_key: str) -> dict:
     series = normalized.get("series") or {}
     roles = normalized.get("roles") or {}
+    periods = normalized.get("periods") or []
     kinds = (config or {}).get("column_kinds") or {}
     ppy = (config or {}).get("periods_per_year")
     rf = float((config or {}).get("risk_free") or 0.0)
+
+    def plabel(i):
+        return str(periods[i]) if periods and i is not None and i < len(periods) else (f"#{i + 1}" if i is not None else "—")
 
     per_col: dict[str, dict] = {}
     records: list[dict] = []
@@ -141,6 +150,52 @@ def compute(normalized: dict, config: dict, ds_key: str) -> dict:
             rec("sharpe_like", f"{name} — Sharpe-like ratio (mean/σ of returns): {fmt_num(m['sharpe_like'])}.")
         if m["downside_deviation"] is not None:
             rec("downside_deviation", f"{name} — downside deviation: {fmt_pct(m['downside_deviation'])}.")
+
+        rets, index = _analysis_series(values, kind)
+
+        # Distribution shape — grounds "fat tails" claims (the quant lens leans
+        # on this) in an actual skew/kurtosis number rather than eyeballing VaR.
+        sk = skewness(rets)
+        ku = excess_kurtosis(rets)
+        if sk is not None and ku is not None:
+            shape = "fat-tailed (more extreme moves than a normal distribution)" if ku > 1 else \
+                    "thin-tailed" if ku < -1 else "near-normal tails"
+            tilt = "left-skewed (larger downside moves)" if sk < -0.5 else \
+                   "right-skewed (larger upside moves)" if sk > 0.5 else "roughly symmetric"
+            rec("distribution",
+                f"{name} — return distribution: skew {fmt_num(sk)} ({tilt}), "
+                f"excess kurtosis {fmt_num(ku)} ({shape}).")
+
+        # Rolling vol — recent-window σ vs full-sample σ signals a regime shift
+        # that a single full-period volatility number hides.
+        latest_sigma, full_sigma = rolling_stdev(rets, _ROLL_WINDOW)
+        if latest_sigma is not None and full_sigma is not None and full_sigma > 0:
+            regime = "rising" if latest_sigma > full_sigma * 1.2 else \
+                     "falling" if latest_sigma < full_sigma * 0.8 else "stable"
+            rec("rolling_vol",
+                f"{name} — volatility regime: {regime} (last {_ROLL_WINDOW}-period σ "
+                f"{fmt_pct(latest_sigma)} vs {fmt_pct(full_sigma)} full-period).")
+
+        # Drawdown duration — WHEN the worst decline happened and whether it
+        # has recovered, not just how deep. Only for "level" columns: there
+        # `index` is nums(values) filtered in original order, so its positions
+        # map 1:1 onto the surviving (non-null) original indices — orig_idx
+        # below recovers that mapping so period labels land on the right date.
+        # For "returns"-kind columns `index` is a synthesized cumulative index
+        # (one extra leading point) with no clean mapping back to periods, so
+        # we skip the label there rather than risk mislabeling.
+        if kind != "returns":
+            orig_idx = [i for i, v in enumerate(values or [])
+                        if isinstance(v, (int, float)) and not (isinstance(v, float) and math.isnan(v))]
+            dd_frac, peak_i, trough_i, recovery_i = max_drawdown_detail(index)
+            if dd_frac is not None and dd_frac > 0 and peak_i is not None and trough_i < len(orig_idx):
+                p_peak = orig_idx[peak_i]
+                p_trough = orig_idx[trough_i]
+                p_recovery = orig_idx[recovery_i] if recovery_i is not None and recovery_i < len(orig_idx) else None
+                recov_txt = f"recovered by {plabel(p_recovery)}" if p_recovery is not None else "not yet recovered"
+                rec("drawdown_duration",
+                    f"{name} — drawdown timing: peak {plabel(p_peak)} → trough {plabel(p_trough)} "
+                    f"({fmt_pct(dd_frac)}), {recov_txt}.")
 
     excluded = [n for n in series if roles.get(n) in _TAIL_EXCLUDED_ROLES]
     if excluded:

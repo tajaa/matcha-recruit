@@ -769,8 +769,18 @@ function Console({ session, onTurn, focus, onRemoveFocus, onClearFocus }: {
     }
   }
 
+  const liveCount = messages.filter((m) => m.role !== 'system').length
+  const msgLimit = session.message_limit ?? 240
+  const nearCap = liveCount >= msgLimit * 0.9
+
   return (
     <div className="flex flex-col h-full">
+      {nearCap && (
+        <div className="px-3 py-2 text-[11px] text-amber-300 bg-amber-500/10 border-b border-amber-500/20">
+          This session is near its conversation limit ({liveCount}/{msgLimit}). Generate a report to
+          capture the analysis, then start a new session.
+        </div>
+      )}
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">
         {messages.length === 0 && (
           <p className="text-sm text-zinc-600">
@@ -781,6 +791,10 @@ function Console({ session, onTurn, focus, onRemoveFocus, onClearFocus }: {
           </p>
         )}
         {messages.map((m, i) => (
+          // System rows are compaction summaries — internal plumbing, never shown.
+          // Return null (not filtered) so `i` stays the stable stored index that
+          // `resolved` proposed-edit keys depend on.
+          m.role === 'system' ? null : (
           <div key={i} className={m.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
             <div className={`max-w-[85%] rounded-xl px-3.5 py-2.5 text-sm whitespace-pre-wrap ${
               m.role === 'user' ? 'bg-emerald-600 text-white' : 'bg-zinc-800/70 text-zinc-200'
@@ -847,6 +861,7 @@ function Console({ session, onTurn, focus, onRemoveFocus, onClearFocus }: {
               )}
             </div>
           </div>
+          )
         ))}
         {status && (
           <div className="flex items-center gap-2 text-xs text-zinc-500">

@@ -16,14 +16,36 @@ volatility owns the tail-risk keys). Pure/deterministic, stdlib only.
 from __future__ import annotations
 
 import math
+import re
+import statistics
 
 from . import base, charts
-from .base import cagr, slug, fmt_num, fmt_pct
+from .base import cagr, slug, fmt_num, fmt_pct, ols_fit, iqr_outliers
 
 KEY = "general_stats"
 LABEL = "Data Overview"
 
 _MAX_RANKED = 8
+_MAX_OUTLIERS_SHOWN = 4
+
+# Month/quarter cycle detection for seasonality. A period label maps to a
+# (cycle_key, phase) — phase is the within-cycle slot (month 1..12, quarter
+# 1..4) so we can compare like-with-like across cycles.
+_QUARTER_RE = re.compile(r"(\d{4}).*?q\s*([1-4])", re.I)
+_MONTH_RE = re.compile(r"(\d{4})[-/](\d{1,2})")
+
+
+def _phase_of(label: str):
+    """(period_len, phase) for a label — (4, q) for quarterly, (12, m) for
+    monthly, else None. Used only to bucket like periods for seasonality."""
+    s = str(label or "")
+    m = _QUARTER_RE.search(s)
+    if m:
+        return 4, int(m.group(2))
+    m = _MONTH_RE.search(s)
+    if m and 1 <= int(m.group(2)) <= 12:
+        return 12, int(m.group(2))
+    return None
 
 
 def applies(normalized: dict) -> bool:
@@ -80,6 +102,45 @@ def _series_stats(values, periods) -> dict | None:
     }
 
 
+def _seasonality(values, periods) -> str | None:
+    """Same-phase comparison across cycles when the periods are quarterly or
+    monthly and span ≥2 full cycles. Returns a one-line summary naming the
+    strongest and weakest phase by average, or None when not applicable."""
+    if not periods or not values:
+        return None
+    phased: dict[int, list[float]] = {}
+    period_len = None
+    for lbl, v in zip(periods, values):
+        if not isinstance(v, (int, float)) or (isinstance(v, float) and math.isnan(v)):
+            continue
+        ph = _phase_of(lbl)
+        if ph is None:
+            return None  # mixed/unparseable labels — not a clean cycle
+        plen, slot = ph
+        if period_len is None:
+            period_len = plen
+        elif period_len != plen:
+            return None
+        phased.setdefault(slot, []).append(float(v))
+    if not phased or period_len is None:
+        return None
+    # Need ≥2 full cycles: at least two observations in the most-seen phase.
+    if max(len(vs) for vs in phased.values()) < 2:
+        return None
+    if len(phased) < max(2, period_len // 2):
+        return None
+    avgs = {slot: statistics.fmean(vs) for slot, vs in phased.items()}
+    hi = max(avgs, key=avgs.get)
+    lo = min(avgs, key=avgs.get)
+    if avgs[lo] == avgs[hi]:
+        return None
+    unit = "Q" if period_len == 4 else "month"
+    swing = (avgs[hi] - avgs[lo]) / abs(avgs[lo]) if avgs[lo] else None
+    swing_txt = f" ({fmt_pct(swing)} above the low)" if swing is not None else ""
+    return (f"seasonality across {period_len}-period cycle: strongest {unit} {hi} "
+            f"(avg {fmt_num(avgs[hi])}), weakest {unit} {lo} (avg {fmt_num(avgs[lo])}){swing_txt}.")
+
+
 def compute(normalized: dict, config: dict, ds_key: str) -> dict:
     series = normalized.get("series") or {}
     periods = normalized.get("periods")
@@ -97,6 +158,11 @@ def compute(normalized: dict, config: dict, ds_key: str) -> dict:
     def rec(sl: str, key: str, name: str, text: str, when: str = "computed"):
         records.append({"cid": f"metric:{ds_key}:{sl}:{key}", "ref": f"{name} — {key}",
                         "summary": text, "when": when})
+
+    def label(i: int) -> str:
+        if periods and i < len(periods):
+            return str(periods[i])
+        return f"#{i + 1}"
 
     for name, s in stats.items():
         sl = slug(name)
@@ -120,6 +186,31 @@ def compute(normalized: dict, config: dict, ds_key: str) -> dict:
             rec(sl, "low", name, f"{name} — low: {fmt_num(s['low'])} in {s['low_label']}.")
         if s["total"] is not None:
             rec(sl, "total", name, f"{name} — total across {s['n']} points: {fmt_num(s['total'])}.")
+
+        # OLS fit — slope + R² separates a real trend from noise. The first→last
+        # trend record says "how much"; this says "how reliable".
+        slope, r2 = ols_fit(series.get(name))
+        if slope is not None and r2 is not None:
+            quality = ("strong linear trend" if r2 >= 0.7 else
+                       "moderate trend" if r2 >= 0.4 else "weak/noisy — no reliable linear trend")
+            rec(sl, "fit", name,
+                f"{name} — linear fit: {'+' if slope >= 0 else ''}{fmt_num(slope)}/period, "
+                f"R²={fmt_num(r2)} ({quality}).")
+
+        # IQR outliers — with period labels so the AI can name the anomalous points.
+        outs = iqr_outliers(series.get(name))
+        if outs:
+            shown = outs[:_MAX_OUTLIERS_SHOWN]
+            listed = ", ".join(f"{label(i)} ({fmt_num(v)})" for i, v in shown)
+            more = f" +{len(outs) - len(shown)} more" if len(outs) > len(shown) else ""
+            rec(sl, "outliers", name,
+                f"{name} — {len(outs)} outlier(s) beyond 1.5×IQR: {listed}{more}.")
+
+        # Seasonality — same-phase comparison across cycles (quarterly/monthly,
+        # ≥2 full cycles). Backs the corp-finance "compare like periods" lens.
+        seas = _seasonality(series.get(name), periods)
+        if seas:
+            rec(sl, "seasonality", name, f"{name} — {seas}")
 
     # Shares of the combined total — only meaningful when every total is
     # positive (mixed-sign shares are nonsense).
