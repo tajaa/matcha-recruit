@@ -114,30 +114,44 @@ async def _load_messages(conn, session_id: str) -> list[dict]:
     return [{**dict(r), "metadata": _parse_jsonb(r["metadata"])} for r in rows]
 
 
-async def _maybe_compact(conn, session_id: str) -> None:
+_compaction_tasks: set = set()  # strong refs so fire-and-forget tasks aren't GC'd mid-flight
+
+
+def _spawn_compaction(session_id: str) -> None:
+    task = asyncio.create_task(_maybe_compact(session_id))
+    _compaction_tasks.add(task)
+    task.add_done_callback(_compaction_tasks.discard)
+
+
+async def _maybe_compact(session_id: str) -> None:
     """Roll older turns into a summary row once enough have accrued since the
-    last one. Best-effort — runs post-stream, never raises into the request."""
+    last one. Best-effort, fire-and-forget (see callsite): opens its OWN
+    connection and must never be awaited inline on the chat response path — the
+    summarization call can take up to ~60s and the client is already done
+    reading the stream by the time this runs."""
     try:
-        history = await _load_messages(conn, session_id)
-        split = ap.split_history(history)
-        if split["uncompacted_count"] <= ap._COMPACT_TRIGGER:
-            return
-        to_compact = split["recent"][:-ap._HISTORY_TURNS]
-        if not to_compact:
-            return
-        summary = await ap.summarize_history(to_compact, split["summary"])
-        if not summary:
-            return
-        # Position the summary row just AFTER the last compacted message so the
-        # newest _HISTORY_TURNS kept-live turns sort after it and stay verbatim
-        # in the prompt (split_history takes messages after the latest summary).
-        boundary = to_compact[-1].get("created_at")
-        created_at = (boundary + timedelta(microseconds=1)) if boundary else None
-        await conn.execute(
-            "INSERT INTO analysis_pilot_messages (session_id, role, content, metadata, created_at) "
-            "VALUES ($1,'system',$2,$3, COALESCE($4, NOW()))",
-            session_id, summary,
-            json.dumps({"kind": "summary", "covers": len(to_compact)}), created_at)
+        async with get_connection() as conn:
+            history = await _load_messages(conn, session_id)
+            split = ap.split_history(history)
+            if split["uncompacted_count"] <= ap._COMPACT_TRIGGER:
+                return
+            to_compact = split["recent"][:-ap._HISTORY_TURNS]
+            if not to_compact:
+                return
+            summary = await ap.summarize_history(to_compact, split["summary"])
+            if not summary:
+                return
+            # Position the summary row just AFTER the last compacted message so
+            # the newest _HISTORY_TURNS kept-live turns sort after it and stay
+            # verbatim in the prompt (split_history takes messages after the
+            # latest summary).
+            boundary = to_compact[-1].get("created_at")
+            created_at = (boundary + timedelta(microseconds=1)) if boundary else None
+            await conn.execute(
+                "INSERT INTO analysis_pilot_messages (session_id, role, content, metadata, created_at) "
+                "VALUES ($1,'system',$2,$3, COALESCE($4, NOW()))",
+                session_id, summary,
+                json.dumps({"kind": "summary", "covers": len(to_compact)}), created_at)
     except Exception:
         logger.exception("analysis_pilot: compaction hook failed")
 
@@ -690,7 +704,10 @@ async def chat(session_id: str, body: ChatIn, request: Request,
                 }))
             await c2.execute("UPDATE analysis_pilot_sessions SET updated_at=NOW() WHERE id=$1",
                              session_id)
-            await _maybe_compact(c2, session_id)
+        # Fire-and-forget: compaction can take ~60s (a Gemini summarization
+        # call) and must not delay [DONE] — the client has already rendered
+        # the answer and is waiting only to re-enable the composer.
+        _spawn_compaction(session_id)
 
     async def event_stream():
         result_payload = None

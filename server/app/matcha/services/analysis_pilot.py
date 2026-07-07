@@ -518,7 +518,25 @@ async def _generate(session: dict, corpus: dict, history: list[dict], latest: st
     suffix = _dynamic_suffix(corpus, history, latest, focus_records)
     cache_name = await _resolve_context_cache(session_id, prefix)
     if cache_name:
-        resp = await _generate_with_thinking(suffix, cache_name=cache_name)
+        try:
+            resp = await _generate_with_thinking(suffix, cache_name=cache_name)
+        except asyncio.TimeoutError:
+            raise
+        except Exception as exc:
+            # The Redis handle can outlive the actual Gemini cache (both share a
+            # TTL but aren't renewed atomically) — an expired/invalid cache_name
+            # must not hard-fail the turn. Drop the stale handle and fall back
+            # to the full prompt once.
+            logger.info("analysis_pilot: cached generate failed (%s) — dropping handle, full prompt", exc)
+            if session_id:
+                try:
+                    from app.core.services.redis_cache import get_redis_cache, cache_delete
+                    redis = get_redis_cache()
+                    if redis is not None:
+                        await cache_delete(redis, _CACHE_KEY.format(session_id=session_id))
+                except Exception:
+                    pass
+            resp = await _generate_with_thinking(prefix + "\n" + suffix)
     else:
         resp = await _generate_with_thinking(prefix + "\n" + suffix)
     data = _parse_json(getattr(resp, "text", "") or "")

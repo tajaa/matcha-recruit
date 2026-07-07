@@ -337,32 +337,40 @@ def iqr_outliers(values: list) -> list[tuple[int, float]]:
 
 
 def skewness(values: list[float]):
-    """Sample skewness (adjusted Fisher–Pearson). None below 3 points or with
-    zero variance."""
+    """Adjusted Fisher–Pearson standardized skewness (matches scipy
+    ``skew(bias=False)`` / Excel SKEW). None below 3 points or with zero
+    variance. The bias-correction wrapper is defined on the POPULATION central
+    moments (m3 / m2**1.5), so we normalize by population std, NOT sample std."""
     xs = nums(values)
     n = len(xs)
     if n < 3:
         return None
     m = statistics.fmean(xs)
-    sd = statistics.stdev(xs)
-    if sd == 0:
+    m2 = sum((x - m) ** 2 for x in xs) / n
+    if m2 == 0:
         return None
-    g1 = sum(((x - m) / sd) ** 3 for x in xs) / n
+    m3 = sum((x - m) ** 3 for x in xs) / n
+    g1 = m3 / m2 ** 1.5
     return g1 * math.sqrt(n * (n - 1)) / (n - 2)
 
 
 def excess_kurtosis(values: list[float]):
-    """Sample excess kurtosis (0 = normal tails; positive = fat tails). None
-    below 4 points or with zero variance."""
+    """Bias-corrected excess kurtosis (matches scipy ``kurtosis(bias=False)`` /
+    Excel KURT; 0 = normal tails, positive = fat tails). None below 4 points or
+    with zero variance. Like ``skewness``, the correction is defined on the
+    POPULATION central moments (m4 / m2**2 - 3), so normalize by population
+    variance — using sample std here yields values below the −2 floor and can
+    flip the sign on fat-tailed data."""
     xs = nums(values)
     n = len(xs)
     if n < 4:
         return None
     m = statistics.fmean(xs)
-    sd = statistics.stdev(xs)
-    if sd == 0:
+    m2 = sum((x - m) ** 2 for x in xs) / n
+    if m2 == 0:
         return None
-    g2 = sum(((x - m) / sd) ** 4 for x in xs) / n - 3.0
+    m4 = sum((x - m) ** 4 for x in xs) / n
+    g2 = m4 / m2 ** 2 - 3.0
     return ((n - 1) / ((n - 2) * (n - 3))) * ((n + 1) * g2 + 6)
 
 

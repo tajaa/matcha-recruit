@@ -36,15 +36,18 @@ _MONTH_RE = re.compile(r"(\d{4})[-/](\d{1,2})")
 
 
 def _phase_of(label: str):
-    """(period_len, phase) for a label — (4, q) for quarterly, (12, m) for
-    monthly, else None. Used only to bucket like periods for seasonality."""
+    """(period_len, phase, year) for a label — (4, q, year) for quarterly,
+    (12, m, year) for monthly, else None. The year travels with the phase so
+    callers can require observations from ≥2 DISTINCT cycles, not just ≥2
+    observations in the same phase (which sub-monthly data — weekly/daily —
+    can satisfy from a single calendar year alone)."""
     s = str(label or "")
     m = _QUARTER_RE.search(s)
     if m:
-        return 4, int(m.group(2))
+        return 4, int(m.group(2)), int(m.group(1))
     m = _MONTH_RE.search(s)
     if m and 1 <= int(m.group(2)) <= 12:
-        return 12, int(m.group(2))
+        return 12, int(m.group(2)), int(m.group(1))
     return None
 
 
@@ -110,22 +113,26 @@ def _seasonality(values, periods) -> str | None:
         return None
     phased: dict[int, list[float]] = {}
     period_len = None
+    years: set[int] = set()
     for lbl, v in zip(periods, values):
         if not isinstance(v, (int, float)) or (isinstance(v, float) and math.isnan(v)):
             continue
         ph = _phase_of(lbl)
         if ph is None:
             return None  # mixed/unparseable labels — not a clean cycle
-        plen, slot = ph
+        plen, slot, year = ph
         if period_len is None:
             period_len = plen
         elif period_len != plen:
             return None
         phased.setdefault(slot, []).append(float(v))
+        years.add(year)
     if not phased or period_len is None:
         return None
-    # Need ≥2 full cycles: at least two observations in the most-seen phase.
-    if max(len(vs) for vs in phased.values()) < 2:
+    # Need ≥2 DISTINCT cycles (calendar years), not just ≥2 observations in the
+    # same phase — sub-monthly data (weekly/daily) can rack up multiple same-
+    # month observations within a single year alone.
+    if len(years) < 2:
         return None
     if len(phased) < max(2, period_len // 2):
         return None

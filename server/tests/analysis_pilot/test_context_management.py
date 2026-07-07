@@ -6,6 +6,7 @@ import math
 
 from app.matcha.services import analysis_pilot as ap
 from app.matcha.services.analysis_packs import base as B
+from app.matcha.services.analysis_packs import general as G
 
 
 # --- A: per-message clipping -------------------------------------------------
@@ -177,6 +178,35 @@ def test_excess_kurtosis_defined():
     assert ku is not None
 
 
+# Pinned against scipy.stats.skew(bias=False) / kurtosis(bias=False) and
+# Excel SKEW/KURT — a prior implementation normalized by SAMPLE stdev inside a
+# formula defined on POPULATION central moments, which silently flipped the
+# sign of kurtosis on genuinely fat-tailed data (see analysis_pilot review).
+
+def test_skewness_matches_reference_value():
+    assert math.isclose(B.skewness([1, 2, 3, 4, 10]), 1.6971, abs_tol=0.01)
+
+
+def test_excess_kurtosis_matches_reference_value():
+    assert math.isclose(B.excess_kurtosis([1, 2, 3, 4, 10]), 3.152, abs_tol=0.01)
+
+
+def test_excess_kurtosis_never_below_floor():
+    # -2 is the mathematical minimum for excess kurtosis (a two-point/uniform-
+    # like distribution) — a normalization bug can produce values below it.
+    for xs in ([2, 4, 6, 8], [1, 2, 3, 4, 5, 6, 7, 8], [5, 5, 1, 5, 5, 1, 5, 5]):
+        ku = B.excess_kurtosis(xs)
+        if ku is not None:
+            assert ku >= -2.0001, f"{xs} -> {ku}"
+
+
+def test_excess_kurtosis_flags_fat_tails_not_thin():
+    # One extreme outlier among tight clusters is the textbook fat-tailed case
+    # — the buggy version reported this as thin-tailed (negative kurtosis).
+    ku = B.excess_kurtosis([1, 2, 3, 4, 10])
+    assert ku > 1  # matches the pack's own ">1 => fat-tailed" threshold
+
+
 def test_rolling_stdev_returns_pair():
     rets = [0.01 * ((-1) ** i) for i in range(30)]
     latest, full = B.rolling_stdev(rets, 12)
@@ -196,3 +226,24 @@ def test_max_drawdown_detail_no_recovery():
     idx = [1.0, 1.4, 1.0, 0.8]
     frac, peak_i, trough_i, recovery_i = B.max_drawdown_detail(idx)
     assert recovery_i is None
+
+
+# --- B: seasonality requires distinct cycles, not just repeated phases -------
+
+def test_seasonality_none_within_a_single_year():
+    # 8 weekly rows, all within 2024 — multiple rows land in the same month
+    # (e.g. two Mondays in January) but there is only ONE calendar year, so
+    # this must NOT be reported as seasonality (no real cycle to compare).
+    periods = ["2024-01-01", "2024-01-08", "2024-01-15", "2024-01-22",
+               "2024-02-05", "2024-02-12", "2024-02-19", "2024-02-26"]
+    values = [10, 11, 9, 10, 20, 21, 19, 20]
+    assert G._seasonality(values, periods) is None
+
+
+def test_seasonality_fires_across_two_years():
+    periods = ["2023 Q1", "2023 Q2", "2023 Q3", "2023 Q4",
+               "2024 Q1", "2024 Q2", "2024 Q3", "2024 Q4"]
+    values = [100, 140, 100, 100, 105, 145, 105, 105]
+    result = G._seasonality(values, periods)
+    assert result is not None
+    assert "Q 2" in result  # Q2 is the strongest phase in both years
