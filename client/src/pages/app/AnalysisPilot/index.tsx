@@ -9,9 +9,9 @@ import { HelpHint } from '../../../components/ui/HelpHint'
 import { useShowOnce } from '../../../hooks/useShowOnce'
 import {
   listAnalysisSessions, getAnalysisSession, createAnalysisSession, uploadDataset, patchDataset,
-  deleteDataset, createComparison, generateReport, downloadPacket, streamChat,
+  deleteDataset, createComparison, generateReport, downloadPacket, streamChat, loadDemoDataset,
   type AnalysisSession, type AnalysisDataset, type AnalysisMessage, type MetricBlock,
-  type Extraction, type ProposedEdit,
+  type Extraction, type ProposedEdit, type DemoDatasetKey,
 } from '../../../api/analysisPilot'
 
 // ---------------------------------------------------------------------------
@@ -45,12 +45,21 @@ const ROLE_OPTIONS_FALLBACK = [
   'lead_time', 'return', 'price', 'score',
 ]
 
-const ANALYSIS_EXAMPLES = [
-  'Summarize this dataset and flag anything unusual.',
-  "What's the trend, and is it real or just noise?",
-  'Which series is riskiest, and why?',
-  'How volatile is this data, and has that changed recently?',
-  'Compare these two periods and explain what changed.',
+// Each example is backed by a real bundled sample dataset (server-shipped CSV,
+// not user data) — clicking one loads it for real into a dedicated demo session
+// and asks the question for real, so it shows an actual computed-and-cited
+// answer instead of a mockup.
+type AnalysisExample = { key: DemoDatasetKey; label: string; shape: string; question: string }
+
+const ANALYSIS_EXAMPLES: AnalysisExample[] = [
+  { key: 'volatility', label: 'Fund prices', shape: '3 asset price series · 104 weeks',
+    question: 'How volatile is this data, and has that changed recently?' },
+  { key: 'financial', label: 'Quarterly financials', shape: 'Full P&L + balance sheet · 12 quarters',
+    question: "What's the trend, and is it real or just noise?" },
+  { key: 'insurance', label: 'GL loss run', shape: '6 policy years',
+    question: "What's driving the loss ratio — frequency or severity?" },
+  { key: 'inventory', label: 'Inventory ops', shape: '24 months',
+    question: 'Where are we at risk of stockouts, and why?' },
 ]
 
 const HOW_IT_WORKS_STEPS: HowItWorksStep[] = [
@@ -86,12 +95,19 @@ const HOW_IT_WORKS_STEPS: HowItWorksStep[] = [
   },
 ]
 
+// Title of the one shared demo session the Examples tab's live demos load
+// their bundled sample datasets into — keeps demo data out of the user's own
+// real analysis sessions entirely (a distinct session, not a distinct flag).
+const DEMO_SESSION_TITLE = 'Analysis Pilot — Live Demo'
+
 export default function AnalysisPilot() {
   const [sessions, setSessions] = useState<AnalysisSession[]>([])
   const [active, setActive] = useState<AnalysisSession | null>(null)
   const [loading, setLoading] = useState(true)
   const [showNew, setShowNew] = useState(false)
   const [showHelp, setShowHelp] = useShowOnce('analysis-pilot')
+  const [pendingAutoAsk, setPendingAutoAsk] = useState<{ text: string } | null>(null)
+  const [demoLoadingKey, setDemoLoadingKey] = useState<DemoDatasetKey | null>(null)
   const activeIdRef = useRef<string | null>(null)
 
   const refreshList = useCallback(async () => {
@@ -140,6 +156,27 @@ export default function AnalysisPilot() {
     void openSession(s.id)
   }, [refreshList, openSession])
 
+  // Examples tab's live demo: find-or-create the one shared demo session, load
+  // the bundled dataset for this key into it (idempotent server-side), queue
+  // the question to auto-ask once Workbench mounts for that session, and
+  // switch into it.
+  const runDemo = useCallback(async (key: DemoDatasetKey, question: string) => {
+    setDemoLoadingKey(key)
+    try {
+      const rows = await refreshList()
+      const existing = rows.find((s) => s.title === DEMO_SESSION_TITLE)
+      const demoId = existing ? existing.id : (await createAnalysisSession({ title: DEMO_SESSION_TITLE })).id
+      await loadDemoDataset(demoId, key)
+      setPendingAutoAsk({ text: question })
+      await refreshList()
+      void openSession(demoId)
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Could not load the demo dataset.')
+    } finally {
+      setDemoLoadingKey(null)
+    }
+  }, [refreshList, openSession])
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-72">
@@ -182,7 +219,9 @@ export default function AnalysisPilot() {
 
       <main className="flex-1 min-w-0">
         {active ? (
-          <Workbench key={active.id} session={active} onChange={reloadActive} onShowHelp={() => setShowHelp(true)} />
+          <Workbench key={active.id} session={active} onChange={reloadActive} onShowHelp={() => setShowHelp(true)}
+            autoAsk={pendingAutoAsk} onAutoAskConsumed={() => setPendingAutoAsk(null)}
+            onRunDemo={runDemo} demoLoadingKey={demoLoadingKey} />
         ) : (
           <div className="h-full flex flex-col items-center justify-center text-center">
             <Wand2 className="h-8 w-8 text-emerald-500 mb-3" />
@@ -216,7 +255,13 @@ export default function AnalysisPilot() {
 
 type Tab = 'metrics' | 'chat' | 'compare' | 'examples'
 
-function Workbench({ session, onChange, onShowHelp }: { session: AnalysisSession; onChange: () => void; onShowHelp: () => void }) {
+function Workbench({ session, onChange, onShowHelp, autoAsk, onAutoAskConsumed, onRunDemo, demoLoadingKey }: {
+  session: AnalysisSession; onChange: () => void; onShowHelp: () => void
+  autoAsk?: { text: string } | null
+  onAutoAskConsumed?: () => void
+  onRunDemo: (key: DemoDatasetKey, question: string) => void
+  demoLoadingKey: DemoDatasetKey | null
+}) {
   const [tab, setTab] = useState<Tab>('metrics')
   const [reporting, setReporting] = useState(false)
   // Highlighted records for the next chat turn — adding one jumps to the chat.
@@ -228,10 +273,21 @@ function Workbench({ session, onChange, onShowHelp }: { session: AnalysisSession
   const removeFocus = useCallback((cid: string) => setFocus((f) => f.filter((c) => c.cid !== cid)), [])
   const clearFocus = useCallback(() => setFocus([]), [])
   // Examples tab hands a prompt to Console via this one-shot signal.
-  const [prefill, setPrefill] = useState<{ text: string; nonce: number } | null>(null)
+  const [prefill, setPrefill] = useState<{ text: string; nonce: number; autoSend?: boolean } | null>(null)
   const prefillNonceRef = useRef(0)
   const datasets = session.datasets ?? []
   const ready = datasets.filter((d) => d.status === 'ready' || d.status === 'needs_review')
+
+  // This Workbench instance is keyed by session.id at the call site, so it
+  // remounts (this effect fires once) whenever a live-demo click switches the
+  // active session into the dedicated demo session with a question pending.
+  useEffect(() => {
+    if (!autoAsk) return
+    setTab('chat')
+    setPrefill({ text: autoAsk.text, nonce: ++prefillNonceRef.current, autoSend: true })
+    onAutoAskConsumed?.()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const genReport = async () => {
     setReporting(true)
@@ -287,10 +343,8 @@ function Workbench({ session, onChange, onShowHelp }: { session: AnalysisSession
           )}
           {tab === 'compare' && <CompareTab session={session} onChange={onChange} />}
           {tab === 'examples' && (
-            <ExamplesTab items={ANALYSIS_EXAMPLES} onUse={(ex) => {
-              setTab('chat')
-              setPrefill({ text: ex, nonce: ++prefillNonceRef.current })
-            }} />
+            <ExamplesTab items={ANALYSIS_EXAMPLES} loadingKey={demoLoadingKey}
+              onUse={(item) => onRunDemo(item.key, item.question)} />
           )}
         </div>
       </div>
@@ -302,19 +356,32 @@ function Workbench({ session, onChange, onShowHelp }: { session: AnalysisSession
 // ExamplesTab — browsable example prompts. Click to prefill the chat composer.
 // --------------------------------------------------------------------------- //
 
-function ExamplesTab({ items, onUse }: { items: string[]; onUse: (text: string) => void }) {
+function ExamplesTab({ items, onUse, loadingKey }: {
+  items: AnalysisExample[]; onUse: (item: AnalysisExample) => void; loadingKey: DemoDatasetKey | null
+}) {
   return (
     <div className="p-4">
-      <p className="text-sm text-zinc-500 mb-3">Click one to drop it into the composer, then edit or send it as-is.</p>
+      <p className="text-sm text-zinc-500 mb-3">
+        These use a small bundled sample dataset — clicking one opens (or reuses) a dedicated demo
+        session and asks the question for real, so your own analyses stay untouched.
+      </p>
       <div className="space-y-1.5">
-        {items.map((ex) => (
-          <button key={ex}
-            onClick={() => onUse(ex)}
-            className="block w-full text-left text-[13px] text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/60 rounded-lg px-3 py-2 transition-colors"
-          >
-            {ex}
-          </button>
-        ))}
+        {items.map((item) => {
+          const loading = loadingKey === item.key
+          return (
+            <button key={item.key}
+              onClick={() => onUse(item)}
+              disabled={loadingKey !== null}
+              className="block w-full text-left rounded-lg px-3 py-2.5 transition-colors hover:bg-zinc-800/60 disabled:cursor-wait disabled:opacity-60"
+            >
+              <div className="flex items-center gap-2 text-[11px] uppercase tracking-wide text-zinc-500">
+                {item.label} <span className="text-zinc-700">·</span> {item.shape}
+                {loading && <Loader2 className="h-3 w-3 animate-spin text-emerald-400" />}
+              </div>
+              <div className="text-[13px] text-zinc-300 mt-0.5">{item.question}</div>
+            </button>
+          )
+        })}
       </div>
     </div>
   )
@@ -780,7 +847,7 @@ function CompareTab({ session, onChange }: { session: AnalysisSession; onChange:
 function Console({ session, onTurn, focus, onRemoveFocus, onClearFocus, prefill }: {
   session: AnalysisSession; onTurn: () => void
   focus: FocusChip[]; onRemoveFocus: (cid: string) => void; onClearFocus: () => void
-  prefill?: { text: string; nonce: number } | null
+  prefill?: { text: string; nonce: number; autoSend?: boolean } | null
 }) {
   const [messages, setMessages] = useState<AnalysisMessage[]>(session.messages ?? [])
   const [input, setInput] = useState('')
@@ -796,17 +863,23 @@ function Console({ session, onTurn, focus, onRemoveFocus, onClearFocus, prefill 
   useEffect(() => () => abortRef.current?.abort(), [])
   useEffect(() => { scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight }) }, [messages, status])
 
-  // Examples tab hands off a prompt here — fill the composer and focus it,
-  // never auto-send (avoids firing a grounded turn against empty/no data).
+  // Examples tab hands off a prompt here. Plain examples just fill the composer
+  // and focus it (never auto-send, avoids firing a grounded turn against
+  // empty/no data); the live-demo examples set autoSend once their bundled
+  // dataset is actually loaded, so the answer is real.
   useEffect(() => {
     if (!prefill) return
-    setInput(prefill.text)
-    textareaRef.current?.focus()
+    if (prefill.autoSend) {
+      void send(prefill.text)
+    } else {
+      setInput(prefill.text)
+      textareaRef.current?.focus()
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prefill?.nonce])
 
-  const send = async () => {
-    const text = input.trim()
+  const send = async (override?: string) => {
+    const text = (override ?? input).trim()
     if (!text || busy) return
     const focusCids = focus.map((c) => c.cid)
     setInput(''); setBusy(true); setStatus('Analyzing…')

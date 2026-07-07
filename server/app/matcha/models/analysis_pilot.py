@@ -23,6 +23,10 @@ class SessionUpdate(BaseModel):
     status: Optional[Literal["active", "closed"]] = None
 
 
+class DemoDatasetIn(BaseModel):
+    demo_key: Literal["volatility", "financial", "insurance", "inventory"]
+
+
 class DatasetPatch(BaseModel):
     """Confirm/adjust a dataset before (re)analysis. `mapping` overrides column→
     role (validated against the canonical vocabulary); `column_kinds` marks a

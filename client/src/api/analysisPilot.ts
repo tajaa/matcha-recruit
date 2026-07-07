@@ -154,6 +154,11 @@ export const uploadDataset = (sessionId: string, file: File) => {
   fd.append('file', file)
   return api.upload<AnalysisDataset>(`/analysis-pilot/pilot/sessions/${sessionId}/datasets`, fd)
 }
+// Examples tab's live demo — loads one of the server's bundled sample datasets
+// (idempotent: a repeat call for a demo already in this session just returns it).
+export type DemoDatasetKey = 'volatility' | 'financial' | 'insurance' | 'inventory'
+export const loadDemoDataset = (sessionId: string, demoKey: DemoDatasetKey) =>
+  api.post<AnalysisDataset>(`/analysis-pilot/pilot/sessions/${sessionId}/datasets/demo`, { demo_key: demoKey })
 export const patchDataset = (
   sessionId: string,
   datasetId: string,

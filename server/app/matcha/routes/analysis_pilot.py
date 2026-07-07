@@ -17,6 +17,7 @@ import json
 import logging
 import math
 from datetime import timedelta
+from pathlib import Path
 from typing import Optional
 from uuid import UUID, uuid4
 
@@ -31,7 +32,7 @@ from ..services import analysis_pilot as ap
 from ..services import analysis_packs as packs
 from ..services.er_document_parser import ERDocumentParser
 from ..models.analysis_pilot import (
-    SessionCreate, SessionUpdate, DatasetPatch, ComparisonCreate, ChatIn, ReportIn,
+    SessionCreate, SessionUpdate, DatasetPatch, ComparisonCreate, ChatIn, ReportIn, DemoDatasetIn,
 )
 # Shared ASCII filename hardening (Starlette latin-1-encodes headers).
 from .legal_defense import _safe_name, _safe_filename
@@ -43,6 +44,17 @@ router = APIRouter()
 _MAX_UPLOAD_BYTES = 25_000_000
 _MAX_DATASETS_PER_SESSION = 20
 _EXT_TO_KIND = {".csv": "csv", ".xlsx": "xlsx", ".pdf": "pdf"}
+
+# Bundled sample datasets for the Examples tab's live demo — small, self-contained
+# CSVs shipped with the server (not user data), one per analyzer-pack domain, so
+# clicking an example shows a real computed-and-cited answer, not a mockup.
+_DEMO_DATA_DIR = Path(__file__).resolve().parents[1] / "data" / "analysis_pilot_demos"
+_DEMO_DATASETS = {
+    "volatility": "fund_prices_weekly.csv",
+    "financial": "quarterly_financials.csv",
+    "insurance": "gl_loss_run.csv",
+    "inventory": "inventory_ops_monthly.csv",
+}
 
 # Explicit column list — `SELECT *` would drag multi-MB `normalized` jsonb
 # through the pool on every load. Slim mode drops the heavy series values
@@ -432,6 +444,56 @@ async def upload_dataset(session_id: str, request: Request, file: UploadFile = F
 
     updated = await _persist_dataset_analysis(ds_id, session_id, status, error,
                                               extraction, normalized, metrics,
+                                              row_count, column_count)
+    return _dataset_out(updated)
+
+
+@router.post("/pilot/sessions/{session_id}/datasets/demo")
+async def load_demo_dataset(session_id: str, body: DemoDatasetIn, request: Request,
+                            current_user=Depends(require_admin_or_client)):
+    """Load one of the bundled sample datasets (Examples tab's live demo) into
+    this session — same pipeline as `upload_dataset` post-multipart-read, minus
+    the upload itself. Idempotent: a repeat call for a demo_key already present
+    in this session just returns the existing row."""
+    company_id = await get_client_company_id(current_user)
+    filename = _DEMO_DATASETS[body.demo_key]
+    data = (_DEMO_DATA_DIR / filename).read_bytes()
+
+    async with get_connection() as conn:
+        await _load_session(conn, session_id, company_id)
+        existing = await conn.fetchrow(
+            "SELECT * FROM analysis_pilot_datasets WHERE session_id = $1 AND filename = $2",
+            session_id, filename)
+        if existing:
+            return _dataset_out(dict(existing))
+        storage_path = await get_storage().upload_private_file(
+            data, filename, prefix=f"analysis-pilot/{session_id}", content_type="text/csv")
+        row = await conn.fetchrow(
+            """INSERT INTO analysis_pilot_datasets
+                   (session_id, company_id, filename, storage_path, source_kind,
+                    content_type, file_size, uploaded_by)
+               VALUES ($1,$2,$3,$4,'csv','text/csv',$5,$6) RETURNING id""",
+            session_id, company_id, filename, storage_path, len(data),
+            getattr(current_user, "id", None),
+        )
+        ds_id = row["id"]
+        await _audit(conn, session_id, current_user, request, "upload",
+                     {"dataset_id": str(ds_id), "filename": filename, "source_kind": "csv", "demo_key": body.demo_key})
+
+    status, error, normalized, metrics = "ready", None, {}, {}
+    row_count = column_count = 0
+    try:
+        parsed = await asyncio.to_thread(packs.parse_tabular, data, "csv")
+        normalized, metrics, (row_count, column_count) = await asyncio.to_thread(
+            ap.analyze_dataset, ds_id, "csv", filename, parsed=parsed)
+        if not normalized.get("series"):
+            status, error = "failed", "No numeric columns detected."
+    except Exception:  # noqa: BLE001 - degrade, never 500
+        logger.exception("analysis_pilot: demo analysis failed for %s", filename)
+        status, error = "failed", "Could not analyze the demo file."
+
+    updated = await _persist_dataset_analysis(ds_id, session_id, status, error,
+                                              None, normalized, metrics,
                                               row_count, column_count)
     return _dataset_out(updated)
 
