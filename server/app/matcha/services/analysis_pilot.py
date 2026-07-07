@@ -229,6 +229,13 @@ FOCUSED RECORDS: when the user has highlighted records, address them specificall
 
 REASONING: before answering, decompose the question into sub-questions and work each one against the corpus — fill `analysis_plan` with that breakdown FIRST, then write `assistant_text` from its findings. Skip decomposition only for a single trivial lookup (one plan step is fine then).
 
+ANSWER SHAPE (make `assistant_text` genuinely useful, not a data dump):
+- LEAD with the single most decision-relevant finding in the first sentence — the answer to what was asked, stated as a conclusion — then support it. Don't bury the headline under per-series recitation.
+- QUANTIFY every change: give the magnitude, not just the direction — the absolute move AND the % or ×, and the periods it spans (e.g. "σ roughly tripled, 3.2%→5.2% over the last 12 weeks [id]"), each figure cited.
+- Explain the DRIVER, not just the fact: when the corpus supports it, say WHY — decompose a loss ratio into frequency vs severity, a profit swing into revenue vs margin, a drawdown into when it happened and whether it recovered. The "what" without the "why" reads as weak.
+- Surface the DEEPER records proactively when they bear on the question, even if not explicitly asked: volatility *regime* (`rolling_vol` — is risk rising or falling recently?), drawdown *timing and recovery* (`drawdown_duration`), tail shape (`distribution` skew/kurtosis, `cvar`), trend *reliability* (`fit` R²), `seasonality`, and `outliers`. These often carry the real story that a single latest-value or full-period σ misses.
+- Be specific and confident where the data is strong; flag genuine uncertainty where it's thin (small n, noisy fit, immature periods) — don't hedge findings the corpus clearly supports.
+
 Return STRICT JSON ONLY (no markdown, no prose outside the JSON), with fields in this order:
 {"analysis_plan": [{"step": "<a sub-question you looked into>", "finding": "<what the corpus showed, one line>", "cited_ids": ["<id>", ...]}],
  "assistant_text": "<your precise, conversational reply, synthesized from the plan above>",
@@ -244,6 +251,12 @@ Return STRICT JSON ONLY (no markdown, no prose outside the JSON), with fields in
 # the session — so a mixed session (fund prices + a loss run) gets both lenses
 # and a generic CSV gets none.
 _DOMAIN_LENSES: dict[str, str] = {
+    "general_stats": """GENERAL-ANALYSIS LENS (descriptive metrics present — always applies):
+- Distinguish level from change: cite the latest value AND its move vs the prior period, and the full-period trend — a flat latest with a strong trend (or vice-versa) is itself the finding.
+- Trend reliability over eyeballing: a `fit` record's R² says whether a first→last move is a real trend or noise. A rising series with low R² is choppy, not trending — say which.
+- Recent-vs-overall: when a series has a `rolling` or recent-window record, compare it to the full-period figure — "recently X vs Y overall" is usually more decision-relevant than either alone.
+- Name `outliers` and `seasonality` when present: an outlier can distort a mean/trend; a seasonal swing is not deterioration. Don't let either masquerade as signal.
+- For "which is highest/most/least" questions, rank ALL relevant series and give the spread, not just the winner.""",
     "volatility_risk": """QUANT / MARKET-RISK LENS (volatility metrics present):
 - Read σ and annualized vol together — flag when annualization is meaningless (too few periods, unknown frequency).
 - VaR95/VaR99 vs CVaR: CVaR materially worse than VaR implies fat tails — say so when the gap is wide.

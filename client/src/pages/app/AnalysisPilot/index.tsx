@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import Markdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import {
   Activity, BarChart3, Check, Download, FileSpreadsheet, FileText, GitCompare, HelpCircle, Loader2,
   MessageSquarePlus, Plus, RefreshCw, Send, Sparkles, Trash2, Wand2, X,
@@ -106,9 +108,10 @@ export default function AnalysisPilot() {
   const [loading, setLoading] = useState(true)
   const [showNew, setShowNew] = useState(false)
   const [showHelp, setShowHelp] = useShowOnce('analysis-pilot')
-  const [pendingAutoAsk, setPendingAutoAsk] = useState<{ text: string } | null>(null)
+  const [pendingAutoAsk, setPendingAutoAsk] = useState<{ text: string; nonce: number } | null>(null)
   const [demoLoadingKey, setDemoLoadingKey] = useState<DemoDatasetKey | null>(null)
   const activeIdRef = useRef<string | null>(null)
+  const autoAskNonceRef = useRef(0)
 
   const refreshList = useCallback(async () => {
     const rows = await listAnalysisSessions()
@@ -167,7 +170,7 @@ export default function AnalysisPilot() {
       const existing = rows.find((s) => s.title === DEMO_SESSION_TITLE)
       const demoId = existing ? existing.id : (await createAnalysisSession({ title: DEMO_SESSION_TITLE })).id
       await loadDemoDataset(demoId, key)
-      setPendingAutoAsk({ text: question })
+      setPendingAutoAsk({ text: question, nonce: ++autoAskNonceRef.current })
       await refreshList()
       void openSession(demoId)
     } catch (e) {
@@ -220,8 +223,7 @@ export default function AnalysisPilot() {
       <main className="flex-1 min-w-0">
         {active ? (
           <Workbench key={active.id} session={active} onChange={reloadActive} onShowHelp={() => setShowHelp(true)}
-            autoAsk={pendingAutoAsk} onAutoAskConsumed={() => setPendingAutoAsk(null)}
-            onRunDemo={runDemo} demoLoadingKey={demoLoadingKey} />
+            autoAsk={pendingAutoAsk} onRunDemo={runDemo} demoLoadingKey={demoLoadingKey} />
         ) : (
           <div className="h-full flex flex-col items-center justify-center text-center">
             <Wand2 className="h-8 w-8 text-emerald-500 mb-3" />
@@ -255,10 +257,9 @@ export default function AnalysisPilot() {
 
 type Tab = 'metrics' | 'chat' | 'compare' | 'examples'
 
-function Workbench({ session, onChange, onShowHelp, autoAsk, onAutoAskConsumed, onRunDemo, demoLoadingKey }: {
+function Workbench({ session, onChange, onShowHelp, autoAsk, onRunDemo, demoLoadingKey }: {
   session: AnalysisSession; onChange: () => void; onShowHelp: () => void
-  autoAsk?: { text: string } | null
-  onAutoAskConsumed?: () => void
+  autoAsk?: { text: string; nonce: number } | null
   onRunDemo: (key: DemoDatasetKey, question: string) => void
   demoLoadingKey: DemoDatasetKey | null
 }) {
@@ -275,19 +276,21 @@ function Workbench({ session, onChange, onShowHelp, autoAsk, onAutoAskConsumed, 
   // Examples tab hands a prompt to Console via this one-shot signal.
   const [prefill, setPrefill] = useState<{ text: string; nonce: number; autoSend?: boolean } | null>(null)
   const prefillNonceRef = useRef(0)
+  const firedAutoAskRef = useRef<number | null>(null)
   const datasets = session.datasets ?? []
   const ready = datasets.filter((d) => d.status === 'ready' || d.status === 'needs_review')
 
-  // This Workbench instance is keyed by session.id at the call site, so it
-  // remounts (this effect fires once) whenever a live-demo click switches the
-  // active session into the dedicated demo session with a question pending.
+  // A live-demo click sets a nonced autoAsk. Fire it exactly once per nonce —
+  // the ref guard survives React StrictMode's double effect-invoke (which was
+  // double-sending), and firing on nonce change (not just mount) means a repeat
+  // click into the already-active demo session still auto-asks.
   useEffect(() => {
-    if (!autoAsk) return
+    if (!autoAsk || firedAutoAskRef.current === autoAsk.nonce) return
+    firedAutoAskRef.current = autoAsk.nonce
     setTab('chat')
     setPrefill({ text: autoAsk.text, nonce: ++prefillNonceRef.current, autoSend: true })
-    onAutoAskConsumed?.()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [autoAsk?.nonce])
 
   const genReport = async () => {
     setReporting(true)
@@ -841,6 +844,90 @@ function CompareTab({ session, onChange }: { session: AnalysisSession; onChange:
 }
 
 // --------------------------------------------------------------------------- //
+// Citation rendering — the model's replies carry corpus ids (metric:/ratio:/
+// corr:/series:/figure:/compare:/dataset:) inline. Render them as clean chips
+// (label = the record's human ref, tooltip = its summary) instead of raw UUIDs,
+// and render the prose as markdown so bold/lists/tables show properly.
+// --------------------------------------------------------------------------- //
+
+type CidInfo = { ref: string; summary: string }
+
+/** cid → {ref, summary} across every computed record in the session (dataset
+ *  metrics + saved comparisons), so a cited id resolves to a readable label. */
+function buildCidIndex(session: AnalysisSession): Map<string, CidInfo> {
+  const idx = new Map<string, CidInfo>()
+  const add = (recs?: Array<{ cid: string; ref: string; summary: string }>) => {
+    for (const r of recs ?? []) idx.set(r.cid, { ref: r.ref, summary: r.summary })
+  }
+  for (const d of session.datasets ?? []) for (const b of Object.values(d.metrics ?? {})) add(b.records)
+  for (const c of session.comparisons ?? []) add(c.result?.records)
+  return idx
+}
+
+// 7 corpus prefixes; UUID + slug segments are [a-z0-9_-] (corr: joins two slugs
+// with __, both metric: shapes resolve by exact lookup). Brackets optional.
+const CID_TOKEN_RE = /\[?((?:dataset|figure|series|metric|ratio|corr|compare):[a-z0-9][a-z0-9_-]*(?::[a-z0-9_-]+)*)\]?/gi
+
+function cidFallbackLabel(cid: string): string {
+  const parts = cid.split(':')
+  const last = parts[parts.length - 1] || cid
+  return last.replace(/__/g, ' / ').replace(/[-_]+/g, ' ').trim() || 'cited'
+}
+
+/** Rewrite each inline cid token into a markdown link `[label](#cid:<cid>)` so
+ *  the markdown renderer can turn it into a chip via the `a` component. */
+function linkifyCids(text: string, idx: Map<string, CidInfo>): string {
+  return text.replace(CID_TOKEN_RE, (_full, cid: string) => {
+    const label = (idx.get(cid)?.ref || cidFallbackLabel(cid)).replace(/[[\]()]/g, '').trim()
+    return `[${label || 'cited'}](#cid:${cid})`
+  })
+}
+
+function CidChip({ label, summary }: { label: string; summary?: string }) {
+  return (
+    <span title={summary}
+      className="mx-0.5 inline-flex items-center rounded-sm border border-emerald-500/25 bg-emerald-500/[0.07] px-1.5 py-px align-baseline font-mono text-[10px] text-emerald-300/90 no-underline">
+      {label}
+    </span>
+  )
+}
+
+/** Render one or more cids as chips (used by evidence map + reasoning steps). */
+function CidChips({ cids, idx }: { cids: string[]; idx: Map<string, CidInfo> }) {
+  if (!cids.length) return null
+  return (
+    <span className="inline-flex flex-wrap gap-0.5 align-middle">
+      {cids.map((cid) => (
+        <CidChip key={cid} label={idx.get(cid)?.ref || cidFallbackLabel(cid)} summary={idx.get(cid)?.summary} />
+      ))}
+    </span>
+  )
+}
+
+/** Assistant prose: markdown + inline citation chips. */
+function CitedMarkdown({ text, idx }: { text: string; idx: Map<string, CidInfo> }) {
+  const processed = useMemo(() => linkifyCids(text, idx), [text, idx])
+  return (
+    <div className="prose prose-sm prose-invert prose-zinc max-w-none prose-p:my-1.5 prose-headings:text-zinc-100 prose-headings:text-sm prose-strong:text-zinc-100 prose-li:my-0.5">
+      <Markdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          a: ({ href, children }) => {
+            if (typeof href === 'string' && href.startsWith('#cid:')) {
+              const cid = href.slice(5)
+              return <CidChip label={idx.get(cid)?.ref || cidFallbackLabel(cid)} summary={idx.get(cid)?.summary} />
+            }
+            return <a href={href} target="_blank" rel="noreferrer" className="text-emerald-400 underline">{children}</a>
+          },
+        }}
+      >
+        {processed}
+      </Markdown>
+    </div>
+  )
+}
+
+// --------------------------------------------------------------------------- //
 // Console — grounded chat with citation-aware observations.
 // --------------------------------------------------------------------------- //
 
@@ -859,6 +946,7 @@ function Console({ session, onTurn, focus, onRemoveFocus, onClearFocus, prefill 
   const scrollRef = useRef<HTMLDivElement>(null)
   const abortRef = useRef<AbortController | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const cidIndex = useMemo(() => buildCidIndex(session), [session])
 
   useEffect(() => () => abortRef.current?.abort(), [])
   useEffect(() => { scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight }) }, [messages, status])
@@ -975,23 +1063,39 @@ function Console({ session, onTurn, focus, onRemoveFocus, onClearFocus, prefill 
           // `resolved` proposed-edit keys depend on.
           m.role === 'system' ? null : (
           <div key={i} className={m.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
-            <div className={`max-w-[85%] rounded-xl px-3.5 py-2.5 text-sm whitespace-pre-wrap ${
-              m.role === 'user' ? 'bg-emerald-600 text-white' : 'bg-zinc-800/70 text-zinc-200'
+            <div className={`max-w-[85%] rounded-xl px-3.5 py-2.5 text-sm ${
+              m.role === 'user' ? 'bg-emerald-600 text-white whitespace-pre-wrap' : 'bg-zinc-800/70 text-zinc-200'
             }`}>
-              {m.content}
+              {m.role === 'assistant'
+                ? <CitedMarkdown text={m.content} idx={cidIndex} />
+                : m.content}
               {m.role === 'user' && (m.metadata?.focus?.length ?? 0) > 0 && (
                 <div className="mt-1.5 text-[10px] text-emerald-200/80">
                   ⌖ focused on {m.metadata!.focus!.length} highlighted record{m.metadata!.focus!.length > 1 ? 's' : ''}
                 </div>
+              )}
+              {m.role === 'assistant' && (m.metadata?.analysis_plan?.length ?? 0) > 0 && (
+                <details className="mt-2">
+                  <summary className="cursor-pointer text-[11px] uppercase tracking-wide text-zinc-500 hover:text-zinc-300">
+                    Reasoning ({m.metadata!.analysis_plan!.length} step{m.metadata!.analysis_plan!.length > 1 ? 's' : ''})
+                  </summary>
+                  <ol className="mt-1.5 space-y-1 list-decimal list-inside text-xs text-zinc-400">
+                    {m.metadata!.analysis_plan!.map((s, j) => (
+                      <li key={j}>
+                        <span className="text-zinc-300">{s.step}</span>
+                        {s.finding && <> — {s.finding}</>}{' '}
+                        <CidChips cids={s.cited_ids ?? []} idx={cidIndex} />
+                      </li>
+                    ))}
+                  </ol>
+                </details>
               )}
               {m.role === 'assistant' && m.metadata?.evidence_map && m.metadata.evidence_map.length > 0 && (
                 <div className="mt-2 pt-2 border-t border-zinc-700/60">
                   <div className="text-[11px] uppercase tracking-wide text-emerald-400/80 mb-1">Grounded observations</div>
                   <ul className="text-xs text-zinc-400 space-y-1">
                     {m.metadata.evidence_map.map((ob, j) => (
-                      <li key={j}>• {ob.point} {ob.cited_ids.length > 0 && (
-                        <span className="text-emerald-500/70">[{ob.cited_ids.length} cited]</span>
-                      )}</li>
+                      <li key={j}>• {ob.point} <CidChips cids={ob.cited_ids ?? []} idx={cidIndex} /></li>
                     ))}
                   </ul>
                 </div>
