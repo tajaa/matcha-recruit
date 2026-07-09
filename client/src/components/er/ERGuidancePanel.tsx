@@ -5,11 +5,11 @@ import type { SuggestedGuidanceResponse, SuggestedGuidanceCard, ERCaseOutcome, O
 
 const BASE = import.meta.env.VITE_API_URL ?? '/api'
 
-// Document-processing poll cadence. The cap (~5 min) bounds the wait for a
+// Document-processing poll cadence. The cap (~45s) bounds the wait for a
 // document that never finishes parsing; the server-side sweep marks such rows
-// 'failed' within 15 min, so this only ever fires ahead of that.
+// 'failed' within 15 min, so this always gives up well ahead of that.
 const DOC_POLL_INTERVAL_MS = 3000
-const MAX_DOC_POLL_ATTEMPTS = 100
+const MAX_DOC_POLL_ATTEMPTS = 15
 
 const priorityVariant: Record<string, BadgeVariant> = {
   high: 'danger',
@@ -89,7 +89,8 @@ export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, onGuidance
   // in 'processing' forever, and this loop would spin against it for the life
   // of the tab. The server now releases such rows, but never let the UI depend
   // on that — after the cap we stop and fall through to the empty state, which
-  // tells the user processing did not complete.
+  // tells the user processing did not complete. Re-opening the case starts a
+  // fresh budget, so a document still parsing is picked back up.
   useEffect(() => {
     if (guidance !== null) return
     let cancelled = false
