@@ -120,10 +120,10 @@ export function Hero() {
       <a
         href="#index"
         aria-label="Scroll to products"
-        className="home-scroll-cue absolute bottom-5 left-1/2 -translate-x-1/2 z-10 hover:opacity-100"
+        className="home-scroll-cue absolute bottom-14 left-1/2 -translate-x-1/2 z-10 hover:opacity-100"
         style={{ color: ASH }}
       >
-        <ChevronDown className="w-6 h-6" strokeWidth={1.5} />
+        <ChevronDown className="w-8 h-8" strokeWidth={1.5} />
       </a>
     </section>
   );
@@ -161,7 +161,7 @@ function TypedHeadline() {
   }, [reduceMotion]);
 
   const cls =
-    "tracking-[-0.02em] text-[clamp(2.2rem,7vw,6.5rem)] xl:text-[clamp(2.4rem,4.7vw,4.7rem)]";
+    "tracking-[-0.02em] text-[clamp(1.9rem,6vw,5.4rem)] xl:text-[clamp(2.1rem,4vw,4rem)]";
   const font: React.CSSProperties = {
     fontFamily: DISPLAY,
     fontWeight: 300,
