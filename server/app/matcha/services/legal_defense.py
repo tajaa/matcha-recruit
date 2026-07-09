@@ -944,7 +944,9 @@ async def gather_evidence(conn, company_id, start, end, features: dict, matter: 
     if start or end:
         notes.append(f"Evidence window: {start or 'earliest record'} to {end or 'present'}.")
     if disabled:
-        notes.append("Not in use by this company (no records exist to include): "
+        # "not included", never "don't exist" — a feature can be switched off
+        # after records were created, so absence here proves nothing.
+        notes.append("Not included (subsystem not enabled for this company): "
                      + ", ".join(disabled) + ".")
 
     if matter:

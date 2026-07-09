@@ -538,8 +538,10 @@ def test_notes_disclose_window_and_disabled_subsystems():
                 "location_id": None, "jurisdiction_state": None},
     ))
     assert any("Evidence window: 2025-01-01 to 2025-06-30." == n for n in corpus["notes"])
-    assert any("Not in use by this company" in n for n in corpus["notes"])
+    assert any("Not included (subsystem not enabled" in n for n in corpus["notes"])
     assert any("Progressive discipline" in n for n in corpus["notes"])
+    # never a nonexistence claim — a feature can be disabled after records exist
+    assert not any("no records exist" in n.lower() for n in corpus["notes"])
 
 
 def test_notes_carry_no_ui_instructions_into_the_packet():
