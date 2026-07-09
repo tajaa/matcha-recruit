@@ -580,7 +580,7 @@ async def create_newsletter(title: str, subject: str, created_by: UUID) -> dict:
 async def update_newsletter(newsletter_id: UUID, updates: dict) -> dict:
     allowed = {
         "title", "subject", "content_html", "curated_article_ids", "scheduled_at",
-        "preheader", "theme", "accent_color",
+        "preheader", "theme", "accent_color", "font",
     }
     sets = []
     params: list = []
@@ -594,6 +594,8 @@ async def update_newsletter(newsletter_id: UUID, updates: dict) -> dict:
             raise ValueError("theme must be 'dark' or 'light'")
         if key == "accent_color" and val and not _HEX_COLOR_RE.match(val):
             raise ValueError("accent_color must be a #RRGGBB hex color")
+        if key == "font" and val not in FONT_STACKS:
+            raise ValueError(f"font must be one of: {', '.join(FONT_STACKS)}")
         sets.append(f"{key} = ${idx}")
         params.append(val)
         idx += 1
@@ -737,13 +739,14 @@ def render_preview(
     *,
     theme: Literal["dark", "light"] = "light",
     accent_color: Optional[str] = None,
+    font: Optional[str] = None,
 ) -> str:
     """Render a draft body through the same pipeline used at send time.
 
     Used by the admin compose preview pane so the iframe shows what
     recipients will actually see — including video poster fallback,
-    branded chrome, and the draft's in-progress theme/accent color (not
-    yet saved). No tracking pixel is injected (send_id=None).
+    branded chrome, and the draft's in-progress theme/accent color/font
+    (not yet saved). No tracking pixel is injected (send_id=None).
     """
     settings = get_settings()
     base_url = (settings.app_base_url or "https://hey-matcha.com").rstrip("/")
@@ -762,6 +765,7 @@ def render_preview(
         fake_unsub,
         theme=theme,
         accent_color=accent_color,
+        font=font,
     )
 
 
@@ -915,6 +919,55 @@ EMAIL_THEMES = {
     },
 }
 
+# Curated Google Fonts for the email body. Deliberately a small, named set
+# (not free-text) — the value flows straight into the @import URL and an
+# inline `font-family` style, so an open field would be an HTML/CSS
+# injection vector. `google_param` is the exact `family=` query value;
+# `css_family` is the CSS font stack with web-safe fallbacks for clients
+# that strip the @import (Outlook desktop, some Gmail paths).
+FONT_STACKS = {
+    "inter": {
+        "label": "Inter",
+        "google_param": "Inter:wght@400;500;600;700",
+        "css_family": "'Inter',-apple-system,system-ui,sans-serif",
+    },
+    "ibm_plex_sans": {
+        "label": "IBM Plex Sans",
+        "google_param": "IBM+Plex+Sans:wght@400;500;600;700",
+        "css_family": "'IBM Plex Sans',-apple-system,system-ui,sans-serif",
+    },
+    "poppins": {
+        "label": "Poppins",
+        "google_param": "Poppins:wght@400;500;600;700",
+        "css_family": "'Poppins',-apple-system,system-ui,sans-serif",
+    },
+    "space_grotesk": {
+        "label": "Space Grotesk",
+        "google_param": "Space+Grotesk:wght@400;500;600;700",
+        "css_family": "'Space Grotesk',-apple-system,system-ui,sans-serif",
+    },
+    "dm_sans": {
+        "label": "DM Sans",
+        "google_param": "DM+Sans:wght@400;500;600;700",
+        "css_family": "'DM Sans',-apple-system,system-ui,sans-serif",
+    },
+    "lora": {
+        "label": "Lora",
+        "google_param": "Lora:wght@400;500;600;700",
+        "css_family": "'Lora',Georgia,'Times New Roman',serif",
+    },
+    "playfair_display": {
+        "label": "Playfair Display",
+        "google_param": "Playfair+Display:wght@400;600;700",
+        "css_family": "'Playfair Display',Georgia,'Times New Roman',serif",
+    },
+    "source_serif": {
+        "label": "Source Serif 4",
+        "google_param": "Source+Serif+4:wght@400;500;600;700",
+        "css_family": "'Source Serif 4',Georgia,'Times New Roman',serif",
+    },
+}
+
 # Per-newsletter accent color override — validated everywhere it's accepted
 # (route + service layer) since it's interpolated directly into inline HTML
 # `style` attributes sent to subscribers.
@@ -1028,6 +1081,7 @@ def _render_email(
     send_id: Optional[UUID] = None,
     theme: Optional[Literal["dark", "light"]] = None,
     accent_color: Optional[str] = None,
+    font: Optional[str] = None,
 ) -> str:
     """Render newsletter HTML with branded template, tracking, and CAN-SPAM
     footer. content_html is already sanitized at write time.
@@ -1036,13 +1090,13 @@ def _render_email(
     URL and click-tracking redirect targets. When omitted (test send) tracking
     is skipped so we don't pollute the analytics with previews.
 
-    `theme`/`accent_color` are per-newsletter design settings. When omitted
-    (the real send + test-send paths), they're read off the `newsletter` row
-    itself (`theme`, `accent_color` columns) — the preview endpoint passes
-    them explicitly instead, since a draft's in-progress edits aren't saved
-    yet. Falls back to the legacy dark palette with no accent override if
-    neither the newsletter row nor the caller supplies them (e.g. older rows
-    predating these columns).
+    `theme`/`accent_color`/`font` are per-newsletter design settings. When
+    omitted (the real send + test-send paths), they're read off the
+    `newsletter` row itself (`theme`, `accent_color`, `font` columns) — the
+    preview endpoint passes them explicitly instead, since a draft's
+    in-progress edits aren't saved yet. Falls back to the legacy dark palette
+    with no accent override and Inter if neither the newsletter row nor the
+    caller supplies them (e.g. older rows predating these columns).
     """
     settings = get_settings()
     if not base_url:
@@ -1054,6 +1108,9 @@ def _render_email(
     resolved_accent = accent_color or newsletter.get("accent_color")
     if resolved_accent and _HEX_COLOR_RE.match(resolved_accent):
         palette["accent"] = resolved_accent
+
+    resolved_font = font or newsletter.get("font") or "inter"
+    font_stack = FONT_STACKS.get(resolved_font, FONT_STACKS["inter"])
 
     content = newsletter.get("content_html") or ""
     preheader = (newsletter.get("preheader") or "").strip()
@@ -1099,9 +1156,9 @@ def _render_email(
         )
 
     return f"""
-    <style>@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');</style>
+    <style>@import url('https://fonts.googleapis.com/css2?family={font_stack['google_param']}&display=swap');</style>
     {preheader_html}
-    <div style="max-width:600px;margin:0 auto;font-family:'Inter',-apple-system,system-ui,sans-serif;background:{palette['wrapper_bg']};color:{palette['wrapper_fg']};padding:32px 24px;">
+    <div style="max-width:600px;margin:0 auto;font-family:{font_stack['css_family']};background:{palette['wrapper_bg']};color:{palette['wrapper_fg']};padding:32px 24px;">
         <div style="text-align:center;margin-bottom:24px;">
             <span style="font-size:20px;font-weight:700;color:{palette['accent']};">Matcha</span>
         </div>

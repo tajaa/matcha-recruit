@@ -561,6 +561,7 @@ class UpdateNewsletterRequest(BaseModel):
     scheduled_at: Optional[datetime] = None
     theme: Optional[str] = None  # "dark" | "light"
     accent_color: Optional[str] = Field(default=None, pattern=r"^#[0-9A-Fa-f]{6}$")
+    font: Optional[str] = None  # one of svc.FONT_STACKS
 
 
 @admin_router.get("/newsletters")
@@ -736,6 +737,7 @@ class PreviewRequest(BaseModel):
     content_html: str = ""
     theme: str = "light"  # "dark" | "light"
     accent_color: Optional[str] = Field(default=None, pattern=r"^#[0-9A-Fa-f]{6}$")
+    font: str = "inter"  # one of svc.FONT_STACKS
 
 
 @admin_router.post("/preview")
@@ -745,15 +747,17 @@ async def render_newsletter_preview(
 ):
     """Render a draft body through the same pipeline as send time so the
     compose iframe shows what recipients actually see (video poster fallback,
-    branded chrome, theme-correct palette, custom accent). No tracking pixel
-    injected."""
+    branded chrome, theme-correct palette, custom accent + font). No tracking
+    pixel injected."""
     theme = body.theme if body.theme in ("dark", "light") else "light"
+    font = body.font if body.font in svc.FONT_STACKS else "inter"
     html = svc.render_preview(
         title=body.title,
         subject=body.subject,
         preheader=body.preheader,
         content_html=body.content_html,
         theme=theme,
+        font=font,
         accent_color=body.accent_color,
     )
     return {"html": html}

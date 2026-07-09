@@ -12,8 +12,9 @@ import { TemplatesTab } from './TemplatesTab'
 import { SendModal } from './SendModal'
 import { AnalyticsDrawer } from './AnalyticsDrawer'
 import { CsvImportModal } from './CsvImportModal'
+import { DEFAULT_FONT } from './fonts'
 
-// New-draft defaults — matches the `newsletters.theme`/`accent_color`
+// New-draft defaults — matches the `newsletters.theme`/`accent_color`/`font`
 // DB column defaults, so a brand-new draft's preview matches what it'll
 // persist as before the first autosave round-trip.
 const DEFAULT_THEME: 'dark' | 'light' = 'light'
@@ -39,6 +40,7 @@ export default function NewsletterAdmin() {
   const [composeHtml, setComposeHtml] = useState('')
   const [composeTheme, setComposeTheme] = useState<'dark' | 'light'>(DEFAULT_THEME)
   const [composeAccentColor, setComposeAccentColor] = useState(DEFAULT_ACCENT_COLOR)
+  const [composeFont, setComposeFont] = useState(DEFAULT_FONT)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [isDirty, setIsDirty] = useState(false)
@@ -76,7 +78,7 @@ export default function NewsletterAdmin() {
       setTab('compose')
       setEditingId(null)
       setComposeTitle(''); setComposeSubject(''); setComposePreheader(''); setComposeHtml('')
-      setComposeTheme(DEFAULT_THEME); setComposeAccentColor(DEFAULT_ACCENT_COLOR)
+      setComposeTheme(DEFAULT_THEME); setComposeAccentColor(DEFAULT_ACCENT_COLOR); setComposeFont(DEFAULT_FONT)
       setIsDirty(false); setSaveStatus('saved')
     }
   }, [location.pathname])
@@ -151,6 +153,7 @@ export default function NewsletterAdmin() {
               content_html: composeHtml || undefined,
               theme: composeTheme,
               accent_color: composeAccentColor,
+              font: composeFont,
             })
           }
           upsertNewsletter(saved)
@@ -162,6 +165,7 @@ export default function NewsletterAdmin() {
             content_html: composeHtml || undefined,
             theme: composeTheme,
             accent_color: composeAccentColor,
+            font: composeFont,
           })
           upsertNewsletter(saved)
         }
@@ -172,7 +176,7 @@ export default function NewsletterAdmin() {
       }
     }, 2000)
     return () => window.clearTimeout(timer)
-  }, [composeTitle, composeSubject, composePreheader, composeHtml, composeTheme, composeAccentColor, isDirty])
+  }, [composeTitle, composeSubject, composePreheader, composeHtml, composeTheme, composeAccentColor, composeFont, isDirty])
 
   useEffect(() => {
     function handler(e: BeforeUnloadEvent) {
@@ -219,6 +223,7 @@ export default function NewsletterAdmin() {
         content_html: composeHtml || undefined,
         theme: composeTheme,
         accent_color: composeAccentColor,
+        font: composeFont,
       })
       upsertNewsletter(saved)
       setIsDirty(false); setSaveStatus('saved')
@@ -334,6 +339,7 @@ export default function NewsletterAdmin() {
     setComposeHtml(nl.content_html || '')
     setComposeTheme(nl.theme ?? DEFAULT_THEME)
     setComposeAccentColor(nl.accent_color ?? DEFAULT_ACCENT_COLOR)
+    setComposeFont(nl.font ?? DEFAULT_FONT)
     setIsDirty(false)
     setSaveStatus('saved')
     setTab('compose')
@@ -346,6 +352,7 @@ export default function NewsletterAdmin() {
     setComposeHtml(t.content_html ?? '')
     setComposeTheme(DEFAULT_THEME)
     setComposeAccentColor(DEFAULT_ACCENT_COLOR)
+    setComposeFont(DEFAULT_FONT)
     setEditingId(null)
     setIsDirty(true); setSaveStatus('unsaved')
     setTab('compose')
@@ -518,6 +525,7 @@ export default function NewsletterAdmin() {
           composeHtml={composeHtml} setComposeHtml={setComposeHtml}
           composeTheme={composeTheme} setComposeTheme={setComposeTheme}
           composeAccentColor={composeAccentColor} setComposeAccentColor={setComposeAccentColor}
+          composeFont={composeFont} setComposeFont={setComposeFont}
           setIsDirty={setIsDirty} setSaveStatus={setSaveStatus}
           saving={saving}
           handleCreate={handleCreate}

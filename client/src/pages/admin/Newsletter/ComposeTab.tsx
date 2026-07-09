@@ -1,7 +1,9 @@
+import { useEffect } from 'react'
 import { Loader2, Plus, Send, Tag as TagIcon, Calendar, Palette } from 'lucide-react'
 import SectionEditor from '../../../components/matcha-work/SectionEditor'
 import { MobilePreview } from './MobilePreview'
 import { uploadNewsletterMedia } from './uploadMedia'
+import { FONT_OPTIONS, FONT_PICKER_STYLESHEET_HREF, fontCssFamily } from './fonts'
 
 // Quick-pick swatches — a small curated set, not a full color picker. Admins
 // can still type any hex value in the field next to it.
@@ -23,6 +25,7 @@ export function ComposeTab({
   composeHtml, setComposeHtml,
   composeTheme, setComposeTheme,
   composeAccentColor, setComposeAccentColor,
+  composeFont, setComposeFont,
   setIsDirty, setSaveStatus,
   saving,
   handleCreate,
@@ -38,6 +41,7 @@ export function ComposeTab({
   composeHtml: string; setComposeHtml: (v: string) => void
   composeTheme: 'dark' | 'light'; setComposeTheme: (v: 'dark' | 'light') => void
   composeAccentColor: string; setComposeAccentColor: (v: string) => void
+  composeFont: string; setComposeFont: (v: string) => void
   setIsDirty: (v: boolean) => void
   setSaveStatus: (v: 'saved' | 'saving' | 'unsaved') => void
   saving: boolean
@@ -47,6 +51,17 @@ export function ComposeTab({
   openSend: (kind: 'now' | 'schedule' | 'segment') => Promise<void>
 }) {
   const isValidHex = /^#[0-9A-Fa-f]{6}$/.test(composeAccentColor)
+
+  // Load every curated font once so the picker can render each option in
+  // its real typeface (not just the current selection).
+  useEffect(() => {
+    if (document.getElementById('newsletter-font-picker-stylesheet')) return
+    const link = document.createElement('link')
+    link.id = 'newsletter-font-picker-stylesheet'
+    link.rel = 'stylesheet'
+    link.href = FONT_PICKER_STYLESHEET_HREF
+    document.head.appendChild(link)
+  }, [])
   return (
     <div className="space-y-4">
       {/* Save status indicator */}
@@ -123,6 +138,26 @@ export function ComposeTab({
               </div>
             </div>
             {!isValidHex && <p className="text-[10px] text-red-600 mt-2">Accent color must be a 6-digit hex value, e.g. #059669.</p>}
+            <div className="mt-3">
+              <label className="block text-[10px] text-slate-500 uppercase tracking-wide mb-1">Font</label>
+              <select
+                value={composeFont}
+                onChange={(e) => { setComposeFont(e.target.value); setIsDirty(true); setSaveStatus('unsaved') }}
+                className="w-full sm:w-64 px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-sm text-slate-800 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                style={{ fontFamily: fontCssFamily(composeFont) }}
+              >
+                <optgroup label="Sans-serif">
+                  {FONT_OPTIONS.filter((f) => f.category === 'sans').map((f) => (
+                    <option key={f.value} value={f.value} style={{ fontFamily: f.cssFamily }}>{f.label}</option>
+                  ))}
+                </optgroup>
+                <optgroup label="Serif">
+                  {FONT_OPTIONS.filter((f) => f.category === 'serif').map((f) => (
+                    <option key={f.value} value={f.value} style={{ fontFamily: f.cssFamily }}>{f.label}</option>
+                  ))}
+                </optgroup>
+              </select>
+            </div>
           </div>
           <div>
             <label className="block text-xs text-slate-600 mb-1">Content</label>
@@ -145,6 +180,7 @@ export function ComposeTab({
           html={composeHtml}
           theme={composeTheme}
           accentColor={isValidHex ? composeAccentColor : '#059669'}
+          font={composeFont}
         />
       </div>
 

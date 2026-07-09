@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Loader2 } from 'lucide-react'
 import { api } from '../../../api/client'
+import { FONT_OPTIONS } from './fonts'
 
 type ThemeKey = 'dark' | 'light'
 type DeviceKey = 'desktop' | 'mobile'
@@ -8,16 +9,16 @@ type DeviceKey = 'desktop' | 'mobile'
 const DEVICE_WIDTHS: Record<DeviceKey, number> = { desktop: 640, mobile: 360 }
 const DEVICE_HEIGHTS: Record<DeviceKey, number> = { desktop: 460, mobile: 640 }
 
-export function MobilePreview({ title, subject, preheader, html, theme, accentColor }: {
+export function MobilePreview({ title, subject, preheader, html, theme, accentColor, font }: {
   title: string; subject: string; preheader: string; html: string
-  theme: ThemeKey; accentColor: string
+  theme: ThemeKey; accentColor: string; font: string
 }) {
   // Iframe runs the SAME render pipeline as outbound mail — POSTs the draft
   // to /admin/newsletter/preview and inlines whatever the backend produces.
   // That's the only way the preview can stay honest about video poster
-  // fallback, branded chrome, theme palette, accent color, and CAN-SPAM
-  // footer changes. theme/accentColor are the Design settings panel's
-  // values — this component just renders what's chosen there, live.
+  // fallback, branded chrome, theme palette, accent color, font, and
+  // CAN-SPAM footer changes. theme/accentColor/font are the Design settings
+  // panel's values — this component just renders what's chosen there, live.
   const [previewHtml, setPreviewHtml] = useState<string>('')
   const [previewLoading, setPreviewLoading] = useState(false)
 
@@ -27,7 +28,7 @@ export function MobilePreview({ title, subject, preheader, html, theme, accentCo
     const t = window.setTimeout(async () => {
       try {
         const res = await api.post<{ html: string }>('/admin/newsletter/preview', {
-          title, subject, preheader, content_html: html, theme, accent_color: accentColor,
+          title, subject, preheader, content_html: html, theme, accent_color: accentColor, font,
         })
         if (!cancelled) setPreviewHtml(res.html || '')
       } catch {
@@ -37,15 +38,16 @@ export function MobilePreview({ title, subject, preheader, html, theme, accentCo
       }
     }, 500)
     return () => { cancelled = true; window.clearTimeout(t) }
-  }, [title, subject, preheader, html, theme, accentColor])
+  }, [title, subject, preheader, html, theme, accentColor, font])
 
   // Wrap server-rendered fragment in a minimal HTML document. The server
   // returns the email body div; we add a doctype + the recipient-side
   // background that simulates what the email client paints around the email.
   const clientBg = theme === 'dark' ? '#0a0a0a' : '#f3f4f6'
-  const previewDoc = `<!doctype html><html><head><meta charset="utf-8"><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"><style>
+  const fontOption = FONT_OPTIONS.find((f) => f.value === font) ?? FONT_OPTIONS[0]
+  const previewDoc = `<!doctype html><html><head><meta charset="utf-8"><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=${fontOption.googleParam}&display=swap" rel="stylesheet"><style>
     html,body{margin:0;padding:0;background:${clientBg};}
-    body{padding:16px 0;font-family:'Inter',-apple-system,system-ui,sans-serif;}
+    body{padding:16px 0;font-family:${fontOption.cssFamily};}
     img{max-width:100%;height:auto}
     video{max-width:100%;height:auto}
   </style></head><body>${previewHtml || '<p style="padding:16px;color:#777;text-align:center;">Loading preview…</p>'}</body></html>`
@@ -84,7 +86,7 @@ export function MobilePreview({ title, subject, preheader, html, theme, accentCo
         <p className="text-[10px] text-slate-400 uppercase tracking-wider">Inbox preview {previewLoading && <Loader2 className="inline-block animate-spin ml-1" size={10} />}</p>
         <p className="text-[10px] text-slate-400">
           <span className="inline-block w-2 h-2 rounded-full align-[-1px] mr-1" style={{ background: accentColor }} />
-          {theme === 'dark' ? 'Dark' : 'Light'} theme — edit in Design settings
+          {theme === 'dark' ? 'Dark' : 'Light'} · {fontOption.label} — edit in Design settings
         </p>
       </div>
       {/* Desktop + mobile shown together — no switching back and forth while drafting. */}

@@ -6144,6 +6144,18 @@ async def init_db():
                     ALTER TABLE newsletters ADD COLUMN accent_color VARCHAR(7) NOT NULL DEFAULT '#059669'
                         CHECK (accent_color ~ '^#[0-9A-Fa-f]{6}$');
                 END IF;
+                -- Curated Google Fonts set — keep in sync with FONT_STACKS
+                -- keys in app/core/services/newsletter_service.py.
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'newsletters' AND column_name = 'font'
+                ) THEN
+                    ALTER TABLE newsletters ADD COLUMN font VARCHAR(32) NOT NULL DEFAULT 'inter'
+                        CHECK (font IN (
+                            'inter', 'ibm_plex_sans', 'poppins', 'space_grotesk',
+                            'dm_sans', 'lora', 'playfair_display', 'source_serif'
+                        ));
+                END IF;
             END $$;
         """)
         await conn.execute("""
