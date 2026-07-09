@@ -56,6 +56,12 @@ export function Masthead({ matter, evidence, genKind, hasAssistant, research, on
                 <HelpHint text="Evidence is limited to this matter's location and state — only records tied to that scope are pulled in. Clear or widen the scope when creating the matter to include more." />
               </span>
             )}
+            {evidence?.theory && (
+              <span className="inline-flex items-center gap-1 normal-case text-zinc-500">
+                subject {evidence.theory.label}
+                <HelpHint text="Evidence is filtered to the subject of this matter, read from its allegation and type — records about unrelated subjects are left out. Set the matter type to Other to pull in every record." />
+              </span>
+            )}
             {deadlineText && <span className={`normal-case ${deadlineTone}`}>{deadlineText}</span>}
             {matter.counsel_directed && (
               <span className="text-zinc-400">at direction of counsel{matter.counsel_name ? ` · ${matter.counsel_name}` : ''}</span>
@@ -121,7 +127,9 @@ function SystemsStrip({ evidence }: { evidence: EvidencePreview | null }) {
             title={src ? src.label
               : ['law', 'legislation', 'case_law'].includes(s.key)
                 ? `${s.label}: set a location/state and run Research in the Legal landscape panel`
-                : `${s.label}: no records in the matter window`}
+                : evidence?.theory
+                  ? `${s.label}: no records matching this matter's ${evidence.theory.label} subject inside the matter window`
+                  : `${s.label}: no records in the matter window`}
           >
             <Icon className={`h-3.5 w-3.5 ${active ? 'text-emerald-400' : 'text-zinc-700'}`} />
             <span className={`text-[10px] font-medium uppercase tracking-[0.15em] ${active ? 'text-zinc-300' : 'text-zinc-600'}`}>

@@ -29,7 +29,9 @@ export function EvidencePanel({ evidence }: { evidence: EvidencePreview | null }
           <p className="px-4 py-2 text-xs text-zinc-600">Loading the record…</p>
         ) : evidence.total === 0 ? (
           <p className="px-4 py-2 text-xs text-zinc-500">
-            No records fall inside the matter's evidence window. Widen the window when creating the matter to pull more history in.
+            {evidence.theory
+              ? `No records match this matter's ${evidence.theory.label} subject inside its evidence window. Widen the window, or set the matter type to Other to pull in records on every subject.`
+              : "No records fall inside the matter's evidence window. Widen the window when creating the matter to pull more history in."}
           </p>
         ) : (
           <>

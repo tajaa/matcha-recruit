@@ -28,6 +28,7 @@ import logging
 import time
 import zipfile
 from datetime import datetime, timezone
+from typing import NamedTuple
 from uuid import UUID
 
 from app.config import get_settings
@@ -171,6 +172,165 @@ async def resolve_matter_jurisdiction(conn, matter: dict) -> dict | None:
     }
 
 
+# --------------------------------------------------------------------------- #
+# Matter theory — subject-matter scoping of the evidence corpus.
+#
+# Location/state scoping (below) answers "whose records?"; it says nothing about
+# "which records?". Without a subject filter a meal-break matter pulls every
+# slip-and-fall and medication-error incident the company ever logged, which
+# buries the relevant record and poisons the AI's grounding corpus.
+#
+# The theory is derived, never asked for: the allegation text decides when it
+# speaks clearly, and ``matter_type`` is the fallback. Types that carry no
+# subject signal (subpoena / audit / other) resolve to the broad theory — no
+# filtering at all, today's behavior — which doubles as the escape hatch when
+# the derivation gets it wrong.
+# --------------------------------------------------------------------------- #
+
+_WAGE_HOUR = ["minimum_wage", "overtime", "meal_breaks", "pay_frequency", "final_pay",
+              "scheduling_reporting", "sick_leave", "leave", "employee_classification",
+              "equal_pay", "pay_transparency"]
+_EEO = ["anti_discrimination", "equal_pay", "pregnancy_accommodation", "eeo_reporting",
+        "background_checks", "pay_transparency", "whistleblower"]
+_SAFETY = ["workplace_safety", "workers_comp", "industrial_hygiene", "machine_safety",
+           "chemical_safety", "environmental_safety", "emergency_preparedness",
+           "radiation_safety", "process_safety", "clinical_safety"]
+
+# Vocabularies the topic filter knows. A slug OUTSIDE these lists is
+# company-defined (discipline infraction types are per-company configurable,
+# er_cases.category has no CHECK constraint) and always passes the filter —
+# silently dropping an unrecognized record from a legal corpus is the one
+# failure mode worse than over-inclusion.
+_INCIDENT_TYPES = ["safety", "behavioral", "property", "near_miss", "other"]
+_ER_CATEGORIES = ["harassment", "discrimination", "safety", "retaliation",
+                  "policy_violation", "misconduct", "wage_hour", "other"]
+_INFRACTIONS = ["attendance", "performance", "safety", "harassment",
+                "policy_violation", "gross_misconduct"]
+
+
+class _Topic(NamedTuple):
+    """Per-source allowlists for one theory. ``None`` = don't filter that source.
+    An EMPTY list is meaningful and different: no value in that source's
+    vocabulary relates to the theory, so the source drops out entirely (a
+    wage-and-hour claim has no relevant IR/OSHA incident type)."""
+    label: str
+    compliance: list[str] | None
+    incidents: list[str] | None
+    er: list[str] | None
+    discipline: list[str] | None
+
+
+_BROAD = _Topic("all records", None, None, None, None)
+
+_THEORIES: dict[str, _Topic] = {
+    "wage_hour": _Topic(
+        label="wage-and-hour",
+        compliance=_WAGE_HOUR,
+        incidents=[],  # no IR/OSHA incident type describes a pay practice
+        er=["wage_hour", "retaliation", "policy_violation", "other"],
+        discipline=["attendance", "performance", "policy_violation"],
+    ),
+    "eeo": _Topic(
+        label="discrimination / EEO",
+        compliance=_EEO,
+        incidents=["behavioral", "other"],
+        er=["harassment", "discrimination", "retaliation", "misconduct",
+            "policy_violation", "other"],
+        discipline=["harassment", "gross_misconduct", "policy_violation", "performance"],
+    ),
+    "safety": _Topic(
+        label="workplace-safety",
+        compliance=_SAFETY,
+        incidents=["safety", "near_miss", "property", "other"],
+        er=["safety", "policy_violation", "other"],
+        discipline=["safety", "policy_violation", "gross_misconduct"],
+    ),
+}
+
+# Substring probes against the matter's title + allegation, lowercased. Ordered
+# scoring: most hits wins, ties fall back to the matter_type map. Deliberately
+# stemmed ("discriminat", "injur") so tense/plural never costs a hit.
+_THEORY_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "wage_hour": ("wage", "overtime", "meal break", "meal period", "rest break",
+                  "off the clock", "off-the-clock", "timecard", "time card", "unpaid",
+                  "minimum wage", "misclassif", "exempt", "tip credit", "payroll",
+                  "final pay", "paystub", "pay stub", "flsa", "hours worked",
+                  "donning", "rounding", "wage theft"),
+    "eeo": ("discriminat", "harass", "retaliat", "hostile work", "title vii", "adea",
+            "eeoc", "pregnan", "accommodat", "wrongful termination", "fmla",
+            "disparate", "hostile environment", "ada "),
+    "safety": ("osha", "injur", "slip", "trip and fall", "safety", "accident",
+               "near miss", "workers comp", "workers' comp", "hazard", "ergonomic",
+               "ppe", "lockout", "exposure"),
+}
+
+# matter_type -> theory when the allegation text is silent or ambiguous.
+# None = broad (no subject filter).
+_MATTER_TYPE_THEORY: dict[str, str | None] = {
+    "class_action": "wage_hour",
+    "single_plaintiff": "wage_hour",
+    "eeoc_charge": "eeo",
+    "subpoena": None,
+    "audit": None,
+    "other": None,
+}
+
+# Back-compat alias: matter_type -> compliance categories. Kept because it is the
+# shape ``_gather_law`` widened from and the shape the registry-key test asserts.
+# Registry-membership of these slugs is enforced by
+# tests/legal_defense/test_legal_defense.py::test_matter_type_categories_are_registry_keys
+# — NOT by a module-level assert: this module is imported unconditionally at
+# app boot via routes/__init__.py, so an import-time assert would take down
+# the entire backend on a registry rename, not just Legal Pilot.
+_MATTER_TYPE_CATEGORIES: dict[str, list[str] | None] = {
+    mt: (_THEORIES[th].compliance if th else None) for mt, th in _MATTER_TYPE_THEORY.items()
+}
+
+
+def resolve_matter_theory(matter: dict | None) -> tuple[str | None, _Topic]:
+    """(theory_slug, topic) for a matter. Returns ``(None, _BROAD)`` when the
+    evidence must stay unfiltered.
+
+    A matter_type that maps to None (subpoena / audit / other) short-circuits to
+    broad BEFORE the keyword scan, and that ordering is the whole escape hatch:
+    a records subpoena mentioning wages must still return every record, and a
+    user told "set the type to Other to see everything" has to actually get
+    everything. Only for the subject-bearing types do allegation keywords pick
+    the theory, with the matter_type map as their fallback."""
+    if not matter:
+        return None, _BROAD
+    mt = matter.get("matter_type")
+    if mt in _MATTER_TYPE_THEORY and _MATTER_TYPE_THEORY[mt] is None:
+        return None, _BROAD
+    # Trailing space so a probe ending in one ("ada ") can still match a term
+    # that lands at the very end of the text.
+    text = f"{matter.get('title') or ''} {matter.get('allegation') or ''} ".lower()
+    scores = {
+        slug: sum(1 for kw in kws if kw in text)
+        for slug, kws in _THEORY_KEYWORDS.items()
+    }
+    best = max(scores, key=lambda k: scores[k])
+    top = scores[best]
+    # A lone keyword hit is enough only when nothing else scores as high —
+    # "retaliation for reporting a safety hazard" must not silently pick one.
+    if top > 0 and sum(1 for v in scores.values() if v == top) == 1:
+        return best, _THEORIES[best]
+    slug = _MATTER_TYPE_THEORY.get(mt)
+    return (slug, _THEORIES[slug]) if slug else (None, _BROAD)
+
+
+def _topic_filter(col: str, n: int) -> str:
+    """Subject-matter predicate for a source's category/type column.
+    ``$n`` = the theory's allowlist, ``$n+1`` = that column's known vocabulary.
+
+    NULL allowlist → no filter. Otherwise a row survives when its value is in
+    the allowlist, is NULL (unattributable — stays in), or lies outside the
+    known vocabulary (company-defined slug — never silently dropped). An EMPTY
+    allowlist therefore drops every row carrying a known-but-irrelevant value."""
+    return (f" AND (${n}::text[] IS NULL OR {col} = ANY(${n})"
+            f" OR {col} IS NULL OR NOT ({col} = ANY(${n + 1})))")
+
+
 def _scope_direct(loc_col: str, state_col: str, n: int) -> str:
     """Matter-scope predicate for tables carrying their own location_id.
     ``$n`` = location uuid, ``$n+1`` = state. No scope → passes every row;
@@ -218,7 +378,7 @@ def _scope_er_involved(n: int) -> str:
         f"      OR (${n}::uuid IS NULL AND UPPER(e.work_state) = UPPER(${n + 1}))))")
 
 
-async def _src_incidents(conn, company_id, start, end, loc_id, state) -> list[dict]:
+async def _src_incidents(conn, company_id, start, end, loc_id, state, topic=_BROAD) -> list[dict]:
     rows = await conn.fetch(
         f"""
         SELECT i.id, i.incident_number, i.title, i.incident_type, i.severity, i.status, i.occurred_at
@@ -228,9 +388,10 @@ async def _src_incidents(conn, company_id, start, end, loc_id, state) -> list[di
           AND ($2::date IS NULL OR i.occurred_at >= $2)
           AND ($3::date IS NULL OR i.occurred_at < ($3::date + 1))
           {_scope_direct("i.location_id", "bl.state", 4)}
+          {_topic_filter("i.incident_type", 6)}
         ORDER BY i.occurred_at DESC NULLS LAST
         """,
-        company_id, start, end, loc_id, state,
+        company_id, start, end, loc_id, state, topic.incidents, _INCIDENT_TYPES,
     )
     return [{
         "cid": f"incident:{r['id']}",
@@ -241,7 +402,7 @@ async def _src_incidents(conn, company_id, start, end, loc_id, state) -> list[di
     } for r in rows]
 
 
-async def _src_er_cases(conn, company_id, start, end, loc_id, state) -> list[dict]:
+async def _src_er_cases(conn, company_id, start, end, loc_id, state, topic=_BROAD) -> list[dict]:
     rows = await conn.fetch(
         f"""
         SELECT ec.id, ec.case_number, ec.title, ec.category, ec.status, ec.outcome, ec.created_at
@@ -250,9 +411,10 @@ async def _src_er_cases(conn, company_id, start, end, loc_id, state) -> list[dic
           AND ($2::date IS NULL OR ec.created_at >= $2)
           AND ($3::date IS NULL OR ec.created_at < ($3::date + 1))
           {_scope_er_involved(4)}
+          {_topic_filter("ec.category", 6)}
         ORDER BY ec.created_at DESC NULLS LAST
         """,
-        company_id, start, end, loc_id, state,
+        company_id, start, end, loc_id, state, topic.er, _ER_CATEGORIES,
     )
     return [{
         "cid": f"er_case:{r['id']}",
@@ -264,11 +426,14 @@ async def _src_er_cases(conn, company_id, start, end, loc_id, state) -> list[dic
     } for r in rows]
 
 
-async def _src_compliance(conn, company_id, start, end, loc_id, state) -> list[dict]:
+async def _src_compliance(conn, company_id, start, end, loc_id, state, topic=_BROAD) -> list[dict]:
     # Current requirement state per location = proof of what the company tracks /
     # the protocol it follows. Joined via business_locations (requirements carry
     # location_id, not company_id). Not date-filtered — it's current posture —
     # so the scope params bind $2/$3 here, not $4/$5.
+    # Category is registry-controlled (compliance_registry.CATEGORIES) and NOT
+    # NULL, so this takes a plain allowlist — no unknown-slug passthrough, and
+    # no NULL arm, needed.
     rows = await conn.fetch(
         f"""
         SELECT cr.id, cr.title, cr.category, cr.current_value, cr.jurisdiction_name,
@@ -278,9 +443,10 @@ async def _src_compliance(conn, company_id, start, end, loc_id, state) -> list[d
         LEFT JOIN jurisdiction_requirements jr ON jr.id = cr.jurisdiction_requirement_id
         WHERE bl.company_id = $1
           {_scope_direct("cr.location_id", "bl.state", 2)}
+          AND ($4::text[] IS NULL OR cr.category = ANY($4))
         ORDER BY cr.last_changed_at DESC NULLS LAST
         """,
-        company_id, loc_id, state,
+        company_id, loc_id, state, topic.compliance,
     )
     return [{
         "cid": f"compliance_req:{r['id']}",
@@ -295,7 +461,7 @@ async def _src_compliance(conn, company_id, start, end, loc_id, state) -> list[d
     } for r in rows]
 
 
-async def _src_discipline(conn, company_id, start, end, loc_id, state) -> list[dict]:
+async def _src_discipline(conn, company_id, start, end, loc_id, state, topic=_BROAD) -> list[dict]:
     rows = await conn.fetch(
         f"""
         SELECT pd.id, pd.discipline_type, pd.infraction_type, pd.severity, pd.status, pd.issued_date
@@ -305,9 +471,10 @@ async def _src_discipline(conn, company_id, start, end, loc_id, state) -> list[d
           AND ($2::date IS NULL OR pd.issued_date >= $2)
           AND ($3::date IS NULL OR pd.issued_date < ($3::date + 1))
           {_scope_employee(4)}
+          {_topic_filter("pd.infraction_type", 6)}
         ORDER BY pd.issued_date DESC NULLS LAST
         """,
-        company_id, start, end, loc_id, state,
+        company_id, start, end, loc_id, state, topic.discipline, _INFRACTIONS,
     )
     return [{
         "cid": f"discipline:{r['id']}",
@@ -321,7 +488,11 @@ async def _src_discipline(conn, company_id, start, end, loc_id, state) -> list[d
     } for r in rows]
 
 
-async def _src_training(conn, company_id, start, end, loc_id, state) -> list[dict]:
+async def _src_training(conn, company_id, start, end, loc_id, state, topic=_BROAD) -> list[dict]:
+    # Deliberately NOT topic-filtered. Training / policy acknowledgments /
+    # accommodations are the exculpatory half of the record — "we trained on
+    # this, they signed for it" — and counsel wants the full set regardless of
+    # theory. They are also small; noise isn't the failure mode here.
     rows = await conn.fetch(
         f"""
         SELECT tr.id, tr.title, tr.training_type, tr.status, tr.completed_date, tr.expiration_date
@@ -345,8 +516,8 @@ async def _src_training(conn, company_id, start, end, loc_id, state) -> list[dic
     } for r in rows]
 
 
-async def _src_policy_ack(conn, company_id, start, end, loc_id, state) -> list[dict]:
-    # loc_id/state unused: policies are company-wide — no location concept
+async def _src_policy_ack(conn, company_id, start, end, loc_id, state, topic=_BROAD) -> list[dict]:
+    # loc_id/state/topic unused: policies are company-wide — no location concept
     # exists anywhere in the policies schema. Stays unscoped by design.
     rows = await conn.fetch(
         """
@@ -369,7 +540,7 @@ async def _src_policy_ack(conn, company_id, start, end, loc_id, state) -> list[d
     } for r in rows]
 
 
-async def _src_accommodations(conn, company_id, start, end, loc_id, state) -> list[dict]:
+async def _src_accommodations(conn, company_id, start, end, loc_id, state, topic=_BROAD) -> list[dict]:
     rows = await conn.fetch(
         f"""
         SELECT ac.id, ac.case_number, ac.title, ac.status, ac.disability_category, ac.created_at
@@ -392,10 +563,13 @@ async def _src_accommodations(conn, company_id, start, end, loc_id, state) -> li
     } for r in rows]
 
 
-async def _src_compliance_alerts(conn, company_id, start, end, loc_id, state) -> list[dict]:
+async def _src_compliance_alerts(conn, company_id, start, end, loc_id, state, topic=_BROAD) -> list[dict]:
     # Date-filtered (unlike _src_compliance's current-posture snapshot) — this
     # is deliberately a history: it shows the company was monitoring during
     # the matter window, not just what it tracks today.
+    # ca.category is nullable (unlike compliance_requirements.category), so the
+    # allowlist carries a NULL arm — an uncategorized alert stays in the corpus
+    # rather than being silently dropped from it.
     rows = await conn.fetch(
         f"""
         SELECT ca.id, ca.title, ca.severity, ca.status, ca.category, ca.deadline,
@@ -406,10 +580,11 @@ async def _src_compliance_alerts(conn, company_id, start, end, loc_id, state) ->
           AND ($2::date IS NULL OR ca.created_at >= $2)
           AND ($3::date IS NULL OR ca.created_at < ($3::date + 1))
           {_scope_direct("ca.location_id", "bl.state", 4)}
+          AND ($6::text[] IS NULL OR ca.category = ANY($6) OR ca.category IS NULL)
         ORDER BY ca.created_at DESC
         LIMIT 100
         """,
-        company_id, start, end, loc_id, state,
+        company_id, start, end, loc_id, state, topic.compliance,
     )
     return [{
         "cid": f"compliance_alert:{r['id']}",
@@ -428,29 +603,6 @@ async def _src_compliance_alerts(conn, company_id, start, end, loc_id, state) ->
 # when the matter carries a location/state (see resolve_matter_jurisdiction).
 # --------------------------------------------------------------------------- #
 
-_WAGE_HOUR = ["minimum_wage", "overtime", "meal_breaks", "pay_frequency", "final_pay",
-              "scheduling_reporting", "sick_leave", "leave", "employee_classification",
-              "equal_pay", "pay_transparency"]
-_EEO = ["anti_discrimination", "equal_pay", "pregnancy_accommodation", "eeo_reporting",
-        "background_checks", "pay_transparency", "whistleblower"]
-
-# Matter type -> compliance categories most relevant to that theory of the
-# case. None = no category filter (pull broadly across the jurisdiction).
-_MATTER_TYPE_CATEGORIES: dict[str, list[str] | None] = {
-    "class_action": _WAGE_HOUR,
-    "single_plaintiff": _WAGE_HOUR,
-    "eeoc_charge": _EEO,
-    "subpoena": None,
-    "audit": None,
-    "other": None,
-}
-# Registry-membership of these slugs is enforced by
-# tests/legal_defense/test_legal_defense.py::test_matter_type_categories_are_registry_keys
-# — NOT by a module-level assert: this module is imported unconditionally at
-# app boot via routes/__init__.py, so an import-time assert would take down
-# the entire backend on a registry rename, not just Legal Pilot.
-
-
 def _dt_date(v) -> str:
     """Date-only render for law/bill records. The two retrieval paths hand
     back different types for the same field (RAG pre-isoformats to str, the
@@ -466,13 +618,17 @@ def _dt_date(v) -> str:
         return str(v)
 
 
-async def _gather_law(conn, matter: dict, juris: dict) -> tuple[dict | None, dict | None]:
+async def _gather_law(conn, matter: dict, juris: dict, topic: _Topic = _BROAD) -> tuple[dict | None, dict | None]:
     """Governing requirements + pending legislation for the matter's
-    jurisdiction chain, filtered to the matter type's relevant categories
+    jurisdiction chain, filtered to the matter theory's relevant categories
     when possible. Returns ``(law_source, legislation_source)``, each shaped
-    like an existing evidence source (``{"label", "records"}``) or None."""
+    like an existing evidence source (``{"label", "records"}``) or None.
+
+    Takes the same ``topic`` the record sources are filtered by, so the
+    governing law and the company records can never describe different
+    theories of the same case."""
     jurisdiction_ids = [c["id"] for c in juris["chain"]]
-    categories = _MATTER_TYPE_CATEGORIES.get(matter.get("matter_type"))
+    categories = topic.compliance or None
     rows = None
 
     if get_settings().gemini_api_key and matter.get("allegation"):
@@ -562,17 +718,18 @@ _LAW_CACHE_TTL = 300.0
 _LAW_CACHE_MAX = 256
 
 
-async def _gather_law_cached(conn, matter: dict, juris: dict) -> tuple[dict | None, dict | None]:
+async def _gather_law_cached(conn, matter: dict, juris: dict, topic: _Topic = _BROAD) -> tuple[dict | None, dict | None]:
     key = (
         str(matter.get("id")),
         str(juris.get("jurisdiction_id")),
         matter.get("matter_type"),
         matter.get("allegation") or "",
+        topic.label,
     )
     hit = _LAW_CACHE.get(key)
     if hit and time.monotonic() - hit[0] < _LAW_CACHE_TTL:
         return hit[1], hit[2]
-    law_src, bill_src = await _gather_law(conn, matter, juris)
+    law_src, bill_src = await _gather_law(conn, matter, juris, topic)
     if len(_LAW_CACHE) >= _LAW_CACHE_MAX:
         _LAW_CACHE.clear()
     _LAW_CACHE[key] = (time.monotonic(), law_src, bill_src)
@@ -646,12 +803,15 @@ async def gather_evidence(conn, company_id, start, end, features: dict, matter: 
     ``matter`` is optional (keyword, default None) so existing callers stay
     source-compatible; when given, (a) location-capable record sources are
     scoped to the matter's location/state (er_cases + policy acks stay
-    company-wide — no location link exists for them), and (b) jurisdiction-
-    grounded law/legislation/case-law sources are added on top.
+    company-wide — no location link exists for them), (b) every subject-bearing
+    source is filtered to the matter's derived theory (see
+    ``resolve_matter_theory``), and (c) jurisdiction-grounded
+    law/legislation/case-law sources are added on top.
     """
     features = features or {}
     sources: dict = {}
     notes: list[str] = []
+    theory, topic = resolve_matter_theory(matter)
 
     # Resolve jurisdiction BEFORE the sources loop: the record queries scope on
     # the matter's location/state, not just the legal-landscape extras below.
@@ -673,7 +833,7 @@ async def gather_evidence(conn, company_id, start, end, features: dict, matter: 
         if not enabled(features):
             continue
         try:
-            recs = await fn(conn, company_id, start, end, loc_id, scope_state)
+            recs = await fn(conn, company_id, start, end, loc_id, scope_state, topic)
         except Exception as e:  # noqa: BLE001 — isolation is the point
             logger.warning("legal_defense: source %s unavailable: %s", key, e)
             notes.append(f"{label}: unavailable")
@@ -688,10 +848,16 @@ async def gather_evidence(conn, company_id, start, end, features: dict, matter: 
     if loc_id or scope_state:
         notes.append(f"Evidence scoped to {(legal_context or {}).get('location_name') or scope_state}.")
 
+    if theory:
+        notes.append(
+            f"Evidence filtered to this matter's {topic.label} theory — records on "
+            f"unrelated subjects are excluded. Set the matter type to Other to see every record."
+        )
+
     if matter:
         if legal_context:
             try:
-                law_src, bill_src = await _gather_law_cached(conn, matter, legal_context)
+                law_src, bill_src = await _gather_law_cached(conn, matter, legal_context, topic)
                 if law_src and law_src["records"]:
                     sources["law"] = law_src
                 if bill_src and bill_src["records"]:
@@ -713,7 +879,9 @@ async def gather_evidence(conn, company_id, start, end, features: dict, matter: 
         for r in s["records"]:
             index[r["cid"]] = {**r, "source": key, "source_label": s["label"]}
 
-    return {"sources": sources, "index": index, "notes": notes, "legal_context": legal_context}
+    return {"sources": sources, "index": index, "notes": notes,
+            "legal_context": legal_context,
+            "theory": {"slug": theory, "label": topic.label} if theory else None}
 
 
 # --------------------------------------------------------------------------- #
@@ -754,6 +922,16 @@ def _history_text(history: list[dict]) -> str:
     return "\n".join(f"[{m['role']}] {m.get('content', '')}" for m in msgs) or "(no prior messages)"
 
 
+def _scope_text(corpus: dict) -> str:
+    """What the corpus was narrowed by. Without this the model reads a filtered
+    corpus as a factual finding ("the company logged no safety incidents") —
+    which is false and, in a memo handed to counsel, dangerous."""
+    theory = (corpus.get("theory") or {}).get("label")
+    lines = [f"- Subject: only records relating to a {theory} theory were retrieved."] if theory else []
+    lines += [f"- {n}" for n in corpus.get("notes") or []]
+    return "\n".join(lines) or "- No filters applied; every record the company holds is below."
+
+
 def _build_prompt(matter: dict, history: list[dict], corpus: dict, latest: str) -> str:
     return f"""{_SYSTEM}
 
@@ -762,6 +940,11 @@ Type: {matter.get('matter_type') or 'other'}
 Jurisdiction: {" → ".join(c["display_name"] for c in (corpus.get("legal_context") or {}).get("chain", [])) or "(not specified)"}
 Allegation / what's being claimed: {matter.get('allegation') or '(not specified)'}
 Factual context the company provided: {matter.get('defense_theory') or '(not specified)'}
+
+CORPUS SCOPE — the corpus below is a FILTERED subset of the company's records.
+A record type missing from it was filtered out, NOT proven absent. Never state or
+imply the company has no records of a kind that this scope excluded.
+{_scope_text(corpus)}
 
 EVIDENCE CORPUS (the ONLY records you may cite):
 {_corpus_text(corpus)}

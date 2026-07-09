@@ -319,6 +319,7 @@ async def get_evidence(matter_id: str, current_user=Depends(require_admin_or_cli
         "notes": corpus["notes"],
         "total": sum(len(s["records"]) for s in corpus["sources"].values()),
         "legal_context": corpus.get("legal_context"),
+        "theory": corpus.get("theory"),
     }
 
 

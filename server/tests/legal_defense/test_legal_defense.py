@@ -230,13 +230,14 @@ def test_gather_evidence_scopes_sources_to_matter_location():
     corpus = asyncio.run(ld.gather_evidence(
         conn, "cid", None, None, _ALL_FEATURES, matter=matter,
     ))
-    # every source got the two scope params on top of company/start/end
-    assert conn.arg_counts["ir_incidents"] == 5
-    assert conn.arg_counts["compliance_requirements"] == 3  # no date filter there
-    assert conn.arg_counts["progressive_discipline"] == 5
-    assert conn.arg_counts["training_records"] == 5
-    assert conn.arg_counts["accommodation_cases"] == 5
-    assert conn.arg_counts["compliance_alerts"] == 5
+    # every source got the two scope params on top of company/start/end;
+    # subject-bearing sources carry the topic allowlist (+ known vocabulary)
+    assert conn.arg_counts["ir_incidents"] == 7
+    assert conn.arg_counts["compliance_requirements"] == 4  # no date filter there
+    assert conn.arg_counts["progressive_discipline"] == 7
+    assert conn.arg_counts["training_records"] == 5         # unfiltered by design
+    assert conn.arg_counts["accommodation_cases"] == 5      # unfiltered by design
+    assert conn.arg_counts["compliance_alerts"] == 6        # registry categories, no passthrough
     assert any(n.startswith("Evidence scoped to") for n in corpus["notes"])
 
 
@@ -268,6 +269,157 @@ def test_matter_type_categories_are_registry_keys():
             continue
         for c in cats:
             assert c in CATEGORY_KEYS
+
+
+# --- matter theory (subject-matter scoping) ----------------------------------
+
+def test_theory_compliance_categories_are_registry_keys():
+    for topic in ld._THEORIES.values():
+        for c in topic.compliance or []:
+            assert c in CATEGORY_KEYS
+
+
+def test_resolve_theory_reads_the_allegation_over_the_matter_type():
+    # the reported bug: a wage-and-hour class action was pulling slip-and-falls
+    slug, topic = ld.resolve_matter_theory({
+        "matter_type": "class_action", "title": "Jones vs 720 Behavioral",
+        "allegation": "Nurses were required to work through meal breaks off the clock.",
+    })
+    assert slug == "wage_hour"
+    assert topic.incidents == []               # no IR incident type is about pay
+    assert "meal_breaks" in topic.compliance
+
+    # a safety class action must NOT inherit the matter_type's wage-hour default
+    slug, topic = ld.resolve_matter_theory({
+        "matter_type": "class_action", "title": "Slip and fall",
+        "allegation": "Employees were injured by an unmarked wet floor hazard.",
+    })
+    assert slug == "safety"
+    assert "safety" in topic.incidents
+
+
+def test_broad_matter_types_ignore_allegation_keywords():
+    """The escape hatch the UI promises. A subject-less matter_type must stay
+    broad even when the allegation is full of theory keywords — otherwise
+    'set the type to Other to see every record' is a lie, and a records
+    subpoena mentioning wages silently loses its safety incidents."""
+    for mt in ("other", "subpoena", "audit"):
+        slug, topic = ld.resolve_matter_theory({
+            "matter_type": mt, "title": "Jones",
+            "allegation": "missed meal breaks, unpaid overtime, wage theft",
+        })
+        assert slug is None, mt
+        assert topic is ld._BROAD, mt
+
+
+def test_theory_keywords_match_at_the_very_end_of_the_text():
+    # a probe carrying a trailing space ("ada ") must still hit a term that
+    # lands last — the scan text is padded for exactly this
+    slug, _ = ld.resolve_matter_theory({
+        "matter_type": "single_plaintiff", "title": "",
+        "allegation": "Claim brought under the ADA",
+    })
+    assert slug == "eeo"
+
+
+def test_compliance_alerts_keep_uncategorized_rows():
+    # ca.category is nullable; an uncategorized alert must survive the filter
+    frag_seen = {}
+
+    class _Conn:
+        async def fetch(self, sql, *args):
+            frag_seen["sql"] = sql
+            return []
+
+    asyncio.run(ld._src_compliance_alerts(
+        _Conn(), "cid", None, None, None, None, ld._THEORIES["wage_hour"]))
+    assert "ca.category IS NULL" in frag_seen["sql"]
+
+
+def test_resolve_theory_falls_back_to_matter_type_when_text_is_silent():
+    assert ld.resolve_matter_theory({"matter_type": "eeoc_charge"})[0] == "eeo"
+    assert ld.resolve_matter_theory({"matter_type": "class_action"})[0] == "wage_hour"
+    # types carrying no subject signal stay broad — the escape hatch
+    for mt in ("subpoena", "audit", "other"):
+        slug, topic = ld.resolve_matter_theory({"matter_type": mt})
+        assert slug is None
+        assert topic is ld._BROAD
+    assert ld.resolve_matter_theory(None) == (None, ld._BROAD)
+
+
+def test_resolve_theory_declines_to_guess_on_a_tie():
+    # one hit each ("discriminat" / "injur") — no winner, so the matter_type
+    # decides rather than a coin flip on keyword ordering.
+    slug, _ = ld.resolve_matter_theory({
+        "matter_type": "eeoc_charge", "title": "",
+        "allegation": "Discrimination claim following an injury.",
+    })
+    assert slug == "eeo"
+    slug, _ = ld.resolve_matter_theory({
+        "matter_type": "class_action", "title": "",
+        "allegation": "Discrimination claim following an injury.",
+    })
+    assert slug == "wage_hour"
+
+
+def test_topic_filter_passes_unknown_slugs_and_nulls():
+    frag = ld._topic_filter("pd.infraction_type", 6)
+    import re
+    assert set(re.findall(r"\$(\d+)", frag)) == {"6", "7"}
+    assert "IS NULL" in frag                        # unattributable rows stay in
+    assert "NOT (pd.infraction_type = ANY($7))" in frag   # company-defined slugs stay in
+
+
+def test_gather_evidence_filters_sources_to_the_theory():
+    class _CapturingConn(_ArgCountConn):
+        def __init__(self):
+            super().__init__()
+            self.topic_args: dict[str, object] = {}
+
+        async def fetch(self, sql, *args):
+            if "ir_incidents" in sql:
+                self.topic_args["incidents"] = args[5]
+            if "progressive_discipline" in sql:
+                self.topic_args["discipline"] = args[5]
+            if "compliance_requirements" in sql:
+                self.topic_args["compliance"] = args[3]
+            return await super().fetch(sql, *args)
+
+    conn = _CapturingConn()
+    corpus = asyncio.run(ld.gather_evidence(
+        conn, "cid", None, None, _ALL_FEATURES,
+        matter={"id": "m1", "company_id": "cid", "matter_type": "class_action",
+                "title": "Jones", "allegation": "unpaid overtime and missed meal breaks",
+                "location_id": None, "jurisdiction_state": None},
+    ))
+    assert conn.topic_args["incidents"] == []      # IR/OSHA drops out entirely
+    assert "attendance" in conn.topic_args["discipline"]
+    assert "meal_breaks" in conn.topic_args["compliance"]
+    assert corpus["theory"] == {"slug": "wage_hour", "label": "wage-and-hour"}
+    assert any("wage-and-hour theory" in n for n in corpus["notes"])
+
+
+def test_gather_evidence_broad_theory_passes_null_allowlists():
+    class _CapturingConn(_ArgCountConn):
+        def __init__(self):
+            super().__init__()
+            self.incident_topic = "unset"
+
+        async def fetch(self, sql, *args):
+            if "ir_incidents" in sql:
+                self.incident_topic = args[5]
+            return await super().fetch(sql, *args)
+
+    conn = _CapturingConn()
+    corpus = asyncio.run(ld.gather_evidence(
+        conn, "cid", None, None, _ALL_FEATURES,
+        matter={"id": "m1", "company_id": "cid", "matter_type": "subpoena",
+                "title": "Records subpoena", "allegation": None,
+                "location_id": None, "jurisdiction_state": None},
+    ))
+    assert conn.incident_topic is None            # NULL allowlist = no filter
+    assert corpus["theory"] is None
+    assert not any("theory" in n for n in corpus["notes"])
 
 
 # --- packet rendering guards -------------------------------------------------

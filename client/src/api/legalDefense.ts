@@ -18,11 +18,16 @@ export type LegalContext = {
   state: string | null
   location_name: string | null
 }
+/** The subject-matter theory the backend derived for the matter (from its
+ *  allegation text, falling back to its type). Null = no filter applied. */
+export type MatterTheory = { slug: string; label: string }
+
 export type EvidencePreview = {
   sources: Record<string, EvidenceSource>
   notes: string[]
   total: number
   legal_context?: LegalContext | null
+  theory?: MatterTheory | null
 }
 
 export type EvidenceMapItem = { point: string; cited_ids: string[] }
