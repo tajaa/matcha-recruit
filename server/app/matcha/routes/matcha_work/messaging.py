@@ -80,6 +80,52 @@ def _track_background_task(task: "asyncio.Task") -> "asyncio.Task":
     return task
 
 
+async def _record_turn_usage(
+    *,
+    thread_id: UUID,
+    company_id: UUID,
+    user_id: UUID,
+    user_role: str,
+    final_usage: dict | None,
+    operation: str,
+) -> dict | None:
+    """THE single accounting path for a turn: cost → usage event → role-gated
+    deduction. Both the happy path and the cancelled-turn finalizer call this —
+    billing logic must not fork (the deleted non-streaming handler drifted from
+    the streaming one on exactly this block, which is how turns went unbilled).
+    Mutates and returns final_usage with cost_dollars set.
+    """
+    if not final_usage:
+        return None
+    cost = calculate_call_cost(
+        model=str(final_usage.get("model") or "unknown"),
+        prompt_tokens=final_usage.get("prompt_tokens"),
+        completion_tokens=final_usage.get("completion_tokens"),
+    )
+    final_usage["cost_dollars"] = float(cost)
+    try:
+        await doc_svc.log_token_usage_event(
+            company_id=company_id,
+            user_id=user_id,
+            thread_id=thread_id,
+            token_usage=final_usage,
+            operation=operation,
+            cost_dollars=float(cost),
+        )
+    except Exception as e:
+        logger.warning("Failed to log Matcha Work token usage for thread %s: %s", thread_id, e)
+    if user_role != "admin":
+        total_tokens = final_usage.get("total_tokens") or 0
+        if total_tokens > 0:
+            try:
+                async with get_connection() as conn:
+                    async with conn.transaction():
+                        await token_budget_service.deduct_tokens(conn, company_id, total_tokens)
+            except Exception as exc:
+                logger.warning("Failed to deduct tokens for thread %s: %s", thread_id, exc)
+    return final_usage
+
+
 async def _finalize_cancelled_turn(
     ai_task: "asyncio.Task",
     *,
@@ -104,35 +150,14 @@ async def _finalize_cancelled_turn(
         raise
     except Exception:
         logger.warning("Cancelled-turn AI task failed for thread %s", thread_id, exc_info=True)
-    final_usage = token_usage or estimated_usage
-    if not final_usage:
-        return
-    cost = calculate_call_cost(
-        model=str(final_usage.get("model") or "unknown"),
-        prompt_tokens=final_usage.get("prompt_tokens"),
-        completion_tokens=final_usage.get("completion_tokens"),
+    await _record_turn_usage(
+        thread_id=thread_id,
+        company_id=company_id,
+        user_id=user_id,
+        user_role=user_role,
+        final_usage=token_usage or estimated_usage,
+        operation="send_message_cancelled",
     )
-    final_usage["cost_dollars"] = float(cost)
-    try:
-        await doc_svc.log_token_usage_event(
-            company_id=company_id,
-            user_id=user_id,
-            thread_id=thread_id,
-            token_usage=final_usage,
-            operation="send_message_cancelled",
-            cost_dollars=float(cost),
-        )
-    except Exception as e:
-        logger.warning("Failed to log cancelled-turn usage for thread %s: %s", thread_id, e)
-    if user_role != "admin":
-        total_tokens = final_usage.get("total_tokens") or 0
-        if total_tokens > 0:
-            try:
-                async with get_connection() as conn:
-                    async with conn.transaction():
-                        await token_budget_service.deduct_tokens(conn, company_id, total_tokens)
-            except Exception as exc:
-                logger.warning("Failed to deduct cancelled-turn tokens for thread %s: %s", thread_id, exc)
 
 
 async def _get_affected_employees(
@@ -251,6 +276,7 @@ async def _get_payer_affected_staff(
             WHERE bl.company_id = $1 AND bl.is_active = true
               AND bl.facility_attributes->'payer_contracts' ?| $2::text[]
             GROUP BY bl.id, bl.name, bl.city, bl.state, bl.facility_attributes
+            HAVING COUNT(e.id) > 0
             """,
             company_id, keys,
         )
@@ -324,18 +350,29 @@ async def _detect_compliance_gaps(
               AND hv.version_number = h.active_version
         """, company_id)
 
-    # Titles alone miss policies whose body covers the category — match the
-    # content head too (a "Workplace Conduct" policy can satisfy anti_discrimination).
-    all_titles = {
-        f"{p['title']} {p['content_head'] or ''}".lower() for p in policies if p["title"]
+    # Two haystacks with different precision requirements. Single-word
+    # keywords ("safety", "wage", "leave") match TITLES ONLY — against 2KB of
+    # body text they hit incidental prose in unrelated policies and suppress
+    # real gaps. Multi-word phrases ("workplace safety", "paid sick") are
+    # specific enough to search the content head too, which is what lets a
+    # generically-titled policy whose body covers the category satisfy it.
+    title_texts = {
+        p["title"].lower() for p in policies if p["title"]
     } | {
         s["title"].lower() for s in handbook_sections if s["title"]
+    }
+    full_texts = title_texts | {
+        f"{p['title']} {p['content_head'] or ''}".lower()
+        for p in policies if p["title"]
     }
 
     gaps = []
     for cat in required_categories:
         keywords = _GAP_KEYWORDS.get(cat, [cat.replace("_", " ")])
-        has_match = any(any(kw in title for kw in keywords) for title in all_titles)
+        has_match = any(
+            any(kw in text for text in (full_texts if " " in kw else title_texts))
+            for kw in keywords
+        )
         if not has_match:
             gaps.append({
                 "category": cat,
@@ -753,14 +790,8 @@ async def send_message_stream(
                 blog_mode_state=stream_blog_mode_state,
                 thread_id=str(thread_id),
             ))
-            try:
-                while True:
-                    done, _ = await asyncio.wait({_ai_task}, timeout=15.0)
-                    if done:
-                        break
-                    yield _sse_data({"type": "keepalive"})
-                ai_resp = await _ai_task
-            except asyncio.CancelledError:
+
+            def _schedule_cancel_finalizer() -> None:
                 # Client disconnected (stop button / tab close). The Gemini call
                 # runs in a thread and cannot be interrupted — its cost is
                 # already committed — so detach a finalizer that awaits it and
@@ -774,142 +805,135 @@ async def send_message_stream(
                     user_role=current_user.role,
                     estimated_usage=estimated_usage,
                 )))
+
+            try:
+                while True:
+                    done, _ = await asyncio.wait({_ai_task}, timeout=15.0)
+                    if done:
+                        break
+                    yield _sse_data({"type": "keepalive"})
+                ai_resp = await _ai_task
+            except asyncio.CancelledError:
+                _schedule_cancel_finalizer()
                 raise
-            logger.info("[TIMING] AI generate took %.2fs for thread %s", _time.monotonic() - _t0, thread_id)
-            _scope_slide_update(ai_resp, thread["current_state"], body.slide_index)
-
-            current_version = thread["version"]
-            (
-                current_state,
-                current_version,
-                pdf_url,
-                changed,
-                assistant_reply_text,
-            ) = await _apply_ai_updates_and_operations(
-                thread_id=thread_id,
-                company_id=company_id,
-                ai_resp=ai_resp,
-                current_state=thread["current_state"],
-                current_version=current_version,
-                user_message=body.content,
-                current_user_id=current_user.id,
-                project_id=thread.get("project_id"),
-                project_meta=stream_project_meta,
-            )
-
-            # Build metadata from compliance reasoning chains + payer sources
-            msg_metadata = _build_compliance_metadata(compliance_result, ai_resp)
-            if ai_resp and getattr(ai_resp, "attachments", None):
-                if msg_metadata is None:
-                    msg_metadata = {}
-                msg_metadata["attachments"] = ai_resp.attachments
-            if stream_payer_sources:
-                if msg_metadata is None:
-                    msg_metadata = {}
-                msg_metadata["payer_sources"] = stream_payer_sources
-
-            # Cross-reference affected employees + detect policy gaps when both node + compliance are on
-            if thread.get("node_mode") and thread.get("compliance_mode") and msg_metadata:
-                if msg_metadata.get("referenced_locations"):
-                    affected = await _get_affected_employees(company_id, msg_metadata)
-                    if affected:
-                        msg_metadata["affected_employees"] = affected
-                gaps = await _detect_compliance_gaps(company_id, msg_metadata)
-                if gaps:
-                    msg_metadata["compliance_gaps"] = gaps
-
-            # Node × payer: staff counts at the locations contracted with the
-            # payers this answer actually cited.
-            if thread.get("node_mode") and thread.get("payer_mode") and stream_payer_sources:
-                try:
-                    payer_staff = await _get_payer_affected_staff(company_id, stream_payer_sources)
-                    if payer_staff:
-                        if msg_metadata is None:
-                            msg_metadata = {}
-                        msg_metadata["payer_affected_staff"] = payer_staff
-                except Exception:
-                    logger.warning("payer_affected_staff failed for thread %s", thread_id, exc_info=True)
-
-            # Annotate reply with change summary for conversation continuity
-            if changed and ai_resp.structured_update and isinstance(ai_resp.structured_update, dict):
-                update_slides = ai_resp.structured_update.get("slides")
-                if update_slides and body.slide_index is not None and 0 <= body.slide_index < len(update_slides):
-                    changed_slide = update_slides[body.slide_index]
-                    if isinstance(changed_slide, dict):
-                        n_bullets = len(changed_slide.get("bullets", []))
-                        change_note = f"\n\n[Applied changes to Slide {body.slide_index + 1}: title=\"{changed_slide.get('title', '')}\", {n_bullets} bullets]"
-                        assistant_reply_text += change_note
-
-            # Save assistant message
-            assistant_msg = await doc_svc.add_message(
-                thread_id,
-                "assistant",
-                assistant_reply_text,
-                version_created=current_version if changed else None,
-                metadata=msg_metadata,
-            )
-
-            # Broadcast new messages to collaborators via WS — fire-and-forget so
-            # a CancelledError inside the lock doesn't kill the SSE generator before
-            # the complete event is sent.
+            # The AI cost is committed the moment the model call finishes —
+            # a disconnect during apply/persist/PDF-render must still bill the
+            # turn, not just a disconnect during generation.
             try:
-                from app.matcha.routes.thread_ws import thread_manager
-                user_msg_dict = _row_to_message(user_msg).model_dump(mode="json")
-                assistant_msg_dict = _row_to_message(assistant_msg).model_dump(mode="json")
-                _track_background_task(asyncio.create_task(
-                    thread_manager.broadcast_new_message(
-                        str(thread_id), [user_msg_dict, assistant_msg_dict], exclude_user=current_user.id
-                    )
-                ))
-            except Exception:
-                logger.warning("Thread WS broadcast failed for thread %s", thread_id)
+                logger.info("[TIMING] AI generate took %.2fs for thread %s", _time.monotonic() - _t0, thread_id)
+                _scope_slide_update(ai_resp, thread["current_state"], body.slide_index)
 
-            # Escalate low-confidence queries for human review
-            if should_escalate(ai_resp):
+                current_version = thread["version"]
+                (
+                    current_state,
+                    current_version,
+                    pdf_url,
+                    changed,
+                    assistant_reply_text,
+                ) = await _apply_ai_updates_and_operations(
+                    thread_id=thread_id,
+                    company_id=company_id,
+                    ai_resp=ai_resp,
+                    current_state=thread["current_state"],
+                    current_version=current_version,
+                    user_message=body.content,
+                    current_user_id=current_user.id,
+                    project_id=thread.get("project_id"),
+                    project_meta=stream_project_meta,
+                )
+
+                # Build metadata from compliance reasoning chains + payer sources
+                msg_metadata = _build_compliance_metadata(compliance_result, ai_resp)
+                if ai_resp and getattr(ai_resp, "attachments", None):
+                    if msg_metadata is None:
+                        msg_metadata = {}
+                    msg_metadata["attachments"] = ai_resp.attachments
+                if stream_payer_sources:
+                    if msg_metadata is None:
+                        msg_metadata = {}
+                    msg_metadata["payer_sources"] = stream_payer_sources
+
+                # Cross-reference affected employees + detect policy gaps when both node + compliance are on
+                if thread.get("node_mode") and thread.get("compliance_mode") and msg_metadata:
+                    if msg_metadata.get("referenced_locations"):
+                        affected = await _get_affected_employees(company_id, msg_metadata)
+                        if affected:
+                            msg_metadata["affected_employees"] = affected
+                    gaps = await _detect_compliance_gaps(company_id, msg_metadata)
+                    if gaps:
+                        msg_metadata["compliance_gaps"] = gaps
+
+                # Node × payer: staff counts at the locations contracted with the
+                # payers this answer actually cited.
+                if thread.get("node_mode") and thread.get("payer_mode") and stream_payer_sources:
+                    try:
+                        payer_staff = await _get_payer_affected_staff(company_id, stream_payer_sources)
+                        if payer_staff:
+                            if msg_metadata is None:
+                                msg_metadata = {}
+                            msg_metadata["payer_affected_staff"] = payer_staff
+                    except Exception:
+                        logger.warning("payer_affected_staff failed for thread %s", thread_id, exc_info=True)
+
+                # Annotate reply with change summary for conversation continuity
+                if changed and ai_resp.structured_update and isinstance(ai_resp.structured_update, dict):
+                    update_slides = ai_resp.structured_update.get("slides")
+                    if update_slides and body.slide_index is not None and 0 <= body.slide_index < len(update_slides):
+                        changed_slide = update_slides[body.slide_index]
+                        if isinstance(changed_slide, dict):
+                            n_bullets = len(changed_slide.get("bullets", []))
+                            change_note = f"\n\n[Applied changes to Slide {body.slide_index + 1}: title=\"{changed_slide.get('title', '')}\", {n_bullets} bullets]"
+                            assistant_reply_text += change_note
+
+                # Save assistant message
+                assistant_msg = await doc_svc.add_message(
+                    thread_id,
+                    "assistant",
+                    assistant_reply_text,
+                    version_created=current_version if changed else None,
+                    metadata=msg_metadata,
+                )
+
+                # Broadcast new messages to collaborators via WS — fire-and-forget so
+                # a CancelledError inside the lock doesn't kill the SSE generator before
+                # the complete event is sent.
                 try:
-                    await create_escalation(
-                        company_id=company_id,
-                        thread_id=thread_id,
-                        user_message_id=user_msg["id"],
-                        assistant_message_id=assistant_msg["id"],
-                        user_query=body.content,
-                        ai_resp=ai_resp,
-                    )
+                    from app.matcha.routes.thread_ws import thread_manager
+                    user_msg_dict = _row_to_message(user_msg).model_dump(mode="json")
+                    assistant_msg_dict = _row_to_message(assistant_msg).model_dump(mode="json")
+                    _track_background_task(asyncio.create_task(
+                        thread_manager.broadcast_new_message(
+                            str(thread_id), [user_msg_dict, assistant_msg_dict], exclude_user=current_user.id
+                        )
+                    ))
                 except Exception:
-                    logger.exception("Failed to create escalation for thread %s", thread_id)
+                    logger.warning("Thread WS broadcast failed for thread %s", thread_id)
 
-            final_usage = ai_resp.token_usage or estimated_usage
-            stream_cost = calculate_call_cost(
-                model=str((final_usage or {}).get("model") or "unknown"),
-                prompt_tokens=(final_usage or {}).get("prompt_tokens"),
-                completion_tokens=(final_usage or {}).get("completion_tokens"),
-            )
-            if final_usage is not None:
-                final_usage["cost_dollars"] = float(stream_cost)
+                # Escalate low-confidence queries for human review
+                if should_escalate(ai_resp):
+                    try:
+                        await create_escalation(
+                            company_id=company_id,
+                            thread_id=thread_id,
+                            user_message_id=user_msg["id"],
+                            assistant_message_id=assistant_msg["id"],
+                            user_query=body.content,
+                            ai_resp=ai_resp,
+                        )
+                    except Exception:
+                        logger.exception("Failed to create escalation for thread %s", thread_id)
 
-            try:
-                await doc_svc.log_token_usage_event(
+                final_usage = await _record_turn_usage(
+                    thread_id=thread_id,
                     company_id=company_id,
                     user_id=current_user.id,
-                    thread_id=thread_id,
-                    token_usage=final_usage,
+                    user_role=current_user.role,
+                    final_usage=ai_resp.token_usage or estimated_usage,
                     operation="send_message",
-                    cost_dollars=float(stream_cost),
                 )
-            except Exception as e:
-                logger.warning("Failed to log Matcha Work token usage for thread %s: %s", thread_id, e)
-
-            if current_user.role != "admin":
-                total_tokens = (final_usage or {}).get("total_tokens") or 0
-                if total_tokens > 0:
-                    try:
-                        async with get_connection() as conn:
-                            async with conn.transaction():
-                                await token_budget_service.deduct_tokens(conn, company_id, total_tokens)
-                    except HTTPException:
-                        logger.warning("Token budget exhausted during stream deduction for thread %s", thread_id)
-                    except Exception as exc:
-                        logger.warning("Failed to deduct tokens for thread %s: %s", thread_id, exc)
+            except asyncio.CancelledError:
+                _schedule_cancel_finalizer()
+                raise
 
             if final_usage:
                 yield _sse_data(

@@ -752,49 +752,6 @@ async def _get_model(
     return settings.analysis_model
 
 
-_LIVE_INFO_KEYWORDS = (
-    # Time-anchored
-    "today", "tonight", "now", "current", "currently", "latest", "recent",
-    "recently", "this week", "this month", "this year", "this morning",
-    "yesterday", "last week", "last month", "right now", "as of",
-    # Markets / finance
-    "market", "markets", "stock", "stocks", "ticker", "price of",
-    "share price", "exchange rate", "crypto", "bitcoin", "ethereum",
-    "s&p", "nasdaq", "dow", "fed", "interest rate", "yield", "earnings",
-    "inflation", "cpi", "ppi", "jobs report", "unemployment rate",
-    # News / events
-    "news", "headline", "headlines", "breaking", "press release",
-    "announced", "announcement", "launch", "launched", "release date",
-    "released", "ship date", "shipped", "ipo", "acquisition",
-    "happening", "going on", "update on", "what's up with",
-    # Sports / weather
-    "score", "scores", "game", "weather", "forecast", "temperature",
-    # Politics
-    "election", "polls", "primary", "vote", "voted", "supreme court",
-    # Lookup-shaped wh- queries that usually need fresh web data
-    "who is the", "who's the", "who won", "who founded", "who created",
-    "when did", "when was", "when is", "when will",
-    "where is", "where's the headquarters",
-    "how much does", "how many users", "how big is",
-    "ceo of", "founder of", "valuation of", "revenue of", "owner of",
-)
-
-
-def needs_live_web_context(user_message: str) -> bool:
-    """Quick heuristic: does this question need real-time web grounding?
-
-    Conservative — false positives cost 5–15s of latency, so we only return True
-    on clear time-sensitive or fresh-fact patterns. Trivial chit-chat, math,
-    coding, and timeless explainers should return False.
-    """
-    if not user_message:
-        return False
-    lowered = user_message.lower()
-    if len(lowered) < 8:
-        return False  # "hi", "thanks", etc.
-    return any(kw in lowered for kw in _LIVE_INFO_KEYWORDS)
-
-
 # ── Auto-thinking heuristic ──
 # Trivial chat → no thinking (fastest). Most general questions → low. Compliance,
 # payer, multi-step skills, analytical asks → high.
@@ -846,61 +803,6 @@ def classify_thinking_level(
     if len(msg) > 280 or msg.count("\n") > 2:
         return "high"
     return "low"
-
-
-async def fetch_live_web_context(user_message: str, settings) -> Optional[str]:
-    """Run a grounded Gemini call to fetch current web info about the user's question.
-
-    Returns a text block to inject into company_context, or None on failure.
-    Grounded calls take 5-15s so this is gated by needs_live_web_context().
-    """
-    try:
-        from google import genai as _genai
-        api_key = settings.gemini_api_key
-        if not api_key:
-            return None
-        client = _genai.Client(api_key=api_key)
-        model = getattr(settings, "analysis_model", None) or "gemini-3-flash-preview"
-        today = date.today().isoformat()
-        logger.info("[grounding] Fetching live web context (model=%s) for: %r", model, user_message[:120])
-        prompt = (
-            f"Today is {today}. The user asked: {user_message!r}\n\n"
-            "Use Google Search to find the most relevant, current, factual information "
-            "needed to answer this. Return a concise factual briefing (no preamble, no "
-            "caveats about being an AI) with the key facts, numbers, quotes, and source "
-            "names. If the question isn't actually time-sensitive, return an empty string."
-        )
-        response = await asyncio.wait_for(
-            asyncio.to_thread(
-                lambda: client.models.generate_content(
-                    model=model,
-                    contents=prompt,
-                    config=types.GenerateContentConfig(
-                        temperature=0.2,
-                        tools=[_GOOGLE_SEARCH_TOOL],
-                    ),
-                )
-            ),
-            timeout=20,
-        )
-        text = (response.text or "").strip()
-        logger.info("[grounding] Got %d chars of live web context", len(text))
-        if not text:
-            return None
-        return (
-            "\n\n=== LIVE WEB CONTEXT (fetched via Google Search grounding just now) ===\n"
-            f"{text}\n"
-            "=== END LIVE WEB CONTEXT ===\n"
-            "CRITICAL INSTRUCTIONS for using the block above:\n"
-            "1. The block above IS your real-time data for this question. It was just fetched from Google Search.\n"
-            "2. DO NOT say 'I don't have access to live data', 'I can't access real-time information', or any similar disclaimer. That would be a lie — you have the data right here.\n"
-            "3. Answer the user's question directly using the specific facts, numbers, and quotes above.\n"
-            "4. You may cite the source names mentioned in the block.\n"
-            "5. Do NOT output an SVG chart for this reply — it is a news/current-events answer.\n"
-        )
-    except Exception as e:
-        logger.warning("fetch_live_web_context failed: %s", e)
-        return None
 
 
 @dataclass

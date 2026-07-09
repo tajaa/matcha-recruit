@@ -38,6 +38,7 @@ class ComplianceContextResult:
 
 _CACHE_TTL = 120  # 2 minutes
 _MAX_LOCAL_CACHE_ENTRIES = 256
+_MAX_BUILD_LOCKS = 512
 _local_cache: dict[str, tuple[float, Any]] = {}
 _build_locks: dict[str, asyncio.Lock] = {}
 
@@ -50,6 +51,16 @@ _MAX_LEGACY_ROWS = 200
 def _get_build_lock(key: str) -> asyncio.Lock:
     lock = _build_locks.get(key)
     if lock is None:
+        # Bound the registry — without eviction it grows 3 locks per company
+        # forever in a long-lived process. Evicting an unlocked entry another
+        # coroutine still references at worst causes one duplicate build
+        # (benign); this runs synchronously on the event loop, so no race.
+        if len(_build_locks) >= _MAX_BUILD_LOCKS:
+            for k in list(_build_locks):
+                if not _build_locks[k].locked():
+                    del _build_locks[k]
+                    if len(_build_locks) < _MAX_BUILD_LOCKS:
+                        break
         lock = _build_locks.setdefault(key, asyncio.Lock())
     return lock
 
@@ -130,8 +141,33 @@ def _format_threshold_status(statuses: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def _norm_state(value: Any) -> Optional[str]:
+    """Normalize a state value to an uppercase 2-letter code.
+
+    employees.work_state is code-normalized at ingest, but
+    business_locations.state is free-entry ('Ca', 'california') — comparing
+    the two raw would misclassify a covered state as remote and emit a
+    duplicate regulatory stack for it.
+    """
+    if not value or not isinstance(value, str):
+        return None
+    s = value.strip()
+    if not s:
+        return None
+    if len(s) == 2:
+        return s.upper()
+    try:
+        # Lazy import — repo convention for cross-module reuse without cycles.
+        from app.matcha.routes.employees._shared import _STATE_NAME_TO_CODE
+        return _STATE_NAME_TO_CODE.get(s.lower(), s.upper())
+    except Exception:
+        return s.upper()
+
+
 async def _fetch_roster_stats(conn, company_id: UUID) -> tuple[int, dict[str, int], dict[str, int]]:
-    """(total_active, by_work_state, by_department) over the FULL roster."""
+    """(total_active, by_work_state, by_department) over the FULL roster.
+
+    State keys are normalized 2-letter codes (see _norm_state)."""
     rows = await conn.fetch(
         """
         SELECT work_state, department, COUNT(*) AS n,
@@ -149,7 +185,8 @@ async def _fetch_roster_stats(conn, company_id: UUID) -> tuple[int, dict[str, in
         if row["g_state"] == 1 and row["g_dept"] == 1:
             total = row["n"]
         elif row["g_state"] == 0 and row["work_state"]:
-            state_counts[row["work_state"]] = row["n"]
+            key = _norm_state(row["work_state"]) or row["work_state"]
+            state_counts[key] = state_counts.get(key, 0) + row["n"]
         elif row["g_dept"] == 0 and row["department"]:
             dept_counts[row["department"]] = row["n"]
     return total, state_counts, dept_counts
@@ -410,7 +447,8 @@ async def _build_compliance_context_uncached(company_id: UUID) -> ComplianceCont
         # has NO business location previously contributed nothing to compliance
         # context — their states' obligations were simply invisible. Resolve a
         # state-level stack for each such state.
-        location_states = {loc["state"] for loc in locations if loc["state"]}
+        location_states = {_norm_state(loc["state"]) for loc in locations if loc["state"]}
+        location_states.discard(None)
         remote_states = sorted(s for s in state_counts if s not in location_states)
         remote_jurisdictions: Dict[str, Any] = {}
         if remote_states:
@@ -492,10 +530,11 @@ async def _build_compliance_context_uncached(company_id: UUID) -> ComplianceCont
                 # (e.g. {"key": "employee_count", "operator": "gte", ...})
                 # evaluate deterministically. setdefault preserves any
                 # explicitly-set facility attribute.
+                loc_state = _norm_state(loc["state"])
                 if total_active:
                     facility_attrs.setdefault("employee_count", total_active)
-                    if loc["state"] and loc["state"] in state_counts:
-                        facility_attrs.setdefault("employee_count_state", state_counts[loc["state"]])
+                    if loc_state and loc_state in state_counts:
+                        facility_attrs.setdefault("employee_count_state", state_counts[loc_state])
                 loc_label = f"{loc['name'] or 'Unknown'} ({loc['city'] or 'N/A'}, {loc['state'] or 'N/A'})"
 
                 # Facility profile + real employee counts (pre-turn, so the
@@ -505,8 +544,8 @@ async def _build_compliance_context_uncached(company_id: UUID) -> ComplianceCont
                 profile_section = _format_facility_profile(loc_label, facility_attrs, activated)
                 n_here = loc_counts.get(loc["id"], 0)
                 emp_line = f"Employees at this location: {n_here}"
-                if loc["state"] and loc["state"] in state_counts:
-                    emp_line += f" | total working in {loc['state']}: {state_counts[loc['state']]}"
+                if loc_state and loc_state in state_counts:
+                    emp_line += f" | total working in {loc_state}: {state_counts[loc_state]}"
                 profile_section += "\n" + emp_line
                 sections.append(profile_section)
                 chars_used += len(profile_section)

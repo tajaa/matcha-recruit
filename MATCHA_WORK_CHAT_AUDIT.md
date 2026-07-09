@@ -156,3 +156,20 @@ Tier 3's HNSW migration is **authored, not applied**: `server/alembic/versions/h
 - `pytest tests/matcha_work/` failure set is **byte-identical before vs after** the change (this container's baseline differs from the venv's documented 12F/126P/8S for environment reasons — missing native deps — but the stash/unstash diff is empty, i.e. zero regressions).
 - `npx tsc --noEmit` clean.
 - The DB-dependent checks in the Verification section above (EXPLAIN ANALYZE, payer-mode billing rows, >50-employee headcount answers) remain user-side — run them against dev after applying `hnswvec01`.
+
+### Post-implementation code review (2026-07-09, same branch)
+
+An 8-angle review of the branch diff surfaced 10 findings; 7 are fixed in the follow-up commit:
+
+1. **Gap-detection over-match** — single-word keywords ("safety", "wage") vs 2KB of policy body suppressed real gaps. Now: single-word keywords match titles only; multi-word phrases may match content heads.
+2. **Remote-state casing/format** — `business_locations.state` is free-entry while `work_state` is code-normalized; `'Ca'`/`'california'` locations made their state look remote. Now normalized via `_norm_state` (codes uppercased, full names mapped through the shared `_STATE_NAME_TO_CODE`).
+3. **Cancel-window gap** — the billing finalizer only covered disconnects during generation; a disconnect during apply/persist/PDF-render still skipped billing. The whole post-AI phase is now covered.
+4. **Duplicated accounting** — the finalizer and happy path each had a copy of cost→log→deduct; both now call one `_record_turn_usage(operation=…)`.
+5. **Zero-staff payer chips** — `HAVING COUNT(e.id) > 0`.
+6. **Orphaned live-web pre-pass** — `needs_live_web_context`/`fetch_live_web_context` (only caller was the deleted handler) removed. If live grounding is wanted on the streaming path, it's a deliberate future feature, not a revival of this code.
+7. **Unbounded `_build_locks`** — now capped (512) with unlocked-entry eviction.
+
+**Open decisions deliberately NOT changed** (flagged for the owner):
+- **Conditional second RAG pass** — the primary dump is trigger-filtered and active-only; the per-question vector search was neither. Skipping it when the dump isn't truncated (per M3) drops retrieval of trigger-non-matching / non-active rows for the common case. If that matters, re-enable unconditionally or pass `statuses=["active"]` + drop the trigger filter difference knowingly.
+- **FMLA-50 dual encoding** — `FEDERAL_HEADCOUNT_THRESHOLDS` (matcha_work_node) and `leave_eligibility_service.py:116` independently hardcode the FMLA 50 threshold. A shared employment-law constants module would prevent drift.
+- **Derived counts in facility_attributes** — `employee_count`/`employee_count_state` are injected via `setdefault` for trigger evaluation and the mutated dict is persisted into reasoning-chain metadata, blurring user-set vs derived. Cleaner: separate derived dict merged only at evaluation time.
