@@ -87,6 +87,9 @@ export default function HandbookPilot() {
   const [showHelp, setShowHelp] = useShowOnce('handbook-pilot')
   const [mode, setMode] = useState<'build' | 'handbook'>('build')
   const [seed, setSeed] = useState<ComposerSeed | null>(null)
+  // The session the user just created in this view — its goal auto-sends as
+  // the first chat turn. Never cleared; inert once the session has messages.
+  const [justCreatedId, setJustCreatedId] = useState<string | null>(null)
   // Bumped whenever drafts may have changed (chat turn, edit, promote) or when
   // the viewer is (re)entered, so the read-only viewer refetches its snapshot.
   const [viewerVersion, setViewerVersion] = useState(0)
@@ -163,6 +166,7 @@ export default function HandbookPilot() {
 
   const onCreated = useCallback(async (s: PilotSession) => {
     setShowNew(false)
+    setJustCreatedId(s.id)
     await refreshList()
     void openSession(s.id)
   }, [refreshList, openSession])
@@ -257,6 +261,7 @@ export default function HandbookPilot() {
                     onTurn={reloadActive}
                     seed={seed}
                     onSeedConsumed={() => setSeed(null)}
+                    autoSeed={active.id === justCreatedId}
                   />
                 </div>
                 <div className="w-80 shrink-0 flex flex-col gap-4 overflow-y-auto">
@@ -318,11 +323,12 @@ export default function HandbookPilot() {
 
 // NB: this component is keyed by session.id in the parent, so it remounts on a
 // session switch — `session` is effectively fixed for an instance's lifetime.
-function Console({ session, onTurn, seed, onSeedConsumed }: {
+function Console({ session, onTurn, seed, onSeedConsumed, autoSeed }: {
   session: PilotSession
   onTurn: () => void
   seed: ComposerSeed | null
   onSeedConsumed: () => void
+  autoSeed: boolean
 }) {
   const [messages, setMessages] = useState<PilotMessage[]>(session.messages ?? [])
   const [input, setInput] = useState('')
@@ -353,8 +359,8 @@ function Console({ session, onTurn, seed, onSeedConsumed }: {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
   }, [messages, status])
 
-  const send = async () => {
-    const text = input.trim()
+  const send = async (override?: string) => {
+    const text = (override ?? input).trim()
     if (!text || busy) return
     setInput('')
     setBusy(true)
@@ -383,6 +389,20 @@ function Console({ session, onTurn, seed, onSeedConsumed }: {
       }
     }
   }
+
+  // The goal from the New-session modal is the first thing the user typed — it
+  // becomes the opening turn rather than sitting inert as a subtitle. Deferred
+  // a tick with cleanup: StrictMode's dev mount→cleanup→mount would otherwise
+  // let the unmount-abort effect above kill this stream mid-flight, leaving a
+  // ghost user message and a stuck composer (aborted turns skip setBusy(false)).
+  useEffect(() => {
+    if (!autoSeed || messages.length > 0) return
+    const goal = session.goal?.trim()
+    if (!goal) return
+    const t = setTimeout(() => { void send(goal) }, 0)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session.id])
 
   return (
     <>
