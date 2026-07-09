@@ -1,24 +1,27 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { Scale, FileDown, Loader2, Upload, Plus, Trash2, ChevronDown, Check, AlertTriangle, FileText } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { Scale, FileDown, Loader2, ChevronDown, Check, AlertTriangle, Trash2 } from 'lucide-react'
 import { Card } from '../../components/ui'
 import {
   fetchLimitReview, fetchCoverage, upsertCoverage, deleteCoverage,
-  uploadContract, createContract, updateContract, deleteContract, downloadReviewPdf,
+  uploadContract, createContract, updateContract, deleteContract, confirmContract,
+  fetchContractReview, downloadContractReviewPdf, fetchContractSourceUrl, downloadReviewPdf,
 } from '../../api/limitAdequacy'
 import type {
-  LimitReview, CoverageList, CoverageRow, ReviewLine, ContractRecord, ContractRequirement, CoverageCatalogEntry,
+  LimitReview, CoverageList, CoverageRow, ReviewLine, CoverageCatalogEntry,
 } from '../../types/limitAdequacy'
 import { LIMIT_STATUS_TONE, LIMIT_STATUS_LABEL, fmtMoney } from '../../types/limitAdequacy'
+import { ContractsPanel, parseMoney, inputCls, Field, Chk } from '../../components/limit-adequacy/ContractsPanel'
+import type { ContractsApi } from '../../components/limit-adequacy/ContractsPanel'
 
-const ENDORSEMENTS: { key: keyof ContractRequirement; label: string }[] = [
-  { key: 'additional_insured', label: 'Additional insured' },
-  { key: 'waiver_of_subrogation', label: 'Waiver of subrogation' },
-  { key: 'primary_noncontributory', label: 'Primary & non-contributory' },
-]
-
-function parseMoney(s: string): number | null {
-  const v = parseFloat(s.replace(/[$,\s]/g, ''))
-  return Number.isFinite(v) ? v : null
+const tenantContractsApi: ContractsApi = {
+  upload: uploadContract,
+  create: createContract,
+  update: updateContract,
+  remove: deleteContract,
+  confirm: confirmContract,
+  review: fetchContractReview,
+  reviewPdf: downloadContractReviewPdf,
+  sourceUrl: fetchContractSourceUrl,
 }
 
 export default function LimitAdequacy() {
@@ -65,7 +68,7 @@ export default function LimitAdequacy() {
 
       <AdequacyTable lines={review.lines} />
       <CoverageEditor coverage={coverage} reload={reloadAll} />
-      <ContractsCard contracts={review.contracts} catalog={coverage.catalog} reload={reloadAll} />
+      <ContractsPanel contracts={review.contracts} catalog={coverage.catalog} reload={reloadAll} api={tenantContractsApi} />
     </div>
   )
 }
@@ -211,183 +214,5 @@ function CoverageLineRow({ cat, row, reload }: { cat: CoverageCatalogEntry; row?
         </div>
       )}
     </div>
-  )
-}
-
-/* ──────────────────────────── Contracts ──────────────────────────── */
-
-function ContractsCard({ contracts, catalog, reload }: { contracts: ContractRecord[]; catalog: CoverageCatalogEntry[]; reload: () => Promise<void> }) {
-  const fileRef = useRef<HTMLInputElement>(null)
-  const [uploading, setUploading] = useState(false)
-  const [adding, setAdding] = useState(false)
-  const [err, setErr] = useState<string | null>(null)
-
-  async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (!file) return
-    setUploading(true); setErr(null)
-    try {
-      const rec = await uploadContract(file)
-      if (rec.status === 'error') setErr('Could not extract requirements — add them manually below.')
-      await reload()
-    } catch { setErr('Upload failed. Use a PDF under 15 MB.') } finally {
-      setUploading(false)
-      if (fileRef.current) fileRef.current.value = ''
-    }
-  }
-
-  return (
-    <Card className="p-5">
-      <div className="flex items-start justify-between mb-1">
-        <h3 className="text-sm font-medium text-zinc-200 tracking-wide">Contracts</h3>
-        <div className="flex items-center gap-2">
-          <button onClick={() => setAdding((v) => !v)} className="inline-flex items-center gap-1 text-xs text-zinc-300 hover:text-zinc-100 px-2.5 py-1.5 rounded-lg border border-zinc-700"><Plus className="h-3.5 w-3.5" /> Add manually</button>
-          <button onClick={() => fileRef.current?.click()} disabled={uploading} className="inline-flex items-center gap-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium rounded-lg px-2.5 py-1.5 disabled:opacity-50">
-            {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />} Upload PDF
-          </button>
-          <input ref={fileRef} type="file" accept="application/pdf,.pdf" onChange={onFile} className="hidden" />
-        </div>
-      </div>
-      <p className="text-[11px] text-zinc-500 mb-3">Upload a customer/vendor/lease contract — we extract the insurance requirements for you to confirm. The PDF isn't stored, only the extracted requirements.</p>
-      {err && <div className="text-[11px] text-amber-400 mb-2">{err}</div>}
-
-      {adding && (
-        <div className="mb-3">
-          <ContractEditor catalog={catalog} onDone={async () => { setAdding(false); await reload() }} onCancel={() => setAdding(false)} />
-        </div>
-      )}
-
-      {contracts.length === 0 && !adding ? (
-        <p className="text-sm text-zinc-600">No contracts yet — upload one or add it manually.</p>
-      ) : (
-        <div className="space-y-1">
-          {contracts.map((c) => <ContractRow key={c.id} contract={c} catalog={catalog} reload={reload} />)}
-        </div>
-      )}
-    </Card>
-  )
-}
-
-function ContractRow({ contract, catalog, reload }: { contract: ContractRecord; catalog: CoverageCatalogEntry[]; reload: () => Promise<void> }) {
-  const [editing, setEditing] = useState(false)
-  const [busy, setBusy] = useState(false)
-  const labelFor = (k: string) => catalog.find((c) => c.key === k)?.label ?? k
-
-  async function remove() {
-    setBusy(true)
-    try { await deleteContract(contract.id); await reload() } finally { setBusy(false) }
-  }
-
-  return (
-    <div className="border-b border-zinc-800/30 last:border-0 py-2">
-      <div className="flex items-start gap-3">
-        <FileText className="h-4 w-4 text-zinc-500 mt-0.5 shrink-0" />
-        <div className="flex-1 min-w-0">
-          <div className="text-sm text-zinc-200 flex items-center gap-2">
-            {contract.name}
-            <span className="text-[10px] text-zinc-600 uppercase">{contract.status}{contract.ai_available ? ' · AI' : ''}</span>
-          </div>
-          {contract.requirements.length > 0 ? (
-            <div className="text-[11px] text-zinc-500 mt-0.5">
-              {contract.requirements.map((r, i) => (
-                <span key={i} className="mr-3">{labelFor(r.line)}: {fmtMoney(r.per_occurrence)}{r.aggregate ? `/${fmtMoney(r.aggregate)}` : ''}</span>
-              ))}
-            </div>
-          ) : <div className="text-[11px] text-zinc-600 mt-0.5">No requirements extracted — edit to add.</div>}
-        </div>
-        <button onClick={() => setEditing((v) => !v)} className="text-xs text-zinc-400 hover:text-zinc-100 px-2 py-1 rounded-lg border border-zinc-700 shrink-0">Edit</button>
-        <button onClick={remove} disabled={busy} className="text-zinc-500 hover:text-red-400 p-1 shrink-0"><Trash2 className="h-4 w-4" /></button>
-      </div>
-      {editing && (
-        <div className="mt-2">
-          <ContractEditor catalog={catalog} existing={contract} onDone={async () => { setEditing(false); await reload() }} onCancel={() => setEditing(false)} />
-        </div>
-      )}
-    </div>
-  )
-}
-
-function emptyReq(): ContractRequirement {
-  return { line: 'gl', per_occurrence: null, aggregate: null, additional_insured: false, waiver_of_subrogation: false, primary_noncontributory: false, note: null }
-}
-
-function ContractEditor({ catalog, existing, onDone, onCancel }: {
-  catalog: CoverageCatalogEntry[]; existing?: ContractRecord; onDone: () => Promise<void>; onCancel: () => void
-}) {
-  const [name, setName] = useState(existing?.name ?? '')
-  const [counterparty, setCounterparty] = useState(existing?.counterparty ?? '')
-  const [reqs, setReqs] = useState<ContractRequirement[]>(existing?.requirements?.length ? existing.requirements : [emptyReq()])
-  const [busy, setBusy] = useState(false)
-
-  function patch(i: number, p: Partial<ContractRequirement>) {
-    setReqs((rs) => rs.map((r, idx) => (idx === i ? { ...r, ...p } : r)))
-  }
-
-  async function save() {
-    if (!name.trim()) return
-    setBusy(true)
-    try {
-      const cleaned = reqs.filter((r) => r.line)
-      if (existing) await updateContract(existing.id, { name, counterparty: counterparty || null, requirements: cleaned })
-      else await createContract({ name, counterparty: counterparty || null, requirements: cleaned })
-      await onDone()
-    } finally { setBusy(false) }
-  }
-
-  return (
-    <div className="bg-zinc-900/60 border border-zinc-800 rounded-xl p-3 space-y-2">
-      <div className="grid grid-cols-2 gap-2">
-        <Field label="Contract name"><input value={name} onChange={(e) => setName(e.target.value)} placeholder="Acme MSA" className={inputCls} /></Field>
-        <Field label="Counterparty"><input value={counterparty} onChange={(e) => setCounterparty(e.target.value)} placeholder="Acme Corp" className={inputCls} /></Field>
-      </div>
-      <div className="space-y-2">
-        {reqs.map((r, i) => (
-          <div key={i} className="bg-zinc-900 border border-zinc-800 rounded-lg p-2 space-y-2">
-            <div className="flex items-center gap-2">
-              <select value={r.line} onChange={(e) => patch(i, { line: e.target.value })} className={`${inputCls} flex-1`}>
-                {catalog.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
-              </select>
-              <input value={r.per_occurrence ?? ''} onChange={(e) => patch(i, { per_occurrence: parseMoney(e.target.value) })} placeholder="per-occ $" className={`${inputCls} w-28`} />
-              <input value={r.aggregate ?? ''} onChange={(e) => patch(i, { aggregate: parseMoney(e.target.value) })} placeholder="agg $" className={`${inputCls} w-28`} />
-              <button onClick={() => setReqs((rs) => rs.filter((_, idx) => idx !== i))} className="text-zinc-500 hover:text-red-400 p-1"><Trash2 className="h-4 w-4" /></button>
-            </div>
-            <div className="flex flex-wrap gap-3">
-              {ENDORSEMENTS.map((e) => (
-                <Chk key={e.key} checked={Boolean(r[e.key])} onChange={(v) => patch(i, { [e.key]: v } as Partial<ContractRequirement>)} label={e.label} />
-              ))}
-            </div>
-          </div>
-        ))}
-        <button onClick={() => setReqs((rs) => [...rs, emptyReq()])} className="inline-flex items-center gap-1 text-xs text-zinc-400 hover:text-zinc-100"><Plus className="h-3.5 w-3.5" /> Add requirement</button>
-      </div>
-      <div className="flex items-center gap-2 pt-1">
-        <button onClick={save} disabled={busy || !name.trim()} className="inline-flex items-center gap-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium rounded-lg px-3 py-1.5 disabled:opacity-50">
-          {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Save
-        </button>
-        <button onClick={onCancel} className="text-xs text-zinc-400 hover:text-zinc-100 px-3 py-1.5 rounded-lg border border-zinc-700">Cancel</button>
-      </div>
-    </div>
-  )
-}
-
-/* ──────────────────────────── small bits ──────────────────────────── */
-
-const inputCls = 'bg-zinc-900 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500 w-full'
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <label className="block">
-      <span className="text-[10px] text-zinc-500 uppercase tracking-wide">{label}</span>
-      <div className="mt-1">{children}</div>
-    </label>
-  )
-}
-
-function Chk({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label: string }) {
-  return (
-    <label className="inline-flex items-center gap-1.5 text-xs text-zinc-300 cursor-pointer">
-      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} className="rounded border-zinc-600 bg-zinc-900 text-emerald-500 focus:ring-0" />
-      {label}
-    </label>
   )
 }

@@ -216,6 +216,8 @@ _LIM_LABEL = {"no_coverage": "NO COVER", "shortfall": "SHORTFALL",
               "directional_low": "LOW", "not_carried": "NOT CARRIED", "ok": "OK"}
 _LIM_CLASS = {"no_coverage": "lim-bad", "shortfall": "lim-bad", "directional_low": "lim-warn",
               "not_carried": "lim-muted", "ok": "lim-good"}
+_RT_CLASS = {"likely_void_by_statute": "lim-bad", "uninsurable_exposure": "lim-bad",
+             "insurable": "lim-good", "review": "lim-muted"}
 
 
 def _money(v) -> str:
@@ -260,10 +262,28 @@ def _limit_section_html(review: Optional[dict]) -> str:
             rows += (f"<tr class='note'><td colspan='6'>Required endorsements to confirm: "
                      f"{_esc(', '.join(e['label'] for e in eg))}</td></tr>")
     headline = f"{s.get('contract_shortfalls', 0)} contract shortfall(s) / {s.get('contracts', 0)} contract(s) reviewed"
-    return (
+    out = (
         f"<h2>Limit Adequacy &amp; Contract Review — {_esc(headline)}</h2>"
         f"<table><thead><tr><th>Line</th><th class='r'>Carried</th><th class='r'>Contract req.</th>"
         f"<th class='r'>Baseline</th><th>Status</th><th>Gap</th></tr></thead><tbody>{rows}</tbody></table>"
+    )
+    out += _risk_transfer_section_html(review)
+    return out
+
+
+def _risk_transfer_section_html(review: dict) -> str:
+    """Indemnity verdicts per contract. Empty (no contracts with risk-transfer
+    data) → "", per this module's omit-the-section convention."""
+    from . import limit_adequacy as _la
+
+    rows = _la.risk_transfer_rows_html(review, esc=_esc, verdict_class=_RT_CLASS)
+    if not rows:
+        return ""
+    return (
+        "<h2>Indemnification &amp; Risk Transfer</h2>"
+        "<table><thead><tr><th>Contract</th><th>Type</th><th>State</th><th>Indemnity form</th>"
+        f"<th>Verdict</th><th>Statute</th></tr></thead><tbody>{rows}</tbody></table>"
+        f"<p style='font-size:8px;color:#888;margin-top:4px'>{_esc(_la.DISCLAIMER)}</p>"
     )
 
 

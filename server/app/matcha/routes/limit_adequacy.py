@@ -14,10 +14,19 @@ from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFil
 
 from ...database import get_connection
 from ..dependencies import require_admin_or_client, get_client_company_id
-from ..services import limit_adequacy as la, contract_parser
+from ..services import limit_adequacy as la, risk_transfer as rt
 from ..models.limit_adequacy import CoverageLineUpdate, ContractCreate, ContractUpdate
 
 router = APIRouter()
+
+MAX_CONTRACT_BYTES = 15_000_000
+
+
+def read_pdf_upload(file: UploadFile) -> None:
+    """Shared guard for the contract-upload endpoints (tenant + broker)."""
+    is_pdf = (file.content_type == "application/pdf") or (file.filename or "").lower().endswith(".pdf")
+    if not is_pdf:
+        raise HTTPException(status_code=400, detail="Upload a PDF contract")
 
 
 @router.get("/review")
@@ -98,9 +107,8 @@ async def list_contracts(current_user=Depends(require_admin_or_client)):
     company_id = await get_client_company_id(current_user)
     async with get_connection() as conn:
         rows = await conn.fetch(
-            """SELECT id, name, counterparty, status, requirements, ai_available,
-                      source_filename, created_at, updated_at
-               FROM company_contracts WHERE company_id = $1 ORDER BY created_at DESC""",
+            f"SELECT {rt._CONTRACT_COLS} FROM company_contracts "
+            "WHERE company_id = $1 ORDER BY created_at DESC",
             company_id,
         )
     return {"contracts": [la._contract_row(r) for r in rows]}
@@ -109,49 +117,36 @@ async def list_contracts(current_user=Depends(require_admin_or_client)):
 @router.post("/contracts/upload")
 async def upload_contract(file: UploadFile = File(...),
                           current_user=Depends(require_admin_or_client)):
-    """Parse an uploaded contract PDF → extracted insurance requirements, store as
-    a contract record the company reviews/edits. The PDF is parsed and discarded."""
+    """Parse an uploaded contract PDF → insurance requirements + indemnity clause,
+    stored as a draft the company reviews, edits, and confirms. The source PDF is
+    retained (private bucket) so clause findings stay verifiable."""
     company_id = await get_client_company_id(current_user)
-    is_pdf = (file.content_type == "application/pdf") or (file.filename or "").lower().endswith(".pdf")
-    if not is_pdf:
-        raise HTTPException(status_code=400, detail="Upload a PDF contract")
+    read_pdf_upload(file)
     data = await file.read()
     if not data:
         raise HTTPException(status_code=400, detail="Empty file")
-    if len(data) > 15_000_000:
+    if len(data) > MAX_CONTRACT_BYTES:
         raise HTTPException(status_code=413, detail="PDF too large (max 15 MB)")
 
-    parsed = await contract_parser.parse_contract(data)
-    fname = (file.filename or "contract.pdf")[:255]
-    name = (parsed.get("counterparty") or fname.rsplit(".", 1)[0])[:255]
-    status = "parsed" if parsed["available"] else "error"
     async with get_connection() as conn:
-        row = await conn.fetchrow(
-            """INSERT INTO company_contracts
-                 (company_id, name, counterparty, status, requirements, ai_available,
-                  source_filename, uploaded_by)
-               VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-               RETURNING id, name, counterparty, status, requirements, ai_available,
-                         source_filename, created_at, updated_at""",
-            company_id, name, parsed.get("counterparty"), status,
-            json.dumps(parsed["requirements"]), parsed["available"], fname, current_user.id,
-        )
-    return la._contract_row(row)
+        return await rt.store_uploaded_contract(conn, company_id, current_user.id, data, file.filename)
 
 
 @router.post("/contracts")
 async def create_contract(body: ContractCreate, current_user=Depends(require_admin_or_client)):
     """Manual contract entry — key the requirements directly (no PDF)."""
     company_id = await get_client_company_id(current_user)
-    reqs = _normalize_requirements(body.requirements)
+    reqs = rt.normalize_requirements(body.requirements)
     async with get_connection() as conn:
         row = await conn.fetchrow(
-            """INSERT INTO company_contracts
-                 (company_id, name, counterparty, status, requirements, ai_available, uploaded_by)
-               VALUES ($1,$2,$3,'manual',$4,FALSE,$5)
-               RETURNING id, name, counterparty, status, requirements, ai_available,
-                         source_filename, created_at, updated_at""",
+            f"""INSERT INTO company_contracts
+                 (company_id, name, counterparty, status, requirements, ai_available, uploaded_by,
+                  contract_type, governing_state, project_state, risk_transfer)
+               VALUES ($1,$2,$3,'manual',$4,FALSE,$5,$6,$7,$8,$9)
+               RETURNING {rt._CONTRACT_COLS}""",
             company_id, body.name, body.counterparty, json.dumps(reqs), current_user.id,
+            body.contract_type, body.governing_state, body.project_state,
+            json.dumps(body.risk_transfer.model_dump()) if body.risk_transfer else None,
         )
     return la._contract_row(row)
 
@@ -161,26 +156,58 @@ async def update_contract(contract_id: str, body: ContractUpdate,
                           current_user=Depends(require_admin_or_client)):
     company_id = await get_client_company_id(current_user)
     async with get_connection() as conn:
-        existing = await conn.fetchrow(
-            "SELECT id FROM company_contracts WHERE id = $1 AND company_id = $2",
-            contract_id, company_id,
-        )
-        if not existing:
-            raise HTTPException(status_code=404, detail="Contract not found")
-        reqs = None if body.requirements is None else json.dumps(_normalize_requirements(body.requirements))
-        row = await conn.fetchrow(
-            """UPDATE company_contracts SET
-                 name = COALESCE($3, name),
-                 counterparty = COALESCE($4, counterparty),
-                 requirements = COALESCE($5::jsonb, requirements),
-                 status = CASE WHEN $5 IS NOT NULL AND status = 'error' THEN 'manual' ELSE status END,
-                 updated_at = NOW()
-               WHERE id = $1 AND company_id = $2
-               RETURNING id, name, counterparty, status, requirements, ai_available,
-                         source_filename, created_at, updated_at""",
-            contract_id, company_id, body.name, body.counterparty, reqs,
-        )
-    return la._contract_row(row)
+        row = await rt.update_contract(conn, company_id, contract_id, body)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Contract not found")
+    return row
+
+
+@router.post("/contracts/{contract_id}/confirm")
+async def confirm_contract(contract_id: str, current_user=Depends(require_admin_or_client)):
+    """Vouch for the extracted terms — lifts the provisional label off the verdict."""
+    company_id = await get_client_company_id(current_user)
+    async with get_connection() as conn:
+        row = await rt.confirm_contract(conn, company_id, contract_id, current_user.id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Contract not found")
+    return row
+
+
+@router.get("/contracts/{contract_id}/review")
+async def contract_review(contract_id: str, current_user=Depends(require_admin_or_client)):
+    """Per-contract, pre-signature review: compliant / exposed / actions."""
+    company_id = await get_client_company_id(current_user)
+    async with get_connection() as conn:
+        review = await rt.build_contract_review(conn, company_id, contract_id)
+    if review is None:
+        raise HTTPException(status_code=404, detail="Contract not found")
+    return review
+
+
+@router.get("/contracts/{contract_id}/review.pdf")
+async def contract_review_pdf(contract_id: str, current_user=Depends(require_admin_or_client)):
+    company_id = await get_client_company_id(current_user)
+    async with get_connection() as conn:
+        review = await rt.build_contract_review(conn, company_id, contract_id)
+    if review is None:
+        raise HTTPException(status_code=404, detail="Contract not found")
+    pdf = await rt.render_contract_review_pdf(review)
+    safe = str((review.get("contract") or {}).get("name") or "contract").replace("/", "-").replace('"', "")
+    return Response(
+        content=pdf, media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="contract-review-{safe}.pdf"'},
+    )
+
+
+@router.get("/contracts/{contract_id}/file")
+async def contract_source_file(contract_id: str, current_user=Depends(require_admin_or_client)):
+    """Time-limited link to the retained source PDF (404 when it wasn't retained)."""
+    company_id = await get_client_company_id(current_user)
+    async with get_connection() as conn:
+        url = await rt.contract_source_url(conn, company_id, contract_id)
+    if not url:
+        raise HTTPException(status_code=404, detail="No source document on file")
+    return {"url": url}
 
 
 @router.delete("/contracts/{contract_id}")
@@ -209,20 +236,3 @@ async def review_pdf(current_user=Depends(require_admin_or_client)):
         content=pdf, media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="limit-adequacy-{safe}.pdf"'},
     )
-
-
-def _normalize_requirements(requirements) -> list[dict]:
-    """Pydantic requirement models → stored shape, with line keys normalized."""
-    out: list[dict] = []
-    for r in requirements or []:
-        line = la.normalize_line(r.line)
-        if not line:
-            continue
-        out.append({
-            "line": line, "per_occurrence": r.per_occurrence, "aggregate": r.aggregate,
-            "additional_insured": r.additional_insured,
-            "waiver_of_subrogation": r.waiver_of_subrogation,
-            "primary_noncontributory": r.primary_noncontributory,
-            "note": r.note,
-        })
-    return out

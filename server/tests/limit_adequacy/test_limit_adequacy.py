@@ -174,3 +174,144 @@ def test_money_format():
     assert la._money(1_500_000) == "$1.5M"
     assert la._money(500_000) == "$500K"
     assert la._money(None) == "—"
+
+
+# --- risk-transfer extraction coercion --------------------------------------
+
+def test_coerce_requirements_captures_quote_and_page():
+    out = cp._coerce_requirements({"requirements": [
+        {"line": "gl", "quote": "  Contractor shall carry $2M  ", "page": "4"},
+    ]})
+    assert out[0]["quote"] == "Contractor shall carry $2M"
+    assert out[0]["page"] == 4
+
+
+def test_coerce_requirements_rejects_nonsense_pages():
+    out = cp._coerce_requirements({"requirements": [
+        {"line": "gl", "page": 0}, {"line": "auto", "page": "x"}, {"line": "cyber", "page": -2},
+    ]})
+    assert [r["page"] for r in out] == [None, None, None]
+
+
+def test_property_is_extractable_now_that_the_prompt_names_it():
+    """The carried-line whitelist has always had `property`; the prompt didn't."""
+    assert "Property" in cp._PROMPT
+    assert cp._coerce_requirements({"requirements": [{"line": "Property"}]})[0]["line"] == "property"
+
+
+def test_coerce_risk_transfer_whitelists_enums():
+    rtx = cp._coerce_risk_transfer({"indemnity": {
+        "present": True, "form": "BROAD", "direction": "we_indemnify_them",
+        "covers_sole_negligence": 1, "defense_obligation": 0, "quote": "q", "page": 7,
+    }})
+    ind = rtx["indemnity"]
+    assert ind["form"] == "broad" and ind["direction"] == "we_indemnify_them"
+    assert ind["covers_sole_negligence"] is True and ind["defense_obligation"] is False
+    assert ind["page"] == 7
+
+
+def test_coerce_risk_transfer_unknown_enum_becomes_unclear_not_a_guess():
+    ind = cp._coerce_risk_transfer({"indemnity": {"present": True, "form": "very broad", "direction": "sideways"}})["indemnity"]
+    assert ind["form"] == "unclear" and ind["direction"] == "unclear"
+
+
+def test_coerce_risk_transfer_absent_clause_and_garbage():
+    assert cp._coerce_risk_transfer({"indemnity": {"present": False}}) == {"indemnity": {"present": False}}
+    assert cp._coerce_risk_transfer({}) is None
+    assert cp._coerce_risk_transfer({"indemnity": "nope"}) is None
+
+
+def test_coerce_risk_transfer_truncates_a_runaway_quote():
+    ind = cp._coerce_risk_transfer({"indemnity": {"present": True, "quote": "x" * 5000}})["indemnity"]
+    assert len(ind["quote"]) == cp._MAX_QUOTE
+
+
+def test_coerce_contract_type_and_state():
+    assert cp._coerce_contract_type("Construction") == "construction"
+    assert cp._coerce_contract_type("handshake") is None
+    assert cp._state(" ny ") == "NY"
+    assert cp._state("New York") is None
+    assert cp._state(None) is None
+
+
+# --- jsonb decoding ---------------------------------------------------------
+
+def test_contract_row_decodes_risk_transfer_jsonb_string():
+    """asyncpg has no jsonb codec on this pool — the column arrives as raw text."""
+    row = {"id": "c1", "requirements": '[{"line":"gl"}]', "risk_transfer": '{"indemnity":{"present":true}}'}
+    out = la._contract_row(row)
+    assert out["requirements"] == [{"line": "gl"}]
+    assert out["risk_transfer"]["indemnity"]["present"] is True
+
+
+def test_contract_row_tolerates_malformed_jsonb():
+    out = la._contract_row({"id": "c1", "requirements": "{bad", "risk_transfer": "{bad"})
+    assert out["requirements"] == [] and out["risk_transfer"] is None
+
+
+def test_contract_row_omits_risk_transfer_key_when_not_selected():
+    assert "risk_transfer" not in la._contract_row({"id": "c1", "requirements": "[]"})
+
+
+# --- upload retention degrade path ------------------------------------------
+
+class _FakeConn:
+    """Captures the INSERT args so we can assert what got persisted."""
+
+    def __init__(self):
+        self.args = None
+
+    async def fetchrow(self, _sql, *args):
+        self.args = args
+        return {"id": "c1", "name": args[1], "counterparty": args[2], "status": args[3],
+                "requirements": args[4], "ai_available": args[5], "source_filename": args[6],
+                "contract_type": args[8], "governing_state": args[9], "project_state": args[10],
+                "storage_path": args[11], "risk_transfer": args[12], "confirmed_at": None,
+                "created_at": None, "updated_at": None}
+
+
+def _install_fakes(monkeypatch, *, upload_raises: bool):
+    from app.matcha.services import risk_transfer as rtx
+
+    async def fake_parse(_data):
+        return {"counterparty": "Acme", "contract_type": "construction",
+                "governing_state": "NY", "project_state": "NY",
+                "requirements": [{"line": "gl"}],
+                "risk_transfer": {"indemnity": {"present": True}},
+                "available": True, "model": "test"}
+
+    class _P:
+        parse_contract = staticmethod(fake_parse)
+
+    monkeypatch.setattr(rtx, "contract_parser", lambda: _P)
+
+    class _Storage:
+        async def upload_private_file(self, *a, **k):
+            if upload_raises:
+                raise RuntimeError("S3 not configured for private uploads")
+            return "s3://bucket/contracts/x.pdf"
+
+    monkeypatch.setattr(rtx, "get_storage", lambda: _Storage())
+    return rtx
+
+
+def test_upload_retains_source_pdf(monkeypatch):
+    import asyncio
+    rtx = _install_fakes(monkeypatch, upload_raises=False)
+    conn = _FakeConn()
+    out = asyncio.run(rtx.store_uploaded_contract(conn, "co", "user", b"%PDF-", "sub.pdf"))
+    assert out["storage_path"] == "s3://bucket/contracts/x.pdf"
+    assert out["status"] == "parsed"
+    assert out["risk_transfer"]["indemnity"]["present"] is True
+
+
+def test_upload_degrades_to_parse_and_discard_when_s3_is_unavailable(monkeypatch):
+    """A dev box with no private bucket must still get its contract review —
+    losing the blob beats losing the record."""
+    import asyncio
+    rtx = _install_fakes(monkeypatch, upload_raises=True)
+    conn = _FakeConn()
+    out = asyncio.run(rtx.store_uploaded_contract(conn, "co", "user", b"%PDF-", "sub.pdf"))
+    assert out["storage_path"] is None
+    assert out["status"] == "parsed"
+    assert out["contract_type"] == "construction"
