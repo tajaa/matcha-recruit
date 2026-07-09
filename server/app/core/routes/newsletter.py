@@ -559,6 +559,8 @@ class UpdateNewsletterRequest(BaseModel):
     curated_article_ids: Optional[list[str]] = None
     preheader: Optional[str] = Field(default=None, max_length=255)
     scheduled_at: Optional[datetime] = None
+    theme: Optional[str] = None  # "dark" | "light"
+    accent_color: Optional[str] = Field(default=None, pattern=r"^#[0-9A-Fa-f]{6}$")
 
 
 @admin_router.get("/newsletters")
@@ -732,7 +734,8 @@ class PreviewRequest(BaseModel):
     subject: str = ""
     preheader: str = ""
     content_html: str = ""
-    theme: str = "dark"  # "dark" | "light"
+    theme: str = "light"  # "dark" | "light"
+    accent_color: Optional[str] = Field(default=None, pattern=r"^#[0-9A-Fa-f]{6}$")
 
 
 @admin_router.post("/preview")
@@ -742,14 +745,16 @@ async def render_newsletter_preview(
 ):
     """Render a draft body through the same pipeline as send time so the
     compose iframe shows what recipients actually see (video poster fallback,
-    branded chrome, theme-correct palette). No tracking pixel injected."""
-    theme = body.theme if body.theme in ("dark", "light") else "dark"
+    branded chrome, theme-correct palette, custom accent). No tracking pixel
+    injected."""
+    theme = body.theme if body.theme in ("dark", "light") else "light"
     html = svc.render_preview(
         title=body.title,
         subject=body.subject,
         preheader=body.preheader,
         content_html=body.content_html,
         theme=theme,
+        accent_color=body.accent_color,
     )
     return {"html": html}
 

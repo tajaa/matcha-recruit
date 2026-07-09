@@ -578,7 +578,10 @@ async def create_newsletter(title: str, subject: str, created_by: UUID) -> dict:
 
 
 async def update_newsletter(newsletter_id: UUID, updates: dict) -> dict:
-    allowed = {"title", "subject", "content_html", "curated_article_ids", "scheduled_at", "preheader"}
+    allowed = {
+        "title", "subject", "content_html", "curated_article_ids", "scheduled_at",
+        "preheader", "theme", "accent_color",
+    }
     sets = []
     params: list = []
     idx = 1
@@ -587,6 +590,10 @@ async def update_newsletter(newsletter_id: UUID, updates: dict) -> dict:
             continue
         if key == "content_html" and val:
             val = sanitize_html(val)
+        if key == "theme" and val not in ("dark", "light"):
+            raise ValueError("theme must be 'dark' or 'light'")
+        if key == "accent_color" and val and not _HEX_COLOR_RE.match(val):
+            raise ValueError("accent_color must be a #RRGGBB hex color")
         sets.append(f"{key} = ${idx}")
         params.append(val)
         idx += 1
@@ -728,13 +735,15 @@ def render_preview(
     preheader: str,
     content_html: str,
     *,
-    theme: Literal["dark", "light"] = "dark",
+    theme: Literal["dark", "light"] = "light",
+    accent_color: Optional[str] = None,
 ) -> str:
     """Render a draft body through the same pipeline used at send time.
 
     Used by the admin compose preview pane so the iframe shows what
-    recipients will actually see — including video poster fallback and
-    branded chrome. No tracking pixel is injected (send_id=None).
+    recipients will actually see — including video poster fallback,
+    branded chrome, and the draft's in-progress theme/accent color (not
+    yet saved). No tracking pixel is injected (send_id=None).
     """
     settings = get_settings()
     base_url = (settings.app_base_url or "https://hey-matcha.com").rstrip("/")
@@ -752,6 +761,7 @@ def render_preview(
         {"name": "there"},
         fake_unsub,
         theme=theme,
+        accent_color=accent_color,
     )
 
 
@@ -905,6 +915,11 @@ EMAIL_THEMES = {
     },
 }
 
+# Per-newsletter accent color override — validated everywhere it's accepted
+# (route + service layer) since it's interpolated directly into inline HTML
+# `style` attributes sent to subscribers.
+_HEX_COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
+
 
 # Match an opening <video> tag (with optional attrs and trailing content
 # until the closing </video>). Captures src + poster attributes if present.
@@ -1011,7 +1026,8 @@ def _render_email(
     *,
     base_url: str = "",
     send_id: Optional[UUID] = None,
-    theme: Literal["dark", "light"] = "dark",
+    theme: Optional[Literal["dark", "light"]] = None,
+    accent_color: Optional[str] = None,
 ) -> str:
     """Render newsletter HTML with branded template, tracking, and CAN-SPAM
     footer. content_html is already sanitized at write time.
@@ -1020,15 +1036,24 @@ def _render_email(
     URL and click-tracking redirect targets. When omitted (test send) tracking
     is skipped so we don't pollute the analytics with previews.
 
-    `theme` controls the wrapper palette. Defaults to dark to match the
-    legacy look. The compose-preview endpoint can request "light" to simulate
-    how recipients in light-mode clients will see the email.
+    `theme`/`accent_color` are per-newsletter design settings. When omitted
+    (the real send + test-send paths), they're read off the `newsletter` row
+    itself (`theme`, `accent_color` columns) — the preview endpoint passes
+    them explicitly instead, since a draft's in-progress edits aren't saved
+    yet. Falls back to the legacy dark palette with no accent override if
+    neither the newsletter row nor the caller supplies them (e.g. older rows
+    predating these columns).
     """
     settings = get_settings()
     if not base_url:
         base_url = (settings.app_base_url or "https://hey-matcha.com").rstrip("/")
 
-    palette = EMAIL_THEMES.get(theme, EMAIL_THEMES["dark"])
+    resolved_theme = theme or newsletter.get("theme") or "dark"
+    palette = dict(EMAIL_THEMES.get(resolved_theme, EMAIL_THEMES["dark"]))
+
+    resolved_accent = accent_color or newsletter.get("accent_color")
+    if resolved_accent and _HEX_COLOR_RE.match(resolved_accent):
+        palette["accent"] = resolved_accent
 
     content = newsletter.get("content_html") or ""
     preheader = (newsletter.get("preheader") or "").strip()

@@ -6127,6 +6127,23 @@ async def init_db():
                 ) THEN
                     ALTER TABLE newsletters ADD COLUMN scheduled_send_started_at TIMESTAMPTZ;
                 END IF;
+                -- Per-newsletter design settings — theme (wrapper palette) +
+                -- accent color, editable per draft instead of a hardcoded
+                -- global dark palette.
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'newsletters' AND column_name = 'theme'
+                ) THEN
+                    ALTER TABLE newsletters ADD COLUMN theme VARCHAR(10) NOT NULL DEFAULT 'light'
+                        CHECK (theme IN ('dark', 'light'));
+                END IF;
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'newsletters' AND column_name = 'accent_color'
+                ) THEN
+                    ALTER TABLE newsletters ADD COLUMN accent_color VARCHAR(7) NOT NULL DEFAULT '#059669'
+                        CHECK (accent_color ~ '^#[0-9A-Fa-f]{6}$');
+                END IF;
             END $$;
         """)
         await conn.execute("""

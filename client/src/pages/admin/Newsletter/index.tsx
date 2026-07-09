@@ -12,7 +12,12 @@ import { TemplatesTab } from './TemplatesTab'
 import { SendModal } from './SendModal'
 import { AnalyticsDrawer } from './AnalyticsDrawer'
 import { CsvImportModal } from './CsvImportModal'
-import type { ViewportKey } from './MobilePreview'
+
+// New-draft defaults — matches the `newsletters.theme`/`accent_color`
+// DB column defaults, so a brand-new draft's preview matches what it'll
+// persist as before the first autosave round-trip.
+const DEFAULT_THEME: 'dark' | 'light' = 'light'
+const DEFAULT_ACCENT_COLOR = '#059669'
 
 export default function NewsletterAdmin() {
   const navigate = useNavigate()
@@ -32,11 +37,12 @@ export default function NewsletterAdmin() {
   const [composeSubject, setComposeSubject] = useState('')
   const [composePreheader, setComposePreheader] = useState('')
   const [composeHtml, setComposeHtml] = useState('')
+  const [composeTheme, setComposeTheme] = useState<'dark' | 'light'>(DEFAULT_THEME)
+  const [composeAccentColor, setComposeAccentColor] = useState(DEFAULT_ACCENT_COLOR)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [isDirty, setIsDirty] = useState(false)
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'unsaved'>('saved')
-  const [previewViewport, setPreviewViewport] = useState<ViewportKey>('mobile')
 
   // Send modal state
   const [sendModal, setSendModal] = useState<{ kind: 'now' | 'schedule' | 'segment' } | null>(null)
@@ -70,6 +76,7 @@ export default function NewsletterAdmin() {
       setTab('compose')
       setEditingId(null)
       setComposeTitle(''); setComposeSubject(''); setComposePreheader(''); setComposeHtml('')
+      setComposeTheme(DEFAULT_THEME); setComposeAccentColor(DEFAULT_ACCENT_COLOR)
       setIsDirty(false); setSaveStatus('saved')
     }
   }, [location.pathname])
@@ -142,6 +149,8 @@ export default function NewsletterAdmin() {
               title: composeTitle.trim(), subject: composeSubject.trim(),
               preheader: composePreheader || undefined,
               content_html: composeHtml || undefined,
+              theme: composeTheme,
+              accent_color: composeAccentColor,
             })
           }
           upsertNewsletter(saved)
@@ -151,6 +160,8 @@ export default function NewsletterAdmin() {
             subject: composeSubject.trim() || undefined,
             preheader: composePreheader || undefined,
             content_html: composeHtml || undefined,
+            theme: composeTheme,
+            accent_color: composeAccentColor,
           })
           upsertNewsletter(saved)
         }
@@ -161,7 +172,7 @@ export default function NewsletterAdmin() {
       }
     }, 2000)
     return () => window.clearTimeout(timer)
-  }, [composeTitle, composeSubject, composePreheader, composeHtml, isDirty])
+  }, [composeTitle, composeSubject, composePreheader, composeHtml, composeTheme, composeAccentColor, isDirty])
 
   useEffect(() => {
     function handler(e: BeforeUnloadEvent) {
@@ -206,6 +217,8 @@ export default function NewsletterAdmin() {
         subject: composeSubject.trim() || undefined,
         preheader: composePreheader || undefined,
         content_html: composeHtml || undefined,
+        theme: composeTheme,
+        accent_color: composeAccentColor,
       })
       upsertNewsletter(saved)
       setIsDirty(false); setSaveStatus('saved')
@@ -319,6 +332,8 @@ export default function NewsletterAdmin() {
     setComposeSubject(nl.subject)
     setComposePreheader(nl.preheader ?? '')
     setComposeHtml(nl.content_html || '')
+    setComposeTheme(nl.theme ?? DEFAULT_THEME)
+    setComposeAccentColor(nl.accent_color ?? DEFAULT_ACCENT_COLOR)
     setIsDirty(false)
     setSaveStatus('saved')
     setTab('compose')
@@ -329,6 +344,8 @@ export default function NewsletterAdmin() {
     setComposeSubject(t.name)
     setComposePreheader(t.preheader ?? '')
     setComposeHtml(t.content_html ?? '')
+    setComposeTheme(DEFAULT_THEME)
+    setComposeAccentColor(DEFAULT_ACCENT_COLOR)
     setEditingId(null)
     setIsDirty(true); setSaveStatus('unsaved')
     setTab('compose')
@@ -499,8 +516,9 @@ export default function NewsletterAdmin() {
           composeSubject={composeSubject} setComposeSubject={setComposeSubject}
           composePreheader={composePreheader} setComposePreheader={setComposePreheader}
           composeHtml={composeHtml} setComposeHtml={setComposeHtml}
+          composeTheme={composeTheme} setComposeTheme={setComposeTheme}
+          composeAccentColor={composeAccentColor} setComposeAccentColor={setComposeAccentColor}
           setIsDirty={setIsDirty} setSaveStatus={setSaveStatus}
-          previewViewport={previewViewport} setPreviewViewport={setPreviewViewport}
           saving={saving}
           handleCreate={handleCreate}
           handleSave={handleSave}

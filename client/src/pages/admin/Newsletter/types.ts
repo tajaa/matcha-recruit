@@ -7,6 +7,7 @@ export type Newsletter = {
   id: string; title: string; subject: string; status: string
   content_html: string | null; preheader: string | null
   scheduled_at: string | null; sent_at: string | null; created_at: string
+  theme?: 'dark' | 'light'; accent_color?: string
   total_sends?: number; total_opened?: number
 }
 
