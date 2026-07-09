@@ -40,6 +40,7 @@ from typing import Optional, get_args
 
 from fastapi import HTTPException, UploadFile
 
+from app.config import get_settings
 from app.core.services.pdf import safe_url_fetcher
 from app.core.services.storage import get_storage
 from app.matcha.models import limit_adequacy as _models
@@ -438,7 +439,10 @@ async def store_uploaded_contract(conn, company_id, user_id, data: bytes, filena
     storage_path = None
     try:
         storage_path = await get_storage().upload_private_file(
-            data, fname, prefix="contracts", content_type="application/pdf"
+            data, fname, prefix="contracts", content_type="application/pdf",
+            # Counterparty contracts get their own bucket — they are third-party
+            # legal documents, not our employees' records. Unset → shared bucket.
+            bucket=get_settings().s3_contracts_bucket,
         )
     except Exception as exc:  # noqa: BLE001 - retention is best-effort
         logger.warning("risk_transfer: contract source not retained (%s)", exc)

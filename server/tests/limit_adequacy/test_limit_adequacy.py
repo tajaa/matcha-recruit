@@ -283,12 +283,16 @@ def _install_fakes(monkeypatch, *, upload_raises: bool):
     monkeypatch.setattr(rtx.contract_parser, "parse_contract", fake_parse)
 
     class _Storage:
-        async def upload_private_file(self, *a, **k):
+        async def upload_private_file(self, data, filename, prefix=None, content_type=None, bucket=None):
             if upload_raises:
                 raise RuntimeError("S3 not configured for private uploads")
-            return "s3://bucket/contracts/x.pdf"
+            # contracts must target their own bucket, not the shared private one
+            assert bucket == "matcha-contracts", bucket
+            return f"s3://{bucket}/contracts/x.pdf"
 
     monkeypatch.setattr(rtx, "get_storage", lambda: _Storage())
+    monkeypatch.setattr(rtx, "get_settings",
+                        lambda: type("S", (), {"s3_contracts_bucket": "matcha-contracts"})())
     return rtx
 
 
@@ -297,7 +301,7 @@ def test_upload_retains_source_pdf(monkeypatch):
     rtx = _install_fakes(monkeypatch, upload_raises=False)
     conn = _FakeConn()
     out = asyncio.run(rtx.store_uploaded_contract(conn, "co", "user", b"%PDF-", "sub.pdf"))
-    assert out["storage_path"] == "s3://bucket/contracts/x.pdf"
+    assert out["storage_path"] == "s3://matcha-contracts/contracts/x.pdf"
     assert out["status"] == "parsed"
     assert out["risk_transfer"]["indemnity"]["present"] is True
 
