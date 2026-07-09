@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Card, Badge, Toggle, Input } from '../../components/ui'
+import { ToggleLeft, Search, Loader2 } from 'lucide-react'
+import { Card, Badge, Toggle } from '../../components/ui'
 import { api } from '../../api/client'
 
 const FEATURE_LABELS: Record<string, string> = {
@@ -93,67 +94,81 @@ export default function Features() {
     featureKeys.filter((k) => features[k]).length
 
   return (
-    <div>
-      <h1 className="text-2xl font-semibold text-zinc-100">
-        Business Features
-      </h1>
-      <p className="mt-2 text-sm text-zinc-500">
-        Toggle feature access per company.
-      </p>
-
-      <div className="mt-6 max-w-xs">
-        <Input
-          label=""
-          placeholder="Search companies..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
+    <div className="flex h-[calc(100vh-7rem)] flex-col overflow-hidden rounded-xl border border-white/[0.06] bg-black">
+      {/* Header */}
+      <div className="flex items-center justify-between border-b border-white/[0.06] px-4 py-3">
+        <h1 className="flex items-center gap-2 text-sm font-semibold text-zinc-100">
+          <ToggleLeft className="h-4 w-4 text-emerald-400" /> Business Features
+        </h1>
+        <span className="hidden text-xs text-zinc-500 md:block">Toggle feature access per company.</span>
       </div>
 
-      {error && (
-        <p className="mt-4 text-sm text-red-400 bg-red-950/30 border border-red-900/30 rounded px-3 py-2">
-          {error}
-        </p>
-      )}
+      {/* Stat bar */}
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-1 border-b border-white/[0.06] px-4 py-2 font-mono text-[11px] uppercase tracking-wide text-zinc-500">
+        <span>Companies <b className="text-zinc-100">{companies.length || '—'}</b></span>
+        <span>Features <b className="text-zinc-100">{featureKeys.length}</b></span>
+      </div>
 
-      {loading ? (
-        <p className="mt-6 text-sm text-zinc-500">Loading...</p>
-      ) : filtered.length === 0 ? (
-        <p className="mt-6 text-sm text-zinc-500">No companies found.</p>
-      ) : (
-        <div className="mt-6 space-y-4">
-          {filtered.map((company) => (
-            <Card key={company.id}>
-              <div className="flex items-center justify-between mb-5">
-                <h3 className="text-sm font-semibold text-zinc-100">
-                  {company.company_name}
-                </h3>
-                <Badge variant="neutral">
-                  {enabledCount(company.enabled_features)}/{featureKeys.length} enabled
-                </Badge>
-              </div>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-3">
-                {featureKeys.map((key) => {
-                  const on = !!company.enabled_features[key]
-                  const busy = toggling === `${company.id}:${key}`
-                  return (
-                    <div key={key} className="flex items-center justify-between">
-                      <span className="text-sm text-zinc-400">
-                        {FEATURE_LABELS[key]}
-                      </span>
-                      <Toggle
-                        checked={on}
-                        disabled={busy}
-                        onChange={(v) => toggle(company.id, key, v)}
-                      />
-                    </div>
-                  )
-                })}
-              </div>
-            </Card>
-          ))}
+      {/* Search */}
+      <div className="border-b border-white/[0.06] px-4 py-3">
+        <div className="relative max-w-xs">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search companies…"
+            className="w-full rounded-lg border border-white/[0.08] bg-white/[0.03] pl-9 pr-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 outline-none focus:border-white/[0.16]"
+          />
         </div>
-      )}
+      </div>
+
+      {/* Body */}
+      <div className="flex-1 overflow-y-auto p-4">
+        {error && (
+          <p className="mb-4 rounded border border-red-900/30 bg-red-950/30 px-3 py-2 text-sm text-red-400">
+            {error}
+          </p>
+        )}
+
+        {loading ? (
+          <Loader2 className="h-5 w-5 animate-spin text-zinc-500" />
+        ) : filtered.length === 0 ? (
+          <p className="text-sm text-zinc-500">No companies found.</p>
+        ) : (
+          <div className="space-y-4">
+            {filtered.map((company) => (
+              <Card key={company.id}>
+                <div className="flex items-center justify-between mb-5">
+                  <h3 className="text-sm font-semibold text-zinc-100">
+                    {company.company_name}
+                  </h3>
+                  <Badge variant="neutral">
+                    {enabledCount(company.enabled_features)}/{featureKeys.length} enabled
+                  </Badge>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-3">
+                  {featureKeys.map((key) => {
+                    const on = !!company.enabled_features[key]
+                    const busy = toggling === `${company.id}:${key}`
+                    return (
+                      <div key={key} className="flex items-center justify-between">
+                        <span className="text-sm text-zinc-400">
+                          {FEATURE_LABELS[key]}
+                        </span>
+                        <Toggle
+                          checked={on}
+                          disabled={busy}
+                          onChange={(v) => toggle(company.id, key, v)}
+                        />
+                      </div>
+                    )
+                  })}
+                </div>
+              </Card>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   )
 }
