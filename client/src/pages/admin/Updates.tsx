@@ -65,18 +65,19 @@ function UpdateRow({ u, open, onToggle }: { u: AdminUpdate; open: boolean; onTog
         <div className="pb-5 pl-7">
           <p className="text-sm leading-relaxed text-zinc-400">{u.summary}</p>
 
-          <div className="mt-3 grid gap-6 lg:grid-cols-3">
-            <div>
-              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">What's new</div>
-              <ul className="space-y-1 text-sm text-zinc-300">
-                {u.whatsNew.map((w, i) => (
-                  <li key={i}>· {w}</li>
-                ))}
-              </ul>
-            </div>
+          <div className="mt-3">
+            <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">What's new</div>
+            <ul className="space-y-1 text-sm leading-normal text-zinc-300 lg:columns-2 lg:gap-8 [&>li]:break-inside-avoid">
+              {u.whatsNew.map((w, i) => (
+                <li key={i}>· {w}</li>
+              ))}
+            </ul>
+          </div>
+
+          <div className="mt-4 grid gap-6 border-t border-zinc-800/60 pt-4 lg:grid-cols-2">
             <div>
               <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">How to use it</div>
-              <ol className="space-y-1 text-sm text-zinc-300">
+              <ol className="space-y-1 text-sm leading-normal text-zinc-300">
                 {u.howToUse.map((h, i) => (
                   <li key={i}>{i + 1}. {h}</li>
                 ))}
@@ -86,7 +87,7 @@ function UpdateRow({ u, open, onToggle }: { u: AdminUpdate; open: boolean; onTog
               {u.notes && u.notes.length > 0 && (
                 <>
                   <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Context</div>
-                  <ul className="space-y-1 text-sm text-zinc-400">
+                  <ul className="space-y-1 text-sm leading-normal text-zinc-400">
                     {u.notes.map((n, i) => (
                       <li key={i}>· {n}</li>
                     ))}
@@ -98,7 +99,7 @@ function UpdateRow({ u, open, onToggle }: { u: AdminUpdate; open: boolean; onTog
                   <div className={`mb-1 text-[11px] font-semibold uppercase tracking-wide text-amber-400 ${u.notes?.length ? 'mt-3' : ''}`}>
                     Setup before it works
                   </div>
-                  <ul className="space-y-1 text-sm text-amber-100/80">
+                  <ul className="space-y-1 text-sm leading-normal text-amber-100/80">
                     {u.setup.map((s, i) => (
                       <li key={i}>· {s}</li>
                     ))}
