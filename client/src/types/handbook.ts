@@ -327,3 +327,30 @@ export type HandbookPublishResponse = {
   active_version: number
   published_at: string | null
 }
+
+export type HandbookShareLink = {
+  token: string
+  /** Path only, e.g. /hb/<token> — prefix with window.location.origin to share. */
+  url: string
+  created_at: string
+  expires_at: string | null
+  view_count: number
+  last_viewed_at: string | null
+}
+
+/** Readable section text — mirrors backend HandbookSectionText. Shared by the
+ *  public share view and the employee portal's acknowledgement view. */
+export type HandbookSectionText = {
+  title: string
+  content: string
+  section_order: number
+}
+
+/** Shape returned by the public, unauthenticated GET /shared/handbook/{token}. */
+export type PublicHandbook = {
+  title: string
+  company_name: string
+  published_at: string | null
+  version: number
+  sections: HandbookSectionText[]
+}

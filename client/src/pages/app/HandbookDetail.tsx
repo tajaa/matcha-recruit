@@ -8,6 +8,7 @@ import { HandbookChangeRequests } from '../../components/handbook/HandbookChange
 import { HandbookFreshnessPanel } from '../../components/handbook/HandbookFreshnessPanel'
 import { HandbookCoveragePanel } from '../../components/handbook/HandbookCoveragePanel'
 import { HandbookDistributeModal } from '../../components/HandbookDistributeModal'
+import { HandbookShareCard } from '../../components/handbook/HandbookShareCard'
 import type {
   HandbookDetail as HandbookDetailType,
   HandbookSection,
@@ -231,6 +232,9 @@ export default function HandbookDetail() {
           </Button>
         </div>
       </div>
+
+      {/* Public share link — only a published handbook can be shared. */}
+      {handbook.status === 'active' && <HandbookShareCard handbookId={handbook.id} />}
 
       {/* Acknowledgement Summary */}
       {ackSummary && (

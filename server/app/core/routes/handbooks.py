@@ -2,7 +2,7 @@ from io import BytesIO
 import mimetypes
 from typing import List, Optional
 
-from fastapi import APIRouter, Body, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, File, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 
 from ...matcha.dependencies import get_client_company_id, require_admin_or_client
@@ -23,15 +23,22 @@ from ..models.handbook import (
     HandbookGuidedDraftResponse,
     HandbookListItemResponse,
     HandbookPublishResponse,
+    HandbookShareLinkRequest,
+    HandbookShareLinkResponse,
     HandbookUpdateRequest,
     HandbookWizardDraftResponse,
     HandbookWizardDraftUpsertRequest,
+    PublicHandbookResponse,
 )
 from ..services.handbook_service import GuidedDraftRateLimitError, HandbookService, derive_handbook_scopes_from_employees
 from ..services.storage import get_storage
 from ...database import get_connection
 
 router = APIRouter(prefix="/handbooks", tags=["handbooks"])
+
+# Mounted separately with no auth + no feature gate — the share token is the
+# only credential. See routes/__init__.py.
+public_router = APIRouter(tags=["handbooks-public"])
 
 
 @router.get("", response_model=List[HandbookListItemResponse])
@@ -256,6 +263,81 @@ async def publish_handbook(
     return handbook
 
 
+def _share_response(row: dict) -> HandbookShareLinkResponse:
+    return HandbookShareLinkResponse(
+        token=row["token"],
+        url=f"/hb/{row['token']}",
+        created_at=row["created_at"],
+        expires_at=row["expires_at"],
+        view_count=row["view_count"],
+        last_viewed_at=row["last_viewed_at"],
+    )
+
+
+@router.get("/{handbook_id}/share", response_model=Optional[HandbookShareLinkResponse])
+async def get_handbook_share_link(
+    handbook_id: str,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """The handbook's live public link, or null if it has never been shared."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    row = await HandbookService.get_share_link(handbook_id, str(company_id))
+    return _share_response(row) if row else None
+
+
+@router.post("/{handbook_id}/share", response_model=HandbookShareLinkResponse)
+async def create_handbook_share_link(
+    handbook_id: str,
+    body: HandbookShareLinkRequest = Body(default_factory=HandbookShareLinkRequest),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Mint (or return) the public read-only link for a published handbook."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    row = await HandbookService.create_share_link(
+        handbook_id, str(company_id), str(current_user.id), body.expires_in_days
+    )
+    if row is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Only a published handbook can be shared. Publish it first.",
+        )
+    return _share_response(row)
+
+
+@router.delete("/{handbook_id}/share")
+async def revoke_handbook_share_link(
+    handbook_id: str,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    revoked = await HandbookService.revoke_share_link(handbook_id, str(company_id))
+    if not revoked:
+        raise HTTPException(status_code=404, detail="No active share link")
+    return {"status": "revoked"}
+
+
+@public_router.get("/{token}", response_model=PublicHandbookResponse)
+async def view_shared_handbook(token: str):
+    """Read a shared handbook (public, no auth — the token is the credential).
+
+    Serves section text only. There is deliberately no public PDF route: the
+    authed ``GET /handbooks/{id}/pdf`` stays the only download path.
+    """
+    data = await HandbookService.get_handbook_by_share_token(token)
+    if data is None:
+        raise HTTPException(status_code=404, detail="This handbook link is no longer available")
+    return PublicHandbookResponse(**data)
+
+
 @router.post("/{handbook_id}/archive")
 async def archive_handbook(
     handbook_id: str,
@@ -333,6 +415,7 @@ async def reject_handbook_change(
 @router.post("/{handbook_id}/distribute", response_model=HandbookDistributionResponse)
 async def distribute_handbook(
     handbook_id: str,
+    background_tasks: BackgroundTasks,
     data: Optional[HandbookDistributionRequest] = Body(default=None),
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
@@ -346,6 +429,8 @@ async def distribute_handbook(
             str(company_id),
             str(current_user.id),
             employee_ids=[str(employee_id) for employee_id in data.employee_ids] if data else None,
+            # Acknowledgement emails send after the response — see the service.
+            background_tasks=background_tasks,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

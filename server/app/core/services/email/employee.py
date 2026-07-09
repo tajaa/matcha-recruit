@@ -276,6 +276,56 @@ Questions? Contact your HR administrator.
             text_content=text_content,
         )
 
+    async def send_handbook_acknowledgement_email(
+        self,
+        to_email: str,
+        to_name: Optional[str],
+        company_name: str,
+        handbook_title: str,
+    ) -> bool:
+        """Tell an employee a handbook is waiting for their acknowledgement.
+
+        Without this, a distributed handbook only surfaces on the employee's
+        next portal login — which for most of the roster is never.
+        """
+        import html as _html
+
+        app_base_url = self.settings.app_base_url
+        portal_url = f"{app_base_url}/portal"
+        title_safe = _html.escape(handbook_title)
+        html_content = f"""<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><style>
+  body {{ font-family: 'Helvetica Neue', Arial, sans-serif; color: #1f2937; background: #f8fafc; margin: 0; padding: 24px; }}
+  .container {{ max-width: 560px; margin: 0 auto; background: white; border-radius: 8px; padding: 28px; }}
+  .logo {{ color: #16a34a; font-weight: bold; letter-spacing: 2px; font-size: 18px; }}
+  h1 {{ font-size: 20px; margin: 16px 0; }}
+  .btn {{ display: inline-block; background: #16a34a; color: white; padding: 12px 22px;
+          text-decoration: none; border-radius: 6px; font-weight: 600; margin-top: 16px; }}
+  .footer {{ font-size: 12px; color: #94a3b8; margin-top: 24px; }}
+</style></head>
+<body>
+  <div class="container">
+    <div class="logo">MATCHA</div>
+    <h1>Please review and acknowledge</h1>
+    <p>Hi {_html.escape(to_name or '')},</p>
+    <p>{_html.escape(company_name)} has shared the <strong>{title_safe}</strong> with you.
+    Please read it and sign your acknowledgement in your employee portal.</p>
+    <p><a class="btn" href="{portal_url}">Review &amp; sign</a></p>
+    <div class="footer">If you have questions, reply to this email or contact your HR administrator.</div>
+  </div>
+</body></html>"""
+        text_content = (
+            f"{company_name} has shared the {handbook_title} with you.\n\n"
+            f"Please read it and sign your acknowledgement: {portal_url}\n"
+        )
+        return await self._send_with_fallback(
+            to_email,
+            to_name,
+            f"Please acknowledge: {handbook_title}",
+            html_content,
+            text_content,
+        )
+
     async def send_task_reminder(
         self,
         to_email: str,

@@ -21,6 +21,7 @@ from ...database import get_connection
 from ...config import get_settings
 from ...core.feature_flags import default_company_features_json
 from ...core.models.auth import CurrentUser
+from ...core.models.handbook import HandbookVersionContent
 from ...core.services.policy_service import SignatureService
 from ..models.employee import (
     EmployeeResponse, EmployeeUpdate, ProfileUpdateRequest,
@@ -737,6 +738,44 @@ async def get_document(
             created_at=doc["created_at"],
             updated_at=doc["updated_at"]
         )
+
+
+@router.get("/me/documents/{document_id}/handbook", response_model=HandbookVersionContent)
+async def get_document_handbook_content(
+    document_id: UUID,
+    employee: dict = Depends(require_employee_record)
+):
+    """Readable handbook text behind a `handbook:<id>:<version>` document.
+
+    Employees have to read a handbook before they can meaningfully acknowledge
+    it, and the stored `storage_path` PDF isn't served to the portal. Returns
+    the sections of the exact version that was distributed.
+    """
+    from ...core.services.handbook_service import HandbookService
+
+    async with get_connection() as conn:
+        doc = await conn.fetchrow(
+            "SELECT org_id, doc_type FROM employee_documents WHERE id = $1 AND employee_id = $2",
+            document_id, employee["id"]
+        )
+
+    if not doc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+
+    parsed = HandbookService.parse_doc_type(doc["doc_type"])
+    if parsed is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This document is not a handbook"
+        )
+    handbook_id, version_number = parsed
+
+    content = await HandbookService.get_sections_for_version(
+        handbook_id, str(doc["org_id"]), version_number
+    )
+    if content is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Handbook content not found")
+    return content
 
 
 @router.post("/me/documents/{document_id}/sign", response_model=EmployeeDocumentResponse)

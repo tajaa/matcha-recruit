@@ -82,6 +82,7 @@ const ChannelInviteLanding = lazy(
 );
 const ResetPassword = lazy(() => import("./pages/ResetPassword"));
 const ERExportDownload = lazy(() => import("./pages/shared/ERExportDownload"));
+const PublicHandbook = lazy(() => import("./pages/shared/PublicHandbook"));
 const CandidateInterview = lazy(
   () => import("./pages/shared/CandidateInterview"),
 );
@@ -208,6 +209,7 @@ export default function App() {
         <Route path="/join-channel/:code" element={<ChannelInviteLanding />} />
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/s/:token" element={<ERExportDownload />} />
+        <Route path="/hb/:token" element={<PublicHandbook />} />
         <Route
           path="/candidate-interview/:token"
           element={<CandidateInterview />}

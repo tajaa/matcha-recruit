@@ -1,20 +1,36 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { GraduationCap, AlertCircle, CheckCircle2, Loader2, Download } from 'lucide-react'
+import { GraduationCap, AlertCircle, CheckCircle2, FileSignature, Loader2, Download } from 'lucide-react'
 import { Card, Badge, Button } from '../../components/ui'
 import { employeeTrainingApi, type MyTrainingRecord } from '../../api/training'
+import { portalDocumentsApi, type EmployeeDocument } from '../../api/portalDocuments'
+import { formatDateOnly } from '../../utils/dateFormat'
 
 export default function PortalDashboard() {
   const [records, setRecords] = useState<MyTrainingRecord[]>([])
+  const [documents, setDocuments] = useState<EmployeeDocument[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  // Surfaced, not swallowed: a silently-empty document list is indistinguishable
+  // from "nothing to sign", and the employee never signs.
+  const [docsError, setDocsError] = useState(false)
 
   useEffect(() => {
     let alive = true
     void (async () => {
       try {
-        const data = await employeeTrainingApi.myRecords()
-        if (alive) setRecords(data)
+        // Documents are additive to the training list — a portal that can't load
+        // them should still render trainings rather than error out entirely.
+        const [data, docs] = await Promise.all([
+          employeeTrainingApi.myRecords(),
+          portalDocumentsApi.list().catch(() => {
+            if (alive) setDocsError(true)
+            return { documents: [], total: 0 }
+          }),
+        ])
+        if (!alive) return
+        setRecords(data)
+        setDocuments(docs.documents)
       } catch (e) {
         if (alive) setError(e instanceof Error ? e.message : 'Failed to load')
       } finally {
@@ -47,10 +63,45 @@ export default function PortalDashboard() {
 
   const pending = records.filter((r) => r.status === 'assigned' || r.status === 'in_progress')
   const completed = records.filter((r) => r.status === 'completed')
+  const toSign = documents.filter((d) => d.status === 'pending_signature')
 
   return (
     <div className="max-w-3xl">
       <h1 className="text-2xl font-semibold text-zinc-100 mb-6">Welcome</h1>
+
+      {docsError && (
+        <Card className="p-4 mb-8 text-sm text-amber-400">
+          ⚠ We couldn't load your documents. If something is awaiting your signature, it won't show
+          here — please reload.
+        </Card>
+      )}
+
+      {toSign.length > 0 && (
+        <>
+          <h2 className="text-sm font-semibold text-zinc-300 mb-3 flex items-center gap-2">
+            <FileSignature className="w-4 h-4 text-amber-400" /> Awaiting your signature
+          </h2>
+          <div className="space-y-2 mb-8">
+            {toSign.map((d) => (
+              <Card key={d.id} className="p-4">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="min-w-0">
+                    <div className="text-sm text-zinc-100 font-medium truncate">{d.title}</div>
+                    <div className="text-xs text-zinc-500 mt-0.5">
+                      Assigned {new Date(d.created_at).toLocaleDateString()}
+                      {/* expires_at is a DATE, not a timestamp — parse it as one. */}
+                      {d.expires_at && <> · Due {formatDateOnly(d.expires_at)}</>}
+                    </div>
+                  </div>
+                  <Link to={`/portal/documents/${d.id}`}>
+                    <Button variant="primary" size="sm">Review &amp; sign</Button>
+                  </Link>
+                </div>
+              </Card>
+            ))}
+          </div>
+        </>
+      )}
 
       <h2 className="text-sm font-semibold text-zinc-300 mb-3 flex items-center gap-2">
         <AlertCircle className="w-4 h-4 text-amber-400" /> To do

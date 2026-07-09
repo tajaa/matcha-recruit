@@ -174,6 +174,7 @@ import type {
   HandbookWizardDraft,
   HandbookWizardDraftState,
   HandbookPublishResponse,
+  HandbookShareLink,
   HandbookSection,
 } from '../types/handbook'
 
@@ -201,6 +202,17 @@ export const handbooks = {
   },
   downloadPdf: (id: string, title: string) =>
     api.download(`/handbooks/${id}/pdf`, `${title}.pdf`),
+
+  // Public read-only share link. Only a published handbook can be shared;
+  // getShareLink resolves to null when the handbook has never been shared.
+  getShareLink: (id: string) => request<HandbookShareLink | null>(`/handbooks/${id}/share`),
+  createShareLink: (id: string, expiresInDays?: number) =>
+    request<HandbookShareLink>(`/handbooks/${id}/share`, {
+      method: 'POST',
+      body: JSON.stringify({ expires_in_days: expiresInDays ?? null }),
+    }),
+  revokeShareLink: (id: string) =>
+    request<{ status: string }>(`/handbooks/${id}/share`, { method: 'DELETE' }),
 
   generateGuidedDraft: (data: HandbookGuidedDraftRequest) =>
     request<HandbookGuidedDraftResponse>('/handbooks/guided-draft', { method: 'POST', body: JSON.stringify(data) }),

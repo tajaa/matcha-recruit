@@ -19,3 +19,18 @@ export function formatDate(value: string | null | undefined): string {
   }
   return _withYear.format(d)
 }
+
+/**
+ * Format a calendar date that carries no time — a Postgres DATE column,
+ * serialized as "YYYY-MM-DD".
+ *
+ * `new Date("2027-07-09")` is parsed as UTC midnight, which renders as the
+ * *previous* day everywhere west of Greenwich. Build the date from its parts so
+ * it lands on local midnight and the displayed day matches what's stored.
+ */
+export function formatDateOnly(value: string | null | undefined): string {
+  if (!value) return '—'
+  const [y, m, d] = value.slice(0, 10).split('-').map(Number)
+  if (!y || !m || !d) return '—'
+  return new Date(y, m - 1, d).toLocaleDateString()
+}

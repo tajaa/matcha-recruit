@@ -8,6 +8,7 @@ from .admin_onboarding import router as admin_onboarding_router
 from .blog import router as blog_router
 from .policies import router as policies_router
 from .handbooks import router as handbooks_router
+from .handbooks import public_router as handbooks_public_router
 from .public_signatures import router as public_signatures_router
 from .compliance import (
     router as compliance_router,
@@ -58,6 +59,10 @@ core_router.include_router(policies_router, tags=["policies"],
                            dependencies=[Depends(require_feature("policies"))])
 core_router.include_router(handbooks_router, tags=["handbooks"],
                            dependencies=[Depends(require_feature("handbooks"))])
+# Public read-only handbook share links — no auth, no feature gate (the token is
+# validated internally, and require_feature needs a logged-in user to gate on).
+core_router.include_router(handbooks_public_router, prefix="/shared/handbook",
+                           tags=["handbooks-public"])
 core_router.include_router(public_signatures_router, tags=["public-signatures"])
 # Lite-friendly subset (calendar, locations-read, alert read/dismiss) is mounted
 # with a broad gate — any of compliance / compliance_lite / incidents (matcha-lite's

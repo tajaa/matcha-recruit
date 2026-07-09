@@ -1,14 +1,18 @@
 import asyncio
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from hashlib import sha256
 import json
 import html
 import logging
 import re
-from typing import Any, Optional
+import secrets
+from typing import TYPE_CHECKING, Any, Optional
 from uuid import UUID
 
 import asyncpg
+
+if TYPE_CHECKING:  # type-only: the service never depends on FastAPI at runtime
+    from fastapi import BackgroundTasks
 
 from ...config import get_settings
 from ...database import get_connection
@@ -4170,6 +4174,7 @@ class HandbookService:
         company_id: str,
         distributed_by: Optional[str] = None,
         employee_ids: Optional[list[str]] = None,
+        background_tasks: Optional["BackgroundTasks"] = None,
     ) -> Optional[HandbookDistributionResponse]:
         handbook = await HandbookService.get_handbook_by_id(handbook_id, company_id)
         if handbook is None:
@@ -4178,7 +4183,7 @@ class HandbookService:
             raise ValueError("Only active handbooks can be distributed for acknowledgement")
 
         file_url, _, version_number = await HandbookService._ensure_handbook_pdf(handbook_id, company_id)
-        doc_type = f"handbook:{handbook_id}:{version_number}"
+        doc_type = HandbookService.build_doc_type(handbook_id, version_number)
 
         async with get_connection() as conn:
             async with conn.transaction():
@@ -4197,7 +4202,7 @@ class HandbookService:
                 if selected_employee_ids:
                     employee_rows = await conn.fetch(
                         """
-                        SELECT id
+                        SELECT id, email, first_name, last_name
                         FROM employees
                         WHERE org_id = $1
                           AND termination_date IS NULL
@@ -4215,7 +4220,7 @@ class HandbookService:
                 else:
                     employee_rows = await conn.fetch(
                         """
-                        SELECT id
+                        SELECT id, email, first_name, last_name
                         FROM employees
                         WHERE org_id = $1
                           AND termination_date IS NULL
@@ -4257,6 +4262,7 @@ class HandbookService:
 
                 assigned = 0
                 skipped = 0
+                notify_rows: list[dict] = []
                 for employee in employee_rows:
                     if employee["id"] in existing_employee_ids:
                         skipped += 1
@@ -4278,6 +4284,7 @@ class HandbookService:
                     )
                     if result == "INSERT 0 1":
                         assigned += 1
+                        notify_rows.append(dict(employee))
                     else:
                         skipped += 1
 
@@ -4304,6 +4311,19 @@ class HandbookService:
                     assigned,
                 )
 
+        # Deferred, never awaited here: a roster-wide send is N sequential calls
+        # to an external mail API, and holding the response open for it times the
+        # admin out on a distribution that already committed. A caller that
+        # passes no scheduler gets no email — employees still see the document
+        # waiting in their portal, which is the durable signal.
+        if background_tasks is not None and notify_rows:
+            background_tasks.add_task(
+                HandbookService._notify_handbook_recipients,
+                company_id,
+                handbook.title,
+                notify_rows,
+            )
+
         return HandbookDistributionResponse(
             handbook_id=UUID(handbook_id),
             handbook_version=version_number,
@@ -4311,6 +4331,40 @@ class HandbookService:
             skipped_existing_count=skipped,
             distributed_at=datetime.utcnow(),
         )
+
+    @staticmethod
+    async def _notify_handbook_recipients(
+        company_id: str,
+        handbook_title: str,
+        recipients: list[dict],
+    ) -> None:
+        try:
+            from .email import get_email_service
+
+            async with get_connection() as conn:
+                company_name = await conn.fetchval(
+                    "SELECT name FROM companies WHERE id = $1", company_id
+                )
+            email_service = get_email_service()
+            for row in recipients:
+                if not row.get("email"):
+                    continue
+                name = " ".join(
+                    part for part in [row.get("first_name"), row.get("last_name")] if part
+                ).strip()
+                try:
+                    await email_service.send_handbook_acknowledgement_email(
+                        to_email=row["email"],
+                        to_name=name or None,
+                        company_name=company_name or "Your employer",
+                        handbook_title=handbook_title,
+                    )
+                except Exception as exc:  # one bad address must not stop the rest
+                    logger.warning(
+                        "Handbook acknowledgement email failed for %s: %s", row["email"], exc
+                    )
+        except Exception as exc:
+            logger.warning("Handbook acknowledgement notification pass failed: %s", exc)
 
     @staticmethod
     async def list_distribution_recipients(
@@ -4323,7 +4377,7 @@ class HandbookService:
         if handbook.status != "active":
             raise ValueError("Only active handbooks can be distributed for acknowledgement")
 
-        doc_type = f"handbook:{handbook_id}:{handbook.active_version}"
+        doc_type = HandbookService.build_doc_type(handbook_id, handbook.active_version)
         async with get_connection() as conn:
             rows = await conn.fetch(
                 """
@@ -4376,7 +4430,7 @@ class HandbookService:
         if handbook is None:
             return None
 
-        doc_type = f"handbook:{handbook_id}:{handbook.active_version}"
+        doc_type = HandbookService.build_doc_type(handbook_id, handbook.active_version)
         async with get_connection() as conn:
             row = await conn.fetchrow(
                 """
@@ -4400,6 +4454,247 @@ class HandbookService:
             pending_count=row["pending_count"] if row else 0,
             expired_count=row["expired_count"] if row else 0,
         )
+
+    # ------------------------------------------------------------------ #
+    # Public share links — a published handbook, readable by anyone holding
+    # the URL. See migration hbshare01.
+    # ------------------------------------------------------------------ #
+
+    # The `handbook:<id>:<version>` employee_documents.doc_type format is minted
+    # here (see distribute_to_employees / get_acknowledgement_summary), so it is
+    # decoded here too — a route that hand-parses it drifts the moment the format
+    # grows a segment.
+    DOC_TYPE_PREFIX = "handbook"
+
+    @staticmethod
+    def build_doc_type(handbook_id: str, version_number: int) -> str:
+        return f"{HandbookService.DOC_TYPE_PREFIX}:{handbook_id}:{version_number}"
+
+    @staticmethod
+    def parse_doc_type(doc_type: Optional[str]) -> Optional[tuple[str, int]]:
+        """`handbook:<uuid>:<version>` → (handbook_id, version), else None.
+
+        Returns None for any non-handbook or malformed value — including a
+        non-UUID id, which would otherwise reach asyncpg as a UUID-typed
+        parameter and raise DataError (a 500) rather than a clean 400.
+        """
+        parts = (doc_type or "").split(":")
+        if len(parts) != 3 or parts[0] != HandbookService.DOC_TYPE_PREFIX:
+            return None
+        try:
+            UUID(parts[1])
+            return parts[1], int(parts[2])
+        except ValueError:
+            return None
+
+    @staticmethod
+    async def get_sections_for_version(
+        handbook_id: str,
+        company_id: str,
+        version_number: int,
+    ) -> Optional[dict]:
+        """Readable content of a specific handbook version.
+
+        Version-pinned on purpose: an employee acknowledges the text that was
+        distributed to them, not whatever the current draft happens to say.
+        """
+        async with get_connection() as conn:
+            row = await conn.fetchrow(
+                "SELECT id, title FROM handbooks WHERE id = $1 AND company_id = $2",
+                handbook_id,
+                company_id,
+            )
+            if not row:
+                return None
+            version_id = await HandbookService._get_active_version_id(
+                conn, str(row["id"]), version_number
+            )
+            if version_id is None:
+                return None
+            sections = await conn.fetch(
+                """
+                SELECT title, content, section_order
+                FROM handbook_sections
+                WHERE handbook_version_id = $1
+                ORDER BY section_order ASC, created_at ASC
+                """,
+                version_id,
+            )
+        return {
+            "title": row["title"],
+            "version": version_number,
+            "sections": [dict(s) for s in sections],
+        }
+
+    @staticmethod
+    async def get_share_link(handbook_id: str, company_id: str) -> Optional[dict]:
+        """The handbook's live (unrevoked, unexpired) share link, if any."""
+        async with get_connection() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT token, created_at, expires_at, view_count, last_viewed_at
+                FROM handbook_share_links
+                WHERE handbook_id = $1 AND company_id = $2
+                  AND revoked_at IS NULL
+                  AND (expires_at IS NULL OR expires_at > now())
+                """,
+                handbook_id,
+                company_id,
+            )
+        return dict(row) if row else None
+
+    @staticmethod
+    async def create_share_link(
+        handbook_id: str,
+        company_id: str,
+        created_by: Optional[str],
+        expires_in_days: Optional[int] = None,
+    ) -> Optional[dict]:
+        """Mint a share link for a published handbook.
+
+        Idempotent: an existing live link is returned rather than minting a
+        second valid URL for the same handbook. Returns None if the handbook
+        isn't this company's, or isn't published — an unpublished draft has no
+        business being world-readable.
+        """
+        expires_at = (
+            datetime.now(timezone.utc) + timedelta(days=expires_in_days)
+            if expires_in_days
+            else None
+        )
+        async with get_connection() as conn:
+            status = await conn.fetchval(
+                "SELECT status FROM handbooks WHERE id = $1 AND company_id = $2",
+                handbook_id,
+                company_id,
+            )
+            if status != "active":
+                return None
+
+            # Sweep expired-but-unrevoked rows first: the partial unique index
+            # keys on revoked_at alone (now() can't live in an index predicate),
+            # so a lapsed link would otherwise block a re-share.
+            await conn.execute(
+                """
+                UPDATE handbook_share_links SET revoked_at = now()
+                WHERE handbook_id = $1 AND revoked_at IS NULL
+                  AND expires_at IS NOT NULL AND expires_at <= now()
+                """,
+                handbook_id,
+            )
+            # Let the partial unique index arbitrate, rather than checking for an
+            # existing row first: two concurrent creates both pass a check-then-
+            # insert and the loser raises UniqueViolation. DO NOTHING makes the
+            # loser return no row, and we then read back whichever link won.
+            row = await conn.fetchrow(
+                """
+                INSERT INTO handbook_share_links
+                    (handbook_id, company_id, token, created_by, expires_at)
+                VALUES ($1, $2, $3, $4, $5)
+                ON CONFLICT (handbook_id) WHERE revoked_at IS NULL DO NOTHING
+                RETURNING token, created_at, expires_at, view_count, last_viewed_at
+                """,
+                handbook_id,
+                company_id,
+                secrets.token_urlsafe(32),
+                created_by,
+                expires_at,
+            )
+            if row is None:
+                row = await conn.fetchrow(
+                    """
+                    SELECT token, created_at, expires_at, view_count, last_viewed_at
+                    FROM handbook_share_links
+                    WHERE handbook_id = $1 AND revoked_at IS NULL
+                    """,
+                    handbook_id,
+                )
+        return dict(row) if row else None
+
+    @staticmethod
+    async def revoke_share_link(handbook_id: str, company_id: str) -> bool:
+        async with get_connection() as conn:
+            result = await conn.execute(
+                """
+                UPDATE handbook_share_links SET revoked_at = now()
+                WHERE handbook_id = $1 AND company_id = $2 AND revoked_at IS NULL
+                """,
+                handbook_id,
+                company_id,
+            )
+        return result.endswith(" 1")
+
+    @staticmethod
+    async def get_handbook_by_share_token(token: str) -> Optional[dict]:
+        """Resolve a share token to the published handbook's readable content.
+
+        No company scoping — the token *is* the authorization. Returns None for
+        an unknown, revoked, or expired token, and for a handbook that has since
+        been unpublished (archived or reverted to draft), so taking a handbook
+        down takes the public link down with it.
+        """
+        async with get_connection() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT h.id, h.title, h.active_version, h.published_at, c.name AS company_name
+                FROM handbook_share_links l
+                JOIN handbooks h ON h.id = l.handbook_id
+                JOIN companies c ON c.id = h.company_id
+                WHERE l.token = $1
+                  AND l.revoked_at IS NULL
+                  AND (l.expires_at IS NULL OR l.expires_at > now())
+                  AND h.status = 'active'
+                """,
+                token,
+            )
+            if not row:
+                return None
+
+            version_id = await HandbookService._get_active_version_id(
+                conn, str(row["id"]), row["active_version"]
+            )
+            if version_id is None:
+                # Legacy rows can point at an active_version with no matching
+                # handbook_versions row; get_handbook_by_id falls back the same
+                # way. Without this the share link serves a 200 with zero
+                # sections, which reads as "they published an empty handbook".
+                version_id = await conn.fetchval(
+                    """
+                    SELECT id FROM handbook_versions
+                    WHERE handbook_id = $1
+                    ORDER BY version_number DESC
+                    LIMIT 1
+                    """,
+                    row["id"],
+                )
+            if version_id is None:
+                return None
+
+            sections = await conn.fetch(
+                """
+                SELECT title, content, section_order
+                FROM handbook_sections
+                WHERE handbook_version_id = $1
+                ORDER BY section_order ASC, created_at ASC
+                """,
+                version_id,
+            )
+            await conn.execute(
+                """
+                UPDATE handbook_share_links
+                SET view_count = view_count + 1, last_viewed_at = now()
+                WHERE token = $1
+                """,
+                token,
+            )
+
+        return {
+            "title": row["title"],
+            "company_name": row["company_name"],
+            "published_at": row["published_at"],
+            "version": row["active_version"],
+            "sections": [dict(s) for s in sections],
+        }
 
     @staticmethod
     async def generate_handbook_pdf_bytes(

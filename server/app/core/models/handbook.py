@@ -191,6 +191,43 @@ class HandbookPublishResponse(BaseModel):
     published_at: Optional[datetime] = None
 
 
+class HandbookShareLinkRequest(BaseModel):
+    expires_in_days: Optional[int] = Field(None, ge=1, le=365)
+
+
+class HandbookShareLinkResponse(BaseModel):
+    token: str
+    url: str
+    created_at: datetime
+    expires_at: Optional[datetime] = None
+    view_count: int = 0
+    last_viewed_at: Optional[datetime] = None
+
+
+class HandbookSectionText(BaseModel):
+    """Readable section text — the shape both the public share view and the
+    employee portal's acknowledgement view render."""
+    title: str
+    content: str
+    section_order: int
+
+
+class PublicHandbookResponse(BaseModel):
+    title: str
+    company_name: str
+    published_at: Optional[datetime] = None
+    version: int
+    sections: list[HandbookSectionText]
+
+
+class HandbookVersionContent(BaseModel):
+    """A specific handbook version's text, pinned by an employee_documents
+    `handbook:<id>:<version>` doc_type."""
+    title: str
+    version: int
+    sections: list[HandbookSectionText]
+
+
 class HandbookDistributionResponse(BaseModel):
     handbook_id: UUID
     handbook_version: int

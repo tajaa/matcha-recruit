@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, UploadFile, File
 from fastapi.responses import StreamingResponse
 
 from app.core.models.auth import CurrentUser
@@ -1567,6 +1567,7 @@ async def send_review_requests(
 async def send_handbook_signatures(
     thread_id: UUID,
     body: SendHandbookSignaturesRequest,
+    background_tasks: BackgroundTasks,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Send handbook acknowledgement signatures from a workbook thread."""
@@ -1590,6 +1591,9 @@ async def send_handbook_signatures(
             company_id=str(company_id),
             distributed_by=str(current_user.id),
             employee_ids=employee_ids,
+            # This endpoint exists to ask employees to sign, so it notifies —
+            # after the response, like the /handbooks distribute route.
+            background_tasks=background_tasks,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
