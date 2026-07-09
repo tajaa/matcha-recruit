@@ -22,6 +22,19 @@ EMBED_BATCH_SIZE = 50
 STALE_PROCESSING_MINUTES = 15
 
 
+def _publish_progress_safe(**kwargs: Any) -> None:
+    """Progress events are cosmetic — a Redis outage must never fail a document.
+
+    publish_task_progress raises on a dead Redis. Inside the embed loop that
+    would roll back every chunk written so far; before it, it would fail the
+    document without embeddings ever being attempted.
+    """
+    try:
+        publish_task_progress(**kwargs)
+    except Exception as exc:  # pragma: no cover - best effort
+        print(f"[Worker] progress publish failed (ignored): {exc}")
+
+
 async def _process_document(document_id: str, case_id: str) -> dict[str, Any]:
     """
     Process an uploaded document:
@@ -131,7 +144,7 @@ async def _process_document(document_id: str, case_id: str) -> dict[str, Any]:
         # the process SIGKILLed, stranding the row in 'processing' forever.
         # One batch at a time keeps peak memory flat in document size.
         if embedding_service is not None:
-            publish_task_progress(
+            _publish_progress_safe(
                 channel=f"er_case:{case_id}",
                 task_type="document_processing",
                 entity_id=document_id,
@@ -181,7 +194,7 @@ async def _process_document(document_id: str, case_id: str) -> dict[str, Any]:
 
                         del embeddings
 
-                        publish_task_progress(
+                        _publish_progress_safe(
                             channel=f"er_case:{case_id}",
                             task_type="document_processing",
                             entity_id=document_id,
@@ -258,12 +271,28 @@ class _ERDocumentTask(celery_app.Task):
 
     def on_failure(self, exc, task_id, args, kwargs, einfo):  # noqa: D102
         document_id = kwargs.get("document_id") or (args[0] if args else None)
+        case_id = kwargs.get("case_id") or (args[1] if len(args) > 1 else None)
         if not document_id:
             return
+
+        error = f"{type(exc).__name__}: {exc}"
         try:
-            asyncio.run(_mark_document_failed(document_id, f"{type(exc).__name__}: {exc}"))
+            asyncio.run(_mark_document_failed(document_id, error))
         except Exception:  # pragma: no cover - best effort, never mask the original failure
             pass
+
+        # The in-process error path publishes; this one must too, or a client
+        # subscribed to the progress channel hangs on the last progress event.
+        if case_id:
+            try:
+                publish_task_error(
+                    channel=f"er_case:{case_id}",
+                    task_type="document_processing",
+                    entity_id=document_id,
+                    error=error,
+                )
+            except Exception:  # pragma: no cover - best effort
+                pass
 
 
 @celery_app.task(base=_ERDocumentTask, bind=True, max_retries=3)
@@ -305,15 +334,23 @@ def process_er_document(self, document_id: str, case_id: str) -> dict[str, Any]:
 async def _reset_stale_documents() -> int:
     conn = await get_db_connection()
     try:
+        # Keying the age off created_at is safe despite reprocessing not
+        # touching it: the reprocess endpoint resets the row to 'pending', and
+        # only _process_document itself flips it to 'processing'. So a re-queued
+        # document is never in this WHERE clause while it waits. And a task that
+        # is genuinely running cannot be swept out from under itself — celery's
+        # task_time_limit (600s) is well inside STALE_PROCESSING_MINUTES, and
+        # worker concurrency is 1, so this sweep never overlaps a live task.
         rows = await conn.fetch(
-            f"""
+            """
             UPDATE er_case_documents
             SET processing_status = 'failed',
                 processing_error = 'Processing did not finish (worker terminated). Re-upload or reprocess.'
             WHERE processing_status = 'processing'
-              AND created_at < NOW() - INTERVAL '{STALE_PROCESSING_MINUTES} minutes'
+              AND created_at < NOW() - make_interval(mins => $1)
             RETURNING id
             """,
+            STALE_PROCESSING_MINUTES,
         )
         return len(rows)
     finally:

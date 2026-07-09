@@ -153,7 +153,10 @@ def test_on_failure_releases_document_stranded_by_worker_kill():
     async def _fake_mark(document_id, error):
         marked.append((document_id, error))
 
-    with patch("app.workers.tasks.er_document_processing._mark_document_failed", _fake_mark):
+    with (
+        patch("app.workers.tasks.er_document_processing._mark_document_failed", _fake_mark),
+        patch("app.workers.tasks.er_document_processing.publish_task_error"),
+    ):
         process_er_document.on_failure(
             exc=RuntimeError("Worker exited prematurely: signal 9 (SIGKILL)"),
             task_id="t-1",
@@ -174,7 +177,10 @@ def test_on_failure_reads_document_id_from_kwargs():
     async def _fake_mark(document_id, error):
         marked.append(document_id)
 
-    with patch("app.workers.tasks.er_document_processing._mark_document_failed", _fake_mark):
+    with (
+        patch("app.workers.tasks.er_document_processing._mark_document_failed", _fake_mark),
+        patch("app.workers.tasks.er_document_processing.publish_task_error"),
+    ):
         process_er_document.on_failure(
             exc=RuntimeError("boom"),
             task_id="t-1",
@@ -193,7 +199,74 @@ def test_stale_sweep_only_targets_processing_rows_past_the_threshold():
         reset = asyncio.run(_reset_stale_documents())
 
     assert reset == 2
-    sweep_sql = conn.executed[0][0]
+    sweep_sql, sweep_args = conn.executed[0]
     assert "processing_status = 'processing'" in sweep_sql
-    assert f"INTERVAL '{STALE_PROCESSING_MINUTES} minutes'" in sweep_sql
+    # Threshold is bound, not interpolated into the SQL text.
+    assert "make_interval(mins => $1)" in sweep_sql
+    assert sweep_args == (STALE_PROCESSING_MINUTES,)
     assert conn.closed
+
+
+def test_redis_outage_does_not_fail_the_document():
+    """Progress events are cosmetic; a dead Redis must not cost us the document."""
+    embedder = _RecordingEmbeddingService()
+    conn = _FakeConn(_doc_row())
+
+    chunks = [
+        {"chunk_index": i, "content": f"chunk {i}", "line_start": i, "char_start": i}
+        for i in range(3)
+    ]
+    parsed = SimpleNamespace(text="raw text", speaker_turns=[], temporal_refs=[])
+    fake_storage = SimpleNamespace(download_file=_async_return(b"filebytes"))
+    fake_parser = SimpleNamespace(
+        parse_document=lambda *_a, **_k: parsed,
+        chunk_text=lambda *_a, **_k: chunks,
+    )
+    fake_scrubber = SimpleNamespace(scrub=lambda text: ("scrubbed", {}))
+
+    def _boom(**_kwargs):
+        raise ConnectionError("redis is down")
+
+    with (
+        patch("app.core.services.storage.get_storage", return_value=fake_storage),
+        patch("app.matcha.services.er_document_parser.ERDocumentParser", return_value=fake_parser),
+        patch("app.core.services.pii_scrubber.PIIScrubber", return_value=fake_scrubber),
+        patch("app.core.services.embedding_service.EmbeddingService", return_value=embedder),
+        patch("app.config.load_settings", return_value=SimpleNamespace(gemini_api_key="k")),
+        patch("app.workers.tasks.er_document_processing.get_db_connection", _async_return(conn)),
+        patch("app.workers.tasks.er_document_processing.publish_task_progress", _boom),
+    ):
+        result = asyncio.run(_process_document("doc-1", "case-1"))
+
+    # Embeddings still ran, chunks still stored, document still completed.
+    assert result["chunks_created"] == 3
+    assert result["embedding_warning"] is None
+    assert conn.statuses()[-1] == "completed"
+
+
+def test_on_failure_publishes_error_to_the_progress_channel():
+    """A listener on er_case:{id} would otherwise hang on the last progress event."""
+    published: list[dict] = []
+
+    async def _fake_mark(document_id, error):
+        return None
+
+    with (
+        patch("app.workers.tasks.er_document_processing._mark_document_failed", _fake_mark),
+        patch(
+            "app.workers.tasks.er_document_processing.publish_task_error",
+            lambda **kw: published.append(kw),
+        ),
+    ):
+        process_er_document.on_failure(
+            exc=RuntimeError("Worker exited prematurely: signal 9 (SIGKILL)"),
+            task_id="t-1",
+            args=("doc-42", "case-7"),
+            kwargs={},
+            einfo=None,
+        )
+
+    assert len(published) == 1
+    assert published[0]["channel"] == "er_case:case-7"
+    assert published[0]["entity_id"] == "doc-42"
+    assert "SIGKILL" in published[0]["error"]
