@@ -202,6 +202,50 @@ def _fmt_num(v) -> str:
         return str(v)
 
 
+def _clause_records(ctx: dict) -> list[dict]:
+    """One `clause:<contract_id>` record per contract carrying an extracted
+    indemnity, so the analyst can cite the clause itself (verbatim quote + page)
+    rather than paraphrasing it.
+
+    Its own corpus source, NOT a prefixed record inside `platform` — the memo's
+    appendix builder dispatches on cid prefix, and an unrecognized prefix inside
+    the platform bucket would fall through to the native branch and re-render
+    every cited platform record as a duplicate table.
+    """
+    recs: list[dict] = []
+    for c in ((ctx or {}).get("limits") or {}).get("contracts") or []:
+        if not isinstance(c, dict):
+            continue
+        ind = c.get("indemnity") or {}
+        clause = (c.get("risk_transfer") or {}).get("indemnity") or {}
+        if not clause.get("present"):
+            continue
+        bits = [f"{str(clause.get('form') or 'unclassified').replace('_', ' ')} form"]
+        if clause.get("covers_sole_negligence"):
+            bits.append("reaches the counterparty's sole negligence")
+        if clause.get("defense_obligation"):
+            bits.append("includes a duty to defend")
+        if ind.get("verdict"):
+            bits.append(f"verdict: {str(ind['verdict']).replace('_', ' ')}")
+        if ind.get("statute"):
+            bits.append(f"under {ind['statute']}")
+        if c.get("provisional"):
+            bits.append("PROVISIONAL — extraction not yet confirmed by a reviewer")
+        quote = clause.get("quote")
+        if quote:
+            page = f", p. {clause['page']}" if clause.get("page") else ""
+            bits.append(f'clause text{page}: "{quote}"')
+        recs.append({
+            "cid": f"clause:{c.get('id')}",
+            "ref": f"Indemnity clause — {c.get('name') or 'contract'}",
+            "summary": (f"{c.get('name') or 'Contract'}"
+                        + (f" (counterparty {c['counterparty']})" if c.get("counterparty") else "")
+                        + f": {'; '.join(bits)}."),
+            "when": "current",
+        })
+    return recs
+
+
 def _platform_records(ctx: dict) -> list[dict]:
     """Serialize a `_tenant_context` / `_external_context` dict into compact
     corpus records. Every accessor is guard-railed — a missing/empty section
@@ -310,38 +354,6 @@ def _platform_records(ctx: dict) -> list[dict]:
             bits.append(f"{len(ln['endorsement_gaps'])} endorsement gap(s)")
         add(f"platform:limits.{_slug(line)}", f"Coverage line — {label}",
             f"{label}: {'; '.join(bits) or 'recorded, no figures on file'}.")
-
-    # Contract risk transfer — one `clause:` record per contract carrying an
-    # extracted indemnity, so the analyst can cite the clause itself (verbatim
-    # quote + page) rather than paraphrasing it. `validate_citations` admits the
-    # new namespace automatically: membership in the corpus index is the gate.
-    for c in limits.get("contracts") or []:
-        if not isinstance(c, dict):
-            continue
-        ind = c.get("indemnity") or {}
-        clause = (c.get("risk_transfer") or {}).get("indemnity") or {}
-        if not clause.get("present"):
-            continue
-        bits = [f"{str(clause.get('form') or 'unclassified').replace('_', ' ')} form"]
-        if clause.get("covers_sole_negligence"):
-            bits.append("reaches the counterparty's sole negligence")
-        if clause.get("defense_obligation"):
-            bits.append("includes a duty to defend")
-        if ind.get("verdict"):
-            bits.append(f"verdict: {str(ind['verdict']).replace('_', ' ')}")
-        if ind.get("statute"):
-            bits.append(f"under {ind['statute']}")
-        if c.get("provisional"):
-            bits.append("PROVISIONAL — extraction not yet confirmed by a reviewer")
-        quote = clause.get("quote")
-        if quote:
-            page = f", p. {clause['page']}" if clause.get("page") else ""
-            bits.append(f'clause text{page}: "{quote}"')
-        add(f"clause:{c.get('id')}",
-            f"Indemnity clause — {c.get('name') or 'contract'}",
-            f"{c.get('name') or 'Contract'}"
-            + (f" (counterparty {c['counterparty']})" if c.get("counterparty") else "")
-            + f": {'; '.join(bits)}.")
 
     # Exclusion gaps
     exclusions = (ctx.get("exclusions") or {}).get("exclusions") or []
@@ -506,10 +518,13 @@ def build_corpus(subject_name: str, ctx: dict, docs: list[dict], native: dict | 
     clients, which instead get a note naming what an on-platform client adds.
     """
     platform = _platform_records(ctx)
+    clauses = _clause_records(ctx)
     doc_recs, fig_recs, notes = _doc_records(docs)
     sources = {
         "platform": {"label": "Platform data on file", "records": platform},
     }
+    if clauses:
+        sources["clauses"] = {"label": "Contract indemnity clauses", "records": clauses}
     if native is not None:
         sources.update(native.get("sources") or {})
         notes.extend(native.get("notes") or [])

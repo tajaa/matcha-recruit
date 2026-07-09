@@ -34,17 +34,22 @@ carries ``DISCLAIMER``.
 """
 
 import asyncio
-import html
 import json
 import logging
-from typing import Optional
+from typing import Optional, get_args
+
+from fastapi import HTTPException, UploadFile
 
 from app.core.services.pdf import safe_url_fetcher
 from app.core.services.storage import get_storage
+from app.matcha.models import limit_adequacy as _models
 
+from . import contract_parser
 from . import limit_adequacy as la
 
 logger = logging.getLogger(__name__)
+
+MAX_CONTRACT_BYTES = 15_000_000
 
 _CONTRACT_COLS = """id, name, counterparty, status, requirements, ai_available, source_filename,
                     contract_type, governing_state, project_state, storage_path, risk_transfer,
@@ -53,14 +58,15 @@ _CONTRACT_COLS = """id, name, counterparty, status, requirements, ai_available, 
 
 DISCLAIMER = la.DISCLAIMER
 
-CONTRACT_TYPES = ["lease", "construction", "vendor_service", "msa", "other"]
-
+# Derived from the Pydantic Literals so the API's accepted vocabulary and the
+# extractor's whitelist can never drift — adding a value in one place is enough.
+#
 # Broad   — indemnitee covered even for its OWN SOLE negligence.
 # Intermediate — indemnitee covered for its own PARTIAL/concurrent negligence.
 # Limited — indemnitor covers only its own negligence. Always insurable.
-INDEMNITY_FORMS = ["broad", "intermediate", "limited", "unclear"]
-
-INDEMNITY_DIRECTIONS = ["we_indemnify_them", "they_indemnify_us", "mutual", "unclear"]
+CONTRACT_TYPES = list(get_args(_models.ContractType))
+INDEMNITY_FORMS = list(get_args(_models.IndemnityForm))
+INDEMNITY_DIRECTIONS = list(get_args(_models.IndemnityDirection))
 
 
 # --- state anti-indemnity table --------------------------------------------
@@ -132,18 +138,38 @@ def _norm_state(v) -> Optional[str]:
     return s if len(s) == 2 and s.isalpha() else None
 
 
+def is_provisional(contract: dict) -> bool:
+    """Provisional = AI-extracted terms a human hasn't vouched for yet.
+
+    Manually-keyed contracts (``ai_available`` false) are human-authored — there
+    are no "extracted terms" to confirm, so they are never provisional."""
+    return bool(contract.get("ai_available")) and not contract.get("confirmed_at")
+
+
 def _controlling_state(contract_type: Optional[str], governing_state: Optional[str],
                        project_state: Optional[str]) -> tuple[Optional[str], Optional[str]]:
-    """Which state's anti-indemnity statute governs → ``(state, conflict_note)``.
+    """Which state's anti-indemnity statute governs → ``(state, blocker_note)``.
 
-    Construction: the project state controls (anti-waiver — a choice-of-law
-    clause does not escape the statute where the work is performed). When both
-    states are known, mapped, and disagree on the rule, we return no state and a
-    note: the honest answer is "a lawyer must resolve this", not a coin flip.
+    Construction: the project state controls, full stop — anti-indemnity
+    statutes are anti-waiver, so a choice-of-law clause does not escape the
+    statute where the work is performed. A missing project state therefore
+    BLOCKS the verdict (note returned) rather than falling back to the
+    governing-law state: the governing state is exactly the input those
+    statutes are designed to ignore, so a confident verdict built on it would
+    be wrong in the worst way. When both states are known, mapped, and disagree
+    on the rule, we also block with a note — the honest answer is "a lawyer
+    must resolve this", not a coin flip.
     """
     gov, proj = _norm_state(governing_state), _norm_state(project_state)
     if contract_type == "construction":
-        if proj and gov and proj != gov:
+        if not proj:
+            return None, (
+                "No project/premises state is recorded. Construction anti-indemnity statutes "
+                "attach to where the work is performed"
+                + (f" — the governing-law state ({gov}) cannot substitute for it" if gov else "")
+                + ". Record the project state on this contract to get a verdict."
+            )
+        if gov and proj != gov:
             r_proj = (_STATE_ANTI_INDEMNITY.get(proj) or {}).get("rule")
             r_gov = (_STATE_ANTI_INDEMNITY.get(gov) or {}).get("rule")
             if r_proj and r_gov and r_proj != r_gov:
@@ -152,7 +178,7 @@ def _controlling_state(contract_type: Optional[str], governing_state: Optional[s
                     f"states' anti-indemnity statutes differ. Most construction anti-indemnity "
                     f"statutes are anti-waiver, so {proj} likely controls — confirm with counsel."
                 )
-        return proj or gov, None
+        return proj, None
     return gov or proj, None
 
 
@@ -181,28 +207,35 @@ def assess_indemnity(risk_transfer: Optional[dict], *, governing_state: Optional
         return out(VERDICT_INSURABLE,
                    "The counterparty indemnifies the client, not the reverse — this transfers risk "
                    "toward the client, not away from it. No insurability exposure.")
-
-    # A broad-form indemnity covers the indemnitee's sole negligence by definition;
-    # trust the classified form over a possibly-unset boolean.
-    covers_sole = form == "broad" or bool(ind.get("covers_sole_negligence"))
-
-    state, conflict = _controlling_state(contract_type, governing_state, project_state)
-    if conflict:
-        return out(VERDICT_REVIEW, conflict)
-    if not state:
+    if direction not in ("we_indemnify_them", "mutual"):
+        # Unknown direction means we don't know whose exposure this is — a
+        # confident void/uninsurable verdict here would be built on a guess.
         return out(VERDICT_REVIEW,
-                   "No governing-law or project state is recorded, so no anti-indemnity statute can "
-                   "be applied. Set the state on this contract to get a verdict.")
+                   "The clause's direction — who indemnifies whom — could not be determined. "
+                   "Confirm the direction to get a verdict.")
 
-    row = _STATE_ANTI_INDEMNITY.get(state)
-    if not row:
+    # A non-broad form that "covers sole negligence" is a contradiction — by
+    # definition only broad form reaches the indemnitee's sole negligence. A
+    # contradictory extraction gets no confident verdict in either direction.
+    if form != "broad" and ind.get("covers_sole_negligence"):
         return out(VERDICT_REVIEW,
-                   f"{state}'s anti-indemnity statute is not in our reference table, so its "
-                   f"enforceability is unresolved here.", state=state)
+                   f"The extraction is contradictory: the clause was classified {form}-form, which by "
+                   f"definition does not reach the counterparty's sole negligence, yet the "
+                   f"sole-negligence flag is set. Read the clause directly and correct one of the two.")
+    covers_sole = form == "broad"
 
-    rule, statute = row["rule"], row["statute"]
+    state, blocker = _controlling_state(contract_type, governing_state, project_state)
 
     if contract_type == "construction":
+        # Enforceability turns on the project state's anti-indemnity statute.
+        if blocker:
+            return out(VERDICT_REVIEW, blocker)
+        row = _STATE_ANTI_INDEMNITY.get(state)
+        if not row:
+            return out(VERDICT_REVIEW,
+                       f"{state}'s anti-indemnity statute is not in our reference table, so its "
+                       f"enforceability is unresolved here.", state=state)
+        rule, statute = row["rule"], row["statute"]
         if covers_sole and rule in ("own_negligence_void", "sole_negligence_void"):
             return out(VERDICT_VOID,
                        f"The clause indemnifies the counterparty for its own sole negligence. Under "
@@ -226,7 +259,9 @@ def assess_indemnity(risk_transfer: Optional[dict], *, governing_state: Optional
                    statute, state)
 
     # Non-construction: the anti-indemnity statutes above don't reach these, so
-    # the question is purely insurability under the CGL insured-contract grant.
+    # the question is purely insurability under the CGL insured-contract grant —
+    # which is state-independent. An unmapped (or even absent) state must not
+    # suppress this analysis.
     if covers_sole:
         return out(VERDICT_UNINSURABLE,
                    "Broad-form indemnity: the client would owe the counterparty even for the "
@@ -264,7 +299,7 @@ def _actions(review: dict, indemnity: dict, contract: dict) -> list[str]:
         for eg in line.get("endorsement_gaps") or []:
             acts.append(f"{line['label']}: obtain {eg['label'].lower()} endorsement — required by this contract.")
 
-    if not contract.get("confirmed_at"):
+    if is_provisional(contract):
         acts.append("Confirm the extracted terms to lift the provisional label from this review.")
     return acts
 
@@ -317,7 +352,7 @@ def review_contract(contract: dict, carried: list[dict], *, headcount: Optional[
         "actions": _actions(review, indemnity, contract),
         # Verdicts computed from an unconfirmed AI extraction are provisional —
         # the human hasn't yet vouched for the clause we read.
-        "provisional": not contract.get("confirmed_at"),
+        "provisional": is_provisional(contract),
         "disclaimer": DISCLAIMER,
     }
 
@@ -371,6 +406,22 @@ async def build_contract_review(conn, company_id, contract_id) -> Optional[dict]
 
 # --- shared contract store (tenant + broker routes call these) --------------
 
+def validate_pdf_upload(file: UploadFile) -> None:
+    """Reject anything that isn't a PDF, before we read it. Shared by the tenant
+    and broker upload endpoints so the two can't drift."""
+    is_pdf = (file.content_type == "application/pdf") or (file.filename or "").lower().endswith(".pdf")
+    if not is_pdf:
+        raise HTTPException(status_code=400, detail="Upload a PDF contract")
+
+
+def validate_pdf_bytes(data: bytes) -> None:
+    """Size/emptiness guard applied after the body is read."""
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty file")
+    if len(data) > MAX_CONTRACT_BYTES:
+        raise HTTPException(status_code=413, detail="PDF too large (max 15 MB)")
+
+
 async def store_uploaded_contract(conn, company_id, user_id, data: bytes, filename: str) -> dict:
     """Parse an uploaded contract PDF, retain the source, insert the draft row.
 
@@ -379,7 +430,7 @@ async def store_uploaded_contract(conn, company_id, user_id, data: bytes, filena
     ``RuntimeError`` on a bare local dev box, and losing the blob is strictly
     better than losing the review, so we degrade to limadq01's parse-and-discard.
     """
-    parsed = await contract_parser().parse_contract(data)
+    parsed = await contract_parser.parse_contract(data)
     fname = (filename or "contract.pdf")[:255]
     name = (parsed.get("counterparty") or fname.rsplit(".", 1)[0])[:255]
     status = "parsed" if parsed["available"] else "error"
@@ -408,12 +459,6 @@ async def store_uploaded_contract(conn, company_id, user_id, data: bytes, filena
     return la._contract_row(row)
 
 
-def contract_parser():
-    """Lazy import — ``contract_parser`` imports this module (enum vocabulary)."""
-    from . import contract_parser as cp
-    return cp
-
-
 def normalize_requirements(requirements) -> list[dict]:
     """Pydantic requirement models → stored shape, with line keys normalized."""
     out: list[dict] = []
@@ -432,8 +477,13 @@ def normalize_requirements(requirements) -> list[dict]:
 
 
 async def update_contract(conn, company_id, contract_id, body) -> Optional[dict]:
-    """Patch a contract. Touching ``risk_transfer`` resets ``confirmed_at`` —
-    the human vouched for the clause we read before, not the one now stored."""
+    """Patch a contract. Touching any **verdict input** resets ``confirmed_at``.
+
+    The verdict is a function of the clause AND the controlling state AND the
+    contract type, so confirming it vouches for all three. Editing the project
+    state of a confirmed contract can flip `insurable` → `likely_void_by_statute`;
+    presenting that as reviewer-vouched would be a lie. Cosmetic edits (name,
+    counterparty, requirements) leave the confirmation intact."""
     existing = await conn.fetchrow(
         "SELECT id FROM company_contracts WHERE id = $1 AND company_id = $2",
         contract_id, company_id,
@@ -442,6 +492,9 @@ async def update_contract(conn, company_id, contract_id, body) -> Optional[dict]
         return None
     reqs = None if body.requirements is None else json.dumps(normalize_requirements(body.requirements))
     rt_json = None if body.risk_transfer is None else json.dumps(body.risk_transfer.model_dump())
+    verdict_inputs_touched = any(
+        v is not None for v in (rt_json, body.contract_type, body.governing_state, body.project_state)
+    )
     row = await conn.fetchrow(
         f"""UPDATE company_contracts SET
              name = COALESCE($3, name),
@@ -451,15 +504,15 @@ async def update_contract(conn, company_id, contract_id, body) -> Optional[dict]
              governing_state = COALESCE($7, governing_state),
              project_state = COALESCE($8, project_state),
              risk_transfer = COALESCE($9::jsonb, risk_transfer),
-             confirmed_at = CASE WHEN $9 IS NOT NULL THEN NULL ELSE confirmed_at END,
-             confirmed_by = CASE WHEN $9 IS NOT NULL THEN NULL ELSE confirmed_by END,
+             confirmed_at = CASE WHEN $10 THEN NULL ELSE confirmed_at END,
+             confirmed_by = CASE WHEN $10 THEN NULL ELSE confirmed_by END,
              status = CASE WHEN $5 IS NOT NULL AND status = 'error' THEN 'manual' ELSE status END,
              updated_at = NOW()
            WHERE id = $1 AND company_id = $2
            RETURNING {_CONTRACT_COLS}""",
         contract_id, company_id, body.name, body.counterparty, reqs,
-        getattr(body, "contract_type", None), getattr(body, "governing_state", None),
-        getattr(body, "project_state", None), rt_json,
+        body.contract_type, body.governing_state, body.project_state, rt_json,
+        verdict_inputs_touched,
     )
     return la._contract_row(row)
 
@@ -490,9 +543,7 @@ async def contract_source_url(conn, company_id, contract_id) -> Optional[str]:
 
 # --- deterministic per-contract review PDF ----------------------------------
 
-def _esc(v) -> str:
-    return html.escape(str(v)) if v is not None else "—"
-
+_esc = la._esc  # one escaper across both contract-review surfaces
 
 _FORM_LABEL = {"broad": "Broad form", "intermediate": "Intermediate form",
                "limited": "Limited form", "unclear": "Unclassified"}

@@ -291,6 +291,31 @@ def _money(v: Optional[float]) -> str:
 
 # --- DB wrapper (never raises) ---------------------------------------------
 
+def attach_verdicts(contracts: list[dict]) -> list[dict]:
+    """Stamp each contract with its indemnity verdict + provisional flag, in place.
+
+    Isolated per contract: one malformed row degrades to a ``review`` verdict
+    instead of stripping the verdicts off every contract after it in the list.
+    Lazy import — ``risk_transfer`` imports this module for the line vocabulary.
+    """
+    from . import risk_transfer
+
+    for c in contracts:
+        try:
+            c["indemnity"] = risk_transfer.assess_indemnity(
+                c.get("risk_transfer"),
+                governing_state=c.get("governing_state"),
+                project_state=c.get("project_state"),
+                contract_type=c.get("contract_type"),
+            )
+        except Exception as exc:  # noqa: BLE001 - isolation is the point
+            logger.warning("limit_adequacy: indemnity verdict failed for %s: %s", c.get("id"), exc)
+            c["indemnity"] = {"verdict": "review", "controlling_state": None, "statute": None,
+                              "basis": "The verdict could not be computed for this contract."}
+        c["provisional"] = risk_transfer.is_provisional(c)
+    return contracts
+
+
 async def build_review(conn, company_id: UUID, *, venue: dict | None = None) -> dict:
     """Fetch carried lines + contracts + company profile + venue tier → analyze.
 
@@ -342,21 +367,7 @@ async def build_review(conn, company_id: UUID, *, venue: dict | None = None) -> 
 
     review = analyze(carried, contracts, headcount=headcount, venue_tier=venue_tier, industry=industry)
 
-    # Indemnity verdict per contract. Lazy import — risk_transfer imports this
-    # module for the line vocabulary, so a top-level import would cycle.
-    try:
-        from . import risk_transfer
-        for c in review["contracts"]:
-            c["indemnity"] = risk_transfer.assess_indemnity(
-                c.get("risk_transfer"),
-                governing_state=c.get("governing_state"),
-                project_state=c.get("project_state"),
-                contract_type=c.get("contract_type"),
-            )
-            c["provisional"] = not c.get("confirmed_at")
-    except Exception as exc:  # pragma: no cover - defensive; verdicts are additive
-        logger.warning("limit_adequacy: indemnity verdicts unavailable: %s", exc)
-
+    attach_verdicts(review["contracts"])
     review["company_id"] = str(company_id)
     review["company_name"] = company_name
     review["headcount"] = headcount

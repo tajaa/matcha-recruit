@@ -12,12 +12,20 @@ contract-requirement shape, line names normalized to our coverage keys.
 import asyncio
 import json
 import logging
-from typing import Optional
+from typing import Optional, get_args
 
 from app.config import get_settings
 from app.matcha.services.ir_analysis import IRAnalyzer
+from app.matcha.models import limit_adequacy as _models
 from app.matcha.services import limit_adequacy as la
-from app.matcha.services import risk_transfer as rt
+
+# Straight off the Pydantic Literals — the same vocabulary the API validates and
+# `risk_transfer` reasons over. Importing the models (a leaf) rather than
+# `risk_transfer` also keeps this module cycle-free, so `risk_transfer` can
+# import it normally.
+_CONTRACT_TYPES = set(get_args(_models.ContractType))
+_INDEMNITY_FORMS = set(get_args(_models.IndemnityForm))
+_INDEMNITY_DIRECTIONS = set(get_args(_models.IndemnityDirection))
 
 logger = logging.getLogger(__name__)
 
@@ -87,8 +95,10 @@ def _page(v) -> Optional[int]:
 
 
 def _state(v) -> Optional[str]:
-    s = str(v or "").strip().upper()
-    return s if len(s) == 2 and s.isalpha() else None
+    """Same normalization the verdict engine applies — a state this rejects would
+    never reach `_STATE_ANTI_INDEMNITY` anyway."""
+    from app.matcha.services.risk_transfer import _norm_state  # lazy: rt imports us
+    return _norm_state(v)
 
 
 def _coerce_requirements(payload: dict) -> list[dict]:
@@ -133,8 +143,8 @@ def _coerce_risk_transfer(payload: dict) -> Optional[dict]:
     return {
         "indemnity": {
             "present": True,
-            "form": form if form in rt.INDEMNITY_FORMS else "unclear",
-            "direction": direction if direction in rt.INDEMNITY_DIRECTIONS else "unclear",
+            "form": form if form in _INDEMNITY_FORMS else "unclear",
+            "direction": direction if direction in _INDEMNITY_DIRECTIONS else "unclear",
             "covers_sole_negligence": bool(ind.get("covers_sole_negligence")),
             "defense_obligation": bool(ind.get("defense_obligation")),
             "quote": _text(ind.get("quote"), _MAX_QUOTE),
@@ -145,7 +155,7 @@ def _coerce_risk_transfer(payload: dict) -> Optional[dict]:
 
 def _coerce_contract_type(v) -> Optional[str]:
     s = str(v or "").strip().lower()
-    return s if s in rt.CONTRACT_TYPES else None
+    return s if s in _CONTRACT_TYPES else None
 
 
 async def parse_contract(pdf_bytes: bytes) -> dict:

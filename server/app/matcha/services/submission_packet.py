@@ -237,12 +237,18 @@ def _money(v) -> str:
 
 def _limit_section_html(review: Optional[dict]) -> str:
     """Optional limit-adequacy section: carried limits vs contract requirements +
-    a directional baseline. Tenant clients only (needs carried/contract data)."""
+    a directional baseline, followed by the indemnity verdicts. Tenant clients
+    only (needs carried/contract data).
+
+    The two halves are independently optional: a contract can carry a
+    likely-void indemnity while naming no insurance limits at all, and a client
+    with no coverage lines on file must still get that finding in the packet.
+    """
     lines = (review or {}).get("lines") or []
     # only render lines that carry data or a requirement — skip empty noise
     rows_data = [l for l in lines if l.get("carried") or l.get("contract_required") or l.get("status") == "directional_low"]
     if not rows_data:
-        return ""
+        return _risk_transfer_section_html(review or {})
     s = review.get("summary") or {}
     rows = ""
     for l in rows_data:

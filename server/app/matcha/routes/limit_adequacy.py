@@ -19,15 +19,6 @@ from ..models.limit_adequacy import CoverageLineUpdate, ContractCreate, Contract
 
 router = APIRouter()
 
-MAX_CONTRACT_BYTES = 15_000_000
-
-
-def read_pdf_upload(file: UploadFile) -> None:
-    """Shared guard for the contract-upload endpoints (tenant + broker)."""
-    is_pdf = (file.content_type == "application/pdf") or (file.filename or "").lower().endswith(".pdf")
-    if not is_pdf:
-        raise HTTPException(status_code=400, detail="Upload a PDF contract")
-
 
 @router.get("/review")
 async def get_review(current_user=Depends(require_admin_or_client)):
@@ -121,13 +112,9 @@ async def upload_contract(file: UploadFile = File(...),
     stored as a draft the company reviews, edits, and confirms. The source PDF is
     retained (private bucket) so clause findings stay verifiable."""
     company_id = await get_client_company_id(current_user)
-    read_pdf_upload(file)
+    rt.validate_pdf_upload(file)
     data = await file.read()
-    if not data:
-        raise HTTPException(status_code=400, detail="Empty file")
-    if len(data) > MAX_CONTRACT_BYTES:
-        raise HTTPException(status_code=413, detail="PDF too large (max 15 MB)")
-
+    rt.validate_pdf_bytes(data)
     async with get_connection() as conn:
         return await rt.store_uploaded_contract(conn, company_id, current_user.id, data, file.filename)
 

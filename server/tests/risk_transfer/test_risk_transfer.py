@@ -262,3 +262,239 @@ def test_risk_transfer_rows_html_uses_the_caller_supplied_class_map():
 def test_risk_transfer_rows_skip_contracts_with_no_clause_and_no_type():
     review = {"contracts": [{"name": "Bare", "risk_transfer": None, "indemnity": {"verdict": "review"}}]}
     assert la.risk_transfer_rows_html(review) == ""
+
+
+# --- regressions from the PR review -----------------------------------------
+#
+# Every case below is an UNKNOWN input that previously escaped the
+# "unknowns degrade to review" invariant and produced a confident verdict.
+
+def test_construction_without_project_state_never_falls_back_to_governing_state():
+    """The governing state is exactly what anti-waiver statutes ignore. A blank
+    project state must block the verdict, not silently substitute NY law."""
+    v = rt.assess_indemnity(_ind(), governing_state="NY", project_state=None,
+                            contract_type="construction")
+    assert v["verdict"] == rt.VERDICT_REVIEW
+    assert "where the work is performed" in v["basis"]
+    assert "NY" in v["basis"]  # names the state it refused to use
+
+
+def test_construction_with_only_a_project_state_still_rules():
+    v = rt.assess_indemnity(_ind(), governing_state=None, project_state="NY",
+                            contract_type="construction")
+    assert v["verdict"] == rt.VERDICT_VOID
+
+
+@pytest.mark.parametrize("state", [None, "WY", "NY"])
+def test_non_construction_insurability_is_state_independent(state):
+    """The CGL 'insured contract' analysis needs no statute table — an unmapped
+    or absent state must not suppress an uninsurable-exposure finding."""
+    v = rt.assess_indemnity(_ind(), governing_state=state, contract_type="lease")
+    assert v["verdict"] == rt.VERDICT_UNINSURABLE
+
+
+@pytest.mark.parametrize("state", [None, "WY"])
+def test_non_construction_limited_form_is_insurable_without_a_statute(state):
+    v = rt.assess_indemnity(_ind(form="limited", covers_sole_negligence=False),
+                            governing_state=state, contract_type="vendor_service")
+    assert v["verdict"] == rt.VERDICT_INSURABLE
+
+
+@pytest.mark.parametrize("direction", ["unclear", "", None, "sideways"])
+def test_unknown_direction_degrades_to_review(direction):
+    """Without knowing who indemnifies whom, we don't know whose exposure it is."""
+    v = rt.assess_indemnity(_ind(direction=direction), project_state="NY",
+                            contract_type="construction")
+    assert v["verdict"] == rt.VERDICT_REVIEW
+    assert "who indemnifies whom" in v["basis"]
+
+
+def test_mutual_direction_is_still_assessed():
+    v = rt.assess_indemnity(_ind(direction="mutual"), project_state="NY",
+                            contract_type="construction")
+    assert v["verdict"] == rt.VERDICT_VOID
+
+
+def test_favorable_direction_wins_over_a_contradictory_form():
+    """If the counterparty indemnifies us, a garbled form flag is irrelevant."""
+    v = rt.assess_indemnity(_ind(direction="they_indemnify_us", form="limited",
+                                 covers_sole_negligence=True),
+                            project_state="NY", contract_type="construction")
+    assert v["verdict"] == rt.VERDICT_INSURABLE
+
+
+@pytest.mark.parametrize("form", ["intermediate", "limited"])
+def test_contradictory_sole_negligence_flag_degrades_to_review(form):
+    """Only broad form reaches sole negligence. A non-broad form carrying the
+    flag is a contradictory extraction — it must not pick the alarming branch."""
+    v = rt.assess_indemnity(_ind(form=form, covers_sole_negligence=True),
+                            project_state="GA", contract_type="construction")
+    assert v["verdict"] == rt.VERDICT_REVIEW
+    assert "contradictory" in v["basis"]
+
+
+# --- provisional is about AI extraction, not about confirmation alone --------
+
+def test_manual_contracts_are_never_provisional():
+    """A human keyed these terms — there is nothing 'extracted' to confirm."""
+    c = _contract(status="manual", ai_available=False, confirmed_at=None)
+    review = rt.review_contract(c, [], headcount=10)
+    assert review["provisional"] is False
+    assert not any("Confirm the extracted terms" in a for a in review["actions"])
+
+
+def test_ai_parsed_unconfirmed_contract_is_provisional():
+    c = _contract(status="parsed", ai_available=True, confirmed_at=None)
+    assert rt.review_contract(c, [], headcount=10)["provisional"] is True
+
+
+def test_is_provisional_predicate():
+    assert rt.is_provisional({"ai_available": True, "confirmed_at": None}) is True
+    assert rt.is_provisional({"ai_available": True, "confirmed_at": "2026-07-09"}) is False
+    assert rt.is_provisional({"ai_available": False, "confirmed_at": None}) is False
+
+
+# --- enum vocabulary is derived, never hand-synced ---------------------------
+
+def test_enum_lists_track_the_pydantic_literals():
+    from typing import get_args
+    from app.matcha.models import limit_adequacy as m
+
+    assert rt.CONTRACT_TYPES == list(get_args(m.ContractType))
+    assert rt.INDEMNITY_FORMS == list(get_args(m.IndemnityForm))
+    assert rt.INDEMNITY_DIRECTIONS == list(get_args(m.IndemnityDirection))
+
+
+# --- confirm-reset covers every verdict input --------------------------------
+
+class _UpdateConn:
+    """Captures the UPDATE args; $10 is the reset flag."""
+
+    def __init__(self):
+        self.reset_flag = None
+
+    async def fetchrow(self, sql, *args):
+        if sql.strip().startswith("SELECT"):
+            return {"id": args[0]}
+        self.reset_flag = args[9]
+        return {"id": "c1", "requirements": "[]", "risk_transfer": None}
+
+
+class _Body:
+    def __init__(self, **kw):
+        self.name = kw.get("name")
+        self.counterparty = kw.get("counterparty")
+        self.requirements = kw.get("requirements")
+        self.contract_type = kw.get("contract_type")
+        self.governing_state = kw.get("governing_state")
+        self.project_state = kw.get("project_state")
+        self.risk_transfer = kw.get("risk_transfer")
+
+
+@pytest.mark.parametrize("body,expect_reset", [
+    (_Body(name="renamed"), False),
+    (_Body(counterparty="Acme II"), False),
+    (_Body(requirements=[]), False),
+    (_Body(project_state="NY"), True),
+    (_Body(governing_state="NY"), True),
+    (_Body(contract_type="construction"), True),
+])
+def test_update_resets_confirmation_only_for_verdict_inputs(body, expect_reset):
+    """The verdict is a function of clause AND state AND type — confirming it
+    vouches for all three, so editing any of them must un-confirm."""
+    import asyncio
+    conn = _UpdateConn()
+    asyncio.run(rt.update_contract(conn, "co", "c1", body))
+    assert conn.reset_flag is expect_reset
+
+
+def test_update_resets_confirmation_when_risk_transfer_changes():
+    import asyncio
+    from app.matcha.models.limit_adequacy import Indemnity, RiskTransfer
+
+    conn = _UpdateConn()
+    body = _Body(risk_transfer=RiskTransfer(indemnity=Indemnity(present=True, form="broad")))
+    asyncio.run(rt.update_contract(conn, "co", "c1", body))
+    assert conn.reset_flag is True
+
+
+# --- broker submission packet -------------------------------------------------
+
+def _review_with_clause(**over):
+    c = {"id": "c1", "name": "Acme Subcontract", "contract_type": "construction",
+         "project_state": "NY", "provisional": False, "risk_transfer": _ind(),
+         "indemnity": {"verdict": rt.VERDICT_VOID, "statute": "N.Y. Gen. Oblig. Law § 5-322.1"}}
+    c.update(over)
+    return {"lines": [], "summary": {}, "contracts": [c]}
+
+
+def test_packet_renders_risk_transfer_even_with_no_limit_rows():
+    """A contract can carry a likely-void indemnity while naming no insurance
+    limits; a client with no coverage lines must still get that finding."""
+    from app.matcha.services import submission_packet as sp
+
+    html = sp._limit_section_html(_review_with_clause())
+    assert "Indemnification" in html
+    assert "LIKELY VOID" in html
+    assert la.DISCLAIMER in html
+
+
+def test_packet_still_omits_everything_when_there_is_nothing_to_say():
+    from app.matcha.services import submission_packet as sp
+
+    assert sp._limit_section_html({"lines": [], "contracts": []}) == ""
+    assert sp._limit_section_html(None) == ""
+
+
+# --- broker pilot corpus ------------------------------------------------------
+
+def test_clause_records_get_their_own_corpus_source_not_the_platform_bucket():
+    """The memo appendix dispatches on cid prefix — a `clause:` record inside the
+    `platform` bucket would fall through to the native branch and duplicate the
+    whole platform table."""
+    from app.matcha.services import broker_pilot as bp
+
+    ctx = {"limits": _review_with_clause()}
+    corpus = bp.build_corpus("Acme", ctx, docs=[], native=None)
+
+    assert "clause:c1" in corpus["index"]
+    assert corpus["index"]["clause:c1"]["source"] == "clauses"
+    platform_cids = [r["cid"] for r in corpus["sources"]["platform"]["records"]]
+    assert not any(c.startswith("clause:") for c in platform_cids)
+
+
+def test_clause_record_carries_the_verbatim_quote_and_verdict():
+    from app.matcha.services import broker_pilot as bp
+
+    corpus = bp.build_corpus("Acme", {"limits": _review_with_clause()}, docs=[], native=None)
+    summary = corpus["index"]["clause:c1"]["summary"]
+    assert "Contractor shall indemnify" in summary
+    assert "likely void by statute" in summary
+    assert "p. 7" in summary
+
+
+def test_provisional_clause_is_labelled_in_the_corpus():
+    from app.matcha.services import broker_pilot as bp
+
+    corpus = bp.build_corpus("Acme", {"limits": _review_with_clause(provisional=True)},
+                             docs=[], native=None)
+    assert "PROVISIONAL" in corpus["index"]["clause:c1"]["summary"]
+
+
+def test_no_clauses_source_when_no_contract_has_an_indemnity():
+    from app.matcha.services import broker_pilot as bp
+
+    ctx = {"limits": {"contracts": [{"id": "c1", "name": "Bare", "risk_transfer": None}]}}
+    corpus = bp.build_corpus("Acme", ctx, docs=[], native=None)
+    assert "clauses" not in corpus["sources"]
+
+
+def test_validate_citations_admits_clause_namespace_and_drops_fakes():
+    from app.matcha.services import broker_pilot as bp
+    from app.matcha.services.legal_defense import validate_citations
+
+    corpus = bp.build_corpus("Acme", {"limits": _review_with_clause()}, docs=[], native=None)
+    clean, dropped = validate_citations(
+        [{"point": "p", "cited_ids": ["clause:c1", "clause:bogus"]}], corpus["index"])
+    assert clean[0]["cited_ids"] == ["clause:c1"]
+    assert dropped == ["clause:bogus"]

@@ -280,10 +280,7 @@ def _install_fakes(monkeypatch, *, upload_raises: bool):
                 "risk_transfer": {"indemnity": {"present": True}},
                 "available": True, "model": "test"}
 
-    class _P:
-        parse_contract = staticmethod(fake_parse)
-
-    monkeypatch.setattr(rtx, "contract_parser", lambda: _P)
+    monkeypatch.setattr(rtx.contract_parser, "parse_contract", fake_parse)
 
     class _Storage:
         async def upload_private_file(self, *a, **k):
@@ -315,3 +312,38 @@ def test_upload_degrades_to_parse_and_discard_when_s3_is_unavailable(monkeypatch
     assert out["storage_path"] is None
     assert out["status"] == "parsed"
     assert out["contract_type"] == "construction"
+
+
+# --- verdict enrichment is isolated per contract ------------------------------
+
+def test_one_bad_contract_does_not_strip_verdicts_off_the_others(monkeypatch):
+    """attach_verdicts mutates the list in place — an exception on one row must
+    not leave every later row without a verdict."""
+    from app.matcha.services import risk_transfer as rtx
+
+    real = rtx.assess_indemnity
+
+    def flaky(risk_transfer, **kw):
+        if (risk_transfer or {}).get("boom"):
+            raise ValueError("malformed")
+        return real(risk_transfer, **kw)
+
+    monkeypatch.setattr(rtx, "assess_indemnity", flaky)
+
+    contracts = [
+        {"id": "a", "ai_available": True, "risk_transfer": {"boom": True}},
+        {"id": "b", "ai_available": True,
+         "risk_transfer": {"indemnity": {"present": True, "form": "limited",
+                                         "direction": "we_indemnify_them"}}},
+    ]
+    la.attach_verdicts(contracts)
+
+    assert contracts[0]["indemnity"]["verdict"] == "review"      # degraded, not missing
+    assert contracts[1]["indemnity"]["verdict"] == "insurable"   # unaffected by its neighbor
+    assert all(c["provisional"] is True for c in contracts)
+
+
+def test_attach_verdicts_marks_manual_contracts_non_provisional():
+    contracts = [{"id": "m", "ai_available": False, "risk_transfer": None}]
+    la.attach_verdicts(contracts)
+    assert contracts[0]["provisional"] is False

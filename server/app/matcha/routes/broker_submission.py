@@ -28,7 +28,6 @@ from ..services import (
 from .ir_incidents import compute_wc_metrics
 from .broker_portfolio import _assert_broker_owns_company
 from .broker_external import _broker_id
-from .limit_adequacy import MAX_CONTRACT_BYTES, read_pdf_upload
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -473,12 +472,9 @@ async def tenant_contracts(company_id: UUID, current_user=Depends(require_broker
 @router.post("/clients/{company_id}/contracts/upload")
 async def tenant_contract_upload(company_id: UUID, file: UploadFile = File(...),
                                  current_user=Depends(require_broker)):
-    read_pdf_upload(file)
+    rt.validate_pdf_upload(file)
     data = await file.read()
-    if not data:
-        raise HTTPException(status_code=400, detail="Empty file")
-    if len(data) > MAX_CONTRACT_BYTES:
-        raise HTTPException(status_code=413, detail="PDF too large (max 15 MB)")
+    rt.validate_pdf_bytes(data)
     async with get_connection() as conn:
         await _assert_broker_owns_company(conn, current_user.id, company_id)
         return await rt.store_uploaded_contract(conn, company_id, current_user.id, data, file.filename)
