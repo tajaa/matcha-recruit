@@ -828,6 +828,13 @@ async def get_project_history_replay_endpoint(
         # board — but 'deleted' isn't in _COLUMN_EVENTS so it never wins the
         # DISTINCT ON in the first place; this filter is a no-op safeguard.
         if r["column_key"] is not None
+        # The Done column resets every week. Seeding it with everything ever
+        # finished makes it the all-time completed list — it only grows, dwarfs
+        # the other columns, and buries the week's actual finishes. A replayed
+        # week shows what THIS week finished, so work closed earlier doesn't
+        # seed the board at all. (A card reopened out of Done mid-week still
+        # appears: the client materializes it from the move event.)
+        and r["column_key"] != "done"
     ]
     events = [
         {

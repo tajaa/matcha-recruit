@@ -184,8 +184,15 @@ final class WeeklyReplayViewModel {
             case "created":
                 state[taskId] = ReplayTaskState(id: taskId, title: event.title, column: event.toColumn ?? "todo")
             case "column_change", "review_rejected", "review_approved":
-                if let column = event.toColumn {
+                guard let column = event.toColumn else { break }
+                if state[taskId] != nil {
                     state[taskId]?.column = column
+                } else {
+                    // Unknown task: it sat in Done before the week began, so the
+                    // server didn't seed it (Done resets weekly), and now it's
+                    // been reopened. Materialize it from the event so the card
+                    // reappears where it was dragged to.
+                    state[taskId] = ReplayTaskState(id: taskId, title: event.title, column: column)
                 }
             case "deleted":
                 state[taskId]?.isDeleted = true

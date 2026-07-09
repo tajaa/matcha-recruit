@@ -90,6 +90,14 @@ class ProjectDetailViewModel {
     @ObservationIgnored private var groupKey: (v: Int, pipeline: Bool, search: String)?
     @ObservationIgnored private var groupValue: [String: [MWProjectTask]] = [:]
 
+    /// Ids of the `done` bucket finished during the current Pacific week —
+    /// what the board shows when its Done column is set to reset weekly.
+    /// Filled by `groupedColumns` (which the board always calls first) so the
+    /// completion dates are parsed on the same cached pass, never per frame.
+    /// A Set rather than a prefix count: the mount-replay re-buckets cards by
+    /// their OLD column, so position in the done array can't be trusted.
+    @ObservationIgnored private(set) var doneThisWeekIds: Set<String> = []
+
     /// Tasks grouped by board/pipeline column key, each bucket in final display
     /// order (priority desc, then oldest-waiting first; the `done` bucket is
     /// pre-sorted most-recently-completed first). Tasks whose column isn't a
@@ -127,11 +135,20 @@ class ProjectDetailViewModel {
         // Done column collapses to the 5 most-recently-completed (newest first);
         // sort that bucket by completion instead of the priority/age order.
         if !pipeline, var done = out["done"] {
-            done.sort {
-                (PacificDateFormatter.parse($0.completedAt ?? $0.updatedAt ?? $0.createdAt) ?? .distantPast)
-                > (PacificDateFormatter.parse($1.completedAt ?? $1.updatedAt ?? $1.createdAt) ?? .distantPast)
+            // Parse each completion once — it feeds both the sort and the
+            // this-week split below.
+            var finished: [String: Date] = [:]
+            finished.reserveCapacity(done.count)
+            for t in done {
+                finished[t.id] = PacificDateFormatter.parse(t.completedAt ?? t.updatedAt ?? t.createdAt) ?? .distantPast
             }
+            done.sort { (finished[$0.id] ?? .distantPast) > (finished[$1.id] ?? .distantPast) }
             out["done"] = done
+
+            let weekStart = PacificDateFormatter.startOfWeek(containing: Date())
+            doneThisWeekIds = Set(done.filter { (finished[$0.id] ?? .distantPast) >= weekStart }.map(\.id))
+        } else {
+            doneThisWeekIds = []
         }
 
         groupKey = (tasksVersion, pipeline, search)

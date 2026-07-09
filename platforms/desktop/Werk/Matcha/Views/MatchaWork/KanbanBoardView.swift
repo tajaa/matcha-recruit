@@ -47,6 +47,13 @@ struct KanbanBoardView: View {
     @State private var searchText = ""
     /// Done column collapses to the 5 most-recently-completed; expand shows all.
     @State private var doneExpanded = false
+    /// Done column policy. `true` (default): the column resets every Monday and
+    /// shows only what was finished this Pacific week — otherwise the board's
+    /// completed pile grows without bound and buries the week's actual wins.
+    /// `false`: the all-time cumulative list, capped at 5 with a "show more".
+    /// Either way nothing is archived or deleted — the expander reveals the
+    /// rest, and the cards stay in `done` on the server.
+    @AppStorage("kanban-done-weekly-reset") private var doneWeeklyReset = true
     /// AI ticket drafting (natural language → reviewable draft).
     @State private var aiDrafting = false
     @State private var aiDraft: MWTaskDraft?
@@ -600,17 +607,51 @@ struct KanbanBoardView: View {
         }
     }
 
+    /// Done-column policy switch, parked in that column's header. Flipping it
+    /// only changes what the board shows — no card is archived, moved, or
+    /// deleted either way.
+    private var donePolicyMenu: some View {
+        Menu {
+            Picker("Done column", selection: $doneWeeklyReset) {
+                Text("Resets weekly").tag(true)
+                Text("Cumulative").tag(false)
+            }
+            .pickerStyle(.inline)
+        } label: {
+            Image(systemName: doneWeeklyReset ? "calendar.badge.clock" : "infinity")
+                .font(.system(size: 9))
+                .foregroundColor(.secondary)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help(doneWeeklyReset
+              ? "Done shows this week's finishes — earlier work is behind the expander"
+              : "Done shows every finished card, newest first")
+    }
+
     private func columnView(key: String, label: String, compact: Bool) -> some View {
         // Grouped+sorted once per (tasks, search, mode) in the view model and
         // memoized — a window resize re-evaluates this body every frame, so the
         // filter/sort/date-parse must NOT run here. `orderedTasks` is already in
         // final display order (done column pre-sorted most-recently-completed).
         let orderedTasks = displayTasks(forColumn: key)
-        // Done column collapses to the 5 most-recently-completed with a "show
-        // more" expander — completed work piles up otherwise.
+        // Done column never shows the whole pile: either this week's finishes
+        // (weekly reset, the default) or the 5 most-recently-completed. The
+        // rest sit behind a "show more" expander. `doneThisWeekIds` is computed
+        // on the memoized grouping pass — no date parsing in this body, which
+        // re-evaluates every frame of a window-resize drag.
         let isDoneColumn = !isPipeline && key == "done"
-        let doneCollapsed = isDoneColumn && !doneExpanded && orderedTasks.count > 5
-        let visibleTasks = doneCollapsed ? Array(orderedTasks.prefix(5)) : orderedTasks
+        let thisWeek = isDoneColumn && doneWeeklyReset
+            ? orderedTasks.filter { viewModel.doneThisWeekIds.contains($0.id) }
+            : []
+        let hiddenDoneCount = isDoneColumn
+            ? (doneWeeklyReset ? orderedTasks.count - thisWeek.count : max(0, orderedTasks.count - 5))
+            : 0
+        let doneCollapsed = isDoneColumn && !doneExpanded && hiddenDoneCount > 0
+        let visibleTasks: [MWProjectTask] = doneCollapsed
+            ? (doneWeeklyReset ? thisWeek : Array(orderedTasks.prefix(5)))
+            : orderedTasks
         // Per-stage deal total (pipeline mode only).
         let stageValue = orderedTasks.reduce(0.0) { $0 + ($1.dealValue ?? 0) }
         let isEmpty = orderedTasks.isEmpty
@@ -628,13 +669,16 @@ struct KanbanBoardView: View {
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundColor(.secondary)
                     .tracking(0.5)
-                Text("\(orderedTasks.count)")
+                Text("\(visibleTasks.count)")
                     .font(.system(size: 10))
                     .foregroundColor(.secondary)
                     .padding(.horizontal, 5)
                     .padding(.vertical, 1)
                     .background(appState.themeText.opacity(0.08))
                     .cornerRadius(4)
+                if isDoneColumn {
+                    donePolicyMenu
+                }
                 if isPipeline && stageValue > 0 {
                     Text(formatDealValue(stageValue))
                         .font(.system(size: 9, weight: .semibold))
@@ -697,10 +741,10 @@ struct KanbanBoardView: View {
             // intrinsic height inside the outer scroll. Regular mode keeps each
             // column independently scrollable to a filled height.
             if compact {
-                columnCards(visibleTasks: visibleTasks, isDoneColumn: isDoneColumn, orderedTasks: orderedTasks)
+                columnCards(visibleTasks: visibleTasks, isDoneColumn: isDoneColumn, hiddenDoneCount: hiddenDoneCount)
             } else {
                 ScrollView {
-                    columnCards(visibleTasks: visibleTasks, isDoneColumn: isDoneColumn, orderedTasks: orderedTasks)
+                    columnCards(visibleTasks: visibleTasks, isDoneColumn: isDoneColumn, hiddenDoneCount: hiddenDoneCount)
                 }
                 .frame(maxHeight: .infinity)
             }
@@ -745,7 +789,7 @@ struct KanbanBoardView: View {
     /// this in its own ScrollView; compact (vertical) mode renders it inline
     /// under the board's single outer vertical ScrollView.
     @ViewBuilder
-    private func columnCards(visibleTasks: [MWProjectTask], isDoneColumn: Bool, orderedTasks: [MWProjectTask]) -> some View {
+    private func columnCards(visibleTasks: [MWProjectTask], isDoneColumn: Bool, hiddenDoneCount: Int) -> some View {
         LazyVStack(spacing: 6) {
             ForEach(visibleTasks) { task in
                 KanbanCardView(
@@ -814,11 +858,15 @@ struct KanbanBoardView: View {
                     } label: { Label("Delete", systemImage: "trash") }
                 }
             }
-            if isDoneColumn && orderedTasks.count > 5 {
+            if isDoneColumn && hiddenDoneCount > 0 {
                 Button {
                     doneExpanded.toggle()
                 } label: {
-                    Text(doneExpanded ? "Show less" : "Show \(orderedTasks.count - 5) more")
+                    Text(doneExpanded
+                         ? "Show less"
+                         : (doneWeeklyReset
+                            ? "Show \(hiddenDoneCount) finished earlier"
+                            : "Show \(hiddenDoneCount) more"))
                         .font(.system(size: 10, weight: .medium))
                         .foregroundColor(.secondary)
                         .frame(maxWidth: .infinity)
