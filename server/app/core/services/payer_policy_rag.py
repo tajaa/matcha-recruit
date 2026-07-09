@@ -32,6 +32,17 @@ def normalize_payer_names(payer_names: list[str]) -> list[str]:
     return list(set(normalized))
 
 
+def contract_keys_for_display_names(display_names: list[str]) -> list[str]:
+    """Reverse of normalize_payer_names: corpus display names → the facility
+    contract keys that map to them (for querying payer_contracts JSONB)."""
+    wanted = {d.lower() for d in display_names}
+    keys = [k for k, v in _PAYER_NAME_MAP.items() if v.lower() in wanted]
+    # Unknown display names round-trip as their lowercase form (matches the
+    # .title() forward mapping for simple one-word payers like "aetna").
+    keys.extend(d.lower() for d in display_names if d.lower() not in {v.lower() for v in _PAYER_NAME_MAP.values()})
+    return list(set(keys))
+
+
 NO_CONTRACTS_CONTEXT = (
     "No payer contracts are configured for this company's locations, so no "
     "payer policy data was retrieved. Coverage questions cannot be answered "

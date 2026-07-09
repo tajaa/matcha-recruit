@@ -37,7 +37,7 @@ from app.matcha.routes.matcha_work._shared import THREAD_FILE_TEXT_CAP, _row_to_
 from app.matcha.services import matcha_work_document as doc_svc
 from app.matcha.services import token_budget_service
 from app.matcha.services.escalation_service import should_escalate, create_escalation
-from app.matcha.services.matcha_work_node import build_compliance_context, build_node_context, ComplianceContextResult
+from app.matcha.services.matcha_work_node import build_compliance_context, build_node_context, build_payer_staff_context, ComplianceContextResult
 from app.matcha.services.matcha_work_ai import (
     _build_company_context,
     _infer_skill_from_state,
@@ -158,7 +158,10 @@ async def _get_affected_employees(
     for ref in referenced:
         for label, lid in label_to_id.items():
             if ref == label or ref in label or label.startswith(ref):
-                loc_ids.append(UUID(lid))
+                try:
+                    loc_ids.append(UUID(lid))
+                except (ValueError, AttributeError, TypeError):
+                    pass  # remote:<ST> pseudo-locations have no location row
                 break
 
     if not loc_ids:
@@ -216,6 +219,60 @@ async def _get_affected_employees(
 
     return result if result else None
 
+async def _get_payer_affected_staff(
+    company_id: UUID,
+    payer_sources: list[dict],
+) -> list[dict] | None:
+    """Count staff at locations contracted with the payers Gemini actually cited.
+
+    Mirrors _get_affected_employees for payer mode: deterministic counts from
+    the roster, keyed off the cited payer_sources rather than model-emitted
+    location labels.
+    """
+    from app.core.services.payer_policy_rag import contract_keys_for_display_names
+
+    cited = sorted({s.get("payer_name") for s in payer_sources if s.get("payer_name")})
+    if not cited:
+        return None
+    keys = contract_keys_for_display_names(cited)
+    if not keys:
+        return None
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT bl.name, bl.city, bl.state,
+                   (SELECT jsonb_agg(p) FROM jsonb_array_elements_text(
+                        bl.facility_attributes->'payer_contracts') p
+                    WHERE p = ANY($2::text[])) AS matched_payers,
+                   COUNT(e.id) AS staff
+            FROM business_locations bl
+            LEFT JOIN employees e
+              ON e.work_location_id = bl.id AND e.termination_date IS NULL
+            WHERE bl.company_id = $1 AND bl.is_active = true
+              AND bl.facility_attributes->'payer_contracts' ?| $2::text[]
+            GROUP BY bl.id, bl.name, bl.city, bl.state, bl.facility_attributes
+            """,
+            company_id, keys,
+        )
+    if not rows:
+        return None
+    from app.core.services.payer_policy_rag import normalize_payer_names
+    out = []
+    for r in rows:
+        matched = r["matched_payers"]
+        if isinstance(matched, str):
+            try:
+                matched = json.loads(matched)
+            except (json.JSONDecodeError, TypeError):
+                matched = []
+        out.append({
+            "location": f"{r['name'] or r['city']}, {r['state']}",
+            "staff_count": r["staff"],
+            "payers": normalize_payer_names(list(matched or [])),
+        })
+    return out
+
+
 _GAP_KEYWORDS: dict[str, list[str]] = {
     "hipaa_privacy": ["hipaa", "privacy", "phi", "protected health"],
     "workplace_safety": ["safety", "osha", "workplace safety", "injury prevention"],
@@ -255,7 +312,8 @@ async def _detect_compliance_gaps(
 
     async with get_connection() as conn:
         policies = await conn.fetch(
-            "SELECT title FROM policies WHERE company_id = $1 AND status = 'active'",
+            "SELECT title, LEFT(content, 2000) AS content_head "
+            "FROM policies WHERE company_id = $1 AND status = 'active'",
             company_id,
         )
         handbook_sections = await conn.fetch("""
@@ -266,8 +324,10 @@ async def _detect_compliance_gaps(
               AND hv.version_number = h.active_version
         """, company_id)
 
+    # Titles alone miss policies whose body covers the category — match the
+    # content head too (a "Workplace Conduct" policy can satisfy anti_discrimination).
     all_titles = {
-        p["title"].lower() for p in policies if p["title"]
+        f"{p['title']} {p['content_head'] or ''}".lower() for p in policies if p["title"]
     } | {
         s["title"].lower() for s in handbook_sections if s["title"]
     }
@@ -292,11 +352,14 @@ def _build_compliance_metadata(
     """Merge pre-computed jurisdiction reasoning and Gemini's reasoning steps into message metadata."""
     chains = compliance_result.reasoning_chains if compliance_result else None
     ai_steps = ai_resp.compliance_reasoning if ai_resp else None
-    if not chains and not ai_steps:
+    thresholds = compliance_result.threshold_status if compliance_result else None
+    if not chains and not ai_steps and not thresholds:
         return None
     metadata: dict = {}
     if chains:
         metadata["compliance_reasoning"] = chains
+    if thresholds:
+        metadata["threshold_status"] = thresholds
     if ai_steps:
         metadata["ai_reasoning_steps"] = ai_steps
     if ai_resp and ai_resp.referenced_categories:
@@ -632,6 +695,15 @@ async def send_message_stream(
                                 query=body.content, conn=_pc2,
                                 company_id=company_id, max_tokens=6000,
                             )
+                        # Payer turns bypass the generic company context, so the
+                        # roster grounding must ride the payer prompt itself.
+                        if thread.get("node_mode"):
+                            try:
+                                _staff_ctx = await build_payer_staff_context(company_id)
+                                if _staff_ctx:
+                                    _pctx = ((_pctx + "\n\n") if _pctx else "") + _staff_ctx
+                            except Exception:
+                                logger.warning("Payer-staff context failed for company %s", company_id, exc_info=True)
                         cn2 = profile.get("name", "your company")
                         stream_payer_prompt = _PMSP.format(
                             company_name=cn2,
@@ -745,6 +817,18 @@ async def send_message_stream(
                 gaps = await _detect_compliance_gaps(company_id, msg_metadata)
                 if gaps:
                     msg_metadata["compliance_gaps"] = gaps
+
+            # Node × payer: staff counts at the locations contracted with the
+            # payers this answer actually cited.
+            if thread.get("node_mode") and thread.get("payer_mode") and stream_payer_sources:
+                try:
+                    payer_staff = await _get_payer_affected_staff(company_id, stream_payer_sources)
+                    if payer_staff:
+                        if msg_metadata is None:
+                            msg_metadata = {}
+                        msg_metadata["payer_affected_staff"] = payer_staff
+                except Exception:
+                    logger.warning("payer_affected_staff failed for thread %s", thread_id, exc_info=True)
 
             # Annotate reply with change summary for conversation continuity
             if changed and ai_resp.structured_update and isinstance(ai_resp.structured_update, dict):

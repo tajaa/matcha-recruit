@@ -402,6 +402,21 @@ export interface ComplianceGap {
   status: 'missing' | 'partial'
 }
 
+export interface ThresholdStatus {
+  name: string
+  threshold: number
+  basis: string
+  employee_count: number
+  applies: boolean
+  directional: boolean
+}
+
+export interface PayerAffectedStaff {
+  location: string
+  staff_count: number
+  payers: string[]
+}
+
 export interface MWMessageMetadata {
   compliance_reasoning?: ComplianceReasoningLocation[]
   ai_reasoning_steps?: AIReasoningStep[]
@@ -410,6 +425,8 @@ export interface MWMessageMetadata {
   payer_sources?: PayerPolicySource[]
   affected_employees?: AffectedEmployeeGroup[]
   compliance_gaps?: ComplianceGap[]
+  threshold_status?: ThresholdStatus[]
+  payer_affected_staff?: PayerAffectedStaff[]
 }
 
 export interface MWMessage {

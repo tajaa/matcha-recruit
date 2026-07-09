@@ -115,3 +115,44 @@ Backend is already running on `:8001` under `dev-remote.sh` (frontend `:5174`) �
 - **H8:** send in thread A, click thread B mid-stream, confirm B's composer is enabled.
 - **H9:** insert a dev `payer_medical_policies` row with `source_url = 'javascript:alert(1)'`, confirm the rendered anchor has no href.
 - Regression: `cd server && ./venv/bin/python -m pytest tests/matcha_work/ -q` — expect the documented baseline of 12 failed / 126 passed / 8 skipped, unchanged.
+
+---
+
+## Supplement (2026-07-09) — remediation status + engine findings from the node-system deep-dive
+
+### Status
+
+All CRITICAL/HIGH/MEDIUM findings above are **fixed** on `claude/map-newest-commit-scope-s2avft`, with two deliberate exceptions:
+- **M10** (check-then-deduct TOCTOU) — deferred; the H12 clamp bounds over-run to one turn per concurrent request. A reservation pattern can come later.
+- **Tier 2** resolved by **deletion**: `POST /threads/{id}/messages` is gone (zero callers verified across web, Werk Swift, and tests). C2/H1/H2/M5 died with it. Route count 204 → 203.
+
+Tier 3's HNSW migration is **authored, not applied**: `server/alembic/versions/hnswvec01_hnsw_vector_indexes.py`. Apply via `./scripts/migrate-dev.sh` → `./scripts/migrate-prod.sh` (CONCURRENTLY; non-transactional — check for INVALID indexes if a build is interrupted).
+
+### Engine findings beyond the original audit (all fixed)
+
+- **Ceiling picked the wrong row.** `determine_governing_requirement`'s ceiling branch took `sorted_rows[-1]` — the most *general* row in the chain (federal, if present) — not the rule's higher jurisdiction. Root cause: the CTE didn't even propagate `higher_jurisdiction_id`. Now propagated; ceiling resolves to the rule's jurisdiction with the old behavior as fallback. The adjacent `else sorted_rows[0]` was dead (unreachable) and is removed.
+- **Precedence LEFT JOIN fanout.** Two active rules matching one category duplicated every requirement row in it — `all_levels` carried duplicates, the single-level render path was defeated, trigger counts inflated. Requirement rows are now deduped by id while every (row × rule) pairing still competes for rule selection; specific rules tie-break by most-local `lower_jurisdiction_id`.
+- **Trigger `TypeError` killed whole turns.** A string facility attribute vs a numeric trigger (`"120" >= 100`) raised through an unguarded chain and killed the SSE stream mid-turn (compounding with H8's stuck spinner). Comparisons now coerce and degrade to not-matched with a warning; the compliance/node context builders are guarded in the stream so failures degrade to a status notice.
+- **Fail-open on malformed triggers** (unknown op/type → True) is *retained* for the v2 passthrough predicates and documented here rather than flipped — silently deactivating requirements is a data-owner decision, not a code fix.
+- **Roster sample was nondeterministic.** The old `LIMIT 50` had no `ORDER BY` — the by-state breakdown was computed over a planner-dependent sample, so "do we have employees in Colorado?" could flip between cache expiries. Aggregates now come from a full-roster GROUPING SETS query; the name listing is ordered and labeled as a sample.
+
+### Combined-mode extensions shipped alongside the fix
+
+**Node × Compliance**
+- **NC1 — deterministic threshold engine**: federal headcount thresholds (Title VII 15, ADEA/COBRA 20, FMLA/ACA 50, EEO-1/WARN 100) computed in code from the real roster and injected as a `FEDERAL HEADCOUNT THRESHOLDS` block + `threshold_status` metadata (chips in `MessageBubble`). `employee_count`/`employee_count_state` are also injected into `facility_attributes` (setdefault — explicit attrs win) so data-authored jurisdiction triggers can gate on headcount deterministically.
+- **NC2 — remote-state coverage**: the compliance jurisdiction set is now locations ∪ `DISTINCT work_state`. States with employees but no business location get a state-level stack labeled "Remote — ST (N remote employees)"; previously those employees' state obligations were structurally invisible.
+- **NC3 — pre-turn counts**: per-location and per-state employee counts render inside each facility profile, so the model reasons *from* true numbers instead of a post-hoc, model-gated metadata card.
+- **NC4 — gap detection upgrade**: policy *content* (first 2KB) is matched as well as titles; gap cards deep-link to Handbook Pilot (`/app/handbook-pilot?draft=<category>`).
+
+**Node × Payer** (previously zero interaction)
+- **NP1 — payer × staff grounding**: per-location payer contracts × headcount × role mix, injected into the payer system prompt (payer turns bypass the generic company context, so it rides `payer_context`).
+- **NP2 — credential risk**: expired/expiring-≤90d licenses grouped by location render as a `CREDENTIAL RISK` block. Feature-detected by data presence in `employee_credentials`, not flag-gated.
+- **NP3 — fail-closed notes**: no contracts → explicit "no payer contracts configured" context; contracts with no matching corpus → "no policy data found for <payers>; answers are not grounded" (never silently searching all payers, never substituting Medicare for Medicaid).
+- **NP4 — staff-under-cited-payers**: post-turn metadata (`payer_affected_staff`) counting staff at locations contracted with the payers the answer actually cited; chips in `MessageBubble`.
+
+### Verification notes (container)
+
+- New unit tests: `server/tests/compliance/test_engine_and_node_fixes.py` (13 tests — ceiling, fanout dedupe, trigger coercion, payer normalization, threshold engine). All pass.
+- `pytest tests/matcha_work/` failure set is **byte-identical before vs after** the change (this container's baseline differs from the venv's documented 12F/126P/8S for environment reasons — missing native deps — but the stash/unstash diff is empty, i.e. zero regressions).
+- `npx tsc --noEmit` clean.
+- The DB-dependent checks in the Verification section above (EXPLAIN ANALYZE, payer-mode billing rows, >50-employee headcount answers) remain user-side — run them against dev after applying `hnswvec01`.

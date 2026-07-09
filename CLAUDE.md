@@ -46,10 +46,10 @@ Sidebar dispatch in `client/src/components/TenantSidebar.tsx`. Tier-check helper
 - Per-company access via `companies.enabled_features` JSONB. When a user URL-hops to a feature they don't have, `<FeatureGate>` (`client/src/components/FeatureGate.tsx`) renders `<UpgradeUpsellCard>` instead of a 403.
 
 ### Matcha-work — collaborative AI workspace
-**Naming convention**: the **web** workspace surface (this section) is referred to as **matcha-work**; the **macOS desktop** workspace is referred to as **werk** (`platforms/desktop/Werk/`). Both share the same backend (`server/app/matcha/routes/matcha_work.py`) and `mw_*` tables — only the client differs. When asked to ship a feature, confirm which surface is meant before editing files.
+**Naming convention**: the **web** workspace surface (this section) is referred to as **matcha-work**; the **macOS desktop** workspace is referred to as **werk** (`platforms/desktop/Werk/`). Both share the same backend (`server/app/matcha/routes/matcha_work/` package) and `mw_*` tables — only the client differs. When asked to ship a feature, confirm which surface is meant before editing files.
 
 - Surface: `client/src/pages/work/*` + `client/src/layouts/WorkLayout.tsx`. Mounted at `/work/*` in `App.tsx`.
-- Backend: `server/app/matcha/routes/matcha_work.py`, `server/app/matcha/services/project_service.py`. Tables prefixed `mw_*`.
+- Backend: `server/app/matcha/routes/matcha_work/` (package, split 2026-07-03), `server/app/matcha/services/project_service.py`. Tables prefixed `mw_*`.
 - macOS desktop client (**werk**): `platforms/desktop/Werk/` (SwiftUI). Xcode project name is still `Matcha.xcodeproj` and bundle ID `com.ahnimal.matcha` — App Store identity is unchanged; only the working directory and conceptual product name differ. `AppState.isPlusActive` from `Subscription.isPersonalPlus` controls Plus features.
 - **Personal mode**: user `role='individual'`. Signup via `BetaRegister.tsx` (`/auth/beta?token=…`) → redirected to `/work`. Stripe sub `matcha_work_personal` ($20/mo) via `POST /api/checkout/personal` (`server/app/matcha/routes/billing.py`).
 - **Business mode**: user `role='client'` inside a Matcha company. Token packs purchased via `POST /api/checkout`. Sidebar entry in `ClientSidebar.tsx` AI group → `/work`.
@@ -69,7 +69,7 @@ Which frontend pairs with which backend package (don't re-derive this):
 | Product | Frontend | Backend | Identity / tables | Domain |
 |---|---|---|---|---|
 | **Matcha** (Free / Lite / Essentials / X / Compliance / Pro) | `client/` — main SPA (hey-matcha.com) | `server/app/core/` + `server/app/matcha/` at `/api` | `users` + `companies` (`signup_source`, `enabled_features`) | HR compliance, IR/OSHA, ER, employees, broker risk tooling |
-| **Matcha-work** (web) | `client/src/pages/work/*` at `/work/*` (+ `/werk`, `/werk-lite` route trees over the same pages) | `server/app/matcha/routes/matcha_work.py` | `mw_*` tables | Collaborative AI workspace |
+| **Matcha-work** (web) | `client/src/pages/work/*` at `/work/*` (+ `/werk`, `/werk-lite` route trees over the same pages) | `server/app/matcha/routes/matcha_work/` | `mw_*` tables | Collaborative AI workspace |
 | **Werk** (macOS) | `platforms/desktop/Werk/` (SwiftUI; project still `Matcha.xcodeproj`) | same matcha-work backend | `mw_*` tables | Desktop surface of matcha-work — confirm which surface (web vs desktop) before editing |
 | **Cappe** | inside `client/` — host-routed on gummfit.com (`client/src/utils/cappeHost.ts`, pages in `client/src/pages/cappe/`) | `server/app/cappe/` at `/api/cappe` (+ unprefixed tenant renderer on `*.gummfit.com`) | `cappe_accounts`, JWT `scope=cappe`, `cappe_*` tables (no matcha tenant model) | Website builder + domain reselling |
 | **Tell-Us** | `client/tellus/` — separate Vite app (React 19), served by the same frontend nginx at `/tellus/` | `server/app/tellus/` at `/api/tellus` | `tellus_accounts` (consumer + brand), JWT `scope=tellus`, `tellus_*` tables | Rewards-for-feedback |
@@ -142,7 +142,7 @@ server/
 │   │   │   ├── ir_incidents/       # Package (split 2026-05-16) — see ir_incidents/CLAUDE.md
 │   │   │   ├── employees/          # 13-file package (split 2026-05-16) — see employees/CLAUDE.md
 │   │   │   ├── er_copilot/         # Package (split 2026-07-06) — see er_copilot/CLAUDE.md
-│   │   │   ├── matcha_work.py      # 8,902 lines (cohesive — not a split candidate)
+│   │   │   ├── matcha_work/        # Package (split 2026-07-03) — see matcha_work/CLAUDE.md
 │   │   │   └── … 25 others
 │   │   ├── services/
 │   │   └── workers/
@@ -270,7 +270,7 @@ Defined in `server/app/core/feature_flags.py` as `DEFAULT_COMPANY_FEATURES`. Per
 
 - **Compliance** (`core/services/compliance_service.py`) — Jurisdiction-aware compliance checking with Gemini AI; preemption rules, tiered data (structured → repository → Gemini research).
 - **AI Chat** (`core/services/ai_chat.py`) — WebSocket chat with local Qwen model or Gemini.
-- **Matcha Work** (`matcha/routes/matcha_work.py` + `services/project_service.py`, `services/matcha_work_ai.py`) — projects, threads, channels, inbox, AI directives.
+- **Matcha Work** (`matcha/routes/matcha_work/` package + `services/project_service.py`, `services/matcha_work_ai.py`) — projects, threads, channels, inbox, AI directives.
 - **Channels** (`matcha/services/channels_service.py`, `mw_channels*` tables) — real-time WebSocket messaging, paid channels, member presence.
 - **IR Incidents** (`matcha/routes/ir_incidents/` — 10-file package since 2026-05-16; see `ir_incidents/CLAUDE.md`) — safety/behavioral incident reporting + AI analysis. Public anonymous intake at `routes/inbound_email.py`.
 - **Discipline** (`matcha/routes/discipline.py` + `services/discipline_engine.py`, signature provider abstraction in `services/signature_provider.py`).
@@ -304,7 +304,7 @@ Scheduling model: no celery-beat. The worker container runs continuously (`resta
 - `risk_assessment` — quantitative analysis runs
 - `interview_analysis` — post-call transcript scoring
 
-**Stays inline in FastAPI (NOT on worker)**: WebSocket chat streams, voice interview WS (Gemini Live), PDF render via WeasyPrint (`asyncio.to_thread` in `routes/matcha_work.py`), all CRUD, Stripe webhooks, auth.
+**Stays inline in FastAPI (NOT on worker)**: WebSocket chat streams, voice interview WS (Gemini Live), PDF render via WeasyPrint (`asyncio.to_thread` in `routes/matcha_work/pdf_export.py`), all CRUD, Stripe webhooks, auth.
 
 PDF render is intentionally inline because the desktop client awaits the bytes — but it is the dominant memory consumer in the backend container. If backend memory pressure recurs, moving `_render_project_pdf` to a celery task and `.get(timeout=60)` is the obvious next step.
 
@@ -436,7 +436,7 @@ Quick lookup for frequently-touched code. Saves grepping the same things repeate
 
 - Web surface → `client/src/pages/work/*` + `client/src/layouts/WorkLayout.tsx`
 - macOS desktop client → `platforms/desktop/Werk/` (SwiftUI, bundle `com.ahnimal.matcha`)
-- Backend routes → `server/app/matcha/routes/matcha_work.py` (8,902 lines — cohesive WS/AI surface, not a split candidate)
+- Backend routes → `server/app/matcha/routes/matcha_work/` (package, split 2026-07-03 — see its CLAUDE.md; 203 routes)
 - Project service → `server/app/matcha/services/project_service.py`
 - AI directives → `server/app/matcha/services/matcha_work_ai.py`
 - Channels (WS) → `server/app/matcha/services/channels_service.py` + `mw_channels*` tables

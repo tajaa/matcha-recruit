@@ -156,6 +156,13 @@ const MessageBubble = React.memo(function MessageBubble({ message: m, lightMode,
                         : 'text-amber-400/80 bg-amber-900/20 border-amber-700/30'
                     }`}>
                       No written policy found for <span className="font-medium">{g.label}</span> — required by governing jurisdiction
+                      {' '}
+                      <a
+                        href={`/app/handbook-pilot?draft=${encodeURIComponent(g.category)}`}
+                        className={`font-medium underline underline-offset-2 ${lm ? 'text-amber-800 hover:text-amber-900' : 'text-amber-300 hover:text-amber-200'}`}
+                      >
+                        Draft with Handbook Pilot →
+                      </a>
                     </div>
                   ))}
                 </div>
@@ -177,6 +184,54 @@ const MessageBubble = React.memo(function MessageBubble({ message: m, lightMode,
                       <span className={lm ? 'text-red-600' : 'text-red-400/70'}> — {p.summary}</span>
                       {p.agency && <span className={metaText}> ({p.agency})</span>}
                     </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {m.metadata?.threshold_status && m.metadata.threshold_status.length > 0 && (
+              <div className={`mt-2 pt-2 border-t ${divider}`}>
+                <span className={`text-[10px] ${metaText} uppercase tracking-wide`}>
+                  Federal Thresholds (computed from roster)
+                </span>
+                <div className="mt-1 flex flex-wrap gap-1.5">
+                  {m.metadata.threshold_status.map((t, i) => (
+                    <span
+                      key={i}
+                      title={`${t.employee_count} active employees vs ${t.basis}${t.applies && t.directional ? ' — directional, verify counting basis' : ''}`}
+                      className={`inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded border ${
+                        t.applies
+                          ? lm
+                            ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
+                            : 'bg-emerald-900/25 text-emerald-300 border-emerald-700/40'
+                          : lm
+                            ? 'bg-zinc-100 text-zinc-500 border-zinc-200'
+                            : 'bg-zinc-800/60 text-zinc-500 border-zinc-700/40'
+                      }`}
+                    >
+                      <span className="font-medium">{t.name.split(' (')[0]}</span>
+                      <span>{t.applies ? `applies${t.directional ? '*' : ''}` : `below ${t.threshold}`}</span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+            {m.metadata?.payer_affected_staff && m.metadata.payer_affected_staff.length > 0 && (
+              <div className={`mt-2 pt-2 border-t ${divider}`}>
+                <span className={`text-[10px] ${metaText} uppercase tracking-wide`}>
+                  Staff Under Cited Payers
+                </span>
+                <div className="mt-1 flex flex-wrap gap-1.5">
+                  {m.metadata.payer_affected_staff.map((ps, i) => (
+                    <span key={i} className={`inline-flex items-center gap-1.5 text-[11px] px-2 py-0.5 rounded border ${
+                      lm
+                        ? 'bg-cyan-50 text-cyan-700 border-cyan-300'
+                        : 'bg-cyan-900/25 text-cyan-300 border-cyan-700/40'
+                    }`}>
+                      <span className="font-medium">{ps.staff_count}</span>
+                      <span className={lm ? 'text-cyan-500' : 'text-cyan-400/70'}>at</span>
+                      <span>{ps.location}</span>
+                      <span className={lm ? 'text-cyan-500' : 'text-cyan-400/70'}>({ps.payers.join(', ')})</span>
+                    </span>
                   ))}
                 </div>
               </div>

@@ -27,6 +27,7 @@ class ComplianceContextResult:
     reasoning_chains: list[dict] | None = field(default=None)
     truncated: bool = False
     has_legacy_locations: bool = False
+    threshold_status: list[dict] | None = field(default=None)
 
 
 # ---------------------------------------------------------------------------
@@ -74,6 +75,86 @@ async def _ctx_cache_set(key: str, value: Any) -> None:
     _local_cache[key] = (time.time(), value)
 
 
+# ---------------------------------------------------------------------------
+# Deterministic headcount-threshold engine (NC1)
+#
+# Employment-law applicability is headcount-gated; leaving the model to reason
+# "50 employees → does WARN apply?" from a truncated roster produced confident
+# wrong answers. Applicability is computed HERE, in code, from the full roster,
+# and handed to the model as settled fact. Federal thresholds only — state
+# thresholds ride the jurisdiction_requirements trigger engine (employee_count
+# is injected into facility_attributes so data-authored triggers can gate on it).
+# ---------------------------------------------------------------------------
+
+FEDERAL_HEADCOUNT_THRESHOLDS: tuple[tuple[str, int, str], ...] = (
+    ("Title VII / ADA / GINA (anti-discrimination)", 15, "15+ employees"),
+    ("ADEA (age discrimination)", 20, "20+ employees"),
+    ("COBRA (health coverage continuation)", 20, "20+ employees, prior-year average"),
+    ("FMLA (family & medical leave)", 50, "50+ employees within 75 miles of the worksite"),
+    ("ACA employer mandate", 50, "50+ full-time-equivalent employees"),
+    ("EEO-1 reporting", 100, "100+ employees (50+ for federal contractors)"),
+    ("WARN Act (plant closings & mass layoffs)", 100, "100+ full-time employees"),
+)
+
+
+def compute_threshold_status(total_active: int) -> list[dict]:
+    """Deterministic federal-threshold applicability from the real headcount.
+
+    Directional by design: thresholds with FTE / radius / duration nuances
+    (ACA, FMLA, COBRA) are flagged so the model presents them as "likely",
+    not settled.
+    """
+    out: list[dict] = []
+    for name, threshold, basis in FEDERAL_HEADCOUNT_THRESHOLDS:
+        out.append({
+            "name": name,
+            "threshold": threshold,
+            "basis": basis,
+            "employee_count": total_active,
+            "applies": total_active >= threshold,
+            "directional": any(k in basis for k in ("full-time", "75 miles", "average")),
+        })
+    return out
+
+
+def _format_threshold_status(statuses: list[dict]) -> str:
+    lines = [
+        "\n--- FEDERAL HEADCOUNT THRESHOLDS (computed from the full roster — treat as authoritative) ---"
+    ]
+    for s in statuses:
+        verdict = "APPLIES" if s["applies"] else "below threshold"
+        qualifier = " (directional — verify the counting basis)" if s["applies"] and s["directional"] else ""
+        lines.append(
+            f"- {s['name']}: {verdict}{qualifier} — {s['employee_count']} active employees vs {s['basis']}"
+        )
+    return "\n".join(lines)
+
+
+async def _fetch_roster_stats(conn, company_id: UUID) -> tuple[int, dict[str, int], dict[str, int]]:
+    """(total_active, by_work_state, by_department) over the FULL roster."""
+    rows = await conn.fetch(
+        """
+        SELECT work_state, department, COUNT(*) AS n,
+               GROUPING(work_state) AS g_state, GROUPING(department) AS g_dept
+        FROM employees
+        WHERE org_id=$1 AND termination_date IS NULL
+        GROUP BY GROUPING SETS ((work_state), (department), ())
+        """,
+        company_id,
+    )
+    total = 0
+    state_counts: dict[str, int] = {}
+    dept_counts: dict[str, int] = {}
+    for row in rows:
+        if row["g_state"] == 1 and row["g_dept"] == 1:
+            total = row["n"]
+        elif row["g_state"] == 0 and row["work_state"]:
+            state_counts[row["work_state"]] = row["n"]
+        elif row["g_dept"] == 0 and row["department"]:
+            dept_counts[row["department"]] = row["n"]
+    return total, state_counts, dept_counts
+
+
 async def build_node_context(company_id: UUID) -> str:
     """Fetch internal company data and format as AI context string."""
     cache_key = f"mw:node_ctx:{company_id}"
@@ -93,17 +174,8 @@ async def _build_node_context_uncached(company_id: UUID) -> str:
     async with get_connection() as conn:
         # Aggregates over the FULL roster — totals and breakdowns must never
         # come from the display sample (a 500-employee company was being told
-        # it has 50). One GROUPING SETS query: grand total + by-state + by-dept.
-        emp_stats = await conn.fetch(
-            """
-            SELECT work_state, department, COUNT(*) AS n,
-                   GROUPING(work_state) AS g_state, GROUPING(department) AS g_dept
-            FROM employees
-            WHERE org_id=$1 AND termination_date IS NULL
-            GROUP BY GROUPING SETS ((work_state), (department), ())
-            """,
-            company_id,
-        )
+        # it has 50).
+        total_active, state_counts, dept_counts = await _fetch_roster_stats(conn, company_id)
         employees = await conn.fetch(
             """
             SELECT first_name, last_name, job_title, department, work_state,
@@ -157,17 +229,6 @@ async def _build_node_context_uncached(company_id: UUID) -> str:
             """,
             company_id,
         )
-
-    total_active = 0
-    dept_counts: dict[str, int] = {}
-    state_counts: dict[str, int] = {}
-    for row in emp_stats:
-        if row["g_state"] == 1 and row["g_dept"] == 1:
-            total_active = row["n"]
-        elif row["g_state"] == 0 and row["work_state"]:
-            state_counts[row["work_state"]] = row["n"]
-        elif row["g_dept"] == 0 and row["department"]:
-            dept_counts[row["department"]] = row["n"]
 
     sections: list[str] = []
 
@@ -291,29 +352,30 @@ async def build_compliance_context(company_id: UUID) -> ComplianceContextResult:
     cache_key = f"mw:compliance_ctx:{company_id}"
     cached = await _ctx_cache_get(cache_key)
     if isinstance(cached, dict) and "context_text" in cached:
-        return ComplianceContextResult(
-            context_text=cached["context_text"],
-            reasoning_chains=cached.get("reasoning_chains"),
-            truncated=bool(cached.get("truncated")),
-            has_legacy_locations=bool(cached.get("has_legacy_locations")),
-        )
+        return _compliance_result_from_cache(cached)
     async with _get_build_lock(cache_key):
         cached = await _ctx_cache_get(cache_key)
         if isinstance(cached, dict) and "context_text" in cached:
-            return ComplianceContextResult(
-                context_text=cached["context_text"],
-                reasoning_chains=cached.get("reasoning_chains"),
-                truncated=bool(cached.get("truncated")),
-                has_legacy_locations=bool(cached.get("has_legacy_locations")),
-            )
+            return _compliance_result_from_cache(cached)
         result = await _build_compliance_context_uncached(company_id)
         await _ctx_cache_set(cache_key, {
             "context_text": result.context_text,
             "reasoning_chains": result.reasoning_chains,
             "truncated": result.truncated,
             "has_legacy_locations": result.has_legacy_locations,
+            "threshold_status": result.threshold_status,
         })
         return result
+
+
+def _compliance_result_from_cache(cached: dict) -> ComplianceContextResult:
+    return ComplianceContextResult(
+        context_text=cached["context_text"],
+        reasoning_chains=cached.get("reasoning_chains"),
+        truncated=bool(cached.get("truncated")),
+        has_legacy_locations=bool(cached.get("has_legacy_locations")),
+        threshold_status=cached.get("threshold_status"),
+    )
 
 
 async def _build_compliance_context_uncached(company_id: UUID) -> ComplianceContextResult:
@@ -327,6 +389,39 @@ async def _build_compliance_context_uncached(company_id: UUID) -> ComplianceCont
             """,
             company_id,
         )
+
+        # Roster truth feeds three things: the deterministic federal-threshold
+        # block, employee_count injection into trigger evaluation, and the
+        # per-location/remote-state headcounts rendered below.
+        total_active, state_counts, _dept_counts = await _fetch_roster_stats(conn, company_id)
+        loc_count_rows = await conn.fetch(
+            """
+            SELECT work_location_id, COUNT(*) AS n
+            FROM employees
+            WHERE org_id=$1 AND termination_date IS NULL AND work_location_id IS NOT NULL
+            GROUP BY work_location_id
+            """,
+            company_id,
+        )
+        loc_counts = {r["work_location_id"]: r["n"] for r in loc_count_rows}
+        threshold_status = compute_threshold_status(total_active) if total_active else None
+
+        # Remote-state coverage: employees working in states where the company
+        # has NO business location previously contributed nothing to compliance
+        # context — their states' obligations were simply invisible. Resolve a
+        # state-level stack for each such state.
+        location_states = {loc["state"] for loc in locations if loc["state"]}
+        remote_states = sorted(s for s in state_counts if s not in location_states)
+        remote_jurisdictions: Dict[str, Any] = {}
+        if remote_states:
+            jur_rows = await conn.fetch(
+                """
+                SELECT id, state FROM jurisdictions
+                WHERE level = 'state' AND country_code = 'US' AND state = ANY($1::text[])
+                """,
+                remote_states,
+            )
+            remote_jurisdictions = {r["state"]: r["id"] for r in jur_rows}
 
         sections: list[str] = []
         sections.append(
@@ -343,9 +438,12 @@ async def _build_compliance_context_uncached(company_id: UUID) -> ComplianceCont
             "a compliance check to pull in the latest requirements."
         )
 
+        if threshold_status:
+            sections.append(_format_threshold_status(threshold_status))
+
         reasoning_chains: list[dict] = []
 
-        if not locations:
+        if not locations and not remote_states:
             sections.append(
                 "\nNo active business locations found. "
                 "Suggest the user add business locations and run a compliance check."
@@ -368,10 +466,13 @@ async def _build_compliance_context_uncached(company_id: UUID) -> ComplianceCont
                 )
                 jurisdiction_locations = jurisdiction_locations[:_MAX_COMPLIANCE_LOCATIONS]
 
-            # One round trip for every location's jurisdiction chain (was an
-            # N+1 with duplicate queries for co-located sites).
+            # One round trip for every location's jurisdiction chain AND every
+            # remote state's chain (was an N+1 with duplicate queries for
+            # co-located sites).
             stacks_by_jurisdiction = await resolve_jurisdiction_stacks(
-                conn, [loc["jurisdiction_id"] for loc in jurisdiction_locations]
+                conn,
+                [loc["jurisdiction_id"] for loc in jurisdiction_locations]
+                + list(remote_jurisdictions.values()),
             )
 
             # Process locations with jurisdiction hierarchy
@@ -387,11 +488,26 @@ async def _build_compliance_context_uncached(company_id: UUID) -> ComplianceCont
                     )
                     break
                 facility_attrs = _parse_facility_attrs(loc["facility_attributes"])
+                # Inject real roster counts so data-authored headcount triggers
+                # (e.g. {"key": "employee_count", "operator": "gte", ...})
+                # evaluate deterministically. setdefault preserves any
+                # explicitly-set facility attribute.
+                if total_active:
+                    facility_attrs.setdefault("employee_count", total_active)
+                    if loc["state"] and loc["state"] in state_counts:
+                        facility_attrs.setdefault("employee_count_state", state_counts[loc["state"]])
                 loc_label = f"{loc['name'] or 'Unknown'} ({loc['city'] or 'N/A'}, {loc['state'] or 'N/A'})"
 
-                # Facility profile
+                # Facility profile + real employee counts (pre-turn, so the
+                # model reasons FROM true numbers instead of optionally citing
+                # locations for a post-hoc count).
                 activated = get_activated_profiles(facility_attrs)
                 profile_section = _format_facility_profile(loc_label, facility_attrs, activated)
+                n_here = loc_counts.get(loc["id"], 0)
+                emp_line = f"Employees at this location: {n_here}"
+                if loc["state"] and loc["state"] in state_counts:
+                    emp_line += f" | total working in {loc['state']}: {state_counts[loc['state']]}"
+                profile_section += "\n" + emp_line
                 sections.append(profile_section)
                 chars_used += len(profile_section)
 
@@ -441,6 +557,58 @@ async def _build_compliance_context_uncached(company_id: UUID) -> ComplianceCont
                     loc, loc_label, facility_attrs, activated, governed,
                 )
                 reasoning_chains.append(loc_chain)
+
+            # Remote-state stacks — employees in states with no business
+            # location. Condensed: state-level chain only, no facility profile
+            # (there is no facility).
+            for st in remote_states:
+                if chars_used > _MAX_COMPLIANCE_CONTEXT_CHARS:
+                    truncated = True
+                    sections.append(
+                        f"\n(Context budget reached — remaining remote-state coverage omitted: "
+                        f"{', '.join(remote_states[remote_states.index(st):])}.)"
+                    )
+                    break
+                n_remote = state_counts.get(st, 0)
+                remote_label = f"Remote — {st} ({n_remote} remote employee{'s' if n_remote != 1 else ''}, no business location)"
+                jid = remote_jurisdictions.get(st)
+                if not jid:
+                    sections.append(
+                        f"\n--- REGULATORY LAYERS: {remote_label} ---\n"
+                        f"No jurisdiction data available for {st}. These employees' "
+                        "state obligations are NOT covered below — flag this to the user."
+                    )
+                    continue
+                stack_rows = stacks_by_jurisdiction.get(jid, [])
+                if not stack_rows:
+                    sections.append(
+                        f"\n--- REGULATORY LAYERS: {remote_label} ---\n"
+                        "No jurisdiction requirements found. Suggest running a compliance check."
+                    )
+                    continue
+                remote_attrs = {"employee_count": total_active, "employee_count_state": n_remote}
+                by_cat = defaultdict(list)
+                for row in stack_rows:
+                    for jsonb_col in ("trigger_conditions", "rule_trigger_condition"):
+                        val = row.get(jsonb_col)
+                        if isinstance(val, str):
+                            try:
+                                row[jsonb_col] = json.loads(val)
+                            except (json.JSONDecodeError, TypeError):
+                                row[jsonb_col] = None
+                    by_cat[row.get("category") or "uncategorized"].append(row)
+                governed = determine_governing_requirement(by_cat, remote_attrs)
+                if len(governed) > 30:
+                    truncated = True
+                lines = [f"\n--- REGULATORY LAYERS: {remote_label} ---"]
+                for cat_result in governed[:30]:
+                    lines.append(_format_category_reasoning(cat_result, remote_attrs))
+                layers_section = "\n".join(lines)
+                sections.append(layers_section)
+                chars_used += len(layers_section)
+                reasoning_chains.append(_build_location_reasoning_chain(
+                    {"id": f"remote:{st}"}, remote_label, remote_attrs, [], governed,
+                ))
 
             # Fallback: locations without jurisdiction_id use legacy table
             if legacy_locations:
@@ -501,6 +669,7 @@ async def _build_compliance_context_uncached(company_id: UUID) -> ComplianceCont
         reasoning_chains=reasoning_chains if reasoning_chains else None,
         truncated=truncated,
         has_legacy_locations=bool(legacy_locations) if locations else False,
+        threshold_status=threshold_status,
     )
 
 
@@ -811,3 +980,120 @@ def _safe_float(val: Any) -> Optional[float]:
         return float(val)
     except (TypeError, ValueError):
         return None
+
+
+# ---------------------------------------------------------------------------
+# Payer × staff context (NP1 + NP2) — deterministic grounding for payer-mode
+# turns when node mode is also on: who actually delivers services under which
+# contracted payer, and whether their credentials are current. Injected into
+# the PAYER system prompt (payer turns bypass the generic company context).
+# ---------------------------------------------------------------------------
+
+
+async def build_payer_staff_context(company_id: UUID) -> Optional[str]:
+    cache_key = f"mw:payer_staff_ctx:{company_id}"
+    cached = await _ctx_cache_get(cache_key)
+    if isinstance(cached, dict) and "text" in cached:
+        return cached["text"] or None
+    async with _get_build_lock(cache_key):
+        cached = await _ctx_cache_get(cache_key)
+        if isinstance(cached, dict) and "text" in cached:
+            return cached["text"] or None
+        text = await _build_payer_staff_context_uncached(company_id)
+        await _ctx_cache_set(cache_key, {"text": text or ""})
+        return text
+
+
+async def _build_payer_staff_context_uncached(company_id: UUID) -> Optional[str]:
+    from ...core.services.payer_policy_rag import normalize_payer_names
+
+    async with get_connection() as conn:
+        locations = await conn.fetch(
+            """
+            SELECT id, name, city, state, facility_attributes->'payer_contracts' AS payers
+            FROM business_locations
+            WHERE company_id = $1 AND is_active = true
+            ORDER BY name NULLS LAST
+            """,
+            company_id,
+        )
+        if not locations:
+            return None
+        staff_rows = await conn.fetch(
+            """
+            SELECT work_location_id, COALESCE(job_title, department, 'Unspecified') AS role,
+                   COUNT(*) AS n
+            FROM employees
+            WHERE org_id = $1 AND termination_date IS NULL AND work_location_id IS NOT NULL
+            GROUP BY work_location_id, COALESCE(job_title, department, 'Unspecified')
+            """,
+            company_id,
+        )
+        # Credential currency (NP2) — feature-detected by data presence, not a
+        # flag: companies without credential records simply get no risk block.
+        cred_rows = await conn.fetch(
+            """
+            SELECT e.work_location_id,
+                   COUNT(*) FILTER (WHERE ec.license_expiration < CURRENT_DATE) AS expired,
+                   COUNT(*) FILTER (WHERE ec.license_expiration >= CURRENT_DATE
+                                      AND ec.license_expiration < CURRENT_DATE + INTERVAL '90 days') AS expiring
+            FROM employee_credentials ec
+            JOIN employees e ON e.id = ec.employee_id
+            WHERE ec.org_id = $1 AND e.termination_date IS NULL
+              AND ec.license_expiration IS NOT NULL
+              AND ec.license_expiration < CURRENT_DATE + INTERVAL '90 days'
+            GROUP BY e.work_location_id
+            """,
+            company_id,
+        )
+
+    staff_by_loc: Dict[Any, list] = defaultdict(list)
+    totals_by_loc: Dict[Any, int] = defaultdict(int)
+    for r in staff_rows:
+        staff_by_loc[r["work_location_id"]].append((r["role"], r["n"]))
+        totals_by_loc[r["work_location_id"]] += r["n"]
+    creds_by_loc = {r["work_location_id"]: r for r in cred_rows}
+
+    lines = [
+        "=== PAYER × STAFF (deterministic, from company records) ===",
+        "Ground coverage/billing answers in this staffing reality. Do NOT invent roles or counts.",
+    ]
+    any_content = False
+    for loc in locations:
+        payers = loc["payers"]
+        if isinstance(payers, str):
+            try:
+                payers = json.loads(payers)
+            except (json.JSONDecodeError, TypeError):
+                payers = None
+        payer_str = (
+            ", ".join(normalize_payer_names(list(payers)))
+            if payers and isinstance(payers, list)
+            else "none configured"
+        )
+        total = totals_by_loc.get(loc["id"], 0)
+        top_roles = sorted(staff_by_loc.get(loc["id"], []), key=lambda x: -x[1])[:6]
+        roles_str = ", ".join(f"{role} {n}" for role, n in top_roles) if top_roles else "no staff linked"
+        label = f"{loc['name'] or 'Unknown'} ({loc['city'] or 'N/A'}, {loc['state'] or 'N/A'})"
+        lines.append(f"- {label} — payers: {payer_str} | staff: {total} ({roles_str})")
+        any_content = any_content or bool(total) or bool(payers)
+
+    cred_lines = []
+    for loc in locations:
+        cr = creds_by_loc.get(loc["id"])
+        if not cr:
+            continue
+        parts = []
+        if cr["expired"]:
+            parts.append(f"{cr['expired']} EXPIRED license{'s' if cr['expired'] != 1 else ''}")
+        if cr["expiring"]:
+            parts.append(f"{cr['expiring']} expiring within 90 days")
+        if parts:
+            label = f"{loc['name'] or 'Unknown'} ({loc['state'] or 'N/A'})"
+            cred_lines.append(f"- {label}: {', '.join(parts)}")
+    if cred_lines:
+        lines.append("\nCREDENTIAL RISK (billing exposure — services delivered by "
+                     "non-current licensees may be denied by contracted payers):")
+        lines.extend(cred_lines)
+
+    return "\n".join(lines) if any_content else None
