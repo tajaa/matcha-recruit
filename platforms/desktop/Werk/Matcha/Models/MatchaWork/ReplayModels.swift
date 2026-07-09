@@ -19,7 +19,10 @@ struct MWWeeklyReplay: Codable {
 }
 
 struct MWReplayStartingTask: Codable {
-    let taskId: String
+    /// Nullable defensively: the server excludes null-keyed rows (tasks
+    /// hard-deleted before task_id_text existed to survive the delete), but
+    /// one unaddressable row shouldn't fail Codable decode for the whole week.
+    let taskId: String?
     let title: String
     let column: String
     let assigneeName: String?

@@ -141,8 +141,9 @@ final class WeeklyReplayViewModel {
         guard let replay else { currentState = [:]; return }
         var state: [String: ReplayTaskState] = [:]
         for t in replay.startingState {
-            state[t.taskId] = ReplayTaskState(
-                id: t.taskId, title: t.title, column: t.column,
+            guard let taskId = t.taskId else { continue }
+            state[taskId] = ReplayTaskState(
+                id: taskId, title: t.title, column: t.column,
                 assigneeName: t.assigneeName, assigneeAvatarUrl: t.assigneeAvatarUrl,
             )
         }

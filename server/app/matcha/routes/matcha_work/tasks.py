@@ -764,6 +764,12 @@ async def get_project_history_replay_endpoint(
     # just the delete event) — with 2+ deleted tasks that collapses them all
     # into one indistinguishable NULL bucket. task_id_text has no FK so it
     # survives deletion and keeps each task's timeline separate.
+    #
+    # Rows written before mwtaskhtxt01 whose task was later hard-deleted have
+    # BOTH columns null — their identity is unrecoverable, and DISTINCT ON
+    # merges every such task into one phantom card. Exclude them: a null key
+    # is not addressable by the replay engine, and emitting it as a card
+    # breaks the client's decode of the whole week.
     _task_key = "COALESCE(h.task_id_text, h.task_id::text)"
 
     async with get_connection() as conn:
@@ -783,6 +789,7 @@ async def get_project_history_replay_endpoint(
             WHERE h.project_id = $1
               AND h.created_at < $2
               AND h.event_type IN ({_COLUMN_EVENTS})
+              AND {_task_key} IS NOT NULL
             ORDER BY {_task_key}, h.created_at DESC
             """,
             project_id, week_start,
@@ -802,6 +809,7 @@ async def get_project_history_replay_endpoint(
             LEFT JOIN admins a ON a.user_id = h.actor_user_id
             WHERE h.project_id = $1
               AND h.created_at >= $2 AND h.created_at < $3
+              AND {_task_key} IS NOT NULL
             ORDER BY h.created_at ASC
             """,
             project_id, week_start, week_end,
