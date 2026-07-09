@@ -1,9 +1,9 @@
 import SwiftUI
 
 /// "History" tab — time-lapse replay of a project's kanban activity for one
-/// week (Mon 12:00am–Sun 11:59:59pm Pacific). Week picker up top, the replay
-/// board in the middle, and a scrubber + play/pause transport bar pinned
-/// below.
+/// week (Mon 12:00am–Sun 11:59:59pm Pacific). Week picker up top, a stats strip
+/// tallying the work as it replays, the replay board in the middle, and a
+/// scrubber + play/pause transport bar pinned below.
 struct WeeklyReplayView: View {
     @Environment(AppState.self) private var appState
     let viewModel: ProjectDetailViewModel
@@ -13,6 +13,10 @@ struct WeeklyReplayView: View {
         VStack(spacing: 0) {
             weekPicker
             Divider().opacity(0.2)
+            if let vm = replayVM, !vm.isLoading, vm.loadError == nil {
+                ReplayStatsBar(stats: vm.stats)
+                Divider().opacity(0.2)
+            }
             content
             Divider().opacity(0.2)
             transportBar
@@ -67,7 +71,11 @@ struct WeeklyReplayView: View {
                     .foregroundColor(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                ReplayBoardView(tasks: Array(vm.currentState.values))
+                // `orderedTasks`, not `currentState.values` — a Dictionary's
+                // value order is unspecified and reshuffles across rebuilds,
+                // which makes every card look like it moved and defeats the
+                // board's matchedGeometryEffect card tracking.
+                ReplayBoardView(tasks: vm.orderedTasks, movingTaskId: vm.movingTaskId)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         } else {

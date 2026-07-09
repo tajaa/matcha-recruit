@@ -68,6 +68,38 @@ struct MWReplayEvent: Codable, Identifiable {
     }
 }
 
+/// What the team did, counted from the replay events folded in so far — so the
+/// numbers tick up as the week plays rather than sitting at their end-of-week
+/// totals from the first frame.
+///
+/// `moved` counts every column change, including the ones that also land in
+/// `completed` (a move to "done") or `sentBack` (a review rejection): those are
+/// facets of a move, not separate events, and the strip reads as
+/// "12 moved, 5 of them finished" rather than three disjoint tallies.
+struct ReplayStats: Equatable {
+    var created = 0
+    var moved = 0
+    var completed = 0
+    var sentBack = 0
+    var deleted = 0
+    var subtasksAdded = 0
+    var subtasksCompleted = 0
+    var contributors: [ReplayContributor] = []
+
+    var isEmpty: Bool {
+        created == 0 && moved == 0 && deleted == 0
+            && subtasksAdded == 0 && subtasksCompleted == 0
+    }
+}
+
+/// One person's footprint on the week, ranked by how many events they authored.
+struct ReplayContributor: Identifiable, Equatable {
+    let id: String
+    let name: String
+    let avatarUrl: String?
+    let eventCount: Int
+}
+
 /// A card's folded-forward state at some scrub position in the replay —
 /// deliberately NOT `MWProjectTask`: the live model is bound to interactive
 /// board machinery (drag/menu/WS mutation) that a frozen historical frame

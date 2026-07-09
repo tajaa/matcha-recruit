@@ -219,6 +219,7 @@
 		DEADBEEF000000000000B007 /* KanbanCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEADBEEF000000000000F007 /* KanbanCard.swift */; };
 		BADA5500000000000000B003 /* ReplayCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = BADA5500000000000000F003 /* ReplayCard.swift */; };
 		BADA5500000000000000B004 /* ReplayBoardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BADA5500000000000000F004 /* ReplayBoardView.swift */; };
+		BADA5500000000000000B006 /* ReplayStatsBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = BADA5500000000000000F006 /* ReplayStatsBar.swift */; };
 		BADA5500000000000000B005 /* WeeklyReplayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BADA5500000000000000F005 /* WeeklyReplayView.swift */; };
 		DEADBEEF000000000000B008 /* KanbanSearch.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEADBEEF000000000000F008 /* KanbanSearch.swift */; };
 		DEADBEEF000000000000B0E1 /* ReviewGuideWizard.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEADBEEF000000000000F0E1 /* ReviewGuideWizard.swift */; };
@@ -324,6 +325,7 @@
 		7A5C0000000000000000F004 /* TaskViewerGraph.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskViewerGraph.swift; sourceTree = "<group>"; };
 		BADA5500000000000000F003 /* ReplayCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReplayCard.swift; sourceTree = "<group>"; };
 		BADA5500000000000000F004 /* ReplayBoardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReplayBoardView.swift; sourceTree = "<group>"; };
+		BADA5500000000000000F006 /* ReplayStatsBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReplayStatsBar.swift; sourceTree = "<group>"; };
 		BADA5500000000000000F005 /* WeeklyReplayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeeklyReplayView.swift; sourceTree = "<group>"; };
 		7A5C0000000000000000F005 /* PendingAttachment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendingAttachment.swift; sourceTree = "<group>"; };
 		7A5C0000000000000000F006 /* NoteRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteRow.swift; sourceTree = "<group>"; };
@@ -819,6 +821,7 @@
 				BADA5500000000000000F005 /* WeeklyReplayView.swift */,
 				BADA5500000000000000F004 /* ReplayBoardView.swift */,
 				BADA5500000000000000F003 /* ReplayCard.swift */,
+				BADA5500000000000000F006 /* ReplayStatsBar.swift */,
 			);
 			name = Replay;
 			path = Replay;
@@ -1261,6 +1264,7 @@
 				DEADBEEF000000000000B007 /* KanbanCard.swift in Sources */,
 				BADA5500000000000000B003 /* ReplayCard.swift in Sources */,
 				BADA5500000000000000B004 /* ReplayBoardView.swift in Sources */,
+				BADA5500000000000000B006 /* ReplayStatsBar.swift in Sources */,
 				BADA5500000000000000B005 /* WeeklyReplayView.swift in Sources */,
 				DEADBEEF000000000000B0E1 /* ReviewGuideWizard.swift in Sources */,
 				DEADBEEF000000000000B008 /* KanbanSearch.swift in Sources */,

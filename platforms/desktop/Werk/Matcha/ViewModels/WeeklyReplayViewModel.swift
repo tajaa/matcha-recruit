@@ -30,6 +30,29 @@ final class WeeklyReplayViewModel {
     /// bugs from applying events out of order.
     private(set) var currentState: [String: ReplayTaskState] = [:]
 
+    /// `currentState` in a STABLE order. A Dictionary's `.values` order is
+    /// unspecified and changes across rebuilds, which reshuffles the board's
+    /// ForEach every fold step and defeats `matchedGeometryEffect`'s card
+    /// tracking. Sorting by id gives each card a fixed slot so a column change
+    /// is the only movement the animation has to express.
+    var orderedTasks: [ReplayTaskState] {
+        currentState.values.sorted { $0.id < $1.id }
+    }
+
+    /// The card the event at `scrubIndex` just moved between columns, if any.
+    /// The board lifts it (scale + shadow + z-order) for the duration of its
+    /// glide so the transition reads as a drag rather than a teleport, then
+    /// `dropLiftTask` clears it to land the card.
+    private(set) var movingTaskId: String?
+    private var dropLiftTask: Task<Void, Never>?
+
+    /// How long a card stays "picked up" after the move that triggered it.
+    /// Matches the board's glide spring — the lift drops as the card lands.
+    private static let liftDuration = Duration.milliseconds(520)
+
+    /// Tally of the events folded in so far — climbs as the week plays.
+    private(set) var stats = ReplayStats()
+
     /// Pacific time label for the current scrub position, e.g. "Tue 2:14 PM".
     var currentMomentLabel: String? {
         guard let replay else { return nil }
@@ -50,6 +73,7 @@ final class WeeklyReplayViewModel {
 
     deinit {
         playTask?.cancel()
+        dropLiftTask?.cancel()
     }
 
     // MARK: - Week navigation
@@ -82,6 +106,7 @@ final class WeeklyReplayViewModel {
             loadError = "Couldn't load this week's history."
             replay = nil
             currentState = [:]
+            stats = ReplayStats()
         }
     }
 
@@ -89,6 +114,8 @@ final class WeeklyReplayViewModel {
 
     /// Jump directly to an event index (used by the draggable scrubber, which
     /// maps a drag position to the nearest event and snaps to it).
+    /// No lift: a scrub can cross dozens of events at once, and picking up
+    /// whichever card the playhead happened to land on would strobe.
     func scrub(to index: Int) {
         guard let replay else { return }
         scrubIndex = max(0, min(index, replay.events.count))
@@ -107,9 +134,11 @@ final class WeeklyReplayViewModel {
         isPlaying = true
         // Fixed total playback duration, divided across events with a floor
         // per-step — a quiet week doesn't feel instant, a busy week doesn't
-        // drag on for minutes.
+        // drag on for minutes. The floor also has to outlast the board's
+        // glide spring, or a busy week retargets each card mid-flight and the
+        // moves read as jitter instead of drags.
         let totalMs = 22_000.0
-        let stepMs = max(150.0, totalMs / Double(replay.events.count))
+        let stepMs = max(320.0, totalMs / Double(replay.events.count))
         playTask?.cancel()
         playTask = Task { [weak self] in
             while let self, !Task.isCancelled {
@@ -123,7 +152,7 @@ final class WeeklyReplayViewModel {
                         return
                     }
                     self.scrubIndex += 1
-                    self.recomputeState()
+                    self.recomputeState(liftLastMove: true)
                 }
             }
         }
@@ -133,12 +162,13 @@ final class WeeklyReplayViewModel {
         isPlaying = false
         playTask?.cancel()
         playTask = nil
+        clearLift()
     }
 
     // MARK: - Fold
 
-    private func recomputeState() {
-        guard let replay else { currentState = [:]; return }
+    private func recomputeState(liftLastMove: Bool = false) {
+        guard let replay else { currentState = [:]; clearLift(); return }
         var state: [String: ReplayTaskState] = [:]
         for t in replay.startingState {
             guard let taskId = t.taskId else { continue }
@@ -147,7 +177,8 @@ final class WeeklyReplayViewModel {
                 assigneeName: t.assigneeName, assigneeAvatarUrl: t.assigneeAvatarUrl,
             )
         }
-        for event in replay.events.prefix(scrubIndex) {
+        let applied = replay.events.prefix(scrubIndex)
+        for event in applied {
             guard let taskId = event.taskId else { continue }
             switch event.eventType {
             case "created":
@@ -163,5 +194,95 @@ final class WeeklyReplayViewModel {
             }
         }
         currentState = state
+        stats = Self.tally(Array(applied))
+
+        if liftLastMove, let moved = lastMovedTaskId(in: replay), state[moved] != nil {
+            setLift(moved)
+        } else {
+            clearLift()
+        }
+    }
+
+    /// Count what the events say the team did. Every event type the board
+    /// ignores (`assignee_change`, `description_change`, `round_started`, …)
+    /// still counts toward its author's contribution total — they're real work,
+    /// just not board-column work.
+    private static func tally(_ events: [MWReplayEvent]) -> ReplayStats {
+        var stats = ReplayStats()
+        var byActor: [String: (name: String, avatar: String?, count: Int)] = [:]
+
+        for event in events {
+            switch event.eventType {
+            case "created":
+                stats.created += 1
+            case "column_change", "review_approved":
+                guard event.fromColumn != event.toColumn else { break }
+                stats.moved += 1
+                if event.toColumn == "done" { stats.completed += 1 }
+            case "review_rejected":
+                guard event.fromColumn != event.toColumn else { break }
+                stats.moved += 1
+                stats.sentBack += 1
+            case "deleted":
+                stats.deleted += 1
+            case "subtask_added":
+                stats.subtasksAdded += 1
+            case "subtask_completed":
+                stats.subtasksCompleted += 1
+            default:
+                break
+            }
+
+            // Fall back to the actor's id when the name joins came up empty
+            // (deleted user, or a row written by a system path with no actor
+            // name) so their work still lands under one identity.
+            guard let actorId = event.actorId else { continue }
+            let name = event.actorName ?? "Unknown"
+            let prior = byActor[actorId]?.count ?? 0
+            byActor[actorId] = (name, event.actorAvatarUrl, prior + 1)
+        }
+
+        stats.contributors = byActor
+            .map { ReplayContributor(id: $0.key, name: $0.value.name,
+                                     avatarUrl: $0.value.avatar, eventCount: $0.value.count) }
+            // Name as tiebreak: a Dictionary iterates in an unspecified order,
+            // so equal counts would otherwise reshuffle the strip every tick.
+            .sorted { ($0.eventCount, $1.name) > ($1.eventCount, $0.name) }
+        return stats
+    }
+
+    /// The task the event at `scrubIndex` carried across columns, or nil if
+    /// that event wasn't a move (creation, deletion, comment, subtask, …) or
+    /// left the card in the column it was already in.
+    private func lastMovedTaskId(in replay: MWWeeklyReplay) -> String? {
+        guard scrubIndex > 0, scrubIndex <= replay.events.count else { return nil }
+        let event = replay.events[scrubIndex - 1]
+        guard ["column_change", "review_rejected", "review_approved"].contains(event.eventType),
+              let taskId = event.taskId,
+              let to = event.toColumn,
+              event.fromColumn != to
+        else { return nil }
+        return taskId
+    }
+
+    /// Pick the card up. Cancels any in-flight drop so a rapid second move
+    /// hands the lift straight to the new card instead of landing the old one.
+    private func setLift(_ taskId: String) {
+        dropLiftTask?.cancel()
+        movingTaskId = taskId
+        dropLiftTask = Task { [weak self] in
+            try? await Task.sleep(for: Self.liftDuration)
+            guard !Task.isCancelled else { return }
+            await MainActor.run { [weak self] in
+                guard let self, self.movingTaskId == taskId else { return }
+                self.movingTaskId = nil
+            }
+        }
+    }
+
+    private func clearLift() {
+        dropLiftTask?.cancel()
+        dropLiftTask = nil
+        movingTaskId = nil
     }
 }
