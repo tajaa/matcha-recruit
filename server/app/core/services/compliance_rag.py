@@ -100,7 +100,13 @@ class ComplianceRAGService:
             idx += 1
 
         if industry_tags:
-            sql += f" AND ce.applicable_industries && ${idx}::text[]"
+            # NULL applicable_industries means the requirement is universal
+            # (untagged baseline/federal law) — array overlap against NULL
+            # yields NULL and silently drops those rows, so allow NULL through.
+            sql += (
+                f" AND (ce.applicable_industries IS NULL"
+                f" OR ce.applicable_industries && ${idx}::text[])"
+            )
             params.append(industry_tags)
             idx += 1
 
@@ -192,7 +198,7 @@ class ComplianceRAGService:
 
         # Get company industry tags for filtering
         company = await conn.fetchrow(
-            "SELECT industry, healthcare_specialties FROM companies WHERE id = $1",
+            "SELECT industry FROM companies WHERE id = $1",
             company_id,
         )
         industry_tags = None

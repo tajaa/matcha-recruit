@@ -8419,14 +8419,26 @@ def _eval_condition(cond: Dict[str, Any], attrs: Dict[str, Any]) -> bool:
             return actual == expected
         if operator == "neq":
             return actual != expected
-        if operator == "gt":
-            return actual > expected
-        if operator == "gte":
-            return actual >= expected
-        if operator == "lt":
-            return actual < expected
-        if operator == "lte":
-            return actual <= expected
+        if operator in ("gt", "gte", "lt", "lte"):
+            # facility_attributes is user-edited JSONB — a numeric trigger vs a
+            # string attr ("120" vs 100) must degrade to False, not TypeError
+            # the whole compliance context.
+            try:
+                a = float(actual) if isinstance(actual, str) else actual
+                e = float(expected) if isinstance(expected, str) else expected
+                if operator == "gt":
+                    return a > e
+                if operator == "gte":
+                    return a >= e
+                if operator == "lt":
+                    return a < e
+                return a <= e
+            except (TypeError, ValueError):
+                logger.warning(
+                    "Trigger comparison failed: %r %s %r (key=%s) — treating as not matched",
+                    actual, operator, expected, key,
+                )
+                return False
         if operator == "in":
             return actual in (expected or [])
         if operator == "contains":
@@ -8452,22 +8464,28 @@ def _eval_condition(cond: Dict[str, Any], attrs: Dict[str, Any]) -> bool:
     return True
 
 
-async def resolve_jurisdiction_stack(
-    conn: asyncpg.Connection, jurisdiction_id: UUID
-) -> List[Dict[str, Any]]:
-    """Walk the jurisdiction hierarchy from leaf to federal via recursive CTE.
+async def resolve_jurisdiction_stacks(
+    conn: asyncpg.Connection, jurisdiction_ids: List[UUID]
+) -> Dict[UUID, List[Dict[str, Any]]]:
+    """Batched variant of resolve_jurisdiction_stack — one round trip for N leaves.
 
-    Returns all active requirements at each level in the chain, joined with
-    matching precedence rules. Results ordered by category + depth (leaf first).
+    Walks every hierarchy in one recursive CTE, carrying the leaf id through the
+    recursion as root_id so results group cleanly. Precedence rules are scoped
+    per-chain (a rule from one leaf's chain never leaks into another's).
+    Returns {leaf_jurisdiction_id: rows ordered by category + depth (leaf first)}.
     """
+    if not jurisdiction_ids:
+        return {}
+    # Dedupe while preserving order
+    unique_ids = list(dict.fromkeys(jurisdiction_ids))
     query = """
         WITH RECURSIVE jurisdiction_chain AS (
             SELECT id, city, state, country_code, level::text AS level, display_name,
-                   parent_id, authority_type, 0 AS depth
-            FROM jurisdictions WHERE id = $1
+                   parent_id, authority_type, 0 AS depth, id AS root_id
+            FROM jurisdictions WHERE id = ANY($1::uuid[])
             UNION ALL
             SELECT j.id, j.city, j.state, j.country_code, j.level::text, j.display_name,
-                   j.parent_id, j.authority_type, jc.depth + 1
+                   j.parent_id, j.authority_type, jc.depth + 1, jc.root_id
             FROM jurisdictions j
             JOIN jurisdiction_chain jc ON j.id = jc.parent_id
             WHERE j.country_code = jc.country_code
@@ -8485,24 +8503,26 @@ async def resolve_jurisdiction_stack(
                    jr.status::text AS req_status, jr.category_id,
                    jr.trigger_conditions, jr.applicable_entity_types,
                    jc.level AS jur_level, jc.display_name AS jur_display_name,
-                   jc.depth
+                   jc.depth, jc.root_id
             FROM jurisdiction_requirements jr
             JOIN jurisdiction_chain jc ON jr.jurisdiction_id = jc.id
             WHERE jr.status = 'active'
         ),
         chain_precedence AS (
-            SELECT pr.id AS rule_id, pr.category_id AS rule_category_id,
+            SELECT jc_h.root_id, pr.id AS rule_id, pr.category_id AS rule_category_id,
                    pr.precedence_type::text AS precedence_type,
                    pr.reasoning_text, pr.legal_citation,
                    pr.trigger_condition, pr.applies_to_all_children,
                    pr.higher_jurisdiction_id, pr.lower_jurisdiction_id
             FROM precedence_rules pr
+            JOIN jurisdiction_chain jc_h ON jc_h.id = pr.higher_jurisdiction_id
             WHERE pr.status = 'active'
-              AND pr.higher_jurisdiction_id IN (SELECT id FROM jurisdiction_chain)
               AND (
-                  (pr.applies_to_all_children = false
-                   AND pr.lower_jurisdiction_id IN (SELECT id FROM jurisdiction_chain))
-                  OR (pr.applies_to_all_children = true)
+                  pr.applies_to_all_children = true
+                  OR pr.lower_jurisdiction_id IN (
+                      SELECT jc_l.id FROM jurisdiction_chain jc_l
+                      WHERE jc_l.root_id = jc_h.root_id
+                  )
               )
         )
         SELECT cr.*,
@@ -8510,14 +8530,33 @@ async def resolve_jurisdiction_stack(
                cp.reasoning_text AS rule_reasoning_text,
                cp.legal_citation AS rule_legal_citation,
                cp.trigger_condition AS rule_trigger_condition,
-               cp.applies_to_all_children
+               cp.applies_to_all_children,
+               cp.higher_jurisdiction_id AS rule_higher_jurisdiction_id,
+               cp.lower_jurisdiction_id AS rule_lower_jurisdiction_id
         FROM chain_requirements cr
         LEFT JOIN chain_precedence cp
             ON cp.rule_category_id = cr.category_id
-        ORDER BY cr.category, cr.depth ASC
+           AND cp.root_id = cr.root_id
+        ORDER BY cr.root_id, cr.category, cr.depth ASC
     """
-    rows = await conn.fetch(query, jurisdiction_id)
-    return [dict(row) for row in rows]
+    rows = await conn.fetch(query, unique_ids)
+    grouped: Dict[UUID, List[Dict[str, Any]]] = {jid: [] for jid in unique_ids}
+    for row in rows:
+        grouped[row["root_id"]].append(dict(row))
+    return grouped
+
+
+async def resolve_jurisdiction_stack(
+    conn: asyncpg.Connection, jurisdiction_id: UUID
+) -> List[Dict[str, Any]]:
+    """Walk the jurisdiction hierarchy from leaf to federal via recursive CTE.
+
+    Returns all active requirements at each level in the chain, joined with
+    matching precedence rules. Results ordered by category + depth (leaf first).
+    Thin wrapper over resolve_jurisdiction_stacks for a single leaf.
+    """
+    grouped = await resolve_jurisdiction_stacks(conn, [jurisdiction_id])
+    return grouped.get(jurisdiction_id, [])
 
 
 def determine_governing_requirement(
@@ -8541,29 +8580,53 @@ def determine_governing_requirement(
         if not rows:
             continue
 
-        # Filter by trigger conditions (evaluate against facility attributes)
-        active_rows = []
+        # Filter by trigger conditions (evaluate against facility attributes).
+        # The precedence LEFT JOIN fans out: a requirement matched by N rules
+        # appears N times, differing only in rule_* columns. Dedupe requirement
+        # rows by id (else all_levels carries duplicates and the single-level
+        # render path is defeated), but keep every (row × rule) pairing as a
+        # rule candidate so no matching rule is lost.
+        active_rows: List[Dict[str, Any]] = []
+        rule_candidates: List[Dict[str, Any]] = []
+        seen_req_ids: set = set()
+        depth_by_jur: Dict[Any, int] = {}
         for row in rows:
             trigger = row.get("trigger_conditions")
-            if evaluate_trigger_conditions(trigger, facility_attributes):
+            if not evaluate_trigger_conditions(trigger, facility_attributes):
+                continue
+            if row.get("rule_id") is not None:
+                rule_candidates.append(row)
+            req_id = row.get("id")
+            if req_id is None or req_id not in seen_req_ids:
+                if req_id is not None:
+                    seen_req_ids.add(req_id)
                 active_rows.append(row)
+            jur_id = row.get("jurisdiction_id")
+            if jur_id is not None:
+                depth_by_jur[jur_id] = row.get("depth", 0)
 
         if not active_rows:
             continue
 
-        # Find precedence rules — prefer specific pair over blanket
+        # Find the governing precedence rule. Specific (non-blanket) beats
+        # blanket; among specific rules, the one pinned to the most local
+        # lower jurisdiction (lowest depth) wins; ties resolve to the first
+        # candidate in SQL order (deterministic).
         rule_row = None
         precedence_type = None
-        for row in active_rows:
-            if row.get("rule_id") is not None:
-                # Check trigger condition on the precedence rule itself
-                rule_trigger = row.get("rule_trigger_condition")
-                if not evaluate_trigger_conditions(rule_trigger, facility_attributes):
-                    continue
-                # Prefer specific (non-blanket) over blanket
-                if rule_row is None or not row.get("applies_to_all_children"):
-                    rule_row = row
-                    precedence_type = row.get("precedence_type")
+        best_score = None
+        for row in rule_candidates:
+            # Check trigger condition on the precedence rule itself
+            rule_trigger = row.get("rule_trigger_condition")
+            if not evaluate_trigger_conditions(rule_trigger, facility_attributes):
+                continue
+            is_specific = not row.get("applies_to_all_children")
+            lower_depth = depth_by_jur.get(row.get("rule_lower_jurisdiction_id"), 999)
+            score = (1 if is_specific else 0, -lower_depth)
+            if best_score is None or score > best_score:
+                best_score = score
+                rule_row = row
+                precedence_type = row.get("precedence_type")
 
         # Sort by depth (0 = leaf/local, higher = more general)
         sorted_rows = sorted(active_rows, key=lambda r: r.get("depth", 0))
@@ -8582,8 +8645,15 @@ def determine_governing_requirement(
             governance_source = "precedence_rule"
 
         elif precedence_type == "ceiling":
-            # Higher jurisdiction's value (find the row at highest depth)
-            governing = sorted_rows[-1] if sorted_rows else sorted_rows[0]
+            # The rule's higher jurisdiction caps the lower one — pick the row
+            # belonging to that jurisdiction, not blindly the most general row
+            # in the chain (a "state caps city" rule must not surface federal).
+            target_jur = rule_row.get("rule_higher_jurisdiction_id") if rule_row else None
+            governing = next(
+                (r for r in sorted_rows if target_jur is not None
+                 and r.get("jurisdiction_id") == target_jur),
+                None,
+            ) or sorted_rows[-1]
             governance_source = "precedence_rule"
 
         elif precedence_type == "supersede":

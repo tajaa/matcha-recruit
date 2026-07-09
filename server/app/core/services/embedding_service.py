@@ -188,3 +188,18 @@ class EmbeddingService:
             chunks.append(current_chunk.strip())
 
         return chunks
+
+
+# Per-key singleton — the genai.Client carries connection state worth reusing;
+# constructing one per request violates the "cache the model handle" rule
+# (server/CLAUDE.md) and adds latency to every RAG lookup.
+_service_registry: dict[str, EmbeddingService] = {}
+
+
+def get_embedding_service(api_key: Optional[str] = None) -> EmbeddingService:
+    key = api_key or ""
+    svc = _service_registry.get(key)
+    if svc is None:
+        svc = EmbeddingService(api_key=api_key)
+        _service_registry[key] = svc
+    return svc

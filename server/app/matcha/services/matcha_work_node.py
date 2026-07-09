@@ -1,5 +1,6 @@
 """Node mode & compliance mode — builds rich internal-data context for Matcha Work threads."""
 
+import asyncio
 import json
 import logging
 import time
@@ -12,8 +13,9 @@ from ...database import get_connection
 from ...core.compliance_registry import get_activated_profiles
 from ...core.services.compliance_service import (
     determine_governing_requirement,
-    resolve_jurisdiction_stack,
+    resolve_jurisdiction_stacks,
 )
+from ...core.services.redis_cache import cache_get, cache_set, get_redis_cache
 
 logger = logging.getLogger(__name__)
 
@@ -23,56 +25,120 @@ class ComplianceContextResult:
     """Holds both the text prompt for Gemini and the structured reasoning chains for storage."""
     context_text: str
     reasoning_chains: list[dict] | None = field(default=None)
+    truncated: bool = False
+    has_legacy_locations: bool = False
 
 
-# TTL cache keyed by company_id — same pattern as _company_profile_cache
-_node_context_cache: dict[str, tuple[float, str]] = {}
-_NODE_CACHE_TTL = 120  # 2 minutes
+# ---------------------------------------------------------------------------
+# Context cache — Redis-backed (shared across workers, TTL-bounded), with an
+# in-process fallback when Redis is unavailable (tests, workers without it).
+# Per-key locks prevent concurrent turns for one company from both rebuilding.
+# ---------------------------------------------------------------------------
 
-_compliance_context_cache: dict[str, tuple[float, "ComplianceContextResult"]] = {}
-_COMPLIANCE_CACHE_TTL = 120  # 2 minutes
+_CACHE_TTL = 120  # 2 minutes
+_MAX_LOCAL_CACHE_ENTRIES = 256
+_local_cache: dict[str, tuple[float, Any]] = {}
+_build_locks: dict[str, asyncio.Lock] = {}
+
+# Context size caps — compliance context is otherwise unbounded (M2).
+_MAX_COMPLIANCE_LOCATIONS = 20
+_MAX_COMPLIANCE_CONTEXT_CHARS = 60_000
+_MAX_LEGACY_ROWS = 200
+
+
+def _get_build_lock(key: str) -> asyncio.Lock:
+    lock = _build_locks.get(key)
+    if lock is None:
+        lock = _build_locks.setdefault(key, asyncio.Lock())
+    return lock
+
+
+async def _ctx_cache_get(key: str) -> Any | None:
+    redis = get_redis_cache()
+    if redis is not None:
+        return await cache_get(redis, key)
+    entry = _local_cache.get(key)
+    if entry and (time.time() - entry[0]) < _CACHE_TTL:
+        return entry[1]
+    return None
+
+
+async def _ctx_cache_set(key: str, value: Any) -> None:
+    redis = get_redis_cache()
+    if redis is not None:
+        await cache_set(redis, key, value, ttl=_CACHE_TTL)
+        return
+    if len(_local_cache) >= _MAX_LOCAL_CACHE_ENTRIES:
+        oldest = min(_local_cache, key=lambda k: _local_cache[k][0])
+        _local_cache.pop(oldest, None)
+    _local_cache[key] = (time.time(), value)
 
 
 async def build_node_context(company_id: UUID) -> str:
     """Fetch internal company data and format as AI context string."""
-    cache_key = str(company_id)
-    now = time.time()
-    cached = _node_context_cache.get(cache_key)
-    if cached and (now - cached[0]) < _NODE_CACHE_TTL:
-        return cached[1]
+    cache_key = f"mw:node_ctx:{company_id}"
+    cached = await _ctx_cache_get(cache_key)
+    if isinstance(cached, str):
+        return cached
+    async with _get_build_lock(cache_key):
+        cached = await _ctx_cache_get(cache_key)
+        if isinstance(cached, str):
+            return cached
+        result = await _build_node_context_uncached(company_id)
+        await _ctx_cache_set(cache_key, result)
+        return result
 
+
+async def _build_node_context_uncached(company_id: UUID) -> str:
     async with get_connection() as conn:
+        # Aggregates over the FULL roster — totals and breakdowns must never
+        # come from the display sample (a 500-employee company was being told
+        # it has 50). One GROUPING SETS query: grand total + by-state + by-dept.
+        emp_stats = await conn.fetch(
+            """
+            SELECT work_state, department, COUNT(*) AS n,
+                   GROUPING(work_state) AS g_state, GROUPING(department) AS g_dept
+            FROM employees
+            WHERE org_id=$1 AND termination_date IS NULL
+            GROUP BY GROUPING SETS ((work_state), (department), ())
+            """,
+            company_id,
+        )
         employees = await conn.fetch(
             """
             SELECT first_name, last_name, job_title, department, work_state,
                    employment_type, start_date
             FROM employees
             WHERE org_id=$1 AND termination_date IS NULL
+            ORDER BY start_date DESC NULLS LAST, last_name NULLS LAST, first_name NULLS LAST
             LIMIT 50
             """,
             company_id,
         )
         policies = await conn.fetch(
             """
-            SELECT title, description, LEFT(content, 500) AS content
+            SELECT title, description, LEFT(content, 500) AS content,
+                   COUNT(*) OVER () AS total_n
             FROM policies
             WHERE company_id=$1 AND status='active'
+            ORDER BY title
             LIMIT 20
             """,
             company_id,
         )
         handbooks = await conn.fetch(
             """
-            SELECT title, status, mode
+            SELECT title, status, mode, COUNT(*) OVER () AS total_n
             FROM handbooks
             WHERE company_id=$1
+            ORDER BY title
             LIMIT 10
             """,
             company_id,
         )
         er_cases = await conn.fetch(
             """
-            SELECT case_number, title, status, category
+            SELECT case_number, title, status, category, COUNT(*) OVER () AS total_n
             FROM er_cases
             WHERE company_id=$1
             ORDER BY updated_at DESC
@@ -82,7 +148,8 @@ async def build_node_context(company_id: UUID) -> str:
         )
         ir_incidents = await conn.fetch(
             """
-            SELECT incident_number, title, incident_type, severity, status
+            SELECT incident_number, title, incident_type, severity, status,
+                   COUNT(*) OVER () AS total_n
             FROM ir_incidents
             WHERE company_id=$1
             ORDER BY occurred_at DESC
@@ -90,6 +157,17 @@ async def build_node_context(company_id: UUID) -> str:
             """,
             company_id,
         )
+
+    total_active = 0
+    dept_counts: dict[str, int] = {}
+    state_counts: dict[str, int] = {}
+    for row in emp_stats:
+        if row["g_state"] == 1 and row["g_dept"] == 1:
+            total_active = row["n"]
+        elif row["g_state"] == 0 and row["work_state"]:
+            state_counts[row["work_state"]] = row["n"]
+        elif row["g_dept"] == 0 and row["department"]:
+            dept_counts[row["department"]] = row["n"]
 
     sections: list[str] = []
 
@@ -102,10 +180,21 @@ async def build_node_context(company_id: UUID) -> str:
         "If the data below does not contain what the user asks about, say so."
     )
 
-    # Employees
-    if employees:
-        dept_counts: dict[str, int] = {}
-        state_counts: dict[str, int] = {}
+    # Employees — aggregates cover the full roster; the name listing is a sample.
+    if total_active or employees:
+        agg_parts = [f"Total active employees: {total_active}"]
+        if dept_counts:
+            dept_str = ", ".join(
+                f"{k}: {v}" for k, v in sorted(dept_counts.items(), key=lambda x: -x[1])[:10]
+            )
+            agg_parts.append(f"By department: {dept_str}")
+        if state_counts:
+            # Every work state matters for compliance reasoning — list all.
+            state_str = ", ".join(
+                f"{k}: {v}" for k, v in sorted(state_counts.items(), key=lambda x: -x[1])
+            )
+            agg_parts.append(f"By work state: {state_str}")
+
         lines = []
         for e in employees:
             name = f"{e['first_name'] or ''} {e['last_name'] or ''}".strip()
@@ -115,27 +204,20 @@ async def build_node_context(company_id: UUID) -> str:
             emp_type = e["employment_type"] or "N/A"
             start = str(e["start_date"]) if e["start_date"] else "N/A"
             lines.append(f"- {name} | {title} | {dept} | {state} | {emp_type} | Started {start}")
-            if dept != "N/A":
-                dept_counts[dept] = dept_counts.get(dept, 0) + 1
-            if state != "N/A":
-                state_counts[state] = state_counts.get(state, 0) + 1
 
-        agg_parts = [f"Total active: {len(employees)}"]
-        if dept_counts:
-            dept_str = ", ".join(f"{k}: {v}" for k, v in sorted(dept_counts.items(), key=lambda x: -x[1])[:10])
-            agg_parts.append(f"By department: {dept_str}")
-        if state_counts:
-            state_str = ", ".join(f"{k}: {v}" for k, v in sorted(state_counts.items(), key=lambda x: -x[1])[:10])
-            agg_parts.append(f"By state: {state_str}")
-
-        sections.append(
-            "\n--- EMPLOYEES ---\n"
-            + " | ".join(agg_parts) + "\n"
-            + "\n".join(lines)
-        )
+        emp_section = "\n--- EMPLOYEES ---\n" + " | ".join(agg_parts)
+        if lines:
+            if total_active > len(lines):
+                emp_section += (
+                    f"\nRoster sample (newest {len(lines)} of {total_active} — "
+                    "the aggregates above cover everyone):"
+                )
+            emp_section += "\n" + "\n".join(lines)
+        sections.append(emp_section)
 
     # Policies
     if policies:
+        total_n = policies[0]["total_n"]
         lines = []
         for p in policies:
             title = p["title"] or "Untitled"
@@ -143,20 +225,28 @@ async def build_node_context(company_id: UUID) -> str:
             content = p["content"] or ""
             preview = (desc + " " + content).strip()[:300]
             lines.append(f"- {title}: {preview}")
-        sections.append("\n--- ACTIVE POLICIES ---\n" + "\n".join(lines))
+        header = "\n--- ACTIVE POLICIES ---"
+        if total_n > len(policies):
+            header += f" (showing {len(policies)} of {total_n})"
+        sections.append(header + "\n" + "\n".join(lines))
 
     # Handbooks
     if handbooks:
+        total_n = handbooks[0]["total_n"]
         lines = []
         for h in handbooks:
             title = h["title"] or "Untitled"
             st = h["status"] or "N/A"
             mode = h["mode"] or "N/A"
             lines.append(f"- {title} | status: {st} | mode: {mode}")
-        sections.append("\n--- HANDBOOKS ---\n" + "\n".join(lines))
+        header = "\n--- HANDBOOKS ---"
+        if total_n > len(handbooks):
+            header += f" (showing {len(handbooks)} of {total_n})"
+        sections.append(header + "\n" + "\n".join(lines))
 
     # ER Cases
     if er_cases:
+        total_n = er_cases[0]["total_n"]
         lines = []
         for c in er_cases:
             num = c["case_number"] or "N/A"
@@ -164,10 +254,14 @@ async def build_node_context(company_id: UUID) -> str:
             st = c["status"] or "N/A"
             cat = c["category"] or "N/A"
             lines.append(f"- {num}: {title} | {cat} | {st}")
-        sections.append("\n--- ER CASES ---\n" + "\n".join(lines))
+        header = "\n--- ER CASES ---"
+        if total_n > len(er_cases):
+            header += f" (showing {len(er_cases)} most recent of {total_n})"
+        sections.append(header + "\n" + "\n".join(lines))
 
     # IR Incidents
     if ir_incidents:
+        total_n = ir_incidents[0]["total_n"]
         lines = []
         for i in ir_incidents:
             num = i["incident_number"] or "N/A"
@@ -176,11 +270,12 @@ async def build_node_context(company_id: UUID) -> str:
             sev = i["severity"] or "N/A"
             st = i["status"] or "N/A"
             lines.append(f"- {num}: {title} | {itype} | severity: {sev} | {st}")
-        sections.append("\n--- IR INCIDENTS ---\n" + "\n".join(lines))
+        header = "\n--- IR INCIDENTS ---"
+        if total_n > len(ir_incidents):
+            header += f" (showing {len(ir_incidents)} most recent of {total_n})"
+        sections.append(header + "\n" + "\n".join(lines))
 
-    result = "\n".join(sections)
-    _node_context_cache[cache_key] = (now, result)
-    return result
+    return "\n".join(sections)
 
 
 async def build_compliance_context(company_id: UUID) -> ComplianceContextResult:
@@ -193,17 +288,42 @@ async def build_compliance_context(company_id: UUID) -> ComplianceContextResult:
     Returns a ComplianceContextResult with both the text prompt and structured reasoning chains.
     Locations without a jurisdiction_id fall back to the legacy compliance_requirements table.
     """
-    cache_key = str(company_id)
-    now = time.time()
-    cached = _compliance_context_cache.get(cache_key)
-    if cached and (now - cached[0]) < _COMPLIANCE_CACHE_TTL:
-        return cached[1]
+    cache_key = f"mw:compliance_ctx:{company_id}"
+    cached = await _ctx_cache_get(cache_key)
+    if isinstance(cached, dict) and "context_text" in cached:
+        return ComplianceContextResult(
+            context_text=cached["context_text"],
+            reasoning_chains=cached.get("reasoning_chains"),
+            truncated=bool(cached.get("truncated")),
+            has_legacy_locations=bool(cached.get("has_legacy_locations")),
+        )
+    async with _get_build_lock(cache_key):
+        cached = await _ctx_cache_get(cache_key)
+        if isinstance(cached, dict) and "context_text" in cached:
+            return ComplianceContextResult(
+                context_text=cached["context_text"],
+                reasoning_chains=cached.get("reasoning_chains"),
+                truncated=bool(cached.get("truncated")),
+                has_legacy_locations=bool(cached.get("has_legacy_locations")),
+            )
+        result = await _build_compliance_context_uncached(company_id)
+        await _ctx_cache_set(cache_key, {
+            "context_text": result.context_text,
+            "reasoning_chains": result.reasoning_chains,
+            "truncated": result.truncated,
+            "has_legacy_locations": result.has_legacy_locations,
+        })
+        return result
 
+
+async def _build_compliance_context_uncached(company_id: UUID) -> ComplianceContextResult:
+    truncated = False
     async with get_connection() as conn:
         locations = await conn.fetch(
             """
             SELECT id, name, city, state, jurisdiction_id, facility_attributes
             FROM business_locations WHERE company_id = $1 AND is_active = true
+            ORDER BY name NULLS LAST, city NULLS LAST
             """,
             company_id,
         )
@@ -239,17 +359,43 @@ async def build_compliance_context(company_id: UUID) -> ComplianceContextResult:
                 else:
                     legacy_locations.append(loc)
 
+            if len(jurisdiction_locations) > _MAX_COMPLIANCE_LOCATIONS:
+                truncated = True
+                sections.append(
+                    f"\n(Context budget: showing {_MAX_COMPLIANCE_LOCATIONS} of "
+                    f"{len(jurisdiction_locations)} locations — run per-location "
+                    "compliance checks for the rest.)"
+                )
+                jurisdiction_locations = jurisdiction_locations[:_MAX_COMPLIANCE_LOCATIONS]
+
+            # One round trip for every location's jurisdiction chain (was an
+            # N+1 with duplicate queries for co-located sites).
+            stacks_by_jurisdiction = await resolve_jurisdiction_stacks(
+                conn, [loc["jurisdiction_id"] for loc in jurisdiction_locations]
+            )
+
             # Process locations with jurisdiction hierarchy
-            for loc in jurisdiction_locations:
+            chars_used = 0
+            for loc_idx, loc in enumerate(jurisdiction_locations):
+                if chars_used > _MAX_COMPLIANCE_CONTEXT_CHARS:
+                    truncated = True
+                    remaining = len(jurisdiction_locations) - loc_idx
+                    sections.append(
+                        f"\n(Context budget reached — {remaining} more location"
+                        f"{'s' if remaining != 1 else ''} omitted. Run per-location "
+                        "compliance checks for details.)"
+                    )
+                    break
                 facility_attrs = _parse_facility_attrs(loc["facility_attributes"])
                 loc_label = f"{loc['name'] or 'Unknown'} ({loc['city'] or 'N/A'}, {loc['state'] or 'N/A'})"
 
                 # Facility profile
                 activated = get_activated_profiles(facility_attrs)
-                sections.append(_format_facility_profile(loc_label, facility_attrs, activated))
+                profile_section = _format_facility_profile(loc_label, facility_attrs, activated)
+                sections.append(profile_section)
+                chars_used += len(profile_section)
 
-                # Resolve full jurisdiction stack
-                stack_rows = await resolve_jurisdiction_stack(conn, loc["jurisdiction_id"])
+                stack_rows = stacks_by_jurisdiction.get(loc["jurisdiction_id"], [])
                 if not stack_rows:
                     sections.append(
                         f"\n--- REGULATORY LAYERS: {loc_label} ---\n"
@@ -280,11 +426,15 @@ async def build_compliance_context(company_id: UUID) -> ComplianceContextResult:
                 governed = determine_governing_requirement(by_cat, facility_attrs)
 
                 # Format regulatory layers (limit 30 categories)
+                if len(governed) > 30:
+                    truncated = True
                 lines = [f"\n--- REGULATORY LAYERS: {loc_label} ---"]
                 for cat_result in governed[:30]:
                     lines.append(_format_category_reasoning(cat_result, facility_attrs))
 
-                sections.append("\n".join(lines))
+                layers_section = "\n".join(lines)
+                sections.append(layers_section)
+                chars_used += len(layers_section)
 
                 # Build structured reasoning chain for this location
                 loc_chain = _build_location_reasoning_chain(
@@ -300,14 +450,23 @@ async def build_compliance_context(company_id: UUID) -> ComplianceContextResult:
                     SELECT cr.category, cr.title, cr.current_value,
                            cr.jurisdiction_name, cr.jurisdiction_level,
                            cr.effective_date, cr.source_url,
-                           bl.city, bl.state, bl.name AS location_name
+                           bl.city, bl.state, bl.name AS location_name,
+                           COUNT(*) OVER () AS total_n
                     FROM compliance_requirements cr
                     JOIN business_locations bl ON cr.location_id = bl.id
                     WHERE bl.id = ANY($1)
                     ORDER BY bl.city, cr.category, cr.jurisdiction_level
+                    LIMIT $2
                     """,
                     legacy_ids,
+                    _MAX_LEGACY_ROWS,
                 )
+                if legacy_rows and legacy_rows[0]["total_n"] > len(legacy_rows):
+                    truncated = True
+                    sections.append(
+                        f"\n(Legacy requirements capped at {len(legacy_rows)} of "
+                        f"{legacy_rows[0]['total_n']}.)"
+                    )
 
                 if legacy_rows:
                     by_loc: Dict[str, list] = defaultdict(list)
@@ -337,12 +496,12 @@ async def build_compliance_context(company_id: UUID) -> ComplianceContextResult:
                         sections.append("\n".join(loc_lines))
 
     context_text = "\n".join(sections)
-    result = ComplianceContextResult(
+    return ComplianceContextResult(
         context_text=context_text,
         reasoning_chains=reasoning_chains if reasoning_chains else None,
+        truncated=truncated,
+        has_legacy_locations=bool(legacy_locations) if locations else False,
     )
-    _compliance_context_cache[cache_key] = (now, result)
-    return result
 
 
 # ---------------------------------------------------------------------------

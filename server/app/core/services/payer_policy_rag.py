@@ -12,6 +12,33 @@ import asyncpg
 
 from .embedding_service import EmbeddingService
 
+# Facility attrs store snake_case contract keys ("medi_cal"); the policy corpus
+# stores display payer names. Medicaid programs are DISTINCT from Medicare —
+# never substitute one program's coverage rules for another's. Unknown payers
+# title-case through and simply match nothing (fail closed).
+_PAYER_NAME_MAP = {
+    "medicare": "Medicare",
+    "medi_cal": "Medi-Cal",
+    "medicaid_other": "Medicaid",
+    "tricare": "TRICARE",
+}
+
+
+def normalize_payer_names(payer_names: list[str]) -> list[str]:
+    """Map facility-attribute contract keys to corpus payer display names."""
+    normalized = []
+    for p in payer_names:
+        normalized.append(_PAYER_NAME_MAP.get(p.lower(), p.title()))
+    return list(set(normalized))
+
+
+NO_CONTRACTS_CONTEXT = (
+    "No payer contracts are configured for this company's locations, so no "
+    "payer policy data was retrieved. Coverage questions cannot be answered "
+    "against a specific payer until contracts are set on the location's "
+    "facility profile (Compliance Setup → location → payer contracts)."
+)
+
 
 class PayerPolicyRAGService:
     """Semantic search over payer policy embeddings for medical policy Q&A."""
@@ -146,14 +173,11 @@ class PayerPolicyRAGService:
 
         # Normalize payer names for search (facility stores "medicare", API stores "Medicare")
         if payer_names:
-            normalized = []
-            for p in payer_names:
-                p_lower = p.lower()
-                if p_lower in ("medicare", "medi_cal", "medicaid_other"):
-                    normalized.append("Medicare")
-                else:
-                    normalized.append(p.title())
-            payer_names = list(set(normalized))
+            payer_names = normalize_payer_names(payer_names)
+        else:
+            # Fail closed: a company with no configured payer contracts must
+            # not be answered from ALL payers' policies as if in-network.
+            return NO_CONTRACTS_CONTEXT, []
 
         results = await self.search_policies(
             query=query,
@@ -164,7 +188,14 @@ class PayerPolicyRAGService:
         )
 
         if not results:
-            return "", []
+            searched = ", ".join(sorted(payer_names))
+            return (
+                f"No policy data was found for the company's contracted payer(s): "
+                f"{searched}. Answers about these payers' coverage rules are NOT "
+                "grounded in retrieved policy documents — say so explicitly rather "
+                "than answering from general knowledge.",
+                [],
+            )
 
         # Build context with token budget
         context_parts = []

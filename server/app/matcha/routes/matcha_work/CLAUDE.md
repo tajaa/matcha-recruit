@@ -1,6 +1,6 @@
 # Matcha Work Routes Package
 
-Backend routes for Matcha Work (collaborative AI workspace — projects, threads, tasks, recruiting, AI turns). Package was split from an 11,572-line flat `matcha_work.py` into per-domain submodules on 2026-07-03. URL surface unchanged (204 routes); external import path `app.matcha.routes.matcha_work` stable.
+Backend routes for Matcha Work (collaborative AI workspace — projects, threads, tasks, recruiting, AI turns). Package was split from an 11,572-line flat `matcha_work.py` into per-domain submodules on 2026-07-03. URL surface unchanged at the split (204 routes; 203 since the 2026-07-09 deletion of the dead non-streaming `POST /threads/{id}/messages` — see `messaging.py`'s module docstring); external import path `app.matcha.routes.matcha_work` stable.
 
 ## Layout
 
@@ -21,9 +21,9 @@ Backend routes for Matcha Work (collaborative AI workspace — projects, threads
 | `collaboration.py` | Discussion channel, project collaborators, invites, admin-user search, thread collaborators | 13 |
 | `recruiting.py` | Recruiting-client CRUD, project chats, job posting, candidate shortlist/dismiss/reject, resume upload/analyze, interviews | 19 |
 | `tutor.py` | Language tutor voice sessions (Gemini Live) + EN/ES/FR utterance-check prompts | 3 |
-| `messaging.py` | The core AI-turn surface: `send_message` + `send_message_stream` (the two biggest handlers) + RAG-context/compliance-gap-detection/thread-file-attachment-meta helpers | 2 |
+| `messaging.py` | The core AI-turn surface: `send_message_stream` (the biggest handler; its non-streaming twin was deleted 2026-07-09 — quota-bypass/wrong-tenant/crash-after-billing drift, zero callers) + RAG-context/compliance-gap-detection/thread-file-attachment-meta helpers | 1 |
 | `threads.py` | Remainder: create/logo/handbook-upload, list/get, versions/revert/finalize/save-draft, PDF/proxy, archive/unarchive, review-requests + signatures + presentation, title/pin/node-mode/compliance-mode/payer-mode (**owns `public_router`** for public review routes) | 24 + 2 public |
-| **Total** | | **204 routes** |
+| **Total** | | **203 routes** |
 
 ## Three routers
 

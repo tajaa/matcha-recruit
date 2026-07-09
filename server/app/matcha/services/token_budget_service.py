@@ -115,7 +115,18 @@ async def deduct_tokens(conn, company_id: UUID, total_tokens: int) -> dict[str, 
     sub_remaining = max(0, row["subscription_token_limit"] - row["subscription_tokens_used"])
 
     if free_remaining + sub_remaining < total_tokens:
-        raise _budget_exception(free_remaining, sub_remaining)
+        # The generation already happened — raising here (with callers
+        # swallowing the exception) rolled back the transaction, so the usage
+        # was never recorded and a company sitting just under its limit could
+        # repeat full-quality turns forever. Clamp instead: drain the balance
+        # to zero so the NEXT check_token_budget blocks.
+        logger.warning(
+            "Token deduction clamped for company %s: owed %s, available %s",
+            company_id, total_tokens, free_remaining + sub_remaining,
+        )
+        total_tokens = free_remaining + sub_remaining
+        if total_tokens <= 0:
+            return await get_token_budget(company_id, conn=conn)
 
     if free_remaining >= total_tokens:
         # Fully covered by free tokens

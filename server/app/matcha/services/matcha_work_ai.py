@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import re
+import threading
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional, Any
@@ -112,6 +113,10 @@ from cachetools import TTLCache  # noqa: E402
 _CACHE_TTL_SECONDS = 3600  # 1 hour — must match Gemini's cache TTL
 _CACHE_REGISTRY_MAX = 2000
 _cache_registry: TTLCache = TTLCache(maxsize=_CACHE_REGISTRY_MAX, ttl=_CACHE_TTL_SECONDS)
+# Serializes cache creation — runs inside asyncio.to_thread, so a threading
+# lock (not asyncio) is correct. Without it, concurrent first-messages for one
+# company each create a Gemini cache; the losers leak until TTL.
+_cache_creation_lock = threading.Lock()
 _cache_unsupported_models: set[str] = set()  # models that don't support caching — skip silently
 
 OFFER_LETTER_FIELDS = list(OfferLetterDocument.model_fields.keys())
@@ -523,37 +528,16 @@ Output constraints:
 - cover_image_url must NOT be set by AI — it is generated automatically.
 
 Data visualization:
-Only include an inline SVG chart when the user EXPLICITLY asks for a chart/graph/visualization,
-OR when the answer is fundamentally a comparison of specific numeric values that the user is asking you to analyze (e.g. "compare Q1 vs Q2 revenue", "break down headcount by department").
-Do NOT include SVG for: general news questions, market commentary, current events, explanations,
-how-tos, conversational replies, or any reply where the numbers aren't the central point.
-When in doubt: do NOT emit SVG. Raw SVG markup is ugly when the client can't render it.
-Guidelines for charts (when appropriate):
-- Use simple, clean SVG (bar charts, horizontal bars, pie/donut, line charts)
-- Dark theme: background transparent, text fill="#9ca3af", bars/slices use these colors: #22c55e, #3b82f6, #f59e0b, #ef4444, #8b5cf6, #ec4899
-- Max width 480px, max height 300px via viewBox
-- Include axis labels and a legend when needed
-- Keep it simple — no animations, no external fonts
-- Only add a chart when data genuinely warrants it — don't chart trivial information
-- The chart SVG goes inline in the "reply" markdown alongside your text explanation
-Example: salary range comparison, headcount by department, compliance score breakdown, candidate match distribution
+NEVER emit inline SVG or raw HTML — no client renders it (it shows up as escaped
+markup). When the user asks for a chart/graph/visualization, or the answer is
+fundamentally a comparison of numeric values, present the data as a well-formed
+Markdown TABLE, optionally with a compact ranked list calling out the key
+comparison. Lead with the takeaway sentence, then the table.
 
 UI Mockups and wireframes:
 When the user asks for a visual mockup, wireframe, dashboard representation, or UI concept:
-- This applies ONLY to genuine UI / screen / app-interface concepts. A request for a document — a PDF, memo, deal memo, brief, report, letter, or "a doc with notes in the margins" — is NOT a wireframe request: write the actual document content as Markdown in your reply (see DOCUMENT EXPORT above). Never answer a document request with an SVG.
-- Create a SIMPLIFIED wireframe as inline SVG — NOT a pixel-perfect design
-- Use rectangles with rounded corners (rx="6") for cards, panels, sections
-- Use text elements for labels and headings — keep font sizes readable (12-16px)
-- Dark theme: card backgrounds fill="#1e1e1e" or fill="#252526", borders stroke="#333", text fill="#e4e4e7", accent fill="#22c55e"
-- Max width 480px, max height 400px via viewBox="0 0 480 400"
-- Show LAYOUT and STRUCTURE, not every detail — use placeholder rectangles for complex content
-- For tables: use simple rect+text rows, not HTML tables
-- For buttons: rounded rect with centered text
-- Do NOT use foreignObject, CSS stylesheets, or HTML inside SVG
-- Do NOT use gradients or complex filters — solid fills only
-- Label each section clearly so the user understands the layout
-- Keep total element count under 50 to avoid rendering issues
-- If the mockup would be too complex for SVG, describe the layout in structured bullet points instead and include a simpler overview SVG showing just the major sections
+- This applies ONLY to genuine UI / screen / app-interface concepts. A request for a document — a PDF, memo, deal memo, brief, report, letter, or "a doc with notes in the margins" — is NOT a wireframe request: write the actual document content as Markdown in your reply (see DOCUMENT EXPORT above).
+- Describe the layout in structured Markdown: one section per screen region (header, nav, panels), with nested bullets for the components inside each region and short notes on hierarchy/emphasis. Never emit SVG or HTML for mockups.
 """
 
 # Dynamic portion — changes every message (never cached)
@@ -952,6 +936,7 @@ class MatchaWorkAIProvider:
         node_mode: bool = False,
         blog_mode_state: Optional[str] = None,
         thread_id: Optional[str] = None,
+        dynamic_context: str = "",
     ) -> AIResponse:
         raise NotImplementedError
 
@@ -987,6 +972,16 @@ class GeminiProvider(MatchaWorkAIProvider):
             if cached_model == model:
                 return name
 
+        with _cache_creation_lock:
+            # Double-check under the lock — another thread may have created it.
+            cached = _cache_registry.get(key)
+            if cached is not None:
+                name, cached_model = cached
+                if cached_model == model:
+                    return name
+            return self._create_cache_locked(key, model, static_prompt, company_id)
+
+    def _create_cache_locked(self, key: str, model: str, static_prompt: str, company_id: str) -> Optional[str]:
         try:
             new_cache = self.client.caches.create(
                 model=model,
@@ -1023,6 +1018,7 @@ class GeminiProvider(MatchaWorkAIProvider):
         node_mode: bool = False,
         blog_mode_state: Optional[str] = None,
         thread_id: Optional[str] = None,
+        dynamic_context: str = "",
     ) -> AIResponse:
         latest_user_msg = next(
             (m["content"] for m in reversed(messages) if m.get("role") == "user"),
@@ -1044,21 +1040,23 @@ class GeminiProvider(MatchaWorkAIProvider):
             from ...core.services.storage import get_storage
             from ..services.matcha_work_document import build_matcha_work_thread_storage_prefix
 
-            def _call_imagen() -> Optional[tuple[bytes, str, str]]:
+            _IMAGE_MODEL = "gemini-3.1-flash-image-preview"
+
+            def _call_imagen() -> Optional[tuple[bytes, str, str, Optional[dict]]]:
                 try:
                     response = self.client.models.generate_content(
-                        model="gemini-3.1-flash-image-preview",
+                        model=_IMAGE_MODEL,
                         contents=latest_user_msg,
                         config=_genai_types.GenerateContentConfig(
                             response_modalities=["IMAGE", "TEXT"],
                             image_config=_genai_types.ImageConfig(aspect_ratio="16:9"),
                         ),
                     )
-                    
+
                     image_data = None
                     mime = "image/png"
                     reply_text = ""
-                    
+
                     if response.candidates and response.candidates[0].content and response.candidates[0].content.parts:
                         for part in response.candidates[0].content.parts:
                             if part.text:
@@ -1066,16 +1064,17 @@ class GeminiProvider(MatchaWorkAIProvider):
                             elif part.inline_data and part.inline_data.data:
                                 image_data = part.inline_data.data
                                 mime = part.inline_data.mime_type or "image/png"
-                    
+
                     if image_data:
-                        return image_data, mime, reply_text
+                        usage = self._extract_usage_metadata(response, _IMAGE_MODEL)
+                        return image_data, mime, reply_text, usage
                 except Exception as e:
                     logger.warning("Gemini image generation call failed: %s", e)
                 return None
 
             result = await asyncio.to_thread(_call_imagen)
             if result:
-                image_bytes, mime_type, reply_text = result
+                image_bytes, mime_type, reply_text, image_usage = result
                 ext = "png" if "png" in mime_type else "jpg"
                 filename = f"image_{secrets.token_hex(8)}.{ext}"
                 
@@ -1113,11 +1112,14 @@ class GeminiProvider(MatchaWorkAIProvider):
                         "filename": filename
                     }]
                     
-                    token_usage = {
+                    # Real usage from the API when available; the hand-rolled
+                    # estimate only backstops a missing usage_metadata.
+                    token_usage = image_usage or {
                         "prompt_tokens": len(latest_user_msg.split()) * 2,
                         "completion_tokens": 1024,
                         "total_tokens": 1024 + len(latest_user_msg.split()) * 2,
-                        "model": "gemini-3.1-flash-image-preview",
+                        "model": _IMAGE_MODEL,
+                        "estimated": True,
                     }
 
                     return AIResponse(
@@ -1156,13 +1158,23 @@ class GeminiProvider(MatchaWorkAIProvider):
                                 system_instruction=full_prompt,
                                 temperature=0.2,
                                 tools=[_GOOGLE_SEARCH_TOOL],
+                                # Payer coverage answers are the hardest turns
+                                # in the system — clinical criteria + grounding.
+                                thinking_config=types.ThinkingConfig(thinking_level="high"),
                             ),
                         )
                     ),
                     timeout=GEMINI_CALL_TIMEOUT,
                 )
                 reply = response.text or "I couldn't generate a response."
-                return AIResponse(assistant_reply=reply, structured_update=None)
+                # Real usage with the ACTUAL model — payer turns are Pro +
+                # search grounding, the priciest combo; billing them from the
+                # input-only flash estimate leaked ~all of their cost.
+                return AIResponse(
+                    assistant_reply=reply,
+                    structured_update=None,
+                    token_usage=self._extract_usage_metadata(response, model),
+                )
             except Exception as e:
                 logger.error("Payer mode Gemini call failed: %s", e, exc_info=True)
                 return AIResponse(
@@ -1173,6 +1185,7 @@ class GeminiProvider(MatchaWorkAIProvider):
         static_prompt, dynamic_prompt, contents, valid_fields, inferred_skill = self._build_prompt_and_contents(
             messages, current_state, company_context=company_context, slide_index=slide_index,
             context_summary=context_summary, blog_mode_state=blog_mode_state,
+            dynamic_context=dynamic_context,
         )
         model = await _get_model(self.settings, model_override, company_id=company_id, user_id=user_id)
 
@@ -1295,6 +1308,7 @@ class GeminiProvider(MatchaWorkAIProvider):
                 mode="general",
                 skill="none",
                 operation="none",
+                token_usage=self._extract_usage_metadata(response, model),
             )
 
         # Gemini sometimes returns a list-wrapped response (e.g. [{...}]) even
@@ -1330,6 +1344,7 @@ class GeminiProvider(MatchaWorkAIProvider):
                     mode="general",
                     skill="none",
                     operation="none",
+                    token_usage=self._extract_usage_metadata(response, model),
                 )
 
         if not isinstance(parsed, dict):
@@ -1344,6 +1359,7 @@ class GeminiProvider(MatchaWorkAIProvider):
                 mode="general",
                 skill="none",
                 operation="none",
+                token_usage=self._extract_usage_metadata(response, model),
             )
 
         reply = parsed.get("reply", "Done.")
@@ -1426,11 +1442,21 @@ class GeminiProvider(MatchaWorkAIProvider):
         current_state: dict,
         company_context: str = "",
         slide_index: Optional[int] = None,
+        dynamic_context: str = "",
+        model_override: Optional[str] = None,
+        company_id: str = "",
+        user_id: str = "",
     ) -> dict:
         static_prompt, dynamic_prompt, _, _, _ = self._build_prompt_and_contents(
-            messages, current_state, company_context=company_context, slide_index=slide_index
+            messages, current_state, company_context=company_context,
+            slide_index=slide_index, dynamic_context=dynamic_context,
         )
-        model = await _get_model(self.settings)
+        # Resolve the SAME model the actual turn will use — estimating against
+        # the default flash model billed Pro-tier fallback turns at flash prices.
+        model = await _get_model(
+            self.settings, model_override,
+            company_id=company_id or None, user_id=user_id or None,
+        )
         windowed = messages[-20:]
         char_count = len(static_prompt) + len(dynamic_prompt) + sum(len(str(msg.get("content", ""))) for msg in windowed)
         prompt_tokens = max(1, char_count // 4)
@@ -1450,11 +1476,17 @@ class GeminiProvider(MatchaWorkAIProvider):
         slide_index: Optional[int] = None,
         context_summary: Optional[str] = None,
         blog_mode_state: Optional[str] = None,
+        dynamic_context: str = "",
     ) -> tuple[str, str, list, list[str], str]:
         """Returns (static_prompt, dynamic_prompt, contents, valid_fields, skill).
 
         static_prompt: instructions + company context (cacheable, changes slowly)
         dynamic_prompt: current_state + summary + slide lock (changes per message)
+        dynamic_context: per-turn context blocks (node/compliance/payer/RAG) —
+            these vary with every message, so routing them here instead of into
+            company_context keeps the static-prompt cache key stable (routing
+            them into the static prompt made the Gemini cache miss every turn
+            and CREATE a new cache per message).
 
         When blog_mode_state is provided (set by the route for project_type='blog'),
         a dedicated blog-only system prompt is used instead of the generic
@@ -1480,6 +1512,8 @@ class GeminiProvider(MatchaWorkAIProvider):
                     f"(Earlier messages were summarized to preserve context)\n"
                     f"{context_summary}\n"
                 )
+            if dynamic_context:
+                dynamic_prompt += "\n\n" + dynamic_context
             blog_contents: list = []
             for msg in windowed:
                 role = "user" if msg["role"] == "user" else "model"
@@ -1528,6 +1562,11 @@ class GeminiProvider(MatchaWorkAIProvider):
             current_state=json.dumps(current_state, default=str, separators=(",", ":")),
             valid_fields=", ".join(valid_fields),
         )
+
+        # Per-turn context (node/compliance/payer/RAG blocks) — must stay out
+        # of the static prompt or the cache key changes every message.
+        if dynamic_context:
+            dynamic_prompt += "\n\n" + dynamic_context
 
         # Recruiting project context — add specific instructions
         # (The route-level _inject_recruiting_project_context provides the primary

@@ -589,19 +589,28 @@ def _blog_mode_state_from_meta(project_meta: Optional[dict]) -> Optional[str]:
         return None
     return _format_blog_mode_state(project_meta)
 
-async def _inject_recruiting_project_context(ctx: str, thread: dict, current_state: dict) -> str:
+async def _inject_recruiting_project_context(
+    ctx: str, thread: dict, current_state: dict,
+    project_meta: Optional[dict] = None,
+) -> str:
     """If this thread belongs to a recruiting project, inject context so the AI
-    generates posting sections instead of creating a new project."""
+    generates posting sections instead of creating a new project.
+
+    Pass `project_meta` (from `_fetch_project_meta`) to reuse an already-fetched
+    row — the streaming handler previously ran this identical query twice per turn.
+    """
     project_id = thread.get("project_id")
     if not project_id:
         return ctx
 
     from app.matcha.services import project_service as proj_svc
-    async with get_connection() as conn:
-        row = await conn.fetchrow(
-            "SELECT title, project_type, sections, project_data FROM mw_projects WHERE id = $1",
-            project_id,
-        )
+    row = project_meta
+    if row is None:
+        async with get_connection() as conn:
+            row = await conn.fetchrow(
+                "SELECT title, project_type, sections, project_data FROM mw_projects WHERE id = $1",
+                project_id,
+            )
     if not row:
         return ctx
     if row["project_type"] == "blog":

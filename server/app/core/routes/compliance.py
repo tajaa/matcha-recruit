@@ -1376,15 +1376,11 @@ async def list_payer_policies(
             params.append(f"%{payer_name}%")
             idx += 1
         elif company_payers:
-            # Normalize: facility stores "medicare", DB stores "Medicare"
-            normalized = []
-            for p in company_payers:
-                if p.lower() in ("medicare", "medi_cal", "medicaid_other"):
-                    normalized.append("Medicare")
-                else:
-                    normalized.append(p.title())
+            # Normalize: facility stores "medicare", DB stores "Medicare".
+            # Shared map — Medicaid programs must not be searched as Medicare.
+            from app.core.services.payer_policy_rag import normalize_payer_names
             conditions.append(f"payer_name = ANY(${idx}::text[])")
-            params.append(list(set(normalized)))
+            params.append(normalize_payer_names(company_payers))
             idx += 1
 
         if procedure_code:

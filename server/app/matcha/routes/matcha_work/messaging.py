@@ -1,6 +1,11 @@
-"""The core AI-turn messaging surface: send_message (non-streaming) and
-send_message_stream (SSE), plus their shared RAG-context, compliance-gap-
-detection, and thread-file-attachment helpers.
+"""The core AI-turn messaging surface: send_message_stream (SSE), plus its
+RAG-context, compliance-gap-detection, and thread-file-attachment helpers.
+
+The non-streaming POST /threads/{id}/messages handler was DELETED (2026-07-09):
+no client called it (web + desktop both stream), and it had drifted from the
+streaming handler — it bypassed the per-user token quota, built context from
+the caller's company instead of the thread's, and crashed after billing on
+payer-mode turns. See MATCHA_WORK_CHAT_AUDIT.md (C2/H1/H2/M5).
 
 Extracted from the original flat matcha_work.py during the package split
 (2026-07-03). See matcha_work/CLAUDE.md.
@@ -37,9 +42,7 @@ from app.matcha.services.matcha_work_ai import (
     _build_company_context,
     _infer_skill_from_state,
     compact_conversation,
-    fetch_live_web_context,
     get_ai_provider,
-    needs_live_web_context,
 )
 from app.matcha.services.model_pricing import calculate_call_cost
 
@@ -49,14 +52,13 @@ router = APIRouter()
 async def _get_rag_context(content: str, company_id, max_tokens: int = 4000) -> str | None:
     """Fetch compliance RAG context for a user question. Returns None on failure."""
     try:
-        from app.core.services.embedding_service import EmbeddingService
+        from app.core.services.embedding_service import get_embedding_service
         from app.core.services.compliance_rag import ComplianceRAGService
 
         api_key = os.getenv("GEMINI_API_KEY") or get_settings().gemini_api_key
         if not api_key or not content:
             return None
-        es = EmbeddingService(api_key=api_key)
-        crag = ComplianceRAGService(es)
+        crag = ComplianceRAGService(get_embedding_service(api_key))
         async with get_connection() as conn:
             ctx, _ = await crag.get_context_for_question(
                 query=content, conn=conn,
@@ -66,6 +68,72 @@ async def _get_rag_context(content: str, company_id, max_tokens: int = 4000) -> 
     except Exception as e:
         logger.warning("RAG augmentation failed: %s", e)
         return None
+
+# Strong refs to fire-and-forget tasks — the event loop only holds weak
+# references, so an un-referenced task can be GC'd mid-flight.
+_background_tasks: set = set()
+
+
+def _track_background_task(task: "asyncio.Task") -> "asyncio.Task":
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+    return task
+
+
+async def _finalize_cancelled_turn(
+    ai_task: "asyncio.Task",
+    *,
+    thread_id: UUID,
+    company_id: UUID,
+    user_id: UUID,
+    user_role: str,
+    estimated_usage: dict | None,
+) -> None:
+    """Record + deduct usage for a turn whose SSE stream was cancelled.
+
+    The Gemini call runs inside asyncio.to_thread — cancelling the task would
+    not stop the underlying HTTP call, so the cost is committed either way.
+    Awaiting it yields the REAL usage; fall back to the estimate if the call
+    itself failed.
+    """
+    token_usage = None
+    try:
+        ai_resp = await ai_task
+        token_usage = getattr(ai_resp, "token_usage", None)
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.warning("Cancelled-turn AI task failed for thread %s", thread_id, exc_info=True)
+    final_usage = token_usage or estimated_usage
+    if not final_usage:
+        return
+    cost = calculate_call_cost(
+        model=str(final_usage.get("model") or "unknown"),
+        prompt_tokens=final_usage.get("prompt_tokens"),
+        completion_tokens=final_usage.get("completion_tokens"),
+    )
+    final_usage["cost_dollars"] = float(cost)
+    try:
+        await doc_svc.log_token_usage_event(
+            company_id=company_id,
+            user_id=user_id,
+            thread_id=thread_id,
+            token_usage=final_usage,
+            operation="send_message_cancelled",
+            cost_dollars=float(cost),
+        )
+    except Exception as e:
+        logger.warning("Failed to log cancelled-turn usage for thread %s: %s", thread_id, e)
+    if user_role != "admin":
+        total_tokens = final_usage.get("total_tokens") or 0
+        if total_tokens > 0:
+            try:
+                async with get_connection() as conn:
+                    async with conn.transaction():
+                        await token_budget_service.deduct_tokens(conn, company_id, total_tokens)
+            except Exception as exc:
+                logger.warning("Failed to deduct cancelled-turn tokens for thread %s: %s", thread_id, exc)
+
 
 async def _get_affected_employees(
     company_id: UUID,
@@ -267,320 +335,6 @@ async def _build_thread_file_attachment_meta(attachments) -> list[dict]:
         out.append(meta)
     return out
 
-@router.post("/threads/{thread_id}/messages", response_model=SendMessageResponse)
-async def send_message(
-    thread_id: UUID,
-    body: SendMessageRequest,
-    current_user: CurrentUser = Depends(require_admin_or_client),
-):
-    """Send a user message → AI response → state update → PDF."""
-    company_id = await get_client_company_id(current_user)
-    if company_id is None:
-        raise HTTPException(status_code=404, detail="Thread not found")
-
-    thread = await doc_svc.get_thread(thread_id, company_id, user_id=current_user.id)
-    if thread is None:
-        raise HTTPException(status_code=404, detail="Thread not found")
-
-    if thread["status"] == "finalized":
-        raise HTTPException(status_code=400, detail="Cannot send messages to a finalized thread")
-
-    if thread["status"] == "archived":
-        raise HTTPException(status_code=400, detail="Cannot send messages to an archived thread")
-
-    if current_user.role != "admin":
-        await token_budget_service.check_token_budget(company_id)
-
-    # Persist attachments (images + non-image files with extracted text) on the
-    # user message metadata, mirroring the streaming endpoint.
-    image_atts = [{"url": u, "kind": "image"} for u in (body.image_urls or []) if isinstance(u, str) and u]
-    file_atts = await _build_thread_file_attachment_meta(body.attachments)
-    all_atts = image_atts + file_atts
-    user_meta = {"attachments": all_atts} if all_atts else None
-    is_file_only = bool(file_atts) and not (body.content or "").strip()
-
-    # Save user message
-    user_msg = await doc_svc.add_message(thread_id, "user", body.content, metadata=user_meta)
-
-    # File-only send → ask for intent rather than auto-analyzing. File + text
-    # already persisted, so the follow-up has context. No model call.
-    if is_file_only:
-        assistant_msg = await doc_svc.add_message(
-            thread_id, "assistant", "Are you looking for analysis or something else?"
-        )
-        return SendMessageResponse(
-            user_message=_row_to_message(user_msg),
-            assistant_message=_row_to_message(assistant_msg),
-            current_state=thread["current_state"],
-            version=thread["version"],
-            task_type=_infer_skill_from_state(thread["current_state"]),
-            pdf_url=None,
-            token_usage=None,
-        )
-
-    # Fetch message history + company profile + context summary in parallel
-    messages, profile, (context_summary, summary_at_count) = await asyncio.gather(
-        doc_svc.get_thread_messages(thread_id, limit=20),
-        doc_svc.get_company_profile_for_ai(company_id),
-        doc_svc.get_context_summary(thread_id),
-    )
-    msg_dicts = [{"role": m["role"], "content": m["content"]} for m in messages]
-    # Collect extracted text from any file attachments in the window for AI context.
-    _file_ctx_parts: list[str] = []
-    for _m in messages:
-        _meta = _m.get("metadata")
-        if isinstance(_meta, str):
-            try:
-                _meta = json.loads(_meta)
-            except Exception:
-                _meta = None
-        if isinstance(_meta, dict):
-            for _a in (_meta.get("attachments") or []):
-                if isinstance(_a, dict) and _a.get("kind") == "file" and _a.get("text"):
-                    _file_ctx_parts.append(f"[{_a.get('filename') or 'file'}]\n{_a['text']}")
-
-    # Inject selected slide content into the AI-facing message (not saved to DB)
-    _inject_slide_context(msg_dicts, thread["current_state"], body.slide_index)
-
-    # Call AI with company context
-    ai_provider = get_ai_provider()
-    ctx = _build_company_context(profile)
-    if _file_ctx_parts:
-        ctx += (
-            "\n\n=== ATTACHED FILES ===\n"
-            "The user attached the following file(s). Use their content only as "
-            "the user's message directs — do not produce an unprompted full "
-            "summary or analysis.\n\n" + "\n\n".join(_file_ctx_parts) + "\n"
-        )
-
-    # Inject project file attachments metadata
-    if thread.get("project_id"):
-        from app.matcha.services import project_file_service
-        pfiles = await project_file_service.list_project_files(thread["project_id"])
-        if pfiles:
-            listing = "\n".join(f"- {f['filename']} ({f['content_type']}, {f['file_size']:,} bytes)" for f in pfiles)
-            ctx += f"\n\n=== PROJECT ATTACHMENTS ===\nThe user has attached these files to the project. Reference them when relevant:\n{listing}\n"
-
-    # Inject recruiting project context so AI generates posting sections in the right project
-    ctx = await _inject_recruiting_project_context(ctx, thread, thread["current_state"])
-
-    # No-project guard: prevent the AI from hallucinating a "project panel" for
-    # plain chat threads. Without this, once current_state accumulates
-    # project_title/project_sections from a prior reply, _infer_skill_from_state
-    # locks skill="project" and the AI keeps claiming it updated a document the
-    # user has no UI to see.
-    if not thread.get("project_id"):
-        ctx += (
-            "\n\n=== PLAIN THREAD (NO PROJECT) ==="
-            "\nThis is a plain chat thread. Per the Surface architecture section at the top of the system prompt: threads cannot contain projects, and no project is attached to this thread."
-            "\n- Set mode=\"general\", skill=\"none\", operation=\"none\". Never emit project_title, project_sections, blog_outline, blog_section_draft, or blog_section_revision."
-            "\n- There is no project panel / canvas / draft surface in this chat — don't reference one."
-            "\n- Documents, memos, deal memos, briefs, reports, letters: WRITE THE COMPLETE DOCUMENT as well-structured Markdown directly in your reply (use # / ## headings, bullet lists, and tables as appropriate). This is fully supported."
-            "\n- The user can export any of your replies to a downloadable PDF using the export button on the message. NEVER say you cannot create, generate, or export a PDF or a document. NEVER output raw SVG or HTML wireframes / mockups of a document — write the actual content as Markdown."
-            "\n- Short-form content (LinkedIn posts, social captions, emails, summaries, cover letters): write it directly in your reply."
-            "\n- Suggest creating a Project (+ next to Projects in the sidebar) ONLY when the user wants to iteratively edit a multi-section document over time — never as a reason to decline writing the content now."
-        )
-
-    # Grounded web search pre-pass for time-sensitive questions
-    # (markets today, news, weather, scores, etc.) — fetches current facts via
-    # Gemini Google Search grounding and injects them into the context.
-    if needs_live_web_context(body.content):
-        from app.config import get_settings as _get_settings
-        live_ctx = await fetch_live_web_context(body.content, _get_settings())
-        if live_ctx:
-            ctx += live_ctx
-
-    compliance_result: ComplianceContextResult | None = None
-    if thread.get("node_mode"):
-        node_ctx = await build_node_context(company_id)
-        ctx += "\n\n" + node_ctx
-    if thread.get("compliance_mode"):
-        compliance_result = await build_compliance_context(company_id)
-        ctx += "\n\n" + compliance_result.context_text
-
-        # RAG augmentation — find requirements most relevant to the user's question
-        rag_ctx = await _get_rag_context(body.content, company_id)
-        if rag_ctx:
-            ctx += "\n\n=== RELEVANT REGULATIONS (semantic search) ===\n" + rag_ctx
-
-    # Payer mode — build dedicated medical policy prompt (separate from HR copilot)
-    payer_prompt = None
-    payer_sources: list[dict] = []
-    if thread.get("payer_mode"):
-        try:
-            import os as _os
-            from app.core.services.embedding_service import EmbeddingService
-            from app.core.services.payer_policy_rag import PayerPolicyRAGService
-            from app.config import get_settings as _get_settings
-            from app.matcha.services.matcha_work_ai import PAYER_MODE_SYSTEM_PROMPT
-            from datetime import date as _date
-
-            user_msg = body.content or ""
-            _api_key = _os.getenv("GEMINI_API_KEY") or _get_settings().gemini_api_key
-            if _api_key and user_msg:
-                _emb = EmbeddingService(api_key=_api_key)
-                _rag = PayerPolicyRAGService(_emb)
-                async with get_connection() as _pconn:
-                    payer_ctx, payer_sources = await _rag.get_context_for_query(
-                        query=user_msg, conn=_pconn,
-                        company_id=company_id, max_tokens=6000,
-                    )
-                company_name = profile.get("name", "your company")
-                payer_prompt = PAYER_MODE_SYSTEM_PROMPT.format(
-                    company_name=company_name,
-                    today=_date.today().isoformat(),
-                    payer_context=payer_ctx or "No matching payer policy data found. Answer based on general knowledge but clearly state this is not from verified policy data.",
-                )
-        except Exception as _e:
-            logger.warning("Failed to build payer policy prompt: %s", _e)
-
-    # If no project is attached, scrub any leftover project_* state so
-    # _infer_skill_from_state doesn't keep locking the AI into "project" skill.
-    ai_facing_state = thread["current_state"]
-    if not thread.get("project_id") and isinstance(ai_facing_state, dict):
-        if "project_title" in ai_facing_state or "project_sections" in ai_facing_state:
-            ai_facing_state = {
-                k: v for k, v in ai_facing_state.items()
-                if k not in ("project_title", "project_sections", "project_status")
-            }
-
-    project_meta = await _fetch_project_meta(thread.get("project_id"))
-    blog_mode_state = _blog_mode_state_from_meta(project_meta)
-
-    ai_resp = await ai_provider.generate(
-        msg_dicts, ai_facing_state, company_context=ctx,
-        slide_index=body.slide_index, context_summary=context_summary,
-        payer_mode_prompt=payer_prompt,
-        model_override=body.model,
-        company_id=str(company_id) if company_id else "",
-        user_id=str(current_user.id),
-        compliance_mode=bool(thread.get("compliance_mode")),
-        payer_mode=bool(thread.get("payer_mode")),
-        node_mode=bool(thread.get("node_mode")),
-        blog_mode_state=blog_mode_state,
-        thread_id=str(thread_id),
-    )
-    _scope_slide_update(ai_resp, thread["current_state"], body.slide_index)
-    final_usage = ai_resp.token_usage
-
-    current_version = thread["version"]
-    (
-        current_state,
-        current_version,
-        pdf_url,
-        changed,
-        assistant_reply_text,
-    ) = await _apply_ai_updates_and_operations(
-        thread_id=thread_id,
-        company_id=company_id,
-        ai_resp=ai_resp,
-        current_state=thread["current_state"],
-        current_version=current_version,
-        user_message=body.content,
-        current_user_id=current_user.id,
-        project_id=thread.get("project_id"),
-        project_meta=project_meta,
-    )
-
-    # Build metadata from compliance reasoning chains + payer sources
-    msg_metadata = _build_compliance_metadata(compliance_result, ai_resp)
-    if ai_resp and getattr(ai_resp, "attachments", None):
-        if msg_metadata is None:
-            msg_metadata = {}
-        msg_metadata["attachments"] = ai_resp.attachments
-    if payer_sources:
-        if msg_metadata is None:
-            msg_metadata = {}
-        msg_metadata["payer_sources"] = payer_sources
-
-    # Cross-reference affected employees + detect policy gaps when both node + compliance are on
-    if thread.get("node_mode") and thread.get("compliance_mode") and msg_metadata:
-        if msg_metadata.get("referenced_locations"):
-            affected = await _get_affected_employees(company_id, msg_metadata)
-            if affected:
-                msg_metadata["affected_employees"] = affected
-        gaps = await _detect_compliance_gaps(company_id, msg_metadata)
-        if gaps:
-            msg_metadata["compliance_gaps"] = gaps
-
-    # Annotate reply with change summary for conversation continuity
-    if changed and ai_resp.structured_update and isinstance(ai_resp.structured_update, dict):
-        update_slides = ai_resp.structured_update.get("slides")
-        if update_slides and body.slide_index is not None and 0 <= body.slide_index < len(update_slides):
-            changed_slide = update_slides[body.slide_index]
-            if isinstance(changed_slide, dict):
-                n_bullets = len(changed_slide.get("bullets", []))
-                change_note = f"\n\n[Applied changes to Slide {body.slide_index + 1}: title=\"{changed_slide.get('title', '')}\", {n_bullets} bullets]"
-                assistant_reply_text += change_note
-
-    # Save assistant message
-    assistant_msg = await doc_svc.add_message(
-        thread_id,
-        "assistant",
-        assistant_reply_text,
-        version_created=current_version if changed else None,
-        metadata=msg_metadata,
-    )
-
-    # Escalate low-confidence queries for human review
-    if should_escalate(ai_resp):
-        try:
-            await create_escalation(
-                company_id=company_id,
-                thread_id=thread_id,
-                user_message_id=user_msg["id"],
-                assistant_message_id=assistant_msg["id"],
-                user_query=body.content,
-                ai_resp=ai_resp,
-            )
-        except Exception:
-            logger.exception("Failed to create escalation for thread %s", thread_id)
-
-    cost = calculate_call_cost(
-        model=str((final_usage or {}).get("model") or "unknown"),
-        prompt_tokens=(final_usage or {}).get("prompt_tokens"),
-        completion_tokens=(final_usage or {}).get("completion_tokens"),
-    )
-    if final_usage is not None:
-        final_usage["cost_dollars"] = float(cost)
-
-    try:
-        await doc_svc.log_token_usage_event(
-            company_id=company_id,
-            user_id=current_user.id,
-            thread_id=thread_id,
-            token_usage=final_usage,
-            operation="send_message",
-            cost_dollars=float(cost),
-        )
-    except Exception as e:
-        logger.warning("Failed to log Matcha Work token usage for thread %s: %s", thread_id, e)
-
-    if current_user.role != "admin":
-        total_tokens = (final_usage or {}).get("total_tokens") or 0
-        if total_tokens > 0:
-            try:
-                async with get_connection() as conn:
-                    async with conn.transaction():
-                        await token_budget_service.deduct_tokens(conn, company_id, total_tokens)
-            except HTTPException:
-                logger.warning("Token budget exhausted during deduction for thread %s", thread_id)
-            except Exception as exc:
-                logger.warning("Failed to deduct tokens for thread %s: %s", thread_id, exc)
-
-    # Trigger conversation compaction in the background if needed
-    asyncio.create_task(_maybe_compact(thread_id, ai_provider, summary_at_count))
-
-    return SendMessageResponse(
-        user_message=_row_to_message(user_msg),
-        assistant_message=_row_to_message(assistant_msg),
-        current_state=current_state,
-        version=current_version,
-        task_type=_infer_skill_from_state(current_state),
-        pdf_url=pdf_url,
-        token_usage=final_usage,
-    )
-
 _compacting_threads: set[UUID] = set()  # simple guard against concurrent compaction
 _COMPACTION_REFRESH_INTERVAL = 20  # re-compact after this many new messages
 
@@ -757,8 +511,12 @@ async def send_message_stream(
             "summary or analysis.\n\n" + joined + "\n"
         )
 
+    # Fetch the project row ONCE per turn — the recruiting-context injector and
+    # the blog-mode state builder both need it (was two identical queries).
+    project_meta = await _fetch_project_meta(thread.get("project_id"))
+
     # Inject recruiting project context so AI generates posting sections in the right project
-    ctx = await _inject_recruiting_project_context(ctx, thread, thread["current_state"])
+    ctx = await _inject_recruiting_project_context(ctx, thread, thread["current_state"], project_meta=project_meta)
 
     # Node/compliance context is built inside event_stream() so we can yield status events
 
@@ -774,14 +532,14 @@ async def send_message_stream(
                 assistant_msg = await doc_svc.add_message(thread_id, "assistant", canned)
                 try:
                     from app.matcha.routes.thread_ws import thread_manager
-                    asyncio.create_task(
+                    _track_background_task(asyncio.create_task(
                         thread_manager.broadcast_new_message(
                             str(thread_id),
                             [_row_to_message(user_msg).model_dump(mode="json"),
                              _row_to_message(assistant_msg).model_dump(mode="json")],
                             exclude_user=current_user.id,
                         )
-                    )
+                    ))
                 except Exception:
                     logger.warning("Thread WS broadcast failed (file-only) for thread %s", thread_id)
                 guard_response = SendMessageResponse(
@@ -795,35 +553,63 @@ async def send_message_stream(
                 )
                 yield _sse_data({"type": "complete", "data": guard_response.model_dump(mode="json")})
                 return
-            # Build mode-specific context with status updates
+            # Build mode-specific context with status updates. Each block is
+            # guarded: a context-builder failure (bad trigger data, DB hiccup)
+            # degrades to a status notice instead of killing the SSE stream.
+            # Mode/RAG blocks change per turn, so they accumulate in dyn_ctx —
+            # NOT ctx, which feeds the cacheable static prompt (H4: putting
+            # per-turn context in the static prompt broke the cache every turn).
+            dyn_ctx = ""
             if thread.get("node_mode"):
                 yield _sse_data({"type": "status", "message": "Loading internal company data..."})
-                node_ctx = await build_node_context(company_id)
-                ctx += "\n\n" + node_ctx
+                try:
+                    node_ctx = await build_node_context(company_id)
+                    dyn_ctx += "\n\n" + node_ctx
+                except Exception:
+                    logger.exception("Node context failed for company %s", company_id)
+                    yield _sse_data({"type": "status", "message": "Internal data unavailable — continuing without it..."})
 
             if thread.get("compliance_mode"):
                 yield _sse_data({"type": "status", "message": "Loading compliance data for your locations..."})
-                compliance_result = await build_compliance_context(company_id)
-                compliance_ctx = compliance_result.context_text
-                cat_count = compliance_ctx.count("Decision path:")
-                trigger_count = compliance_ctx.count("[trigger:")
-                loc_count = compliance_ctx.count("FACILITY PROFILE")
-                if cat_count > 0:
-                    parts = [f"{cat_count} regulatory categories across {loc_count} location{'s' if loc_count != 1 else ''}"]
-                    if trigger_count > 0:
-                        parts.append(f"{trigger_count} triggered requirement{'s' if trigger_count != 1 else ''}")
-                    yield _sse_data({"type": "status", "message": f"Found {' with '.join(parts)} — building reasoning chains..."})
-                elif compliance_ctx.count("legacy format") > 0:
-                    yield _sse_data({"type": "status", "message": "Loaded compliance data (legacy format) — cross-referencing..."})
-                else:
-                    yield _sse_data({"type": "status", "message": "No compliance data found — will suggest running a check..."})
-                ctx += "\n\n" + compliance_ctx
+                try:
+                    compliance_result = await build_compliance_context(company_id)
+                    compliance_ctx = compliance_result.context_text
+                    # Counts come from the structured reasoning chains, not
+                    # substring-matching prose another module formats.
+                    _chains = compliance_result.reasoning_chains or []
+                    loc_count = len(_chains)
+                    cat_count = sum(len(c.get("categories", [])) for c in _chains)
+                    trigger_count = sum(
+                        1
+                        for c in _chains
+                        for cat in c.get("categories", [])
+                        for lvl in cat.get("all_levels", [])
+                        if lvl.get("trigger_condition") is not None
+                    )
+                    if cat_count > 0:
+                        parts = [f"{cat_count} regulatory categories across {loc_count} location{'s' if loc_count != 1 else ''}"]
+                        if trigger_count > 0:
+                            parts.append(f"{trigger_count} triggered requirement{'s' if trigger_count != 1 else ''}")
+                        yield _sse_data({"type": "status", "message": f"Found {' with '.join(parts)} — building reasoning chains..."})
+                    elif "legacy format" in compliance_ctx:
+                        yield _sse_data({"type": "status", "message": "Loaded compliance data (legacy format) — cross-referencing..."})
+                    else:
+                        yield _sse_data({"type": "status", "message": "No compliance data found — will suggest running a check..."})
+                    dyn_ctx += "\n\n" + compliance_ctx
 
-                # RAG augmentation — find requirements most relevant to the question
-                yield _sse_data({"type": "status", "message": "Searching relevant regulations..."})
-                rag_ctx = await _get_rag_context(body.content, company_id)
-                if rag_ctx:
-                    ctx += "\n\n=== RELEVANT REGULATIONS (semantic search) ===\n" + rag_ctx
+                    # RAG augmentation — only when the primary dump was
+                    # truncated or some location lacks jurisdiction data;
+                    # otherwise it re-retrieves what the full dump already
+                    # contains (extra embedding hop + vector scan per turn).
+                    if compliance_result.truncated or compliance_result.has_legacy_locations:
+                        yield _sse_data({"type": "status", "message": "Searching relevant regulations..."})
+                        rag_ctx = await _get_rag_context(body.content, company_id)
+                        if rag_ctx:
+                            dyn_ctx += "\n\n=== RELEVANT REGULATIONS (semantic search) ===\n" + rag_ctx
+                except Exception:
+                    logger.exception("Compliance context failed for company %s", company_id)
+                    compliance_result = None
+                    yield _sse_data({"type": "status", "message": "Compliance data unavailable — continuing without it..."})
 
             # Payer mode — build payer prompt inside stream for status events
             stream_payer_prompt = None
@@ -832,7 +618,7 @@ async def send_message_stream(
                 yield _sse_data({"type": "status", "message": "Searching payer coverage data..."})
                 try:
                     import os as _os2
-                    from app.core.services.embedding_service import EmbeddingService as _ES2
+                    from app.core.services.embedding_service import get_embedding_service as _ges2
                     from app.core.services.payer_policy_rag import PayerPolicyRAGService as _PRAG2
                     from app.config import get_settings as _gs2
                     from app.matcha.services.matcha_work_ai import PAYER_MODE_SYSTEM_PROMPT as _PMSP
@@ -840,8 +626,7 @@ async def send_message_stream(
 
                     _ak2 = _os2.getenv("GEMINI_API_KEY") or _gs2().gemini_api_key
                     if _ak2 and body.content:
-                        _e2 = _ES2(api_key=_ak2)
-                        _r2 = _PRAG2(_e2)
+                        _r2 = _PRAG2(_ges2(_ak2))
                         async with get_connection() as _pc2:
                             _pctx, stream_payer_sources = await _r2.get_context_for_query(
                                 query=body.content, conn=_pc2,
@@ -858,7 +643,12 @@ async def send_message_stream(
                 except Exception as _pe:
                     logger.warning("Stream payer context failed: %s", _pe)
 
-            estimated_usage = await ai_provider.estimate_usage(msg_dicts, thread["current_state"], company_context=ctx, slide_index=body.slide_index)
+            estimated_usage = await ai_provider.estimate_usage(
+                msg_dicts, thread["current_state"], company_context=ctx,
+                slide_index=body.slide_index, dynamic_context=dyn_ctx,
+                model_override=body.model,
+                company_id=str(company_id), user_id=str(current_user.id),
+            )
             yield _sse_data(
                 {
                     "type": "usage",
@@ -875,10 +665,11 @@ async def send_message_stream(
             # Run generation as a background task and emit keepalives every 15 s
             # so proxies with short read-timeouts (e.g. nginx default 60 s) don't
             # close the SSE connection while we wait for the AI to finish.
-            stream_project_meta = await _fetch_project_meta(thread.get("project_id"))
+            stream_project_meta = project_meta
             stream_blog_mode_state = _blog_mode_state_from_meta(stream_project_meta)
             _ai_task = asyncio.create_task(ai_provider.generate(
                 msg_dicts, thread["current_state"], company_context=ctx,
+                dynamic_context=dyn_ctx,
                 slide_index=body.slide_index, context_summary=context_summary,
                 payer_mode_prompt=stream_payer_prompt,
                 model_override=body.model,
@@ -890,12 +681,28 @@ async def send_message_stream(
                 blog_mode_state=stream_blog_mode_state,
                 thread_id=str(thread_id),
             ))
-            while True:
-                done, _ = await asyncio.wait({_ai_task}, timeout=15.0)
-                if done:
-                    break
-                yield _sse_data({"type": "keepalive"})
-            ai_resp = await _ai_task
+            try:
+                while True:
+                    done, _ = await asyncio.wait({_ai_task}, timeout=15.0)
+                    if done:
+                        break
+                    yield _sse_data({"type": "keepalive"})
+                ai_resp = await _ai_task
+            except asyncio.CancelledError:
+                # Client disconnected (stop button / tab close). The Gemini call
+                # runs in a thread and cannot be interrupted — its cost is
+                # already committed — so detach a finalizer that awaits it and
+                # records + deducts the real usage. Without this, every "stop"
+                # click was a fully-paid, entirely-unbilled turn.
+                _track_background_task(asyncio.create_task(_finalize_cancelled_turn(
+                    _ai_task,
+                    thread_id=thread_id,
+                    company_id=company_id,
+                    user_id=current_user.id,
+                    user_role=current_user.role,
+                    estimated_usage=estimated_usage,
+                )))
+                raise
             logger.info("[TIMING] AI generate took %.2fs for thread %s", _time.monotonic() - _t0, thread_id)
             _scope_slide_update(ai_resp, thread["current_state"], body.slide_index)
 
@@ -965,11 +772,11 @@ async def send_message_stream(
                 from app.matcha.routes.thread_ws import thread_manager
                 user_msg_dict = _row_to_message(user_msg).model_dump(mode="json")
                 assistant_msg_dict = _row_to_message(assistant_msg).model_dump(mode="json")
-                asyncio.create_task(
+                _track_background_task(asyncio.create_task(
                     thread_manager.broadcast_new_message(
                         str(thread_id), [user_msg_dict, assistant_msg_dict], exclude_user=current_user.id
                     )
-                )
+                ))
             except Exception:
                 logger.warning("Thread WS broadcast failed for thread %s", thread_id)
 
@@ -1044,7 +851,7 @@ async def send_message_stream(
             yield _sse_data({"type": "complete", "data": response.model_dump(mode="json")})
 
             # Trigger compaction in the background if needed
-            asyncio.create_task(_maybe_compact(thread_id, ai_provider, summary_at_count))
+            _track_background_task(asyncio.create_task(_maybe_compact(thread_id, ai_provider, summary_at_count)))
         except BaseException as e:
             logger.error("Matcha Work stream failed for thread %s: %s (%s)", thread_id, e, type(e).__name__, exc_info=True)
             try:

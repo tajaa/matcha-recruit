@@ -20,6 +20,17 @@ MODEL_PRICING: dict[str, dict[str, Decimal]] = {
         "input_per_1m": Decimal("2.00"),
         "output_per_1m": Decimal("12.00"),
     },
+    # Gemini 3.1 Flash Lite — flash-lite tier
+    "gemini-3.1-flash-lite": {
+        "input_per_1m": Decimal("0.10"),
+        "output_per_1m": Decimal("0.40"),
+    },
+    # Gemini 3.1 Flash Image — image output tokens are billed at the image
+    # rate (~$30/1M ≈ $0.039 per 1290-token image); placeholder pending GA.
+    "gemini-3.1-flash-image-preview": {
+        "input_per_1m": Decimal("0.30"),
+        "output_per_1m": Decimal("30.00"),
+    },
     # Gemini 2.5 Flash — kept for any legacy references
     "gemini-2.5-flash": {
         "input_per_1m": Decimal("0.30"),
