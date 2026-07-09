@@ -38,6 +38,10 @@ public_router = APIRouter()
 
 _MATTER_TYPES = ("subpoena", "class_action", "eeoc_charge", "single_plaintiff", "audit", "other")
 
+# Mirrors the ck_legal_matters_subject_theory CHECK (migration legaldef04) and
+# the service's _THEORIES keys + BROAD_THEORY.
+_SUBJECT_THEORY = Literal["wage_hour", "eeo", "safety", "all"]
+
 
 # --------------------------------------------------------------------------- #
 # Models
@@ -57,6 +61,8 @@ class MatterCreate(_JurisdictionStateMixin):
     matter_type: Literal["subpoena", "class_action", "eeoc_charge", "single_plaintiff", "audit", "other"] = "other"
     allegation: Optional[str] = Field(None, max_length=20_000)
     defense_theory: Optional[str] = Field(None, max_length=20_000)
+    # None = derive the evidence subject from the allegation (the default).
+    subject_theory: Optional[_SUBJECT_THEORY] = None
     evidence_start: Optional[date] = None
     evidence_end: Optional[date] = None
     counsel_directed: bool = False
@@ -75,6 +81,10 @@ class MatterUpdate(_JurisdictionStateMixin):
     evidence_start: Optional[date] = None
     evidence_end: Optional[date] = None
     status: Optional[Literal["draft", "active", "closed"]] = None
+    # Override for the derived evidence subject. Send null to go back to
+    # deriving it from the allegation; 'all' pulls every subject. Mirrors how
+    # location_id / jurisdiction_state override the derived jurisdiction.
+    subject_theory: Optional[_SUBJECT_THEORY] = None
     counsel_directed: Optional[bool] = None
     counsel_name: Optional[str] = Field(None, max_length=200)
     counsel_email: Optional[str] = Field(None, max_length=320)
@@ -214,15 +224,15 @@ async def create_matter(body: MatterCreate, request: Request, current_user=Depen
                 (company_id, title, matter_type, allegation, defense_theory,
                  evidence_start, evidence_end, counsel_directed, counsel_name,
                  counsel_email, created_by, location_id, jurisdiction_state,
-                 response_deadline, deadline_note, status)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'active')
+                 response_deadline, deadline_note, subject_theory, status)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'active')
             RETURNING *
             """,
             company_id, body.title, body.matter_type, body.allegation, body.defense_theory,
             body.evidence_start, body.evidence_end, body.counsel_directed,
             body.counsel_name, body.counsel_email, getattr(current_user, "id", None),
             body.location_id, body.jurisdiction_state,
-            body.response_deadline, body.deadline_note,
+            body.response_deadline, body.deadline_note, body.subject_theory,
         )
         await _audit(conn, row["id"], current_user, request, "create", {"title": body.title})
     return dict(row)
@@ -447,8 +457,16 @@ async def generate_packet(matter_id: str, body: PacketIn, request: Request, curr
         if not memo:
             raise HTTPException(status_code=400, detail="Discuss the matter in chat first — the packet is built from that analysis.")
         features = await _features(conn, company_id)
+        # apply_theory=False: the packet is an attorney deliverable, and
+        # build_defense_packet's appendix/ZIP must carry every incident / ER /
+        # discipline record in scope so the compilation can't read as selective
+        # to opposing counsel. Subject filtering shapes the chat and sidebar; it
+        # must not silently delete a category of records from the exhibit. It
+        # also keeps every cid the memo cites inside the index, so nothing renders
+        # as both "no longer in evidence scope" and a full appendix page.
         corpus = await ld.gather_evidence(
-            conn, company_id, matter["evidence_start"], matter["evidence_end"], features, matter=matter
+            conn, company_id, matter["evidence_start"], matter["evidence_end"], features,
+            matter=matter, apply_theory=False,
         )
         company = await conn.fetchrow("SELECT name FROM companies WHERE id = $1", company_id)
 

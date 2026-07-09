@@ -25,16 +25,22 @@ import asyncio
 import io
 import json
 import logging
+import re
 import time
 import zipfile
 from datetime import datetime, timezone
-from typing import NamedTuple
+from typing import NamedTuple, get_args
 from uuid import UUID
 
 from app.config import get_settings
+from app.core.compliance_registry import CATEGORY_KEYS
 from app.core.services.genai_client import get_genai_client
 from app.core.services.pdf import safe_url_fetcher
 from app.core.services.storage import get_storage
+from app.matcha.models.er_case import ERCaseCategory
+from app.matcha.models.ir_incident import IRIncidentType
+
+from .discipline_engine import DEFAULT_INFRACTION_TYPES
 
 from .claims_readiness import (
     build_er_packet,
@@ -196,16 +202,18 @@ _SAFETY = ["workplace_safety", "workers_comp", "industrial_hygiene", "machine_sa
            "chemical_safety", "environmental_safety", "emergency_preparedness",
            "radiation_safety", "process_safety", "clinical_safety"]
 
-# Vocabularies the topic filter knows. A slug OUTSIDE these lists is
+# Vocabularies the topic filter knows, DERIVED from their sources of truth so a
+# new incident type / ER category / infraction can't silently change filter
+# semantics by looking "company-defined". A slug outside these lists really is
 # company-defined (discipline infraction types are per-company configurable,
-# er_cases.category has no CHECK constraint) and always passes the filter —
-# silently dropping an unrecognized record from a legal corpus is the one
-# failure mode worse than over-inclusion.
-_INCIDENT_TYPES = ["safety", "behavioral", "property", "near_miss", "other"]
-_ER_CATEGORIES = ["harassment", "discrimination", "safety", "retaliation",
-                  "policy_violation", "misconduct", "wage_hour", "other"]
-_INFRACTIONS = ["attendance", "performance", "safety", "harassment",
-                "policy_violation", "gross_misconduct"]
+# er_cases.category has no CHECK constraint, and the Specialization Research
+# Wizard mints compliance categories outside the registry) and always passes the
+# filter — silently dropping an unrecognized record from a legal corpus is the
+# one failure mode worse than over-inclusion.
+_INCIDENT_TYPES = list(get_args(IRIncidentType))
+_ER_CATEGORIES = list(get_args(ERCaseCategory))
+_INFRACTIONS = [d["infraction_type"] for d in DEFAULT_INFRACTION_TYPES]
+_COMPLIANCE_CATEGORIES = sorted(CATEGORY_KEYS)
 
 
 class _Topic(NamedTuple):
@@ -247,21 +255,40 @@ _THEORIES: dict[str, _Topic] = {
     ),
 }
 
-# Substring probes against the matter's title + allegation, lowercased. Ordered
-# scoring: most hits wins, ties fall back to the matter_type map. Deliberately
-# stemmed ("discriminat", "injur") so tense/plural never costs a hit.
+# Word-boundary probes against the matter's title + allegation, lowercased.
+# A trailing ``*`` marks a stem ("discriminat*" matches discriminates,
+# discrimination) so tense/plural never costs a hit; everything else must match
+# a whole word. Bare-substring matching was wrong in both directions: "ada "
+# fired inside "Nevada", and "ppe" inside "happened" — each flipping a matter
+# onto a theory that then filtered out its own core records.
 _THEORY_KEYWORDS: dict[str, tuple[str, ...]] = {
-    "wage_hour": ("wage", "overtime", "meal break", "meal period", "rest break",
-                  "off the clock", "off-the-clock", "timecard", "time card", "unpaid",
-                  "minimum wage", "misclassif", "exempt", "tip credit", "payroll",
-                  "final pay", "paystub", "pay stub", "flsa", "hours worked",
+    "wage_hour": ("wage*", "overtime", "meal break*", "meal period*", "rest break*",
+                  "off the clock", "off-the-clock", "timecard*", "time card*", "unpaid",
+                  "minimum wage", "misclassif*", "exempt", "tip credit", "payroll",
+                  "final pay", "paystub*", "pay stub*", "flsa", "hours worked",
                   "donning", "rounding", "wage theft"),
-    "eeo": ("discriminat", "harass", "retaliat", "hostile work", "title vii", "adea",
-            "eeoc", "pregnan", "accommodat", "wrongful termination", "fmla",
-            "disparate", "hostile environment", "ada "),
-    "safety": ("osha", "injur", "slip", "trip and fall", "safety", "accident",
-               "near miss", "workers comp", "workers' comp", "hazard", "ergonomic",
+    "eeo": ("discriminat*", "harass*", "retaliat*", "hostile work", "title vii", "adea",
+            "eeoc", "pregnan*", "accommodat*", "wrongful termination", "fmla",
+            "disparate", "hostile environment", "ada"),
+    "safety": ("osha", "injur*", "slip", "trip and fall", "safety", "accident*",
+               "near miss", "workers comp*", "workers' comp*", "hazard*", "ergonomic*",
                "ppe", "lockout", "exposure"),
+}
+
+
+def _compile_probes(kws: tuple[str, ...]) -> list[re.Pattern]:
+    """``foo*`` → ``\\bfoo`` (stem, matches any suffix); ``foo`` → ``\\bfoo\\b``."""
+    out = []
+    for kw in kws:
+        if kw.endswith("*"):
+            out.append(re.compile(r"\b" + re.escape(kw[:-1])))
+        else:
+            out.append(re.compile(r"\b" + re.escape(kw) + r"\b"))
+    return out
+
+
+_THEORY_PROBES: dict[str, list[re.Pattern]] = {
+    slug: _compile_probes(kws) for slug, kws in _THEORY_KEYWORDS.items()
 }
 
 # matter_type -> theory when the allegation text is silent or ambiguous.
@@ -275,48 +302,81 @@ _MATTER_TYPE_THEORY: dict[str, str | None] = {
     "other": None,
 }
 
-# Back-compat alias: matter_type -> compliance categories. Kept because it is the
-# shape ``_gather_law`` widened from and the shape the registry-key test asserts.
-# Registry-membership of these slugs is enforced by
-# tests/legal_defense/test_legal_defense.py::test_matter_type_categories_are_registry_keys
+# Types whose theory the type itself asserts: an EEOC charge is a discrimination
+# charge by definition. One incidental word ("terminated after her workplace
+# accident") must not swing it onto a safety corpus, so keywords need
+# _STRONG_OVERRIDE hits to win.
+#
+# The others are weak priors — "class action" and "single plaintiff" describe
+# procedural posture, not subject, and their wage-and-hour mapping is a guess
+# about which suit is most common. Any unambiguous keyword beats a guess: a
+# single_plaintiff matter titled "warehouse forklift injury" is a safety matter,
+# whatever the modal class action is about.
+_STRONG_TYPE_PRIORS = frozenset({"eeoc_charge"})
+_STRONG_OVERRIDE = 2
+
+# The value a user stores on ``legal_matters.subject_theory`` to force broad
+# scope. NULL on that column means "derive"; this means "derive nothing".
+BROAD_THEORY = "all"
+
+# Registry-membership of the theory slugs is enforced by
+# tests/legal_defense/test_legal_defense.py::test_theory_compliance_categories_are_registry_keys
 # — NOT by a module-level assert: this module is imported unconditionally at
 # app boot via routes/__init__.py, so an import-time assert would take down
 # the entire backend on a registry rename, not just Legal Pilot.
-_MATTER_TYPE_CATEGORIES: dict[str, list[str] | None] = {
-    mt: (_THEORIES[th].compliance if th else None) for mt, th in _MATTER_TYPE_THEORY.items()
-}
 
 
 def resolve_matter_theory(matter: dict | None) -> tuple[str | None, _Topic]:
-    """(theory_slug, topic) for a matter. Returns ``(None, _BROAD)`` when the
-    evidence must stay unfiltered.
+    """(theory_slug, topic) for a matter. ``(None, _BROAD)`` = evidence unfiltered.
 
-    A matter_type that maps to None (subpoena / audit / other) short-circuits to
-    broad BEFORE the keyword scan, and that ordering is the whole escape hatch:
-    a records subpoena mentioning wages must still return every record, and a
-    user told "set the type to Other to see everything" has to actually get
-    everything. Only for the subject-bearing types do allegation keywords pick
-    the theory, with the matter_type map as their fallback."""
+    Precedence, narrowest authority first:
+
+    1. ``matter.subject_theory`` — the user's stored override. ``'all'`` forces
+       broad. This is the escape hatch, and it is a real one: the matter's other
+       scoping axis (jurisdiction) already works this way, and a derived-only
+       subject left a misclassified matter with no recovery short of deleting it.
+    2. ``matter_type`` values carrying no subject signal (subpoena / audit /
+       other) → broad. A records subpoena mentioning wages must still return
+       every record.
+    3. Allegation/title keywords, when nothing ties them. They override a weak
+       matter_type prior outright and a strong one (``_STRONG_TYPE_PRIORS``)
+       only with ``_STRONG_OVERRIDE`` hits.
+    4. The ``matter_type`` map.
+
+    A tie never resolves to a theory that scored zero: two subjects arguing for
+    attention is a signal to widen, not to fall back on a prior neither
+    supports."""
     if not matter:
         return None, _BROAD
-    mt = matter.get("matter_type")
-    if mt in _MATTER_TYPE_THEORY and _MATTER_TYPE_THEORY[mt] is None:
+
+    stored = matter.get("subject_theory")
+    if stored == BROAD_THEORY:
         return None, _BROAD
-    # Trailing space so a probe ending in one ("ada ") can still match a term
-    # that lands at the very end of the text.
-    text = f"{matter.get('title') or ''} {matter.get('allegation') or ''} ".lower()
-    scores = {
-        slug: sum(1 for kw in kws if kw in text)
-        for slug, kws in _THEORY_KEYWORDS.items()
-    }
+    if stored in _THEORIES:
+        return stored, _THEORIES[stored]
+
+    mt = matter.get("matter_type")
+    fallback = _MATTER_TYPE_THEORY.get(mt)
+    if mt in _MATTER_TYPE_THEORY and fallback is None:
+        return None, _BROAD
+
+    text = f"{matter.get('title') or ''} {matter.get('allegation') or ''}".lower()
+    scores = {slug: sum(1 for p in probes if p.search(text))
+              for slug, probes in _THEORY_PROBES.items()}
     best = max(scores, key=lambda k: scores[k])
     top = scores[best]
-    # A lone keyword hit is enough only when nothing else scores as high —
-    # "retaliation for reporting a safety hazard" must not silently pick one.
-    if top > 0 and sum(1 for v in scores.values() if v == top) == 1:
-        return best, _THEORIES[best]
-    slug = _MATTER_TYPE_THEORY.get(mt)
-    return (slug, _THEORIES[slug]) if slug else (None, _BROAD)
+    tied = [s for s, v in scores.items() if v == top]
+
+    if top > 0 and len(tied) == 1:
+        needed = _STRONG_OVERRIDE if mt in _STRONG_TYPE_PRIORS else 1
+        if best == fallback or top >= needed:
+            return best, _THEORIES[best]
+    elif top > 0 and fallback not in tied:
+        # Tied subjects, none of them the matter_type's prior → widen rather
+        # than assert a theory the text gives no support for.
+        return None, _BROAD
+
+    return (fallback, _THEORIES[fallback]) if fallback else (None, _BROAD)
 
 
 def _topic_filter(col: str, n: int) -> str:
@@ -326,7 +386,15 @@ def _topic_filter(col: str, n: int) -> str:
     NULL allowlist → no filter. Otherwise a row survives when its value is in
     the allowlist, is NULL (unattributable — stays in), or lies outside the
     known vocabulary (company-defined slug — never silently dropped). An EMPTY
-    allowlist therefore drops every row carrying a known-but-irrelevant value."""
+    allowlist therefore drops every row carrying a known-but-irrelevant value.
+
+    Every filtered source uses this one predicate. The three hand-rolled
+    variants it replaced differed only in whether they carried the NULL arm and
+    the passthrough arm — and the next source to be added would have copied
+    whichever was nearest. Both arms are inert on a column that is NOT NULL with
+    a closed vocabulary, so uniformity costs nothing and a wrong copy costs a
+    record silently missing from a legal corpus. The vocabulary must never be
+    empty: ``NOT (col = ANY('{}'))`` is always true, degenerating the filter."""
     return (f" AND (${n}::text[] IS NULL OR {col} = ANY(${n})"
             f" OR {col} IS NULL OR NOT ({col} = ANY(${n + 1})))")
 
@@ -431,9 +499,11 @@ async def _src_compliance(conn, company_id, start, end, loc_id, state, topic=_BR
     # the protocol it follows. Joined via business_locations (requirements carry
     # location_id, not company_id). Not date-filtered — it's current posture —
     # so the scope params bind $2/$3 here, not $4/$5.
-    # Category is registry-controlled (compliance_registry.CATEGORIES) and NOT
-    # NULL, so this takes a plain allowlist — no unknown-slug passthrough, and
-    # no NULL arm, needed.
+    # The category vocabulary is NOT closed: compliance_service's Specialization
+    # Research Wizard has Gemini mint snake_case keys outside CATEGORY_KEYS and
+    # writes them onto requirements. Those go through _topic_filter's passthrough
+    # arm rather than being dropped — a hospital's `cardiac_catheterization_safety`
+    # requirement belongs in a safety matter's corpus.
     rows = await conn.fetch(
         f"""
         SELECT cr.id, cr.title, cr.category, cr.current_value, cr.jurisdiction_name,
@@ -443,10 +513,10 @@ async def _src_compliance(conn, company_id, start, end, loc_id, state, topic=_BR
         LEFT JOIN jurisdiction_requirements jr ON jr.id = cr.jurisdiction_requirement_id
         WHERE bl.company_id = $1
           {_scope_direct("cr.location_id", "bl.state", 2)}
-          AND ($4::text[] IS NULL OR cr.category = ANY($4))
+          {_topic_filter("cr.category", 4)}
         ORDER BY cr.last_changed_at DESC NULLS LAST
         """,
-        company_id, loc_id, state, topic.compliance,
+        company_id, loc_id, state, topic.compliance, _COMPLIANCE_CATEGORIES,
     )
     return [{
         "cid": f"compliance_req:{r['id']}",
@@ -567,9 +637,6 @@ async def _src_compliance_alerts(conn, company_id, start, end, loc_id, state, to
     # Date-filtered (unlike _src_compliance's current-posture snapshot) — this
     # is deliberately a history: it shows the company was monitoring during
     # the matter window, not just what it tracks today.
-    # ca.category is nullable (unlike compliance_requirements.category), so the
-    # allowlist carries a NULL arm — an uncategorized alert stays in the corpus
-    # rather than being silently dropped from it.
     rows = await conn.fetch(
         f"""
         SELECT ca.id, ca.title, ca.severity, ca.status, ca.category, ca.deadline,
@@ -580,11 +647,11 @@ async def _src_compliance_alerts(conn, company_id, start, end, loc_id, state, to
           AND ($2::date IS NULL OR ca.created_at >= $2)
           AND ($3::date IS NULL OR ca.created_at < ($3::date + 1))
           {_scope_direct("ca.location_id", "bl.state", 4)}
-          AND ($6::text[] IS NULL OR ca.category = ANY($6) OR ca.category IS NULL)
+          {_topic_filter("ca.category", 6)}
         ORDER BY ca.created_at DESC
         LIMIT 100
         """,
-        company_id, start, end, loc_id, state, topic.compliance,
+        company_id, start, end, loc_id, state, topic.compliance, _COMPLIANCE_CATEGORIES,
     )
     return [{
         "cid": f"compliance_alert:{r['id']}",
@@ -628,7 +695,11 @@ async def _gather_law(conn, matter: dict, juris: dict, topic: _Topic = _BROAD) -
     governing law and the company records can never describe different
     theories of the same case."""
     jurisdiction_ids = [c["id"] for c in juris["chain"]]
-    categories = topic.compliance or None
+    # NOT ``or None`` — an empty allowlist means "no jurisdiction category is
+    # relevant to this theory", the same as it does for the record sources.
+    # Collapsing it to None would pull the ENTIRE jurisdiction corpus, the exact
+    # law/record divergence the shared ``topic`` was introduced to prevent.
+    categories = topic.compliance
     rows = None
 
     if get_settings().gemini_api_key and matter.get("allegation"):
@@ -671,9 +742,11 @@ async def _gather_law(conn, matter: dict, juris: dict, topic: _Topic = _BROAD) -
             )
 
         rows = await _fetch(categories)
-        if not rows and categories is not None:
-            # A wage-hour category map on a non-wage class action must not
-            # blank the source entirely — widen to the full jurisdiction.
+        if not rows and categories:
+            # A theory whose categories this jurisdiction happens not to track
+            # must not blank the source entirely — widen to the full
+            # jurisdiction. An EMPTY list is not "no categories tracked", it is
+            # "no category is relevant", so it never widens.
             rows = await _fetch(None)
         rows = [dict(r) for r in rows]
 
@@ -792,26 +865,33 @@ _SOURCES = [
 ]
 
 
-async def gather_evidence(conn, company_id, start, end, features: dict, matter: dict | None = None) -> dict:
+async def gather_evidence(conn, company_id, start, end, features: dict, matter: dict | None = None,
+                          apply_theory: bool = True) -> dict:
     """Assemble the in-scope evidence corpus across every enabled subsystem.
 
     Each source is isolated: a failure (missing column, transient error) degrades
     that source to "unavailable" and is noted — it never aborts the whole gather.
-    Returns ``{sources, index, notes, legal_context}`` where ``index`` is a flat
-    cid→record map used for citation validation and the PDF evidence index.
+    Returns ``{sources, index, notes, legal_context, theory}`` where ``index`` is
+    a flat cid→record map used for citation validation and the PDF evidence index.
 
     ``matter`` is optional (keyword, default None) so existing callers stay
     source-compatible; when given, (a) location-capable record sources are
     scoped to the matter's location/state (er_cases + policy acks stay
     company-wide — no location link exists for them), (b) every subject-bearing
-    source is filtered to the matter's derived theory (see
-    ``resolve_matter_theory``), and (c) jurisdiction-grounded
-    law/legislation/case-law sources are added on top.
+    source is filtered to the matter's theory (see ``resolve_matter_theory``),
+    and (c) jurisdiction-grounded law/legislation/case-law sources are added.
+
+    ``apply_theory=False`` keeps (a) and (c) but skips (b). The packet path uses
+    it: ``build_defense_packet`` promises the appendix and ZIP carry every
+    incident / ER / discipline record in scope, cited or not, precisely so the
+    exhibit can't be read as selective. Subject relevance is a chat and sidebar
+    concern; an attorney deliverable that quietly omits a whole category of
+    records is the thing that docstring exists to prevent.
     """
     features = features or {}
     sources: dict = {}
     notes: list[str] = []
-    theory, topic = resolve_matter_theory(matter)
+    theory, topic = resolve_matter_theory(matter) if apply_theory else (None, _BROAD)
 
     # Resolve jurisdiction BEFORE the sources loop: the record queries scope on
     # the matter's location/state, not just the legal-landscape extras below.
@@ -828,6 +908,10 @@ async def gather_evidence(conn, company_id, start, end, features: dict, matter: 
     # fall back to the raw override so state scoping still applies when
     # resolution fails (unknown state / location without a jurisdiction row).
     scope_state = (legal_context or {}).get("state") or (matter or {}).get("jurisdiction_state")
+
+    # Sources this company doesn't run at all. Recorded so nothing downstream —
+    # the model especially — can read their absence as "no such records exist".
+    disabled = [label for _k, label, _fn, enabled in _SOURCES if not enabled(features)]
 
     for key, label, fn, enabled in _SOURCES:
         if not enabled(features):
@@ -848,11 +932,20 @@ async def gather_evidence(conn, company_id, start, end, features: dict, matter: 
     if loc_id or scope_state:
         notes.append(f"Evidence scoped to {(legal_context or {}).get('location_name') or scope_state}.")
 
+    # Notes are rendered verbatim into the attorney-facing packet PDF's "Scope
+    # notes" section, so they state facts about the compilation and nothing else
+    # — never app-navigation instructions counsel can't act on. The escape-hatch
+    # copy ("widen the subject") lives in the UI, where the control does.
     if theory:
         notes.append(
-            f"Evidence filtered to this matter's {topic.label} theory — records on "
-            f"unrelated subjects are excluded. Set the matter type to Other to see every record."
+            f"Evidence filtered to this matter's {topic.label} subject; "
+            f"records on unrelated subjects are excluded."
         )
+    if start or end:
+        notes.append(f"Evidence window: {start or 'earliest record'} to {end or 'present'}.")
+    if disabled:
+        notes.append("Not in use by this company (no records exist to include): "
+                     + ", ".join(disabled) + ".")
 
     if matter:
         if legal_context:
@@ -881,7 +974,13 @@ async def gather_evidence(conn, company_id, start, end, features: dict, matter: 
 
     return {"sources": sources, "index": index, "notes": notes,
             "legal_context": legal_context,
-            "theory": {"slug": theory, "label": topic.label} if theory else None}
+            "theory": {
+                "slug": theory,
+                "label": topic.label,
+                # Derived subjects are a guess the user can correct; stored ones
+                # are their decision. The UI says so, and shouldn't guess which.
+                "overridden": bool((matter or {}).get("subject_theory")),
+            } if theory else None}
 
 
 # --------------------------------------------------------------------------- #
@@ -925,11 +1024,14 @@ def _history_text(history: list[dict]) -> str:
 def _scope_text(corpus: dict) -> str:
     """What the corpus was narrowed by. Without this the model reads a filtered
     corpus as a factual finding ("the company logged no safety incidents") —
-    which is false and, in a memo handed to counsel, dangerous."""
-    theory = (corpus.get("theory") or {}).get("label")
-    lines = [f"- Subject: only records relating to a {theory} theory were retrieved."] if theory else []
-    lines += [f"- {n}" for n in corpus.get("notes") or []]
-    return "\n".join(lines) or "- No filters applied; every record the company holds is below."
+    which is false and, in a memo handed to counsel, dangerous.
+
+    ``notes`` already carries every narrowing fact (subject, location, window,
+    subsystems not in use), so this renders them rather than restating any. The
+    empty case must never claim completeness: a corpus with no notes can still
+    be shaped by a feature gate or a date bound this function cannot see."""
+    lines = [f"- {n}" for n in corpus.get("notes") or []]
+    return "\n".join(lines) or "- No subject filter was applied to this corpus."
 
 
 def _build_prompt(matter: dict, history: list[dict], corpus: dict, latest: str) -> str:

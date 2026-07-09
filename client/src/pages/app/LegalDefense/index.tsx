@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import { HelpCircle, Loader2, Plus, Scale } from 'lucide-react'
-import { Button, useToast } from '../../../components/ui'
+import { Button, Select, useToast } from '../../../components/ui'
 import { HowItWorksModal } from '../../../components/ui/HowItWorksModal'
 import { useShowOnce } from '../../../hooks/useShowOnce'
 import { LEGAL_PILOT_HOW_IT_WORKS_STEPS } from './howItWorksSteps'
 import {
   listMatters, getMatter, getEvidence, generatePacket, downloadPacket, streamChat,
-  runResearch, listResearch,
+  runResearch, listResearch, updateMatter,
   type Matter, type MatterMessage, type EvidencePreview, type Packet, type ChatResult, type ResearchRow,
+  type MatterTheory, type SubjectTheory,
 } from '../../../api/legalDefense'
 import { LABEL, seedRecap, startersFor, typeLabel } from './shared'
 import { Masthead } from './Masthead'
@@ -273,11 +274,82 @@ function MatterWorkbench({ matter, evidence, research, researching, onRunResearc
           <LegalContextPanel legalContext={evidence?.legal_context} research={research}
             onRunResearch={onRunResearch} researching={researching}
             matterId={matter.id} onRefresh={onRefresh} />
+          {/* Sibling, not nested: LegalContextPanel swaps itself for the
+              jurisdiction setter when no jurisdiction is set, and the subject
+              override has to stay reachable either way. */}
+          <SubjectScopeSetter matter={matter} theory={evidence?.theory} onRefresh={onRefresh} />
           <EvidencePanel evidence={evidence} />
           <PacketsPanel matterId={matter.id} packets={matter.packets ?? []} toast={toast} onShare={setShareFor} />
         </div>
       </div>
       {shareFor && <ShareModal matterId={matter.id} packet={shareFor} onClose={() => setShareFor(null)} toast={toast} />}
+    </div>
+  )
+}
+
+// --------------------------------------------------------------------------- //
+// SubjectScopeSetter — the override for the derived evidence subject.
+//
+// The backend reads the subject off the allegation, and a derivation can be
+// wrong. Without a control the only recovery would be rewriting the allegation
+// — mutating the legal record of what's being claimed to steer a classifier —
+// or deleting the matter and losing its transcript, packets and audit trail.
+// Same shape as the jurisdiction override that already sits above it.
+// --------------------------------------------------------------------------- //
+
+const SUBJECT_OPTIONS: { value: SubjectTheory | ''; label: string }[] = [
+  { value: '', label: 'Auto — read from the allegation' },
+  { value: 'wage_hour', label: 'Wage and hour' },
+  { value: 'eeo', label: 'Discrimination / EEO' },
+  { value: 'safety', label: 'Workplace safety' },
+  { value: 'all', label: 'All records — no subject filter' },
+]
+
+function SubjectScopeSetter({ matter, theory, onRefresh }: {
+  matter: Matter
+  theory: MatterTheory | null | undefined
+  onRefresh: () => void
+}) {
+  const { toast } = useToast()
+  const [saving, setSaving] = useState(false)
+  const current = matter.subject_theory ?? ''
+
+  async function save(next: string) {
+    if (saving || next === current) return
+    setSaving(true)
+    try {
+      // '' clears the override back to derive — send null, not the empty string.
+      await updateMatter(matter.id, { subject_theory: (next || null) as SubjectTheory | null })
+      onRefresh()
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Failed to set the evidence subject', 'error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="border-b border-white/[0.06] px-4 py-3">
+      <div className="flex items-center justify-between gap-2">
+        <span className={LABEL}>Evidence subject</span>
+        {saving && <Loader2 className="h-3 w-3 animate-spin text-zinc-600" />}
+      </div>
+      <Select
+        className="mt-2"
+        value={current}
+        options={SUBJECT_OPTIONS}
+        onChange={(e) => void save(e.target.value)}
+      />
+      <p className="mt-1.5 text-[11px] leading-relaxed text-zinc-500">
+        {matter.subject_theory
+          ? 'Records outside this subject are left out of the corpus and the chat.'
+          : theory
+            ? `Read as ${theory.label} from the allegation. Set it yourself if that's wrong.`
+            : 'Every subject is included. Narrow it to cut records unrelated to the claim.'}
+      </p>
+      <p className="mt-1 text-[10px] leading-relaxed text-zinc-600">
+        The attorney packet always includes every record in scope, whichever subject is set.
+      </p>
     </div>
   )
 }

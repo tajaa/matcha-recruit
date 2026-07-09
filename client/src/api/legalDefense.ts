@@ -18,9 +18,14 @@ export type LegalContext = {
   state: string | null
   location_name: string | null
 }
-/** The subject-matter theory the backend derived for the matter (from its
- *  allegation text, falling back to its type). Null = no filter applied. */
-export type MatterTheory = { slug: string; label: string }
+/** Values accepted by `legal_matters.subject_theory`. `null` derives the subject
+ *  from the allegation; `'all'` forces every subject into the corpus. */
+export type SubjectTheory = 'wage_hour' | 'eeo' | 'safety' | 'all'
+
+/** The subject the backend scoped evidence to — derived from the matter's
+ *  allegation text, or read from its stored `subject_theory` override.
+ *  Null = no subject filter applied. */
+export type MatterTheory = { slug: string; label: string; overridden: boolean }
 
 export type EvidencePreview = {
   sources: Record<string, EvidenceSource>
@@ -29,6 +34,14 @@ export type EvidencePreview = {
   legal_context?: LegalContext | null
   theory?: MatterTheory | null
 }
+
+/** The sources a subject filter actually narrows. Training, policy
+ *  acknowledgments and accommodations are deliberately never subject-filtered
+ *  (they're the exculpatory half of the record), so an empty one of those must
+ *  not be blamed on the subject. Mirrors `_THEORIES` in the service. */
+export const SUBJECT_FILTERED_SOURCES = new Set([
+  'incidents', 'er_cases', 'compliance', 'compliance_alerts', 'discipline',
+])
 
 export type EvidenceMapItem = { point: string; cited_ids: string[] }
 export type MessageMeta = {
@@ -78,6 +91,8 @@ export type Matter = {
   counsel_email: string | null
   location_id: string | null
   jurisdiction_state: string | null
+  /** null = derive the evidence subject from the allegation. */
+  subject_theory: SubjectTheory | null
   response_deadline: string | null
   deadline_note: string | null
   created_at: string
@@ -93,6 +108,8 @@ export type MatterCreate = {
   matter_type: MatterType
   allegation?: string | null
   defense_theory?: string | null
+  /** null (or omitted) derives the evidence subject from the allegation. */
+  subject_theory?: SubjectTheory | null
   evidence_start?: string | null
   evidence_end?: string | null
   counsel_directed?: boolean

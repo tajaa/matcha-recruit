@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { FileArchive, FileText, Loader2 } from 'lucide-react'
 import { Button, Toggle } from '../../../components/ui'
 import { HelpHint } from '../../../components/ui/HelpHint'
-import type { EvidencePreview, Matter, ResearchRow } from '../../../api/legalDefense'
+import { SUBJECT_FILTERED_SOURCES, type EvidencePreview, type Matter, type ResearchRow } from '../../../api/legalDefense'
 import { LABEL, SOURCE_META, typeLabel } from './shared'
 
 /** Docket header: matter caption + the systems strip (which internal systems
@@ -59,7 +59,14 @@ export function Masthead({ matter, evidence, genKind, hasAssistant, research, on
             {evidence?.theory && (
               <span className="inline-flex items-center gap-1 normal-case text-zinc-500">
                 subject {evidence.theory.label}
-                <HelpHint text="Evidence is filtered to the subject of this matter, read from its allegation and type — records about unrelated subjects are left out. Set the matter type to Other to pull in every record." />
+                {!evidence.theory.overridden && <span className="text-zinc-600">(auto)</span>}
+                <HelpHint
+                  text={
+                    evidence.theory.overridden
+                      ? "Evidence is filtered to the subject you set for this matter — records on unrelated subjects are left out. Change it under Legal landscape."
+                      : "Evidence is filtered to the subject read from this matter's allegation — records on unrelated subjects are left out. If that's wrong, set the subject yourself under Legal landscape."
+                  }
+                />
               </span>
             )}
             {deadlineText && <span className={`normal-case ${deadlineTone}`}>{deadlineText}</span>}
@@ -127,7 +134,11 @@ function SystemsStrip({ evidence }: { evidence: EvidencePreview | null }) {
             title={src ? src.label
               : ['law', 'legislation', 'case_law'].includes(s.key)
                 ? `${s.label}: set a location/state and run Research in the Legal landscape panel`
-                : evidence?.theory
+                // Only blame the subject filter for the sources it actually
+                // narrows — an empty Training panel is a feature gate or an
+                // empty subsystem, and saying otherwise sends the user to the
+                // wrong control.
+                : evidence?.theory && SUBJECT_FILTERED_SOURCES.has(s.key)
                   ? `${s.label}: no records matching this matter's ${evidence.theory.label} subject inside the matter window`
                   : `${s.label}: no records in the matter window`}
           >
