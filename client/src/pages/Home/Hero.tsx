@@ -1,7 +1,21 @@
+import { useEffect, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { ASH, BONE, DISPLAY, LINE_D, MATCHA } from "./theme";
-import { MARQUEE_WORDS } from "./data";
+import { useReducedMotion } from "./instruments/shared";
 import { ProductCarousel } from "./ProductCarousel";
+
+// The headline types itself out like a terminal. Segments keep the per-word
+// styling (italic accents) that the old static markup had.
+const HEADLINE: { text: string; style?: React.CSSProperties }[] = [
+  { text: "We run the whole " },
+  { text: "risk", style: { color: "#D97706", fontStyle: "italic" } },
+  { text: " & " },
+  { text: "people", style: { color: MATCHA, fontStyle: "italic" } },
+  { text: " function." },
+];
+const HEADLINE_CHARS = HEADLINE.reduce((n, s) => n + s.text.length, 0);
+const TYPE_MS = 42;
+const TYPE_DELAY_MS = 400;
 
 export function Hero() {
   return (
@@ -24,7 +38,7 @@ export function Hero() {
               className="hidden sm:block justify-self-center text-[10.5px] tracking-[0.28em] font-mono uppercase"
               style={{ color: ASH }}
             >
-              Software · Practitioners
+              Volatility · Researchers
             </span>
             <span
               className="justify-self-end text-[10.5px] tracking-[0.28em] font-mono uppercase tabular-nums"
@@ -42,43 +56,13 @@ export function Hero() {
         </div>
       </div>
 
-      {/* Ticker — pulled high so it reads immediately, no scroll required */}
-      <div>
-        <Marquee />
-      </div>
-
       {/* Headline + supporting content, stacked at every breakpoint — the
           carousel sits full-width below the headline/CTAs instead of
           fighting them for space in a side-by-side column. */}
       <div className="relative max-w-[1600px] mx-auto w-full px-6 sm:px-10 flex-1 flex flex-col justify-center py-8 sm:py-10">
         <div>
           <div>
-            <h1
-              className="home-rise tracking-[-0.02em] text-[clamp(2.2rem,7vw,6.5rem)] xl:text-[clamp(2.4rem,4.7vw,4.7rem)]"
-              style={{ fontFamily: DISPLAY, fontWeight: 300, lineHeight: 1.02 }}
-            >
-              <span style={{ animationDelay: "0.16s" }}>We run the whole</span>{" "}
-              <span
-                style={{
-                  animationDelay: "0.36s",
-                  color: "#D97706",
-                  fontStyle: "italic",
-                }}
-              >
-                risk
-              </span>
-              <span style={{ animationDelay: "0.44s" }}>&nbsp;&amp;&nbsp;</span>
-              <span
-                style={{
-                  animationDelay: "0.54s",
-                  color: MATCHA,
-                  fontStyle: "italic",
-                }}
-              >
-                people
-              </span>
-              <span style={{ animationDelay: "0.62s" }}>&nbsp;function.</span>
-            </h1>
+            <TypedHeadline />
 
             {/* Deck row — editorial band under the headline: hairline rule,
                 tagline left, the starting-line cue right as a circled arrow. */}
@@ -87,13 +71,18 @@ export function Hero() {
               style={{ borderColor: LINE_D, animationDelay: "0.66s" }}
             >
               <p
-                className="max-w-3xl text-xl sm:text-2xl"
-                style={{ color: BONE, lineHeight: 1.5 }}
+                className="max-w-3xl text-[1.35rem] sm:text-[1.75rem] tracking-[-0.011em]"
+                style={{
+                  fontFamily: DISPLAY,
+                  fontWeight: 300,
+                  color: BONE,
+                  lineHeight: 1.42,
+                }}
               >
                 <span style={{ color: "#FFFFFF" }}>
                   Managing your risk before your risk manages you.
                 </span>{" "}
-                <span style={{ color: ASH }}>
+                <span style={{ color: ASH, fontStyle: "italic" }}>
                   Workplace safety, compliance, and risk analysis.
                 </span>
               </p>
@@ -141,31 +130,84 @@ export function Hero() {
 }
 
 // ---------------------------------------------------------------------------
-// Marquee
+// Typed headline
 // ---------------------------------------------------------------------------
 
-export function Marquee() {
-  const row = [...MARQUEE_WORDS, ...MARQUEE_WORDS];
+function TypedHeadline() {
+  const reduceMotion = useReducedMotion();
+  const [typed, setTyped] = useState(0);
+
+  useEffect(() => {
+    if (reduceMotion) {
+      setTyped(HEADLINE_CHARS);
+      return;
+    }
+    let timer = 0;
+    const start = window.setTimeout(() => {
+      timer = window.setInterval(() => {
+        setTyped((n) => {
+          if (n >= HEADLINE_CHARS) {
+            window.clearInterval(timer);
+            return n;
+          }
+          return n + 1;
+        });
+      }, TYPE_MS);
+    }, TYPE_DELAY_MS);
+    return () => {
+      window.clearTimeout(start);
+      window.clearInterval(timer);
+    };
+  }, [reduceMotion]);
+
+  const cls =
+    "tracking-[-0.02em] text-[clamp(2.2rem,7vw,6.5rem)] xl:text-[clamp(2.4rem,4.7vw,4.7rem)]";
+  const font: React.CSSProperties = {
+    fontFamily: DISPLAY,
+    fontWeight: 300,
+    lineHeight: 1.02,
+    whiteSpace: "pre-wrap",
+  };
+
+  // Reveal by slicing each segment against a running character cursor.
+  let cursor = 0;
+
   return (
-    <div
-      className="relative overflow-hidden border-y py-[5px] select-none"
-      style={{ borderColor: LINE_D, backgroundColor: MATCHA }}
-    >
-      <div className="home-marquee-track flex w-max items-center whitespace-nowrap">
-        {row.map((w, i) => (
-          <span key={i} className="flex items-center">
-            <span
-              className="px-4 text-[clamp(0.5rem,0.85vw,0.78rem)] tracking-tight"
-              style={{ fontFamily: DISPLAY, fontWeight: 400, color: "#5C584E" }}
-            >
-              {w}
-            </span>
-            <span className="text-[0.5rem]" style={{ color: "#5C584E" }}>
-              ✦
-            </span>
+    // A hidden full-text copy holds the final height so the deck row and
+    // carousel below don't reflow line-by-line as the headline types.
+    <div className="relative">
+      <h1 aria-hidden className={cls} style={{ ...font, visibility: "hidden" }}>
+        {HEADLINE.map((s, i) => (
+          <span key={i} style={s.style}>
+            {s.text}
           </span>
         ))}
-      </div>
+      </h1>
+      <h1
+        className={`${cls} absolute inset-0`}
+        style={font}
+        aria-label={HEADLINE.map((s) => s.text).join("")}
+      >
+        {HEADLINE.map((s, i) => {
+          const shown = s.text.slice(0, Math.max(0, typed - cursor));
+          cursor += s.text.length;
+          return (
+            <span key={i} style={s.style}>
+              {shown}
+            </span>
+          );
+        })}
+        <span
+          aria-hidden
+          className="home-caret inline-block align-baseline"
+          style={{
+            width: "0.055em",
+            height: "0.78em",
+            marginLeft: "0.05em",
+            backgroundColor: "#D97706",
+          }}
+        />
+      </h1>
     </div>
   );
 }

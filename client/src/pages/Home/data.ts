@@ -78,15 +78,6 @@ export const CAROUSEL_PRODUCTS: Product[] = [
   PRODUCTS[0], // 01 Full Platform
 ];
 
-export const MARQUEE_WORDS = [
-  "WORKPLACE SAFETY",
-  "COMPLIANCE",
-  "EMPLOYEE RELATIONS",
-  "RISK MANAGEMENT",
-  "PEOPLE STRATEGY",
-  "REGULATORY TRACKING",
-];
-
 export const HOME_JSON_LD = {
   "@context": "https://schema.org",
   "@type": "Organization",

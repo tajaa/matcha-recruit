@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { AnimatePresence, motion, MotionConfig } from "framer-motion";
 import { CAROUSEL_PRODUCTS } from "./data";
@@ -41,6 +41,32 @@ export function ProductCarousel() {
   const slide = CAROUSEL_PRODUCTS[index];
   const Instrument = INSTRUMENT_COMPONENTS[index];
 
+  // Instruments have different natural heights, so the slot snapped on every
+  // slide change. Pin it to the tallest instrument seen so far: it grows a few
+  // times during the first cycle, then never moves again. Measuring per-slide
+  // instead would pump the slot to 0 in the gap AnimatePresence mode="wait"
+  // leaves between exit and enter.
+  const slotRef = useRef<HTMLDivElement>(null);
+  const [slotHeight, setSlotHeight] = useState(0);
+  const widthRef = useRef(0);
+  useLayoutEffect(() => {
+    const el = slotRef.current;
+    if (!el) return;
+    const measure = () => {
+      const { width, height } = el.getBoundingClientRect();
+      if (!height) return;
+      // A width change means a new layout — reset the high-water mark so the
+      // slot can shrink back down rather than keeping a stale desktop height.
+      const reset = width !== widthRef.current;
+      widthRef.current = width;
+      setSlotHeight((prev) => (reset ? height : Math.max(prev, height)));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   const variants = {
     enter: (dir: number) => ({ x: dir > 0 ? 32 : -32, opacity: 0 }),
     center: { x: 0, opacity: 1 },
@@ -52,74 +78,87 @@ export function ProductCarousel() {
       onMouseEnter={() => setPaused(true)}
       onMouseLeave={() => setPaused(false)}
     >
-      {/* What you're about to see, ABOVE the card. Fixed-height slot so the
-          heading (1- vs 2-line names + optional subheader) never reflows the
-          card below it as slides change. */}
-      <div className="flex items-start justify-between gap-4 mb-5 h-[72px]">
-        <AnimatePresence mode="wait" initial={false}>
-          <motion.div
-            key={index}
-            initial={{ opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -6 }}
-            transition={{ duration: 0.3 }}
-            className="flex items-start gap-3 min-w-0"
-          >
-            <span
-              className="font-mono text-sm shrink-0 pt-1"
-              style={{ color: slide.accent }}
-            >
-              {slide.n}
-            </span>
-            <div className="min-w-0">
-              <h3
-                className="tracking-[-0.02em] truncate"
-                style={{
-                  fontFamily: DISPLAY,
-                  fontWeight: 400,
-                  fontSize: slide.nameSize ?? "clamp(1.75rem, 2.4vw, 2.75rem)",
-                  color: BONE,
-                }}
+      <div className="flex flex-col lg:flex-row lg:items-center gap-8 lg:gap-12">
+        {/* Copy column, LEFT. min-h on the heading slot keeps the View link
+            still across 1- vs 2-line names and optional subheaders. */}
+        <div className="lg:w-[320px] lg:shrink-0 flex flex-col">
+          <div className="min-h-[92px]">
+            <AnimatePresence mode="wait" initial={false}>
+              <motion.div
+                key={index}
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -6 }}
+                transition={{ duration: 0.3 }}
+                className="flex items-start gap-3 min-w-0"
               >
-                {slide.name}
-              </h3>
-              {slide.subheader && (
-                <p
-                  className="text-[11px] sm:text-[12px] font-mono uppercase tracking-[0.14em] mt-1 truncate"
-                  style={{ color: ASH }}
+                <span
+                  className="font-mono text-sm shrink-0 pt-1"
+                  style={{ color: slide.accent }}
                 >
-                  {slide.subheader}
-                </p>
-              )}
-            </div>
-          </motion.div>
-        </AnimatePresence>
-        <Link
-          to={slide.to}
-          className="text-[13px] font-mono uppercase tracking-[0.18em] shrink-0 transition-opacity hover:opacity-60"
-          style={{ color: ASH }}
-        >
-          View →
-        </Link>
-      </div>
+                  {slide.n}
+                </span>
+                <div className="min-w-0">
+                  <h3
+                    className="tracking-[-0.02em]"
+                    style={{
+                      fontFamily: DISPLAY,
+                      fontWeight: 400,
+                      fontSize:
+                        slide.nameSize ?? "clamp(1.75rem, 2.4vw, 2.75rem)",
+                      color: BONE,
+                    }}
+                  >
+                    {slide.name}
+                  </h3>
+                  {slide.subheader && (
+                    <p
+                      className="text-[11px] sm:text-[12px] font-mono uppercase tracking-[0.14em] mt-1"
+                      style={{ color: ASH }}
+                    >
+                      {slide.subheader}
+                    </p>
+                  )}
+                </div>
+              </motion.div>
+            </AnimatePresence>
+          </div>
+          <Link
+            to={slide.to}
+            className="text-[13px] font-mono uppercase tracking-[0.18em] shrink-0 transition-opacity hover:opacity-60 mt-4 self-start"
+            style={{ color: ASH }}
+          >
+            View →
+          </Link>
+        </div>
 
-      <MotionConfig reducedMotion="user">
-        <Link to={slide.to} className="group block">
-          <AnimatePresence mode="wait" custom={direction} initial={false}>
+        <MotionConfig reducedMotion="user">
+          <Link to={slide.to} className="group block flex-1 min-w-0">
             <motion.div
-              key={index}
-              custom={direction}
-              variants={variants}
-              initial="enter"
-              animate="center"
-              exit="exit"
-              transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+              initial={false}
+              animate={{ height: slotHeight || "auto" }}
+              transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
+              style={{ overflow: "hidden" }}
             >
-              <Instrument />
+              <div ref={slotRef}>
+                <AnimatePresence mode="wait" custom={direction} initial={false}>
+                  <motion.div
+                    key={index}
+                    custom={direction}
+                    variants={variants}
+                    initial="enter"
+                    animate="center"
+                    exit="exit"
+                    transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+                  >
+                    <Instrument />
+                  </motion.div>
+                </AnimatePresence>
+              </div>
             </motion.div>
-          </AnimatePresence>
-        </Link>
-      </MotionConfig>
+          </Link>
+        </MotionConfig>
+      </div>
 
       <div className="mt-4 flex items-center gap-2">
         {CAROUSEL_PRODUCTS.map((s, i) => (
