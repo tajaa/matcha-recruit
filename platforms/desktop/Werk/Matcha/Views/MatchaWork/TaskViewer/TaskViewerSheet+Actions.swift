@@ -230,10 +230,20 @@ extension TaskViewerSheet {
     func copyTicketToClipboard() async {
         isCopying = true
 
+        // The review context is derived from `history`, which the sheet loads
+        // lazily. Copying before that lands would silently export a sent-back
+        // ticket as if it had never been reviewed.
+        if !historyLoaded { await loadHistory() }
+
         // Download up to 6 image attachments and write them to a per-task temp
         // dir so their paths are real + readable. Only successfully-written
         // files contribute a path (never list an unreadable one).
-        let images = Array(attachments.filter { $0.isImage }.prefix(6))
+        //
+        // Current round first: on a rework the reviewer's evidence is the newest
+        // screenshot, and a ticket with 6+ round-1 images would otherwise spend
+        // the whole cap before reaching it.
+        let ordered = currentRoundAttachments + earlierRoundAttachments
+        let images = Array(ordered.filter { $0.isImage }.prefix(6))
         let tmpDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("werk-ticket-\(task.id)", isDirectory: true)
         try? FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
@@ -254,6 +264,7 @@ extension TaskViewerSheet {
             attachments: attachments,
             subtasks: subtasks,
             screenshotPaths: screenshotPaths,
+            review: reviewContext,
         )
 
         let board = NSPasteboard.general

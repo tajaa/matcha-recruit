@@ -80,6 +80,48 @@ extension TaskViewerSheet {
         return parts.joined(separator: " · ")
     }
 
+    // MARK: - Clipboard export context
+
+    /// The review state a copied ticket needs so a coding agent reads it as a
+    /// REWORK rather than a fresh feature request. Nil when the ticket carries
+    /// no reviewer feedback — the copy then keeps its plain shape.
+    ///
+    /// The gate mirrors `directiveHero` exactly, and deliberately isn't
+    /// `boardColumn == "changes_requested"`: `reject_project_task` lands the card
+    /// there, but `review_note` survives the assignee dragging it to In Progress
+    /// to start the rework — which is precisely when they'd copy it. The server
+    /// clears the note on re-entry to review/done, so its presence is the truth.
+    var reviewContext: TaskClipboardExporter.ReviewContext? {
+        let note = task.reviewNote?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !note.isEmpty,
+              ["changes_requested", "in_progress", "todo"].contains(task.boardColumn)
+        else { return nil }
+
+        let sentBack = history.last { $0.eventType == "review_rejected" }
+        let allRounds = rounds
+
+        // Everything closed before the current round: work the reviewer already
+        // accepted. Listing it is what stops the agent rebuilding it.
+        let fixedEarlier = allRounds
+            .filter { $0.index < currentRound }
+            .map { (round: $0.index, titles: $0.fixedSubtaskTitles) }
+            .filter { !$0.titles.isEmpty }
+
+        return TaskClipboardExporter.ReviewContext(
+            note: note,
+            denials: reviewDenials.map {
+                TaskClipboardExporter.Denial(title: $0.title, reason: $0.reason, severity: $0.severity)
+            },
+            severitySummary: denialSeverityCounts,
+            currentRound: currentRound,
+            totalRounds: max(allRounds.count, currentRound),
+            cycleCount: task.reviewCycleCount ?? 0,
+            sentBackBy: sentBack?.actorName,
+            sentBackAt: sentBack?.createdAt,
+            fixedEarlier: fixedEarlier,
+        )
+    }
+
     // MARK: - Reviewer-added scope (#7)
 
     /// Name to tag a checklist item with when someone OTHER than the assignee
