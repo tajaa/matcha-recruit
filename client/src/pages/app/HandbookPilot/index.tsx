@@ -181,8 +181,10 @@ export default function HandbookPilot() {
 
   return (
     <div className="flex h-[calc(100vh-7rem)] gap-4">
-      {/* Sessions rail */}
-      <aside className="w-64 shrink-0 flex flex-col border border-zinc-800 rounded-xl bg-zinc-950/40">
+      {/* Sessions rail — hidden in Handbook mode so the document gets the full
+          reading width; the Build/Handbook toolbar stays as the way back. */}
+      <aside className={`w-64 shrink-0 flex-col border border-zinc-800 rounded-xl bg-zinc-950/40 ${
+        active && mode === 'handbook' ? 'hidden' : 'flex'}`}>
         <div className="p-3 border-b border-zinc-800 flex items-center justify-between">
           <div className="flex items-center gap-1.5">
             <Sparkles className="h-4 w-4 text-emerald-500" />

@@ -152,7 +152,7 @@ export default function HandbookViewer({ sessionId, refreshKey, onDraftRequireme
               <p className="text-sm">Your handbook appears here as the pilot drafts it.</p>
             </div>
           ) : (
-            <div className="max-w-[70ch] mx-auto space-y-8">
+            <div className="max-w-[90ch] mx-auto space-y-8">
               {handbook!.sections.map((s) => (
                 <DocBlock key={s.id} item={s} selected={s.id === selectedId}
                   refCb={(el) => { sectionRefs.current[s.id] = el }} onSelect={() => setSelectedId(s.id)} />
