@@ -31,6 +31,7 @@ from ._shared import (
     _collect_raw_evidence_context,
     _fetch_company_policy_context,
     _resolve_involved_parties,
+    _load_guidance_context,
     _build_er_analyzer,
 )
 
@@ -92,49 +93,6 @@ async def generate_suggested_guidance(
         if not case_row:
             raise HTTPException(status_code=404, detail="Case not found")
 
-        # Enrich involved employees with names
-        involved_raw = case_row["involved_employees"]
-        if isinstance(involved_raw, str):
-            try:
-                involved_raw = json.loads(involved_raw)
-            except Exception:
-                involved_raw = []
-        if not isinstance(involved_raw, list):
-            involved_raw = []
-
-        enriched_employees = []
-        for entry in involved_raw:
-            if not isinstance(entry, dict):
-                continue
-            emp_id_str = entry.get("employee_id")
-            if not emp_id_str:
-                continue
-            try:
-                emp_id = UUID(str(emp_id_str))
-            except (ValueError, TypeError):
-                continue
-            emp_row = await conn.fetchrow(
-                "SELECT first_name, last_name FROM employees WHERE id = $1", emp_id,
-            )
-            name = "Unknown"
-            if emp_row:
-                first = emp_row["first_name"] or ""
-                last = emp_row["last_name"] or ""
-                name = f"{first} {last}".strip() or "Unknown"
-            enriched_employees.append({"name": name, "role": entry.get("role", "unknown")})
-
-        evidence_rows = await conn.fetch(
-            """
-            SELECT id, filename
-            FROM er_case_documents
-            WHERE case_id = $1
-              AND processing_status = 'completed'
-              AND document_type != 'policy'
-            ORDER BY created_at DESC
-            """,
-            case_id,
-        )
-
         analysis_rows = await conn.fetch(
             """
             SELECT analysis_type, analysis_data
@@ -145,40 +103,13 @@ async def generate_suggested_guidance(
             ["timeline", "discrepancies", "policy_check"],
         )
 
-        transcript_rows = await conn.fetch(
-            """
-            SELECT id, filename, scrubbed_text
-            FROM er_case_documents
-            WHERE case_id = $1 AND processing_status = 'completed' AND document_type = 'transcript'
-            ORDER BY created_at DESC
-            """,
-            case_id,
-        )
-
-        # Fetch ALL completed docs with scrubbed text (for guidance prompt context)
-        all_doc_text_rows = await conn.fetch(
-            """
-            SELECT id, filename, document_type, scrubbed_text
-            FROM er_case_documents
-            WHERE case_id = $1 AND processing_status = 'completed'
-              AND scrubbed_text IS NOT NULL AND scrubbed_text != ''
-            ORDER BY created_at DESC
-            """,
-            case_id,
-        )
-
-        # Check for linked incident witnesses and investigation transcript count
-        linked_incident = await conn.fetchrow(
-            "SELECT witnesses FROM ir_incidents WHERE er_case_id = $1 LIMIT 1",
-            case_id,
-        )
-        completed_investigation_transcript_count = await conn.fetchval(
-            """
-            SELECT COUNT(*) FROM ir_investigation_interviews
-            WHERE er_case_id = $1 AND status IN ('completed', 'analyzed')
-            """,
-            case_id,
-        ) or 0
+        ctx = await _load_guidance_context(conn, case_id, case_row)
+        enriched_employees = ctx["enriched_employees"]
+        evidence_rows = ctx["evidence_rows"]
+        transcript_rows = ctx["transcript_rows"]
+        all_doc_text_rows = ctx["all_doc_text_rows"]
+        linked_incident = ctx["linked_incident"]
+        completed_investigation_transcript_count = ctx["completed_investigation_transcript_count"]
 
     analysis_map: dict[str, dict[str, Any]] = {}
     for row in analysis_rows:
@@ -298,7 +229,10 @@ async def generate_suggested_guidance(
 
         # Handle guidance result
         if isinstance(raw_payload, BaseException):
-            logger.warning("Suggested guidance generation failed for case %s: %s", case_id, raw_payload)
+            logger.error(
+                "Suggested guidance generation failed for case %s: %s", case_id, raw_payload,
+                exc_info=raw_payload,
+            )
             payload = fallback_payload
         else:
             payload = _normalize_suggested_guidance_payload(
@@ -310,7 +244,10 @@ async def generate_suggested_guidance(
 
         # Handle confidence result
         if isinstance(confidence_result, BaseException):
-            logger.warning("Confidence eval failed for case %s: %s", case_id, confidence_result)
+            logger.error(
+                "Confidence eval failed for case %s: %s", case_id, confidence_result,
+                exc_info=confidence_result,
+            )
             confidence_result = {"confidence": floor_confidence, "signals": [], "summary": ""}
 
         confidence = confidence_result.get("confidence", floor_confidence)
@@ -344,7 +281,9 @@ async def generate_suggested_guidance(
 
         return result
     except Exception as exc:
-        logger.warning("Suggested guidance generation failed for case %s: %s", case_id, exc)
+        logger.error(
+            "Suggested guidance generation failed for case %s: %s", case_id, exc, exc_info=True,
+        )
         fallback_payload["determination_confidence"] = floor_confidence
         return SuggestedGuidanceResponse(**fallback_payload)
 
@@ -376,49 +315,6 @@ async def generate_suggested_guidance_stream(
         if not case_row:
             raise HTTPException(status_code=404, detail="Case not found")
 
-        # Enrich involved employees with names
-        involved_raw_s = case_row["involved_employees"]
-        if isinstance(involved_raw_s, str):
-            try:
-                involved_raw_s = json.loads(involved_raw_s)
-            except Exception:
-                involved_raw_s = []
-        if not isinstance(involved_raw_s, list):
-            involved_raw_s = []
-
-        enriched_employees_s = []
-        for entry in involved_raw_s:
-            if not isinstance(entry, dict):
-                continue
-            emp_id_str = entry.get("employee_id")
-            if not emp_id_str:
-                continue
-            try:
-                emp_id = UUID(str(emp_id_str))
-            except (ValueError, TypeError):
-                continue
-            emp_row = await conn.fetchrow(
-                "SELECT first_name, last_name FROM employees WHERE id = $1", emp_id,
-            )
-            name = "Unknown"
-            if emp_row:
-                first = emp_row["first_name"] or ""
-                last = emp_row["last_name"] or ""
-                name = f"{first} {last}".strip() or "Unknown"
-            enriched_employees_s.append({"name": name, "role": entry.get("role", "unknown")})
-
-        evidence_rows = await conn.fetch(
-            """
-            SELECT id, filename
-            FROM er_case_documents
-            WHERE case_id = $1
-              AND processing_status = 'completed'
-              AND document_type != 'policy'
-            ORDER BY created_at DESC
-            """,
-            case_id,
-        )
-
         analysis_rows = await conn.fetch(
             """
             SELECT analysis_type, analysis_data
@@ -429,27 +325,11 @@ async def generate_suggested_guidance_stream(
             ["timeline", "discrepancies", "policy_check"],
         )
 
-        transcript_rows = await conn.fetch(
-            """
-            SELECT id, filename, scrubbed_text
-            FROM er_case_documents
-            WHERE case_id = $1 AND processing_status = 'completed' AND document_type = 'transcript'
-            ORDER BY created_at DESC
-            """,
-            case_id,
-        )
-
-        # Fetch ALL completed docs with scrubbed text (for guidance prompt context)
-        all_doc_text_rows_s = await conn.fetch(
-            """
-            SELECT id, filename, document_type, scrubbed_text
-            FROM er_case_documents
-            WHERE case_id = $1 AND processing_status = 'completed'
-              AND scrubbed_text IS NOT NULL AND scrubbed_text != ''
-            ORDER BY created_at DESC
-            """,
-            case_id,
-        )
+        ctx = await _load_guidance_context(conn, case_id, case_row)
+        enriched_employees_s = ctx["enriched_employees"]
+        evidence_rows = ctx["evidence_rows"]
+        transcript_rows = ctx["transcript_rows"]
+        all_doc_text_rows_s = ctx["all_doc_text_rows"]
 
     async def event_stream():
         def sse(event: dict) -> str:
@@ -574,7 +454,10 @@ async def generate_suggested_guidance_stream(
             yield sse({"type": "status", "message": "Assembling recommendations..."})
 
             if isinstance(raw_result, BaseException):
-                logger.warning("Streaming guidance generation failed for case %s: %s", case_id, raw_result)
+                logger.error(
+                    "Streaming guidance generation failed for case %s: %s", case_id, raw_result,
+                    exc_info=raw_result,
+                )
                 payload = fallback
             else:
                 payload = _normalize_suggested_guidance_payload(
@@ -585,7 +468,10 @@ async def generate_suggested_guidance_stream(
                 )
 
             if isinstance(conf_result, BaseException):
-                logger.warning("Streaming confidence eval failed for case %s: %s", case_id, conf_result)
+                logger.error(
+                    "Streaming confidence eval failed for case %s: %s", case_id, conf_result,
+                    exc_info=conf_result,
+                )
                 conf_result = {"confidence": floor_conf, "signals": [], "summary": ""}
 
             conf = conf_result.get("confidence", floor_conf)
@@ -602,7 +488,9 @@ async def generate_suggested_guidance_stream(
             response_obj = SuggestedGuidanceResponse(**payload)
             yield sse({"type": "result", "data": response_obj.model_dump(mode="json")})
         except Exception as exc:
-            logger.warning("Streaming guidance generation failed for case %s: %s", case_id, exc)
+            logger.error(
+                "Streaming guidance generation failed for case %s: %s", case_id, exc, exc_info=True,
+            )
             fallback["determination_confidence"] = floor_conf
             response_obj = SuggestedGuidanceResponse(**fallback)
             yield sse({"type": "result", "data": response_obj.model_dump(mode="json")})

@@ -277,22 +277,84 @@ async def _fetch_company_policy_context(conn, company_id: UUID) -> str:
 
 
 async def _resolve_involved_parties(conn, raw_employees: Any) -> list[dict]:
-    """Resolve involved_employees JSONB into name+role dicts for Gemini context."""
+    """Resolve involved_employees JSONB into name+role dicts for Gemini context.
+
+    Skips malformed entries (non-dict, missing/invalid employee_id) instead of
+    raising — legacy rows predate Pydantic validation on this JSONB.
+    """
     involved = _normalize_json_list(raw_employees)
     if not involved:
         return []
-    emp_ids = [UUID(e["employee_id"]) if isinstance(e["employee_id"], str) else e["employee_id"] for e in involved if "employee_id" in e]
-    if not emp_ids:
+    parties: list[tuple[UUID, str]] = []
+    for e in involved:
+        if not isinstance(e, dict) or not e.get("employee_id"):
+            continue
+        try:
+            emp_id = UUID(str(e["employee_id"]))
+        except (ValueError, TypeError):
+            continue
+        parties.append((emp_id, e.get("role", "unknown")))
+    if not parties:
         return []
     rows = await conn.fetch(
         "SELECT id, first_name, last_name FROM employees WHERE id = ANY($1::uuid[])",
-        emp_ids,
+        [p[0] for p in parties],
     )
-    name_map = {str(r["id"]): f"{r['first_name']} {r['last_name']}" for r in rows}
+    name_map = {
+        str(r["id"]): (f"{r['first_name'] or ''} {r['last_name'] or ''}".strip() or "Unknown")
+        for r in rows
+    }
     return [
-        {"name": name_map.get(str(e["employee_id"]), "Unknown"), "role": e["role"]}
-        for e in involved
+        {"name": name_map.get(str(emp_id), "Unknown"), "role": role}
+        for emp_id, role in parties
     ]
+
+
+async def _load_guidance_context(conn, case_id: UUID, case_row) -> dict[str, Any]:
+    """Single-round-trip context load shared by the suggested-guidance endpoints.
+
+    Replaces 3 sequential er_case_documents queries (evidence/transcript/all-text
+    views only differ by filter) with one, and replaces an inline per-employee
+    N+1 lookup with the batched _resolve_involved_parties.
+    """
+    enriched_employees = await _resolve_involved_parties(conn, case_row["involved_employees"])
+
+    doc_rows = await conn.fetch(
+        """
+        SELECT id, filename, document_type, scrubbed_text
+        FROM er_case_documents
+        WHERE case_id = $1 AND processing_status = 'completed'
+        ORDER BY created_at DESC
+        """,
+        case_id,
+    )
+    evidence_rows = [r for r in doc_rows if r["document_type"] != "policy"]
+    transcript_rows = [r for r in doc_rows if r["document_type"] == "transcript"]
+    all_doc_text_rows = [
+        r for r in doc_rows
+        if r["scrubbed_text"] is not None and r["scrubbed_text"] != ""
+    ]
+
+    linked_incident = await conn.fetchrow(
+        "SELECT witnesses FROM ir_incidents WHERE er_case_id = $1 LIMIT 1",
+        case_id,
+    )
+    completed_investigation_transcript_count = await conn.fetchval(
+        """
+        SELECT COUNT(*) FROM ir_investigation_interviews
+        WHERE er_case_id = $1 AND status IN ('completed', 'analyzed')
+        """,
+        case_id,
+    ) or 0
+
+    return {
+        "enriched_employees": enriched_employees,
+        "evidence_rows": evidence_rows,
+        "transcript_rows": transcript_rows,
+        "all_doc_text_rows": all_doc_text_rows,
+        "linked_incident": linked_incident,
+        "completed_investigation_transcript_count": completed_investigation_transcript_count,
+    }
 
 
 def _build_er_analyzer(model_override: Optional[str] = None):

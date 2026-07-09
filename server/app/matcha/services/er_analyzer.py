@@ -7,6 +7,7 @@ AI-powered analysis for Employee Relations investigations:
 - Summary Report Generation
 """
 
+import asyncio
 import json
 import logging
 from datetime import datetime, timezone
@@ -20,6 +21,11 @@ FALLBACK_MODELS = (
     "gemini-2.5-flash",
     "gemini-2.0-flash",
 )
+
+# ER prompts embed document excerpts up to ER_DOC_TOTAL_CHAR_CAP (600k chars,
+# see _shared.py) — a much larger payload than IR's analyzer calls (45s), so
+# this matches matcha_work_ai.py's 120s rather than IR's timeout.
+GEMINI_CALL_TIMEOUT = 120
 
 
 # ===========================================
@@ -550,65 +556,123 @@ class ERAnalyzer:
         return deduped
 
     async def _generate_content_async(self, prompt: str) -> str:
-        """Generate content with automatic fallback when the configured model is unavailable."""
+        """Generate content with automatic fallback when the configured model is
+        unavailable, and a bounded same-model retry (no fallback) on timeout.
+
+        A timeout says nothing about model availability, so it must not skip to
+        a worse fallback model — but it also must not retry unboundedly. Worst
+        case is exactly 2 attempts x GEMINI_CALL_TIMEOUT.
+        """
         last_model_error: Exception | None = None
         for candidate in self._model_candidates():
-            try:
-                response = await self.client.aio.models.generate_content(
-                    model=candidate,
-                    contents=prompt,
-                )
-                if candidate != self.model:
-                    logger.warning(
-                        "ERAnalyzer model '%s' unavailable; fell back to '%s'",
-                        self.model,
-                        candidate,
+            for attempt in range(2):
+                try:
+                    response = await asyncio.wait_for(
+                        self.client.aio.models.generate_content(
+                            model=candidate,
+                            contents=prompt,
+                        ),
+                        timeout=GEMINI_CALL_TIMEOUT,
                     )
-                return (response.text or "").strip()
-            except Exception as exc:
-                if self._is_model_unavailable_error(exc):
-                    last_model_error = exc
-                    logger.warning(
-                        "ERAnalyzer model candidate '%s' unavailable: %s",
+                    if candidate != self.model:
+                        logger.warning(
+                            "ERAnalyzer model '%s' unavailable; fell back to '%s'",
+                            self.model,
+                            candidate,
+                        )
+                    return (response.text or "").strip()
+                except asyncio.TimeoutError:
+                    logger.error(
+                        "ERAnalyzer Gemini call TIMED OUT after %ss (model=%s, attempt=%s/2)",
+                        GEMINI_CALL_TIMEOUT,
                         candidate,
-                        exc,
+                        attempt + 1,
                     )
-                    continue
-                raise
+                    if attempt == 0:
+                        continue
+                    raise TimeoutError(
+                        f"ERAnalyzer Gemini call TIMED OUT after {GEMINI_CALL_TIMEOUT}s (model={candidate})"
+                    )
+                except Exception as exc:
+                    if self._is_model_unavailable_error(exc):
+                        last_model_error = exc
+                        logger.warning(
+                            "ERAnalyzer model candidate '%s' unavailable: %s",
+                            candidate,
+                            exc,
+                        )
+                        break
+                    raise
 
         if last_model_error:
             raise last_model_error
         raise RuntimeError("No Gemini model candidates were available for ER analysis")
 
     async def _generate_content_streaming(self, prompt: str) -> AsyncIterator[str]:
-        """Stream content from Gemini, yielding text chunks. Falls back through model candidates."""
+        """Stream content from Gemini, yielding text chunks.
+
+        Falls back through model candidates for availability errors, and
+        retries once (same model, before any chunk has reached the caller) on
+        timeout. Once a chunk has been yielded, a subsequent timeout is raised
+        rather than retried — restarting the stream would duplicate
+        already-yielded text in the caller's accumulator.
+        """
         last_model_error: Exception | None = None
         for candidate in self._model_candidates():
-            try:
-                response = await self.client.aio.models.generate_content_stream(
-                    model=candidate,
-                    contents=prompt,
-                )
-                if candidate != self.model:
-                    logger.warning(
-                        "ERAnalyzer model '%s' unavailable; fell back to '%s'",
-                        self.model,
-                        candidate,
+            for attempt in range(2):
+                yielded_any = False
+                try:
+                    stream = await asyncio.wait_for(
+                        self.client.aio.models.generate_content_stream(
+                            model=candidate,
+                            contents=prompt,
+                        ),
+                        timeout=GEMINI_CALL_TIMEOUT,
                     )
-                async for chunk in response:
-                    if chunk.text:
-                        yield chunk.text
-                return
-            except Exception as exc:
-                if self._is_model_unavailable_error(exc):
-                    last_model_error = exc
-                    logger.warning(
-                        "ERAnalyzer model candidate '%s' unavailable: %s",
+                    if candidate != self.model:
+                        logger.warning(
+                            "ERAnalyzer model '%s' unavailable; fell back to '%s'",
+                            self.model,
+                            candidate,
+                        )
+                    chunk_iter = stream.__aiter__()
+                    while True:
+                        try:
+                            chunk = await asyncio.wait_for(
+                                chunk_iter.__anext__(), timeout=GEMINI_CALL_TIMEOUT,
+                            )
+                        except StopAsyncIteration:
+                            return
+                        if chunk.text:
+                            yielded_any = True
+                            yield chunk.text
+                except asyncio.TimeoutError:
+                    logger.error(
+                        "ERAnalyzer Gemini stream TIMED OUT after %ss (model=%s, attempt=%s/2, mid_stream=%s)",
+                        GEMINI_CALL_TIMEOUT,
                         candidate,
-                        exc,
+                        attempt + 1,
+                        yielded_any,
                     )
-                    continue
-                raise
+                    if yielded_any:
+                        raise TimeoutError(
+                            f"ERAnalyzer Gemini stream TIMED OUT after {GEMINI_CALL_TIMEOUT}s mid-stream (model={candidate})"
+                        )
+                    if attempt == 0:
+                        continue
+                    raise TimeoutError(
+                        f"ERAnalyzer Gemini stream TIMED OUT after {GEMINI_CALL_TIMEOUT}s (model={candidate})"
+                    )
+                except Exception as exc:
+                    if not yielded_any and self._is_model_unavailable_error(exc):
+                        last_model_error = exc
+                        logger.warning(
+                            "ERAnalyzer model candidate '%s' unavailable: %s",
+                            candidate,
+                            exc,
+                        )
+                        break
+                    raise
 
         if last_model_error:
             raise last_model_error
