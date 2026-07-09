@@ -553,6 +553,14 @@ def test_update_returns_none_when_the_row_vanishes_mid_update():
     assert asyncio.run(rt.update_contract(_Racing(), "co", "c1", _body(name="x"))) is None
 
 
+def test_an_explicit_null_name_is_ignored_not_written():
+    """`name` is NOT NULL in the schema — null means 'don't touch', or the
+    UPDATE dies on the constraint."""
+    conn = _update(_body(name=None, counterparty="Acme II"))
+    assert not conn.touched("name")
+    assert conn.touched("counterparty")
+
+
 def test_update_with_an_empty_body_is_a_no_op():
     conn = _UpdateConn()
     import asyncio

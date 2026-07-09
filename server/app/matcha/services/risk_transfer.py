@@ -546,7 +546,9 @@ async def update_contract(conn, company_id, contract_id, body) -> Optional[dict]
 
     sent = body.model_fields_set
     incoming: dict = {}
-    if "name" in sent:
+    # `name` is NOT NULL — an explicit null is "don't touch", not "clear",
+    # or the write dies on the constraint.
+    if "name" in sent and body.name is not None:
         incoming["name"] = body.name
     if "counterparty" in sent:
         incoming["counterparty"] = body.counterparty
