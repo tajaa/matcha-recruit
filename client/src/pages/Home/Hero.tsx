@@ -3,6 +3,7 @@ import { ChevronDown } from "lucide-react";
 import { ASH, BONE, DISPLAY, LINE_D, MATCHA } from "./theme";
 import { useReducedMotion } from "./instruments/shared";
 import { ProductCarousel } from "./ProductCarousel";
+import { StartCapture } from "./StartCapture";
 
 // The headline types itself out like a terminal. Segments keep the per-word
 // styling (italic accents) that the old static markup had.
@@ -14,15 +15,26 @@ const HEADLINE: { text: string; style?: React.CSSProperties }[] = [
   { text: " function." },
 ];
 const HEADLINE_CHARS = HEADLINE.reduce((n, s) => n + s.text.length, 0);
-const TYPE_MS = 42;
-const TYPE_DELAY_MS = 400;
+const TYPE_MS = 38;
+const TYPE_DELAY_MS = 620;
+
+// The hero reveals in sequence rather than all at once: masthead, then the
+// headline types, then the deck row, then the carousel. Deriving the last two
+// from the typing constants keeps the cadence right if the headline changes.
+const TYPED_DONE_S = (TYPE_DELAY_MS + HEADLINE_CHARS * TYPE_MS) / 1000;
+const MASTHEAD_DELAY_S = 0.15;
+const DECK_DELAY_S = TYPED_DONE_S + 0.18;
+const CAROUSEL_DELAY_S = DECK_DELAY_S + 0.55;
 
 export function Hero() {
   return (
     <section className="relative w-full min-h-[100svh] flex flex-col">
       {/* Masthead row */}
-      <div className="max-w-[1600px] mx-auto w-full px-6 sm:px-10 pt-[76px] sm:pt-[84px]">
-        <div className="home-fade" style={{ animationDelay: "0.05s" }}>
+      <div className="max-w-[1600px] mx-auto w-full px-6 sm:px-10 lg:px-16 xl:px-24 pt-[76px] sm:pt-[84px]">
+        <div
+          className="home-fade"
+          style={{ animationDelay: `${MASTHEAD_DELAY_S}s` }}
+        >
           <div className="grid grid-cols-2 sm:grid-cols-3 items-center pb-3">
             <span
               className="flex items-center gap-2.5 text-[10.5px] tracking-[0.28em] font-mono uppercase"
@@ -59,16 +71,20 @@ export function Hero() {
       {/* Headline + supporting content, stacked at every breakpoint — the
           carousel sits full-width below the headline/CTAs instead of
           fighting them for space in a side-by-side column. */}
-      <div className="relative max-w-[1600px] mx-auto w-full px-6 sm:px-10 flex-1 flex flex-col justify-center py-8 sm:py-10">
+      <div className="relative max-w-[1600px] mx-auto w-full px-6 sm:px-10 lg:px-16 xl:px-24 flex-1 flex flex-col justify-center py-8 sm:py-10">
         <div>
           <div>
             <TypedHeadline />
 
             {/* Deck row — editorial band under the headline: hairline rule,
-                tagline left, the starting-line cue right as a circled arrow. */}
+                tagline left, work-email capture right. The capture sits above
+                the fold on purpose: it's the page's one conversion point. */}
             <div
-              className="mt-10 pt-7 border-t flex flex-col lg:flex-row lg:items-end lg:justify-between gap-8 home-fade"
-              style={{ borderColor: LINE_D, animationDelay: "0.66s" }}
+              className="mt-10 pt-7 border-t flex flex-col lg:flex-row lg:items-end lg:justify-between gap-8 lg:gap-16 home-fade"
+              style={{
+                borderColor: LINE_D,
+                animationDelay: `${DECK_DELAY_S}s`,
+              }}
             >
               <p
                 className="max-w-3xl text-[1.35rem] sm:text-[1.75rem] tracking-[-0.011em]"
@@ -86,32 +102,15 @@ export function Hero() {
                   Workplace safety, compliance, and risk analysis.
                 </span>
               </p>
-              <a
-                href="#index"
-                className="group inline-flex items-center gap-3.5 shrink-0 pb-1"
-              >
-                <span
-                  className="text-[11px] font-mono uppercase tracking-[0.22em] transition-colors duration-200"
-                  style={{ color: BONE }}
-                >
-                  Find your starting line
-                </span>
-                <span
-                  aria-hidden
-                  className="flex items-center justify-center w-9 h-9 rounded-full border transition-colors duration-200 group-hover:bg-[#A3C57D] group-hover:border-[#A3C57D] group-hover:text-[#0E0E0C]"
-                  style={{ borderColor: LINE_D, color: ASH }}
-                >
-                  ↓
-                </span>
-              </a>
+              <StartCapture />
             </div>
           </div>
 
           <div
             className="mt-14 home-fade w-full max-w-[1360px] mx-auto"
-            style={{ animationDelay: "0.8s" }}
+            style={{ animationDelay: `${CAROUSEL_DELAY_S}s` }}
           >
-            <ProductCarousel />
+            <ProductCarousel startDelayMs={CAROUSEL_DELAY_S * 1000} />
           </div>
         </div>
       </div>
@@ -161,7 +160,7 @@ function TypedHeadline() {
   }, [reduceMotion]);
 
   const cls =
-    "tracking-[-0.02em] text-[clamp(1.9rem,6vw,5.4rem)] xl:text-[clamp(2.1rem,4vw,4rem)]";
+    "tracking-[-0.02em] text-[clamp(1.7rem,5.2vw,4.6rem)] xl:text-[clamp(1.9rem,3.4vw,3.4rem)]";
   const font: React.CSSProperties = {
     fontFamily: DISPLAY,
     fontWeight: 300,

@@ -21,7 +21,7 @@ export function PageStyle() {
         to { opacity: 1; transform: translateY(0); }
       }
       @keyframes homeFadeUp {
-        from { opacity: 0; transform: translateY(18px); }
+        from { opacity: 0; transform: translateY(24px); }
         to { opacity: 1; transform: translateY(0); }
       }
       @keyframes homePulse {
@@ -45,7 +45,7 @@ export function PageStyle() {
         55%, 100% { opacity: 0; }
       }
       .home-rise > span { display: inline-block; animation: homeRise 0.9s cubic-bezier(0.16,1,0.3,1) both; }
-      .home-fade { opacity: 0; animation: homeFadeUp 0.8s ease-out forwards; }
+      .home-fade { opacity: 0; animation: homeFadeUp 1s cubic-bezier(0.16,1,0.3,1) forwards; }
       .home-pulse { animation: homePulse 2.4s ease-in-out infinite; }
       .home-scroll-cue { animation: homeScrollCue 1.8s ease-in-out infinite; }
       .home-float { animation: homeFloat 7s ease-in-out infinite; }

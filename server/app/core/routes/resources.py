@@ -7,6 +7,7 @@ visitors to the resources signup page.
 """
 
 import html as _html
+import json as _json
 import logging
 import os
 from typing import Optional
@@ -1188,6 +1189,151 @@ async def join_lite_waitlist(body: LiteWaitlistRequest, request: Request):
         logger.warning("Lite waitlist email failed: %s", exc)
 
     return LiteWaitlistResponse(ok=True)
+
+
+# ---------------------------------------------------------------------------
+# Landing qualification wizard — fully public capture. No auth.
+# Work email only; consumer mailboxes are rejected so sales isn't chasing
+# personal addresses.
+# ---------------------------------------------------------------------------
+
+# Consumer mailbox providers. A lead from one of these isn't a company
+# buying HR software, so we bounce them back to the form rather than
+# recording a lead nobody will follow up on.
+FREE_EMAIL_DOMAINS: frozenset[str] = frozenset({
+    "gmail.com", "googlemail.com",
+    "yahoo.com", "yahoo.co.uk", "yahoo.co.in", "ymail.com", "rocketmail.com",
+    "hotmail.com", "hotmail.co.uk", "outlook.com", "live.com", "msn.com",
+    "icloud.com", "me.com", "mac.com",
+    "aol.com", "gmx.com", "gmx.net", "mail.com", "mail.ru",
+    "protonmail.com", "proton.me", "pm.me",
+    "yandex.com", "yandex.ru", "zoho.com",
+    "fastmail.com", "hey.com", "tutanota.com", "tuta.io",
+    "qq.com", "163.com", "126.com", "naver.com", "hanmail.net",
+    "comcast.net", "verizon.net", "att.net", "sbcglobal.net", "cox.net",
+    "btinternet.com", "orange.fr", "free.fr", "web.de", "t-online.de",
+})
+
+HEADCOUNT_RANGES = ("1-24", "25-99", "100-299", "300-999", "1000+")
+LOCATION_RANGES = ("1", "2-4", "5-9", "10+")
+PRIMARY_NEEDS = (
+    "workplace_safety",
+    "compliance",
+    "employee_relations",
+    "hr_operations",
+    "legal_exposure",
+    "not_sure",
+)
+
+
+class QualifyRequest(BaseModel):
+    email: str = Field(..., min_length=3, max_length=255)
+    name: Optional[str] = Field(default=None, max_length=255)
+    company_name: Optional[str] = Field(default=None, max_length=255)
+    headcount_range: str = Field(..., max_length=20)
+    location_range: str = Field(..., max_length=20)
+    primary_needs: list[str] = Field(default_factory=list, max_length=6)
+    website: Optional[str] = Field(default=None)  # honeypot
+
+
+class QualifyResponse(BaseModel):
+    ok: bool
+
+
+@router.post("/qualify", response_model=QualifyResponse)
+async def submit_qualification(body: QualifyRequest, request: Request):
+    """Public landing-page qualification wizard.
+
+    Writes a lead_captures row with the structured answers in `details`
+    and fires a best-effort sales notification. Work emails only.
+    """
+    if body.website:
+        raise HTTPException(status_code=400, detail="Invalid submission")
+
+    ip = client_ip(request)
+    await check_rate_limit(ip, "qualify", 5, 3600)
+
+    import re as _re
+    email = body.email.strip().lower()
+    if not _re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
+        raise HTTPException(status_code=400, detail="Invalid email address")
+
+    domain = email.rsplit("@", 1)[1]
+    if domain in FREE_EMAIL_DOMAINS:
+        raise HTTPException(
+            status_code=400,
+            detail="Please use your work email address.",
+        )
+
+    if body.headcount_range not in HEADCOUNT_RANGES:
+        raise HTTPException(status_code=400, detail="Invalid headcount range")
+    if body.location_range not in LOCATION_RANGES:
+        raise HTTPException(status_code=400, detail="Invalid location range")
+    needs = [n for n in body.primary_needs if n in PRIMARY_NEEDS]
+
+    details = {
+        "headcount_range": body.headcount_range,
+        "location_range": body.location_range,
+        "primary_needs": needs,
+        "company_name": body.company_name,
+    }
+
+    async with get_connection() as conn:
+        # De-dupe on email + slug within 24h, same as the Lite waitlist —
+        # a double-submit shouldn't page sales twice.
+        existing = await conn.fetchval(
+            """
+            SELECT 1 FROM lead_captures
+            WHERE email = $1
+              AND asset_slug = 'landing_qualification'
+              AND created_at > NOW() - INTERVAL '24 hours'
+            LIMIT 1
+            """,
+            email,
+        )
+        if not existing:
+            await conn.execute(
+                """
+                INSERT INTO lead_captures (email, name, asset_slug, source, ip_address, details)
+                VALUES ($1, $2, 'landing_qualification', 'home_wizard', $3, $4::jsonb)
+                """,
+                email,
+                body.name,
+                ip,
+                _json.dumps(details),
+            )
+
+    if existing:
+        return QualifyResponse(ok=True)
+
+    try:
+        from ..services.email import get_email_service
+        sales_email = os.getenv("SALES_INQUIRY_EMAIL")
+        email_svc = get_email_service()
+        if sales_email and email_svc.is_configured():
+            safe_email = _html.escape(email)
+            safe_name = _html.escape(body.name or "(no name)")
+            safe_company = _html.escape(body.company_name or "(not given)")
+            safe_headcount = _html.escape(body.headcount_range)
+            safe_locations = _html.escape(body.location_range)
+            safe_needs = _html.escape(", ".join(needs) or "(none selected)")
+            await email_svc.send_email(
+                to_email=sales_email,
+                to_name="Matcha Sales",
+                subject=f"New qualified lead: {body.company_name or email}",
+                html_content=(
+                    "<h2>Landing qualification wizard</h2>"
+                    f"<p><strong>Contact:</strong> {safe_name} &lt;{safe_email}&gt;</p>"
+                    f"<p><strong>Company:</strong> {safe_company}</p>"
+                    f"<p><strong>Employees:</strong> {safe_headcount}</p>"
+                    f"<p><strong>Locations:</strong> {safe_locations}</p>"
+                    f"<p><strong>Needs:</strong> {safe_needs}</p>"
+                ),
+            )
+    except Exception as exc:
+        logger.warning("Qualification lead email failed: %s", exc)
+
+    return QualifyResponse(ok=True)
 
 
 # ---------------------------------------------------------------------------

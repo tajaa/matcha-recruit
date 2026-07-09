@@ -3,7 +3,7 @@ import { ASH, BONE, DISPLAY, MATCHA, NOIR } from "./theme";
 export function CTABand({ onDemoClick }: { onDemoClick: () => void }) {
   return (
     <section className="py-28 sm:py-40">
-      <div className="max-w-[1400px] mx-auto px-6 sm:px-10 text-center">
+      <div className="max-w-[1400px] mx-auto px-6 sm:px-10 lg:px-16 xl:px-24 text-center">
         <h2
           className="tracking-[-0.02em]"
           style={{

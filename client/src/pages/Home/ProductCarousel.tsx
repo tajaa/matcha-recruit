@@ -17,11 +17,25 @@ export const INSTRUMENT_COMPONENTS = [
 ];
 export const SHOWCASE_INTERVAL = 6000;
 
-export function ProductCarousel() {
+export function ProductCarousel({
+  startDelayMs = 0,
+}: {
+  startDelayMs?: number;
+}) {
   const [index, setIndex] = useState(0);
   const [direction, setDirection] = useState(1);
   const [paused, setPaused] = useState(false);
   const reduceMotion = useReducedMotion();
+
+  // The hero fades the carousel in after the headline finishes typing. Hold
+  // the autoplay clock until then, or the first slide burns most of its turn
+  // off-screen and swaps almost as soon as the visitor sees it.
+  const [started, setStarted] = useState(startDelayMs === 0);
+  useEffect(() => {
+    if (started) return;
+    const t = window.setTimeout(() => setStarted(true), startDelayMs);
+    return () => window.clearTimeout(t);
+  }, [started, startDelayMs]);
 
   const goTo = (next: number, dir: number) => {
     setDirection(dir);
@@ -32,11 +46,11 @@ export function ProductCarousel() {
   };
 
   useEffect(() => {
-    if (paused || reduceMotion) return;
+    if (paused || reduceMotion || !started) return;
     const t = window.setInterval(() => goTo(index + 1, 1), SHOWCASE_INTERVAL);
     return () => window.clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [paused, index, reduceMotion]);
+  }, [paused, index, reduceMotion, started]);
 
   const slide = CAROUSEL_PRODUCTS[index];
   const Instrument = INSTRUMENT_COMPONENTS[index];
@@ -173,7 +187,7 @@ export function ProductCarousel() {
               backgroundColor: i === index ? "rgba(245,242,237,0.18)" : LINE_D,
             }}
           >
-            {i === index && !paused && !reduceMotion && (
+            {i === index && !paused && !reduceMotion && started && (
               <span
                 key={index}
                 className="absolute inset-0 origin-left"
@@ -183,7 +197,7 @@ export function ProductCarousel() {
                 }}
               />
             )}
-            {i === index && (paused || reduceMotion) && (
+            {i === index && (paused || reduceMotion || !started) && (
               <span
                 className="absolute inset-0"
                 style={{ backgroundColor: s.accent }}

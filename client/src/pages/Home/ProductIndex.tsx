@@ -8,7 +8,7 @@ export function ProductIndex() {
 
   return (
     <section id="index" className="scroll-mt-16 py-20 sm:py-28">
-      <div className="max-w-[1600px] mx-auto w-full px-6 sm:px-10">
+      <div className="max-w-[1600px] mx-auto w-full px-6 sm:px-10 lg:px-16 xl:px-24">
         <div className="flex items-baseline justify-between mb-2">
           <h2
             className="text-[11px] tracking-[0.3em] font-mono uppercase"

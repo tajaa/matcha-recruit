@@ -6,7 +6,7 @@ export function Manifesto() {
       style={{ backgroundColor: MATCHA, color: NOIR }}
       className="py-24 sm:py-36"
     >
-      <div className="max-w-[1400px] mx-auto px-6 sm:px-10">
+      <div className="max-w-[1400px] mx-auto px-6 sm:px-10 lg:px-16 xl:px-24">
         <span className="text-[11px] tracking-[0.3em] font-mono uppercase">
           The point
         </span>
