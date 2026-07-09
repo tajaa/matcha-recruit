@@ -146,13 +146,13 @@ export default function Features() {
                     {enabledCount(company.enabled_features)}/{featureKeys.length} enabled
                   </Badge>
                 </div>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-3">
+                <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-x-5 gap-y-3">
                   {featureKeys.map((key) => {
                     const on = !!company.enabled_features[key]
                     const busy = toggling === `${company.id}:${key}`
                     return (
-                      <div key={key} className="flex items-center justify-between">
-                        <span className="text-sm text-zinc-400">
+                      <div key={key} className="flex items-center gap-3">
+                        <span className="min-w-0 flex-1 truncate text-sm text-zinc-400" title={FEATURE_LABELS[key]}>
                           {FEATURE_LABELS[key]}
                         </span>
                         <Toggle
