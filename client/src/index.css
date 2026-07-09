@@ -55,7 +55,7 @@ html[data-app-shell-bg] {
 }
 
 html[data-app-shell-bg="admin"] {
-  background-color: #09090b;
+  background-color: #3f3f46;
 }
 
 @keyframes ticker {

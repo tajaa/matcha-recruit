@@ -93,7 +93,7 @@ export default function AppLayout({ sidebar, logoLabel, variant }: { sidebar: Re
 
   return (
     <LayoutContext.Provider value={{ hasTopNav: true, sidebarCollapsed }}>
-      <div className={isAdmin ? 'min-h-screen bg-gradient-to-b from-zinc-950 to-black' : 'min-h-screen bg-vsc-bg'}>
+      <div className={isAdmin ? 'min-h-screen bg-gradient-to-b from-zinc-700 to-zinc-900' : 'min-h-screen bg-vsc-bg'}>
 
         {/* Full-width top navbar */}
         <header className={
