@@ -45,6 +45,12 @@ export function parseMoney(s: string): number | null {
   return Number.isFinite(v) ? v : null
 }
 
+/** Mirrors the server's `_norm_state` — a half-typed code is no code at all. */
+function normState(s: string): string | null {
+  const v = s.trim().toUpperCase()
+  return /^[A-Z]{2}$/.test(v) ? v : null
+}
+
 export const inputCls =
   'bg-zinc-900 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500 w-full'
 
@@ -318,6 +324,7 @@ function ContractEditor({ catalog, existing, api, onDone, onCancel }: {
   const originalInd = existing?.risk_transfer?.indemnity ?? EMPTY_INDEMNITY
   const [ind, setInd] = useState<Indemnity>(originalInd)
   const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
 
   function patch(i: number, p: Partial<ContractRequirement>) {
     setReqs((rs) => rs.map((r, idx) => (idx === i ? { ...r, ...p } : r)))
@@ -326,26 +333,39 @@ function ContractEditor({ catalog, existing, api, onDone, onCancel }: {
 
   async function save() {
     if (!name.trim()) return
-    setBusy(true)
+    setBusy(true); setErr(null)
     try {
       const cleaned = reqs.filter((r) => r.line)
-      // Only send risk_transfer when it actually changed — the server resets the
-      // confirmation stamp on any risk_transfer write, and renaming a contract
-      // must not silently un-confirm its clause.
-      const changed = JSON.stringify(ind) !== JSON.stringify(originalInd)
-      const risk_transfer: RiskTransfer | undefined = changed ? { indemnity: ind } : undefined
-      const payload: ContractPayload = {
-        name,
-        counterparty: counterparty || null,
-        requirements: cleaned,
-        contract_type: contractType || null,
-        governing_state: governingState.toUpperCase() || null,
-        project_state: projectState.toUpperCase() || null,
-        ...(risk_transfer ? { risk_transfer } : {}),
+      const type = contractType || null
+      const gov = normState(governingState)
+      const proj = normState(projectState)
+      const clause: RiskTransfer = { indemnity: ind }
+      const indChanged = JSON.stringify(ind) !== JSON.stringify(originalInd)
+
+      if (existing) {
+        // PUT is a true PATCH: an unsent field is left alone, and the server
+        // un-confirms the contract when a *verdict input* changes value. Sending
+        // an unchanged contract_type would strip the confirmation off a renamed
+        // contract, so only ship what the user actually edited.
+        const payload: ContractPayload = {}
+        if (name !== existing.name) payload.name = name
+        if ((counterparty || null) !== (existing.counterparty ?? null)) payload.counterparty = counterparty || null
+        if (JSON.stringify(cleaned) !== JSON.stringify(existing.requirements)) payload.requirements = cleaned
+        if (type !== (existing.contract_type ?? null)) payload.contract_type = type
+        if (gov !== (existing.governing_state ?? null)) payload.governing_state = gov
+        if (proj !== (existing.project_state ?? null)) payload.project_state = proj
+        if (indChanged) payload.risk_transfer = clause
+        await api.update(existing.id, payload)
+      } else if (api.create) {
+        await api.create({
+          name, counterparty: counterparty || null, requirements: cleaned,
+          contract_type: type, governing_state: gov, project_state: proj,
+          ...(ind.present ? { risk_transfer: clause } : {}),
+        })
       }
-      if (existing) await api.update(existing.id, payload)
-      else if (api.create) await api.create({ ...payload, name, requirements: cleaned })
       await onDone()
+    } catch {
+      setErr('Could not save this contract. Check the state codes (two letters) and try again.')
     } finally { setBusy(false) }
   }
 
@@ -426,6 +446,8 @@ function ContractEditor({ catalog, existing, api, onDone, onCancel }: {
         ))}
         <button onClick={() => setReqs((rs) => [...rs, emptyReq()])} className="inline-flex items-center gap-1 text-xs text-zinc-400 hover:text-zinc-100"><Plus className="h-3.5 w-3.5" /> Add requirement</button>
       </div>
+
+      {err && <div className="text-[11px] text-amber-400">{err}</div>}
 
       <div className="flex items-center gap-2 pt-1">
         <button onClick={save} disabled={busy || !name.trim()} className="inline-flex items-center gap-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium rounded-lg px-3 py-1.5 disabled:opacity-50">

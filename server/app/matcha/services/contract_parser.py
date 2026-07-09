@@ -10,7 +10,6 @@ contract-requirement shape, line names normalized to our coverage keys.
 """
 
 import asyncio
-import json
 import logging
 from typing import Optional, get_args
 
@@ -173,7 +172,7 @@ async def parse_contract(pdf_bytes: bytes) -> dict:
         )
         raw = (getattr(response, "text", None) or "").strip()
         payload = analyzer._parse_json_response(raw) or {}
-    except (asyncio.TimeoutError, json.JSONDecodeError, Exception) as exc:
+    except Exception as exc:  # noqa: BLE001 - best-effort; a draft beats a 500
         logger.warning("Contract parse failed: %s", exc)
         payload = {}
     return {

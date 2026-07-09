@@ -139,6 +139,17 @@ def _norm_state(v) -> Optional[str]:
     return s if len(s) == 2 and s.isalpha() else None
 
 
+# The CGL insured-contract analysis is state-independent: a broad-form clause
+# reaching the counterparty's SOLE negligence is uninsurable no matter which
+# statute governs enforceability. One text, three verdict paths.
+_BROAD_CGL_BASIS = (
+    "Broad-form indemnity: the client would owe the counterparty even for the "
+    "counterparty's SOLE negligence. That promise falls outside the CGL "
+    "\"insured contract\" definition — the client funds it personally. Negotiate to "
+    "intermediate or limited form."
+)
+
+
 def is_provisional(contract: dict) -> bool:
     """Provisional = AI-extracted terms a human hasn't vouched for yet.
 
@@ -229,13 +240,17 @@ def assess_indemnity(risk_transfer: Optional[dict], *, governing_state: Optional
 
     if contract_type == "construction":
         # Enforceability turns on the project state's anti-indemnity statute.
-        if blocker:
-            return out(VERDICT_REVIEW, blocker)
-        row = _STATE_ANTI_INDEMNITY.get(state)
-        if not row:
-            return out(VERDICT_REVIEW,
-                       f"{state}'s anti-indemnity statute is not in our reference table, so its "
-                       f"enforceability is unresolved here.", state=state)
+        # Insurability does NOT — so a missing/unmapped state blocks only the
+        # *void* half of the analysis, never the state-independent CGL half.
+        row = _STATE_ANTI_INDEMNITY.get(state) if state else None
+        if blocker or not row:
+            unresolved = blocker or (
+                f"{state}'s anti-indemnity statute is not in our reference table, so its "
+                f"enforceability is unresolved here."
+            )
+            if covers_sole:
+                return out(VERDICT_UNINSURABLE, f"{_BROAD_CGL_BASIS} Separately: {unresolved}", state=state)
+            return out(VERDICT_REVIEW, unresolved, state=state)
         rule, statute = row["rule"], row["statute"]
         if covers_sole and rule in ("own_negligence_void", "sole_negligence_void"):
             return out(VERDICT_VOID,
@@ -254,6 +269,14 @@ def assess_indemnity(risk_transfer: Optional[dict], *, governing_state: Optional
                        f"Intermediate-form indemnity. {statute} voids only sole-negligence indemnity in "
                        f"{state}, so this clause survives and sits inside the CGL insured-contract scope.",
                        statute, state)
+        if covers_sole:
+            # A `rule: "none"` state — the statute doesn't void the clause, but the
+            # CGL insured-contract grant still won't fund sole-negligence indemnity.
+            # Without this, broad form falls through to the limited-form return below.
+            return out(VERDICT_UNINSURABLE,
+                       f"{_BROAD_CGL_BASIS} {statute} does not void it in {state}, so the client would "
+                       f"be bound to a promise no policy responds to.",
+                       statute, state)
         return out(VERDICT_INSURABLE,
                    f"Limited-form indemnity — the client answers only for its own negligence. "
                    f"Enforceable in {state} and covered as an insured contract.",
@@ -264,12 +287,7 @@ def assess_indemnity(risk_transfer: Optional[dict], *, governing_state: Optional
     # which is state-independent. An unmapped (or even absent) state must not
     # suppress this analysis.
     if covers_sole:
-        return out(VERDICT_UNINSURABLE,
-                   "Broad-form indemnity: the client would owe the counterparty even for the "
-                   "counterparty's SOLE negligence. That promise falls outside the CGL "
-                   "\"insured contract\" definition — the client funds it personally. Negotiate to "
-                   "intermediate or limited form.",
-                   state=state)
+        return out(VERDICT_UNINSURABLE, _BROAD_CGL_BASIS, state=state)
     if form == "intermediate":
         return out(VERDICT_INSURABLE,
                    "Intermediate-form indemnity — within the CGL insured-contract grant, so the "
@@ -339,7 +357,7 @@ def review_contract(contract: dict, carried: list[dict], *, headcount: Optional[
             "project_state": contract.get("project_state"),
             "status": contract.get("status"),
             "confirmed_at": contract.get("confirmed_at"),
-            "has_source": bool(contract.get("storage_path")),
+            "has_source": bool(contract.get("has_source")),
         },
         "lines": review["lines"],
         "indemnity": indemnity,
@@ -447,20 +465,38 @@ async def store_uploaded_contract(conn, company_id, user_id, data: bytes, filena
     except Exception as exc:  # noqa: BLE001 - retention is best-effort
         logger.warning("risk_transfer: contract source not retained (%s)", exc)
 
-    row = await conn.fetchrow(
-        f"""INSERT INTO company_contracts
-             (company_id, name, counterparty, status, requirements, ai_available,
-              source_filename, uploaded_by, contract_type, governing_state,
-              project_state, storage_path, risk_transfer)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
-           RETURNING {_CONTRACT_COLS}""",
-        company_id, name, parsed.get("counterparty"), status,
-        json.dumps(parsed["requirements"]), parsed["available"], fname, user_id,
-        parsed.get("contract_type"), parsed.get("governing_state"), parsed.get("project_state"),
-        storage_path,
-        json.dumps(parsed["risk_transfer"]) if parsed.get("risk_transfer") else None,
-    )
+    try:
+        row = await conn.fetchrow(
+            f"""INSERT INTO company_contracts
+                 (company_id, name, counterparty, status, requirements, ai_available,
+                  source_filename, uploaded_by, contract_type, governing_state,
+                  project_state, storage_path, risk_transfer)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+               RETURNING {_CONTRACT_COLS}""",
+            company_id, name, parsed.get("counterparty"), status,
+            json.dumps(parsed["requirements"]), parsed["available"], fname, user_id,
+            parsed.get("contract_type"), parsed.get("governing_state"), parsed.get("project_state"),
+            storage_path,
+            json.dumps(parsed["risk_transfer"]) if parsed.get("risk_transfer") else None,
+        )
+    except Exception:
+        # No row will ever reference the blob we just wrote — don't leave it behind.
+        if storage_path:
+            await discard_source(storage_path)
+        raise
     return la._contract_row(row)
+
+
+async def discard_source(storage_path: Optional[str]) -> None:
+    """Best-effort delete of a retained source PDF. ``delete_file`` parses the
+    bucket back out of the ``s3://`` URI, so a contract written before the
+    contracts bucket existed still deletes from wherever it actually lives."""
+    if not storage_path:
+        return
+    try:
+        await get_storage().delete_file(storage_path)
+    except Exception as exc:  # noqa: BLE001 - cleanup must never fail the caller
+        logger.warning("risk_transfer: contract source not deleted (%s)", exc)
 
 
 def normalize_requirements(requirements) -> list[dict]:
@@ -480,45 +516,79 @@ def normalize_requirements(requirements) -> list[dict]:
     return out
 
 
-async def update_contract(conn, company_id, contract_id, body) -> Optional[dict]:
-    """Patch a contract. Touching any **verdict input** resets ``confirmed_at``.
+# Columns whose value the confirmation vouches for. The verdict is a function of
+# the clause AND the controlling state AND the contract type, so confirming it
+# vouches for all three: editing the project state of a confirmed contract can
+# flip `insurable` → `likely_void_by_statute`, and presenting that as
+# reviewer-vouched would be a lie. Cosmetic edits (name, counterparty,
+# requirements) leave the confirmation intact.
+_VERDICT_INPUTS = ("contract_type", "governing_state", "project_state", "risk_transfer")
 
-    The verdict is a function of the clause AND the controlling state AND the
-    contract type, so confirming it vouches for all three. Editing the project
-    state of a confirmed contract can flip `insurable` → `likely_void_by_statute`;
-    presenting that as reviewer-vouched would be a lie. Cosmetic edits (name,
-    counterparty, requirements) leave the confirmation intact."""
+
+async def update_contract(conn, company_id, contract_id, body) -> Optional[dict]:
+    """Patch a contract. Changing any **verdict input** resets ``confirmed_at``.
+
+    PATCH semantics are driven by Pydantic's ``model_fields_set``, not by
+    null-checks: a field the caller didn't send is left alone, and a field sent
+    explicitly as null is CLEARED. (A mis-extracted ``project_state`` has to be
+    removable — it is the single load-bearing input for every construction
+    verdict.) The confirmation resets only when a verdict input's value actually
+    CHANGES, so re-sending the same ``contract_type`` while renaming a contract
+    no longer silently un-confirms it.
+    """
     existing = await conn.fetchrow(
-        "SELECT id FROM company_contracts WHERE id = $1 AND company_id = $2",
+        f"SELECT {_CONTRACT_COLS} FROM company_contracts WHERE id = $1 AND company_id = $2",
         contract_id, company_id,
     )
     if not existing:
         return None
-    reqs = None if body.requirements is None else json.dumps(normalize_requirements(body.requirements))
-    rt_json = None if body.risk_transfer is None else json.dumps(body.risk_transfer.model_dump())
-    verdict_inputs_touched = any(
-        v is not None for v in (rt_json, body.contract_type, body.governing_state, body.project_state)
-    )
+    current = la._contract_row(existing)
+
+    sent = body.model_fields_set
+    incoming: dict = {}
+    if "name" in sent:
+        incoming["name"] = body.name
+    if "counterparty" in sent:
+        incoming["counterparty"] = body.counterparty
+    if "requirements" in sent:
+        incoming["requirements"] = normalize_requirements(body.requirements)
+    if "contract_type" in sent:
+        incoming["contract_type"] = body.contract_type
+    # States are normalized on write — a value `_norm_state` would reject must not
+    # persist only to read back as "unmapped" at verdict time.
+    if "governing_state" in sent:
+        incoming["governing_state"] = _norm_state(body.governing_state)
+    if "project_state" in sent:
+        incoming["project_state"] = _norm_state(body.project_state)
+    if "risk_transfer" in sent:
+        incoming["risk_transfer"] = None if body.risk_transfer is None else body.risk_transfer.model_dump()
+
+    if not incoming:
+        return current
+
+    reset = any(k in incoming and incoming[k] != current.get(k) for k in _VERDICT_INPUTS)
+
+    # jsonb columns need an explicit cast and a serialized value; everything else
+    # binds straight through.
+    _JSONB = {"requirements", "risk_transfer"}
+    sets, args = [], [contract_id, company_id]
+    for col, val in incoming.items():
+        args.append(json.dumps(val) if col in _JSONB and val is not None else val)
+        sets.append(f"{col} = ${len(args)}" + ("::jsonb" if col in _JSONB else ""))
+    if "requirements" in incoming:
+        sets.append("status = CASE WHEN status = 'error' THEN 'manual' ELSE status END")
+    if reset:
+        sets.append("confirmed_at = NULL")
+        sets.append("confirmed_by = NULL")
+    sets.append("updated_at = NOW()")
+
     row = await conn.fetchrow(
-        f"""UPDATE company_contracts SET
-             name = COALESCE($3, name),
-             counterparty = COALESCE($4, counterparty),
-             requirements = COALESCE($5::jsonb, requirements),
-             contract_type = COALESCE($6, contract_type),
-             governing_state = COALESCE($7, governing_state),
-             project_state = COALESCE($8, project_state),
-             risk_transfer = COALESCE($9::jsonb, risk_transfer),
-             confirmed_at = CASE WHEN $10 THEN NULL ELSE confirmed_at END,
-             confirmed_by = CASE WHEN $10 THEN NULL ELSE confirmed_by END,
-             status = CASE WHEN $5 IS NOT NULL AND status = 'error' THEN 'manual' ELSE status END,
-             updated_at = NOW()
-           WHERE id = $1 AND company_id = $2
-           RETURNING {_CONTRACT_COLS}""",
-        contract_id, company_id, body.name, body.counterparty, reqs,
-        body.contract_type, body.governing_state, body.project_state, rt_json,
-        verdict_inputs_touched,
+        f"""UPDATE company_contracts SET {', '.join(sets)}
+            WHERE id = $1 AND company_id = $2
+            RETURNING {_CONTRACT_COLS}""",
+        *args,
     )
-    return la._contract_row(row)
+    return la._contract_row(row) if row else None
 
 
 async def confirm_contract(conn, company_id, contract_id, user_id) -> Optional[dict]:

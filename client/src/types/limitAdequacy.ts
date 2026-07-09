@@ -96,7 +96,6 @@ export interface ContractRecord {
   indemnity?: IndemnityAssessment
   provisional?: boolean
   has_source?: boolean
-  storage_path?: string | null
   created_at?: string
   updated_at?: string
 }

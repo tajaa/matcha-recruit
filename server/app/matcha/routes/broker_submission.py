@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFil
 from pydantic import BaseModel
 
 from ...database import get_connection
+from ...core.feature_flags import merge_company_features
 from ..dependencies import require_broker, require_broker_pro
 from ..models.limit_adequacy import ContractUpdate
 from ..services import (
@@ -457,6 +458,23 @@ async def tenant_limits_pdf(company_id: UUID, current_user=Depends(require_broke
 # the tenant sees the same records on its Limit Adequacy page. Handler bodies live
 # in `risk_transfer`, shared verbatim with the tenant routes.
 
+async def _assert_client_has_limit_adequacy(conn, company_id: UUID) -> None:
+    """Broker WRITES need the client's own feature flag.
+
+    A broker owning the client is enough to *read* its posture (the convention
+    across every `/broker/clients/{id}/…` surface), but writing a contract into a
+    company whose Limit Adequacy page doesn't exist would strand the row where the
+    client can never see, correct, or confirm it. Reads stay ungated.
+    """
+    row = await conn.fetchrow(
+        "SELECT enabled_features, signup_source FROM companies WHERE id = $1", company_id
+    )
+    features = merge_company_features(row["enabled_features"] if row else None,
+                                      row["signup_source"] if row else None)
+    if not features.get("limit_adequacy"):
+        raise HTTPException(status_code=403, detail="Client does not have Limit Adequacy enabled")
+
+
 @router.get("/clients/{company_id}/contracts")
 async def tenant_contracts(company_id: UUID, current_user=Depends(require_broker)):
     async with get_connection() as conn:
@@ -477,6 +495,7 @@ async def tenant_contract_upload(company_id: UUID, file: UploadFile = File(...),
     rt.validate_pdf_bytes(data)
     async with get_connection() as conn:
         await _assert_broker_owns_company(conn, current_user.id, company_id)
+        await _assert_client_has_limit_adequacy(conn, company_id)
         return await rt.store_uploaded_contract(conn, company_id, current_user.id, data, file.filename)
 
 
@@ -485,6 +504,7 @@ async def tenant_contract_update(company_id: UUID, contract_id: UUID, body: Cont
                                  current_user=Depends(require_broker)):
     async with get_connection() as conn:
         await _assert_broker_owns_company(conn, current_user.id, company_id)
+        await _assert_client_has_limit_adequacy(conn, company_id)
         row = await rt.update_contract(conn, company_id, contract_id, body)
     if row is None:
         raise HTTPException(status_code=404, detail="Contract not found")
@@ -496,6 +516,7 @@ async def tenant_contract_confirm(company_id: UUID, contract_id: UUID,
                                   current_user=Depends(require_broker)):
     async with get_connection() as conn:
         await _assert_broker_owns_company(conn, current_user.id, company_id)
+        await _assert_client_has_limit_adequacy(conn, company_id)
         row = await rt.confirm_contract(conn, company_id, contract_id, current_user.id)
     if row is None:
         raise HTTPException(status_code=404, detail="Contract not found")

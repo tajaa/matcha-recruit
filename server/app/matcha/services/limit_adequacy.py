@@ -273,7 +273,7 @@ def analyze(carried: list[dict], contracts: list[dict], *, headcount: Optional[i
                            "project_state": c.get("project_state"),
                            "risk_transfer": c.get("risk_transfer"),
                            "confirmed_at": c.get("confirmed_at"),
-                           "has_source": bool(c.get("storage_path")),
+                           "has_source": bool(c.get("has_source")),
                            "requirements": c.get("requirements") or []} for c in contracts]}
 
 
@@ -379,7 +379,11 @@ async def build_review(conn, company_id: UUID, *, venue: dict | None = None) -> 
 
 def _contract_row(r) -> dict:
     """Row → dict. The pool has no jsonb codec, so jsonb columns arrive as raw
-    strings and must be decoded explicitly."""
+    strings and must be decoded explicitly.
+
+    ``storage_path`` collapses to a ``has_source`` boolean — these dicts are
+    serialized straight to API responses, and the raw ``s3://bucket/key`` is
+    nobody's business but the presigner's (which reads the column directly)."""
     import json
     d = dict(r)
     d["id"] = str(d["id"])
@@ -398,6 +402,8 @@ def _contract_row(r) -> dict:
             except json.JSONDecodeError:
                 rt = None
         d["risk_transfer"] = rt if isinstance(rt, dict) else None
+    if "storage_path" in d:
+        d["has_source"] = bool(d.pop("storage_path"))
     return d
 
 

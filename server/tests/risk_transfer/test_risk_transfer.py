@@ -7,6 +7,8 @@ project-state anti-indemnity statute, or an unconfirmed AI extraction rendered
 as settled fact.
 """
 
+import json
+
 import pytest
 
 from app.matcha.services import risk_transfer as rt
@@ -28,7 +30,7 @@ def _contract(**over):
         "id": "c1", "name": "Acme Subcontract", "counterparty": "Acme",
         "status": "parsed", "ai_available": True, "confirmed_at": None,
         "contract_type": "construction", "governing_state": "NY", "project_state": "NY",
-        "storage_path": "s3://bucket/key", "risk_transfer": _ind(),
+        "has_source": True, "risk_transfer": _ind(),
         "requirements": [],
     }
     c.update(over)
@@ -63,11 +65,28 @@ def test_statute_table_rows_are_well_formed():
         assert row["statute"] and any(ch.isdigit() for ch in row["statute"]), state
 
 
-def test_table_is_partial_and_unmapped_states_never_read_as_no_statute():
+@pytest.mark.parametrize("form", ["intermediate", "limited"])
+def test_table_is_partial_and_unmapped_states_never_read_as_no_statute(form):
+    """An unmapped state must never resolve the ENFORCEABILITY question — silence
+    is not "no statute". Only non-broad forms reach this, because broad form is
+    decided by the state-independent CGL analysis below."""
     assert "WY" not in rt._STATE_ANTI_INDEMNITY
-    v = rt.assess_indemnity(_ind(), project_state="WY", contract_type="construction")
+    v = rt.assess_indemnity(_ind(form=form, covers_sole_negligence=False),
+                            project_state="WY", contract_type="construction")
     assert v["verdict"] == rt.VERDICT_REVIEW
     assert "not in our reference table" in v["basis"]
+
+
+def test_unmapped_construction_state_does_not_suppress_the_cgl_analysis():
+    """Insurability under the CGL insured-contract grant is state-independent. An
+    unmapped state resolves only enforceability, so a broad-form clause is still
+    an uninsurable exposure — the same finding a lease in the same state gets."""
+    v = rt.assess_indemnity(_ind(), project_state="WY", contract_type="construction")
+    assert v["verdict"] == rt.VERDICT_UNINSURABLE
+    assert "SOLE negligence" in v["basis"]
+    assert "not in our reference table" in v["basis"]  # enforceability still flagged open
+    lease = rt.assess_indemnity(_ind(), governing_state="WY", contract_type="lease")
+    assert lease["verdict"] == v["verdict"]
 
 
 # --- construction: project state controls -----------------------------------
@@ -85,10 +104,20 @@ def test_project_state_controls_construction_over_choice_of_law():
 def test_conflicting_mapped_states_degrade_to_review():
     """GA voids only sole-negligence indemnity; NY voids any. When the project and
     governing states disagree on the RULE, the honest answer is 'ask counsel'."""
-    v = rt.assess_indemnity(_ind(), governing_state="GA", project_state="NY",
+    v = rt.assess_indemnity(_ind(form="intermediate", covers_sole_negligence=False),
+                            governing_state="GA", project_state="NY",
                             contract_type="construction")
     assert v["verdict"] == rt.VERDICT_REVIEW
     assert "anti-waiver" in v["basis"]
+
+
+def test_conflicting_states_still_yield_the_state_independent_finding():
+    """The conflict blocks the VOID ruling, not the CGL one — a broad-form clause
+    is uninsurable whichever of the two states ends up controlling."""
+    v = rt.assess_indemnity(_ind(), governing_state="GA", project_state="NY",
+                            contract_type="construction")
+    assert v["verdict"] == rt.VERDICT_UNINSURABLE
+    assert "anti-waiver" in v["basis"]  # the unresolved enforceability is still surfaced
 
 
 def test_agreeing_states_do_not_trigger_the_conflict_path():
@@ -165,8 +194,13 @@ def test_counterparty_indemnifies_us_is_never_our_exposure():
     ({"indemnity": {"present": False}}, {}),
     (_ind(form="unclear"), dict(project_state="NY", contract_type="construction")),
     (_ind(form="bogus"), dict(project_state="NY", contract_type="construction")),
-    (_ind(), dict(contract_type="construction")),                       # no state at all
-    (_ind(), dict(project_state="ZZZ", contract_type="construction")),  # malformed state
+    # No usable state → the statute lookup is blocked. Non-broad forms have nothing
+    # left to rule on; broad form still gets the state-independent CGL finding
+    # (see test_missing_project_state_still_yields_the_state_independent_finding).
+    (_ind(form="intermediate", covers_sole_negligence=False),
+     dict(contract_type="construction")),                                # no state at all
+    (_ind(form="intermediate", covers_sole_negligence=False),
+     dict(project_state="ZZZ", contract_type="construction")),           # malformed state
 ])
 def test_unknowns_degrade_to_review(rtx, kwargs):
     assert rt.assess_indemnity(rtx, **kwargs)["verdict"] == rt.VERDICT_REVIEW
@@ -223,7 +257,7 @@ def test_confirmed_extraction_is_not_provisional():
 
 def test_review_contract_reports_source_retention():
     assert rt.review_contract(_contract(), [], headcount=1)["contract"]["has_source"] is True
-    assert rt.review_contract(_contract(storage_path=None), [], headcount=1)["contract"]["has_source"] is False
+    assert rt.review_contract(_contract(has_source=False), [], headcount=1)["contract"]["has_source"] is False
 
 
 def test_insurable_contract_yields_no_indemnity_action():
@@ -272,11 +306,39 @@ def test_risk_transfer_rows_skip_contracts_with_no_clause_and_no_type():
 def test_construction_without_project_state_never_falls_back_to_governing_state():
     """The governing state is exactly what anti-waiver statutes ignore. A blank
     project state must block the verdict, not silently substitute NY law."""
-    v = rt.assess_indemnity(_ind(), governing_state="NY", project_state=None,
+    v = rt.assess_indemnity(_ind(form="intermediate", covers_sole_negligence=False),
+                            governing_state="NY", project_state=None,
                             contract_type="construction")
     assert v["verdict"] == rt.VERDICT_REVIEW
     assert "where the work is performed" in v["basis"]
     assert "NY" in v["basis"]  # names the state it refused to use
+
+
+def test_missing_project_state_still_yields_the_state_independent_finding():
+    """A blank project state blocks the statute lookup, not the CGL analysis."""
+    v = rt.assess_indemnity(_ind(), governing_state="NY", project_state=None,
+                            contract_type="construction")
+    assert v["verdict"] == rt.VERDICT_UNINSURABLE
+    assert "where the work is performed" in v["basis"]
+    assert v["controlling_state"] is None
+
+
+@pytest.mark.parametrize("form,expected", [
+    ("broad", rt.VERDICT_UNINSURABLE),
+    ("intermediate", rt.VERDICT_INSURABLE),
+    ("limited", rt.VERDICT_INSURABLE),
+])
+def test_a_no_statute_state_never_relabels_broad_form_as_limited(monkeypatch, form, expected):
+    """A `rule: "none"` row means the statute doesn't VOID the clause — it does not
+    mean the CGL grant funds it. Broad form must not fall through to the
+    limited-form 'Enforceable and covered' return."""
+    monkeypatch.setitem(rt._STATE_ANTI_INDEMNITY, "ZZ",
+                        {"rule": "none", "statute": "Hyp. Rev. Code § 1"})
+    v = rt.assess_indemnity(_ind(form=form, covers_sole_negligence=(form == "broad")),
+                            project_state="ZZ", contract_type="construction")
+    assert v["verdict"] == expected
+    if form == "broad":
+        assert "Limited-form" not in v["basis"]
 
 
 def test_construction_with_only_a_project_state_still_rules():
@@ -365,57 +427,138 @@ def test_enum_lists_track_the_pydantic_literals():
     assert rt.INDEMNITY_DIRECTIONS == list(get_args(m.IndemnityDirection))
 
 
-# --- confirm-reset covers every verdict input --------------------------------
+# --- PATCH semantics: exclude_unset + value-compare ---------------------------
+#
+# `ContractUpdate` (not a stub) — `model_fields_set` IS the mechanism under test,
+# and a hand-rolled body with every attribute present cannot exercise it.
 
 class _UpdateConn:
-    """Captures the UPDATE args; $10 is the reset flag."""
+    """Captures the generated UPDATE. `sets` is the SET clause, `args` its binds."""
 
-    def __init__(self):
-        self.reset_flag = None
+    def __init__(self, stored=None):
+        self.stored = stored or {
+            "id": "c1", "requirements": "[]", "risk_transfer": None,
+            "contract_type": "construction", "governing_state": "NY", "project_state": "NY",
+            "name": "Acme Subcontract", "counterparty": "Acme",
+        }
+        self.sql = None
+        self.args = None
 
     async def fetchrow(self, sql, *args):
         if sql.strip().startswith("SELECT"):
-            return {"id": args[0]}
-        self.reset_flag = args[9]
-        return {"id": "c1", "requirements": "[]", "risk_transfer": None}
+            return dict(self.stored)
+        self.sql, self.args = sql, args
+        return dict(self.stored)
+
+    @property
+    def reset(self) -> bool:
+        return "confirmed_at = NULL" in (self.sql or "")
+
+    def bound(self, col: str):
+        """The value bound to `col` in the generated SET clause."""
+        import re
+        m = re.search(rf"\b{col} = \$(\d+)", self.sql)
+        assert m, f"{col} not in SET clause: {self.sql}"
+        return self.args[int(m.group(1)) - 1]
+
+    def touched(self, col: str) -> bool:
+        import re
+        return bool(re.search(rf"\b{col} = \$\d+", self.sql or ""))
 
 
-class _Body:
-    def __init__(self, **kw):
-        self.name = kw.get("name")
-        self.counterparty = kw.get("counterparty")
-        self.requirements = kw.get("requirements")
-        self.contract_type = kw.get("contract_type")
-        self.governing_state = kw.get("governing_state")
-        self.project_state = kw.get("project_state")
-        self.risk_transfer = kw.get("risk_transfer")
+def _update(body, stored=None) -> _UpdateConn:
+    import asyncio
+    conn = _UpdateConn(stored)
+    asyncio.run(rt.update_contract(conn, "co", "c1", body))
+    return conn
+
+
+def _body(**kw):
+    from app.matcha.models.limit_adequacy import ContractUpdate
+    return ContractUpdate(**kw)
 
 
 @pytest.mark.parametrize("body,expect_reset", [
-    (_Body(name="renamed"), False),
-    (_Body(counterparty="Acme II"), False),
-    (_Body(requirements=[]), False),
-    (_Body(project_state="NY"), True),
-    (_Body(governing_state="NY"), True),
-    (_Body(contract_type="construction"), True),
+    # cosmetic edits never disturb the confirmation
+    (_body(name="renamed"), False),
+    (_body(counterparty="Acme II"), False),
+    (_body(requirements=[]), False),
+    # re-sending an UNCHANGED verdict input is not an edit. The contract editor
+    # posts every field on save, so a null-check here would un-confirm on rename.
+    (_body(name="renamed", contract_type="construction"), False),
+    (_body(governing_state="NY", project_state="NY"), False),
+    # genuinely changing one does un-confirm
+    (_body(project_state="CA"), True),
+    (_body(governing_state="DE"), True),
+    (_body(contract_type="lease"), True),
+    # clearing one is a change too
+    (_body(project_state=None), True),
 ])
-def test_update_resets_confirmation_only_for_verdict_inputs(body, expect_reset):
+def test_update_resets_confirmation_only_when_a_verdict_input_changes(body, expect_reset):
     """The verdict is a function of clause AND state AND type — confirming it
-    vouches for all three, so editing any of them must un-confirm."""
-    import asyncio
-    conn = _UpdateConn()
-    asyncio.run(rt.update_contract(conn, "co", "c1", body))
-    assert conn.reset_flag is expect_reset
+    vouches for all three, so *changing* any of them must un-confirm. Re-sending
+    the same value must not."""
+    assert _update(body).reset is expect_reset
+
+
+def test_unsent_fields_are_left_alone():
+    """`COALESCE(null, col)` semantics are gone: absence means 'don't touch'."""
+    conn = _update(_body(name="renamed"))
+    assert conn.touched("name")
+    for col in ("project_state", "governing_state", "contract_type", "risk_transfer", "requirements"):
+        assert not conn.touched(col), col
+
+
+def test_an_explicit_null_clears_a_verdict_input():
+    """A mis-extracted project state must be removable, not merely overwritable —
+    it is the single load-bearing input for every construction verdict."""
+    conn = _update(_body(project_state=None))
+    assert conn.touched("project_state")
+    assert conn.bound("project_state") is None
+    assert conn.reset is True
+
+
+def test_states_are_normalized_on_write():
+    """A value `_norm_state` would reject must not persist only to read back as
+    'unmapped' at verdict time."""
+    conn = _update(_body(governing_state="ca"))
+    assert conn.bound("governing_state") == "CA"
+    assert _update(_body(project_state="1a")).bound("project_state") is None
 
 
 def test_update_resets_confirmation_when_risk_transfer_changes():
-    import asyncio
     from app.matcha.models.limit_adequacy import Indemnity, RiskTransfer
 
+    body = _body(risk_transfer=RiskTransfer(indemnity=Indemnity(present=True, form="broad")))
+    assert _update(body).reset is True
+
+
+def test_resending_an_identical_risk_transfer_does_not_reset():
+    from app.matcha.models.limit_adequacy import Indemnity, RiskTransfer
+
+    clause = RiskTransfer(indemnity=Indemnity(present=True, form="broad"))
+    stored = dict(_UpdateConn().stored, risk_transfer=json.dumps(clause.model_dump()))
+    assert _update(_body(risk_transfer=clause), stored).reset is False
+
+
+def test_update_returns_none_when_the_row_vanishes_mid_update():
+    """Deleted between the existence check and the UPDATE → 404, not a 500 on
+    `dict(None)`."""
+    import asyncio
+
+    class _Racing(_UpdateConn):
+        async def fetchrow(self, sql, *args):
+            return dict(self.stored) if sql.strip().startswith("SELECT") else None
+
+    assert asyncio.run(rt.update_contract(_Racing(), "co", "c1", _body(name="x"))) is None
+
+
+def test_update_with_an_empty_body_is_a_no_op():
     conn = _UpdateConn()
-    body = _Body(risk_transfer=RiskTransfer(indemnity=Indemnity(present=True, form="broad")))
-    asyncio.run(rt.update_contract(conn, "co", "c1", body))
-    assert conn.reset_flag is True
+    import asyncio
+    out = asyncio.run(rt.update_contract(conn, "co", "c1", _body()))
+    assert conn.sql is None  # never issued an UPDATE
+    assert out["id"] == "c1"
 
 
 # --- broker submission packet -------------------------------------------------

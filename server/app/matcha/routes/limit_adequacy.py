@@ -9,6 +9,7 @@ Business-facing, tenant-isolated. Broker surfaces live in `broker_submission.py`
 """
 
 import json
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile
 
@@ -132,14 +133,14 @@ async def create_contract(body: ContractCreate, current_user=Depends(require_adm
                VALUES ($1,$2,$3,'manual',$4,FALSE,$5,$6,$7,$8,$9)
                RETURNING {rt._CONTRACT_COLS}""",
             company_id, body.name, body.counterparty, json.dumps(reqs), current_user.id,
-            body.contract_type, body.governing_state, body.project_state,
+            body.contract_type, rt._norm_state(body.governing_state), rt._norm_state(body.project_state),
             json.dumps(body.risk_transfer.model_dump()) if body.risk_transfer else None,
         )
     return la._contract_row(row)
 
 
 @router.put("/contracts/{contract_id}")
-async def update_contract(contract_id: str, body: ContractUpdate,
+async def update_contract(contract_id: UUID, body: ContractUpdate,
                           current_user=Depends(require_admin_or_client)):
     company_id = await get_client_company_id(current_user)
     async with get_connection() as conn:
@@ -150,7 +151,7 @@ async def update_contract(contract_id: str, body: ContractUpdate,
 
 
 @router.post("/contracts/{contract_id}/confirm")
-async def confirm_contract(contract_id: str, current_user=Depends(require_admin_or_client)):
+async def confirm_contract(contract_id: UUID, current_user=Depends(require_admin_or_client)):
     """Vouch for the extracted terms — lifts the provisional label off the verdict."""
     company_id = await get_client_company_id(current_user)
     async with get_connection() as conn:
@@ -161,7 +162,7 @@ async def confirm_contract(contract_id: str, current_user=Depends(require_admin_
 
 
 @router.get("/contracts/{contract_id}/review")
-async def contract_review(contract_id: str, current_user=Depends(require_admin_or_client)):
+async def contract_review(contract_id: UUID, current_user=Depends(require_admin_or_client)):
     """Per-contract, pre-signature review: compliant / exposed / actions."""
     company_id = await get_client_company_id(current_user)
     async with get_connection() as conn:
@@ -172,7 +173,7 @@ async def contract_review(contract_id: str, current_user=Depends(require_admin_o
 
 
 @router.get("/contracts/{contract_id}/review.pdf")
-async def contract_review_pdf(contract_id: str, current_user=Depends(require_admin_or_client)):
+async def contract_review_pdf(contract_id: UUID, current_user=Depends(require_admin_or_client)):
     company_id = await get_client_company_id(current_user)
     async with get_connection() as conn:
         review = await rt.build_contract_review(conn, company_id, contract_id)
@@ -187,7 +188,7 @@ async def contract_review_pdf(contract_id: str, current_user=Depends(require_adm
 
 
 @router.get("/contracts/{contract_id}/file")
-async def contract_source_file(contract_id: str, current_user=Depends(require_admin_or_client)):
+async def contract_source_file(contract_id: UUID, current_user=Depends(require_admin_or_client)):
     """Time-limited link to the retained source PDF (404 when it wasn't retained)."""
     company_id = await get_client_company_id(current_user)
     async with get_connection() as conn:
@@ -198,13 +199,16 @@ async def contract_source_file(contract_id: str, current_user=Depends(require_ad
 
 
 @router.delete("/contracts/{contract_id}")
-async def delete_contract(contract_id: str, current_user=Depends(require_admin_or_client)):
+async def delete_contract(contract_id: UUID, current_user=Depends(require_admin_or_client)):
+    """Drop the row **and** the retained source PDF — otherwise a counterparty's
+    contract outlives every reference to it in a bucket nobody can reach."""
     company_id = await get_client_company_id(current_user)
     async with get_connection() as conn:
-        await conn.execute(
-            "DELETE FROM company_contracts WHERE id = $1 AND company_id = $2",
+        storage_path = await conn.fetchval(
+            "DELETE FROM company_contracts WHERE id = $1 AND company_id = $2 RETURNING storage_path",
             contract_id, company_id,
         )
+    await rt.discard_source(storage_path)
     return {"deleted": True}
 
 

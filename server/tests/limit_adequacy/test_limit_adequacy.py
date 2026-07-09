@@ -270,6 +270,10 @@ class _FakeConn:
                 "created_at": None, "updated_at": None}
 
 
+#: s3:// URIs the fake storage was asked to delete, newest last.
+DELETED: list = []
+
+
 def _install_fakes(monkeypatch, *, upload_raises: bool):
     from app.matcha.services import risk_transfer as rtx
 
@@ -290,6 +294,11 @@ def _install_fakes(monkeypatch, *, upload_raises: bool):
             assert bucket == "matcha-contracts", bucket
             return f"s3://{bucket}/contracts/x.pdf"
 
+        async def delete_file(self, path):
+            DELETED.append(path)
+            return True
+
+    DELETED.clear()
     monkeypatch.setattr(rtx, "get_storage", lambda: _Storage())
     monkeypatch.setattr(rtx, "get_settings",
                         lambda: type("S", (), {"s3_contracts_bucket": "matcha-contracts"})())
@@ -301,7 +310,8 @@ def test_upload_retains_source_pdf(monkeypatch):
     rtx = _install_fakes(monkeypatch, upload_raises=False)
     conn = _FakeConn()
     out = asyncio.run(rtx.store_uploaded_contract(conn, "co", "user", b"%PDF-", "sub.pdf"))
-    assert out["storage_path"] == "s3://matcha-contracts/contracts/x.pdf"
+    assert out["has_source"] is True
+    assert "storage_path" not in out  # never leaves the service layer
     assert out["status"] == "parsed"
     assert out["risk_transfer"]["indemnity"]["present"] is True
 
@@ -313,9 +323,41 @@ def test_upload_degrades_to_parse_and_discard_when_s3_is_unavailable(monkeypatch
     rtx = _install_fakes(monkeypatch, upload_raises=True)
     conn = _FakeConn()
     out = asyncio.run(rtx.store_uploaded_contract(conn, "co", "user", b"%PDF-", "sub.pdf"))
-    assert out["storage_path"] is None
+    assert out["has_source"] is False
     assert out["status"] == "parsed"
     assert out["contract_type"] == "construction"
+
+
+def test_upload_deletes_the_blob_when_the_insert_fails(monkeypatch):
+    """No row will ever reference it — an orphaned counterparty contract in a
+    bucket nobody can reach is worse than no retention at all."""
+    import asyncio
+    import pytest as _pytest
+    rtx = _install_fakes(monkeypatch, upload_raises=False)
+
+    class _BrokenConn:
+        async def fetchrow(self, _sql, *args):
+            raise RuntimeError("insert exploded")
+
+    with _pytest.raises(RuntimeError, match="insert exploded"):
+        asyncio.run(rtx.store_uploaded_contract(_BrokenConn(), "co", "user", b"%PDF-", "sub.pdf"))
+    assert DELETED == ["s3://matcha-contracts/contracts/x.pdf"]
+
+
+def test_discard_source_is_best_effort_and_ignores_a_missing_path(monkeypatch):
+    """Delete failures must never surface to the caller — the row is already gone."""
+    import asyncio
+    rtx = _install_fakes(monkeypatch, upload_raises=False)
+
+    asyncio.run(rtx.discard_source(None))
+    assert DELETED == []
+
+    class _AngryStorage:
+        async def delete_file(self, path):
+            raise RuntimeError("S3 down")
+
+    monkeypatch.setattr(rtx, "get_storage", lambda: _AngryStorage())
+    asyncio.run(rtx.discard_source("s3://b/k.pdf"))  # does not raise
 
 
 # --- verdict enrichment is isolated per contract ------------------------------
