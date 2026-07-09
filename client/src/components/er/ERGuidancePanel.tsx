@@ -5,6 +5,12 @@ import type { SuggestedGuidanceResponse, SuggestedGuidanceCard, ERCaseOutcome, O
 
 const BASE = import.meta.env.VITE_API_URL ?? '/api'
 
+// Document-processing poll cadence. The cap (~5 min) bounds the wait for a
+// document that never finishes parsing; the server-side sweep marks such rows
+// 'failed' within 15 min, so this only ever fires ahead of that.
+const DOC_POLL_INTERVAL_MS = 3000
+const MAX_DOC_POLL_ATTEMPTS = 100
+
 const priorityVariant: Record<string, BadgeVariant> = {
   high: 'danger',
   medium: 'warning',
@@ -78,18 +84,31 @@ export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, onGuidance
   // Poll document processing status while there's no guidance yet and something
   // is still parsing. Keyed on [caseId, guidance] so a Documents-tab upload
   // (which sets guidance back to null) restarts polling for the new file.
+  //
+  // The poll is capped: a worker killed mid-parse (OOM) used to leave the row
+  // in 'processing' forever, and this loop would spin against it for the life
+  // of the tab. The server now releases such rows, but never let the UI depend
+  // on that — after the cap we stop and fall through to the empty state, which
+  // tells the user processing did not complete.
   useEffect(() => {
     if (guidance !== null) return
     let cancelled = false
     let timer: ReturnType<typeof setTimeout> | null = null
+    let attempts = 0
     async function poll() {
       try {
         const docs = await api.get<ERDocument[]>(`/er/cases/${caseId}/documents`)
         if (cancelled) return
         const completed = docs.filter((d) => d.processing_status === 'completed').length
         const processing = docs.filter((d) => d.processing_status === 'pending' || d.processing_status === 'processing').length
+        attempts += 1
+        if (processing > 0 && attempts >= MAX_DOC_POLL_ATTEMPTS) {
+          // Give up waiting; surface the stalled document instead of spinning.
+          setDocStats({ completed, processing: 0, total: docs.length })
+          return
+        }
         setDocStats({ completed, processing, total: docs.length })
-        if (processing > 0) timer = setTimeout(poll, 3000)
+        if (processing > 0) timer = setTimeout(poll, DOC_POLL_INTERVAL_MS)
       } catch {
         if (!cancelled) setDocStats({ completed: 0, processing: 0, total: 0 })
       }

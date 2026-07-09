@@ -92,15 +92,21 @@ services:
     networks:
       - matcha-network
     # Low memory mode: 1 concurrent task, restart after each to free memory.
-    # 128M is enough for the periodic scheduled tasks (compliance checks,
-    # reminders, deadline escalation). Heavy LLM research tasks (healthcare,
-    # oncology, legislation watch) are rare; if one OOMs, task_acks_late +
-    # max_retries=3 will retry it.
+    # 128M covered the periodic scheduled tasks (compliance checks, reminders,
+    # deadline escalation) but not er_document_processing, which parses an
+    # upload of up to MAX_UPLOAD_SIZE (50MB) — the worker idles near 60M, so a
+    # real document reliably breached the cgroup and got SIGKILLed at ~140M.
+    #
+    # An OOM is NOT retried, contrary to what this comment used to claim:
+    # task_acks_late only redelivers when task_reject_on_worker_lost is set,
+    # and max_retries applies to in-Python self.retry(). A SIGKILLed task is
+    # marked FAILURE and dropped. reset_stale_er_documents (dispatched on
+    # worker startup) is what releases any row an OOM stranded in 'processing'.
     command: python -m celery -A app.workers.celery_app worker --loglevel=info --concurrency=1 --max-tasks-per-child=5
     deploy:
       resources:
         limits:
-          memory: 128M
+          memory: 320M
     logging:
       driver: "json-file"
       options:

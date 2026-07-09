@@ -118,11 +118,17 @@ def on_worker_ready(**kwargs):
         enqueue_scheduled_compliance_checks,
         run_deadline_escalation,
     )
+    from app.workers.tasks.er_document_processing import reset_stale_er_documents
     from app.workers.tasks.legislation_watch import run_legislation_watch
     from app.workers.tasks.leave_agent_tasks import run_leave_agent_orchestration
     from app.workers.tasks.onboarding_reminders import run_onboarding_reminders
     from app.workers.tasks.pattern_recognition import run_pattern_recognition
     from app.workers.tasks.structured_data_fetch import fetch_structured_data_sources
+
+    # Not scheduler-gated: a single cheap, idempotent UPDATE that repairs rows
+    # a previous worker death stranded in 'processing'. Gating it behind a
+    # default-disabled scheduler_settings row would defeat its purpose.
+    reset_stale_er_documents.delay()
 
     if _is_scheduler_enabled("structured_data_fetch"):
         fetch_structured_data_sources.delay()
