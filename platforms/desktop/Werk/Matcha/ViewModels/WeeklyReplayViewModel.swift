@@ -54,13 +54,12 @@ final class WeeklyReplayViewModel {
 
     // MARK: - Week navigation
 
-    func previousWeek() { changeWeek(by: -7) }
-    func nextWeek() { changeWeek(by: 7) }
+    func previousWeek() { changeWeek(by: -1) }
+    func nextWeek() { changeWeek(by: 1) }
 
-    private func changeWeek(by days: Int) {
+    private func changeWeek(by weeks: Int) {
         pause()
-        guard let newStart = Calendar(identifier: .gregorian).date(byAdding: .day, value: days, to: weekStart) else { return }
-        weekStart = newStart
+        weekStart = PacificDateFormatter.addWeeks(weeks, to: weekStart)
         scrubIndex = 0
         Task { await load() }
     }
@@ -72,13 +71,14 @@ final class WeeklyReplayViewModel {
         isLoading = true
         loadError = nil
         defer { isLoading = false }
+        let iso = ISO8601DateFormatter().string(from: weekStart)
         do {
-            let iso = ISO8601DateFormatter().string(from: weekStart)
             let result = try await service.fetchWeeklyReplay(projectId: projectId, weekStart: iso)
             replay = result
             scrubIndex = 0
             recomputeState()
         } catch {
+            print("[WeeklyReplay] load failed project=\(projectId) week_start=\(iso): \(error)")
             loadError = "Couldn't load this week's history."
             replay = nil
             currentState = [:]

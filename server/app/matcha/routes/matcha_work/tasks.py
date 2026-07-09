@@ -709,7 +709,7 @@ def _serialize_history_row(r) -> dict:
 async def get_task_history_endpoint(
     project_id: UUID,
     task_id: UUID,
-    current_user: CurrentUser = Depends(require_admin_or_client),
+    current_user: CurrentUser = Depends(require_company_member),
 ):
     """Audit-trail timeline for one task — who/when at each transition."""
     await _verify_project_access(project_id, current_user)
@@ -736,7 +736,7 @@ async def get_task_history_endpoint(
 async def get_project_history_replay_endpoint(
     project_id: UUID,
     week_start: datetime = Query(...),
-    current_user: CurrentUser = Depends(require_admin_or_client),
+    current_user: CurrentUser = Depends(require_company_member),
 ):
     """Weekly Work Replay data: the board's column state as of `week_start`
     (Monday 00:00 Pacific, computed client-side) plus every history event
@@ -992,7 +992,7 @@ async def log_task_activity_endpoint(
     project_id: UUID,
     task_id: UUID,
     body: dict = Body(...),
-    current_user: CurrentUser = Depends(require_admin_or_client),
+    current_user: CurrentUser = Depends(require_company_member),
 ):
     """Log a sales follow-up activity (call/email/note/meeting) onto a task's
     history timeline so collaborators see the deal's touchpoints.
@@ -1067,7 +1067,7 @@ def _serialize_activity_row(r) -> dict:
 async def get_project_activity_endpoint(
     project_id: UUID,
     limit: int = 50,
-    current_user: CurrentUser = Depends(require_admin_or_client),
+    current_user: CurrentUser = Depends(require_company_member),
 ):
     """Cross-domain activity feed for the Overview tab.
 

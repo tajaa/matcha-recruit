@@ -571,6 +571,14 @@ enum PacificDateFormatter {
         return cal.date(from: comps) ?? date
     }
 
+    /// `start` shifted by ±n whole weeks in the same Pacific calendar as
+    /// `startOfWeek`, so week navigation keeps landing on Monday 12:00am
+    /// Pacific — day-based math in a device-local calendar drifts an hour
+    /// off the boundary when the jump crosses a DST transition.
+    static func addWeeks(_ weeks: Int, to start: Date) -> Date {
+        pacificCalendar.date(byAdding: .weekOfYear, value: weeks, to: start) ?? start
+    }
+
     /// "Jun 30 – Jul 6" for the week-picker header. Both ends computed from
     /// the same Pacific calendar as `startOfWeek` so they never drift a day
     /// apart across a DST transition.
