@@ -1135,29 +1135,31 @@ async def delete_incident(
         if not row:
             raise HTTPException(status_code=404, detail="Incident not found")
 
-        # Log the deletion audit BEFORE the DELETE. get_connection() autocommits
-        # per statement, and ir_audit_log.incident_id is ON DELETE SET NULL — so
-        # inserting the audit row after the DELETE would fail the FK check (parent
-        # already gone) with a 500, and the deletion event would go unrecorded.
-        # Writing it first lets the SET NULL cascade null the link while the row
-        # (with incident_number/title in details) survives as the trail.
-        await log_audit(
-            conn,
-            str(incident_id),
-            str(current_user.id),
-            "incident_deleted",
-            "incident",
-            str(incident_id),
-            {"incident_number": row["incident_number"], "title": row["title"]},
-            request.client.host if request.client else None,
-        )
+        # Audit + delete in ONE transaction, audit first. get_connection()
+        # autocommits per statement, and ir_audit_log.incident_id is ON DELETE
+        # SET NULL — so inserting the audit row after the DELETE used to fail
+        # the FK check (parent already gone) with a 500, and the deletion went
+        # unrecorded. Audit-first lets the SET NULL cascade null the link while
+        # the row (with incident_number/title in details) survives as the
+        # trail; the transaction keeps the pair atomic if the DELETE fails.
+        async with conn.transaction():
+            await log_audit(
+                conn,
+                str(incident_id),
+                str(current_user.id),
+                "incident_deleted",
+                "incident",
+                str(incident_id),
+                {"incident_number": row["incident_number"], "title": row["title"]},
+                request.client.host if request.client else None,
+            )
 
-        # Delete (cascade will handle documents, analysis, etc.)
-        await conn.execute(
-            f"DELETE FROM ir_incidents WHERE id = $1 AND {company_clause}",
-            str(incident_id),
-            company_id,
-        )
+            # Delete (cascade will handle documents, analysis, etc.)
+            await conn.execute(
+                f"DELETE FROM ir_incidents WHERE id = $1 AND {company_clause}",
+                str(incident_id),
+                company_id,
+            )
 
         return {"message": "Incident deleted successfully"}
 

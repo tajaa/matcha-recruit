@@ -682,6 +682,9 @@ class Osha300ASummary(BaseModel):
     # every 300A/ITA filing). Surfaced so a silently-wrong federal form can't
     # print without a warning.
     data_quality_warnings: list[str] = []
+
+
+class Osha300ASaveRequest(BaseModel):
     """Persist manual hours / headcount override / certification for a 300A.
 
     Upserts osha_annual_summaries for (company, location, year). The total_*

@@ -353,7 +353,12 @@ export function OshaLogsPanel() {
       const problems = await api.get<ItaProblem[]>(`/ir/incidents/osha/ita/validate?year=${year}`)
       if (problems.length > 0) {
         setItaProblems(problems)
-        return
+        // Missing establishment fields block the export (the backend 400s on
+        // them anyway). The unassigned-recordables entry is advisory — those
+        // incidents are excluded from the file, but the file itself is valid —
+        // so surface it and continue.
+        const blocking = problems.filter((p) => !p.missing.includes('unassigned_location'))
+        if (blocking.length > 0) return
       }
       promptExport('OSHA ITA Establishment Export', renderItaPreview(), () =>
         api.download(`/ir/incidents/osha/ita/export.csv?year=${year}&attested=true`, `osha_ita_${year}.csv`),
@@ -463,7 +468,9 @@ export function OshaLogsPanel() {
             <AlertTriangle size={15} />
             {itaProblems.length === 0
               ? 'ITA export failed — check establishment data and retry.'
-              : 'Cannot export ITA file — fill these establishment fields first:'}
+              : itaProblems.every((p) => p.missing.includes('unassigned_location'))
+                ? 'Review before filing — these incidents are excluded from the export:'
+                : 'Cannot export ITA file — fill these establishment fields first:'}
           </div>
           {itaProblems.length > 0 && (
             <ul className="mt-3 space-y-1.5">
