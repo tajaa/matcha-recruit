@@ -295,9 +295,16 @@ class StorageService:
         filename: str,
         prefix: str = "documents",
         content_type: Optional[str] = None,
+        bucket: Optional[str] = None,
     ) -> str:
-        """Upload a file to the private bucket. Returns an s3:// URI (no CloudFront)."""
-        bucket = self.private_bucket or self.bucket
+        """Upload a file to a private bucket. Returns an s3:// URI (no CloudFront).
+
+        ``bucket`` overrides the shared private bucket for domains that keep their
+        own (e.g. contracts). Reads and deletes need no equivalent knob — they
+        parse the bucket back out of the stored ``s3://`` URI — so a domain can be
+        split off without migrating anything it already wrote.
+        """
+        bucket = bucket or self.private_bucket or self.bucket
         if not self.s3_client or not bucket:
             raise RuntimeError("S3 not configured for private uploads")
 

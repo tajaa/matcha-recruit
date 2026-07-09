@@ -27,6 +27,13 @@ from app.core.services.pdf import safe_url_fetcher
 
 logger = logging.getLogger(__name__)
 
+# Brokers review insurance and risk-transfer provisions — never the whole
+# agreement. Every rendered surface carries this; `risk_transfer` re-exports it.
+DISCLAIMER = (
+    "Review limited to insurance and risk-transfer provisions. Not legal advice — "
+    "have counsel review the full agreement."
+)
+
 # Casualty lines we model. ``endorsements`` = whether contract endorsement
 # requirements (AI / WOS / P&NC) are meaningful for the line.
 COVERAGE_LINES = [
@@ -261,6 +268,12 @@ def analyze(carried: list[dict], contracts: list[dict], *, headcount: Optional[i
             "contracts": [{"id": c.get("id"), "name": c.get("name"),
                            "counterparty": c.get("counterparty"), "status": c.get("status"),
                            "ai_available": c.get("ai_available"),
+                           "contract_type": c.get("contract_type"),
+                           "governing_state": c.get("governing_state"),
+                           "project_state": c.get("project_state"),
+                           "risk_transfer": c.get("risk_transfer"),
+                           "confirmed_at": c.get("confirmed_at"),
+                           "has_source": bool(c.get("has_source")),
                            "requirements": c.get("requirements") or []} for c in contracts]}
 
 
@@ -277,6 +290,31 @@ def _money(v: Optional[float]) -> str:
 
 
 # --- DB wrapper (never raises) ---------------------------------------------
+
+def attach_verdicts(contracts: list[dict]) -> list[dict]:
+    """Stamp each contract with its indemnity verdict + provisional flag, in place.
+
+    Isolated per contract: one malformed row degrades to a ``review`` verdict
+    instead of stripping the verdicts off every contract after it in the list.
+    Lazy import — ``risk_transfer`` imports this module for the line vocabulary.
+    """
+    from . import risk_transfer
+
+    for c in contracts:
+        try:
+            c["indemnity"] = risk_transfer.assess_indemnity(
+                c.get("risk_transfer"),
+                governing_state=c.get("governing_state"),
+                project_state=c.get("project_state"),
+                contract_type=c.get("contract_type"),
+            )
+        except Exception as exc:  # noqa: BLE001 - isolation is the point
+            logger.warning("limit_adequacy: indemnity verdict failed for %s: %s", c.get("id"), exc)
+            c["indemnity"] = {"verdict": "review", "controlling_state": None, "statute": None,
+                              "basis": "The verdict could not be computed for this contract."}
+        c["provisional"] = risk_transfer.is_provisional(c)
+    return contracts
+
 
 async def build_review(conn, company_id: UUID, *, venue: dict | None = None) -> dict:
     """Fetch carried lines + contracts + company profile + venue tier → analyze.
@@ -309,7 +347,9 @@ async def build_review(conn, company_id: UUID, *, venue: dict | None = None) -> 
             company_id,
         )]
         contracts = [_contract_row(r) for r in await conn.fetch(
-            """SELECT id, name, counterparty, status, requirements, ai_available
+            """SELECT id, name, counterparty, status, requirements, ai_available,
+                      contract_type, governing_state, project_state, risk_transfer,
+                      confirmed_at, storage_path
                FROM company_contracts WHERE company_id = $1 ORDER BY created_at DESC""",
             company_id,
         )]
@@ -326,15 +366,24 @@ async def build_review(conn, company_id: UUID, *, venue: dict | None = None) -> 
         logger.warning("limit_adequacy: venue lookup failed: %s", exc)
 
     review = analyze(carried, contracts, headcount=headcount, venue_tier=venue_tier, industry=industry)
+
+    attach_verdicts(review["contracts"])
     review["company_id"] = str(company_id)
     review["company_name"] = company_name
     review["headcount"] = headcount
     review["industry"] = industry
     review["venue_tier"] = venue_tier
+    review["disclaimer"] = DISCLAIMER
     return review
 
 
 def _contract_row(r) -> dict:
+    """Row → dict. The pool has no jsonb codec, so jsonb columns arrive as raw
+    strings and must be decoded explicitly.
+
+    ``storage_path`` collapses to a ``has_source`` boolean — these dicts are
+    serialized straight to API responses, and the raw ``s3://bucket/key`` is
+    nobody's business but the presigner's (which reads the column directly)."""
     import json
     d = dict(r)
     d["id"] = str(d["id"])
@@ -345,6 +394,16 @@ def _contract_row(r) -> dict:
         except json.JSONDecodeError:
             req = []
     d["requirements"] = req if isinstance(req, list) else []
+    if "risk_transfer" in d:
+        rt = d["risk_transfer"]
+        if isinstance(rt, str):
+            try:
+                rt = json.loads(rt)
+            except json.JSONDecodeError:
+                rt = None
+        d["risk_transfer"] = rt if isinstance(rt, dict) else None
+    if "storage_path" in d:
+        d["has_source"] = bool(d.pop("storage_path"))
     return d
 
 
@@ -384,6 +443,52 @@ def _limit_rows_html(review: dict) -> str:
     return rows
 
 
+_VERDICT_LABEL = {"likely_void_by_statute": "LIKELY VOID", "uninsurable_exposure": "UNINSURABLE",
+                  "insurable": "INSURABLE", "review": "NEEDS REVIEW"}
+_VERDICT_CLASS = {"likely_void_by_statute": "st bad", "uninsurable_exposure": "st bad",
+                  "insurable": "st good", "review": "st muted"}
+
+
+def risk_transfer_rows_html(review: dict, esc=None, verdict_class: dict | None = None) -> str:
+    """Per-contract indemnity verdicts, as ``<tr>`` rows.
+
+    Shared by this module's PDF and the broker submission packet. Both supply
+    their own escaper and verdict→CSS map, because the two stylesheets name their
+    status classes differently (``st bad`` here, ``lim-bad`` there)."""
+    esc = esc or _esc
+    cls = verdict_class or _VERDICT_CLASS
+    rows = ""
+    for c in review.get("contracts") or []:
+        ind = c.get("indemnity") or {}
+        rt = (c.get("risk_transfer") or {}).get("indemnity") or {}
+        if not rt.get("present") and not c.get("contract_type"):
+            continue
+        form = str(rt.get("form") or "—").replace("_", " ")
+        prov = " <em>(provisional)</em>" if c.get("provisional") else ""
+        rows += (
+            f"<tr><td>{esc(c.get('name'))}</td>"
+            f"<td>{esc((c.get('contract_type') or '—').replace('_', ' '))}</td>"
+            f"<td>{esc(c.get('project_state') or c.get('governing_state'))}</td>"
+            f"<td>{esc(form)}</td>"
+            f"<td class='{cls.get(ind.get('verdict'), cls.get('review', ''))}'>"
+            f"{_VERDICT_LABEL.get(ind.get('verdict'), '—')}{prov}</td>"
+            f"<td>{esc(ind.get('statute'))}</td></tr>"
+        )
+    return rows
+
+
+def _risk_transfer_html(review: dict) -> str:
+    rows = risk_transfer_rows_html(review)
+    if not rows:
+        return ""
+    return (
+        "<h2>Indemnification &amp; risk transfer</h2>"
+        "<table><thead><tr><th>Contract</th><th>Type</th><th>State</th><th>Indemnity form</th>"
+        "<th>Verdict</th><th>Statute</th></tr></thead>"
+        f"<tbody>{rows}</tbody></table>"
+    )
+
+
 def _limits_html(company_name: str, review: dict) -> str:
     s = review.get("summary") or {}
     return f"""<!DOCTYPE html><html><head><meta charset="utf-8"><style>
@@ -420,9 +525,12 @@ def _limits_html(company_name: str, review: dict) -> str:
         <th class="r">Baseline</th><th>Status</th><th>Gap</th></tr></thead>
         <tbody>{_limit_rows_html(review) or '<tr><td colspan="6">No coverage lines on file</td></tr>'}</tbody></table>
 
-      <div class="foot">Prepared by Matcha. Contract requirements were extracted from the client's uploaded contracts;
-      baseline figures are directional size/venue heuristics, not peer benchmarks or a quote. Confirm endorsements and
-      limits against the policy declarations. Present alongside the carrier loss run and insurance application.</div>
+      {_risk_transfer_html(review)}
+
+      <div class="foot">{_esc(DISCLAIMER)} Prepared by Matcha. Contract requirements were extracted from the client's
+      uploaded contracts; baseline figures are directional size/venue heuristics, not peer benchmarks or a quote.
+      Confirm endorsements and limits against the policy declarations. Present alongside the carrier loss run and
+      insurance application.</div>
     </body></html>"""
 
 

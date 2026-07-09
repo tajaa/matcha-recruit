@@ -10,15 +10,18 @@ import logging
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile
 from pydantic import BaseModel
 
 from ...database import get_connection
+from ...core.feature_flags import merge_company_features
 from ..dependencies import require_broker, require_broker_pro
+from ..models.limit_adequacy import ContractUpdate
 from ..services import (
     wc_depth, epl_readiness, external_clients as ext, submission_packet as sp,
     controls_evidence as ce, claims_readiness as cr, submission_readiness as sr,
     venue_severity as vs, exclusion_gap as eg, limit_adequacy as la,
+    risk_transfer as rt,
     loss_development as ld, property_sov, property_cat,
     property_exposure as property_exp, property_recommendations as property_recs,
     property_risk as property_risk_svc,
@@ -445,3 +448,110 @@ async def tenant_limits_pdf(company_id: UUID, current_user=Depends(require_broke
         review = await la.build_review(conn, company_id)
     pdf = await la.render_review_pdf(meta["name"], review)
     return _named_pdf(meta["name"], "limit-adequacy", pdf)
+
+
+# --- broker-driven contract review ------------------------------------------
+#
+# The real-world flow is "send the contract to your broker before you sign it",
+# so the broker — not only the tenant — can upload, correct, confirm, and package
+# a client's contracts. Writes land in the client's own `company_contracts`, so
+# the tenant sees the same records on its Limit Adequacy page. Handler bodies live
+# in `risk_transfer`, shared verbatim with the tenant routes.
+
+async def _assert_client_has_limit_adequacy(conn, company_id: UUID) -> None:
+    """Broker WRITES need the client's own feature flag.
+
+    A broker owning the client is enough to *read* its posture (the convention
+    across every `/broker/clients/{id}/…` surface), but writing a contract into a
+    company whose Limit Adequacy page doesn't exist would strand the row where the
+    client can never see, correct, or confirm it. Reads stay ungated.
+    """
+    row = await conn.fetchrow(
+        "SELECT enabled_features, signup_source FROM companies WHERE id = $1", company_id
+    )
+    features = merge_company_features(row["enabled_features"] if row else None,
+                                      row["signup_source"] if row else None)
+    if not features.get("limit_adequacy"):
+        raise HTTPException(status_code=403, detail="Client does not have Limit Adequacy enabled")
+
+
+@router.get("/clients/{company_id}/contracts")
+async def tenant_contracts(company_id: UUID, current_user=Depends(require_broker)):
+    async with get_connection() as conn:
+        await _assert_broker_owns_company(conn, current_user.id, company_id)
+        rows = await conn.fetch(
+            f"SELECT {rt._CONTRACT_COLS} FROM company_contracts "
+            "WHERE company_id = $1 ORDER BY created_at DESC",
+            company_id,
+        )
+    return {"contracts": [la._contract_row(r) for r in rows]}
+
+
+@router.post("/clients/{company_id}/contracts/upload")
+async def tenant_contract_upload(company_id: UUID, file: UploadFile = File(...),
+                                 current_user=Depends(require_broker)):
+    rt.validate_pdf_upload(file)
+    data = await file.read()
+    rt.validate_pdf_bytes(data)
+    async with get_connection() as conn:
+        await _assert_broker_owns_company(conn, current_user.id, company_id)
+        await _assert_client_has_limit_adequacy(conn, company_id)
+        return await rt.store_uploaded_contract(conn, company_id, current_user.id, data, file.filename)
+
+
+@router.put("/clients/{company_id}/contracts/{contract_id}")
+async def tenant_contract_update(company_id: UUID, contract_id: UUID, body: ContractUpdate,
+                                 current_user=Depends(require_broker)):
+    async with get_connection() as conn:
+        await _assert_broker_owns_company(conn, current_user.id, company_id)
+        await _assert_client_has_limit_adequacy(conn, company_id)
+        row = await rt.update_contract(conn, company_id, contract_id, body)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Contract not found")
+    return row
+
+
+@router.post("/clients/{company_id}/contracts/{contract_id}/confirm")
+async def tenant_contract_confirm(company_id: UUID, contract_id: UUID,
+                                  current_user=Depends(require_broker)):
+    async with get_connection() as conn:
+        await _assert_broker_owns_company(conn, current_user.id, company_id)
+        await _assert_client_has_limit_adequacy(conn, company_id)
+        row = await rt.confirm_contract(conn, company_id, contract_id, current_user.id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Contract not found")
+    return row
+
+
+@router.get("/clients/{company_id}/contracts/{contract_id}/review")
+async def tenant_contract_review(company_id: UUID, contract_id: UUID,
+                                 current_user=Depends(require_broker)):
+    async with get_connection() as conn:
+        await _assert_broker_owns_company(conn, current_user.id, company_id)
+        review = await rt.build_contract_review(conn, company_id, contract_id)
+    if review is None:
+        raise HTTPException(status_code=404, detail="Contract not found")
+    return review
+
+
+@router.get("/clients/{company_id}/contracts/{contract_id}/review.pdf")
+async def tenant_contract_review_pdf(company_id: UUID, contract_id: UUID,
+                                     current_user=Depends(require_broker)):
+    async with get_connection() as conn:
+        await _assert_broker_owns_company(conn, current_user.id, company_id)
+        review = await rt.build_contract_review(conn, company_id, contract_id)
+    if review is None:
+        raise HTTPException(status_code=404, detail="Contract not found")
+    pdf = await rt.render_contract_review_pdf(review)
+    return _named_pdf(str((review.get("contract") or {}).get("name") or "contract"), "contract-review", pdf)
+
+
+@router.get("/clients/{company_id}/contracts/{contract_id}/file")
+async def tenant_contract_file(company_id: UUID, contract_id: UUID,
+                               current_user=Depends(require_broker)):
+    async with get_connection() as conn:
+        await _assert_broker_owns_company(conn, current_user.id, company_id)
+        url = await rt.contract_source_url(conn, company_id, contract_id)
+    if not url:
+        raise HTTPException(status_code=404, detail="No source document on file")
+    return {"url": url}

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import {
-  ArrowLeft, ArrowRight, Building2, FileText, FileUp, MessageSquareQuote, Sparkles, X,
+  ArrowLeft, ArrowRight, Building2, FileText, FileUp, Handshake, MessageSquareQuote, Sparkles, X,
 } from 'lucide-react'
 import { LABEL } from './shared'
 
@@ -16,9 +16,19 @@ const STEPS = [
     icon: Sparkles,
     title: 'The record assembles itself',
     body: 'The systems strip across the top shows everything in scope: the analytics you’ve entered '
-      + '(loss runs, WC, EPL, property) plus — for on-platform clients — the operational records Matcha '
-      + 'generates natively: incidents, ER cases, compliance, discipline, training, policy acknowledgments.',
+      + '(loss runs, WC, EPL, property), the indemnity clauses read out of the client’s contracts, plus — '
+      + 'for on-platform clients — the operational records Matcha generates natively: incidents, ER cases, '
+      + 'compliance, discipline, training, policy acknowledgments.',
     detail: 'Dark systems on the strip mean no data yet — for external clients, they light up once the client operates on Matcha.',
+  },
+  {
+    icon: Handshake,
+    title: 'Review a contract before your client signs',
+    body: 'On the client’s Limits tab, upload a lease, subcontract, or vendor agreement. We extract the '
+      + 'insurance the counterparty requires — limits, additional insured, waiver of subrogation, primary '
+      + '& non-contributory — and the indemnification clause, then diff it all against what the client carries.',
+    detail: 'You get a compliant / exposed / actions summary plus a client-ready PDF. Insurance and risk-transfer '
+      + 'provisions only — it is not legal advice, and every page says so.',
   },
   {
     icon: FileUp,

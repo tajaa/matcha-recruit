@@ -174,3 +174,222 @@ def test_money_format():
     assert la._money(1_500_000) == "$1.5M"
     assert la._money(500_000) == "$500K"
     assert la._money(None) == "—"
+
+
+# --- risk-transfer extraction coercion --------------------------------------
+
+def test_coerce_requirements_captures_quote_and_page():
+    out = cp._coerce_requirements({"requirements": [
+        {"line": "gl", "quote": "  Contractor shall carry $2M  ", "page": "4"},
+    ]})
+    assert out[0]["quote"] == "Contractor shall carry $2M"
+    assert out[0]["page"] == 4
+
+
+def test_coerce_requirements_rejects_nonsense_pages():
+    out = cp._coerce_requirements({"requirements": [
+        {"line": "gl", "page": 0}, {"line": "auto", "page": "x"}, {"line": "cyber", "page": -2},
+    ]})
+    assert [r["page"] for r in out] == [None, None, None]
+
+
+def test_property_is_extractable_now_that_the_prompt_names_it():
+    """The carried-line whitelist has always had `property`; the prompt didn't."""
+    assert "Property" in cp._PROMPT
+    assert cp._coerce_requirements({"requirements": [{"line": "Property"}]})[0]["line"] == "property"
+
+
+def test_coerce_risk_transfer_whitelists_enums():
+    rtx = cp._coerce_risk_transfer({"indemnity": {
+        "present": True, "form": "BROAD", "direction": "we_indemnify_them",
+        "covers_sole_negligence": 1, "defense_obligation": 0, "quote": "q", "page": 7,
+    }})
+    ind = rtx["indemnity"]
+    assert ind["form"] == "broad" and ind["direction"] == "we_indemnify_them"
+    assert ind["covers_sole_negligence"] is True and ind["defense_obligation"] is False
+    assert ind["page"] == 7
+
+
+def test_coerce_risk_transfer_unknown_enum_becomes_unclear_not_a_guess():
+    ind = cp._coerce_risk_transfer({"indemnity": {"present": True, "form": "very broad", "direction": "sideways"}})["indemnity"]
+    assert ind["form"] == "unclear" and ind["direction"] == "unclear"
+
+
+def test_coerce_risk_transfer_absent_clause_and_garbage():
+    assert cp._coerce_risk_transfer({"indemnity": {"present": False}}) == {"indemnity": {"present": False}}
+    assert cp._coerce_risk_transfer({}) is None
+    assert cp._coerce_risk_transfer({"indemnity": "nope"}) is None
+
+
+def test_coerce_risk_transfer_truncates_a_runaway_quote():
+    ind = cp._coerce_risk_transfer({"indemnity": {"present": True, "quote": "x" * 5000}})["indemnity"]
+    assert len(ind["quote"]) == cp._MAX_QUOTE
+
+
+def test_coerce_contract_type_and_state():
+    assert cp._coerce_contract_type("Construction") == "construction"
+    assert cp._coerce_contract_type("handshake") is None
+    assert cp._state(" ny ") == "NY"
+    assert cp._state("New York") is None
+    assert cp._state(None) is None
+
+
+# --- jsonb decoding ---------------------------------------------------------
+
+def test_contract_row_decodes_risk_transfer_jsonb_string():
+    """asyncpg has no jsonb codec on this pool — the column arrives as raw text."""
+    row = {"id": "c1", "requirements": '[{"line":"gl"}]', "risk_transfer": '{"indemnity":{"present":true}}'}
+    out = la._contract_row(row)
+    assert out["requirements"] == [{"line": "gl"}]
+    assert out["risk_transfer"]["indemnity"]["present"] is True
+
+
+def test_contract_row_tolerates_malformed_jsonb():
+    out = la._contract_row({"id": "c1", "requirements": "{bad", "risk_transfer": "{bad"})
+    assert out["requirements"] == [] and out["risk_transfer"] is None
+
+
+def test_contract_row_omits_risk_transfer_key_when_not_selected():
+    assert "risk_transfer" not in la._contract_row({"id": "c1", "requirements": "[]"})
+
+
+# --- upload retention degrade path ------------------------------------------
+
+class _FakeConn:
+    """Captures the INSERT args so we can assert what got persisted."""
+
+    def __init__(self):
+        self.args = None
+
+    async def fetchrow(self, _sql, *args):
+        self.args = args
+        return {"id": "c1", "name": args[1], "counterparty": args[2], "status": args[3],
+                "requirements": args[4], "ai_available": args[5], "source_filename": args[6],
+                "contract_type": args[8], "governing_state": args[9], "project_state": args[10],
+                "storage_path": args[11], "risk_transfer": args[12], "confirmed_at": None,
+                "created_at": None, "updated_at": None}
+
+
+#: s3:// URIs the fake storage was asked to delete, newest last.
+DELETED: list = []
+
+
+def _install_fakes(monkeypatch, *, upload_raises: bool):
+    from app.matcha.services import risk_transfer as rtx
+
+    async def fake_parse(_data):
+        return {"counterparty": "Acme", "contract_type": "construction",
+                "governing_state": "NY", "project_state": "NY",
+                "requirements": [{"line": "gl"}],
+                "risk_transfer": {"indemnity": {"present": True}},
+                "available": True, "model": "test"}
+
+    monkeypatch.setattr(rtx.contract_parser, "parse_contract", fake_parse)
+
+    class _Storage:
+        async def upload_private_file(self, data, filename, prefix=None, content_type=None, bucket=None):
+            if upload_raises:
+                raise RuntimeError("S3 not configured for private uploads")
+            # contracts must target their own bucket, not the shared private one
+            assert bucket == "matcha-contracts", bucket
+            return f"s3://{bucket}/contracts/x.pdf"
+
+        async def delete_file(self, path):
+            DELETED.append(path)
+            return True
+
+    DELETED.clear()
+    monkeypatch.setattr(rtx, "get_storage", lambda: _Storage())
+    monkeypatch.setattr(rtx, "get_settings",
+                        lambda: type("S", (), {"s3_contracts_bucket": "matcha-contracts"})())
+    return rtx
+
+
+def test_upload_retains_source_pdf(monkeypatch):
+    import asyncio
+    rtx = _install_fakes(monkeypatch, upload_raises=False)
+    conn = _FakeConn()
+    out = asyncio.run(rtx.store_uploaded_contract(conn, "co", "user", b"%PDF-", "sub.pdf"))
+    assert out["has_source"] is True
+    assert "storage_path" not in out  # never leaves the service layer
+    assert out["status"] == "parsed"
+    assert out["risk_transfer"]["indemnity"]["present"] is True
+
+
+def test_upload_degrades_to_parse_and_discard_when_s3_is_unavailable(monkeypatch):
+    """A dev box with no private bucket must still get its contract review —
+    losing the blob beats losing the record."""
+    import asyncio
+    rtx = _install_fakes(monkeypatch, upload_raises=True)
+    conn = _FakeConn()
+    out = asyncio.run(rtx.store_uploaded_contract(conn, "co", "user", b"%PDF-", "sub.pdf"))
+    assert out["has_source"] is False
+    assert out["status"] == "parsed"
+    assert out["contract_type"] == "construction"
+
+
+def test_upload_deletes_the_blob_when_the_insert_fails(monkeypatch):
+    """No row will ever reference it — an orphaned counterparty contract in a
+    bucket nobody can reach is worse than no retention at all."""
+    import asyncio
+    import pytest as _pytest
+    rtx = _install_fakes(monkeypatch, upload_raises=False)
+
+    class _BrokenConn:
+        async def fetchrow(self, _sql, *args):
+            raise RuntimeError("insert exploded")
+
+    with _pytest.raises(RuntimeError, match="insert exploded"):
+        asyncio.run(rtx.store_uploaded_contract(_BrokenConn(), "co", "user", b"%PDF-", "sub.pdf"))
+    assert DELETED == ["s3://matcha-contracts/contracts/x.pdf"]
+
+
+def test_discard_source_is_best_effort_and_ignores_a_missing_path(monkeypatch):
+    """Delete failures must never surface to the caller — the row is already gone."""
+    import asyncio
+    rtx = _install_fakes(monkeypatch, upload_raises=False)
+
+    asyncio.run(rtx.discard_source(None))
+    assert DELETED == []
+
+    class _AngryStorage:
+        async def delete_file(self, path):
+            raise RuntimeError("S3 down")
+
+    monkeypatch.setattr(rtx, "get_storage", lambda: _AngryStorage())
+    asyncio.run(rtx.discard_source("s3://b/k.pdf"))  # does not raise
+
+
+# --- verdict enrichment is isolated per contract ------------------------------
+
+def test_one_bad_contract_does_not_strip_verdicts_off_the_others(monkeypatch):
+    """attach_verdicts mutates the list in place — an exception on one row must
+    not leave every later row without a verdict."""
+    from app.matcha.services import risk_transfer as rtx
+
+    real = rtx.assess_indemnity
+
+    def flaky(risk_transfer, **kw):
+        if (risk_transfer or {}).get("boom"):
+            raise ValueError("malformed")
+        return real(risk_transfer, **kw)
+
+    monkeypatch.setattr(rtx, "assess_indemnity", flaky)
+
+    contracts = [
+        {"id": "a", "ai_available": True, "risk_transfer": {"boom": True}},
+        {"id": "b", "ai_available": True,
+         "risk_transfer": {"indemnity": {"present": True, "form": "limited",
+                                         "direction": "we_indemnify_them"}}},
+    ]
+    la.attach_verdicts(contracts)
+
+    assert contracts[0]["indemnity"]["verdict"] == "review"      # degraded, not missing
+    assert contracts[1]["indemnity"]["verdict"] == "insurable"   # unaffected by its neighbor
+    assert all(c["provisional"] is True for c in contracts)
+
+
+def test_attach_verdicts_marks_manual_contracts_non_provisional():
+    contracts = [{"id": "m", "ai_available": False, "risk_transfer": None}]
+    la.attach_verdicts(contracts)
+    assert contracts[0]["provisional"] is False

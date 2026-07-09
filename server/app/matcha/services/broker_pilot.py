@@ -202,6 +202,50 @@ def _fmt_num(v) -> str:
         return str(v)
 
 
+def _clause_records(ctx: dict) -> list[dict]:
+    """One `clause:<contract_id>` record per contract carrying an extracted
+    indemnity, so the analyst can cite the clause itself (verbatim quote + page)
+    rather than paraphrasing it.
+
+    Its own corpus source, NOT a prefixed record inside `platform` — the memo's
+    appendix builder dispatches on cid prefix, and an unrecognized prefix inside
+    the platform bucket would fall through to the native branch and re-render
+    every cited platform record as a duplicate table.
+    """
+    recs: list[dict] = []
+    for c in ((ctx or {}).get("limits") or {}).get("contracts") or []:
+        if not isinstance(c, dict):
+            continue
+        ind = c.get("indemnity") or {}
+        clause = (c.get("risk_transfer") or {}).get("indemnity") or {}
+        if not clause.get("present"):
+            continue
+        bits = [f"{str(clause.get('form') or 'unclassified').replace('_', ' ')} form"]
+        if clause.get("covers_sole_negligence"):
+            bits.append("reaches the counterparty's sole negligence")
+        if clause.get("defense_obligation"):
+            bits.append("includes a duty to defend")
+        if ind.get("verdict"):
+            bits.append(f"verdict: {str(ind['verdict']).replace('_', ' ')}")
+        if ind.get("statute"):
+            bits.append(f"under {ind['statute']}")
+        if c.get("provisional"):
+            bits.append("PROVISIONAL — extraction not yet confirmed by a reviewer")
+        quote = clause.get("quote")
+        if quote:
+            page = f", p. {clause['page']}" if clause.get("page") else ""
+            bits.append(f'clause text{page}: "{quote}"')
+        recs.append({
+            "cid": f"clause:{c.get('id')}",
+            "ref": f"Indemnity clause — {c.get('name') or 'contract'}",
+            "summary": (f"{c.get('name') or 'Contract'}"
+                        + (f" (counterparty {c['counterparty']})" if c.get("counterparty") else "")
+                        + f": {'; '.join(bits)}."),
+            "when": "current",
+        })
+    return recs
+
+
 def _platform_records(ctx: dict) -> list[dict]:
     """Serialize a `_tenant_context` / `_external_context` dict into compact
     corpus records. Every accessor is guard-railed — a missing/empty section
@@ -474,10 +518,13 @@ def build_corpus(subject_name: str, ctx: dict, docs: list[dict], native: dict | 
     clients, which instead get a note naming what an on-platform client adds.
     """
     platform = _platform_records(ctx)
+    clauses = _clause_records(ctx)
     doc_recs, fig_recs, notes = _doc_records(docs)
     sources = {
         "platform": {"label": "Platform data on file", "records": platform},
     }
+    if clauses:
+        sources["clauses"] = {"label": "Contract indemnity clauses", "records": clauses}
     if native is not None:
         sources.update(native.get("sources") or {})
         notes.extend(native.get("notes") or [])
@@ -502,7 +549,7 @@ def build_corpus(subject_name: str, ctx: dict, docs: list[dict], native: dict | 
 # Grounded AI turn (analyst, not advisor)
 # --------------------------------------------------------------------------- #
 
-_SYSTEM = """You are a commercial P&C insurance analysis assistant working for a licensed insurance broker who is preparing analysis for a client. You ground EVERY statement in the EVIDENCE CORPUS below: the client's platform records (`platform:` IDs), the company's operational records generated natively on the platform (`incident:` / `er_case:` / `compliance_req:` / `compliance_alert:` / `discipline:` / `training:` / `policy_ack:` / `accommodation:` IDs — present only for on-platform clients), and the broker's uploaded documents (`doc:` / `docfig:` IDs).
+_SYSTEM = """You are a commercial P&C insurance analysis assistant working for a licensed insurance broker who is preparing analysis for a client. You ground EVERY statement in the EVIDENCE CORPUS below: the client's platform records (`platform:` IDs), the company's operational records generated natively on the platform (`incident:` / `er_case:` / `compliance_req:` / `compliance_alert:` / `discipline:` / `training:` / `policy_ack:` / `accommodation:` IDs — present only for on-platform clients), the indemnification clauses extracted from the client's contracts (`clause:` IDs), and the broker's uploaded documents (`doc:` / `docfig:` IDs).
 
 HARD RULES:
 - Cite ONLY the bracketed IDs that appear in the EVIDENCE CORPUS. NEVER invent a figure, carrier, date, limit, premium, or ID.
@@ -510,6 +557,8 @@ HARD RULES:
 - Where the corpus does not address a point, say so plainly and put it under open_questions — never speculate or fill gaps.
 - You MAY compute simple derived figures (differences, ratios, loss ratios, year-over-year changes) from cited values — state the inputs and cite their IDs.
 - You are an ANALYST, NOT AN ADVISOR: do not recommend buying or declining coverage, do not opine on legal duties, and note that quotes and forms must be verified against actual policy language.
+- On `clause:` records: your remit is INSURANCE AND RISK TRANSFER ONLY. Discuss indemnity form, insurability, and the endorsements a clause requires — never opine on payment terms, termination, IP, or dispute resolution, and never state that a clause IS or IS NOT enforceable. A recorded verdict is a starting point for counsel, so report it as such and say so.
+- A `clause:` record marked PROVISIONAL comes from an unconfirmed AI extraction — say that whenever you rely on it.
 - Raw document text (DOCUMENT TEXT blocks) belongs to its `doc:` ID — cite that ID when using it.
 
 Return STRICT JSON ONLY (no markdown, no prose outside the JSON), shape:

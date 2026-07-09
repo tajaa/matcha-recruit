@@ -1,7 +1,7 @@
 import type { LucideIcon } from 'lucide-react'
 import {
   Accessibility, AlertTriangle, Bell, BookOpenCheck, Building2, ClipboardCheck,
-  FileSignature, FileText, Gauge, Gavel, GraduationCap, HardHat, Hash, MapPin,
+  FileSignature, FileText, Gauge, Gavel, GraduationCap, Handshake, HardHat, Hash, MapPin,
   Scale, ShieldCheck, Siren, TrendingUp, Users, Warehouse,
 } from 'lucide-react'
 import type { ContextPreview, CorpusRecord, DocStatus, DocType } from '../../../api/brokerPilot'
@@ -52,6 +52,7 @@ export const SOURCE_META: { key: string; label: string; icon: LucideIcon }[] = [
   { key: 'property', label: 'Property', icon: Warehouse },
   { key: 'venue', label: 'Venue', icon: MapPin },
   { key: 'limits', label: 'Limits', icon: Scale },
+  { key: 'clauses', label: 'Contract clauses', icon: Handshake },
   { key: 'controls', label: 'Controls', icon: ClipboardCheck },
   { key: 'exclusions', label: 'Exclusions', icon: AlertTriangle },
   { key: 'readiness', label: 'Readiness', icon: Gauge },
@@ -83,6 +84,7 @@ export const SYSTEM_LABEL: Record<string, string> = {
   property: 'Property / SOV',
   venue: 'Venue exposure',
   limits: 'Limit adequacy',
+  clauses: 'Contract indemnity clauses',
   controls: 'Controls evidence',
   exclusions: 'Emerging exclusions',
   readiness: 'Submission readiness',
@@ -134,6 +136,7 @@ export const STARTERS = [
   'Give me an underwriting read on the WC reserve development and biggest EPL and catastrophe exposures.',
   'Summarize what the uploaded documents show and how it squares with the platform data on file.',
   'Compare the quoted premium against the loss history — is the pricing supported?',
+  'Which contract indemnity clauses put this client at risk, and do their limits meet what the contracts require?',
   'Where is the data thin or low-confidence, and what will an underwriter ask for next?',
 ]
 
