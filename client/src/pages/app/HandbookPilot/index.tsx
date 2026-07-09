@@ -7,12 +7,13 @@ import {
   listPilotSessions, getPilotSession, getPilotContext, createPilotSession,
   updatePilotDraft, deletePilotDraft, promotePilotDrafts, streamChat,
   type PilotSession, type PilotDraft, type PilotMessage, type ContextPreview,
-  type PromoteResult,
+  type PromoteResult, type CoverageEntry,
 } from '../../../api/handbookPilot'
 import { HowItWorksModal, type HowItWorksStep } from '../../../components/ui/HowItWorksModal'
 import { HelpHint } from '../../../components/ui/HelpHint'
 import { useShowOnce } from '../../../hooks/useShowOnce'
 import HandbookViewer from './HandbookViewer'
+import RequirementsPanel from './RequirementsPanel'
 
 // ---------------------------------------------------------------------------
 // Handbook Pilot — conversational, grounded handbook/policy generation.
@@ -43,6 +44,14 @@ const HOW_IT_WORKS_STEPS: HowItWorksStep[] = [
     detail: 'A citation check runs on every turn — invented legal references never reach the draft.',
   },
   {
+    icon: Scale,
+    title: 'Close the gaps',
+    body: 'The Requirements panel lists every requirement that applies to your locations and which '
+      + 'ones no draft cites yet. Hit Draft on one and the pilot picks it up.',
+    detail: 'Uncited doesn\'t mean non-compliant — your existing handbook may already cover it. Run a '
+      + 'compliance scan to grade the drafted language itself.',
+  },
+  {
     icon: Pencil,
     title: 'Review & edit',
     body: 'Tweak the drafted language before anything becomes real.',
@@ -65,6 +74,10 @@ const HANDBOOK_EXAMPLES = [
   'Draft a standalone pay-transparency policy for our open roles.',
 ]
 
+// A prompt handed to the composer from outside the Console (a requirement's
+// Draft button). `nonce` makes re-picking the same requirement re-seed.
+type ComposerSeed = { text: string; nonce: number }
+
 export default function HandbookPilot() {
   const [sessions, setSessions] = useState<PilotSession[]>([])
   const [active, setActive] = useState<PilotSession | null>(null)
@@ -73,6 +86,7 @@ export default function HandbookPilot() {
   const [showNew, setShowNew] = useState(false)
   const [showHelp, setShowHelp] = useShowOnce('handbook-pilot')
   const [mode, setMode] = useState<'build' | 'handbook'>('build')
+  const [seed, setSeed] = useState<ComposerSeed | null>(null)
   // Bumped whenever drafts may have changed (chat turn, edit, promote) or when
   // the viewer is (re)entered, so the read-only viewer refetches its snapshot.
   const [viewerVersion, setViewerVersion] = useState(0)
@@ -87,6 +101,7 @@ export default function HandbookPilot() {
   const openSession = useCallback(async (id: string) => {
     activeIdRef.current = id
     setContext(null)
+    setSeed(null)  // a requirement picked in one session never leaks into the next
     try {
       const [full, ctx] = await Promise.all([
         getPilotSession(id),
@@ -129,6 +144,21 @@ export default function HandbookPilot() {
   const showHandbook = useCallback(() => {
     setViewerVersion((v) => v + 1)  // refetch on entry so post-edit changes show
     setMode('handbook')
+  }, [])
+
+  // A requirement nothing cites yet → a targeted prompt in the composer. We
+  // prefill rather than send: the admin gets to add context (and a mis-click
+  // never burns a drafting turn).
+  const draftRequirement = useCallback((req: CoverageEntry) => {
+    const where = req.jurisdiction && req.jurisdiction !== req.state
+      ? `${req.state} — ${req.jurisdiction}`
+      : req.state
+    setSeed({
+      text: `Draft a handbook section covering this requirement: ${req.title} (${where}). `
+        + `Ground every enforceable clause in [${req.cid}] and any related requirements in the corpus.`,
+      nonce: Date.now(),
+    })
+    setMode('build')
   }, [])
 
   const onCreated = useCallback(async (s: PilotSession) => {
@@ -221,16 +251,33 @@ export default function HandbookPilot() {
                 <div className="flex-1 min-w-0 flex flex-col border border-zinc-800 rounded-xl bg-zinc-950/40">
                   {/* key by session id → remount (and reset transcript/abort the
                       stream) when the user switches sessions mid-turn */}
-                  <Console key={active.id} session={active} onTurn={reloadActive} />
+                  <Console
+                    key={active.id}
+                    session={active}
+                    onTurn={reloadActive}
+                    seed={seed}
+                    onSeedConsumed={() => setSeed(null)}
+                  />
                 </div>
                 <div className="w-80 shrink-0 flex flex-col gap-4 overflow-y-auto">
                   <DraftsPanel key={active.id} session={active} onChange={reloadActive} />
-                  <ContextPanel context={context} />
+                  <RailTabs
+                    key={active.id}
+                    sessionId={active.id}
+                    refreshKey={viewerVersion}
+                    context={context}
+                    onDraft={draftRequirement}
+                  />
                 </div>
               </div>
             ) : (
               <div className="flex-1 min-h-0 flex">
-                <HandbookViewer key={active.id} sessionId={active.id} refreshKey={viewerVersion} />
+                <HandbookViewer
+                  key={active.id}
+                  sessionId={active.id}
+                  refreshKey={viewerVersion}
+                  onDraftRequirement={draftRequirement}
+                />
               </div>
             )}
           </>
@@ -271,7 +318,12 @@ export default function HandbookPilot() {
 
 // NB: this component is keyed by session.id in the parent, so it remounts on a
 // session switch — `session` is effectively fixed for an instance's lifetime.
-function Console({ session, onTurn }: { session: PilotSession; onTurn: () => void }) {
+function Console({ session, onTurn, seed, onSeedConsumed }: {
+  session: PilotSession
+  onTurn: () => void
+  seed: ComposerSeed | null
+  onSeedConsumed: () => void
+}) {
   const [messages, setMessages] = useState<PilotMessage[]>(session.messages ?? [])
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
@@ -283,6 +335,19 @@ function Console({ session, onTurn }: { session: PilotSession; onTurn: () => voi
 
   // Abort any in-flight turn when the user switches sessions (unmount).
   useEffect(() => () => abortRef.current?.abort(), [])
+
+  // A requirement's Draft button seeds the composer. Consumed on apply, so
+  // remounting (mode toggle) never refills an already-sent prompt. Appends
+  // rather than replaces — the Requirements rail sits beside a live composer,
+  // and clicking Draft must not silently eat a half-typed message.
+  useEffect(() => {
+    if (!seed) return
+    setInput((cur) => (cur.trim() ? `${cur.trimEnd()}\n\n${seed.text}` : seed.text))
+    setView('chat')
+    textareaRef.current?.focus()
+    onSeedConsumed()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seed?.nonce])
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
@@ -549,6 +614,37 @@ function DraftRow({ draft, selected, onToggle, onChange }: {
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+// --------------------------------------------------------------------------- //
+// RailTabs — the requirements gap list (what's left to draft) and the grounding
+// corpus preview (what the pilot is reading), tabbed. Drafts stays pinned above
+// both: it's the surface the user acts on after every turn.
+// --------------------------------------------------------------------------- //
+
+function RailTabs({ sessionId, refreshKey, context, onDraft }: {
+  sessionId: string
+  refreshKey: number
+  context: ContextPreview | null
+  onDraft: (req: CoverageEntry) => void
+}) {
+  const [tab, setTab] = useState<'requirements' | 'grounding'>('requirements')
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="inline-flex items-center gap-1 self-start rounded-lg border border-zinc-800 bg-zinc-950/40 p-0.5">
+        {([['requirements', 'Requirements'], ['grounding', 'Grounding']] as const).map(([k, label]) => (
+          <button key={k} onClick={() => setTab(k)}
+            className={`px-2.5 py-1 text-[11px] rounded-md ${
+              tab === k ? 'bg-zinc-800 text-emerald-400' : 'text-zinc-500 hover:text-zinc-300'}`}>
+            {label}
+          </button>
+        ))}
+      </div>
+      {tab === 'requirements'
+        ? <RequirementsPanel sessionId={sessionId} refreshKey={refreshKey} onDraft={onDraft} />
+        : <ContextPanel context={context} />}
     </div>
   )
 }

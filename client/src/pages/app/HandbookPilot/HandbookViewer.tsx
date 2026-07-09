@@ -8,8 +8,10 @@ import {
 import {
   getPilotHandbook, runComplianceScan,
   type AssembledHandbook, type AssembledSection, type ComplianceScanResult, type ComplianceGap,
+  type CoverageEntry,
 } from '../../../api/handbookPilot'
 import { HelpHint } from '../../../components/ui/HelpHint'
+import RequirementsPanel, { SEVERITY_STYLE } from './RequirementsPanel'
 
 // ---------------------------------------------------------------------------
 // HandbookViewer — the "living handbook". Assembles the session's drafts into a
@@ -26,19 +28,17 @@ function highlightPlaceholders(md: string): string {
   return (md || '').replace(/\[([A-Z0-9_]{2,})\](?!\()/g, '`[$1]`')
 }
 
-const SEVERITY_STYLE: Record<string, string> = {
-  critical: 'bg-red-500/10 text-red-300 border-red-500/30',
-  important: 'bg-amber-500/10 text-amber-300 border-amber-500/30',
-  recommended: 'bg-sky-500/10 text-sky-300 border-sky-500/30',
-}
-
 function statusDot(s: AssembledSection) {
   if (s.status === 'promoted') return <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
   const color = s.grounded ? 'bg-emerald-500' : 'bg-amber-500'
   return <span className={`h-2 w-2 rounded-full shrink-0 ${color}`} />
 }
 
-export default function HandbookViewer({ sessionId, refreshKey }: { sessionId: string; refreshKey: string | number }) {
+export default function HandbookViewer({ sessionId, refreshKey, onDraftRequirement }: {
+  sessionId: string
+  refreshKey: string | number
+  onDraftRequirement: (req: CoverageEntry) => void
+}) {
   const [handbook, setHandbook] = useState<AssembledHandbook | null>(null)
   const [loading, setLoading] = useState(true)
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -125,9 +125,12 @@ export default function HandbookViewer({ sessionId, refreshKey }: { sessionId: s
                 <Chip>{summary.policy_count} policies</Chip>
                 <Chip className="text-emerald-400">{summary.grounded_sections} grounded</Chip>
                 {summary.law_records > 0 && (
-                  <Chip className={summary.uncovered > 0 ? 'text-amber-400' : 'text-emerald-400'}>
-                    {summary.covered}/{summary.law_records} requirements cited
-                  </Chip>
+                  <>
+                    <Chip className={summary.uncovered > 0 ? 'text-amber-400' : 'text-emerald-400'}>
+                      {summary.covered}/{summary.law_records} requirements cited
+                    </Chip>
+                    <HelpHint text="Deterministic count: requirements whose id is cited by at least one draft, out of every requirement that applies to your work locations. The Requirements panel on the right lists them — and lets you draft the ones nothing cites yet." />
+                  </>
                 )}
               </>
             )}
@@ -175,11 +178,15 @@ export default function HandbookViewer({ sessionId, refreshKey }: { sessionId: s
       {/* Compliance detail */}
       <aside className="w-80 shrink-0 overflow-y-auto">
         <CompliancePanel
+          sessionId={sessionId}
+          refreshKey={refreshKey}
           selected={selected}
           handbook={handbook}
           scan={scan}
           scanError={scanError}
           onSelectClear={() => setSelectedId(null)}
+          onDraftRequirement={onDraftRequirement}
+          onViewSection={selectItem}
         />
       </aside>
     </div>
@@ -256,12 +263,19 @@ function DocBlock({ item, selected, refCb, onSelect }: {
 // Compliance panel — provenance for the selected section + session-level gaps.
 // --------------------------------------------------------------------------- //
 
-function CompliancePanel({ selected, handbook, scan, scanError, onSelectClear }: {
+function CompliancePanel({
+  sessionId, refreshKey, selected, handbook, scan, scanError,
+  onSelectClear, onDraftRequirement, onViewSection,
+}: {
+  sessionId: string
+  refreshKey: string | number
   selected: AssembledSection | null
   handbook: AssembledHandbook | null
   scan: ComplianceScanResult | null
   scanError: string | null
   onSelectClear: () => void
+  onDraftRequirement: (req: CoverageEntry) => void
+  onViewSection: (draftId: string) => void
 }) {
   const matchedForSelected = useMemo(() => {
     if (!selected || !scan) return []
@@ -334,18 +348,18 @@ function CompliancePanel({ selected, handbook, scan, scanError, onSelectClear }:
         <div className="px-3 py-2.5 border-b border-zinc-800 flex items-center gap-1.5">
           <ShieldCheck className="h-4 w-4 text-emerald-500" />
           <span className="text-sm font-semibold text-zinc-200">Compliance</span>
-          <HelpHint text="Live coverage compares the requirements your drafts cite against all that apply to your locations. The scan grades each required topic against the drafted language." />
+          <HelpHint text="The scan grades each required topic against the language you've actually drafted, and explains what good looks like for the ones it can't find." />
         </div>
         <div className="p-3 space-y-3">
-          {handbook?.summary && (
-            <div className="flex items-center gap-2 text-[12px]">
-              <span className="text-emerald-400">{handbook.summary.covered} covered</span>
-              <span className="text-zinc-600">·</span>
-              <span className={handbook.summary.uncovered > 0 ? 'text-amber-400' : 'text-zinc-500'}>
-                {handbook.summary.uncovered} not yet cited
-              </span>
-            </div>
-          )}
+          <RequirementsPanel
+            sessionId={sessionId}
+            refreshKey={refreshKey}
+            handbook={handbook}
+            scan={scan}
+            onDraft={onDraftRequirement}
+            onViewSection={onViewSection}
+            compact
+          />
 
           {scanError && <p className="text-[12px] text-amber-400">⚠ {scanError}</p>}
 

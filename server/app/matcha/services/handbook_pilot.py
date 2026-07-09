@@ -17,11 +17,19 @@ Derived from the Broker Pilot / Legal Pilot architecture
 gates directly. Never raises on the analysis path — failures degrade, not 500.
 
 Corpus cid scheme (one flat index; the citation gate keys on it):
-- ``profile``               — the company handbook profile record
-- ``law:<state>-<slug>-<n>``— one record per applicable jurisdiction requirement
-- ``handbook:<uuid>``       — one record per existing handbook section
-- ``policy:<uuid>``         — one record per existing policy
-- ``playbook:<slug>``       — one record per industry playbook baseline section
+- ``profile``                        — the company handbook profile record
+- ``law:<state>-<cat>-<title-slug>`` — one record per applicable jurisdiction requirement
+- ``handbook:<uuid>``                — one record per existing handbook section
+- ``policy:<uuid>``                  — one record per existing policy
+- ``playbook:<slug>``                — one record per industry playbook baseline section
+
+Law cids are derived from the requirement's *content* (state + category + title),
+not its position in the fetch, because `_fetch_state_requirements` orders by
+effective/updated date — a jurisdiction data refresh reorders the rows. Cids used
+to carry the enumeration ordinal (`law:<state>-<cat>-<n>`), so a refresh silently
+re-pointed every stored citation and cited requirements fell back to "uncovered".
+Citations stored under that old scheme are recovered by `lookup_record`, which
+matches on the `state-category` prefix when it names exactly one requirement.
 """
 
 import asyncio
@@ -185,15 +193,85 @@ def _profile_record(profile: dict | None) -> list[dict]:
 
 def _law_records(requirements: dict) -> list[dict]:
     """One record per applicable jurisdiction requirement. `requirements` is the
-    state -> [requirement dict] map from handbook_service._fetch_state_requirements."""
+    state -> [requirement dict] map from handbook_service._fetch_state_requirements.
+
+    The cid is derived from the requirement's *content* (state + category +
+    title), never its position in the fetch — see the module docstring. Two
+    requirements can legitimately share state + category + title (a state and a
+    city minimum wage), so a collision qualifies every colliding member with its
+    jurisdiction. Members still identical after that are indistinguishable on
+    content and get an ordinal over a sorted key, so the assignment doesn't
+    depend on fetch order either.
+
+    Disambiguation is applied to ALL members of a colliding group, not just the
+    later ones: giving the first arrival the bare cid would hand a different
+    requirement the bare cid after a reorder, which is the bug this scheme
+    exists to kill."""
     recs: list[dict] = []
     for state, reqs in (requirements or {}).items():
-        for n, r in enumerate((reqs or [])[:_LAW_PER_STATE_CAP]):
-            if not isinstance(r, dict):
-                continue
+        rows = [r for r in (reqs or [])[:_LAW_PER_STATE_CAP] if isinstance(r, dict)]
+
+        def _parts(r: dict) -> tuple[str, str, str, str]:
             title = r.get("title") or r.get("category") or "requirement"
-            cid = f"law:{_slug(state)}-{_slug(r.get('category') or title)}-{n}"
-            juris = r.get("jurisdiction_name") or state
+            return (
+                str(title),
+                str(r.get("category") or title),
+                str(r.get("jurisdiction_name") or state),
+                f"law:{_slug(state)}-{_slug(r.get('category') or title)}-{_slug(title)}",
+            )
+
+        base_counts: dict[str, int] = {}
+        qual_counts: dict[str, int] = {}
+        for r in rows:
+            _, _, juris, base = _parts(r)
+            base_counts[base] = base_counts.get(base, 0) + 1
+            qual_counts[f"{base}-{_slug(juris)}"] = qual_counts.get(f"{base}-{_slug(juris)}", 0) + 1
+
+        # Content sort key for the last-resort ordinal. Keys on EVERY field, not
+        # a hand-picked few: two rows tying here are indistinguishable on content,
+        # so which one wins the ordinal cannot matter. Picking a subset would let
+        # rows that differ in an unlisted field (source_url, numeric_value) tie,
+        # and a stable sort would then hand out ordinals by fetch order —
+        # re-pointing citations on a data refresh, the bug this scheme kills.
+        def _tiebreak(r: dict) -> str:
+            return repr(sorted((str(k), str(v)) for k, v in r.items()))
+
+        ordinals: dict[int, int] = {}
+        next_ordinal: dict[str, int] = {}
+        for r in sorted(rows, key=_tiebreak):
+            _, _, juris, base = _parts(r)
+            qual = f"{base}-{_slug(juris)}"
+            if base_counts[base] > 1 and qual_counts[qual] > 1:
+                ordinals[id(r)] = next_ordinal.get(qual, 0)
+                next_ordinal[qual] = next_ordinal.get(qual, 0) + 1
+
+        # Mint in content order (never fetch order), then emit in fetch order.
+        # Groups are disambiguated independently, so a qualified cid from one
+        # group can still equal a bare cid from another (category `minimum_wage`
+        # + title "Minimum wage" in San Francisco collides with title "Minimum
+        # wage San Francisco"). build_corpus keys the index by cid and would
+        # silently drop the loser — force a suffix instead.
+        minted: set[str] = set()
+        cid_by_row: dict[int, str] = {}
+        for r in sorted(rows, key=_tiebreak):
+            _, _, juris, base = _parts(r)
+            cid = base
+            if base_counts[base] > 1:
+                cid = f"{base}-{_slug(juris)}"
+                if qual_counts[cid] > 1:
+                    cid = f"{cid}-{ordinals[id(r)] + 1}"
+            if cid in minted:
+                n = 2
+                while f"{cid}-x{n}" in minted:
+                    n += 1
+                cid = f"{cid}-x{n}"
+            minted.add(cid)
+            cid_by_row[id(r)] = cid
+
+        for r in rows:
+            title, category, juris, _ = _parts(r)
+            cid = cid_by_row[id(r)]
+
             parts = [str(title)]
             if r.get("current_value"):
                 parts.append(f"value {r['current_value']}")
@@ -204,6 +282,12 @@ def _law_records(requirements: dict) -> list[dict]:
                 "ref": f"{state} · {juris}: {title}",
                 "summary": " — ".join(parts) + ".",
                 "when": str(r.get("effective_date") or "current"),
+                # Structured fields the viewer groups + joins on, so the client
+                # never has to parse `ref` apart.
+                "state": str(state),
+                "title": str(title),
+                "category": category,
+                "jurisdiction": str(juris),
             })
     return recs
 
@@ -295,6 +379,60 @@ def build_corpus(grounding: dict) -> dict:
     return {"sources": sources, "index": index, "notes": notes}
 
 
+# Law cids minted under the old positional scheme: `law:<state>-<category>-<n>`.
+_LEGACY_LAW_CID = re.compile(r"^(law:.+)-(\d+)$")
+
+
+def lookup_record(cid, index: dict) -> dict | None:
+    """Resolve a STORED citation to its corpus record, or None.
+
+    Read paths only (`resolve_citations`, coverage) — never the citation gate.
+    A cid the model emits must exact-match the index or be dropped; routing new
+    citations through the legacy recovery below would launder an invented id
+    into a real requirement.
+
+    Citations written before law cids became content-derived carry an ordinal
+    (`law:ca-meal-rest-breaks-0`) that no longer names anything, but the
+    state+category it encodes still does. Recovery compares the legacy prefix
+    against each record's *structured* state/category fields — exact slug
+    equality, so category `paid-leave` never bleeds into `paid-leave-and-sick-time`,
+    and a current-scheme cid whose title slug happens to end in digits
+    (`law:ca-osha-recordkeeping-osha-form-300`) parses to a prefix matching no
+    state+category pair and correctly stays unresolved.
+
+    When two or more current requirements share a state+category (a state AND a
+    city minimum wage), the lost ordinal was the only thing that told them apart
+    — refuse to guess; the viewer flags the citation as out of scope. Pure."""
+    index = index or {}
+    if not isinstance(cid, str):
+        return None
+    rec = index.get(cid)
+    if rec is not None:
+        return rec
+    m = _LEGACY_LAW_CID.match(cid)
+    if not m:
+        return None
+    prefix = m.group(1)
+    matches = [
+        r for c, r in index.items()
+        if c.startswith("law:") and _legacy_prefix(r) == prefix
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _legacy_prefix(rec: dict) -> str:
+    """The `law:<state>-<category>` stem the old positional scheme built cids on."""
+    title = rec.get("title") or "requirement"
+    return f"law:{_slug(rec.get('state'))}-{_slug(rec.get('category') or title)}"
+
+
+def canonical_cid(cid, index: dict) -> str:
+    """The canonical cid a stored citation resolves to (itself, unless it's a
+    legacy positional law cid). Pure."""
+    rec = lookup_record(cid, index)
+    return (rec or {}).get("cid") or cid
+
+
 # --------------------------------------------------------------------------- #
 # Grounded AI turn — HR policy drafter, grounded in the corpus.
 # --------------------------------------------------------------------------- #
@@ -357,7 +495,13 @@ def _coerce_drafts(raw, index: dict) -> tuple[list[dict], list[str]]:
     Filters citations per-draft directly (same rule as the shared
     ``validate_citations`` gate — keep only ids present in ``index``) rather than
     round-tripping through an evidence_map, so the citation→draft mapping doesn't
-    depend on that function's row ordering."""
+    depend on that function's row ordering.
+
+    Membership is EXACT — deliberately not ``lookup_record``. That helper's
+    legacy-cid recovery exists for citations already stored in the database; run
+    a model-emitted id through it and an invented `law:ca-overtime-2025` would
+    resolve to the one real overtime requirement instead of being dropped, which
+    is precisely the hallucination this gate exists to stop."""
     if not isinstance(raw, list):
         return [], []
     drafts: list[dict] = []
@@ -374,8 +518,13 @@ def _coerce_drafts(raw, index: dict) -> tuple[list[dict], list[str]]:
             continue
         raw_ids = d.get("cited_ids")
         ids = [c for c in raw_ids if isinstance(c, str)] if isinstance(raw_ids, list) else []
-        kept = [c for c in ids if c in index]
-        dropped.extend(c for c in ids if c not in index)
+        kept: list[str] = []
+        for c in ids:
+            if c not in index:
+                dropped.append(c)
+                continue
+            if c not in kept:
+                kept.append(c)
         section_key = d.get("section_key")
         section_key = _slug(section_key)[:120] if section_key else _slug(title)[:120]
         drafts.append({
@@ -456,29 +605,38 @@ def resolve_citations(cids, index: dict) -> list[dict]:
     """Map each stored citation cid to its human-readable corpus record. Unknown
     cids (a requirement that aged out of scope since the draft was proposed)
     resolve to a minimal, clearly-flagged record so the viewer never silently
-    hides a citation. Pure."""
+    hides a citation. A legacy positional cid resolves to its record and is
+    displayed under the canonical cid.
+
+    Deduped by RESOLVED cid: two legacy cids under one state+category collapse
+    onto the same record, and the viewer keys its citation cards on `cid`. Pure."""
     index = index or {}
     out: list[dict] = []
+    seen: set[str] = set()
     for cid in _coerce_cid_list(cids):
-        rec = index.get(cid)
+        rec = lookup_record(cid, index)
         if rec:
-            out.append({
-                "cid": cid,
+            entry = {
+                "cid": rec.get("cid") or cid,
                 "ref": rec.get("ref") or cid,
                 "summary": rec.get("summary") or "",
                 "source": rec.get("source") or "unknown",
                 "source_label": rec.get("source_label") or "",
                 "when": rec.get("when") or "",
-            })
+            }
         else:
-            out.append({
+            entry = {
                 "cid": cid,
                 "ref": cid,
                 "summary": "",
                 "source": "unknown",
                 "source_label": "No longer in scope",
                 "when": "",
-            })
+            }
+        if entry["cid"] in seen:
+            continue
+        seen.add(entry["cid"])
+        out.append(entry)
     return out
 
 
@@ -514,23 +672,35 @@ def assemble_handbook(session: dict, drafts: list[dict], corpus: dict) -> dict:
     policies = [_assemble_draft(d, index) for d in drafts if d.get("kind") == "policy"]
 
     # Deterministic coverage: all applicable jurisdiction requirements in the
-    # corpus vs the set of cids cited by any draft in this session.
-    cited: set[str] = set()
+    # corpus vs the set of cids cited by any draft in this session. Citations
+    # stored under the legacy positional scheme collapse onto their canonical
+    # cid, so an old draft still counts toward coverage exactly once.
+    cited_by: dict[str, list[str]] = {}
     for d in drafts:
         for c in _coerce_cid_list(d.get("citations")):
-            cited.add(c)
+            canon = canonical_cid(c, index)
+            ids = cited_by.setdefault(canon, [])
+            draft_id = str(d.get("id"))
+            if draft_id not in ids:
+                ids.append(draft_id)
 
     law_records = [(cid, rec) for cid, rec in index.items()
                    if isinstance(cid, str) and cid.startswith("law:")]
     covered, uncovered = [], []
     for cid, rec in law_records:
+        citing = cited_by.get(cid) or []
         entry = {
             "cid": cid,
             "ref": rec.get("ref") or cid,
             "summary": rec.get("summary") or "",
             "source_label": rec.get("source_label") or "",
+            "state": rec.get("state") or "",
+            "title": rec.get("title") or "",
+            "category": rec.get("category"),
+            "jurisdiction": rec.get("jurisdiction") or "",
+            "cited_by": citing,
         }
-        (covered if cid in cited else uncovered).append(entry)
+        (covered if citing else uncovered).append(entry)
 
     return {
         "sections": sections,

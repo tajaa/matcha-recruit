@@ -124,7 +124,20 @@ export type AssembledSection = {
   grounded: boolean
 }
 
-export type CoverageEntry = { cid: string; ref: string; summary: string; source_label: string }
+// One applicable jurisdiction requirement, plus whether any draft in this
+// session cites it. `cited_by` holds the ids of the drafts that do — empty for
+// an uncovered requirement.
+export type CoverageEntry = {
+  cid: string
+  ref: string
+  summary: string
+  source_label: string
+  state: string
+  title: string
+  category: string | null
+  jurisdiction: string
+  cited_by: string[]
+}
 
 export type AssembledHandbook = {
   sections: AssembledSection[]

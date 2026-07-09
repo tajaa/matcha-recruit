@@ -44,6 +44,194 @@ def test_build_corpus_flat_index_and_counts():
     assert any(c.startswith("playbook:") for c in idx)
 
 
+# --- law cids: content-derived, stable across a jurisdiction-data reorder ----
+
+def _ca(category, title, juris="California", **extra):
+    return {"category": category, "title": title, "jurisdiction_name": juris, **extra}
+
+
+def test_law_cids_are_content_derived_and_stable_under_reordering():
+    """The bug this guards: `_fetch_state_requirements` orders by effective /
+    updated date, so a jurisdiction data refresh reorders the rows. Positional
+    cids re-pointed every stored citation; content-derived cids don't move."""
+    reqs = [
+        _ca("meal_rest_breaks", "Meal and rest breaks"),
+        _ca("paid_sick_leave", "Paid sick leave"),
+        _ca("wage_statements", "Wage statement detail"),
+    ]
+    before = {r["cid"] for r in hp._law_records({"CA": reqs})}
+    after = {r["cid"] for r in hp._law_records({"CA": list(reversed(reqs))})}
+
+    assert before == after == {
+        "law:ca-meal-rest-breaks-meal-and-rest-breaks",
+        "law:ca-paid-sick-leave-paid-sick-leave",
+        "law:ca-wage-statements-wage-statement-detail",
+    }
+
+
+def test_law_cid_collisions_qualify_every_member_and_survive_reorder():
+    """A state and a city minimum wage share state+category+title. Handing the
+    first arrival the bare cid would re-point it on a reorder — every colliding
+    member must be qualified by jurisdiction."""
+    reqs = [
+        _ca("minimum_wage", "Minimum wage", "California", current_value="$16.00"),
+        _ca("minimum_wage", "Minimum wage", "San Francisco", current_value="$18.67"),
+    ]
+    fwd = {r["jurisdiction"]: r["cid"] for r in hp._law_records({"CA": reqs})}
+    rev = {r["jurisdiction"]: r["cid"] for r in hp._law_records({"CA": list(reversed(reqs))})}
+
+    assert fwd == rev, "a reorder must not swap which requirement owns which cid"
+    assert fwd == {
+        "California": "law:ca-minimum-wage-minimum-wage-california",
+        "San Francisco": "law:ca-minimum-wage-minimum-wage-san-francisco",
+    }
+
+
+def test_law_cid_identical_rows_get_content_sorted_ordinals():
+    """Rows indistinguishable on state/category/title/jurisdiction fall back to
+    an ordinal — assigned over a sorted content key, not fetch order."""
+    reqs = [
+        _ca("minimum_wage", "Minimum wage", "San Francisco", current_value="$18.67"),
+        _ca("minimum_wage", "Minimum wage", "San Francisco", current_value="$17.00"),
+    ]
+    fwd = {r["summary"]: r["cid"] for r in hp._law_records({"CA": reqs})}
+    rev = {r["summary"]: r["cid"] for r in hp._law_records({"CA": list(reversed(reqs))})}
+    assert fwd == rev
+    assert len(set(fwd.values())) == 2, "collisions must not collapse distinct requirements"
+    assert all(c.startswith("law:ca-minimum-wage-minimum-wage-san-francisco-") for c in fwd.values())
+
+
+def test_law_cid_tiebreak_uses_every_field_not_a_subset():
+    """Rows tying on the obvious content fields but differing elsewhere must NOT
+    fall back to fetch order for their ordinal."""
+    reqs = [
+        _ca("minimum_wage", "Minimum wage", "San Francisco", source_url="https://a.example.com"),
+        _ca("minimum_wage", "Minimum wage", "San Francisco", source_url="https://b.example.com"),
+    ]
+    fwd = {r["cid"] for r in hp._law_records({"CA": reqs})}
+    rev = {r["cid"] for r in hp._law_records({"CA": list(reversed(reqs))})}
+    by_url_fwd = {d["source_url"]: r["cid"] for d, r in zip(reqs, hp._law_records({"CA": reqs}))}
+    rev_rows = list(reversed(reqs))
+    by_url_rev = {d["source_url"]: r["cid"] for d, r in zip(rev_rows, hp._law_records({"CA": rev_rows}))}
+    assert fwd == rev
+    assert by_url_fwd == by_url_rev, "a reorder must not swap which row owns which ordinal"
+
+
+def test_law_cid_cross_group_collision_keeps_both_requirements():
+    """A jurisdiction-qualified cid from one collision group can equal a bare cid
+    from another. build_corpus keys the index by cid — neither may be dropped."""
+    reqs = [
+        _ca("minimum_wage", "Minimum wage", "California"),
+        _ca("minimum_wage", "Minimum wage", "San Francisco"),
+        _ca("minimum_wage", "Minimum wage San Francisco", "California"),
+    ]
+    recs = hp._law_records({"CA": reqs})
+    cids = [r["cid"] for r in recs]
+    assert len(set(cids)) == 3, f"cid collision dropped a requirement: {cids}"
+
+    idx = hp.build_corpus({"requirements": {"CA": reqs}})["index"]
+    assert len([c for c in idx if c.startswith("law:")]) == 3
+
+
+def test_law_records_carry_structured_fields():
+    r = hp._law_records(_grounding()["requirements"])[0]
+    assert r["state"] == "CA"
+    assert r["title"] == "Meal and rest breaks"
+    assert r["category"] == "meal_rest_breaks"
+    assert r["jurisdiction"] == "California"
+
+
+# --- legacy positional citations: prefix recovery ---------------------------
+
+def test_legacy_cid_resolves_by_state_category_prefix():
+    """A citation stored as `law:ca-meal-rest-breaks-0` names a category that now
+    has exactly one requirement — honor it, whatever ordinal it was written as."""
+    corpus = hp.build_corpus(_grounding())
+    idx = corpus["index"]
+    canon = "law:ca-meal-rest-breaks-meal-and-rest-breaks"
+
+    for legacy in ("law:ca-meal-rest-breaks-0", "law:ca-meal-rest-breaks-7"):
+        resolved = hp.resolve_citations([legacy], idx)[0]
+        assert resolved["source"] == "law"
+        assert resolved["cid"] == canon, "displayed under the canonical cid"
+        assert hp.canonical_cid(legacy, idx) == canon
+
+
+def test_legacy_cid_refuses_to_guess_when_prefix_is_ambiguous():
+    """Two minimum wages under one category: the ordinal was the only thing that
+    distinguished them, and it's exactly what moved. Flag it, don't guess."""
+    g = _grounding()
+    g["requirements"]["CA"] = [
+        _ca("minimum_wage", "Minimum wage", "California"),
+        _ca("minimum_wage", "Minimum wage", "San Francisco"),
+    ]
+    idx = hp.build_corpus(g)["index"]
+    assert hp.lookup_record("law:ca-minimum-wage-0", idx) is None
+    resolved = hp.resolve_citations(["law:ca-minimum-wage-0"], idx)[0]
+    assert resolved["source"] == "unknown"
+    assert resolved["source_label"] == "No longer in scope"
+
+
+def test_lookup_record_rejects_non_law_and_garbage():
+    idx = hp.build_corpus(_grounding())["index"]
+    assert hp.lookup_record("handbook:ghost-1", idx) is None  # ordinal-looking, not law:
+    assert hp.lookup_record("law:zz-nothing-0", idx) is None
+    assert hp.lookup_record(None, idx) is None
+    assert hp.canonical_cid("law:zz-nothing-0", idx) == "law:zz-nothing-0"
+
+
+def test_legacy_recovery_does_not_bleed_across_category_boundaries():
+    """`paid-leave` is a string prefix of `paid-leave-and-sick-time`. Recovery
+    compares the structured state+category, so the old citation stays unresolved
+    rather than silently naming a different category's requirement."""
+    g = _grounding()
+    g["requirements"]["CA"] = [_ca("paid_leave_and_sick_time", "Combined leave")]
+    idx = hp.build_corpus(g)["index"]
+    assert hp.lookup_record("law:ca-paid-leave-0", idx) is None
+    # the requirement's OWN legacy prefix still resolves
+    assert hp.canonical_cid("law:ca-paid-leave-and-sick-time-0", idx) \
+        == "law:ca-paid-leave-and-sick-time-combined-leave"
+
+
+def test_legacy_recovery_ignores_current_cids_whose_title_ends_in_digits():
+    """`law:ca-osha-recordkeeping-osha-form-300` is a CURRENT cid, not a legacy
+    positional one. If it ages out of scope it must be flagged, never re-pointed
+    at the sibling Form 300A requirement."""
+    g = _grounding()
+    g["requirements"]["CA"] = [_ca("osha_recordkeeping", "OSHA Form 300A")]
+    idx = hp.build_corpus(g)["index"]
+    aged_out = "law:ca-osha-recordkeeping-osha-form-300"
+    assert hp.lookup_record(aged_out, idx) is None
+    resolved = hp.resolve_citations([aged_out], idx)[0]
+    assert resolved["source"] == "unknown"
+    assert resolved["source_label"] == "No longer in scope"
+
+
+def test_coerce_drafts_gate_is_exact_match_and_never_launders_invented_cids():
+    """The citation gate must not run model output through legacy recovery: an
+    invented `law:ca-<category>-<n>` would otherwise resolve to the one real
+    requirement in that category instead of being dropped."""
+    g = _grounding()
+    g["requirements"]["CA"] = [_ca("overtime", "Overtime pay")]
+    idx = hp.build_corpus(g)["index"]
+    canon = "law:ca-overtime-overtime-pay"
+    raw = [{"kind": "handbook_section", "title": "Overtime", "content": "body",
+            "cited_ids": [canon, canon, "law:ca-overtime-2025", "law:ghost-99"]}]
+    drafts, dropped = hp._coerce_drafts(raw, idx)
+    assert dropped == ["law:ca-overtime-2025", "law:ghost-99"]
+    assert drafts[0]["cited_ids"] == [canon]  # deduped, nothing laundered
+
+
+def test_resolve_citations_dedupes_by_resolved_cid():
+    """Two legacy cids under one state+category collapse onto the same record —
+    the viewer keys its citation cards on cid, so don't emit it twice."""
+    idx = hp.build_corpus(_grounding())["index"]
+    canon = "law:ca-meal-rest-breaks-meal-and-rest-breaks"
+    resolved = hp.resolve_citations(
+        ["law:ca-meal-rest-breaks-3", "law:ca-meal-rest-breaks-7", canon], idx)
+    assert [c["cid"] for c in resolved] == [canon]
+
+
 def test_build_corpus_notes_when_no_scopes():
     g = _grounding()
     g["scopes"] = []
@@ -148,9 +336,13 @@ def _drafts():
 
 def _corpus():
     idx = dict(_index())
+    idx["law:ca-meal-0"] = {**idx["law:ca-meal-0"], "state": "CA", "title": "Meal breaks",
+                            "category": "meal_rest_breaks", "jurisdiction": "California"}
     # a second law record nobody cites → an uncovered / candidate-gap requirement
     idx["law:ca-osha-1"] = {"ref": "CA OSHA log", "summary": "",
-                            "source": "law", "source_label": "Applicable jurisdiction requirements"}
+                            "source": "law", "source_label": "Applicable jurisdiction requirements",
+                            "state": "CA", "title": "OSHA log", "category": "osha",
+                            "jurisdiction": "California"}
     return {"index": idx}
 
 
@@ -180,6 +372,27 @@ def test_assemble_handbook_coverage_covered_vs_uncovered():
     assert [c["cid"] for c in cov["covered"]] == ["law:ca-meal-0"]
     assert [c["cid"] for c in cov["uncovered"]] == ["law:ca-osha-1"]
     assert asm["summary"]["covered"] == 1 and asm["summary"]["uncovered"] == 1
+    # entries carry the fields the viewer groups + joins on, and who cites them
+    assert cov["covered"][0]["state"] == "CA"
+    assert cov["covered"][0]["title"] == "Meal breaks"
+    assert cov["covered"][0]["cited_by"] == ["d1"]
+    assert cov["uncovered"][0]["cited_by"] == []
+
+
+def test_assemble_handbook_coverage_counts_legacy_citation_once():
+    """A draft written before the cid change cites the positional id. It must
+    still count as covering the requirement — once, under the canonical cid."""
+    corpus = hp.build_corpus(_grounding())
+    canon = "law:ca-meal-rest-breaks-meal-and-rest-breaks"
+    drafts = [{"id": "old", "kind": "handbook_section", "title": "Meal & Rest",
+               "section_key": "meal_rest", "content": "body", "status": "pending",
+               "promoted_ref": None, "citations": ["law:ca-meal-rest-breaks-0", canon]}]
+
+    asm = hp.assemble_handbook({}, drafts, corpus)
+    assert asm["summary"]["law_records"] == 1
+    assert asm["summary"]["covered"] == 1 and asm["summary"]["uncovered"] == 0
+    assert [c["cid"] for c in asm["coverage"]["covered"]] == [canon]
+    assert asm["coverage"]["covered"][0]["cited_by"] == ["old"]  # not ["old", "old"]
 
 
 def test_assemble_handbook_tolerates_empty():
