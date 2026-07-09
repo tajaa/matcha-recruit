@@ -13,8 +13,8 @@ struct PaywallSheet: View {
     /// Contextual headline per locked feature (falls back to the generic one).
     private var headline: String {
         switch appState.paywallFeature {
-        case "projects_solo": return "Projects need Lite"
-        case "projects_collab": return "Collab projects need Pro"
+        case "projects_solo": return "Workspaces need Lite"
+        case "projects_collab": return "Collab workspaces need Pro"
         case "journals_full": return "This journal type needs Lite"
         case "email_ai": return "Email AI drafting needs Lite"
         case "go_live": return "Going live needs Pro"
@@ -44,7 +44,7 @@ struct PaywallSheet: View {
         plan: .lite,
         price: "$9/mo",
         features: [
-            "Solo projects — docs, presentations, blogs",
+            "Solo workspaces — docs, presentations, blogs",
             "All journal types — novel, screenplay, blog",
             "Email AI reply drafting",
             "4× the free AI quota",
@@ -57,7 +57,7 @@ struct PaywallSheet: View {
         features: [
             "Everything in Lite",
             "Pro AI model — deeper reasoning",
-            "Collab projects — kanban, tickets, teams",
+            "Collab workspaces — kanban, tickets, teams",
             "Go Live video & audio broadcasts",
             "Create paid channels & job postings",
             "20× the free AI quota",

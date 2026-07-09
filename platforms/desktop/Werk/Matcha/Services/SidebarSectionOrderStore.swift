@@ -29,7 +29,7 @@ final class SidebarSectionOrderStore {
         var iconName: String {
             switch self {
             case .channels: return "number"
-            case .projects: return "folder"
+            case .projects: return "square.grid.2x2"
             case .journals: return "book.closed"
             case .productivity: return "checklist"
             case .threads:  return "bubble.left.and.bubble.right"
@@ -41,7 +41,8 @@ final class SidebarSectionOrderStore {
         var displayName: String {
             switch self {
             case .channels: return "Channels"
-            case .projects: return "Projects"
+            // `.projects` rawValue stays "projects" — it's the persistence key.
+            case .projects: return "Workspaces"
             case .journals: return "Journals"
             case .productivity: return "Productivity"
             case .threads:  return "Threads"

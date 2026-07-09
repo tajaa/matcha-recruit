@@ -119,7 +119,7 @@ struct SplitSecondaryPane: View {
 
     private var label: String {
         switch target {
-        case .project: return "Project"
+        case .project: return "Workspace"
         case .channel: return "Channel"
         case .thread: return "Thread"
         case .journal: return "Journal"
@@ -206,7 +206,7 @@ struct BottomSplitPane: View {
             }
         }
         if !switcher.projects.isEmpty {
-            Section("Projects") {
+            Section("Workspaces") {
                 ForEach(switcher.projects) { p in
                     Button(p.title) { appState.bottomSplitTarget = .project(p.id) }
                 }
@@ -264,7 +264,7 @@ final class SplitSwitcherModel {
         case .channel(let id):
             return channels.first { $0.id == id }.map { "#\($0.name)" } ?? "Channel"
         case .project(let id):
-            return projects.first { $0.id == id }?.title ?? "Project"
+            return projects.first { $0.id == id }?.title ?? "Workspace"
         case .journal(let id):
             return journals.first { $0.id == id }?.title ?? "Journal"
         case .file(let ref):
@@ -411,7 +411,7 @@ struct SplitFinderPalette: View {
         var out: [Entry] = []
         out += model.threads.map { Entry(id: "t:\($0.id)", target: .thread($0.id), title: $0.displayName, icon: "bubble.left.and.bubble.right", group: "Threads") }
         out += model.channels.map { Entry(id: "c:\($0.id)", target: .channel($0.id), title: "#\($0.name)", icon: "number", group: "Channels") }
-        out += model.projects.map { Entry(id: "p:\($0.id)", target: .project($0.id), title: $0.title, icon: "folder", group: "Projects") }
+        out += model.projects.map { Entry(id: "p:\($0.id)", target: .project($0.id), title: $0.title, icon: "square.grid.2x2", group: "Workspaces") }
         out += model.journals.map { Entry(id: "j:\($0.id)", target: .journal($0.id), title: $0.title, icon: "book.closed", group: "Journals") }
         out += fileEntries.map { hit in
             Entry(id: "f:\(hit.file.id)", target: .file(MWFileRef(file: hit.file)),
@@ -429,7 +429,9 @@ struct SplitFinderPalette: View {
         }
     }
 
-    private let groupOrder = ["Threads", "Channels", "Projects", "Journals", "Files"]
+    // Must match the `group` strings in `allEntries` — an unlisted group falls
+    // out of the palette's section ordering.
+    private let groupOrder = ["Threads", "Channels", "Workspaces", "Journals", "Files"]
 
     @ViewBuilder
     private var results: some View {

@@ -19,7 +19,9 @@ struct WorkTab: Codable, Hashable, Identifiable {
     var icon: String {
         switch kind {
         case .home: return "house"
-        case .project: return "folder"
+        // Workspaces are panes of work (chat, board, files), not a place files
+        // sit — a folder glyph reads as the Files tab inside one.
+        case .project: return "square.grid.2x2"
         case .channel: return "number"
         case .thread: return "bubble.left"
         case .journal: return "book.closed"
@@ -609,7 +611,7 @@ class AppState {
                     let pid = metaString("project_id") ?? ""
                     if !pid.isEmpty, pid != self.selectedProjectId {
                         let projTitle = metaString("project_title")
-                            ?? (n?["title"] as? String ?? "Project")
+                            ?? (n?["title"] as? String ?? "Workspace")
                         let msg = (n?["body"] as? String) ?? (n?["title"] as? String ?? "Updated")
                         let icon: String
                         switch type {

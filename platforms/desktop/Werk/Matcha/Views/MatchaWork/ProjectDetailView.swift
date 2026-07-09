@@ -117,7 +117,7 @@ struct ProjectDetailView: View {
             // An aux window must not write the shared nav/tab context.
             if !isEmbedded {
                 appState.setActiveContext(WorkTab(kind: .project, entityId: projectId,
-                                                  title: viewModel.project?.title ?? "Project"))
+                                                  title: viewModel.project?.title ?? "Workspace"))
             }
         }
         // Same project already open when the notification fires: projectId
@@ -161,13 +161,13 @@ struct ProjectDetailView: View {
                             }
                         }
                     } label: {
-                        Image(systemName: project.icon ?? "folder")
+                        Image(systemName: project.icon ?? "square.grid.2x2")
                             .font(.system(size: 13))
                             .foregroundColor(appState.themeAccent)
                     }
                     .menuStyle(.borderlessButton)
                     .fixedSize()
-                    .help("Change project icon")
+                    .help("Change workspace icon")
                 }
             }
             ToolbarItem(placement: .navigation) {
@@ -282,7 +282,7 @@ struct ProjectDetailView: View {
                     } label: {
                         Image(systemName: "questionmark.circle").font(.system(size: 13))
                     }
-                    .help("Collab project guide")
+                    .help("Collab workspace guide")
                 }
 
                 if viewModel.project?.projectType == "collab" {
@@ -302,9 +302,9 @@ struct ProjectDetailView: View {
                         Button { showCompleteConfirm = true } label: {
                             Image(systemName: "checkmark.circle").font(.system(size: 13))
                         }
-                        .help("Mark project complete")
+                        .help("Mark workspace complete")
                         .confirmationDialog(
-                            "Mark project complete?",
+                            "Mark workspace complete?",
                             isPresented: $showCompleteConfirm,
                             titleVisibility: .visible
                         ) {
@@ -313,7 +313,7 @@ struct ProjectDetailView: View {
                             }
                             Button("Cancel", role: .cancel) {}
                         } message: {
-                            Text("Owner only. Project will move to the Completed section.")
+                            Text("Owner only. Workspace will move to the Completed section.")
                         }
                     }
                 }
@@ -325,7 +325,7 @@ struct ProjectDetailView: View {
                 } label: {
                     Image(systemName: "square.and.arrow.up").font(.system(size: 13))
                 }
-                .help("Export project")
+                .help("Export workspace")
 
                 Menu {
                     Button("Archive") {
@@ -343,7 +343,7 @@ struct ProjectDetailView: View {
                         guard let p = viewModel.project else { return }
                         let alert = NSAlert()
                         alert.messageText = "Delete \"\(p.title)\"?"
-                        alert.informativeText = "Permanently deletes the project, its sections, and all associated threads and messages. Cannot be undone."
+                        alert.informativeText = "Permanently deletes the workspace, its sections, and all associated threads and messages. Cannot be undone."
                         alert.alertStyle = .critical
                         alert.addButton(withTitle: "Delete Permanently")
                         alert.addButton(withTitle: "Cancel")
@@ -361,11 +361,11 @@ struct ProjectDetailView: View {
                 } label: {
                     Image(systemName: "ellipsis.circle").font(.system(size: 13))
                 }
-                .help("Archive or delete project")
+                .help("Archive or delete workspace")
             }
         }
-        .alert("Rename project", isPresented: $showRenameAlert) {
-            TextField("Project title", text: $renameDraft)
+        .alert("Rename workspace", isPresented: $showRenameAlert) {
+            TextField("Workspace title", text: $renameDraft)
             Button("Save") {
                 let trimmed = renameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !trimmed.isEmpty else { return }
@@ -851,7 +851,7 @@ struct ProjectDetailView: View {
                 Image(systemName: "exclamationmark.triangle")
                     .font(.system(size: 28))
                     .foregroundColor(.red)
-                Text("Couldn't open project")
+                Text("Couldn't open workspace")
                     .font(.system(size: 13, weight: .medium))
                     .foregroundColor(appState.themeText)
                 Text(err)
@@ -1020,7 +1020,7 @@ struct ProjectDetailView: View {
                 ZStack {
                     Color.appBackground.ignoresSafeArea()
                     VStack(spacing: 12) {
-                        Image(systemName: "folder").font(.system(size: 36)).foregroundColor(.secondary)
+                        Image(systemName: "square.grid.2x2").font(.system(size: 36)).foregroundColor(.secondary)
                         Text("Select a section or chat")
                             .font(.system(size: 13))
                             .foregroundColor(.secondary)
@@ -1163,7 +1163,7 @@ private struct CollabThreadsView: View {
                 Spacer()
             } else if threads.isEmpty {
                 Spacer()
-                Text("No threads yet — start one to chat with AI about this project.")
+                Text("No threads yet — start one to chat with AI about this workspace.")
                     .font(.system(size: 11)).foregroundColor(.secondary)
                     .multilineTextAlignment(.center).padding(.horizontal, 24)
                 Spacer()

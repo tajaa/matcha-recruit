@@ -146,10 +146,10 @@ struct CollabProjectWizardView: View {
     private var createForm: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                Text("name the project")
+                Text("name the workspace")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(.white.opacity(0.9))
-                Text("collaborators see this in the sidebar and the project header. you can rename it anytime.")
+                Text("collaborators see this in the sidebar and the workspace header. you can rename it anytime.")
                     .font(.system(size: 11))
                     .foregroundColor(.white.opacity(0.45))
 
@@ -170,7 +170,7 @@ struct CollabProjectWizardView: View {
                     Text("short description (optional)")
                         .font(.system(size: 10))
                         .foregroundColor(.white.opacity(0.4))
-                    TextField("", text: $description, prompt: Text("what this project is about").foregroundColor(.white.opacity(0.25)), axis: .vertical)
+                    TextField("", text: $description, prompt: Text("what this workspace is about").foregroundColor(.white.opacity(0.25)), axis: .vertical)
                         .textFieldStyle(.plain)
                         .font(.system(size: 13))
                         .foregroundColor(.white.opacity(0.9))
@@ -208,7 +208,7 @@ struct CollabProjectWizardView: View {
                             configRow(label: "your role", value: role)
                         }
                         Divider().opacity(0.2)
-                        Text("editable from the project view")
+                        Text("editable from the workspace view")
                             .font(.system(size: 10))
                             .foregroundColor(.white.opacity(0.4))
                         Text("• click the title in the toolbar to rename\n• overview tab → invite to add people\n• kanban / files / sections live in the segmented picker at top")
@@ -261,7 +261,7 @@ struct CollabProjectWizardView: View {
         } else {
             VStack {
                 Spacer()
-                Text("no project loaded")
+                Text("no workspace loaded")
                     .font(.system(size: 11))
                     .foregroundColor(.white.opacity(0.45))
                 Spacer()
@@ -374,7 +374,7 @@ struct CollabProjectWizardView: View {
                     if creating {
                         Text("creating…")
                     } else {
-                        Text("create project")
+                        Text("create workspace")
                     }
                 }
                 .buttonStyle(.borderedProminent)
@@ -482,7 +482,7 @@ private struct CollabWizardInvitePicker: View {
                     Text(query.isEmpty ? "type to search workspace people" : "no matching users")
                         .font(.system(size: 11))
                         .foregroundColor(.secondary)
-                    Text("you can also skip this step and invite from the project overview later.")
+                    Text("you can also skip this step and invite from the workspace overview later.")
                         .font(.system(size: 10))
                         .foregroundColor(.white.opacity(0.35))
                         .multilineTextAlignment(.center)

@@ -3,7 +3,7 @@ import AppKit
 
 // MARK: - Projects hub (full-pane dashboard)
 
-/// Full-pane "Projects" home — opened by clicking the sidebar Projects nav row.
+/// Full-pane "Workspaces" home — opened by clicking the sidebar Workspaces nav row.
 /// No persistent rail: browsing (grid, search, sort, multi-select bulk actions)
 /// and working (a single open project's kanban/detail) are two distinct panes —
 /// opening a project replaces the grid entirely; "‹ Projects" returns to it.
@@ -33,7 +33,7 @@ struct ProjectsLibraryView: View {
 
     private let columns = [GridItem(.adaptive(minimum: 200, maximum: 280), spacing: 14)]
     private let types: [(type: String, label: String, icon: String)] = [
-        ("general", "General", "folder"),
+        ("general", "General", "square.grid.2x2"),
         ("presentation", "Presentation", "rectangle.on.rectangle.angled"),
         ("recruiting", "Recruiting", "person.2"),
         ("collab", "Collab", "person.3.sequence"),
@@ -70,7 +70,7 @@ struct ProjectsLibraryView: View {
             Button("Delete Permanently", role: .destructive) { Task { await bulkDelete() } }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Permanently deletes each project, its sections, and all associated threads and messages. Cannot be undone.")
+            Text("Permanently deletes each workspace, its sections, and all associated threads and messages. Cannot be undone.")
         }
         .sheet(isPresented: $showNewBlog) {
             NewBlogSheet { proj in
@@ -86,7 +86,7 @@ struct ProjectsLibraryView: View {
             Button { appState.selectedProjectId = nil } label: {
                 HStack(spacing: 4) {
                     Image(systemName: "chevron.left").font(.system(size: 11, weight: .semibold))
-                    Text("Projects").font(.system(size: 12, weight: .semibold))
+                    Text("Workspaces").font(.system(size: 12, weight: .semibold))
                 }
                 .foregroundColor(appState.themeTextSecondary)
             }
@@ -98,7 +98,7 @@ struct ProjectsLibraryView: View {
 
     private var typeMenu: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("New Project").font(.system(size: 12, weight: .semibold))
+            Text("New Workspace").font(.system(size: 12, weight: .semibold))
                 .foregroundColor(appState.themeTextSecondary).padding(.bottom, 4)
             ForEach(types, id: \.type) { t in
                 Button { showTypePicker = false; create(type: t.type) } label: {
@@ -133,8 +133,8 @@ struct ProjectsLibraryView: View {
         VStack(spacing: 12) {
             HStack(alignment: .center) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Projects").font(.system(size: 20, weight: .bold)).foregroundColor(appState.themeText)
-                    Text("Workspaces, presentations, and collab boards")
+                    Text("Workspaces").font(.system(size: 20, weight: .bold)).foregroundColor(appState.themeText)
+                    Text("Chat, boards, presentations, and files — one space per effort")
                         .font(.system(size: 12)).foregroundColor(appState.themeTextSecondary)
                 }
                 Spacer()
@@ -186,7 +186,7 @@ struct ProjectsLibraryView: View {
 
     private var newButton: some View {
         Button { showTypePicker = true } label: {
-            HStack(spacing: 5) { Image(systemName: "plus"); Text("New Project").font(.system(size: 12, weight: .semibold)) }
+            HStack(spacing: 5) { Image(systemName: "plus"); Text("New Workspace").font(.system(size: 12, weight: .semibold)) }
                 .padding(.horizontal, 12).padding(.vertical, 7)
                 .background(appState.themeAccent).foregroundColor(appState.themeOnAccent).cornerRadius(8)
         }
@@ -198,9 +198,9 @@ struct ProjectsLibraryView: View {
         if isLoading {
             Spacer(); ProgressView().tint(appState.themeTextSecondary); Spacer()
         } else if shown.isEmpty {
-            MWHubEmpty(icon: "folder",
-                       title: search.isEmpty && filter == .all ? "No projects yet" : "Nothing here",
-                       cta: "New Project") { showTypePicker = true }
+            MWHubEmpty(icon: "square.grid.2x2",
+                       title: search.isEmpty && filter == .all ? "No workspaces yet" : "Nothing here",
+                       cta: "New Workspace") { showTypePicker = true }
         } else {
             ScrollView {
                 LazyVGrid(columns: columns, spacing: 14) {
@@ -227,7 +227,7 @@ struct ProjectsLibraryView: View {
                             .font(.system(size: 15))
                             .foregroundColor(isSelected ? appState.themeAccent : appState.themeTextSecondary.opacity(0.5))
                     } else {
-                        Image(systemName: p.icon ?? "folder").font(.system(size: 16)).foregroundColor(appState.themeAccent)
+                        Image(systemName: p.icon ?? "square.grid.2x2").font(.system(size: 16)).foregroundColor(appState.themeAccent)
                     }
                     Spacer()
                     if p.isPinned ?? false {
@@ -323,7 +323,7 @@ struct ProjectsLibraryView: View {
             return
         }
         Task {
-            if let proj = try? await MatchaWorkService.shared.createProject(title: "New Project", projectType: type) {
+            if let proj = try? await MatchaWorkService.shared.createProject(title: "New Workspace", projectType: type) {
                 await MainActor.run { appState.projectsListGeneration &+= 1; open(proj) }
             }
         }

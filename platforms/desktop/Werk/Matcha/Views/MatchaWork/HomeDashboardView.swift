@@ -204,7 +204,7 @@ struct HomeDashboardView: View {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 14))
                     .foregroundColor(appState.themeTextSecondary)
-                TextField("Search projects, chats, threads, journals…", text: $search)
+                TextField("Search workspaces, chats, threads, journals…", text: $search)
                     .textFieldStyle(.plain)
                     .font(.system(size: 15))
                     .foregroundColor(appState.themeText)
@@ -271,7 +271,7 @@ struct HomeDashboardView: View {
 
     private func hitIcon(_ k: HitKind) -> String {
         switch k {
-        case .project: return "folder"
+        case .project: return "square.grid.2x2"
         case .thread:  return "bubble.left"
         case .journal: return "book.closed"
         case .channel: return "number"
@@ -334,9 +334,9 @@ struct HomeDashboardView: View {
 
     private var activeProjectsCard: some View {
         VStack(alignment: .leading, spacing: 8) {
-            cardHeader(title: "ACTIVE PROJECTS", trailing: activeProjects.isEmpty ? nil : "\(activeProjects.count)")
+            cardHeader(title: "ACTIVE WORKSPACES", trailing: activeProjects.isEmpty ? nil : "\(activeProjects.count)")
             if activeProjects.isEmpty {
-                Text("No active projects yet.")
+                Text("No active workspaces yet.")
                     .font(.system(size: 11))
                     .foregroundColor(appState.themeText.opacity(0.4))
                     .padding(.vertical, 4)
@@ -696,7 +696,7 @@ struct HomeDashboardView: View {
         case "recruiting": return "person.2"
         case "collab": return "rectangle.split.3x1"
         case "discipline": return "shield"
-        default: return "folder"
+        default: return "square.grid.2x2"
         }
     }
 

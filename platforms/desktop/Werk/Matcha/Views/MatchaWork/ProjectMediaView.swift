@@ -97,7 +97,7 @@ struct ProjectMediaView: View {
                     Text("Nothing in media yet")
                         .font(.system(size: 12))
                         .foregroundColor(.secondary)
-                    Text("Drop files or links in the project chat to see them here.")
+                    Text("Drop files or links in the workspace chat to see them here.")
                         .font(.system(size: 10))
                         .foregroundColor(.secondary.opacity(0.7))
                         .multilineTextAlignment(.center)

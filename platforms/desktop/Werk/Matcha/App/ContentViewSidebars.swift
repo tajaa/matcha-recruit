@@ -73,9 +73,9 @@ struct ArchiveView: View {
                         .frame(maxWidth: .infinity).padding(.top, 40)
                 } else {
                     if !projects.isEmpty {
-                        section("Projects", "folder") {
+                        section("Workspaces", "square.grid.2x2") {
                             ForEach(projects) { p in
-                                row(p.title, "folder",
+                                row(p.title, "square.grid.2x2",
                                     open: { open { appState.selectedProjectId = p.id } },
                                     restore: { restoreProject(p) })
                             }

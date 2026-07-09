@@ -90,7 +90,7 @@ struct ContentView: View {
             }
             Button("Not now", role: .cancel) { }
         } message: {
-            Text("Notifications are off. Turn them on in System Settings → Notifications → Matcha so you don't miss channel mentions, task assignments, and project updates.")
+            Text("Notifications are off. Turn them on in System Settings → Notifications → Matcha so you don't miss channel mentions, task assignments, and workspace updates.")
         }
         .sheet(isPresented: $showDiscoverChannels) {
             DiscoverChannelsSheet { joinedId in
@@ -445,9 +445,9 @@ struct ContentView: View {
 
     @ViewBuilder
     private var projectsSidebarSection: some View {
-        // No "+" here — project creation lives on the Projects home page
+        // No "+" here — workspace creation lives on the Workspaces home page
         // (ProjectsLibraryView), not as a sidebar shortcut.
-        sidebarNavRow(title: "Projects", icon: "folder",
+        sidebarNavRow(title: "Workspaces", icon: "square.grid.2x2",
                       isActive: appState.showProjectsHub,
                       lockedFeature: appState.canSoloProjects ? nil : "projects_solo",
                       onOpen: openProjectsHub)

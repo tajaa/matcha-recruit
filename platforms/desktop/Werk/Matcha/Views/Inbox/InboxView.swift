@@ -177,7 +177,7 @@ struct InboxThreadView: View {
             if let invite = pendingInvite {
                 HStack(spacing: 12) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("You've been invited to join this project")
+                        Text("You've been invited to join this workspace")
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundColor(appState.themeText)
                         Text("Invited by \(invite.invitedBy)")

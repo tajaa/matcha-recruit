@@ -307,7 +307,7 @@ struct ChannelsSidebarView: View {
                     appState.showInbox = false
                     appState.showSkills = false
                 } label: {
-                    Label("Open collab project", systemImage: "folder")
+                    Label("Open collab workspace", systemImage: "square.grid.2x2")
                 }
                 Divider()
             }
