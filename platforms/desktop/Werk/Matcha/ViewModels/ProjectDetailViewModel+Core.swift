@@ -125,6 +125,9 @@ extension ProjectDetailViewModel {
                         project = bundle.project
                         activeChatId = bundle.project.chats?.first?.id
                         tasks = bundle.tasks
+                        // The bundle always ships the week-scoped Done column.
+                        doneScope = "week"
+                        doneTotal = bundle.doneTotal ?? bundle.tasks.filter { $0.boardColumn == "done" }.count
                         var seeded: [String: [MWProjectFile]] = [:]
                         for t in bundle.tasks { if let atts = t.attachments { seeded[t.id] = atts } }
                         taskFiles = seeded

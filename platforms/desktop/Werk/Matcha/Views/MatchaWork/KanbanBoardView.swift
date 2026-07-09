@@ -332,6 +332,11 @@ struct KanbanBoardView: View {
             if viewModel.tasks.isEmpty {
                 await viewModel.loadTasks()
             }
+            // A cumulative Done column needs the cards the week-scoped load
+            // withheld. Weekly boards fetch them only if the user expands.
+            if !doneWeeklyReset && !isPipeline {
+                await viewModel.loadAllDoneTasks()
+            }
             // Auto-pick up merged commits → subtask check-offs (gated 10-min
             // cooldown; no-op if no repo connected). "Done = merged."
             await viewModel.autoScanCommitsIfStale()
@@ -349,6 +354,11 @@ struct KanbanBoardView: View {
         }
         .onChange(of: appState.pendingOpenTaskId) { _, _ in
             openPendingTaskIfPossible()
+        }
+        // Switching Done to cumulative mid-session: pull the earlier finishes
+        // the week-scoped load left on the server.
+        .onChange(of: doneWeeklyReset) { _, weekly in
+            if !weekly { Task { await viewModel.loadAllDoneTasks() } }
         }
         // Re-render once a minute so aging tints advance while the board sits
         // open. Cards carry closures (non-equatable), so the parent re-render
@@ -645,8 +655,12 @@ struct KanbanBoardView: View {
         let thisWeek = isDoneColumn && doneWeeklyReset
             ? orderedTasks.filter { viewModel.doneThisWeekIds.contains($0.id) }
             : []
+        // Count against the server's Done total, not the loaded slice: the board
+        // only ever holds this week's finishes until the user expands.
         let hiddenDoneCount = isDoneColumn
-            ? (doneWeeklyReset ? orderedTasks.count - thisWeek.count : max(0, orderedTasks.count - 5))
+            ? (doneWeeklyReset
+               ? max(0, viewModel.doneTotal - thisWeek.count)
+               : max(0, viewModel.doneTotal - 5))
             : 0
         let doneCollapsed = isDoneColumn && !doneExpanded && hiddenDoneCount > 0
         let visibleTasks: [MWProjectTask] = doneCollapsed
@@ -861,6 +875,9 @@ struct KanbanBoardView: View {
             if isDoneColumn && hiddenDoneCount > 0 {
                 Button {
                     doneExpanded.toggle()
+                    // Those earlier finishes aren't in memory — the board loaded
+                    // only this week's. Fetch them the first time Done expands.
+                    if doneExpanded { Task { await viewModel.loadAllDoneTasks() } }
                 } label: {
                     Text(doneExpanded
                          ? "Show less"

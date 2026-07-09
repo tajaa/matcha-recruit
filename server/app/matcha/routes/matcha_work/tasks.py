@@ -46,17 +46,41 @@ async def set_project_pipeline_mode_endpoint(
     enabled = bool(body.get("enabled", False))
     return await proj_svc.update_project_data(project_id, {"pipeline_mode": enabled})
 
-@router.get("/projects/{project_id}/tasks")
-async def list_project_tasks_endpoint(
+@router.get("/projects/{project_id}/tasks/done-count")
+async def count_done_tasks_endpoint(
     project_id: UUID,
     current_user: CurrentUser = Depends(require_company_member),
 ):
-    """List all kanban tasks for a project. Embeds attachments per task so
-    the kanban card can render thumbnails without N+1 follow-up requests."""
+    """`{total, this_week}` for the Done column. The board needs the total to
+    label its "show N finished earlier" expander, which the task list itself
+    can't supply — it never returns the whole column."""
+    from app.matcha.services import project_task_service as pt_svc
+    await _verify_project_access(project_id, current_user)
+    return await pt_svc.count_done_tasks(project_id)
+
+@router.get("/projects/{project_id}/tasks")
+async def list_project_tasks_endpoint(
+    project_id: UUID,
+    done_scope: str = Query("all", pattern="^(week|all)$"),
+    current_user: CurrentUser = Depends(require_company_member),
+):
+    """List a project's kanban tasks. Embeds attachments per task so the kanban
+    card can render thumbnails without N+1 follow-up requests.
+
+    Every column comes back whole EXCEPT Done, which grows without bound as a
+    project ages. `done_scope=week` returns only what was finished this Pacific
+    week; `all` (the default) returns the most recently finished, capped at
+    `DONE_MAX_ROWS`.
+
+    The default is `all` so the web board — which doesn't ask for a scope and has
+    no "show earlier" expander — keeps its cumulative Done column, now merely
+    bounded rather than unbounded. The desktop board opens on `week` and
+    re-requests `all` when the user expands Done."""
     from app.matcha.services import project_task_service as pt_svc
     from app.matcha.services import project_file_service
     await _verify_project_access(project_id, current_user)
-    tasks = await pt_svc.list_project_tasks(project_id, viewer_id=current_user.id)
+    tasks = await pt_svc.list_project_tasks(project_id, viewer_id=current_user.id,
+                                            done_scope=done_scope)
     if not tasks:
         return tasks
     task_ids = [UUID(t["id"]) for t in tasks if t.get("id")]

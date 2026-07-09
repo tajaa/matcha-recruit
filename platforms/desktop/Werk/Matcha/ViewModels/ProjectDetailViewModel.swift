@@ -90,6 +90,16 @@ class ProjectDetailViewModel {
     @ObservationIgnored private var groupKey: (v: Int, pipeline: Bool, search: String)?
     @ObservationIgnored private var groupValue: [String: [MWProjectTask]] = [:]
 
+    /// Every card in the project's Done column, including those the server
+    /// withheld from `tasks`. The board labels its expander with the difference.
+    var doneTotal = 0
+
+    /// Which slice of Done the loaded `tasks` represent: "week" (the default —
+    /// only this week's finishes) or "all" (server-capped recent). A revalidate
+    /// has to re-request the SAME scope, or an expanded Done column silently
+    /// collapses under the user mid-session.
+    var doneScope = "week"
+
     /// Ids of the `done` bucket finished during the current Pacific week —
     /// what the board shows when its Done column is set to reset weekly.
     /// Filled by `groupedColumns` (which the board always calls first) so the

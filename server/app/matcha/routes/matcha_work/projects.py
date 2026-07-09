@@ -140,7 +140,10 @@ async def get_project_bundle_endpoint(
     async def _tasks_with_attachments() -> list[dict]:
         # Mirror list_project_tasks_endpoint: embed presigned attachments per
         # task so kanban cards render thumbnails without N+1 follow-ups.
-        tasks = await pt_svc.list_project_tasks(project_id, viewer_id=current_user.id)
+        # Week-scoped Done: the desktop board opens from this bundle and pulls
+        # earlier finishes on demand. `done_total` below carries the real count.
+        tasks = await pt_svc.list_project_tasks(project_id, viewer_id=current_user.id,
+                                                done_scope=pt_svc.DONE_SCOPE_WEEK)
         if not tasks:
             return tasks
         task_ids = [UUID(t["id"]) for t in tasks if t.get("id")]
@@ -149,13 +152,14 @@ async def get_project_bundle_endpoint(
             t["attachments"] = _resolve_file_urls(grouped.get(t["id"], []))
         return tasks
 
-    tasks, files, folders, links, collaborators, elements = await asyncio.gather(
+    tasks, files, folders, links, collaborators, elements, done_count = await asyncio.gather(
         _tasks_with_attachments(),
         project_file_service.list_project_files(project_id),
         project_file_service.list_project_folders(project_id),
         proj_svc.list_project_links(project_id),
         proj_svc.list_collaborators(project_id),
         _list_project_elements(project_id),
+        pt_svc.count_done_tasks(project_id),
     )
     return {
         "project": project,
@@ -165,6 +169,9 @@ async def get_project_bundle_endpoint(
         "links": links,
         "collaborators": collaborators,
         "elements": elements,
+        # `tasks` carries only this week's Done cards (see list_project_tasks).
+        # The board needs the full count to label its expander.
+        "done_total": done_count["total"],
     }
 
 @router.patch("/projects/{project_id}")

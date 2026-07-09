@@ -6,11 +6,24 @@ extension MatchaWorkService {
     func cachedProjectTasks(_ projectId: String) -> [MWProjectTask]? { cachedValue(projectTasksCache[projectId]) }
     func invalidateProjectTasks(projectId: String) { projectTasksCache.removeValue(forKey: projectId) }
 
-    func listProjectTasks(projectId: String, forceRefresh: Bool = false) async throws -> [MWProjectTask] {
+    /// `doneScope: "week"` (the server default) returns only this week's Done
+    /// cards; `"all"` returns the most recently finished, server-capped. Every
+    /// other column comes back whole either way. The board opens on "week" and
+    /// re-requests "all" when the user expands the Done column.
+    func listProjectTasks(projectId: String, forceRefresh: Bool = false,
+                          doneScope: String = "week") async throws -> [MWProjectTask] {
         if !forceRefresh, let cached = cachedValue(projectTasksCache[projectId]) { return cached }
-        let result: [MWProjectTask] = try await client.request(method: "GET", path: "\(basePath)/projects/\(projectId)/tasks")
+        let result: [MWProjectTask] = try await client.request(
+            method: "GET", path: "\(basePath)/projects/\(projectId)/tasks?done_scope=\(doneScope)")
         projectTasksCache[projectId] = MWCacheEntry(value: result, expiresAt: Date().addingTimeInterval(cacheTTL))
         return result
+    }
+
+    /// `{total, this_week}` for the Done column — the full counts the task list
+    /// withholds. Used to label the board's "show N finished earlier" expander
+    /// on paths that don't go through the project bundle.
+    func fetchDoneCount(projectId: String) async throws -> MWDoneCount {
+        try await client.request(method: "GET", path: "\(basePath)/projects/\(projectId)/tasks/done-count")
     }
 
     func createProjectTask(

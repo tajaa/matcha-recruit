@@ -5,6 +5,24 @@ extension ProjectDetailViewModel {
 
     // MARK: - Collab: tasks
 
+    /// Load the Done column beyond the current week (server-capped). Called when
+    /// the user expands Done, or opens a board whose Done policy is cumulative.
+    /// No-op once "all" is already loaded, so expanding twice costs one fetch.
+    func loadAllDoneTasks() async {
+        guard doneScope != "all", let pid = project?.id else { return }
+        await MainActor.run { doneScope = "all" }
+        // loadTasks() force-refreshes, so the week-scoped cache entry can't win.
+        await loadTasks()
+        // Older finishes may still be truncated by the server cap; the count
+        // comes from the DB, not from what we managed to load.
+        if let counts = try? await service.fetchDoneCount(projectId: pid) {
+            await MainActor.run {
+                guard project?.id == pid else { return }
+                doneTotal = counts.total
+            }
+        }
+    }
+
     func loadTasks() async {
         guard let pid = project?.id else { return }
         // Only show the spinner on a cold load; a warm revalidate diff-updates
@@ -13,7 +31,8 @@ extension ProjectDetailViewModel {
         let wasEmpty = tasks.isEmpty
         await MainActor.run { if wasEmpty { isLoadingTasks = true } }
         do {
-            let list = try await service.listProjectTasks(projectId: pid, forceRefresh: true)
+            let list = try await service.listProjectTasks(projectId: pid, forceRefresh: true,
+                                                          doneScope: doneScope)
             await MainActor.run {
                 guard project?.id == pid else { return }   // ignore late landing after a switch
                 tasks = list

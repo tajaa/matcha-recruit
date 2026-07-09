@@ -143,6 +143,18 @@ private struct LenientStringMap: Decodable {
     }
 }
 
+/// Full Done-column counts. The task list only ever ships a bounded slice of
+/// that column, so the board learns the real totals from here.
+struct MWDoneCount: Codable {
+    let total: Int
+    let thisWeek: Int
+
+    enum CodingKeys: String, CodingKey {
+        case total
+        case thisWeek = "this_week"
+    }
+}
+
 struct MWProjectTask: Codable, Identifiable, Hashable {
     let id: String
     var projectId: String?

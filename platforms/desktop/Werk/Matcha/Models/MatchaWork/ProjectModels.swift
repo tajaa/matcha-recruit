@@ -155,6 +155,16 @@ struct MWProjectBundle: Codable {
     let links: [MWProjectLink]
     let collaborators: [MWProjectCollaborator]
     let elements: [MWProjectElement]
+    /// Every Done card on the board, including the ones `tasks` withheld — the
+    /// bundle ships only the current week's finishes. Drives the board's
+    /// "show N finished earlier" expander. Optional so an older server that
+    /// doesn't send it still decodes.
+    let doneTotal: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case project, tasks, files, folders, links, collaborators, elements
+        case doneTotal = "done_total"
+    }
 }
 
 struct MWProjectChat: Codable, Identifiable, Hashable {

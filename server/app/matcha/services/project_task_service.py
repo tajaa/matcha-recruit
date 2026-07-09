@@ -19,13 +19,34 @@ auto-populated by send-back.
 
 import json
 import logging
-from datetime import date as _date, datetime, timezone
+from datetime import date as _date, datetime, timedelta, timezone
 from typing import Optional
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from ...database import get_connection
 
 logger = logging.getLogger(__name__)
+
+# A board's Done column accumulates forever, so it is never fetched whole.
+# `week` (the default) sends only what was finished this Pacific week; `all`
+# sends the most recently finished, capped. Both are bounded by DONE_MAX_ROWS —
+# a two-year-old board would otherwise ship thousands of closed cards, each
+# carrying attachments + history subquery results, on every project open.
+DONE_SCOPE_WEEK = "week"
+DONE_SCOPE_ALL = "all"
+DONE_MAX_ROWS = 200
+
+_PACIFIC = ZoneInfo("America/Los_Angeles")
+
+
+def pacific_week_start(now: Optional[datetime] = None) -> datetime:
+    """Monday 00:00 Pacific of the week containing `now`, as an aware UTC-comparable
+    datetime. Matches the client's `PacificDateFormatter.startOfWeek` so the board
+    and the weekly replay agree on where a week begins."""
+    now = (now or datetime.now(timezone.utc)).astimezone(_PACIFIC)
+    midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    return midnight - timedelta(days=midnight.weekday())
 
 
 async def _log_task_history(
@@ -226,7 +247,59 @@ async def log_task_activity(
     return {"ok": True, "kind": kind}
 
 
-async def list_project_tasks(project_id: UUID, viewer_id: Optional[UUID] = None) -> list[dict]:
+async def count_done_tasks(project_id: UUID) -> dict:
+    """How many cards sit in Done, and how many landed there this Pacific week.
+    The board needs the total to label its "show earlier finished" expander —
+    `list_project_tasks` deliberately never returns the whole column."""
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT COUNT(*) AS total,
+                   COUNT(*) FILTER (
+                       WHERE COALESCE(t.completed_at, t.updated_at, t.created_at) >= $2
+                   ) AS this_week
+            FROM mw_tasks t
+            WHERE t.project_id = $1 AND t.status != 'cancelled' AND t.board_column = 'done'
+            """,
+            project_id, pacific_week_start(),
+        )
+    return {"total": row["total"], "this_week": row["this_week"]}
+
+
+async def _visible_done_task_ids(conn, project_id: UUID, scope: str, limit: int) -> list[UUID]:
+    """The subset of the Done column a board is allowed to load. Ordered
+    newest-finished first and hard-capped, so the payload can't grow with the
+    project's age. Cards with no `completed_at` (pre-dating the column, or moved
+    by a path that didn't stamp it) fall back to updated/created time rather than
+    dropping out of Done entirely."""
+    limit = max(1, min(limit, DONE_MAX_ROWS))
+    recency = "COALESCE(t.completed_at, t.updated_at, t.created_at)"
+    params: list = [project_id]
+    week_clause = ""
+    if scope == DONE_SCOPE_WEEK:
+        params.append(pacific_week_start())
+        week_clause = f"AND {recency} >= $2"
+    params.append(limit)
+    rows = await conn.fetch(
+        f"""
+        SELECT t.id FROM mw_tasks t
+        WHERE t.project_id = $1 AND t.status != 'cancelled' AND t.board_column = 'done'
+          {week_clause}
+        ORDER BY {recency} DESC
+        LIMIT ${len(params)}
+        """,
+        *params,
+    )
+    return [r["id"] for r in rows]
+
+
+async def list_project_tasks(
+    project_id: UUID,
+    viewer_id: Optional[UUID] = None,
+    *,
+    done_scope: str = DONE_SCOPE_WEEK,
+    done_limit: int = DONE_MAX_ROWS,
+) -> list[dict]:
     # Inline the counted-event literals (code constants, not user input) so the
     # badge subqueries stay in lock-step with COUNTED_UPDATE_EVENTS.
     _counted = ", ".join(f"'{e}'" for e in COUNTED_UPDATE_EVENTS)
@@ -243,6 +316,12 @@ async def list_project_tasks(project_id: UUID, viewer_id: Optional[UUID] = None)
     else:
         _self3 = _self4 = ""
     async with get_connection() as conn:
+        # Resolve which Done cards are in scope first, then admit exactly those.
+        # Filtering inside the main query instead would still evaluate the
+        # per-card history subqueries for every closed card on the board.
+        done_ids = await _visible_done_task_ids(conn, project_id, done_scope, done_limit)
+        params.append(done_ids)
+        _done_clause = f"AND (t.board_column <> 'done' OR t.id = ANY(${len(params)}::uuid[]))"
         rows = await conn.fetch(
             f"""
             SELECT t.id, t.project_id, t.company_id, t.created_by, t.title, t.description,
@@ -319,6 +398,7 @@ async def list_project_tasks(project_id: UUID, viewer_id: Optional[UUID] = None)
             LEFT JOIN admins a2 ON a2.user_id = t.created_by
             LEFT JOIN mw_project_elements el ON el.id = t.element_id
             WHERE t.project_id = $1 AND t.status != 'cancelled'
+              {_done_clause}
             ORDER BY
                 CASE t.priority
                     WHEN 'critical' THEN 0 WHEN 'high' THEN 1
