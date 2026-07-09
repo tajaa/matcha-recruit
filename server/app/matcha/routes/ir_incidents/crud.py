@@ -1135,24 +1135,31 @@ async def delete_incident(
         if not row:
             raise HTTPException(status_code=404, detail="Incident not found")
 
-        # Delete (cascade will handle documents, analysis, etc.)
-        await conn.execute(
-            f"DELETE FROM ir_incidents WHERE id = $1 AND {company_clause}",
-            str(incident_id),
-            company_id,
-        )
+        # Audit + delete in ONE transaction, audit first. get_connection()
+        # autocommits per statement, and ir_audit_log.incident_id is ON DELETE
+        # SET NULL — so inserting the audit row after the DELETE used to fail
+        # the FK check (parent already gone) with a 500, and the deletion went
+        # unrecorded. Audit-first lets the SET NULL cascade null the link while
+        # the row (with incident_number/title in details) survives as the
+        # trail; the transaction keeps the pair atomic if the DELETE fails.
+        async with conn.transaction():
+            await log_audit(
+                conn,
+                str(incident_id),
+                str(current_user.id),
+                "incident_deleted",
+                "incident",
+                str(incident_id),
+                {"incident_number": row["incident_number"], "title": row["title"]},
+                request.client.host if request.client else None,
+            )
 
-        # Log audit
-        await log_audit(
-            conn,
-            str(incident_id),
-            str(current_user.id),
-            "incident_deleted",
-            "incident",
-            str(incident_id),
-            {"incident_number": row["incident_number"], "title": row["title"]},
-            request.client.host if request.client else None,
-        )
+            # Delete (cascade will handle documents, analysis, etc.)
+            await conn.execute(
+                f"DELETE FROM ir_incidents WHERE id = $1 AND {company_clause}",
+                str(incident_id),
+                company_id,
+            )
 
         return {"message": "Incident deleted successfully"}
 

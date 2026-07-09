@@ -19,6 +19,7 @@ step 10.
 import asyncio
 import json
 import logging
+from datetime import timedelta
 from typing import Optional
 from uuid import UUID
 
@@ -51,6 +52,7 @@ from ._shared import (
     _sse,
     _utc_now_naive,
     log_audit,
+    parse_witnesses,
 )
 
 logger = logging.getLogger(__name__)

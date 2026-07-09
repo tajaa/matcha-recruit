@@ -348,19 +348,86 @@ async def _aggregate_300a(conn, company_id, location_id, year) -> dict:
             COALESCE(SUM(CASE WHEN classification = 'death' THEN 1 ELSE 0 END), 0) AS total_deaths,
             COALESCE(SUM(CASE WHEN classification = 'days_away' THEN 1 ELSE 0 END), 0) AS total_days_away_cases,
             COALESCE(SUM(CASE WHEN classification = 'restricted_duty' THEN 1 ELSE 0 END), 0) AS total_restricted_cases,
-            COALESCE(SUM(CASE WHEN classification NOT IN ('death','days_away','restricted_duty') THEN 1 ELSE 0 END), 0) AS total_other_recordable,
-            COALESCE(SUM(days_away), 0) AS total_days_away,
-            COALESCE(SUM(days_restricted), 0) AS total_days_restricted,
+            -- Columns G/H/I/J must partition total_cases. A recordable case with a
+            -- NULL/unrecognized classification is neither death/days_away/restricted,
+            -- and `NULL NOT IN (...)` is NULL (falls to ELSE 0) — so without the
+            -- COALESCE it would be dropped from every column while still counted in
+            -- total_cases, breaking the OSHA footing G+H+I+J = total_cases.
+            COALESCE(SUM(CASE WHEN COALESCE(classification, 'other') NOT IN ('death','days_away','restricted_duty') THEN 1 ELSE 0 END), 0) AS total_other_recordable,
+            -- Per 29 CFR 1904.7(b)(3)(vii) the day count for a single case is capped
+            -- at 180 for each of columns K and L. Cap per case BEFORE summing.
+            COALESCE(SUM(LEAST(COALESCE(days_away, 0), 180)), 0) AS total_days_away,
+            COALESCE(SUM(LEAST(COALESCE(days_restricted, 0), 180)), 0) AS total_days_restricted,
+            -- M1..M6 must also partition total_cases: NULL and any unrecognized
+            -- injury_type fall through to "all other illnesses" (M6) rather than
+            -- vanishing. M1 (injuries) is the explicit-injury/NULL bucket.
             COALESCE(SUM(CASE WHEN COALESCE(injury_type, 'injury') = 'injury' THEN 1 ELSE 0 END), 0) AS total_injuries,
             COALESCE(SUM(CASE WHEN injury_type = 'skin_disorder' THEN 1 ELSE 0 END), 0) AS total_skin_disorders,
             COALESCE(SUM(CASE WHEN injury_type = 'respiratory' THEN 1 ELSE 0 END), 0) AS total_respiratory,
             COALESCE(SUM(CASE WHEN injury_type = 'poisoning' THEN 1 ELSE 0 END), 0) AS total_poisonings,
             COALESCE(SUM(CASE WHEN injury_type = 'hearing_loss' THEN 1 ELSE 0 END), 0) AS total_hearing_loss,
-            COALESCE(SUM(CASE WHEN injury_type IN ('other_illness', 'mental_illness') THEN 1 ELSE 0 END), 0) AS total_other_illnesses
+            COALESCE(SUM(CASE WHEN injury_type IS NOT NULL
+                               AND injury_type NOT IN ('injury','skin_disorder','respiratory','poisoning','hearing_loss')
+                          THEN 1 ELSE 0 END), 0) AS total_other_illnesses
         FROM cases
         """,
         company_id, location_id, year,
     )
+
+
+async def _osha_data_quality_warnings(conn, company_id, year, location_id=None) -> list[str]:
+    """Non-blocking data-quality flags for a 300A / ITA filing.
+
+    - When ``location_id`` is given: recordable incidents at that establishment/year
+      whose classification is missing (they foot into "other recordable" but lack
+      the death/days-away/restricted detail the 300A/301 needs).
+    - Always: recordable incidents in the year that are NOT assigned to any
+      location. These appear on the company-wide 300 log but on NO 300A summary
+      and in NO ITA row, so they are silently excluded from the actual filing.
+    """
+    warnings: list[str] = []
+
+    if location_id is not None:
+        missing_class = await conn.fetchval(
+            """
+            SELECT COUNT(*) FROM ir_incidents i
+            WHERE i.company_id = $1
+              AND i.location_id = $2
+              AND i.osha_recordable = true
+              AND EXTRACT(YEAR FROM i.occurred_at) = $3
+              AND NOT EXISTS (
+                  SELECT 1 FROM ir_osha_case_details cd
+                  WHERE cd.incident_id = i.id AND cd.classification IS NOT NULL
+              )
+              AND i.osha_classification IS NULL
+            """,
+            company_id, location_id, year,
+        ) or 0
+        if missing_class:
+            warnings.append(
+                f"{missing_class} recordable incident(s) at this establishment have no "
+                f"OSHA classification (death / days away / restricted / other). They are "
+                f"counted but cannot be placed in columns G–J correctly until classified."
+            )
+
+    unassigned = await conn.fetchval(
+        """
+        SELECT COUNT(*) FROM ir_incidents
+        WHERE company_id = $1
+          AND osha_recordable = true
+          AND EXTRACT(YEAR FROM occurred_at) = $2
+          AND location_id IS NULL
+        """,
+        company_id, year,
+    ) or 0
+    if unassigned:
+        warnings.append(
+            f"{unassigned} recordable incident(s) in {year} are not assigned to a "
+            f"location and are excluded from every 300A summary and the ITA export. "
+            f"Assign each to an establishment so it appears on the correct filing."
+        )
+
+    return warnings
 
 
 async def _active_headcount(conn, company_id, location_id, *, city=None, state=None, sole_location=False) -> int:
@@ -757,6 +824,7 @@ async def get_osha_300a_summary(
             city=est["city"], state=est["state"], sole_location=(loc_count == 1),
         )
         agg = await _aggregate_300a(conn, company_id, location_id, year)
+        warnings = await _osha_data_quality_warnings(conn, company_id, year, location_id)
 
         cached = await conn.fetchrow(
             "SELECT * FROM osha_annual_summaries WHERE company_id = $1 AND location_id = $2 AND year = $3",
@@ -796,6 +864,7 @@ async def get_osha_300a_summary(
             certified_by=cached["certified_by"] if cached else None,
             certified_title=cached["certified_title"] if cached else None,
             certified_date=cached["certified_date"] if cached else None,
+            data_quality_warnings=warnings,
         )
 
 
@@ -1034,6 +1103,16 @@ async def validate_ita_export(
 
     async with get_connection() as conn:
         establishments = await _gather_ita_establishments(conn, company_id, year)
+        unassigned = await conn.fetchval(
+            """
+            SELECT COUNT(*) FROM ir_incidents
+            WHERE company_id = $1
+              AND osha_recordable = true
+              AND EXTRACT(YEAR FROM occurred_at) = $2
+              AND location_id IS NULL
+            """,
+            company_id, year,
+        ) or 0
 
     problems = []
     for est in establishments:
@@ -1044,6 +1123,17 @@ async def validate_ita_export(
                 "establishment_name": est["establishment_name"],
                 "missing": missing,
             })
+    # Completeness pre-flight: recordables not tied to any establishment are
+    # excluded from the ITA export entirely (they only show on the company-wide
+    # 300 log). Surface them as a company-level, non-blocking problem entry so
+    # the reviewer can't miss that N cases won't be filed. location_id is None
+    # to distinguish it from a per-establishment missing-fields row.
+    if unassigned:
+        problems.append({
+            "location_id": None,
+            "establishment_name": f"{unassigned} unassigned recordable incident(s)",
+            "missing": ["unassigned_location"],
+        })
     return problems
 
 

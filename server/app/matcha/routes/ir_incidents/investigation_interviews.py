@@ -43,6 +43,10 @@ async def create_investigation_interview(
 
     company_id = await get_client_company_id(current_user)
 
+    # Load incident + prior transcripts on a short-lived connection, then RELEASE
+    # it before the Gemini question-generation call so the (potentially tens of
+    # seconds) model round doesn't hold an asyncpg pool slot. Re-acquire below for
+    # the writes.
     async with get_connection() as conn:
         incident = await conn.fetchrow(
             """
@@ -64,7 +68,6 @@ async def create_investigation_interview(
                 detail=f"Incident must be in investigating, action_required, or reported status (current: {incident['status']})",
             )
 
-        prior_transcripts = []
         prior_rows = await conn.fetch(
             """
             SELECT i.transcript
@@ -77,24 +80,25 @@ async def create_investigation_interview(
         )
         prior_transcripts = [r["transcript"] for r in prior_rows]
 
-        settings = get_settings()
-        incident_data = {
-            "title": incident["title"],
-            "description": incident["description"],
-            "incident_type": incident["incident_type"],
-            "severity": incident["severity"],
-            "location": incident["location"],
-            "occurred_at": str(incident["occurred_at"]) if incident["occurred_at"] else None,
-        }
-        questions = await generate_investigation_questions(
-            incident=incident_data,
-            interviewee_name=request_body.interviewee_name,
-            interviewee_role=request_body.interviewee_role,
-            prior_transcripts=prior_transcripts if prior_transcripts else None,
-            api_key=settings.gemini_api_key,
-            model=settings.analysis_model,
-        )
+    settings = get_settings()
+    incident_data = {
+        "title": incident["title"],
+        "description": incident["description"],
+        "incident_type": incident["incident_type"],
+        "severity": incident["severity"],
+        "location": incident["location"],
+        "occurred_at": str(incident["occurred_at"]) if incident["occurred_at"] else None,
+    }
+    questions = await generate_investigation_questions(
+        incident=incident_data,
+        interviewee_name=request_body.interviewee_name,
+        interviewee_role=request_body.interviewee_role,
+        prior_transcripts=prior_transcripts if prior_transcripts else None,
+        api_key=settings.gemini_api_key,
+        model=settings.analysis_model,
+    )
 
+    async with get_connection() as conn:
         async with conn.transaction():
             interview_row = await conn.fetchrow(
                 """
@@ -201,6 +205,12 @@ async def batch_create_investigation_interviews(
 
     company_id = await get_client_company_id(current_user)
 
+    # Read-only prep on a short-lived connection, RELEASED before the per-item
+    # loop. Each item runs a Gemini question-generation call that can take tens
+    # of seconds — holding one pooled connection across up to 20 sequential
+    # calls pinned a pool slot for minutes. The model call now runs
+    # connection-free; a fresh connection is acquired per item only for the
+    # writes + invite email.
     async with get_connection() as conn:
         incident = await conn.fetchrow(
             """
@@ -248,42 +258,44 @@ async def batch_create_investigation_interviews(
         )
         company_name = company_row["name"] if company_row else "Your Company"
 
-        settings = get_settings()
-        incident_data = {
-            "title": incident["title"],
-            "description": incident["description"],
-            "incident_type": incident["incident_type"],
-            "severity": incident["severity"],
-            "location": incident["location"],
-            "occurred_at": str(incident["occurred_at"]) if incident["occurred_at"] else None,
-        }
+    settings = get_settings()
+    incident_data = {
+        "title": incident["title"],
+        "description": incident["description"],
+        "incident_type": incident["incident_type"],
+        "severity": incident["severity"],
+        "location": incident["location"],
+        "occurred_at": str(incident["occurred_at"]) if incident["occurred_at"] else None,
+    }
 
-        created = []
-        failed = []
-        seen_emails_this_batch: set[str] = set()
+    created = []
+    failed = []
+    seen_emails_this_batch: set[str] = set()
 
-        for item in request_body:
-            if item.interviewee_email:
-                email_lower = item.interviewee_email.lower()
-                if email_lower in existing_emails or email_lower in seen_emails_this_batch:
-                    failed.append({
-                        "interviewee_name": item.interviewee_name,
-                        "interviewee_email": item.interviewee_email,
-                        "error": "An active investigation interview already exists for this email address",
-                    })
-                    continue
-                seen_emails_this_batch.add(email_lower)
+    for item in request_body:
+        if item.interviewee_email:
+            email_lower = item.interviewee_email.lower()
+            if email_lower in existing_emails or email_lower in seen_emails_this_batch:
+                failed.append({
+                    "interviewee_name": item.interviewee_name,
+                    "interviewee_email": item.interviewee_email,
+                    "error": "An active investigation interview already exists for this email address",
+                })
+                continue
+            seen_emails_this_batch.add(email_lower)
 
-            try:
-                questions = await generate_investigation_questions(
-                    incident=incident_data,
-                    interviewee_name=item.interviewee_name,
-                    interviewee_role=item.interviewee_role,
-                    prior_transcripts=prior_transcripts if prior_transcripts else None,
-                    api_key=settings.gemini_api_key,
-                    model=settings.analysis_model,
-                )
+        try:
+            # Connection-free: only the model round-trip.
+            questions = await generate_investigation_questions(
+                incident=incident_data,
+                interviewee_name=item.interviewee_name,
+                interviewee_role=item.interviewee_role,
+                prior_transcripts=prior_transcripts if prior_transcripts else None,
+                api_key=settings.gemini_api_key,
+                model=settings.analysis_model,
+            )
 
+            async with get_connection() as conn:
                 async with conn.transaction():
                     interview_row = await conn.fetchrow(
                         """
@@ -360,35 +372,35 @@ async def batch_create_investigation_interviews(
                     except Exception as e:
                         logging.getLogger(__name__).warning("Failed to send investigation invite email: %s", e)
 
-                created.append({
-                    "investigation_interview_id": str(junction_row["id"]),
-                    "interview_id": str(interview_id),
-                    "interviewee_name": item.interviewee_name,
-                    "interviewee_email": item.interviewee_email,
-                    "websocket_url": f"/api/ws/interview/{interview_id}",
-                    "ws_auth_token": ws_token,
-                    "questions_generated": questions,
-                    "invite_sent": invite_sent,
-                })
+            created.append({
+                "investigation_interview_id": str(junction_row["id"]),
+                "interview_id": str(interview_id),
+                "interviewee_name": item.interviewee_name,
+                "interviewee_email": item.interviewee_email,
+                "websocket_url": f"/api/ws/interview/{interview_id}",
+                "ws_auth_token": ws_token,
+                "questions_generated": questions,
+                "invite_sent": invite_sent,
+            })
 
-            except HTTPException:
-                raise
-            except Exception as e:
-                logging.getLogger(__name__).warning(
-                    "Failed to create investigation interview for %s: %s", item.interviewee_name, e
-                )
-                failed.append({
-                    "interviewee_name": item.interviewee_name,
-                    "interviewee_email": item.interviewee_email,
-                    "error": str(e),
-                })
+        except HTTPException:
+            raise
+        except Exception as e:
+            logging.getLogger(__name__).warning(
+                "Failed to create investigation interview for %s: %s", item.interviewee_name, e
+            )
+            failed.append({
+                "interviewee_name": item.interviewee_name,
+                "interviewee_email": item.interviewee_email,
+                "error": str(e),
+            })
 
-        return {
-            "created": len(created),
-            "failed": len(failed),
-            "interviews": created,
-            "errors": failed,
-        }
+    return {
+        "created": len(created),
+        "failed": len(failed),
+        "interviews": created,
+        "errors": failed,
+    }
 
 
 @router.post("/{incident_id}/investigation-interviews/{investigation_interview_id}/resend-invite")
@@ -514,8 +526,10 @@ async def generate_investigation_interview_link(
         invite_token = row["invite_token"]
         if not invite_token:
             invite_token = secrets.token_urlsafe(32)
+            # Stamp invite_sent_at so a copy-share link starts the expiry clock
+            # (the public validator enforces INVITE_TOKEN_TTL_DAYS off this).
             await conn.execute(
-                "UPDATE ir_investigation_interviews SET invite_token = $1 WHERE id = $2",
+                "UPDATE ir_investigation_interviews SET invite_token = $1, invite_sent_at = NOW() WHERE id = $2",
                 invite_token, investigation_interview_id,
             )
 

@@ -75,8 +75,11 @@ class AnonymousReportRequest(BaseModel):
     # category_data for reference, not re-parsed (the user already reviewed
     # and edited the prefilled fields before submitting).
     voice_transcript: Optional[str] = Field(None, max_length=20_000)
-    # Honeypot — must be empty
-    company_name: Optional[str] = Field(None, max_length=255)
+    # Honeypot — must be empty. Deliberately NOT a plausible field name (was
+    # `company_name`, which browsers/password-managers autofill — a real reporter
+    # on a phone QR scan could have it populated and get their legal-record report
+    # silently dropped). Matches the RequestInfoForm convention.
+    internal_ref: Optional[str] = Field(None, max_length=255)
 
 
 class LocationReportRequest(BaseModel):
@@ -91,8 +94,9 @@ class LocationReportRequest(BaseModel):
     witnesses: list[str] = Field(default_factory=list, max_length=50)
     corrective_actions: Optional[str] = Field(None, max_length=10_000)
     voice_transcript: Optional[str] = Field(None, max_length=20_000)
-    # Honeypot — must be empty
-    company_name: Optional[str] = Field(None, max_length=255)
+    # Honeypot — must be empty. Implausible name so browser/password-manager
+    # autofill can't populate it for a real reporter (see AnonymousReportRequest).
+    internal_ref: Optional[str] = Field(None, max_length=255)
 
 
 def _derive_title(description: str, limit: int = 80) -> str:
@@ -146,8 +150,9 @@ async def submit_anonymous_report(
     per-location links' equivalent.
     """
     # Honeypot check — bots fill this hidden field
-    if body.company_name:
+    if body.internal_ref:
         # Silently accept to not tip off the bot
+        logger.warning("[IR] anonymous report honeypot tripped (token=%s…)", token[:8])
         return {"submitted": True}
 
     # Re-validate trimmed length — Pydantic min_length runs pre-strip.
@@ -380,7 +385,8 @@ async def submit_location_report(
     indistinguishable in quality from a logged-in submission.
     """
     # Honeypot — bots fill this hidden field; silently accept so as not to tip them off.
-    if body.company_name:
+    if body.internal_ref:
+        logger.warning("[IR] location report honeypot tripped (token=%s…)", token[:8])
         return {"submitted": True}
 
     description_trimmed = body.description.strip()

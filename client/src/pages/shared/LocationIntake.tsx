@@ -77,7 +77,7 @@ export default function LocationIntake() {
           occurred_at: occurredAt.trim() || null,
           witnesses,
           corrective_actions: nextSteps.trim() || null,
-          company_name: honeypot,
+          internal_ref: honeypot,
           ...(voiceTranscript ? { voice_transcript: voiceTranscript } : {}),
         }),
       })
@@ -216,10 +216,12 @@ export default function LocationIntake() {
           />
         </Field>
 
-        {/* Honeypot — hidden from real users; bots fill this */}
+        {/* Honeypot — hidden from real users; bots fill this. Implausible name
+            (not company_name/email) so browser autofill won't populate it for a
+            real reporter and silently drop their report. */}
         <input
           type="text"
-          name="company_name"
+          name="internal_ref"
           tabIndex={-1}
           autoComplete="off"
           value={honeypot}

@@ -182,7 +182,10 @@ async def stream_copilot_round(
     company_id = await get_client_company_id(current_user)
 
     async def event_stream():
-        # Acquire connection inside generator so it lives for the full stream
+        # Load state + append the user turn on a SHORT-LIVED connection, then
+        # RELEASE it before the (up-to-60s) Gemini call so a slow model round
+        # doesn't pin an asyncpg pool slot for its whole duration. Re-acquire a
+        # fresh connection only for the persist/audit writes afterward.
         async with get_connection() as conn:
             incident, analyses, messages = await load_incident_state(
                 conn, incident_id, company_id
@@ -190,8 +193,6 @@ async def stream_copilot_round(
             if incident is None:
                 yield _sse({"type": "error", "detail": "Incident not found"})
                 return
-
-            yield _sse({"type": "status", "stage": "thinking"})
 
             # Append the user's message FIRST so the orchestrator includes it.
             user_msg = (body.message or "").strip()
@@ -207,18 +208,21 @@ async def stream_copilot_round(
                 )
                 messages.append(user_row)
 
-            try:
-                payload = await generate_guidance(
-                    incident=incident,
-                    analyses=analyses,
-                    messages=messages,
-                )
-            except Exception as exc:
-                logger.exception("IR Copilot round failed for incident %s", incident_id)
-                yield _sse({"type": "error", "detail": "Failed to generate guidance"})
-                return
+        yield _sse({"type": "status", "stage": "thinking"})
 
-            # Persist assistant text + cards
+        try:
+            payload = await generate_guidance(
+                incident=incident,
+                analyses=analyses,
+                messages=messages,
+            )
+        except Exception:
+            logger.exception("IR Copilot round failed for incident %s", incident_id)
+            yield _sse({"type": "error", "detail": "Failed to generate guidance"})
+            return
+
+        # Persist assistant text + cards + audit on a fresh short-lived connection.
+        async with get_connection() as conn:
             await persist_assistant_round(
                 conn,
                 incident_id=incident_id,
@@ -226,13 +230,6 @@ async def stream_copilot_round(
                 user_message=None,  # already inserted above
                 guidance_payload=payload,
             )
-
-            yield _sse({"type": "summary", "text": payload.get("summary") or ""})
-            for q in payload.get("open_questions") or []:
-                yield _sse({"type": "open_question", "text": q})
-            for card in payload.get("cards") or []:
-                yield _sse({"type": "card", "card": card})
-            yield _sse({"type": "done", "model": payload.get("model")})
 
             await log_audit(
                 conn,
@@ -244,6 +241,13 @@ async def stream_copilot_round(
                 details={"cards": len(payload.get("cards") or []), "user_message_len": len(user_msg)},
                 ip_address=request.client.host if request.client else None,
             )
+
+        yield _sse({"type": "summary", "text": payload.get("summary") or ""})
+        for q in payload.get("open_questions") or []:
+            yield _sse({"type": "open_question", "text": q})
+        for card in payload.get("cards") or []:
+            yield _sse({"type": "card", "card": card})
+        yield _sse({"type": "done", "model": payload.get("model")})
 
     return StreamingResponse(
         event_stream(),
@@ -1983,20 +1987,30 @@ async def accept_copilot_card(
                     })
                     yield _sse({"type": "done", "model": "osha_chain"})
                     return
+            except Exception:
+                logger.exception("copilot accept failed for incident %s", incident_id)
+                yield _sse({"type": "error", "detail": "Action failed — see server logs"})
+                return
 
-                # Re-run guidance with fresh state
-                yield _sse({"type": "status", "stage": "thinking"})
+        # Follow-up guidance round — OUTSIDE the action's connection scope so the
+        # (up-to-60s) Gemini call doesn't pin a pool slot: reload state on a
+        # short-lived connection, release it for the model call, then re-acquire
+        # to persist the round.
+        try:
+            yield _sse({"type": "status", "stage": "thinking"})
+            async with get_connection() as conn:
                 incident, analyses, messages = await load_incident_state(
                     conn, incident_id, company_id
                 )
-                try:
-                    payload = await generate_guidance(
-                        incident=incident, analyses=analyses, messages=messages,
-                    )
-                except Exception:
-                    logger.exception("Follow-up guidance failed after accept")
-                    payload = {"summary": event_summary, "open_questions": [], "cards": []}
+            try:
+                payload = await generate_guidance(
+                    incident=incident, analyses=analyses, messages=messages,
+                )
+            except Exception:
+                logger.exception("Follow-up guidance failed after accept")
+                payload = {"summary": event_summary, "open_questions": [], "cards": []}
 
+            async with get_connection() as conn:
                 await persist_assistant_round(
                     conn,
                     incident_id=incident_id,
@@ -2005,15 +2019,15 @@ async def accept_copilot_card(
                     guidance_payload=payload,
                 )
 
-                yield _sse({"type": "summary", "text": payload.get("summary") or ""})
-                for q in payload.get("open_questions") or []:
-                    yield _sse({"type": "open_question", "text": q})
-                for new_card in payload.get("cards") or []:
-                    yield _sse({"type": "card", "card": new_card})
-                yield _sse({"type": "done", "model": payload.get("model")})
-            except Exception:
-                logger.exception("copilot accept failed for incident %s", incident_id)
-                yield _sse({"type": "error", "detail": "Action failed — see server logs"})
+            yield _sse({"type": "summary", "text": payload.get("summary") or ""})
+            for q in payload.get("open_questions") or []:
+                yield _sse({"type": "open_question", "text": q})
+            for new_card in payload.get("cards") or []:
+                yield _sse({"type": "card", "card": new_card})
+            yield _sse({"type": "done", "model": payload.get("model")})
+        except Exception:
+            logger.exception("copilot accept follow-up failed for incident %s", incident_id)
+            yield _sse({"type": "error", "detail": "Action failed — see server logs"})
 
     return StreamingResponse(
         event_stream(),

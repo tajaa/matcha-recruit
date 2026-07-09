@@ -70,10 +70,11 @@ type Summary300A = {
   certified_by: string | null
   certified_title: string | null
   certified_date: string | null
+  data_quality_warnings?: string[]
 }
 
 type ItaProblem = {
-  location_id: string
+  location_id: string | null
   establishment_name: string
   missing: string[]
 }
@@ -112,6 +113,7 @@ const missingLabel: Record<string, string> = {
   naics: 'NAICS code',
   street_address: 'Street address',
   total_hours_worked: 'Total hours worked',
+  unassigned_location: 'a location (excluded from the filing until assigned)',
 }
 
 export function OshaLogsPanel() {
@@ -351,7 +353,12 @@ export function OshaLogsPanel() {
       const problems = await api.get<ItaProblem[]>(`/ir/incidents/osha/ita/validate?year=${year}`)
       if (problems.length > 0) {
         setItaProblems(problems)
-        return
+        // Missing establishment fields block the export (the backend 400s on
+        // them anyway). The unassigned-recordables entry is advisory — those
+        // incidents are excluded from the file, but the file itself is valid —
+        // so surface it and continue.
+        const blocking = problems.filter((p) => !p.missing.includes('unassigned_location'))
+        if (blocking.length > 0) return
       }
       promptExport('OSHA ITA Establishment Export', renderItaPreview(), () =>
         api.download(`/ir/incidents/osha/ita/export.csv?year=${year}&attested=true`, `osha_ita_${year}.csv`),
@@ -461,12 +468,14 @@ export function OshaLogsPanel() {
             <AlertTriangle size={15} />
             {itaProblems.length === 0
               ? 'ITA export failed — check establishment data and retry.'
-              : 'Cannot export ITA file — fill these establishment fields first:'}
+              : itaProblems.every((p) => p.missing.includes('unassigned_location'))
+                ? 'Review before filing — these incidents are excluded from the export:'
+                : 'Cannot export ITA file — fill these establishment fields first:'}
           </div>
           {itaProblems.length > 0 && (
             <ul className="mt-3 space-y-1.5">
               {itaProblems.map((p) => (
-                <li key={p.location_id} className="text-[12px] text-amber-200/90">
+                <li key={p.location_id ?? 'unassigned'} className="text-[12px] text-amber-200/90">
                   <span className="font-medium">{p.establishment_name || 'Unnamed location'}</span>
                   {' — missing '}
                   {p.missing.map((m) => missingLabel[m] ?? m).join(', ')}
@@ -474,6 +483,22 @@ export function OshaLogsPanel() {
               ))}
             </ul>
           )}
+        </div>
+      )}
+
+      {/* 300A data-quality warnings — recordables missing a classification or a
+          location won't foot / file correctly. Non-blocking. */}
+      {summary && summary.data_quality_warnings && summary.data_quality_warnings.length > 0 && (
+        <div className="bg-amber-950/30 border border-amber-500/30 rounded-2xl p-5">
+          <div className="flex items-center gap-2 text-amber-300 text-sm font-semibold">
+            <AlertTriangle size={15} />
+            Data quality — review before filing
+          </div>
+          <ul className="mt-3 space-y-1.5">
+            {summary.data_quality_warnings.map((w, i) => (
+              <li key={i} className="text-[12px] text-amber-200/90">{w}</li>
+            ))}
+          </ul>
         </div>
       )}
 
