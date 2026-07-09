@@ -70,23 +70,23 @@ export function TagsTab({ tags, onChange, subscribers }: {
 
   return (
     <div className="space-y-4 max-w-2xl">
-      <div className="rounded-xl border border-zinc-800 p-4">
-        <p className="text-xs text-zinc-400 mb-3">Add a tag (slug must be lowercase, no spaces).</p>
+      <div className="rounded-xl border border-slate-200 bg-white shadow-sm p-4">
+        <p className="text-xs text-slate-500 mb-3">Add a tag (slug must be lowercase, no spaces).</p>
         <div className="grid grid-cols-3 gap-2 mb-2">
-          <input value={slug} onChange={(e) => setSlug(e.target.value)} placeholder="slug (e.g. hospitality)" className="px-3 py-2 rounded-lg border border-zinc-700 bg-zinc-900 text-sm text-zinc-200 placeholder-zinc-500 outline-none" />
-          <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Label (e.g. Hospitality)" className="px-3 py-2 rounded-lg border border-zinc-700 bg-zinc-900 text-sm text-zinc-200 placeholder-zinc-500 outline-none" />
-          <button onClick={add} disabled={!slug.trim() || !label.trim()} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium rounded-lg disabled:opacity-40">Add tag</button>
+          <input value={slug} onChange={(e) => setSlug(e.target.value)} placeholder="slug (e.g. hospitality)" className="px-3 py-2 rounded-lg border border-slate-300 bg-white text-sm text-slate-900 placeholder-slate-400 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition-colors" />
+          <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Label (e.g. Hospitality)" className="px-3 py-2 rounded-lg border border-slate-300 bg-white text-sm text-slate-900 placeholder-slate-400 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition-colors" />
+          <button onClick={add} disabled={!slug.trim() || !label.trim()} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium rounded-lg shadow-sm disabled:opacity-40">Add tag</button>
         </div>
-        <input value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="Description (optional)" className="w-full px-3 py-2 rounded-lg border border-zinc-700 bg-zinc-900 text-sm text-zinc-200 placeholder-zinc-500 outline-none" />
+        <input value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="Description (optional)" className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-sm text-slate-900 placeholder-slate-400 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition-colors" />
       </div>
-      <div className="rounded-xl border border-zinc-800 overflow-hidden">
+      <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
         <table className="w-full text-xs">
-          <thead className="bg-zinc-900/80 border-b border-zinc-800">
+          <thead className="bg-slate-50 border-b border-slate-200">
             <tr>
-              <th className="text-left px-4 py-2.5 text-zinc-400 font-medium">Slug</th>
-              <th className="text-left px-4 py-2.5 text-zinc-400 font-medium">Label</th>
-              <th className="text-left px-4 py-2.5 text-zinc-400 font-medium">Description</th>
-              <th className="text-right px-4 py-2.5 text-zinc-400 font-medium">Subs</th>
+              <th className="text-left px-4 py-2.5 text-slate-500 font-medium uppercase tracking-wide text-[10px]">Slug</th>
+              <th className="text-left px-4 py-2.5 text-slate-500 font-medium uppercase tracking-wide text-[10px]">Label</th>
+              <th className="text-left px-4 py-2.5 text-slate-500 font-medium uppercase tracking-wide text-[10px]">Description</th>
+              <th className="text-right px-4 py-2.5 text-slate-500 font-medium uppercase tracking-wide text-[10px]">Subs</th>
               <th />
             </tr>
           </thead>
@@ -103,22 +103,22 @@ export function TagsTab({ tags, onChange, subscribers }: {
               return (
                 <React.Fragment key={t.id}>
                   <tr
-                    className="border-b border-zinc-800/50 hover:bg-zinc-800/20 cursor-pointer"
+                    className="border-b border-slate-100 hover:bg-slate-50 cursor-pointer"
                     onClick={() => expandTag(t.id)}
                   >
-                    <td className="px-4 py-2.5 font-mono text-zinc-300">{t.slug}</td>
-                    <td className="px-4 py-2.5 text-zinc-200">{t.label}</td>
-                    <td className="px-4 py-2.5 text-zinc-500">{t.description ?? '—'}</td>
-                    <td className="px-4 py-2.5 text-right text-zinc-400">{t.subscriber_count}</td>
+                    <td className="px-4 py-2.5 font-mono text-slate-600">{t.slug}</td>
+                    <td className="px-4 py-2.5 text-slate-800">{t.label}</td>
+                    <td className="px-4 py-2.5 text-slate-400">{t.description ?? '—'}</td>
+                    <td className="px-4 py-2.5 text-right text-slate-500">{t.subscriber_count}</td>
                     <td className="px-4 py-2.5 text-right">
                       <div className="flex items-center gap-2 justify-end">
                         <ChevronDown
                           size={12}
-                          className={`text-zinc-500 transition-transform ${expandedTag === t.id ? 'rotate-180' : ''}`}
+                          className={`text-slate-400 transition-transform ${expandedTag === t.id ? 'rotate-180' : ''}`}
                         />
                         <button
                           onClick={(e) => { e.stopPropagation(); remove(t.id) }}
-                          className="text-zinc-500 hover:text-red-400"
+                          className="text-slate-400 hover:text-red-600"
                           title="Delete tag"
                         >
                           <Trash2 size={13} />
@@ -128,26 +128,26 @@ export function TagsTab({ tags, onChange, subscribers }: {
                   </tr>
                   {expandedTag === t.id && (
                     <tr>
-                      <td colSpan={5} className="px-4 py-3 bg-zinc-900/40 border-b border-zinc-800/50">
+                      <td colSpan={5} className="px-4 py-3 bg-slate-50 border-b border-slate-100">
                         {loadingMembers.has(t.id) && (
-                          <p className="text-[11px] text-zinc-500 mb-2 flex items-center gap-1"><Loader2 size={10} className="animate-spin" /> Loading…</p>
+                          <p className="text-[11px] text-slate-400 mb-2 flex items-center gap-1"><Loader2 size={10} className="animate-spin" /> Loading…</p>
                         )}
                         {!loadingMembers.has(t.id) && tagMembers[t.id] !== undefined && members.length === 0 && (
-                          <p className="text-[11px] text-zinc-500 mb-2">No members yet.</p>
+                          <p className="text-[11px] text-slate-400 mb-2">No members yet.</p>
                         )}
                         {members.length > 0 && (
                           <div className="space-y-1 mb-3">
                             {members.map(m => (
                               <div key={m.id} className="flex items-center gap-2">
-                                <span className="text-[11px] text-zinc-300 flex-1">{m.email}</span>
+                                <span className="text-[11px] text-slate-600 flex-1">{m.email}</span>
                                 <span className={`px-1.5 py-0.5 rounded text-[10px] ${
-                                  m.status === 'active' ? 'bg-emerald-900/30 text-emerald-400'
-                                  : m.status === 'pending' ? 'bg-amber-900/30 text-amber-400'
-                                  : 'bg-zinc-800 text-zinc-500'
+                                  m.status === 'active' ? 'bg-emerald-50 text-emerald-700'
+                                  : m.status === 'pending' ? 'bg-amber-50 text-amber-700'
+                                  : 'bg-slate-100 text-slate-500'
                                 }`}>{m.status}</span>
                                 <button
                                   onClick={() => removeMemberFromTag(t.id, m.id)}
-                                  className="text-zinc-600 hover:text-red-400"
+                                  className="text-slate-400 hover:text-red-600"
                                   title="Remove from group"
                                 >
                                   <X size={11} />
@@ -159,25 +159,25 @@ export function TagsTab({ tags, onChange, subscribers }: {
                         {/* Add subscriber search */}
                         <div className="relative">
                           <div className="flex items-center gap-2">
-                            <UserPlus size={11} className="text-zinc-500 shrink-0" />
+                            <UserPlus size={11} className="text-slate-400 shrink-0" />
                             <input
                               value={search}
                               onChange={(e) => setAddSearch(prev => ({ ...prev, [t.id]: e.target.value }))}
                               placeholder="Add subscriber by email…"
-                              className="flex-1 px-2 py-1 rounded border border-zinc-700 bg-zinc-900 text-[11px] text-zinc-200 placeholder-zinc-600 outline-none focus:border-zinc-500"
+                              className="flex-1 px-2 py-1 rounded border border-slate-300 bg-white text-[11px] text-slate-800 placeholder-slate-400 outline-none focus:border-emerald-500"
                               onClick={(e) => e.stopPropagation()}
                             />
                           </div>
                           {searchResults.length > 0 && (
-                            <div className="absolute left-6 top-full mt-1 z-50 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl w-72">
+                            <div className="absolute left-6 top-full mt-1 z-50 bg-white border border-slate-200 rounded-lg shadow-lg w-72">
                               {searchResults.map(s => (
                                 <button
                                   key={s.id}
                                   onClick={(e) => { e.stopPropagation(); addMemberToTag(t.id, s) }}
-                                  className="w-full text-left px-3 py-2 text-[11px] text-zinc-300 hover:bg-zinc-800 flex items-center gap-2"
+                                  className="w-full text-left px-3 py-2 text-[11px] text-slate-600 hover:bg-slate-50 flex items-center gap-2"
                                 >
                                   <span className="flex-1 truncate">{s.email}</span>
-                                  {s.name && <span className="text-zinc-500 truncate max-w-[100px]">{s.name}</span>}
+                                  {s.name && <span className="text-slate-400 truncate max-w-[100px]">{s.name}</span>}
                                 </button>
                               ))}
                             </div>
@@ -189,7 +189,7 @@ export function TagsTab({ tags, onChange, subscribers }: {
                 </React.Fragment>
               )
             })}
-            {tags.length === 0 && <tr><td colSpan={5} className="px-4 py-8 text-center text-zinc-500">No tags yet.</td></tr>}
+            {tags.length === 0 && <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-400">No tags yet.</td></tr>}
           </tbody>
         </table>
       </div>

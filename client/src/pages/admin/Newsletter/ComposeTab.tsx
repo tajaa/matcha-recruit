@@ -37,29 +37,29 @@ export function ComposeTab({
     <div className="space-y-4">
       {/* Save status indicator */}
       <div className="h-4 flex items-center">
-        {saveStatus === 'saving' && <span className="text-[10px] text-zinc-500 flex items-center gap-1"><Loader2 size={10} className="animate-spin" /> Saving…</span>}
-        {saveStatus === 'saved' && editingId && <span className="text-[10px] text-zinc-500">Saved</span>}
-        {saveStatus === 'unsaved' && <span className="text-[10px] text-amber-500">Unsaved changes</span>}
+        {saveStatus === 'saving' && <span className="text-[10px] text-slate-400 flex items-center gap-1"><Loader2 size={10} className="animate-spin" /> Saving…</span>}
+        {saveStatus === 'saved' && editingId && <span className="text-[10px] text-slate-400">Saved</span>}
+        {saveStatus === 'unsaved' && <span className="text-[10px] text-amber-600">Unsaved changes</span>}
       </div>
       <div className={`grid ${previewViewport === 'wide' ? 'grid-cols-1' : previewViewport === 'desktop' ? 'lg:grid-cols-[1fr_660px]' : 'lg:grid-cols-[1fr_376px]'} gap-6 max-w-6xl`}>
         <div className="space-y-4">
           <div>
-            <label className="block text-xs text-zinc-400 mb-1">Title</label>
-            <input value={composeTitle} onChange={(e) => { setComposeTitle(e.target.value); setIsDirty(true); setSaveStatus('unsaved') }} placeholder="Newsletter title..." className="w-full px-3 py-2 rounded-lg border border-zinc-700 bg-zinc-900 text-sm text-zinc-200 placeholder-zinc-500 outline-none focus:border-zinc-500" />
+            <label className="block text-xs text-slate-600 mb-1">Title</label>
+            <input value={composeTitle} onChange={(e) => { setComposeTitle(e.target.value); setIsDirty(true); setSaveStatus('unsaved') }} placeholder="Newsletter title..." className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-sm text-slate-900 placeholder-slate-400 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition-colors" />
           </div>
           <div>
-            <label className="block text-xs text-zinc-400 mb-1">Subject line</label>
-            <input value={composeSubject} onChange={(e) => { setComposeSubject(e.target.value); setIsDirty(true); setSaveStatus('unsaved') }} placeholder="Email subject..." className="w-full px-3 py-2 rounded-lg border border-zinc-700 bg-zinc-900 text-sm text-zinc-200 placeholder-zinc-500 outline-none focus:border-zinc-500" />
+            <label className="block text-xs text-slate-600 mb-1">Subject line</label>
+            <input value={composeSubject} onChange={(e) => { setComposeSubject(e.target.value); setIsDirty(true); setSaveStatus('unsaved') }} placeholder="Email subject..." className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-sm text-slate-900 placeholder-slate-400 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition-colors" />
           </div>
           <div>
-            <label className="block text-xs text-zinc-400 mb-1">
-              Preheader <span className="text-zinc-600">— inbox preview snippet, hidden in body</span>
+            <label className="block text-xs text-slate-600 mb-1">
+              Preheader <span className="text-slate-400">— inbox preview snippet, hidden in body</span>
             </label>
-            <input value={composePreheader} onChange={(e) => { setComposePreheader(e.target.value); setIsDirty(true); setSaveStatus('unsaved') }} maxLength={255} placeholder="Short hook seen in the recipient's inbox preview..." className="w-full px-3 py-2 rounded-lg border border-zinc-700 bg-zinc-900 text-sm text-zinc-200 placeholder-zinc-500 outline-none focus:border-zinc-500" />
+            <input value={composePreheader} onChange={(e) => { setComposePreheader(e.target.value); setIsDirty(true); setSaveStatus('unsaved') }} maxLength={255} placeholder="Short hook seen in the recipient's inbox preview..." className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-sm text-slate-900 placeholder-slate-400 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition-colors" />
           </div>
           <div>
-            <label className="block text-xs text-zinc-400 mb-1">Content</label>
-            <div className="rounded-lg border border-zinc-700 overflow-hidden" style={{ background: '#1e1e1e' }}>
+            <label className="block text-xs text-slate-600 mb-1">Content</label>
+            <div className="rounded-lg border border-slate-300 overflow-hidden shadow-sm" style={{ background: '#1e1e1e' }}>
               <SectionEditor
                 content={composeHtml}
                 onUpdate={(html) => { setComposeHtml(html); setIsDirty(true); setSaveStatus('unsaved') }}
@@ -83,24 +83,24 @@ export function ComposeTab({
 
       <div className="flex flex-wrap gap-2 max-w-6xl">
         {!editingId ? (
-          <button onClick={handleCreate} disabled={saving || !composeTitle.trim() || !composeSubject.trim()} className="flex items-center gap-1.5 px-4 py-2 bg-zinc-700 hover:bg-zinc-600 text-white text-sm font-medium rounded-lg disabled:opacity-40">
+          <button onClick={handleCreate} disabled={saving || !composeTitle.trim() || !composeSubject.trim()} className="flex items-center gap-1.5 px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white text-sm font-medium rounded-lg shadow-sm disabled:opacity-40">
             {saving ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />} Create Draft
           </button>
         ) : (
           <>
-            <button onClick={handleSave} disabled={saving} className="flex items-center gap-1.5 px-4 py-2 bg-zinc-700 hover:bg-zinc-600 text-white text-sm font-medium rounded-lg disabled:opacity-40">
+            <button onClick={handleSave} disabled={saving} className="flex items-center gap-1.5 px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white text-sm font-medium rounded-lg shadow-sm disabled:opacity-40">
               {saving ? <Loader2 size={14} className="animate-spin" /> : null} Save Draft
             </button>
-            <button onClick={handleTestSend} className="flex items-center gap-1.5 px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-sm font-medium rounded-lg border border-zinc-700">
+            <button onClick={handleTestSend} className="flex items-center gap-1.5 px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 text-sm font-medium rounded-lg border border-slate-300 shadow-sm">
               <Send size={14} /> Send Test
             </button>
-            <button onClick={() => openSend('now')} className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium rounded-lg">
+            <button onClick={() => openSend('now')} className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium rounded-lg shadow-sm">
               <Send size={14} /> Send to all
             </button>
-            <button onClick={() => openSend('segment')} className="flex items-center gap-1.5 px-4 py-2 bg-emerald-700 hover:bg-emerald-600 text-white text-sm font-medium rounded-lg">
+            <button onClick={() => openSend('segment')} className="flex items-center gap-1.5 px-4 py-2 bg-white hover:bg-emerald-50 text-emerald-700 text-sm font-medium rounded-lg border border-emerald-300 shadow-sm">
               <TagIcon size={14} /> Send to segment
             </button>
-            <button onClick={() => openSend('schedule')} className="flex items-center gap-1.5 px-4 py-2 bg-sky-700 hover:bg-sky-600 text-white text-sm font-medium rounded-lg">
+            <button onClick={() => openSend('schedule')} className="flex items-center gap-1.5 px-4 py-2 bg-white hover:bg-sky-50 text-sky-700 text-sm font-medium rounded-lg border border-sky-300 shadow-sm">
               <Calendar size={14} /> Schedule…
             </button>
           </>

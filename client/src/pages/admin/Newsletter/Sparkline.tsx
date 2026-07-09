@@ -9,17 +9,17 @@ export function Sparkline({ points }: { points: number[] }) {
     .join(' ')
   return (
     <svg width={w} height={h} className="block">
-      <path d={path} stroke="#34d399" strokeWidth={1.5} fill="none" />
+      <path d={path} stroke="#059669" strokeWidth={1.5} fill="none" />
     </svg>
   )
 }
 
 export function Stat({ label, value, sub }: { label: string; value: number | string; sub?: string }) {
   return (
-    <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
-      <p className="text-[10px] text-zinc-500 uppercase tracking-wider mb-1">{label}</p>
-      <p className="text-xl font-semibold text-zinc-100">{value}</p>
-      {sub && <p className="text-[10px] text-zinc-500 mt-0.5">{sub}</p>}
+    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+      <p className="text-[10px] text-slate-400 uppercase tracking-wider mb-1">{label}</p>
+      <p className="text-xl font-semibold text-slate-900">{value}</p>
+      {sub && <p className="text-[10px] text-slate-400 mt-0.5">{sub}</p>}
     </div>
   )
 }

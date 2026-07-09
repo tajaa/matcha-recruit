@@ -36,27 +36,27 @@ export function TemplatesTab({
   return (
     <div className="grid lg:grid-cols-[1fr_360px] gap-6 max-w-6xl">
       <div className="space-y-3">
-        <p className="text-xs text-zinc-400">Saved templates seed new newsletters with proven content.</p>
-        {templates.length === 0 && <p className="text-zinc-500 text-sm py-4">No templates yet.</p>}
+        <p className="text-xs text-slate-500">Saved templates seed new newsletters with proven content.</p>
+        {templates.length === 0 && <p className="text-slate-400 text-sm py-4">No templates yet.</p>}
         {templates.map((t) => (
-          <div key={t.id} className="rounded-xl border border-zinc-800 px-4 py-3 flex items-center gap-3">
-            <Layout size={14} className="text-zinc-500 shrink-0" />
+          <div key={t.id} className="rounded-xl border border-slate-200 bg-white shadow-sm px-4 py-3 flex items-center gap-3">
+            <Layout size={14} className="text-slate-400 shrink-0" />
             <div className="flex-1 min-w-0">
-              <p className="text-sm text-zinc-200 truncate">{t.name}</p>
-              {t.description && <p className="text-[11px] text-zinc-500 truncate">{t.description}</p>}
+              <p className="text-sm text-slate-800 truncate">{t.name}</p>
+              {t.description && <p className="text-[11px] text-slate-400 truncate">{t.description}</p>}
             </div>
-            <button onClick={() => onPickTemplate(t)} className="text-xs text-emerald-400 hover:text-emerald-300">Use →</button>
-            <button onClick={() => remove(t.id)} className="text-zinc-500 hover:text-red-400"><Trash2 size={13} /></button>
+            <button onClick={() => onPickTemplate(t)} className="text-xs text-emerald-700 hover:text-emerald-800 font-medium">Use →</button>
+            <button onClick={() => remove(t.id)} className="text-slate-400 hover:text-red-600"><Trash2 size={13} /></button>
           </div>
         ))}
       </div>
-      <div className="rounded-xl border border-zinc-800 p-4 space-y-3 self-start">
-        <p className="text-[10px] text-zinc-500 uppercase tracking-wider">Save current as template</p>
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Template name" className="w-full px-3 py-2 rounded-lg border border-zinc-700 bg-zinc-900 text-sm text-zinc-200 placeholder-zinc-500 outline-none" />
-        <input value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="Description (optional)" className="w-full px-3 py-2 rounded-lg border border-zinc-700 bg-zinc-900 text-sm text-zinc-200 placeholder-zinc-500 outline-none" />
-        <input value={pre} onChange={(e) => setPre(e.target.value)} placeholder="Preheader (optional)" className="w-full px-3 py-2 rounded-lg border border-zinc-700 bg-zinc-900 text-sm text-zinc-200 placeholder-zinc-500 outline-none" />
-        <textarea value={html} onChange={(e) => setHtml(e.target.value)} placeholder="Paste sanitized HTML or leave blank for an empty starter" rows={5} className="w-full px-3 py-2 rounded-lg border border-zinc-700 bg-zinc-900 text-xs font-mono text-zinc-200 placeholder-zinc-500 outline-none" />
-        <button onClick={save} disabled={!name.trim()} className="w-full px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium rounded-lg disabled:opacity-40">Save template</button>
+      <div className="rounded-xl border border-slate-200 bg-white shadow-sm p-4 space-y-3 self-start">
+        <p className="text-[10px] text-slate-400 uppercase tracking-wider">Save current as template</p>
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Template name" className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-sm text-slate-900 placeholder-slate-400 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition-colors" />
+        <input value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="Description (optional)" className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-sm text-slate-900 placeholder-slate-400 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition-colors" />
+        <input value={pre} onChange={(e) => setPre(e.target.value)} placeholder="Preheader (optional)" className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-sm text-slate-900 placeholder-slate-400 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition-colors" />
+        <textarea value={html} onChange={(e) => setHtml(e.target.value)} placeholder="Paste sanitized HTML or leave blank for an empty starter" rows={5} className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-slate-50 text-xs font-mono text-slate-800 placeholder-slate-400 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition-colors" />
+        <button onClick={save} disabled={!name.trim()} className="w-full px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium rounded-lg shadow-sm disabled:opacity-40">Save template</button>
       </div>
     </div>
   )

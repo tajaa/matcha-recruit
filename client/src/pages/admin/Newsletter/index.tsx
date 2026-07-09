@@ -378,19 +378,19 @@ export default function NewsletterAdmin() {
   }
 
   if (loading) {
-    return <div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-zinc-500" size={24} /></div>
+    return <div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-slate-400" size={24} /></div>
   }
 
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-xl font-semibold text-zinc-100">Newsletter</h1>
+        <h1 className="text-xl font-semibold text-slate-900">Newsletter</h1>
         <button
           onClick={() => {
             if (isDirty && !confirm('Discard unsaved changes?')) return
             navigate('/admin/newsletter/composer')
           }}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium rounded-lg transition-colors"
+          className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium rounded-lg shadow-sm transition-colors"
         >
           <Plus size={14} /> New Newsletter
         </button>
@@ -399,21 +399,21 @@ export default function NewsletterAdmin() {
       {/* Stats + growth sparkline */}
       {stats && (
         <div className="flex flex-wrap items-end gap-3 mb-6">
-          <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 px-4 py-2">
-            <p className="text-[10px] text-zinc-500 uppercase">Active</p>
-            <p className="text-lg font-bold text-zinc-100">{stats.active}</p>
+          <div className="rounded-lg border border-slate-200 bg-white shadow-sm px-4 py-2">
+            <p className="text-[10px] text-slate-400 uppercase tracking-wide">Active</p>
+            <p className="text-lg font-bold text-slate-900">{stats.active}</p>
           </div>
           {Object.entries(stats.by_source).slice(0, 5).map(([src, cnt]) => (
-            <div key={src} className="rounded-lg border border-zinc-800 bg-zinc-900/50 px-4 py-2">
-              <p className="text-[10px] text-zinc-500 uppercase">{src}</p>
-              <p className="text-lg font-bold text-zinc-100">{cnt}</p>
+            <div key={src} className="rounded-lg border border-slate-200 bg-white shadow-sm px-4 py-2">
+              <p className="text-[10px] text-slate-400 uppercase tracking-wide">{src}</p>
+              <p className="text-lg font-bold text-slate-900">{cnt}</p>
             </div>
           ))}
           {growth.length > 0 && (
-            <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 px-4 py-2 flex-1 min-w-[280px]">
-              <p className="text-[10px] text-zinc-500 uppercase">90-day growth</p>
+            <div className="rounded-lg border border-slate-200 bg-white shadow-sm px-4 py-2 flex-1 min-w-[280px]">
+              <p className="text-[10px] text-slate-400 uppercase tracking-wide">90-day growth</p>
               <Sparkline points={growth.map((p) => p.subscribed)} />
-              <p className="text-[10px] text-zinc-500 mt-1">
+              <p className="text-[10px] text-slate-400 mt-1">
                 +{growth.reduce((sum, p) => sum + p.subscribed, 0)} in last {growth.length} days
               </p>
             </div>
@@ -423,16 +423,16 @@ export default function NewsletterAdmin() {
 
       {/* Send progress (sticky banner while sending) */}
       {progress && progress.newsletter_status === 'sending' && (
-        <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 mb-4 flex items-center gap-3">
-          <Loader2 className="animate-spin text-amber-300 shrink-0" size={16} />
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 mb-4 flex items-center gap-3">
+          <Loader2 className="animate-spin text-amber-600 shrink-0" size={16} />
           <div className="flex-1">
-            <div className="text-xs text-amber-200">
+            <div className="text-xs text-amber-800">
               Sending: {progress.sent} / {progress.queued}
-              {progress.failed > 0 && <span className="ml-2 text-red-300">{progress.failed} failed</span>}
+              {progress.failed > 0 && <span className="ml-2 text-red-600">{progress.failed} failed</span>}
             </div>
-            <div className="mt-1 h-1.5 rounded-full bg-zinc-800 overflow-hidden">
+            <div className="mt-1 h-1.5 rounded-full bg-amber-100 overflow-hidden">
               <div
-                className="h-full bg-amber-400 transition-all"
+                className="h-full bg-amber-500 transition-all"
                 style={{ width: `${progress.queued ? Math.round((progress.sent / progress.queued) * 100) : 0}%` }}
               />
             </div>
@@ -441,16 +441,16 @@ export default function NewsletterAdmin() {
       )}
 
       {/* Tabs */}
-      <div className="flex gap-1 mb-6 border-b border-zinc-800/60 pb-px">
+      <div className="flex gap-1 mb-6 border-b border-slate-200 pb-px">
         {(['subscribers', 'newsletters', 'compose', 'tags', 'templates'] as Tab[]).map((t) => {
           const draftCount = t === 'newsletters' ? newsletters.filter(n => n.status === 'draft').length : 0
           return (
-            <button key={t} onClick={() => handleTabChange(t)} className={`px-4 py-2 text-xs font-medium transition-colors relative flex items-center gap-1.5 ${tab === t ? 'text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'}`}>
+            <button key={t} onClick={() => handleTabChange(t)} className={`px-4 py-2 text-xs font-medium transition-colors relative flex items-center gap-1.5 ${tab === t ? 'text-slate-900' : 'text-slate-500 hover:text-slate-800'}`}>
               {t === 'compose' ? (editingId ? 'Edit Draft' : 'Compose') : t.charAt(0).toUpperCase() + t.slice(1)}
               {draftCount > 0 && (
-                <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-zinc-700 text-zinc-300 font-mono leading-none">{draftCount}</span>
+                <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-slate-100 text-slate-500 font-mono leading-none">{draftCount}</span>
               )}
-              {tab === t && <span className="absolute bottom-0 left-2 right-2 h-px bg-zinc-300 rounded-full" />}
+              {tab === t && <span className="absolute bottom-0 left-2 right-2 h-0.5 bg-emerald-600 rounded-full" />}
             </button>
           )
         })}

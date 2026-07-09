@@ -63,13 +63,13 @@ export function CsvImportModal({ onClose, onDone }: { onClose: () => void; onDon
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
-      <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 w-full max-w-2xl">
+    <div className="fixed inset-0 z-50 bg-slate-900/40 flex items-center justify-center p-4">
+      <div className="bg-white border border-slate-200 rounded-xl shadow-xl p-6 w-full max-w-2xl">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-sm font-semibold text-zinc-100">Import subscribers</h3>
-          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300"><X size={16} /></button>
+          <h3 className="text-sm font-semibold text-slate-900">Import subscribers</h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-700"><X size={16} /></button>
         </div>
-        <p className="text-xs text-zinc-500 mb-3">
+        <p className="text-xs text-slate-500 mb-3">
           Paste CSV. First column = email, optional second column = name. Header row optional. Up to 500 rows per import.
         </p>
         <textarea
@@ -77,12 +77,12 @@ export function CsvImportModal({ onClose, onDone }: { onClose: () => void; onDon
           onChange={(e) => setCsv(e.target.value)}
           placeholder={'email,name\nsam@example.com,Sam Lee\nalex@example.com,Alex Park'}
           rows={10}
-          className="w-full px-3 py-2 rounded-lg border border-zinc-700 bg-zinc-800 text-xs font-mono text-zinc-200 placeholder-zinc-500 outline-none"
+          className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-slate-50 text-xs font-mono text-slate-800 placeholder-slate-400 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition-colors"
         />
-        <p className="text-[10px] text-zinc-500 mt-2">Detected: {parseCsv().length} valid email(s)</p>
+        <p className="text-[10px] text-slate-400 mt-2">Detected: {parseCsv().length} valid email(s)</p>
         <div className="flex justify-end gap-2 mt-4">
-          <button onClick={onClose} className="text-xs px-3 py-1.5 rounded-lg text-zinc-400 hover:text-zinc-200">Cancel</button>
-          <button onClick={submit} disabled={busy || parseCsv().length === 0} className="text-xs px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-40">
+          <button onClick={onClose} className="text-xs px-3 py-1.5 rounded-lg text-slate-500 hover:text-slate-800">Cancel</button>
+          <button onClick={submit} disabled={busy || parseCsv().length === 0} className="text-xs px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm disabled:opacity-40">
             {busy ? 'Importing…' : 'Import'}
           </button>
         </div>
