@@ -1014,7 +1014,16 @@ export function sendMessageStream(
             if (!line.startsWith('data: ')) continue
             const raw = line.slice(6).trim()
             if (raw === '[DONE]') {
+              // Stream closed without a complete/error event — if we got here,
+              // neither callback fired. Leaving the caller waiting freezes the
+              // composer until a full page reload.
               clearTimeout(timeout)
+              reportApiError({
+                endpoint: `/matcha-work/threads/${threadId}/messages/stream`,
+                status: 200,
+                message: 'SSE stream ended ([DONE]) without complete/error event',
+              })
+              callbacks.onError('The response stream ended unexpectedly. Please try again.')
               return
             }
 
@@ -1044,7 +1053,18 @@ export function sendMessageStream(
             }
           }
         }
+        // Reader drained without a complete/error event (proxy cut the
+        // connection, backend crashed mid-stream, …). Surface it — silence
+        // here left the UI stuck on "Thinking…" with the input disabled.
         clearTimeout(timeout)
+        if (!ctrl.signal.aborted) {
+          reportApiError({
+            endpoint: `/matcha-work/threads/${threadId}/messages/stream`,
+            status: 200,
+            message: 'SSE stream closed without complete/error event',
+          })
+          callbacks.onError('The response stream ended unexpectedly. Please try again.')
+        }
       })
       .catch((e) => {
         clearTimeout(timeout)

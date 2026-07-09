@@ -160,6 +160,10 @@ export default function MatchaWorkThread() {
     if (!threadId) return
     setLoading(true)
     setError('')
+    // Switching threads mid-stream: the abort below fires no onComplete/onError
+    // (user-initiated), so nothing else resets `streaming` — without this the
+    // new thread mounts with a disabled composer and a permanent "Thinking…".
+    setStreaming(false)
     getThread(threadId)
       .then((data) => {
         setThread(data)
@@ -172,7 +176,7 @@ export default function MatchaWorkThread() {
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load thread'))
       .finally(() => setLoading(false))
 
-    return () => { abortRef.current?.abort() }
+    return () => { abortRef.current?.abort('thread-switch') }
   }, [threadId])
 
   const prevLenRef = useRef(0)
@@ -257,7 +261,7 @@ export default function MatchaWorkThread() {
 
   function handleSend(overrideContent?: string, slideIndex?: number) {
     const content = (overrideContent ?? input).trim()
-    if (!threadId || !content || streaming) return
+    if (!threadId || !content || streaming || togglingMode) return
 
     setInput('')
     setStreaming(true)
@@ -467,7 +471,11 @@ export default function MatchaWorkThread() {
     try {
       await apiFn(threadId, !current)
       setThread((prev) => prev ? { ...prev, [`${mode}_mode`]: !current } : prev)
-    } catch {}
+    } catch (e) {
+      // A silently-failed toggle leaves the user believing the mode is on
+      // while the backend answers without it.
+      console.error(`Failed to toggle ${mode} mode`, e)
+    }
     setTogglingMode(null)
   }
 

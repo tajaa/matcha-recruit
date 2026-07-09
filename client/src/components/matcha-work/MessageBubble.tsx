@@ -3,6 +3,7 @@ import { FileText, Package, PlusCircle } from 'lucide-react'
 import Markdown from 'react-markdown'
 import type { MWMessage } from '../../types/matcha-work'
 import ComplianceReasoningPanel from './ComplianceReasoningPanel'
+import { safeUrl } from './markdownToHtml'
 
 function extractPenalties(reasoning: MWMessage['metadata']): { category: string; summary: string; agency: string }[] {
   if (!reasoning?.compliance_reasoning) return []
@@ -191,8 +192,8 @@ const MessageBubble = React.memo(function MessageBubble({ message: m, lightMode,
                       <span className="text-emerald-500">{s.payer_name}</span>
                       {s.policy_number && <span className={lm ? 'text-zinc-400' : 'text-zinc-600'}>|</span>}
                       {s.policy_number && <span>{s.policy_number}</span>}
-                      {s.source_url && (
-                        <a href={s.source_url} target="_blank" rel="noopener noreferrer" className="text-emerald-500 hover:text-emerald-400 ml-0.5">
+                      {safeUrl(s.source_url) && (
+                        <a href={safeUrl(s.source_url)!} target="_blank" rel="noopener noreferrer" className="text-emerald-500 hover:text-emerald-400 ml-0.5">
                           view
                         </a>
                       )}

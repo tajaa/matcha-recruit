@@ -16,12 +16,24 @@ function escapeAttr(s: string): string {
  * collaborators, so an unvalidated href is an XSS vector.
  */
 function sanitizeHref(url: string): string | null {
+  const safe = safeUrl(url)
+  return safe === null ? null : escapeAttr(safe)
+}
+
+/**
+ * Scheme check only, no HTML-escaping — for React `href={...}` props (React
+ * escapes attribute values itself). Returns the URL, or null when the scheme
+ * is disallowed (`javascript:`, `data:`, `vbscript:`, …). Use this on ANY
+ * model- or RAG-sourced URL before rendering it as a link.
+ */
+export function safeUrl(url: string | null | undefined): string | null {
+  if (!url) return null
   const trimmed = url.trim()
   // Relative paths and in-page anchors carry no scheme — safe.
-  if (/^(\/|#|\.\/|\.\.\/|\?)/.test(trimmed)) return escapeAttr(trimmed)
+  if (/^(\/|#|\.\/|\.\.\/|\?)/.test(trimmed)) return trimmed
   const scheme = trimmed.match(/^([a-zA-Z][a-zA-Z0-9+.-]*):/)?.[1]?.toLowerCase()
-  if (!scheme) return escapeAttr(trimmed) // no scheme → treat as relative
-  if (scheme === 'http' || scheme === 'https' || scheme === 'mailto') return escapeAttr(trimmed)
+  if (!scheme) return trimmed // no scheme → treat as relative
+  if (scheme === 'http' || scheme === 'https' || scheme === 'mailto') return trimmed
   return null
 }
 

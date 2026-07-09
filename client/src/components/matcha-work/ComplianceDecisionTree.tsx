@@ -10,6 +10,7 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { ExternalLink } from 'lucide-react'
+import { safeUrl } from './markdownToHtml'
 import type {
   AIReasoningStep,
   ComplianceReasoningCategory,
@@ -143,9 +144,9 @@ function JurisdictionNode({ data }: { data: { level: string; name: string; title
               {data.enforcingAgency && <span className="text-zinc-500"> — {data.enforcingAgency}</span>}
             </div>
           )}
-          {data.sourceUrl && (
+          {safeUrl(data.sourceUrl) && (
             <a
-              href={data.sourceUrl}
+              href={safeUrl(data.sourceUrl)!}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1 text-[10px] text-cyan-500 hover:text-cyan-400 mt-1"
