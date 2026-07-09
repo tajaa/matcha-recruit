@@ -676,9 +676,12 @@ class Osha300ASummary(BaseModel):
     certified_by: Optional[str] = None
     certified_title: Optional[str] = None
     certified_date: Optional[date] = None
-
-
-class Osha300ASaveRequest(BaseModel):
+    # Non-blocking data-quality flags for this establishment/year: recordable
+    # incidents whose classification is missing (won't foot into G/H/I/J
+    # meaningfully) or that are unassigned to a location (excluded from this and
+    # every 300A/ITA filing). Surfaced so a silently-wrong federal form can't
+    # print without a warning.
+    data_quality_warnings: list[str] = []
     """Persist manual hours / headcount override / certification for a 300A.
 
     Upserts osha_annual_summaries for (company, location, year). The total_*

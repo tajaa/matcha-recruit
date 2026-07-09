@@ -57,7 +57,7 @@ export default function AnonymousReport() {
           location: location.trim() || null,
           involved_parties: involvedParties.trim() || null,
           contact_info: contactInfo.trim() || null,
-          company_name: honeypot,
+          internal_ref: honeypot,
           ...(voiceTranscript ? { voice_transcript: voiceTranscript } : {}),
         }),
       })
@@ -183,10 +183,12 @@ export default function AnonymousReport() {
           />
         </Field>
 
-        {/* Honeypot — hidden from real users; bots fill this */}
+        {/* Honeypot — hidden from real users; bots fill this. Implausible name
+            (not company_name/email) so browser autofill won't populate it for a
+            real reporter and silently drop their report. */}
         <input
           type="text"
-          name="company_name"
+          name="internal_ref"
           tabIndex={-1}
           autoComplete="off"
           value={honeypot}

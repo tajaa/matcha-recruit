@@ -70,10 +70,11 @@ type Summary300A = {
   certified_by: string | null
   certified_title: string | null
   certified_date: string | null
+  data_quality_warnings?: string[]
 }
 
 type ItaProblem = {
-  location_id: string
+  location_id: string | null
   establishment_name: string
   missing: string[]
 }
@@ -112,6 +113,7 @@ const missingLabel: Record<string, string> = {
   naics: 'NAICS code',
   street_address: 'Street address',
   total_hours_worked: 'Total hours worked',
+  unassigned_location: 'a location (excluded from the filing until assigned)',
 }
 
 export function OshaLogsPanel() {
@@ -466,7 +468,7 @@ export function OshaLogsPanel() {
           {itaProblems.length > 0 && (
             <ul className="mt-3 space-y-1.5">
               {itaProblems.map((p) => (
-                <li key={p.location_id} className="text-[12px] text-amber-200/90">
+                <li key={p.location_id ?? 'unassigned'} className="text-[12px] text-amber-200/90">
                   <span className="font-medium">{p.establishment_name || 'Unnamed location'}</span>
                   {' — missing '}
                   {p.missing.map((m) => missingLabel[m] ?? m).join(', ')}
@@ -474,6 +476,22 @@ export function OshaLogsPanel() {
               ))}
             </ul>
           )}
+        </div>
+      )}
+
+      {/* 300A data-quality warnings — recordables missing a classification or a
+          location won't foot / file correctly. Non-blocking. */}
+      {summary && summary.data_quality_warnings && summary.data_quality_warnings.length > 0 && (
+        <div className="bg-amber-950/30 border border-amber-500/30 rounded-2xl p-5">
+          <div className="flex items-center gap-2 text-amber-300 text-sm font-semibold">
+            <AlertTriangle size={15} />
+            Data quality — review before filing
+          </div>
+          <ul className="mt-3 space-y-1.5">
+            {summary.data_quality_warnings.map((w, i) => (
+              <li key={i} className="text-[12px] text-amber-200/90">{w}</li>
+            ))}
+          </ul>
         </div>
       )}
 

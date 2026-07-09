@@ -1,6 +1,7 @@
 """Document upload / list / delete for IR Incidents."""
 import logging
-from uuid import UUID
+import os
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 
@@ -18,6 +19,27 @@ from ._shared import log_audit
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# Max IR document size. Matches the voice-intake guard; keeps a single large
+# upload from being buffered whole into memory unbounded.
+MAX_DOCUMENT_BYTES = 25 * 1024 * 1024
+
+# Server-derived MIME per allowed extension. We do NOT trust the client-supplied
+# content_type for storage: a .png uploaded as text/html would be a stored-XSS
+# vector if the object is ever served inline. The stored/served type is derived
+# from the validated extension here.
+_EXT_MIME = {
+    ".pdf": "application/pdf",
+    ".doc": "application/msword",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".txt": "text/plain",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".csv": "text/csv",
+    ".json": "application/json",
+}
 
 
 @router.post("/{incident_id}/documents", response_model=IRDocumentUploadResponse)
@@ -47,19 +69,39 @@ async def upload_document(
     if document_type not in valid_types:
         raise HTTPException(status_code=400, detail=f"Invalid document type. Must be one of: {valid_types}")
 
-    allowed_extensions = {".pdf", ".doc", ".docx", ".txt", ".png", ".jpg", ".jpeg", ".gif", ".csv", ".json"}
-    file_ext = "." + file.filename.split(".")[-1].lower() if "." in file.filename else ""
-    if file_ext not in allowed_extensions:
-        raise HTTPException(status_code=400, detail=f"File type not allowed. Allowed: {allowed_extensions}")
+    # Reduce the client filename to a bare basename before doing anything with it
+    # (an attacker-controlled name can contain path separators / be absent).
+    raw_name = file.filename or ""
+    safe_name = os.path.basename(raw_name.replace("\\", "/")).strip() or "upload"
+    _, ext = os.path.splitext(safe_name)
+    file_ext = ext.lower()
+    if file_ext not in _EXT_MIME:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File type not allowed. Allowed: {sorted(_EXT_MIME)}",
+        )
 
     content = await file.read()
     file_size = len(content)
+    if file_size == 0:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+    if file_size > MAX_DOCUMENT_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large. Max {MAX_DOCUMENT_BYTES // (1024 * 1024)} MB.",
+        )
+
+    # Store the object under a generated key (no client input in the S3 path) so a
+    # crafted filename can't traverse the prefix and two files with the same name
+    # on one incident can't collide/overwrite each other. The human-readable name
+    # is kept only in the DB row. The content type is derived from the validated
+    # extension, never the client-supplied value.
+    stored_mime = _EXT_MIME[file_ext]
+    file_path = f"ir-incidents/{incident_id}/{uuid4().hex}{file_ext}"
 
     storage = get_storage()
-    file_path = f"ir-incidents/{incident_id}/{file.filename}"
-
     try:
-        storage.upload_file(content, file_path, file.content_type)
+        storage.upload_file(content, file_path, stored_mime)
     except Exception as e:
         logger.error(f"Failed to upload IR document for incident {incident_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to upload file. Please try again.")
@@ -75,9 +117,9 @@ async def upload_document(
             """,
             str(incident_id),
             document_type,
-            file.filename,
+            safe_name,
             file_path,
-            file.content_type,
+            stored_mime,
             file_size,
             str(current_user.id),
         )
@@ -89,7 +131,7 @@ async def upload_document(
             "document_uploaded",
             "document",
             str(row["id"]),
-            {"filename": file.filename, "document_type": document_type},
+            {"filename": safe_name, "document_type": document_type},
             request.client.host if request.client else None,
         )
 
