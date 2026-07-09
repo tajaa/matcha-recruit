@@ -4,12 +4,14 @@ export function Sparkline({ points }: { points: number[] }) {
   const w = 240
   const h = 32
   const step = points.length > 1 ? w / (points.length - 1) : 0
-  const path = points
-    .map((v, i) => `${i === 0 ? 'M' : 'L'} ${(i * step).toFixed(1)} ${(h - (v / max) * h).toFixed(1)}`)
-    .join(' ')
+  const pts = points.map((v, i) => [i * step, h - (v / max) * h] as const)
+  const line = pts.map(([x, y], i) => `${i === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${y.toFixed(1)}`).join(' ')
+  // Close the path down to the baseline for a soft area fill under the line.
+  const area = `${line} L ${w} ${h} L 0 ${h} Z`
   return (
-    <svg width={w} height={h} className="block">
-      <path d={path} stroke="#059669" strokeWidth={1.5} fill="none" />
+    <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" className="block w-full my-1.5" height={h} role="img" aria-label="Subscriber growth trend">
+      <path d={area} fill="#059669" fillOpacity={0.08} />
+      <path d={line} stroke="#059669" strokeWidth={1.5} fill="none" vectorEffect="non-scaling-stroke" />
     </svg>
   )
 }

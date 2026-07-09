@@ -378,19 +378,26 @@ export default function NewsletterAdmin() {
   }
 
   if (loading) {
-    return <div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-slate-400" size={24} /></div>
+    return (
+      <div className="rounded-2xl bg-slate-50 border border-slate-200 shadow-xl min-h-[calc(100vh-8rem)] flex items-center justify-center">
+        <Loader2 className="animate-spin text-slate-400" size={24} />
+      </div>
+    )
   }
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-xl font-semibold text-slate-900">Newsletter</h1>
+    <div className="rounded-2xl bg-slate-50 border border-slate-200 shadow-xl min-h-[calc(100vh-8rem)] p-5 md:p-8">
+      <div className="flex items-start justify-between mb-6 gap-4">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900">Newsletter</h1>
+          <p className="text-sm text-slate-500 mt-0.5">Compose, segment, and broadcast to your subscribers.</p>
+        </div>
         <button
           onClick={() => {
             if (isDirty && !confirm('Discard unsaved changes?')) return
             navigate('/admin/newsletter/composer')
           }}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium rounded-lg shadow-sm transition-colors"
+          className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium rounded-lg shadow-sm hover:shadow transition-all shrink-0"
         >
           <Plus size={14} /> New Newsletter
         </button>
@@ -398,23 +405,23 @@ export default function NewsletterAdmin() {
 
       {/* Stats + growth sparkline */}
       {stats && (
-        <div className="flex flex-wrap items-end gap-3 mb-6">
-          <div className="rounded-lg border border-slate-200 bg-white shadow-sm px-4 py-2">
-            <p className="text-[10px] text-slate-400 uppercase tracking-wide">Active</p>
-            <p className="text-lg font-bold text-slate-900">{stats.active}</p>
+        <div className="flex flex-wrap items-stretch gap-3 mb-6">
+          <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 min-w-[130px]">
+            <p className="text-[10px] font-medium text-emerald-700/70 uppercase tracking-wide">Active subscribers</p>
+            <p className="text-2xl font-bold text-emerald-700 mt-0.5 tabular-nums">{stats.active}</p>
           </div>
           {Object.entries(stats.by_source).slice(0, 5).map(([src, cnt]) => (
-            <div key={src} className="rounded-lg border border-slate-200 bg-white shadow-sm px-4 py-2">
-              <p className="text-[10px] text-slate-400 uppercase tracking-wide">{src}</p>
-              <p className="text-lg font-bold text-slate-900">{cnt}</p>
+            <div key={src} className="rounded-xl border border-slate-200 bg-white shadow-sm px-4 py-3 min-w-[110px]">
+              <p className="text-[10px] font-medium text-slate-400 uppercase tracking-wide truncate">{src}</p>
+              <p className="text-2xl font-bold text-slate-900 mt-0.5 tabular-nums">{cnt}</p>
             </div>
           ))}
           {growth.length > 0 && (
-            <div className="rounded-lg border border-slate-200 bg-white shadow-sm px-4 py-2 flex-1 min-w-[280px]">
-              <p className="text-[10px] text-slate-400 uppercase tracking-wide">90-day growth</p>
+            <div className="rounded-xl border border-slate-200 bg-white shadow-sm px-4 py-3 flex-1 min-w-[280px] flex flex-col justify-between">
+              <p className="text-[10px] font-medium text-slate-400 uppercase tracking-wide">90-day growth</p>
               <Sparkline points={growth.map((p) => p.subscribed)} />
               <p className="text-[10px] text-slate-400 mt-1">
-                +{growth.reduce((sum, p) => sum + p.subscribed, 0)} in last {growth.length} days
+                <span className="font-semibold text-emerald-600">+{growth.reduce((sum, p) => sum + p.subscribed, 0)}</span> in last {growth.length} days
               </p>
             </div>
           )}
