@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ChevronDown, Loader2 } from 'lucide-react'
+import { ChevronDown, Loader2, Sparkles } from 'lucide-react'
 import { api } from '../../api/client'
+import { LABEL } from '../../components/ui'
 import type { AdminUpdate } from '../../types/adminUpdates'
 
 const fmtDate = (iso: string) =>
@@ -9,64 +10,34 @@ const fmtDate = (iso: string) =>
 const monthLabel = (iso: string) =>
   new Date(iso + 'T00:00:00').toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
 
-// Stable color per category, picked from a small fixed palette (keyed by string hash).
-const BADGE_COLORS = [
-  'bg-emerald-500/10 text-emerald-300 ring-emerald-500/20',
-  'bg-sky-500/10 text-sky-300 ring-sky-500/20',
-  'bg-violet-500/10 text-violet-300 ring-violet-500/20',
-  'bg-rose-500/10 text-rose-300 ring-rose-500/20',
-  'bg-amber-500/10 text-amber-300 ring-amber-500/20',
-  'bg-cyan-500/10 text-cyan-300 ring-cyan-500/20',
-  'bg-fuchsia-500/10 text-fuchsia-300 ring-fuchsia-500/20',
-  'bg-lime-500/10 text-lime-300 ring-lime-500/20',
-]
-
-function badgeColor(category: string) {
-  let h = 0
-  for (let i = 0; i < category.length; i++) h = (h * 31 + category.charCodeAt(i)) >>> 0
-  return BADGE_COLORS[h % BADGE_COLORS.length]
-}
-
-function CategoryBadge({ category }: { category: string }) {
-  return (
-    <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset ${badgeColor(category)}`}>
-      {category}
-    </span>
-  )
-}
-
 function UpdateRow({ u, open, onToggle }: { u: AdminUpdate; open: boolean; onToggle: () => void }) {
   return (
-    <article className="border-b border-zinc-800 last:border-b-0">
+    <article className="border-b border-white/[0.06] last:border-b-0">
       <button
         type="button"
         onClick={onToggle}
-        className="flex w-full items-start gap-3 py-3 text-left hover:bg-zinc-900/40"
+        className="flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-white/[0.02]"
       >
         <ChevronDown
-          className={`mt-1 h-4 w-4 shrink-0 text-zinc-500 transition-transform ${open ? 'rotate-0' : '-rotate-90'}`}
+          className={`mt-1 h-4 w-4 shrink-0 text-zinc-600 transition-transform ${open ? 'rotate-0' : '-rotate-90'}`}
         />
         <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+          <div className="flex flex-wrap items-center gap-3 font-mono text-[10px] uppercase tracking-wide text-zinc-500">
             <span className="tabular-nums">{fmtDate(u.date)}</span>
-            <CategoryBadge category={u.category} />
-            {u.tag === 'action-needed' && (
-              <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-300 ring-1 ring-inset ring-amber-500/20">
-                Setup needed
-              </span>
-            )}
+            <span>{u.category}</span>
+            {u.tag === 'action-needed' && <span className="text-amber-400">Setup needed</span>}
           </div>
-          <h2 className="mt-1 truncate text-[15px] font-semibold text-zinc-50">{u.title}</h2>
+          <h2 className="mt-1 truncate text-[15px] font-semibold text-zinc-100">{u.title}</h2>
           {!open && <p className="mt-0.5 truncate text-sm text-zinc-500">{u.summary}</p>}
         </div>
       </button>
 
       {open && (
-        <div className="pb-5 pl-7">
+        <div className="px-4 pb-6 pl-11">
           <p className="text-sm leading-relaxed text-zinc-400">{u.summary}</p>
 
           <div className="mt-3">
-            <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">What's new</div>
+            <div className={`mb-1 ${LABEL}`}>What's new</div>
             <ul className="space-y-1 text-sm leading-normal text-zinc-300 lg:columns-2 lg:gap-8 [&>li]:break-inside-avoid">
               {u.whatsNew.map((w, i) => (
                 <li key={i}>· {w}</li>
@@ -74,9 +45,9 @@ function UpdateRow({ u, open, onToggle }: { u: AdminUpdate; open: boolean; onTog
             </ul>
           </div>
 
-          <div className="mt-4 grid gap-6 border-t border-zinc-800/60 pt-4 lg:grid-cols-2">
+          <div className="mt-4 grid gap-6 border-t border-white/[0.06] pt-4 lg:grid-cols-2">
             <div>
-              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">How to use it</div>
+              <div className={`mb-1 ${LABEL}`}>How to use it</div>
               <ol className="space-y-1 text-sm leading-normal text-zinc-300">
                 {u.howToUse.map((h, i) => (
                   <li key={i}>{i + 1}. {h}</li>
@@ -86,7 +57,7 @@ function UpdateRow({ u, open, onToggle }: { u: AdminUpdate; open: boolean; onTog
             <div>
               {u.notes && u.notes.length > 0 && (
                 <>
-                  <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Context</div>
+                  <div className={`mb-1 ${LABEL}`}>Context</div>
                   <ul className="space-y-1 text-sm leading-normal text-zinc-400">
                     {u.notes.map((n, i) => (
                       <li key={i}>· {n}</li>
@@ -96,7 +67,7 @@ function UpdateRow({ u, open, onToggle }: { u: AdminUpdate; open: boolean; onTog
               )}
               {u.setup && u.setup.length > 0 && (
                 <>
-                  <div className={`mb-1 text-[11px] font-semibold uppercase tracking-wide text-amber-400 ${u.notes?.length ? 'mt-3' : ''}`}>
+                  <div className={`mb-1 text-[10px] font-medium uppercase tracking-[0.15em] text-amber-400 ${u.notes?.length ? 'mt-3' : ''}`}>
                     Setup before it works
                   </div>
                   <ul className="space-y-1 text-sm leading-normal text-amber-100/80">
@@ -115,7 +86,8 @@ function UpdateRow({ u, open, onToggle }: { u: AdminUpdate; open: boolean; onTog
 }
 
 /** Master-admin changelog — what shipped + how to use it, so nothing built
- *  ever gets lost. Content is authored in the admin_updates DB table. */
+ *  ever gets lost. Content is authored in the admin_updates DB table. Styled as
+ *  its own bordered module (matching Legal Pilot's shell), not a plain page. */
 export default function Updates() {
   const [updates, setUpdates] = useState<AdminUpdate[] | null>(null)
   const [error, setError] = useState(false)
@@ -133,6 +105,11 @@ export default function Updates() {
 
   const categories = useMemo(
     () => (updates ? Array.from(new Set(updates.map((u) => u.category))).sort() : []),
+    [updates]
+  )
+
+  const setupNeededCount = useMemo(
+    () => (updates ? updates.filter((u) => u.tag === 'action-needed').length : 0),
     [updates]
   )
 
@@ -165,30 +142,43 @@ export default function Updates() {
   const setAll = (open: boolean) => setOpenIds(new Set(open && updates ? updates.map((u) => u.id) : []))
 
   return (
-    <div className="max-w-6xl">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-semibold text-zinc-100">Updates</h1>
-          <p className="mt-0.5 text-sm text-zinc-500">New features and how to use them — newest first.</p>
+    <div className="flex h-[calc(100vh-7rem)] flex-col overflow-hidden rounded-xl border border-white/[0.06] bg-black">
+      {/* Header */}
+      <div className="flex items-center justify-between border-b border-white/[0.06] px-4 py-3">
+        <h1 className="flex items-center gap-2 text-sm font-semibold text-zinc-100">
+          <Sparkles className="h-4 w-4 text-emerald-400" /> Updates
+        </h1>
+        <div className="flex items-center gap-4">
+          <span className="hidden text-xs text-zinc-500 md:block">New features and how to use them — newest first.</span>
+          {updates && updates.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setAll(!allOpen)}
+              className="rounded-md border border-white/[0.08] px-2.5 py-1 text-xs font-medium text-zinc-400 transition-colors hover:bg-white/[0.04] hover:text-zinc-100"
+            >
+              {allOpen ? 'Collapse all' : 'Expand all'}
+            </button>
+          )}
         </div>
-        {updates && updates.length > 0 && (
-          <button
-            type="button"
-            onClick={() => setAll(!allOpen)}
-            className="text-xs font-medium text-zinc-400 hover:text-zinc-200"
-          >
-            {allOpen ? 'Collapse all' : 'Expand all'}
-          </button>
-        )}
       </div>
 
+      {/* Stat bar */}
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-1 border-b border-white/[0.06] px-4 py-2 font-mono text-[11px] uppercase tracking-wide text-zinc-500">
+        <span>Updates <b className="text-zinc-100">{updates?.length ?? '—'}</b></span>
+        <span>Categories <b className="text-zinc-100">{categories.length || '—'}</b></span>
+        <span className={setupNeededCount > 0 ? 'text-amber-400' : ''}>
+          Setup needed <b>{setupNeededCount || '—'}</b>
+        </span>
+      </div>
+
+      {/* Category tabs */}
       {categories.length > 1 && (
-        <div className="mt-3 flex flex-wrap gap-1.5">
+        <div className="flex flex-wrap items-center gap-1 border-b border-white/[0.06] px-2 py-1.5">
           <button
             type="button"
             onClick={() => setCategory(null)}
-            className={`rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${
-              category === null ? 'bg-zinc-100 text-zinc-900 ring-zinc-100' : 'text-zinc-400 ring-zinc-700 hover:text-zinc-200'
+            className={`rounded px-2 py-1 font-mono text-[10px] uppercase tracking-wide transition-colors ${
+              category === null ? 'bg-white/[0.06] text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'
             }`}
           >
             All
@@ -198,8 +188,8 @@ export default function Updates() {
               key={c}
               type="button"
               onClick={() => setCategory(c)}
-              className={`rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${
-                category === c ? 'bg-zinc-100 text-zinc-900 ring-zinc-100' : 'text-zinc-400 ring-zinc-700 hover:text-zinc-200'
+              className={`rounded px-2 py-1 font-mono text-[10px] uppercase tracking-wide transition-colors ${
+                category === c ? 'bg-white/[0.06] text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'
               }`}
             >
               {c}
@@ -208,12 +198,13 @@ export default function Updates() {
         </div>
       )}
 
-      <div className="mt-5">
-        {error && <p className="text-sm text-red-400">Couldn't load updates.</p>}
-        {!error && !updates && <Loader2 className="h-5 w-5 animate-spin text-zinc-500" />}
+      {/* Scrolling body */}
+      <div className="flex-1 overflow-y-auto">
+        {error && <p className="px-4 py-4 text-sm text-red-400">Couldn't load updates.</p>}
+        {!error && !updates && <Loader2 className="m-4 h-5 w-5 animate-spin text-zinc-500" />}
         {groups.map((g) => (
-          <div key={g.label} className="mb-6">
-            <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-zinc-600">{g.label}</div>
+          <div key={g.label}>
+            <div className={`sticky top-0 z-10 border-b border-white/[0.06] bg-black px-4 py-1.5 ${LABEL}`}>{g.label}</div>
             <div>
               {g.items.map((u) => (
                 <UpdateRow key={u.id} u={u} open={openIds.has(u.id)} onToggle={() => toggle(u.id)} />

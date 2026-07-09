@@ -54,6 +54,10 @@ html[data-app-shell-bg] {
   background-color: var(--color-vsc-bg);
 }
 
+html[data-app-shell-bg="admin"] {
+  background-color: #09090b;
+}
+
 @keyframes ticker {
   0%   { transform: translateX(0); }
   100% { transform: translateX(-50%); }

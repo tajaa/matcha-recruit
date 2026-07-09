@@ -50,18 +50,19 @@ function getInitials(name: string | null | undefined, email: string | undefined)
   return (email?.[0] ?? 'M').toUpperCase()
 }
 
-export default function AppLayout({ sidebar, logoLabel }: { sidebar: ReactNode; logoLabel?: string }) {
+export default function AppLayout({ sidebar, logoLabel, variant }: { sidebar: ReactNode; logoLabel?: string; variant?: 'admin' }) {
   const { loading, isPersonal, me } = useMe()
   const { pathname } = useLocation()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() =>
     localStorage.getItem('sidebar_collapsed') === 'true'
   )
+  const isAdmin = variant === 'admin'
 
   useEffect(() => {
-    document.documentElement.setAttribute('data-app-shell-bg', 'true')
+    document.documentElement.setAttribute('data-app-shell-bg', isAdmin ? 'admin' : 'true')
     return () => document.documentElement.removeAttribute('data-app-shell-bg')
-  }, [])
+  }, [isAdmin])
 
   useEffect(() => {
     setMobileMenuOpen(false)
@@ -92,10 +93,14 @@ export default function AppLayout({ sidebar, logoLabel }: { sidebar: ReactNode; 
 
   return (
     <LayoutContext.Provider value={{ hasTopNav: true, sidebarCollapsed }}>
-      <div className="min-h-screen bg-vsc-bg">
+      <div className={isAdmin ? 'min-h-screen bg-gradient-to-b from-zinc-950 to-black' : 'min-h-screen bg-vsc-bg'}>
 
         {/* Full-width top navbar */}
-        <header className="fixed top-0 left-0 right-0 h-14 bg-[#141416] border-b border-vsc-border/30 flex items-center px-4 z-40 gap-3">
+        <header className={
+          isAdmin
+            ? 'fixed top-0 left-0 right-0 h-14 bg-zinc-950/95 backdrop-blur border-b border-white/[0.06] flex items-center px-4 z-40 gap-3'
+            : 'fixed top-0 left-0 right-0 h-14 bg-[#141416] border-b border-vsc-border/30 flex items-center px-4 z-40 gap-3'
+        }>
           {/* Desktop: collapse toggle */}
           <button
             onClick={() => setSidebarCollapsed(v => !v)}

@@ -38,7 +38,7 @@ export default function AdminRoutes() {
   return (
     <RequireRole roles={['admin']}>
       <Routes>
-      <Route element={<AppLayout sidebar={<AdminSidebar />} logoLabel="Matcha Admin" />}>
+      <Route element={<AppLayout sidebar={<AdminSidebar />} logoLabel="Matcha Admin" variant="admin" />}>
         <Route index element={<Navigate to="customers" replace />} />
         <Route path="updates" element={<Updates />} />
         <Route path="customers" element={<Customers />} />
