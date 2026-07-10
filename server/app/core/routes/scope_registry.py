@@ -203,6 +203,19 @@ async def fetch_queue_endpoint(
     return {"items": items, "count": len(items)}
 
 
+@router.get("/labor-scope", dependencies=[Depends(require_admin)])
+async def labor_scope_endpoint(state: str, city: Optional[str] = None):
+    """Per-jurisdiction labor scope for a generic employer — federal/state/city
+    codified-vs-fetch split + the core-labor checklist + honest exhaustiveness.
+
+    Industry-agnostic (no coordinate): the authoritative "what labor must we
+    fetch for this jurisdiction, and what's already codified" view.
+    """
+    from app.core.services.scope_registry.labor_scope import labor_scope
+    async with get_connection() as conn:
+        return await labor_scope(conn, state=state, city=city)
+
+
 @router.get("/shadow-log", dependencies=[Depends(require_admin)])
 async def list_shadow_log(limit: int = 50):
     """resolve_scope vs expand_scope diffs recorded on onboarding finalize.

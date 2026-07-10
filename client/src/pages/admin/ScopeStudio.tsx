@@ -114,6 +114,40 @@ type ResolveResult = {
   unmodeled_coordinates: { kind: string; value: string; note: string }[]
 }
 
+// ── Labor scope (jurisdiction-first, industry-agnostic) ──────────────────────
+
+type LaborScopeLevel = {
+  codified: {
+    citation: string; heading: string | null; regulation_key: string | null
+    requirement?: { title?: string | null } | null
+  }[]
+  uncodified: { citation: string; heading: string | null; regulation_key: string | null }[]
+  counts: { codified: number; uncodified: number; provisional: number }
+}
+
+type LaborExhaustiveness = {
+  basis: 'enumerated' | 'curated' | 'none'
+  note: string
+  indexes: { slug: string; name: string; enumerable: boolean; item_count: number; unclassified_count: number }[]
+}
+
+type LaborScopeResponse = {
+  coordinate: { state: string; city: string | null; state_found: boolean; city_found: boolean }
+  core: {
+    items: { category: string; key: string; present: boolean; level: string | null }[]
+    present: number; total: number; complete: boolean
+  }
+  registry: {
+    levels: { federal: LaborScopeLevel; state: LaborScopeLevel; city: LaborScopeLevel }
+    skipped: { category_specific: number; conditional: number }
+  }
+  exhaustiveness: { federal: LaborExhaustiveness; state: LaborExhaustiveness; city: LaborExhaustiveness }
+}
+
+const LEVEL_LABELS: [keyof LaborScopeResponse['registry']['levels'], string][] = [
+  ['federal', 'Federal'], ['state', 'State'], ['city', 'City / Local'],
+]
+
 // ── Specialty derive/confirm modal (from IndustryRequirements, verbatim shape) ─
 
 function SpecialtyReviewModal({
@@ -242,6 +276,9 @@ export default function ScopeStudio() {
   const [resolveResult, setResolveResult] = useState<ResolveResult | null>(null)
   const [resolveError, setResolveError] = useState<string | null>(null)
 
+  const [laborScope, setLaborScope] = useState<LaborScopeResponse | null>(null)
+  const [laborError, setLaborError] = useState<string | null>(null)
+
   const [newSpecialty, setNewSpecialty] = useState('')
   const [discovering, setDiscovering] = useState(false)
   const [proposal, setProposal] = useState<DiscoverResponse | null>(null)
@@ -332,6 +369,35 @@ export default function ScopeStudio() {
       cancelled = true
     }
   }, [industry, state, city, headcount, matrixNonce])
+
+  // ── Labor scope (jurisdiction-only; NOT keyed on industry/headcount) ──
+  useEffect(() => {
+    let cancelled = false
+    if (!state.trim()) {
+      setLaborScope(null)
+      setLaborError(null)
+      return
+    }
+    ;(async () => {
+      try {
+        const params = new URLSearchParams({ state: state.trim().toUpperCase() })
+        if (city.trim()) params.set('city', city.trim())
+        const res = await api.get<LaborScopeResponse>(`/admin/scope-registry/labor-scope?${params.toString()}`)
+        if (!cancelled) {
+          setLaborScope(res)
+          setLaborError(null)
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setLaborScope(null)
+          setLaborError(e instanceof Error ? e.message : 'Labor scope failed')
+        }
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [state, city, matrixNonce])
 
   const grouped = useMemo(() => {
     if (!matrix) return [] as [string, CategoryEntry[]][]
@@ -746,6 +812,141 @@ export default function ScopeStudio() {
             )}
           </div>
         </div>
+      </div>
+
+      {/* Labor scope — the authoritative "what must we fetch" view (jurisdiction-first) */}
+      <div className="mt-4 rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
+        <div className="mb-1 flex items-baseline justify-between">
+          <div className="text-sm font-medium text-zinc-300">
+            Labor scope{laborScope ? ` — ${laborScope.coordinate.state}${laborScope.coordinate.city ? `, ${laborScope.coordinate.city}` : ''}` : ''}
+          </div>
+          <div className="text-[11px] text-zinc-500">generic employer · federal + state + city</div>
+        </div>
+        {!state.trim() ? (
+          <div className="text-xs text-zinc-500">Set a state to see the labor scope.</div>
+        ) : laborError ? (
+          <div className="text-xs text-red-400">{laborError}</div>
+        ) : !laborScope ? (
+          <div className="text-xs text-zinc-500">Loading…</div>
+        ) : laborScope.exhaustiveness.federal.basis === 'none'
+            && laborScope.exhaustiveness.state.basis === 'none' ? (
+          <div className="text-xs text-amber-400">
+            Scope registry is empty — run <span className="font-mono">server/scripts/populate_scope_registry.py</span> to populate it.
+          </div>
+        ) : (
+          <>
+            {/* Core spine — the 12-key must-have labor checklist */}
+            <div className="mb-4">
+              <div className="mb-1 flex items-center gap-2 text-[11px] uppercase text-zinc-500">
+                Core labor checklist
+                <span className={laborScope.core.complete ? 'text-emerald-400' : 'text-amber-400'}>
+                  {laborScope.core.present}/{laborScope.core.total} codified
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {laborScope.core.items.map((it) => (
+                  <span
+                    key={`${it.category}:${it.key}`}
+                    className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[11px] ${
+                      it.present
+                        ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+                        : 'border-amber-500/30 bg-amber-500/10 text-amber-300'
+                    }`}
+                    title={it.present ? `codified at ${it.level} level` : 'not yet in jurisdiction-data — to fetch'}
+                  >
+                    {it.present ? <Check className="h-3 w-3" /> : null}
+                    {it.key}
+                    {it.present && it.level ? <span className="text-emerald-500/70">·{it.level}</span> : null}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            {/* Federal / State / City — codified vs fetch queue, with honest exhaustiveness */}
+            <div className="grid gap-3 md:grid-cols-3">
+              {LEVEL_LABELS.map(([lvl, label]) => {
+                const data = laborScope.registry.levels[lvl]
+                const ex = laborScope.exhaustiveness[lvl]
+                const badge =
+                  ex.basis === 'enumerated'
+                    ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+                    : ex.basis === 'curated'
+                      ? 'border-amber-500/30 bg-amber-500/10 text-amber-300'
+                      : 'border-zinc-700 bg-zinc-800/50 text-zinc-500'
+                const badgeText =
+                  ex.basis === 'enumerated' ? 'exhaustive (eCFR-enumerated)'
+                    : ex.basis === 'curated' ? 'curated core — not exhaustive'
+                      : 'no indexes ingested'
+                return (
+                  <div key={lvl} className="rounded border border-zinc-800 bg-zinc-950/40 p-3">
+                    <div className="mb-1.5 flex items-center justify-between">
+                      <span className="text-xs font-medium text-zinc-200">{label}</span>
+                      <span className={`rounded border px-1.5 py-0.5 text-[10px] ${badge}`} title={ex.note}>
+                        {badgeText}
+                      </span>
+                    </div>
+                    {ex.indexes.length > 0 && (
+                      <div className="mb-2 space-y-0.5">
+                        {ex.indexes.map((ix) => (
+                          <div key={ix.slug} className="text-[10px] text-zinc-500">
+                            <span className="font-mono text-zinc-400">{ix.slug}</span> · {ix.item_count} items
+                            {ix.unclassified_count > 0 && (
+                              <span className="text-amber-500/80"> · {ix.unclassified_count} unclassified</span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <div className="flex gap-3 text-[11px]">
+                      <span className="text-emerald-400">{data.counts.codified} codified</span>
+                      <span className="text-amber-400">{data.counts.uncodified} to fetch</span>
+                      {data.counts.provisional > 0 && (
+                        <span className="text-zinc-500">{data.counts.provisional} awaiting confirm</span>
+                      )}
+                    </div>
+                    {data.codified.length > 0 && (
+                      <details className="mt-2">
+                        <summary className="cursor-pointer text-[10px] uppercase text-zinc-500">
+                          Codified ({data.codified.length})
+                        </summary>
+                        <ul className="mt-1 space-y-0.5">
+                          {data.codified.map((it) => (
+                            <li key={it.citation} className="text-[11px] text-zinc-400">
+                              <span className="font-mono text-emerald-300/80">{it.citation}</span>
+                              {it.requirement?.title ? ` — ${it.requirement.title}` : it.regulation_key ? ` — ${it.regulation_key}` : ''}
+                            </li>
+                          ))}
+                        </ul>
+                      </details>
+                    )}
+                    {data.uncodified.length > 0 && (
+                      <div className="mt-2">
+                        <div className="text-[10px] uppercase text-zinc-500">Fetch queue</div>
+                        <ul className="mt-1 space-y-0.5">
+                          {data.uncodified.slice(0, 10).map((it) => (
+                            <li key={it.citation} className="text-[11px] text-amber-300/80">
+                              <span className="font-mono">{it.citation}</span>
+                              {it.heading ? <span className="text-zinc-500"> — {it.heading}</span> : ''}
+                            </li>
+                          ))}
+                          {data.uncodified.length > 10 && (
+                            <li className="text-[10px] text-zinc-600">+{data.uncodified.length - 10} more</li>
+                          )}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+
+            {(laborScope.registry.skipped.category_specific > 0 || laborScope.registry.skipped.conditional > 0) && (
+              <div className="mt-2 text-[11px] text-zinc-500">
+                {laborScope.registry.skipped.category_specific} category-gated + {laborScope.registry.skipped.conditional} conditional items excluded (generic-employer view)
+              </div>
+            )}
+          </>
+        )}
       </div>
 
       {proposal && (
