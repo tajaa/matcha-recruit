@@ -38,12 +38,12 @@
       "comparator": "text_contains",
       "expected_text": "14 day",
       "effective_from": "2017-11-26",
-      "authority_url": "https://rules.cityofnewyork.us/rule/automated-employment-decision-tools-2/",
+      "authority_url": "https://www.nyc.gov/site/dca/about/fairworkweek-deductions-laws.page",
       "industries": ["fast food", "retail"],
       "severity": "warn",
       "curated_by": "claude-research",
-      "curated_at": "2026-07-09",
-      "notes": "NYC Fair Workweek: 14-day advance schedule; 'clopening' = shifts under 11 hrs apart, carrying a $100 premium; schedule-change premiums $10-$75. Covers fast food and retail. AUTHORITY URL NEEDS REPLACING — the canonical DCWP Fair Workweek FAQ at nyc.gov blocks automated fetch, and the URL here points at the Local Law 144 rule instead. Fix before verifying."
+      "curated_at": "2026-07-10",
+      "notes": "NYC Fair Workweek: 14-day advance schedule; 'clopening' = shifts under 11 hrs apart, carrying a $100 premium; schedule-change premiums $10-$75. Covers fast food and retail. Authority is the official DCWP Fair Workweek Law page (covers both industries; the fast-food FAQ PDF at /assets/dca/downloads/pdf/workers/FAQs-FairWorkweek-FastFood.pdf is fast-food-only). nyc.gov returns 403 to automated fetch — the authority suite must read that as host-alive, not dead."
     },
     {
       "requirement_key": "pay_transparency",

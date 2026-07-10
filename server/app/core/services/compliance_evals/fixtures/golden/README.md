@@ -78,6 +78,7 @@ Recorded honestly so a verifier knows where to look hardest:
   machine-readable from the primary page.
 - CA `fast_food_minimum_wage` ($20.00) could not be confirmed as *current* — the
   DIR FAQ shows no post-2024 Fast Food Council adjustment. Marked `warn`.
-- `us_ny_new_york_city.json` → `predictive_scheduling` carries a **wrong
-  `authority_url`** (it points at the Local Law 144 rule). Fix it during
-  verification.
+- `us_ny_new_york_city.json` → `predictive_scheduling` now cites the official
+  DCWP Fair Workweek Law page (fixed 2026-07-10 — it previously pointed at the
+  Local Law 144 rule). Like the rest of nyc.gov it 403s automated fetches;
+  confirm the 14-day / clopening values by opening it in a browser.
