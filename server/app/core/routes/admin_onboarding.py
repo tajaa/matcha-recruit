@@ -30,7 +30,7 @@ import secrets
 from typing import Any, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from fastapi.responses import Response, StreamingResponse
 
 from app.database import get_connection
@@ -1386,6 +1386,7 @@ async def gap_check_session(
 )
 async def finalize_session(
     session_id: UUID,
+    background: BackgroundTasks,
     current_user: CurrentUser = Depends(require_master_admin),
 ):
     """Write the durable manifest + invite the owner.
@@ -1514,6 +1515,18 @@ async def finalize_session(
             """,
             invite_token, json.dumps(dossier), session_id,
         )
+
+    # Shadow the scope registry against this authoritative resolution — read-only
+    # diff into scope_shadow_log, after the response, fully guarded. expand_scope
+    # stays authoritative (SCOPE_REGISTRY_PLAN.md commit 5).
+    from app.core.services.scope_registry.shadow import record_shadow
+    background.add_task(
+        record_shadow,
+        session_id=session_id,
+        company_id=company_id,
+        industry=_safe_jsonb(row["basics"], {}).get("industry"),
+        existing_items=existing,
+    )
 
     return FinalizeResponse(
         session_id=session_id,

@@ -269,9 +269,17 @@ async def ingest_ecfr_index(
 
 
 async def ingest_curated_index(conn, spec: CuratedIndexSpec) -> IngestResult:
-    """Upsert a curated CA index and its hand-authored rows (enumerable=false)."""
+    """Upsert a curated index and its hand-authored rows (enumerable=false).
+
+    A curated index is usually state/local (resolves a jurisdiction row), but a
+    federal curated index (e.g. the FLSA statute, which isn't in eCFR) has NULL
+    jurisdiction — same as the federal eCFR parts.
+    """
     rows = CURATED_ROWS.get(spec.slug, [])
-    jurisdiction_id = await _resolve_jurisdiction_id(conn, spec.jurisdiction)
+    jurisdiction_id = (
+        None if spec.level == "federal"
+        else await _resolve_jurisdiction_id(conn, spec.jurisdiction)
+    )
 
     items = [
         {

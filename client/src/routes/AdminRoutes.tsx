@@ -10,8 +10,7 @@ import JurisdictionData from '../pages/admin/JurisdictionData'
 import WcRateData from '../pages/admin/WcRateData'
 import PayerData from '../pages/admin/PayerData'
 import Jurisdictions from '../pages/admin/Jurisdictions'
-import IndustryRequirements from '../pages/admin/IndustryRequirements'
-import SpecializationResearch from '../pages/admin/SpecializationResearch'
+import ScopeStudio from '../pages/admin/ScopeStudio'
 import Brokers from '../pages/admin/Brokers'
 import FractionalHR from '../pages/admin/FractionalHR'
 import FractionalClientDetail from '../pages/admin/FractionalClientDetail'
@@ -64,8 +63,7 @@ export default function AdminRoutes() {
         <Route path="jurisdiction-data/policy/:id" element={<PolicyDetailPage />} />
         <Route path="payer-data" element={<PayerData />} />
         <Route path="jurisdictions" element={<Jurisdictions />} />
-        <Route path="industry-requirements" element={<IndustryRequirements />} />
-        <Route path="specialization-research" element={<SpecializationResearch />} />
+        <Route path="scope-studio" element={<ScopeStudio />} />
         <Route path="brokers" element={<Brokers />} />
         <Route path="fractional-hr" element={<FractionalHR />} />
         <Route path="fractional-hr/:clientId" element={<FractionalClientDetail />} />

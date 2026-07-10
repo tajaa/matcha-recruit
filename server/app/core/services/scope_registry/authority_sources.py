@@ -85,11 +85,20 @@ FEDERAL_ECFR_PARTS: List[FederalPart] = [
 ]
 
 
-# ── California — curated slices (enumerable=false; "curated, not exhaustive") ──
+# ── Curated slices (enumerable=false; "curated, not exhaustive") ──────────────
 CURATED_INDEXES: List[CuratedIndexSpec] = [
+    # Federal FLSA wage-hour floor — statute lives in 29 U.S.C., not eCFR, so
+    # it's curated. level='federal' ⇒ jurisdiction_id NULL (applies to all US).
+    CuratedIndexSpec(
+        slug="us-flsa",
+        name="Fair Labor Standards Act — federal wage-hour floor (selected)",
+        jurisdiction={},
+        level="federal",
+        domain_categories=["all_industry"],
+    ),
     CuratedIndexSpec(
         slug="ca-labor-code",
-        name="California Labor Code — selected provisions",
+        name="California Labor Code — core wage-hour spine + AB 701 (selected)",
         jurisdiction={"state": "CA", "level": "state"},
         domain_categories=["all_ca_employers"],
     ),

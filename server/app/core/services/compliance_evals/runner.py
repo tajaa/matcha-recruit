@@ -19,13 +19,14 @@ from app.database import get_connection
 from . import authority as authority_suite
 from . import completeness as completeness_suite
 from . import golden as golden_suite
+from . import scope as scope_suite
 from . import industry_keysets as iks
 from . import tagging as tagging_suite
 from .scoring import Subscores, composite_score, evaluate_readiness
 
 logger = logging.getLogger(__name__)
 
-ALL_SUITES = ("completeness", "authority", "tagging", "golden")
+ALL_SUITES = ("completeness", "authority", "tagging", "golden", "scope")
 DEFAULT_STALENESS_DAYS = 90
 
 # Suites that reach the network. Routed to Celery rather than BackgroundTasks so a
@@ -219,6 +220,15 @@ async def run_evals(
                 authority_results = out["results"]
                 all_findings.extend(out["findings"])
                 totals["urls_checked"] = len(out["url_liveness"])
+
+            if "scope" in suites:
+                _progress(run_id, "Auditing scope-registry coverage", 80)
+                # Findings-only: authority indexes are registry-global and the
+                # result table is per-jurisdiction, so scope contributes
+                # findings + totals, not a composite subscore.
+                out = await scope_suite.run_scope(conn, jur_ids)
+                all_findings.extend(out["findings"])
+                totals.update(out["totals"])
 
             _progress(run_id, "Computing freshness", 85)
             freshness_results = await _freshness_by_jurisdiction(conn, jur_ids)

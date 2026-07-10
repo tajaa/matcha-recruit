@@ -8547,61 +8547,12 @@ async def delete_industry_profile(profile_id: UUID):
 # Industry requirements matrix
 # ---------------------------------------------------------------------------
 
-async def _resolve_jurisdiction_chain(conn, state: str, city: Optional[str]) -> Dict[str, Any]:
-    """The jurisdictions whose requirements an establishment here inherits.
-
-    city ∪ county ∪ state ∪ federal — the same union `compliance_evals` uses for
-    presence (`completeness.present_keys_for`). A requirement held at the state
-    level covers a business in the city; asking only about the city row would
-    report nearly everything as missing.
-
-    `federal` and `national` are not the same bucket: `national` rows are country
-    roots (UK, Mexico, Singapore), so only the US `federal` row is chained here.
-
-    Reports `state_found`/`city_found` separately from the id list, because the
-    federal row always resolves — a caller checking only `ids` would treat a
-    nonexistent state as a valid one-link chain.
-    """
-    ids: List[UUID] = []
-
-    federal = await conn.fetchval(
-        "SELECT id FROM jurisdictions WHERE level::text = 'federal' LIMIT 1"
-    )
-    if federal:
-        ids.append(federal)
-
-    state_id = await conn.fetchval(
-        "SELECT id FROM jurisdictions WHERE level::text = 'state' AND state = $1 "
-        "AND COALESCE(country_code,'US') = 'US' LIMIT 1",
-        state,
-    )
-    if state_id:
-        ids.append(state_id)
-
-    city_found = False
-    if city:
-        city_row = await conn.fetchrow(
-            "SELECT id, county FROM jurisdictions WHERE LOWER(city) = LOWER($1) AND state = $2 "
-            "AND COALESCE(country_code,'US') = 'US' LIMIT 1",
-            city, state,
-        )
-        if city_row:
-            city_found = True
-            ids.append(city_row["id"])
-            if city_row["county"]:
-                county_id = await conn.fetchval(
-                    "SELECT id FROM jurisdictions WHERE level::text = 'county' "
-                    "AND LOWER(county) = LOWER($1) AND state = $2 LIMIT 1",
-                    city_row["county"], state,
-                )
-                if county_id:
-                    ids.append(county_id)
-
-    return {
-        "ids": ids,
-        "state_found": state_id is not None,
-        "city_found": city_found,
-    }
+# Moved to the service layer (scope_registry/jurisdiction_chain.py) so the
+# scope-registry resolver can share it — services must not import from routes.
+# Kept under its old private name for this module's callsites.
+from app.core.services.scope_registry.jurisdiction_chain import (  # noqa: E402
+    resolve_jurisdiction_chain as _resolve_jurisdiction_chain,
+)
 
 
 async def _load_industry_profile_row(conn, canonical: str):
