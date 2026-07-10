@@ -1,0 +1,86 @@
+{
+  "fixture_version": "2026.07",
+  "jurisdiction": {
+    "country_code": "US",
+    "state": "CA",
+    "city": "Los Angeles",
+    "level": "city"
+  },
+  "facts": [
+    {
+      "requirement_key": "local_minimum_wage",
+      "category": "minimum_wage",
+      "comparator": "numeric_eq",
+      "expected_numeric": 17.87,
+      "effective_from": "2025-07-01",
+      "effective_to": "2026-07-01",
+      "authority_url": "https://wagesla.lacity.gov/",
+      "severity": "critical",
+      "curated_by": "claude-research",
+      "curated_at": "2026-07-09",
+      "notes": "Superseded rate, retained on purpose: it is the predecessor of the 2026-07-01 fact below, which is what stops `golden_stale` from firing. This pair is the worked example of how a CPI-reindexed wage is curated."
+    },
+    {
+      "requirement_key": "local_minimum_wage",
+      "category": "minimum_wage",
+      "comparator": "numeric_eq",
+      "expected_numeric": 18.42,
+      "effective_from": "2026-07-01",
+      "effective_to": "2027-07-01",
+      "authority_url": "https://wagesla.lacity.gov/sites/g/files/wph1941/files/2026-04/2026%20MWR%20Increase%20Memo%2001-30-26%20ADA%20Final.pdf",
+      "severity": "critical",
+      "curated_by": "claude-research",
+      "curated_at": "2026-07-09",
+      "notes": "LA CITY Minimum Wage Ordinance, +$0.55 (CPI-W). Do NOT conflate with unincorporated LA COUNTY, which is $18.47 on the same date. Reindexes every July 1 — a successor fact is due before 2027-07-01."
+    },
+    {
+      "requirement_key": "exempt_salary_threshold",
+      "category": "minimum_wage",
+      "comparator": "numeric_eq",
+      "expected_numeric": 70304.0,
+      "effective_from": "2026-01-01",
+      "effective_to": "2027-01-01",
+      "authority_url": "https://www.dir.ca.gov/DIRNews/2025/2025-118.html",
+      "severity": "warn",
+      "curated_by": "claude-research",
+      "curated_at": "2026-07-09",
+      "notes": "State law surfaced at the city level; the exempt threshold keys off the STATE minimum wage, not the city ordinance."
+    },
+    {
+      "requirement_key": "fast_food_minimum_wage",
+      "category": "minimum_wage",
+      "comparator": "numeric_eq",
+      "expected_numeric": 20.0,
+      "effective_from": "2024-04-01",
+      "authority_url": "https://www.dir.ca.gov/dlse/Fast-Food-Minimum-Wage-FAQ.htm",
+      "industries": ["fast food"],
+      "severity": "warn",
+      "curated_by": "claude-research",
+      "curated_at": "2026-07-09",
+      "notes": "AB 1228 is a state floor that exceeds the LA city general rate; same Council-adjustment caveat as the state fixture."
+    },
+    {
+      "requirement_key": "local_sick_leave",
+      "category": "sick_leave",
+      "comparator": "exists",
+      "effective_from": "2016-07-01",
+      "authority_url": "https://codelibrary.amlegal.com/codes/los_angeles/latest/lamc/0-0-0-292369",
+      "severity": "warn",
+      "curated_by": "claude-research",
+      "curated_at": "2026-07-09",
+      "notes": "LAMC 187.04 — accrue 1 hr per 30 worked or frontload 48 hrs; annual use cappable at 48 hrs; carryover cappable at 72 hrs."
+    },
+    {
+      "requirement_key": "predictive_scheduling",
+      "category": "scheduling_reporting",
+      "comparator": "exists",
+      "effective_from": "2023-04-01",
+      "authority_url": "https://wagesla.lacity.gov/fair-work-week-information",
+      "industries": ["retail"],
+      "severity": "warn",
+      "curated_by": "claude-research",
+      "curated_at": "2026-07-09",
+      "notes": "LA City Fair Work Week Ordinance: NAICS retail with 300+ employees globally; 14-day advance schedule; predictability pay; 10-hr rest between shifts. LA County runs a separate ordinance (effective 2025-07-01) for unincorporated areas."
+    }
+  ]
+}

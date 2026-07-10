@@ -23,6 +23,7 @@ from ..services.credential_crypto import decrypt_credential_fields
 from ..feature_flags import merge_company_features
 from ..services.email import get_email_service
 from ..models.compliance import AutoCheckSettings, LocationCreate
+from ..models.compliance_evals import EvalRunRequest, FindingResolveRequest
 from ..compliance_registry import (
     TRIGGER_PROFILES,
     LABOR_CATEGORIES, HEALTHCARE_CATEGORIES, ONCOLOGY_CATEGORIES,
@@ -5091,6 +5092,368 @@ async def get_policy_detail(key_definition_id: UUID):
                 for r in change_log
             ],
         }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Compliance data evals
+#
+# Measures the jurisdiction catalog: completeness per (jurisdiction × industry),
+# citation authority, tag/key organization, and agreement with golden facts.
+# Read-only over `jurisdiction_requirements` — findings are recorded, never
+# auto-applied. Registered ahead of `/jurisdictions/{jurisdiction_id}` so the
+# literal `evals` segment can never be parsed as a jurisdiction UUID.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def _eval_iso(value) -> Optional[str]:
+    """ISO-format a timestamp. The `fmt_date` helpers elsewhere in this module are
+    nested inside their handlers, so the eval endpoints carry their own."""
+    return value.isoformat() if value else None
+
+
+def _eval_json(value):
+    """asyncpg has no jsonb codec on this pool — jsonb columns arrive as raw text."""
+    return json.loads(value) if isinstance(value, str) else value
+
+
+def _jurisdiction_label(label: Optional[str], state: Optional[str]) -> Optional[str]:
+    if label and state and label != state:
+        return f"{label}, {state}"
+    return label
+
+
+@router.post("/jurisdictions/evals/run")
+async def trigger_eval_run(
+    payload: EvalRunRequest,
+    background: BackgroundTasks,
+    current_user=Depends(require_admin),
+):
+    """Start an eval run. Network-touching suites go to Celery; the rest run inline."""
+    from ..services.compliance_evals import NETWORK_SUITES, run_evals
+
+    suites = list(payload.suites)
+    if not suites:
+        raise HTTPException(status_code=400, detail="At least one suite is required")
+
+    jurisdiction_ids = [str(j) for j in (payload.jurisdiction_ids or [])] or None
+
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            INSERT INTO compliance_eval_runs (suites, trigger_source, triggered_by, params)
+            VALUES ($1, 'manual', $2, $3) RETURNING id
+            """,
+            suites,
+            current_user.id,
+            json.dumps({
+                "jurisdiction_ids": jurisdiction_ids,
+                "industries": payload.industries,
+            }),
+        )
+    run_id = row["id"]
+
+    if NETWORK_SUITES & set(suites):
+        from app.workers.tasks.compliance_evals import run_compliance_evals
+
+        run_compliance_evals.delay(
+            suites=suites,
+            jurisdiction_ids=jurisdiction_ids,
+            industries=payload.industries,
+            triggered_by=str(current_user.id),
+            trigger_source="manual",
+            run_id=str(run_id),
+        )
+        dispatched = "celery"
+    else:
+        background.add_task(
+            run_evals,
+            suites=suites,
+            jurisdiction_ids=jurisdiction_ids,
+            industries=payload.industries,
+            triggered_by=current_user.id,
+            trigger_source="manual",
+            run_id=run_id,
+        )
+        dispatched = "inline"
+
+    return {
+        "run_id": str(run_id),
+        "status": "running",
+        "dispatched_to": dispatched,
+        "suites": suites,
+    }
+
+
+@router.get("/jurisdictions/evals/runs", dependencies=[Depends(require_admin)])
+async def list_eval_runs(limit: int = Query(20, ge=1, le=100)):
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT id, suites, status, trigger_source, totals, error_text,
+                   started_at, finished_at
+            FROM compliance_eval_runs
+            ORDER BY started_at DESC
+            LIMIT $1
+            """,
+            limit,
+        )
+    return {
+        "runs": [
+            {
+                "id": str(r["id"]),
+                "suites": list(r["suites"] or []),
+                "status": r["status"],
+                "trigger_source": r["trigger_source"],
+                "totals": _eval_json(r["totals"]),
+                "error_text": r["error_text"],
+                "started_at": _eval_iso(r["started_at"]),
+                "finished_at": _eval_iso(r["finished_at"]),
+            }
+            for r in rows
+        ]
+    }
+
+
+@router.get("/jurisdictions/evals/runs/{run_id}", dependencies=[Depends(require_admin)])
+async def get_eval_run(
+    run_id: UUID,
+    suite: Optional[str] = None,
+    severity: Optional[str] = None,
+    finding_status: Optional[str] = Query(None, alias="status"),
+    jurisdiction_id: Optional[UUID] = None,
+    limit: int = Query(200, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+):
+    async with get_connection() as conn:
+        run = await conn.fetchrow(
+            "SELECT id, suites, status, trigger_source, totals, error_text, "
+            "started_at, finished_at FROM compliance_eval_runs WHERE id = $1",
+            run_id,
+        )
+        if not run:
+            raise HTTPException(status_code=404, detail="Eval run not found")
+
+        clauses = ["f.run_id = $1"]
+        params: List[Any] = [run_id]
+        for value, column in (
+            (suite, "f.suite"),
+            (severity, "f.severity"),
+            (finding_status, "f.status"),
+        ):
+            if value:
+                params.append(value)
+                clauses.append(f"{column} = ${len(params)}")
+        if jurisdiction_id:
+            params.append(jurisdiction_id)
+            clauses.append(f"f.jurisdiction_id = ${len(params)}")
+
+        where = " AND ".join(clauses)
+        total = await conn.fetchval(
+            f"SELECT COUNT(*) FROM compliance_eval_findings f WHERE {where}", *params
+        )
+        params.extend([limit, offset])
+        findings = await conn.fetch(
+            f"""
+            SELECT f.id, f.suite, f.finding_type, f.severity, f.jurisdiction_id,
+                   f.requirement_id, f.requirement_key, f.category, f.industry,
+                   f.expected, f.observed, f.status, f.notes, f.created_at,
+                   COALESCE(NULLIF(j.city, ''), j.state, j.display_name) AS jurisdiction_label,
+                   j.state
+            FROM compliance_eval_findings f
+            LEFT JOIN jurisdictions j ON j.id = f.jurisdiction_id
+            WHERE {where}
+            ORDER BY
+                CASE f.severity WHEN 'critical' THEN 0 WHEN 'warn' THEN 1 ELSE 2 END,
+                f.created_at
+            LIMIT ${len(params) - 1} OFFSET ${len(params)}
+            """,
+            *params,
+        )
+
+        counts = await conn.fetch(
+            "SELECT finding_type, severity, COUNT(*) AS n FROM compliance_eval_findings "
+            "WHERE run_id = $1 GROUP BY finding_type, severity ORDER BY n DESC",
+            run_id,
+        )
+
+    return {
+        "run": {
+            "id": str(run["id"]),
+            "suites": list(run["suites"] or []),
+            "status": run["status"],
+            "trigger_source": run["trigger_source"],
+            "totals": _eval_json(run["totals"]),
+            "error_text": run["error_text"],
+            "started_at": _eval_iso(run["started_at"]),
+            "finished_at": _eval_iso(run["finished_at"]),
+        },
+        "finding_counts": [
+            {"finding_type": c["finding_type"], "severity": c["severity"], "count": c["n"]}
+            for c in counts
+        ],
+        "total": total,
+        "findings": [
+            {
+                "id": str(f["id"]),
+                "suite": f["suite"],
+                "finding_type": f["finding_type"],
+                "severity": f["severity"],
+                "jurisdiction_id": str(f["jurisdiction_id"]) if f["jurisdiction_id"] else None,
+                "jurisdiction_label": _jurisdiction_label(f["jurisdiction_label"], f["state"]),
+                "requirement_id": str(f["requirement_id"]) if f["requirement_id"] else None,
+                "requirement_key": f["requirement_key"],
+                "category": f["category"],
+                "industry": f["industry"],
+                "expected": _eval_json(f["expected"]),
+                "observed": _eval_json(f["observed"]),
+                "status": f["status"],
+                "notes": f["notes"],
+                "created_at": _eval_iso(f["created_at"]),
+            }
+            for f in findings
+        ],
+    }
+
+
+@router.get("/jurisdictions/evals/scorecard", dependencies=[Depends(require_admin)])
+async def eval_scorecard(
+    jurisdiction_id: Optional[UUID] = None,
+    industry: Optional[str] = None,
+):
+    """Latest composite cell per (jurisdiction × industry).
+
+    `DISTINCT ON` over `created_at DESC` so a partial re-run of one suite never
+    erases an older cell from a suite it did not measure.
+    """
+    clauses = ["r.suite = 'composite'"]
+    params: List[Any] = []
+    if jurisdiction_id:
+        params.append(jurisdiction_id)
+        clauses.append(f"r.jurisdiction_id = ${len(params)}")
+    if industry:
+        params.append(industry)
+        clauses.append(f"r.industry = ${len(params)}")
+    where = " AND ".join(clauses)
+
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            f"""
+            SELECT DISTINCT ON (r.jurisdiction_id, r.industry)
+                   r.jurisdiction_id, r.industry, r.score, r.detail,
+                   r.onboarding_ready, r.created_at,
+                   COALESCE(NULLIF(j.city, ''), j.state, j.display_name) AS label, j.state
+            FROM compliance_eval_results r
+            JOIN jurisdictions j ON j.id = r.jurisdiction_id
+            WHERE {where}
+            ORDER BY r.jurisdiction_id, r.industry, r.created_at DESC
+            """,
+            *params,
+        )
+
+    cells = []
+    for r in rows:
+        detail = _eval_json(r["detail"]) or {}
+        cells.append({
+            "jurisdiction_id": str(r["jurisdiction_id"]),
+            "jurisdiction_label": _jurisdiction_label(r["label"], r["state"]),
+            "industry": r["industry"],
+            "composite": float(r["score"]) if r["score"] is not None else None,
+            "onboarding_ready": r["onboarding_ready"],
+            "status": detail.get("status"),
+            "subscores": detail.get("subscores", {}),
+            "blocking": detail.get("blocking", []),
+            "measured_at": _eval_iso(r["created_at"]),
+        })
+    return {"cells": cells}
+
+
+@router.get("/jurisdictions/evals/onboarding-readiness", dependencies=[Depends(require_admin)])
+async def eval_onboarding_readiness(
+    industry: str,
+    state: Optional[str] = None,
+    city: Optional[str] = None,
+    country_code: str = "US",
+):
+    """Can a company in `industry` onboard into this location with the data we hold?"""
+    from ..services.compliance_evals import onboarding_readiness
+
+    if not state:
+        raise HTTPException(status_code=400, detail="state is required")
+
+    async with get_connection() as conn:
+        return await onboarding_readiness(
+            conn, industry=industry, state=state, city=city, country_code=country_code
+        )
+
+
+@router.post("/jurisdictions/evals/findings/{finding_id}/resolve")
+async def resolve_eval_finding(
+    finding_id: UUID,
+    payload: FindingResolveRequest,
+    current_user=Depends(require_admin),
+):
+    """Adjudicate a finding.
+
+    Never writes to `jurisdiction_requirements`: marking a finding `fixed` records
+    the admin's judgement, and the catalog edit happens through the existing
+    requirement-editing surfaces. Keeping the eval read-only is what lets a later
+    run independently confirm the fix.
+    """
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            UPDATE compliance_eval_findings
+            SET status = $2, notes = COALESCE($3, notes),
+                resolved_by = $4, resolved_at = NOW()
+            WHERE id = $1
+            RETURNING id, status
+            """,
+            finding_id, payload.status, payload.notes, current_user.id,
+        )
+    if not row:
+        raise HTTPException(status_code=404, detail="Finding not found")
+    return {"id": str(row["id"]), "status": row["status"]}
+
+
+@router.get("/jurisdictions/evals/golden", dependencies=[Depends(require_admin)])
+async def list_golden_facts():
+    """The curated fact corpus with its active/pending/expired state."""
+    from datetime import date as _date
+
+    from ..services.compliance_evals.golden import load_fixtures
+
+    today = _date.today()
+    facts = []
+    for fixture in load_fixtures():
+        jur = fixture.jurisdiction
+        label = ", ".join(p for p in (jur.city, jur.state) if p) or jur.level
+        for fact in fixture.facts:
+            if fact.active_on(today):
+                state_label = "active"
+            elif fact.expired_on(today):
+                state_label = "expired"
+            else:
+                state_label = "pending"
+            facts.append({
+                "jurisdiction": label,
+                "requirement_key": fact.requirement_key,
+                "category": fact.category,
+                "comparator": fact.comparator,
+                "severity": fact.severity,
+                "effective_from": str(fact.effective_from),
+                "effective_to": str(fact.effective_to) if fact.effective_to else None,
+                "authority_url": fact.authority_url,
+                "curated_by": fact.curated_by,
+                "verified_by": fact.verified_by,
+                "notes": fact.notes,
+                "state": state_label,
+            })
+    return {
+        "facts": facts,
+        "total": len(facts),
+        "active": sum(1 for f in facts if f["state"] == "active"),
+        "unverified": sum(1 for f in facts if not f["verified_by"]),
+    }
 
 
 @router.get("/jurisdictions/{jurisdiction_id}", dependencies=[Depends(require_admin)])

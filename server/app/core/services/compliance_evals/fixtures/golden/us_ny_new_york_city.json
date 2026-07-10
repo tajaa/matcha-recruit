@@ -1,0 +1,60 @@
+{
+  "fixture_version": "2026.07",
+  "jurisdiction": {
+    "country_code": "US",
+    "state": "NY",
+    "city": "New York City",
+    "level": "city"
+  },
+  "facts": [
+    {
+      "requirement_key": "local_minimum_wage",
+      "category": "minimum_wage",
+      "comparator": "numeric_eq",
+      "expected_numeric": 17.0,
+      "effective_from": "2026-01-01",
+      "effective_to": "2027-01-01",
+      "authority_url": "https://dol.ny.gov/minimum-wage",
+      "severity": "warn",
+      "curated_by": "claude-research",
+      "curated_at": "2026-07-09",
+      "notes": "NYC has NO municipal minimum-wage ordinance. The $17.00 downstate rate is set by STATE law for NYC / Long Island / Westchester. Recorded here because that is where the establishment-level lookup expects to find it, but the authority is the state, not the city."
+    },
+    {
+      "requirement_key": "local_sick_leave",
+      "category": "sick_leave",
+      "comparator": "text_contains",
+      "expected_text": "56",
+      "effective_from": "2020-09-30",
+      "authority_url": "https://rules.cityofnewyork.us/wp-content/uploads/2023/09/DCWP-NOA-Earned-Safe-and-Sick-Time-Act.pdf",
+      "severity": "warn",
+      "curated_by": "claude-research",
+      "curated_at": "2026-07-09",
+      "notes": "NYC Earned Safe and Sick Time Act — 1 hr per 30 worked; 100+ employees accrue up to 56 hrs paid, 5-99 up to 40 hrs paid. A 2026-02-22 amendment layers 32 hrs UNPAID leave on top; the paid caps are unchanged."
+    },
+    {
+      "requirement_key": "predictive_scheduling",
+      "category": "scheduling_reporting",
+      "comparator": "text_contains",
+      "expected_text": "14 day",
+      "effective_from": "2017-11-26",
+      "authority_url": "https://rules.cityofnewyork.us/rule/automated-employment-decision-tools-2/",
+      "industries": ["fast food", "retail"],
+      "severity": "warn",
+      "curated_by": "claude-research",
+      "curated_at": "2026-07-09",
+      "notes": "NYC Fair Workweek: 14-day advance schedule; 'clopening' = shifts under 11 hrs apart, carrying a $100 premium; schedule-change premiums $10-$75. Covers fast food and retail. AUTHORITY URL NEEDS REPLACING — the canonical DCWP Fair Workweek FAQ at nyc.gov blocks automated fetch, and the URL here points at the Local Law 144 rule instead. Fix before verifying."
+    },
+    {
+      "requirement_key": "pay_transparency",
+      "category": "anti_discrimination",
+      "comparator": "exists",
+      "effective_from": "2022-11-01",
+      "authority_url": "https://council.nyc.gov/data/salary-transparency/",
+      "severity": "warn",
+      "curated_by": "claude-research",
+      "curated_at": "2026-07-09",
+      "notes": "NYC Local Law 32 (as amended by LL 59), under the NYC Human Rights Law — 4+ employees must post a good-faith minimum and maximum salary in job, promotion, and transfer ads."
+    }
+  ]
+}

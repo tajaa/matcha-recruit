@@ -1,0 +1,143 @@
+{
+  "_comment": [
+    "Hand-labeled ground truth for `applicable_industries` on catalog rows.",
+    "The structural check in tagging.py only sees tags that are ABSENT on an",
+    "industry-specific category. It cannot see a tag that is simply WRONG — a",
+    "wage rule tagged `healthcare`, say, which then hides from every other tenant.",
+    "That is what these labels measure (micro-averaged precision/recall).",
+    "",
+    "Match key is (state, city, requirement_key) against the NORMALIZED key —",
+    "so a minimum-wage row stored under rate_type `general` is labeled as",
+    "`state_minimum_wage` at state level or `local_minimum_wage` at city level.",
+    "See keys.normalize_key.",
+    "",
+    "`expected_industries: []` means the requirement is universal and MUST carry",
+    "no tag — an untagged universal row is correct, and tagging it would wrongly",
+    "hide it from companies in other industries.",
+    "",
+    "Seeded from rows observed in dev on 2026-07-09. Extend opportunistically:",
+    "when adjudicating a tagging finding, add the row here with its correct tags.",
+    "Labels are curated by a human; a wrong label silently mis-scores the suite."
+  ],
+  "labels": [
+    {
+      "state": "CA",
+      "city": "los angeles",
+      "requirement_key": "local_minimum_wage",
+      "expected_industries": [],
+      "note": "Universal wage floor — applies to every employer in the city."
+    },
+    {
+      "state": "CA",
+      "city": "los angeles",
+      "requirement_key": "fast_food_minimum_wage",
+      "expected_industries": ["fast food"],
+      "note": "AB 1228 covers only chains with 60+ national establishments."
+    },
+    {
+      "state": "CA",
+      "city": "",
+      "requirement_key": "healthcare_minimum_wage",
+      "expected_industries": ["healthcare"],
+      "note": "SB 525 applies only to covered health care facilities."
+    },
+    {
+      "state": "CA",
+      "city": "",
+      "requirement_key": "state_minimum_wage",
+      "expected_industries": [],
+      "note": "Universal."
+    },
+    {
+      "state": "CA",
+      "city": "",
+      "requirement_key": "exempt_salary_threshold",
+      "expected_industries": [],
+      "note": "Universal white-collar exemption threshold."
+    },
+    {
+      "state": "CA",
+      "city": "",
+      "requirement_key": "healthcare_overtime",
+      "expected_industries": ["healthcare"],
+      "note": "IWC Wage Orders 4/5 alternative workweek for healthcare."
+    },
+    {
+      "state": "CA",
+      "city": "",
+      "requirement_key": "seventh_day_overtime",
+      "expected_industries": [],
+      "note": "Universal — Labor Code 510 applies to all non-exempt employees."
+    },
+    {
+      "state": "CA",
+      "city": "los angeles",
+      "requirement_key": "epcra_tri_reporting",
+      "expected_industries": ["manufacturing"],
+      "note": "EPCRA 313 Toxic Release Inventory reporting is triggered by covered NAICS manufacturing sectors. Untagged in dev today, so it reaches every tenant."
+    },
+    {
+      "state": "CA",
+      "city": "los angeles",
+      "requirement_key": "cercla_superfund_liability",
+      "expected_industries": ["manufacturing"],
+      "note": "Industrial site liability."
+    },
+    {
+      "state": "CA",
+      "city": "san francisco",
+      "requirement_key": "clean_water_act_npdes",
+      "expected_industries": ["manufacturing"],
+      "note": "Industrial stormwater / process-water discharge permitting."
+    },
+    {
+      "state": "TX",
+      "city": "",
+      "requirement_key": "hipaa_privacy_rule",
+      "expected_industries": ["healthcare"],
+      "note": "Correctly tagged `healthcare` in dev — a true positive for precision."
+    },
+    {
+      "state": "NY",
+      "city": "",
+      "requirement_key": "pain_management_opioid_prescribing",
+      "expected_industries": ["healthcare"],
+      "note": "Clinical prescribing rule. Untagged in dev, so it leaks to non-healthcare tenants."
+    },
+    {
+      "state": "NY",
+      "city": "",
+      "requirement_key": "infection_control_prevention_standards",
+      "expected_industries": ["healthcare"],
+      "note": "Untagged in dev."
+    },
+    {
+      "state": "NY",
+      "city": "",
+      "requirement_key": "state_health_privacy_laws",
+      "expected_industries": ["healthcare"],
+      "note": "Untagged in dev."
+    },
+    {
+      "state": "NY",
+      "city": "",
+      "requirement_key": "mandatory_overtime_restrictions",
+      "expected_industries": ["healthcare"],
+      "note": "NY Labor Law 167 binds health care employers only."
+    },
+    {
+      "state": "CO",
+      "city": "co",
+      "requirement_key": "daily_weekly_overtime",
+      "expected_industries": [],
+      "note": "Universal."
+    },
+    {
+      "state": "NV",
+      "city": "",
+      "requirement_key": "daily_weekly_overtime",
+      "expected_industries": [],
+      "note": "Universal."
+    }
+  ]
+}

@@ -14,6 +14,7 @@ import GapIntelligencePanel from '../../components/admin/jurisdiction/GapIntelli
 import KeyCoverageDrawer from '../../components/admin/jurisdiction/KeyCoverageDrawer'
 import KeyIndexTab from '../../components/admin/jurisdiction/KeyIndexTab'
 import IntegrityTab from '../../components/admin/jurisdiction/IntegrityTab'
+import EvalsTab from '../../components/admin/jurisdiction/EvalsTab'
 import PenaltyOverviewTab from '../../components/admin/jurisdiction/PenaltyOverviewTab'
 import ProfileEditorModal from '../../components/admin/jurisdiction/ProfileEditorModal'
 import SpecialtyFilterSelect from '../../components/admin/jurisdiction/SpecialtyFilterSelect'
@@ -23,7 +24,7 @@ import type { DataOverview, BookmarkedReq, FlatCity, CatCoverage, SpecialtyFilte
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
-type Tab = 'explorer' | 'policies' | 'quality' | 'key-index' | 'integrity' | 'penalties' | 'preemption' | 'bookmarks' | 'api-sources'
+type Tab = 'explorer' | 'policies' | 'quality' | 'evals' | 'key-index' | 'integrity' | 'penalties' | 'preemption' | 'bookmarks' | 'api-sources'
 
 type SourceCount = {
   research_source: string
@@ -310,6 +311,7 @@ export default function JurisdictionData() {
           { id: 'explorer' as Tab, label: 'Explorer' },
           { id: 'policies' as Tab, label: 'Policies' },
           { id: 'quality' as Tab, label: 'Data Quality' },
+          { id: 'evals' as Tab, label: 'Evals' },
           { id: 'key-index' as Tab, label: 'Key Index' },
           { id: 'integrity' as Tab, label: 'Integrity' },
           { id: 'penalties' as Tab, label: 'Penalties' },
@@ -325,6 +327,9 @@ export default function JurisdictionData() {
 
       {/* ── Policies Tab ── */}
       {tab === 'policies' && <PolicyBrowserTab />}
+
+      {/* ── Evals Tab ── */}
+      {tab === 'evals' && <EvalsTab />}
 
       {/* ── Explorer Tab ── */}
       {tab === 'explorer' && (

@@ -1,0 +1,164 @@
+{
+  "fixture_version": "2026.07",
+  "jurisdiction": {
+    "country_code": "US",
+    "state": null,
+    "city": null,
+    "level": "federal"
+  },
+  "facts": [
+    {
+      "requirement_key": "national_minimum_wage",
+      "category": "minimum_wage",
+      "comparator": "numeric_eq",
+      "expected_numeric": 7.25,
+      "effective_from": "2009-07-24",
+      "authority_url": "https://www.dol.gov/agencies/whd/minimum-wage",
+      "severity": "critical",
+      "curated_by": "claude-research",
+      "curated_at": "2026-07-09",
+      "notes": "FLSA floor, unchanged since 2009-07-24. Keyed `national_minimum_wage` because keys.normalize_key maps a federal-level rate_type of `general` onto that name."
+    },
+    {
+      "requirement_key": "tipped_minimum_wage",
+      "category": "minimum_wage",
+      "comparator": "numeric_eq",
+      "expected_numeric": 2.13,
+      "effective_from": "2009-07-24",
+      "authority_url": "https://www.dol.gov/agencies/whd/fact-sheets/15-tipped-employees-flsa",
+      "severity": "critical",
+      "curated_by": "claude-research",
+      "curated_at": "2026-07-09",
+      "notes": "Required cash wage $2.13; maximum tip credit $5.12."
+    },
+    {
+      "requirement_key": "exempt_salary_threshold",
+      "category": "minimum_wage",
+      "comparator": "numeric_eq",
+      "expected_numeric": 35568.0,
+      "effective_from": "2020-01-01",
+      "authority_url": "https://www.dol.gov/agencies/whd/overtime/salary-levels",
+      "severity": "critical",
+      "curated_by": "claude-research",
+      "curated_at": "2026-07-09",
+      "notes": "TRAP: the widely-cited $58,656 comes from the 2024 DOL rule, which Texas v. DOL (E.D. Tex., 2024-11-15) vacated nationwide. DOL is enforcing the 2019 level: $684/week = $35,568/year (HCE $107,432). A catalog row asserting $58,656 is wrong and this fact must fail it."
+    },
+    {
+      "requirement_key": "daily_weekly_overtime",
+      "category": "overtime",
+      "comparator": "exists",
+      "effective_from": "1938-10-24",
+      "authority_url": "https://www.dol.gov/agencies/whd/overtime",
+      "severity": "warn",
+      "curated_by": "claude-research",
+      "curated_at": "2026-07-09",
+      "notes": "FLSA overtime is weekly only (1.5x after 40 hrs/workweek); there is no federal daily-overtime rule. `exists` rather than text_contains — every plausible phrasing of '40 hours' would also match unrelated rows."
+    },
+    {
+      "requirement_key": "fmla",
+      "category": "leave",
+      "comparator": "text_contains",
+      "expected_text": "12 week",
+      "effective_from": "1993-08-05",
+      "authority_url": "https://www.dol.gov/agencies/whd/fact-sheets/28-fmla",
+      "severity": "warn",
+      "curated_by": "claude-research",
+      "curated_at": "2026-07-09",
+      "notes": "12 workweeks unpaid, job-protected. Coverage: 50 employees within 75 miles; eligibility 12 months + 1,250 hours."
+    },
+    {
+      "requirement_key": "osha_general_duty",
+      "category": "workplace_safety",
+      "comparator": "text_contains",
+      "expected_text": "recognized hazards",
+      "effective_from": "1970-12-29",
+      "authority_url": "https://www.osha.gov/laws-regs/oshact/section5-duties",
+      "severity": "warn",
+      "curated_by": "claude-research",
+      "curated_at": "2026-07-09",
+      "notes": "OSH Act 5(a)(1). 'recognized hazards' is the statutory term of art, so the substring is distinctive rather than incidental."
+    },
+    {
+      "requirement_key": "injury_illness_recordkeeping",
+      "category": "workplace_safety",
+      "comparator": "exists",
+      "effective_from": "2002-01-01",
+      "authority_url": "https://www.osha.gov/laws-regs/regulations/standardnumber/1904/1904.1",
+      "severity": "warn",
+      "curated_by": "claude-research",
+      "curated_at": "2026-07-09",
+      "notes": "29 CFR 1904.1 — partial exemption at 10 or fewer employees; forms 300/300A/301."
+    },
+    {
+      "requirement_key": "hazard_communication",
+      "category": "workplace_safety",
+      "comparator": "exists",
+      "effective_from": "1994-02-09",
+      "authority_url": "https://www.osha.gov/laws-regs/regulations/standardnumber/1910/1910.1200",
+      "severity": "warn",
+      "curated_by": "claude-research",
+      "curated_at": "2026-07-09",
+      "notes": "29 CFR 1910.1200 (HazCom / GHS)."
+    },
+    {
+      "requirement_key": "osha_poster",
+      "category": "posting_requirements",
+      "comparator": "exists",
+      "effective_from": "1971-05-29",
+      "authority_url": "https://www.osha.gov/publications/poster",
+      "severity": "warn",
+      "curated_by": "claude-research",
+      "curated_at": "2026-07-09",
+      "notes": "29 CFR 1903.2 — 'Job Safety and Health: It's the Law' (Pub. 3165)."
+    },
+
+    {
+      "requirement_key": "lockout_tagout",
+      "category": "machine_safety",
+      "comparator": "exists",
+      "effective_from": "1990-01-02",
+      "authority_url": "https://www.osha.gov/laws-regs/regulations/standardnumber/1910/1910.147",
+      "industries": ["manufacturing"],
+      "severity": "warn",
+      "curated_by": "claude-research",
+      "curated_at": "2026-07-09",
+      "notes": "29 CFR 1910.147 (control of hazardous energy). Manufacturing pack — a manufacturer onboarding anywhere in the US needs this key present."
+    },
+    {
+      "requirement_key": "osha_psm",
+      "category": "process_safety",
+      "comparator": "exists",
+      "effective_from": "1992-05-26",
+      "authority_url": "https://www.osha.gov/laws-regs/regulations/standardnumber/1910/1910.119",
+      "industries": ["manufacturing"],
+      "severity": "warn",
+      "curated_by": "claude-research",
+      "curated_at": "2026-07-09",
+      "notes": "29 CFR 1910.119 — Process Safety Management of Highly Hazardous Chemicals."
+    },
+    {
+      "requirement_key": "respiratory_protection",
+      "category": "industrial_hygiene",
+      "comparator": "exists",
+      "effective_from": "1998-04-08",
+      "authority_url": "https://www.osha.gov/laws-regs/regulations/standardnumber/1910/1910.134",
+      "industries": ["manufacturing"],
+      "severity": "warn",
+      "curated_by": "claude-research",
+      "curated_at": "2026-07-09",
+      "notes": "29 CFR 1910.134."
+    },
+    {
+      "requirement_key": "rcra_hazardous_waste",
+      "category": "environmental_compliance",
+      "comparator": "exists",
+      "effective_from": "1980-11-19",
+      "authority_url": "https://www.epa.gov/hw/criteria-definition-solid-waste-and-solid-and-hazardous-waste-exclusions",
+      "industries": ["manufacturing"],
+      "severity": "warn",
+      "curated_by": "claude-research",
+      "curated_at": "2026-07-09",
+      "notes": "RCRA Subtitle C generator standards (40 CFR 262)."
+    }
+  ]
+}

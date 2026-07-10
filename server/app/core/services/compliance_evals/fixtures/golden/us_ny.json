@@ -1,0 +1,134 @@
+{
+  "fixture_version": "2026.07",
+  "jurisdiction": {
+    "country_code": "US",
+    "state": "NY",
+    "city": null,
+    "level": "state"
+  },
+  "facts": [
+    {
+      "requirement_key": "state_minimum_wage",
+      "category": "minimum_wage",
+      "comparator": "numeric_eq",
+      "expected_numeric": 16.0,
+      "effective_from": "2026-01-01",
+      "effective_to": "2027-01-01",
+      "authority_url": "https://dol.ny.gov/minimum-wage",
+      "severity": "warn",
+      "curated_by": "claude-research",
+      "curated_at": "2026-07-09",
+      "notes": "NY splits by region: $17.00 in NYC / Long Island / Westchester, $16.00 rest-of-state. The STATE jurisdiction row carries the statewide floor ($16.00); the downstate uplift belongs on the city/county rows. Deliberately `warn`, not `critical` — a catalog that stored $17.00 here is arguably reasonable, and a human should adjudicate rather than have accuracy zeroed."
+    },
+    {
+      "requirement_key": "tipped_minimum_wage",
+      "category": "minimum_wage",
+      "comparator": "numeric_eq",
+      "expected_numeric": 10.7,
+      "effective_from": "2026-01-01",
+      "effective_to": "2027-01-01",
+      "authority_url": "https://dol.ny.gov/minimum-wage",
+      "severity": "warn",
+      "curated_by": "claude-research",
+      "curated_at": "2026-07-09",
+      "notes": "Rest-of-state tipped FOOD SERVICE cash wage ($10.70 cash + $5.30 credit). Downstate is $11.35 + $5.65. Service employees use different figures again. Only hospitality employers may take a tip credit."
+    },
+    {
+      "requirement_key": "exempt_salary_threshold",
+      "category": "minimum_wage",
+      "comparator": "numeric_eq",
+      "expected_numeric": 62353.2,
+      "effective_from": "2026-01-01",
+      "effective_to": "2027-01-01",
+      "authority_url": "https://dol.ny.gov/minimum-wage-frequently-asked-questions",
+      "severity": "warn",
+      "curated_by": "claude-research",
+      "curated_at": "2026-07-09",
+      "notes": "Rest-of-state executive/administrative threshold ($1,199.10/wk). Downstate is $1,275.00/wk = $66,300/yr. NY sets no separate professional threshold (follows FLSA)."
+    },
+    {
+      "requirement_key": "daily_weekly_overtime",
+      "category": "overtime",
+      "comparator": "exists",
+      "effective_from": "2000-01-01",
+      "authority_url": "https://forms.labor.ny.gov/WP/CR142.pdf",
+      "severity": "warn",
+      "curated_by": "claude-research",
+      "curated_at": "2026-07-09",
+      "notes": "12 NYCRR 142-2.2 — 1.5x after 40 hrs (44 for residential employees). NY has no daily-overtime rule."
+    },
+    {
+      "requirement_key": "mandatory_overtime_restrictions",
+      "category": "overtime",
+      "comparator": "text_contains",
+      "expected_text": "nurse",
+      "effective_from": "2009-07-01",
+      "authority_url": "https://dol.ny.gov/system/files/documents/2021/02/nurse_overtime_section_167.pdf",
+      "industries": ["healthcare"],
+      "severity": "warn",
+      "curated_by": "claude-research",
+      "curated_at": "2026-07-09",
+      "notes": "NY Labor Law 167 — a health care employer may not require a nurse to work beyond regularly scheduled hours, with narrow emergency exceptions. Voluntary overtime remains allowed. Healthcare pack."
+    },
+    {
+      "requirement_key": "spread_of_hours",
+      "category": "scheduling_reporting",
+      "comparator": "text_contains",
+      "expected_text": "spread of hours",
+      "effective_from": "2000-01-01",
+      "authority_url": "https://forms.labor.ny.gov/WP/CR142.pdf",
+      "severity": "warn",
+      "curated_by": "claude-research",
+      "curated_at": "2026-07-09",
+      "notes": "12 NYCRR 142-2.4 — one extra hour at the BASIC MINIMUM wage (not the employee's rate) when the spread exceeds 10 hours, or on a split shift."
+    },
+    {
+      "requirement_key": "reporting_time_pay",
+      "category": "scheduling_reporting",
+      "comparator": "text_contains",
+      "expected_text": "four hours",
+      "effective_from": "2000-01-01",
+      "authority_url": "https://forms.labor.ny.gov/WP/CR142.pdf",
+      "severity": "warn",
+      "curated_by": "claude-research",
+      "curated_at": "2026-07-09",
+      "notes": "12 NYCRR 142-2.3 call-in pay: at least four hours, or the scheduled shift length if shorter, at the basic minimum wage."
+    },
+    {
+      "requirement_key": "state_paid_sick_leave",
+      "category": "sick_leave",
+      "comparator": "text_contains",
+      "expected_text": "56 hours",
+      "effective_from": "2021-01-01",
+      "authority_url": "https://www.ny.gov/new-york-paid-sick-leave/new-york-paid-sick-leave",
+      "severity": "warn",
+      "curated_by": "claude-research",
+      "curated_at": "2026-07-09",
+      "notes": "NY Labor Law 196-b, tiered by size and net income: 100+ employees = 56 hrs paid; 5-99 = 40 hrs paid; 0-4 with >$1M net income = 40 hrs paid; 0-4 otherwise = 40 hrs unpaid. The substring targets the top tier."
+    },
+    {
+      "requirement_key": "state_paid_family_leave",
+      "category": "leave",
+      "comparator": "text_contains",
+      "expected_text": "12 week",
+      "effective_from": "2026-01-01",
+      "effective_to": "2027-01-01",
+      "authority_url": "https://paidfamilyleave.ny.gov/2026",
+      "severity": "warn",
+      "curated_by": "claude-research",
+      "curated_at": "2026-07-09",
+      "notes": "2026: 12 weeks at 67% of AWW, capped at 67% of NYSAWW ($1,228.53/wk max benefit); employee contribution 0.432% of gross wages, annual cap $411.91. Contribution rate is reset annually by DFS."
+    },
+    {
+      "requirement_key": "pay_transparency",
+      "category": "anti_discrimination",
+      "comparator": "exists",
+      "effective_from": "2023-09-17",
+      "authority_url": "https://dol.ny.gov/pay-transparency",
+      "severity": "warn",
+      "curated_by": "claude-research",
+      "curated_at": "2026-07-09",
+      "notes": "NY Labor Law 194-b — 4+ employees must disclose a compensation range in job, promotion, and transfer postings, including remote roles reporting to a NY worksite."
+    }
+  ]
+}

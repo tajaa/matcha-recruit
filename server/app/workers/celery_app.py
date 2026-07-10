@@ -220,6 +220,15 @@ def on_worker_ready(**kwargs):
     else:
         print("[Worker] Grievance deadline alerts scheduler is disabled, skipping.")
 
+    from app.workers.tasks.compliance_evals import run_scheduled_compliance_evals
+
+    # Fires on every worker restart (hourly cron); the task itself declines unless
+    # the last scheduled run is older than MIN_SCHEDULED_INTERVAL_DAYS.
+    if _is_scheduler_enabled("compliance_evals"):
+        run_scheduled_compliance_evals.delay()
+    else:
+        print("[Worker] Compliance evals scheduler is disabled, skipping.")
+
     from app.workers.tasks.auto_archive import run_auto_archive
 
     if _is_scheduler_enabled("auto_archive"):
