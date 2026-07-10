@@ -105,3 +105,52 @@ def test_industry_tag_stays_within_its_column_for_a_long_specialty():
     assert len(slug) > MAX_GROUP
     assert len(industry_tag("healthcare", slug)) <= MAX_INDUSTRY_TAG
     # The group column is the binding constraint, and `confirm` raises on it.
+
+
+# ── discover-tag normalization ────────────────────────────────────────────────
+
+def test_rewrite_tag_replaces_the_raw_discover_tag():
+    """`discover_specialization_categories` derives its tag with
+    `.lower().replace(' ', '_')`, which keeps punctuation: "OB/GYN" →
+    `healthcare:ob/gyn`. Confirm writes `healthcare:ob_gyn`. The stored
+    research_context embeds the tag as a literal instruction for future research
+    passes — left unrewritten, requirements would be tagged with a tag no
+    specialty or category matches, permanently invisible to the filter."""
+    from app.core.services.industry_specialties import rewrite_tag
+
+    ctx = "…Tag each requirement with 'applicable_industries': ['healthcare:ob/gyn']."
+    out = rewrite_tag(ctx, "healthcare:ob/gyn", "healthcare:ob_gyn")
+    assert "healthcare:ob_gyn" in out
+    assert "ob/gyn" not in out
+
+
+def test_rewrite_tag_noop_when_tags_agree_or_inputs_empty():
+    from app.core.services.industry_specialties import rewrite_tag
+
+    ctx = "tag ['healthcare:oncology']"
+    assert rewrite_tag(ctx, "healthcare:oncology", "healthcare:oncology") == ctx
+    assert rewrite_tag("", "a", "b") == ""
+    assert rewrite_tag(ctx, "", "b") == ctx
+
+
+def test_underlying_tag_diverges_exactly_when_name_has_punctuation():
+    """Documents the divergence discover() exists to normalize."""
+    for name, diverges in [("Sleep Medicine", False), ("OB/GYN", True), ("Ear, Nose & Throat", True)]:
+        underlying = "healthcare:" + name.lower().replace(" ", "_")
+        normalized = industry_tag("healthcare", slugify(name))
+        assert (underlying != normalized) is diverges, name
+
+
+# ── proposed-category key validation ─────────────────────────────────────────
+
+def test_proposed_category_key_must_be_slug_shaped():
+    """The key becomes `compliance_categories.slug` verbatim; an uppercase or
+    spaced key would create a category downstream comparisons never match."""
+    import pydantic
+
+    from app.core.routes.admin import ProposedCategory
+
+    ProposedCategory(key="laser_safety_compliance")  # valid
+    for bad in ("Laser Safety", "LASER_SAFETY", "laser-safety", "_leading", "a", "x" * 61):
+        with pytest.raises(pydantic.ValidationError):
+            ProposedCategory(key=bad)

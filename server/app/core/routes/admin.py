@@ -8827,7 +8827,11 @@ class SpecialtyDiscoverRequest(BaseModel):
 
 
 class ProposedCategory(BaseModel):
-    key: str
+    # The key becomes `compliance_categories.slug` verbatim, so it must already
+    # be slug-shaped: Gemini is prompted for snake_case, but the payload is
+    # client-supplied and an uppercase or spaced key would create a category that
+    # downstream slug comparisons never match.
+    key: str = Field(..., min_length=2, max_length=60, pattern=r"^[a-z0-9][a-z0-9_]*$")
     label: Optional[str] = None
     description: Optional[str] = None
     authority_sources: List[str] = Field(default_factory=list)
@@ -8869,6 +8873,17 @@ async def discover_industry_specialty(industry: str, payload: SpecialtyDiscoverR
     slug = spec.slugify(payload.name)
     if not slug:
         raise HTTPException(status_code=400, detail="Specialty name must contain letters or digits")
+    # Confirm would reject this slug anyway (it becomes the 30-char category
+    # `group` column) — reject it here, before spending a Gemini call on a
+    # proposal that can never be saved.
+    if len(slug) > spec.MAX_GROUP:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Specialty name is too long once slugified ({len(slug)} chars; max "
+                f"{spec.MAX_GROUP}). Use a shorter name, e.g. an accepted abbreviation."
+            ),
+        )
 
     async with get_connection() as conn:
         existing = await conn.fetchrow(

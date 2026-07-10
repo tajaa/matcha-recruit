@@ -71,6 +71,13 @@ def industry_tag(parent_industry: str, slug: str) -> str:
     return f"{parent_industry}:{slug}"
 
 
+def rewrite_tag(context: str, old_tag: str, new_tag: str) -> str:
+    """Replace the underlying discover call's raw tag with the normalized one."""
+    if not context or not old_tag or old_tag == new_tag:
+        return context
+    return context.replace(old_tag, new_tag)
+
+
 async def list_specialties(conn, parent_industry: str) -> List[Dict[str, Any]]:
     """Active specialties for an industry, with how many categories each resolves to.
 
@@ -124,16 +131,28 @@ async def discover(parent_industry: str, name: str) -> Dict[str, Any]:
     Thin wrapper over the existing `discover_specialization_categories`, which
     already prompts for 5-15 specialty-only categories with authority sources and
     a reusable research-context paragraph. Nothing is persisted here.
+
+    The underlying function derives its tag with `.lower().replace(' ', '_')`,
+    which keeps punctuation: "OB/GYN" becomes `healthcare:ob/gyn` while confirm
+    writes `healthcare:ob_gyn`. Left alone, the stored research_context would
+    instruct future research passes to tag requirements with a tag no specialty
+    or category matches — permanently invisible to the specialty filter. So the
+    tag is normalized here and rewritten inside the context text.
     """
     from .compliance_service import discover_specialization_categories
 
     result = await discover_specialization_categories(name, parent_industry=parent_industry)
+
+    slug = slugify(name)
+    tag = industry_tag(parent_industry, slug)
+    context = rewrite_tag(result.get("industry_context", ""), result.get("industry_tag", ""), tag)
+
     return {
-        "slug": slugify(name),
+        "slug": slug,
         "label": name.strip(),
-        "industry_tag": result["industry_tag"],
+        "industry_tag": tag,
         "categories": result.get("categories", []),
-        "research_context": result.get("industry_context", ""),
+        "research_context": context,
     }
 
 
