@@ -636,12 +636,65 @@ def test_classification_vocab_is_decoupled_from_derivation_vocab():
         "Hipaa 3-day unpaid suspension following confirmed HIPAA disclosure.", "wage_hour")
 
 
+def test_clinical_records_are_not_unclassifiable():
+    """A healthcare tenant's ER cases are mostly ABOUT care delivery. Before the
+    clinical group, 'Oncology Incident' (category 'Other') hit no probe at all,
+    read as 'no subject detected', and failed open into a wage-and-hour corpus —
+    four of them survived the round-3 fix in production."""
+    rows = [
+        {"id": "1", "case_number": "ER-1", "title": "Oncology Incident",
+         "description": None, "category": "other",
+         "status": "open", "outcome": None, "created_at": None},
+        {"id": "2", "case_number": "ER-2", "title": "Medication error during unpaid overtime shift",
+         "description": None, "category": "other",
+         "status": "open", "outcome": None, "created_at": None},
+    ]
+    wage = asyncio.run(ld._src_er_cases(
+        _RowConn(rows), "cid", None, None, None, None, ld._THEORIES["wage_hour"]))
+    # clinical-only case drops; the one that is ALSO a wage record stays
+    assert [r["cid"] for r in wage] == ["er_case:2"]
+    broad = asyncio.run(ld._src_er_cases(_RowConn(rows), "cid", None, None, None, None))
+    assert len(broad) == 2
+
+
+def test_an_unmodeled_subject_vetoes_the_matter_type_prior():
+    """'Jane Jones Vs World Health - HIPAA Claim' (a patient-privacy claim) scored
+    zero on every theory and inherited single_plaintiff's wage-and-hour prior,
+    filtering a privacy matter through a wage allowlist. The text is not silent —
+    it names a subject no theory models — so broad is the only honest scope."""
+    slug, topic = ld.resolve_matter_theory({
+        "matter_type": "single_plaintiff", "title": "Jane Jones Vs World Health - HIPAA Claim",
+        "allegation": "A nurse took a selfie in her room; her patient chart was visible.",
+    })
+    assert slug is None and topic is ld._BROAD
+    # a clinical-subject matter likewise
+    assert ld.resolve_matter_theory({
+        "matter_type": "class_action", "allegation": "systemic medication errors"})[0] is None
+    # a genuinely SILENT allegation still inherits the prior — the veto needs a
+    # positive read on an unmodeled subject, not merely the absence of a theory
+    assert ld.resolve_matter_theory({"matter_type": "single_plaintiff"})[0] == "wage_hour"
+    assert ld.resolve_matter_theory(
+        {"matter_type": "class_action", "allegation": "a dispute arose"})[0] == "wage_hour"
+    # and a wage allegation that merely MENTIONS a chart is still wage
+    assert ld.resolve_matter_theory({
+        "matter_type": "class_action",
+        "allegation": "nurses charted off the clock without overtime pay"})[0] == "wage_hour"
+    # the stored override still outranks the veto
+    assert ld.resolve_matter_theory({
+        "matter_type": "single_plaintiff", "subject_theory": "eeo",
+        "allegation": "HIPAA breach"})[0] == "eeo"
+
+
 def test_classify_probe_maps_cover_every_theory():
     """_matches_other_subject indexes _CLASSIFY_PROBES[slug] bare — a theory
     added to _THEORIES without a keyword entry is a production KeyError on
     every source, invisible to a green suite without this assertion."""
     assert set(ld._THEORY_KEYWORDS) == set(ld._THEORIES)
     assert set(ld._THEORIES) <= set(ld._CLASSIFY_PROBES)
+    # off-theory groups name subjects NO matter can carry — a collision would
+    # make _names_unmodeled_subject veto that theory's own matters
+    assert not (set(ld._OFF_THEORY_KEYWORDS) & set(ld._THEORIES))
+    assert ld._OFF_THEORY_PROBES
     for slug in ld._CLASSIFY_ONLY_KEYWORDS:
         assert slug in ld._THEORIES
     for slug, excluded in ld._CLASSIFY_EXCLUDE_KEYWORDS.items():

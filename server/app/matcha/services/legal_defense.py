@@ -361,6 +361,11 @@ _OFF_THEORY_KEYWORDS: dict[str, tuple[str, ...]] = {
     # subject as unambiguously as the correct spelling.
     "privacy": ("hipaa", "hippa", "phi", "patient privacy", "patient record*",
                 "medical record*", "data breach", "protected health"),
+    # A healthcare tenant's records are mostly ABOUT care delivery. Without this
+    # group an "Oncology Incident" ER case reads as "no subject detected" and
+    # fails open into every matter's corpus, wage-and-hour included.
+    "clinical": ("oncolog*", "patient care", "medication error*", "clinical care",
+                 "patient treatment", "infection control", "patient fall*"),
 }
 
 _CLASSIFY_PROBES: dict[str, list[re.Pattern]] = {
@@ -370,6 +375,22 @@ _CLASSIFY_PROBES: dict[str, list[re.Pattern]] = {
        for slug, kws in _THEORY_KEYWORDS.items()},
     **{slug: _compile_probes(kws) for slug, kws in _OFF_THEORY_KEYWORDS.items()},
 }
+
+
+_OFF_THEORY_PROBES: list[re.Pattern] = [
+    p for slug in _OFF_THEORY_KEYWORDS for p in _CLASSIFY_PROBES[slug]
+]
+
+
+def _names_unmodeled_subject(text: str) -> bool:
+    """Does ``text`` name a subject no theory models (privacy, clinical care)?
+
+    Used only to VETO a matter_type prior that scored no keywords of its own —
+    never to assert a theory, because there is no theory to assert. Silence and
+    a named-but-unmodeled subject are different states, and only the first one
+    should inherit ``_MATTER_TYPE_THEORY``'s guess about the modal suit."""
+    t = (text or "").lower()
+    return any(p.search(t) for p in _OFF_THEORY_PROBES)
 
 
 def _is_signalless(value, vocabulary, generic=frozenset()) -> bool:
@@ -507,6 +528,14 @@ def resolve_matter_theory(matter: dict | None) -> tuple[str | None, _Topic]:
     elif top > 0 and fallback not in tied:
         # Tied subjects, none of them the matter_type's prior → widen rather
         # than assert a theory the text gives no support for.
+        return None, _BROAD
+
+    if top == 0 and _names_unmodeled_subject(text):
+        # The text is not silent — it names a subject this system has no theory
+        # for (a patient-privacy claim, a clinical-care claim). The matter_type
+        # prior is a guess about the modal suit, and here the text proves the
+        # guess wrong: a HIPAA matter filtered through the wage-and-hour
+        # allowlist loses its own records. Broad is the only honest scope.
         return None, _BROAD
 
     return (fallback, _THEORIES[fallback]) if fallback else (None, _BROAD)

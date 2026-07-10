@@ -454,6 +454,55 @@ def test_keywords_drop_stopwords_and_digits():
     assert "employees" in kws and "clock" in kws
 
 
+def test_keywords_drop_party_and_employer_names():
+    """An allegation names its parties first, so the leading keywords identified
+    nobody's legal subject: the live query for a nurse meal-break matter was
+    'jim jones nurse AND (wage anchor)', and CourtListener's AND semantics
+    surfaced opinions that merely had a party named Jones."""
+    a = "Jim Jones, a nurse, is claiming World Health denied the nurses their breaks"
+    assert lr._proper_nouns(a) == {"jim", "jones", "world", "health"}
+    kws = lr._keywords(a, 6)
+    for name in ("jim", "jones", "world", "health"):
+        assert name not in kws
+    assert "nurse" in kws and "claiming" in kws and "breaks" in kws
+
+
+def test_keywords_keep_sentence_initial_words_and_acronyms():
+    # a sentence-initial capital is ambiguous — "Employees" is not a name
+    assert lr._proper_nouns("Employees were required to work off the clock") == set()
+    assert "employees" in lr._keywords("Employees were required to work off the clock", 6)
+    # ALL-CAPS statutes are real search terms, never names
+    kws = lr._keywords("Nurses allege FLSA and OSHA violations at World Health", 6)
+    assert "flsa" in kws and "osha" in kws
+    assert "world" not in kws and "health" not in kws
+
+
+def test_keywords_catch_a_first_name_before_a_surname():
+    # "Jim" is sentence-initial (ambiguous alone) but precedes the name "Jones"
+    assert lr._proper_nouns("Jim Jones alleges unpaid overtime") == {"jim", "jones"}
+
+
+def test_criminal_captions_are_dropped_before_ranking():
+    """A sovereign as first party is a prosecution. Neither the subject anchor
+    nor the subject gate catches these: 'People v. Von Villas' is a murder appeal
+    whose opinion discusses police OVERTIME, so it satisfies the wage anchor and
+    reads as on-subject to the gate. It was retrieved for a real nurse
+    meal-break matter."""
+    def _named(i, name):
+        return {"id": str(i), "case_name": name, "date_filed": None, "score": 50.0}
+
+    out = lr._filter_rank([
+        _named(1, "People v. Von Villas"),
+        _named(2, "State v. Smith"),
+        _named(3, "Commonwealth v. Jones"),
+        _named(4, "United States v. Doe"),
+        _named(5, "Espejo v. The Copley Press"),
+        _named(6, "Villas v. People's Bank"),          # employer named "People's"
+        _named(7, "State of Nevada v. U.S. Dep't of Labor"),  # civil, sovereign as party
+    ])
+    assert [c["id"] for c in out] == ["5", "6", "7"]
+
+
 def test_build_query_ladder_narrow_to_broad_distinct():
     ladder = lr.build_query_ladder(
         "class_action",

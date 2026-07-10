@@ -220,15 +220,58 @@ what when where which while who whom why will with would you your yours
 """.split())
 _WORD_RE = re.compile(r"[a-zA-Z][a-zA-Z'-]+")
 
+# Sentence-ish boundaries: a capital right after one of these says nothing about
+# whether the word is a name.
+_SENTENCE_END = frozenset(".!?;:")
+# ALL-CAPS acronyms are real search terms (FLSA, OSHA, ADA, EEOC), never names.
+_ACRONYM_MAX = 5
+
+
+def _proper_nouns(text: str) -> set[str]:
+    """Lowercased tokens that read as proper nouns in ``text`` — party and
+    employer names. Pure.
+
+    An allegation names its parties first ("Jim Jones, a nurse, is claiming
+    World Health denied breaks"), so the leading keywords are exactly the words
+    that identify nobody's legal subject. CourtListener ANDs free text, so
+    "jim jones nurse" retrieves opinions that merely have a party named Jones —
+    a criminal appeal, in the case that prompted this.
+
+    A token is a name when EVERY occurrence is capitalized and at least one sits
+    mid-sentence (where capitalization carries information). A sentence-initial
+    capital is ambiguous — "Employees were required..." is not a name — so it
+    only counts when the NEXT token is itself a name, which is how "Jim" in
+    "Jim Jones" is caught without catching "Employees" in "Employees were"."""
+    occurrences: list[tuple[str, bool, bool]] = []   # (lower, capitalized, sentence_initial)
+    for m in _WORD_RE.finditer(text or ""):
+        tok = m.group()
+        before = (text[:m.start()].rstrip() or "")
+        sentence_initial = not before or before[-1] in _SENTENCE_END
+        occurrences.append((tok.lower(), tok[0].isupper(), sentence_initial))
+        if tok.isupper() and len(tok) <= _ACRONYM_MAX:
+            occurrences[-1] = (tok.lower(), False, sentence_initial)   # acronym, not a name
+
+    always_cap = {low for low, cap, _ in occurrences if cap}
+    always_cap -= {low for low, cap, _ in occurrences if not cap}
+    names = {low for low, cap, si in occurrences if cap and not si and low in always_cap}
+
+    # "Jim" is sentence-initial, but it precedes the name "Jones".
+    for i, (low, cap, si) in enumerate(occurrences):
+        if cap and si and low in always_cap and i + 1 < len(occurrences):
+            if occurrences[i + 1][0] in names:
+                names.add(low)
+    return names
+
 
 def _keywords(text: str, limit: int) -> list[str]:
-    """Significant search terms from free text: alphabetic tokens, stopwords
-    and 1-char fragments dropped, order preserved, deduped. Pure."""
+    """Significant search terms from free text: alphabetic tokens, stopwords,
+    1-char fragments and proper nouns dropped, order preserved, deduped. Pure."""
     out: list[str] = []
     seen: set[str] = set()
+    names = _proper_nouns(text or "")
     for tok in _WORD_RE.findall(text or ""):
         low = tok.lower()
-        if low in _QUERY_STOPWORDS or len(low) < 2 or low in seen:
+        if low in _QUERY_STOPWORDS or len(low) < 2 or low in seen or low in names:
             continue
         seen.add(low)
         out.append(low)
@@ -304,6 +347,15 @@ def _sanitize_query(query: str) -> str:
     return " ".join(cleaned.split())
 
 
+# A sovereign as the FIRST party is a criminal prosecution. Anchored to the start
+# of the caption so an employer named "People's Bank" or a case captioned
+# "Villas v. State Farm" is untouched — only the plaintiff position matters. The
+# "of <sovereign>" forms ("State of Nevada v. U.S. Dep't of Labor") are civil and
+# deliberately excluded by requiring the "v." right after the sovereign.
+_CRIMINAL_CAPTION_RE = re.compile(
+    r"^(the\s+)?(people|state|commonwealth|united\s+states)\s+vs?[.\s]", re.IGNORECASE)
+
+
 def _bm25(row: dict) -> float | None:
     """CourtListener's Elasticsearch relevance score, ``meta.score.bm25``.
     Returns None when absent or non-numeric — callers treat that as "unscored"
@@ -360,28 +412,38 @@ def _parse_search_results(payload: dict, limit: int | None = None) -> list[dict]
 
 
 def _filter_rank(cases: list[dict], limit: int = _MAX_CASES) -> list[dict]:
-    """Dedupe, drop weak hits, cap. Pure (unit-tested).
+    """Dedupe, drop criminal prosecutions and weak hits, cap. Pure (unit-tested).
 
-    Three passes, in order:
+    Four passes, in order:
 
     1. **Dedupe** by cluster id, then by (case name, filing date) — the live API
        returns the same opinion twice under sibling cluster ids (probing showed
        both "Martel v. HG Staffing" and "NEVILLE, JR. VS. DIST. CT."
        duplicated), and duplicates otherwise consume the cap.
-    2. **Relevance floor** at ``_RELEVANCE_FLOOR_RATIO`` of a reference BM25 —
+    2. **Criminal captions** (``_CRIMINAL_CAPTION_RE``) — a sovereign as
+       plaintiff is a prosecution, never employment precedent. Neither the
+       subject anchor nor the subject gate can catch these: "People v. Von
+       Villas" is a murder appeal whose opinion discusses police *overtime*, so
+       it satisfies a wage-and-hour anchor AND carries a wage keyword that makes
+       the gate read it as on-subject. It was retrieved for a real nurse
+       meal-break matter. The caption is the only reliable signal.
+    3. **Relevance floor** at ``_RELEVANCE_FLOOR_RATIO`` of a reference BM25 —
        the median of the top ``_FLOOR_REFERENCE_SAMPLE`` scores, so one
        caption-match outlier cannot raise the bar past the whole field. The
        ``court`` filter fixes jurisdiction but not strength of match: the tail
        of a result page can match on one incidental term and still fill a slot.
        Unscored rows always survive (see ``_bm25``).
-    3. **Cap** at ``limit`` after sorting by score, unscored last.
+    4. **Cap** at ``limit`` after sorting by score, unscored last.
     """
     seen_ids: set[str] = set()
     seen_names: set[tuple[str, str]] = set()
     deduped: list[dict] = []
     for c in cases:
-        name_key = (str(c.get("case_name") or "").strip().lower(), str(c.get("date_filed") or ""))
+        name = str(c.get("case_name") or "").strip()
+        name_key = (name.lower(), str(c.get("date_filed") or ""))
         if c["id"] in seen_ids or name_key in seen_names:
+            continue
+        if _CRIMINAL_CAPTION_RE.match(name):
             continue
         seen_ids.add(c["id"])
         seen_names.add(name_key)
