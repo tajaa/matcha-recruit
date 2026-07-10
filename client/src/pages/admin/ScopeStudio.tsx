@@ -124,6 +124,7 @@ type ResolveResult = {
 
 type LaborScopeRequirement = {
   title?: string | null
+  key_definition_id?: string | null
   current_value?: string | null
   source_url?: string | null
   source_name?: string | null
@@ -1031,10 +1032,21 @@ export default function ScopeStudio() {
                           {data.codified.map((it) => {
                             const r = it.requirement
                             const when = r?.codified_at ?? r?.last_verified_at
+                            const policyHref = r?.key_definition_id
+                              ? `/admin/jurisdiction-data/policy/${r.key_definition_id}`
+                              : null
                             return (
                               <li key={it.citation} className="text-[11px] text-zinc-400">
                                 <div>
-                                  <span className="font-mono text-emerald-300/80">{it.citation}</span>
+                                  {policyHref ? (
+                                    <a href={policyHref}
+                                       className="font-mono text-emerald-300/80 hover:text-emerald-200 hover:underline"
+                                       title="Open in Compliance Library">
+                                      {it.citation}
+                                    </a>
+                                  ) : (
+                                    <span className="font-mono text-emerald-300/80">{it.citation}</span>
+                                  )}
                                   {r?.title ? ` — ${r.title}` : it.regulation_key ? ` — ${it.regulation_key}` : ''}
                                 </div>
                                 {r?.current_value && (

@@ -266,9 +266,9 @@ async def labor_scope(
         )
         for req in await conn.fetch(
             f"""
-            SELECT jr.regulation_key, jr.title, jr.current_value, jr.source_url,
-                   jr.source_name, jr.jurisdiction_level, jr.jurisdiction_name,
-                   jr.last_verified_at, {link_select}
+            SELECT jr.regulation_key, jr.key_definition_id, jr.title, jr.current_value,
+                   jr.source_url, jr.source_name, jr.jurisdiction_level,
+                   jr.jurisdiction_name, jr.last_verified_at, {link_select}
             FROM jurisdiction_requirements jr
             {link_join}
             WHERE jr.jurisdiction_id = ANY($1::uuid[])
