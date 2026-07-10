@@ -72,14 +72,22 @@ async def run_scope(conn, jurisdiction_ids: Optional[List] = None) -> Dict:
         "scope_ungated_conditional": 0,
     }
 
-    indexes = await conn.fetch(
-        """
-        SELECT id, slug, name, jurisdiction_id, enumerable, source_type,
-               item_count, unclassified_count
-        FROM authority_indexes
-        ORDER BY slug
-        """
-    )
+    # Degrade cleanly when scoperg01 isn't applied: `scope` is in ALL_SUITES,
+    # so a default eval run reaches here even on a DB without the registry
+    # tables — a missing table must not fail the WHOLE eval run.
+    try:
+        indexes = await conn.fetch(
+            """
+            SELECT id, slug, name, jurisdiction_id, enumerable, source_type,
+                   item_count, unclassified_count
+            FROM authority_indexes
+            ORDER BY slug
+            """
+        )
+    except Exception:
+        totals["scope_registry_available"] = False
+        return {"findings": findings, "totals": totals}
+
     jur_filter = set(jurisdiction_ids or [])
 
     for idx in indexes:

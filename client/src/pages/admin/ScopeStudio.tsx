@@ -246,6 +246,10 @@ export default function ScopeStudio() {
   const [discovering, setDiscovering] = useState(false)
   const [proposal, setProposal] = useState<DiscoverResponse | null>(null)
   const [specialtyError, setSpecialtyError] = useState<string | null>(null)
+  // A derived specialty's categories, kept so "research the gap" sends real
+  // category keys (the research run researches exactly `categories`).
+  const [researchTarget, setResearchTarget] =
+    useState<{ label: string; industry_tag: string; categories: string[] } | null>(null)
 
   // Research (SSE) — reused from SpecializationResearch.
   const [research, setResearch] = useState<{
@@ -359,6 +363,11 @@ export default function ScopeStudio() {
         { name },
       )
       setProposal(res)
+      setResearchTarget({
+        label: res.label,
+        industry_tag: res.industry_tag,
+        categories: res.categories.map((c) => c.key),
+      })
     } catch (e) {
       setSpecialtyError(e instanceof Error ? e.message : 'Discovery failed')
     } finally {
@@ -375,7 +384,12 @@ export default function ScopeStudio() {
   }
 
   // ── Research the gap inline (reuses the SSE read loop) ──
-  const researchSpecialty = async (spec: Specialty) => {
+  // Researches the derived specialty's OWN categories (from researchTarget) —
+  // the run tags everything it writes with industry_tag, so passing another
+  // specialty's categories would mis-tag them. Empty categories research
+  // nothing, so a target is required.
+  const researchTargetGap = async () => {
+    if (!researchTarget || researchTarget.categories.length === 0) return
     if (!state.trim()) {
       setResearch({ running: false, message: '', completed: 0, total: 0, error: 'Set a state first.' })
       return
@@ -395,10 +409,10 @@ export default function ScopeStudio() {
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         body: JSON.stringify({
-          specialization: spec.label,
+          specialization: researchTarget.label,
           parent_industry: industry,
-          industry_tag: spec.industry_tag,
-          categories: [],
+          industry_tag: researchTarget.industry_tag,
+          categories: researchTarget.categories,
           states: [state.trim().toUpperCase()],
           cities,
           industry_context: '',
@@ -696,23 +710,24 @@ export default function ScopeStudio() {
 
           {/* Research the gap */}
           <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
-            <div className="mb-2 text-sm font-medium text-zinc-300">Research a specialty’s gaps</div>
-            <div className="space-y-1">
-              {available.length === 0 && (
-                <div className="text-xs text-zinc-500">No specialties for this industry yet.</div>
-              )}
-              {available.map((s) => (
-                <button
-                  key={s.slug}
-                  onClick={() => researchSpecialty(s)}
-                  disabled={research?.running}
-                  className="flex w-full items-center justify-between rounded border border-zinc-800 px-3 py-1.5 text-left text-xs text-zinc-300 hover:border-zinc-600 disabled:opacity-50"
-                >
-                  <span>{s.label}</span>
-                  <Microscope className="h-3.5 w-3.5 text-zinc-500" />
-                </button>
-              ))}
-            </div>
+            <div className="mb-2 text-sm font-medium text-zinc-300">Research the gap</div>
+            {researchTarget && researchTarget.categories.length > 0 ? (
+              <button
+                onClick={researchTargetGap}
+                disabled={research?.running || !state.trim()}
+                className="flex w-full items-center justify-between rounded border border-zinc-800 px-3 py-2 text-left text-xs text-zinc-200 hover:border-zinc-600 disabled:opacity-50"
+              >
+                <span>
+                  Research {researchTarget.label} — {researchTarget.categories.length} categories
+                  {!state.trim() && <span className="text-amber-400"> (set a state)</span>}
+                </span>
+                <Microscope className="h-3.5 w-3.5 text-zinc-500" />
+              </button>
+            ) : (
+              <div className="text-xs text-zinc-500">
+                Derive a specialty above, then research its categories here.
+              </div>
+            )}
             {research && (
               <div className="mt-3 rounded border border-zinc-800 bg-zinc-950/50 p-3 text-xs">
                 {research.error ? (

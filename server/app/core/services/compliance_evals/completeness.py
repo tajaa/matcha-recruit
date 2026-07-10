@@ -143,6 +143,19 @@ async def registry_expected_keys(
     if not chain:
         return None
 
+    # Only trust the registry denominator when the covering indexes are
+    # DEFINITIVELY scoped (plan §10: unclassified_count = 0). During partial
+    # classification the resolved set is a subset of the true scope, so using
+    # it as `expected` would shrink the denominator and inflate completeness.
+    # Any unclassified item in a covering index ⇒ fall back to category-groups.
+    covering = await conn.fetch(
+        "SELECT unclassified_count FROM authority_indexes "
+        "WHERE jurisdiction_id IS NULL OR jurisdiction_id = ANY($1::uuid[])",
+        list(chain_ids),
+    )
+    if not covering or any(c["unclassified_count"] > 0 for c in covering):
+        return None
+
     # Confirmed classifications whose index covers this jurisdiction chain
     # (federal NULL always applies) and whose disposition selects the category.
     rows = await conn.fetch(
@@ -175,14 +188,37 @@ async def registry_expected_keys(
     return expected or None
 
 
+async def registry_has_confirmed_classifications(conn) -> bool:
+    """Cheap one-shot: is the scope registry live at all?
+
+    Lets a full eval skip the per-(jurisdiction×industry) registry query when
+    nothing is classified yet (the state everywhere until authoring happens),
+    and degrades to False when `scoperg01` isn't applied — the completeness
+    suite must run on a DB without the scope-registry tables.
+    """
+    try:
+        return bool(await conn.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM authority_item_classifications "
+            "WHERE status = 'confirmed')"
+        ))
+    except Exception:
+        return False
+
+
 async def evaluate_pair(
     conn,
     graph: Dict,
     jurisdiction_id,
     industry: Optional[str],
     weights_cache: Dict[str, Dict[str, float]],
+    *,
+    registry_active: bool = True,
 ) -> Tuple[Dict, List[Dict]]:
-    """Score one (jurisdiction × industry) cell and emit its missing-key findings."""
+    """Score one (jurisdiction × industry) cell and emit its missing-key findings.
+
+    ``registry_active`` lets the caller skip the registry-expected lookup in bulk
+    when no confirmed classifications exist (see run_completeness).
+    """
     jur = graph["jurisdictions"][jurisdiction_id]
     country = jur.get("country_code") or "US"
 
@@ -192,8 +228,10 @@ async def evaluate_pair(
 
     # Prefer the registry's grounded scope where it covers this coordinate;
     # otherwise fall back to the category-group expectation (labeled honestly).
-    registry_expected = await registry_expected_keys(
-        conn, chain_ids_for(graph, jurisdiction_id), industry
+    registry_expected = (
+        await registry_expected_keys(conn, chain_ids_for(graph, jurisdiction_id), industry)
+        if registry_active
+        else None
     )
     if registry_expected is not None:
         expected = registry_expected
@@ -278,11 +316,13 @@ async def run_completeness(
     results: Dict = {}
     findings: List[Dict] = []
     weights_cache: Dict[str, Dict[str, float]] = {}
+    registry_active = await registry_has_confirmed_classifications(conn)
 
     for jid in jurisdiction_ids:
         for industry in industries:
             cell, cell_findings = await evaluate_pair(
-                conn, graph, jid, industry, weights_cache
+                conn, graph, jid, industry, weights_cache,
+                registry_active=registry_active,
             )
             results[(jid, industry)] = cell
             findings.extend(cell_findings)
