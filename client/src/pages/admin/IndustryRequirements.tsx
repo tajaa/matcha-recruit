@@ -22,9 +22,18 @@ type TriggerInfo = {
   categories: string[]
 }
 
+type ScopedTo = {
+  state: string
+  city: string | null
+  city_found: boolean | null
+  jurisdictions_in_chain: number
+}
+
 type MatrixResponse = {
   summary: { total: number; with_data: number; missing_data: number }
   industry_profile: { name: string; focused_categories: string[] } | null
+  /** Non-null when coverage is scoped to an establishment's jurisdiction chain. */
+  scoped_to: ScopedTo | null
   active_triggers: TriggerInfo[]
   categories: CategoryEntry[]
 }
@@ -260,6 +269,12 @@ export default function IndustryRequirements() {
   const [specialtyError, setSpecialtyError] = useState<string | null>(null)
   const [matrixNonce, setMatrixNonce] = useState(0)
 
+  // Location scopes coverage to a real establishment's jurisdiction chain
+  // (city ∪ county ∪ state ∪ federal) instead of "does anyone, anywhere, have data".
+  const [state, setState] = useState('')
+  const [city, setCity] = useState('')
+  const [onlyGaps, setOnlyGaps] = useState(false)
+
   const loadSpecialties = useCallback(async () => {
     try {
       const res = await api.get<{ specialties: Specialty[] }>(
@@ -290,6 +305,10 @@ export default function IndustryRequirements() {
           if (entityType) params.set('entity_type', entityType)
           if (payers.length) params.set('payer_contracts', payers.join(','))
         }
+        if (state.trim()) {
+          params.set('state', state.trim().toUpperCase())
+          if (city.trim()) params.set('city', city.trim())
+        }
         const res = await api.get<MatrixResponse>(`/admin/industry-requirements-matrix?${params.toString()}`)
         if (!cancelled) setData(res)
       } catch {
@@ -300,7 +319,7 @@ export default function IndustryRequirements() {
     }
     fetch()
     return () => { cancelled = true }
-  }, [industry, specialties, entityType, payers, matrixNonce])
+  }, [industry, specialties, entityType, payers, state, city, matrixNonce])
 
   const discoverSpecialty = async () => {
     const name = newSpecialty.trim()
@@ -339,7 +358,10 @@ export default function IndustryRequirements() {
   const grouped = useMemo(() => {
     if (!data) return []
     const map = new Map<string, CategoryEntry[]>()
-    for (const cat of data.categories) {
+    // With `onlyGaps`, the table becomes the codify worklist: the categories this
+    // industry is liable for that have no requirement in this jurisdiction chain.
+    const rows = onlyGaps ? data.categories.filter((c) => !c.has_data) : data.categories
+    for (const cat of rows) {
       const g = cat.group || 'Other'
       if (!map.has(g)) map.set(g, [])
       map.get(g)!.push(cat)
@@ -353,7 +375,7 @@ export default function IndustryRequirements() {
       if (ib === -1) return -1
       return ia - ib
     })
-  }, [data])
+  }, [data, onlyGaps])
 
   const summary = data?.summary
 
@@ -390,6 +412,43 @@ export default function IndustryRequirements() {
               <option key={ind.value} value={ind.value}>{ind.label}</option>
             ))}
           </select>
+        </div>
+
+        {/* Location — scopes coverage to a real establishment's chain */}
+        <div>
+          <label className="block text-[10px] uppercase tracking-wide text-zinc-500 font-medium mb-1.5">
+            Location
+          </label>
+          <div className="flex gap-1">
+            <input
+              value={state}
+              onChange={(e) => setState(e.target.value.toUpperCase().slice(0, 2))}
+              placeholder="ST"
+              className="w-14 bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-300 text-xs px-2 py-1.5 placeholder:text-zinc-600"
+            />
+            <input
+              value={city}
+              onChange={(e) => setCity(e.target.value)}
+              placeholder="City (optional)"
+              disabled={!state.trim()}
+              className="flex-1 min-w-0 bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-300 text-xs px-2 py-1.5 placeholder:text-zinc-600 disabled:opacity-50"
+            />
+          </div>
+          {data?.scoped_to ? (
+            <p className="text-[11px] text-zinc-500 mt-1">
+              Coverage across {data.scoped_to.jurisdictions_in_chain} jurisdiction
+              {data.scoped_to.jurisdictions_in_chain === 1 ? '' : 's'} (city ∪ county ∪ state ∪ federal)
+            </p>
+          ) : (
+            <p className="text-[11px] text-zinc-600 mt-1">
+              Unset — counts are global, not for any one establishment.
+            </p>
+          )}
+          {data?.scoped_to?.city_found === false && (
+            <p className="text-[11px] text-amber-400 mt-1">
+              No jurisdiction record for “{data.scoped_to.city}” — showing state + federal only.
+            </p>
+          )}
         </div>
 
         {/* Specialties — DB-derived, extensible */}
@@ -505,12 +564,22 @@ export default function IndustryRequirements() {
                 </span>
                 <span className="text-zinc-700">|</span>
                 <span className="text-sm text-emerald-400">
-                  <span className="font-mono font-bold">{summary.with_data}</span> have data
+                  <span className="font-mono font-bold">{summary.with_data}</span> codified
+                  {data.scoped_to && ` for ${[data.scoped_to.city, data.scoped_to.state].filter(Boolean).join(', ')}`}
                 </span>
                 <span className="text-zinc-700">|</span>
-                <span className="text-sm text-amber-400">
-                  <span className="font-mono font-bold">{summary.missing_data}</span> need research
-                </span>
+                <button
+                  onClick={() => setOnlyGaps((v) => !v)}
+                  disabled={!summary.missing_data}
+                  title="Show only the categories with no requirement in this jurisdiction chain"
+                  className={`text-sm rounded-md px-2 py-0.5 border transition-colors disabled:opacity-50 ${
+                    onlyGaps
+                      ? 'border-amber-500/60 bg-amber-500/10 text-amber-300'
+                      : 'border-transparent text-amber-400 hover:border-zinc-700'
+                  }`}
+                >
+                  <span className="font-mono font-bold">{summary.missing_data}</span> to codify
+                </button>
                 <div className="flex-1" />
                 <div className="w-32 h-2 rounded-full bg-zinc-800 overflow-hidden">
                   <div

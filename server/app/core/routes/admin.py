@@ -8547,6 +8547,63 @@ async def delete_industry_profile(profile_id: UUID):
 # Industry requirements matrix
 # ---------------------------------------------------------------------------
 
+async def _resolve_jurisdiction_chain(conn, state: str, city: Optional[str]) -> Dict[str, Any]:
+    """The jurisdictions whose requirements an establishment here inherits.
+
+    city ∪ county ∪ state ∪ federal — the same union `compliance_evals` uses for
+    presence (`completeness.present_keys_for`). A requirement held at the state
+    level covers a business in the city; asking only about the city row would
+    report nearly everything as missing.
+
+    `federal` and `national` are not the same bucket: `national` rows are country
+    roots (UK, Mexico, Singapore), so only the US `federal` row is chained here.
+
+    Reports `state_found`/`city_found` separately from the id list, because the
+    federal row always resolves — a caller checking only `ids` would treat a
+    nonexistent state as a valid one-link chain.
+    """
+    ids: List[UUID] = []
+
+    federal = await conn.fetchval(
+        "SELECT id FROM jurisdictions WHERE level::text = 'federal' LIMIT 1"
+    )
+    if federal:
+        ids.append(federal)
+
+    state_id = await conn.fetchval(
+        "SELECT id FROM jurisdictions WHERE level::text = 'state' AND state = $1 "
+        "AND COALESCE(country_code,'US') = 'US' LIMIT 1",
+        state,
+    )
+    if state_id:
+        ids.append(state_id)
+
+    city_found = False
+    if city:
+        city_row = await conn.fetchrow(
+            "SELECT id, county FROM jurisdictions WHERE LOWER(city) = LOWER($1) AND state = $2 "
+            "AND COALESCE(country_code,'US') = 'US' LIMIT 1",
+            city, state,
+        )
+        if city_row:
+            city_found = True
+            ids.append(city_row["id"])
+            if city_row["county"]:
+                county_id = await conn.fetchval(
+                    "SELECT id FROM jurisdictions WHERE level::text = 'county' "
+                    "AND LOWER(county) = LOWER($1) AND state = $2 LIMIT 1",
+                    city_row["county"], state,
+                )
+                if county_id:
+                    ids.append(county_id)
+
+    return {
+        "ids": ids,
+        "state_found": state_id is not None,
+        "city_found": city_found,
+    }
+
+
 async def _load_industry_profile_row(conn, canonical: str):
     """Profile row for a canonical industry slug.
 
@@ -8576,9 +8633,18 @@ async def get_industry_requirements_matrix(
     specialties: Optional[str] = Query(None),
     entity_type: Optional[str] = Query(None),
     payer_contracts: Optional[str] = Query(None),
+    state: Optional[str] = Query(None, max_length=2),
+    city: Optional[str] = Query(None),
 ):
     """Return a matrix of compliance categories applicable to an industry,
-    annotated with jurisdiction data coverage and trigger-profile sourcing."""
+    annotated with jurisdiction data coverage and trigger-profile sourcing.
+
+    With `state` (and optionally `city`), coverage is scoped to that
+    establishment's jurisdiction chain — city ∪ county ∪ state ∪ federal —
+    turning the global "does anyone have data for this category" into the
+    question that matters: "is this category codified *for Los Angeles*". The
+    categories with no data in the chain are the codify worklist for that city.
+    """
 
     specialty_list = [s.strip() for s in specialties.split(",") if s.strip()] if specialties else []
     payer_list = [p.strip() for p in payer_contracts.split(",") if p.strip()] if payer_contracts else []
@@ -8666,19 +8732,45 @@ async def get_industry_requirements_matrix(
                 "name": profile_row["name"] if profile_row else canonical,
                 "focused_categories": focused_categories,
             },
+            "scoped_to": None,
             "active_triggers": active_triggers,
             "categories": [],
         }
 
-    # 5. Query jurisdiction data counts for applicable categories
+    # 5. Query jurisdiction data counts for applicable categories, scoped to the
+    #    establishment's chain when a location was given.
+    scoped_to: Optional[Dict[str, Any]] = None
     async with get_connection() as conn:
-        data_rows = await conn.fetch(
-            "SELECT category, COUNT(*) AS req_count, COUNT(DISTINCT jurisdiction_id) AS jur_count "
-            "FROM jurisdiction_requirements "
-            "WHERE category = ANY($1::text[]) "
-            "GROUP BY category",
-            applicable_slugs,
-        )
+        if state:
+            chain = await _resolve_jurisdiction_chain(conn, state.upper(), city)
+            if not chain["state_found"]:
+                raise HTTPException(
+                    status_code=404, detail=f"No jurisdiction record for state {state.upper()}"
+                )
+            data_rows = await conn.fetch(
+                "SELECT category, COUNT(*) AS req_count, COUNT(DISTINCT jurisdiction_id) AS jur_count "
+                "FROM jurisdiction_requirements "
+                "WHERE category = ANY($1::text[]) AND jurisdiction_id = ANY($2::uuid[]) "
+                "GROUP BY category",
+                applicable_slugs, chain["ids"],
+            )
+            scoped_to = {
+                "state": state.upper(),
+                "city": city,
+                # An unknown city is not an error: the chain degrades to
+                # state ∪ federal, and the caller is told the city was not found
+                # rather than being shown state coverage as if it were the city's.
+                "city_found": chain["city_found"] if city else None,
+                "jurisdictions_in_chain": len(chain["ids"]),
+            }
+        else:
+            data_rows = await conn.fetch(
+                "SELECT category, COUNT(*) AS req_count, COUNT(DISTINCT jurisdiction_id) AS jur_count "
+                "FROM jurisdiction_requirements "
+                "WHERE category = ANY($1::text[]) "
+                "GROUP BY category",
+                applicable_slugs,
+            )
 
     data_map = {r["category"]: {"req_count": r["req_count"], "jur_count": r["jur_count"]} for r in data_rows}
 
@@ -8714,6 +8806,7 @@ async def get_industry_requirements_matrix(
             "name": profile_row["name"] if profile_row else canonical,
             "focused_categories": focused_categories,
         },
+        "scoped_to": scoped_to,
         "active_triggers": active_triggers,
         "categories": categories_out,
     }
