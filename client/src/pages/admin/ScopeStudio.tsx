@@ -109,6 +109,9 @@ type ResolveItem = {
   heading: string | null
   regulation_key: string | null
   disposition: string
+  item_id?: string | null
+  has_body?: boolean
+  source_url?: string | null
 }
 
 type ResolveResult = {
@@ -179,6 +182,34 @@ type LaborScopeResponse = {
 const LEVEL_LABELS: [keyof LaborScopeResponse['registry']['levels'], string][] = [
   ['federal', 'Federal'], ['state', 'State'], ['city', 'City / Local'],
 ]
+
+// Reader-aware citation: opens the in-app statute drawer when body text exists,
+// else links to the source, else plain text. Module-scope so it isn't a new
+// component identity every parent render.
+function CitationLink({
+  it, onOpen,
+}: {
+  it: { citation: string; item_id?: string | null; has_body?: boolean; source_url?: string | null }
+  onOpen: (itemId: string) => void
+}) {
+  const cls = 'font-mono text-emerald-300/80 hover:text-emerald-200 hover:underline'
+  if (it.has_body && it.item_id) {
+    return (
+      <button onClick={() => onOpen(it.item_id as string)} className={`${cls} inline-flex items-center gap-1`}
+              title="Read the full regulation text">
+        {it.citation}<BookOpen className="h-3 w-3 opacity-60" />
+      </button>
+    )
+  }
+  if (it.source_url) {
+    return (
+      <a href={it.source_url} target="_blank" rel="noreferrer" className={cls} title="Read the regulation (source)">
+        {it.citation}
+      </a>
+    )
+  }
+  return <span className="font-mono text-emerald-300/80">{it.citation}</span>
+}
 
 // ── Specialty derive/confirm modal (from IndustryRequirements, verbatim shape) ─
 
@@ -346,28 +377,6 @@ export default function ScopeStudio() {
       setReader({ open: true, loading: false, body: null })
     }
   }, [])
-
-  // Reader-aware citation: opens the in-app statute drawer when we have the body
-  // text, else links out to the source, else plain text.
-  const CitationLink = ({ it }: { it: { citation: string; item_id?: string | null; has_body?: boolean; source_url?: string | null } }) => {
-    const cls = 'font-mono text-emerald-300/80 hover:text-emerald-200 hover:underline'
-    if (it.has_body && it.item_id) {
-      return (
-        <button onClick={() => openReader(it.item_id as string)} className={`${cls} inline-flex items-center gap-1`}
-                title="Read the full regulation text">
-          {it.citation}<BookOpen className="h-3 w-3 opacity-60" />
-        </button>
-      )
-    }
-    if (it.source_url) {
-      return (
-        <a href={it.source_url} target="_blank" rel="noreferrer" className={cls} title="Read the regulation (source)">
-          {it.citation}
-        </a>
-      )
-    }
-    return <span className="font-mono text-emerald-300/80">{it.citation}</span>
-  }
 
   // Research model tier (light/heavy) — display-only status, ported from the
   // retired Specialization Research page.
@@ -870,7 +879,7 @@ export default function ScopeStudio() {
                     <ul className="mt-1 space-y-1">
                       {resolveResult.uncodified.slice(0, 12).map((it) => (
                         <li key={it.citation} className="text-xs text-zinc-400">
-                          <span className="font-mono text-zinc-300">{it.citation}</span>
+                          <CitationLink it={it} onOpen={openReader} />
                           {it.heading ? ` — ${it.heading}` : ''}
                         </li>
                       ))}
@@ -1089,7 +1098,7 @@ export default function ScopeStudio() {
                               <li key={it.citation} className="text-[11px] text-zinc-400">
                                 <div>
                                   {/* Citation → in-app statute reader (or source) */}
-                                  <CitationLink it={it} />
+                                  <CitationLink it={it} onOpen={openReader} />
                                   {r?.title ? ` — ${r.title}` : it.regulation_key ? ` — ${it.regulation_key}` : ''}
                                   {policyHref && (
                                     <a href={policyHref}

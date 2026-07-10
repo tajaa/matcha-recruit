@@ -3,7 +3,6 @@ from app.core.services.scope_registry.body_fetch import (
     _norm_citation,
     extract_ecfr_bodies,
     extract_html_text,
-    fetcher_for,
 )
 
 # Mirrors the real eCFR full-text XML: DIV nodes carry hierarchy_metadata with a
@@ -36,6 +35,34 @@ def test_extract_ecfr_bodies_keys_by_normalized_citation():
     assert "29 CFR 1904 Subpart A" in bodies
 
 
+def test_subpart_with_own_prose_excludes_its_sections():
+    """A node with real prose of its own does NOT duplicate child-section text."""
+    xml = _ECFR_XML.replace(
+        "<HEAD>Subpart A - Purpose</HEAD>",
+        "<HEAD>Subpart A - Purpose</HEAD><P>This subpart carries a real introductory "
+        "obligation paragraph of its own, well over the stub threshold.</P>",
+    )
+    bodies = extract_ecfr_bodies(xml)
+    sub = bodies["29 CFR 1904 Subpart A"]
+    assert "introductory obligation paragraph" in sub
+    assert "require employers to record" not in sub  # section text NOT duplicated
+
+
+def test_stub_subpart_falls_back_to_full_subtree():
+    """A heading-only subpart (no own prose) reads as its sections — an empty
+    reader would be worse than duplication."""
+    bodies = extract_ecfr_bodies(_ECFR_XML)
+    sub = bodies["29 CFR 1904 Subpart A"]
+    assert "Subpart A - Purpose" in sub
+    assert "require employers to record" in sub  # fallback: subtree included
+
+
+def test_norm_citation_only_strips_cfr_part_prefix():
+    # unrelated 'Part' (appendix citations) must NOT be stripped → no key collision
+    assert _norm_citation("Non-Mandatory Appendix A to Subpart B of Part 1904, Title 29") \
+        == "Non-Mandatory Appendix A to Subpart B of Part 1904, Title 29"
+
+
 def test_extract_html_text_strips_chrome():
     html = """<html><head><style>x{}</style></head><body>
       <nav>MENU HOME</nav>
@@ -49,8 +76,3 @@ def test_extract_html_text_strips_chrome():
     assert "track()" not in text
 
 
-def test_fetcher_for_routing():
-    assert fetcher_for("ecfr", None) == "ecfr"
-    assert fetcher_for("curated", "https://leginfo.legislature.ca.gov/x") == "html"
-    assert fetcher_for("curated", None) is None
-    assert fetcher_for("curated", "not-a-url") is None

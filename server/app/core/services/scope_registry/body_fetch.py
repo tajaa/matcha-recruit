@@ -24,7 +24,6 @@ import hashlib
 import logging
 import re
 from typing import Any, Dict, List, Optional
-from urllib.parse import urlparse
 
 import httpx
 
@@ -44,16 +43,47 @@ def _clean(text: str) -> str:
 
 def _norm_citation(c: str) -> str:
     """eCFR full-XML metadata cites subparts as '29 CFR Part 1904 Subpart A' while
-    our items store '29 CFR 1904 Subpart A' — drop the 'Part ' so they match.
-    Sections ('29 CFR 1904.0') already match exactly."""
-    return re.sub(r"\bPart\s+", "", (c or "").strip())
+    our items store '29 CFR 1904 Subpart A' — drop 'Part ' ONLY in the
+    'NN CFR Part NNNN' prefix (anchored, so unrelated 'Part' tokens in appendix
+    citations can't collapse two citations onto one key). Sections match as-is."""
+    return re.sub(r"(\bCFR )Part\s+", r"\1", (c or "").strip())
+
+
+def _citation_of(el, _html) -> Optional[str]:
+    hm = el.get("hierarchy_metadata")
+    if not hm:
+        return None
+    m = re.search(r'"citation"\s*:\s*"([^"]+)"', _html.unescape(hm))
+    return m.group(1) if m else None
+
+
+def _own_text(el, _html) -> str:
+    """Text of an element EXCLUDING descendants that carry their own citation.
+
+    A subpart (DIV6) contains its sections (DIV8), each an item in its own right;
+    without this, the subpart body would duplicate every section's text (2x the
+    part, hundreds of KB). This yields each node's *own* obligation text only."""
+    parts: List[str] = []
+
+    def walk(node, is_root: bool):
+        if not is_root and _citation_of(node, _html):
+            return  # captured as its own item
+        if node.text:
+            parts.append(node.text)
+        for ch in node:
+            walk(ch, False)
+            if ch.tail:
+                parts.append(ch.tail)
+
+    walk(el, True)
+    return _clean(" ".join(parts))
 
 
 def extract_ecfr_bodies(xml: bytes | str) -> Dict[str, str]:
     """Parse eCFR full-text XML → {normalized citation: body text}.
 
     Every DIV node carries a ``hierarchy_metadata`` attribute whose ``citation``
-    identifies it; the node's inner text is the obligation body.
+    identifies it; the node's *own* text (not its sub-items) is its body.
     """
     import html as _html
 
@@ -64,23 +94,21 @@ def extract_ecfr_bodies(xml: bytes | str) -> Dict[str, str]:
     root = etree.fromstring(xml)
     out: Dict[str, str] = {}
     for el in root.iter():
-        hm = el.get("hierarchy_metadata")
-        if not hm:
+        raw = _citation_of(el, _html)
+        if not raw:
             continue
-        # eCFR double-encodes some nodes' metadata (&quot; for "); unescape so
-        # subparts (DIV6) and sections (DIV8) both parse.
-        hm = _html.unescape(hm)
-        m = re.search(r'"citation"\s*:\s*"([^"]+)"', hm)
-        if not m:
-            continue
-        cit = _norm_citation(m.group(1))
-        text = _clean(" ".join(el.itertext()))
+        text = _own_text(el, _html)
+        if len(text) < 40:
+            # A subpart usually has no prose of its own (just its heading) —
+            # a 17-char "body" would open an empty reader. Fall back to the
+            # full subtree so reading a subpart reads its sections.
+            text = _clean(" ".join(el.itertext()))
         if text:
-            out[cit] = text
+            out[_norm_citation(raw)] = text
     return out
 
 
-def extract_html_text(html: str, host: Optional[str] = None) -> str:
+def extract_html_text(html: str) -> str:
     """Best-effort readable text from a source page (bs4). Strips chrome; prefers
     a known/main content container, falls back to the body."""
     import warnings
@@ -111,14 +139,40 @@ def extract_html_text(html: str, host: Optional[str] = None) -> str:
     return _clean(node.get_text("\n"))
 
 
-def fetcher_for(source_type: Optional[str], source_url: Optional[str]) -> Optional[str]:
-    """Which strategy fetches this item/index. eCFR indexes use the batch XML
-    fetcher; anything with an http(s) source_url uses the generic HTML fetcher."""
-    if source_type == "ecfr":
-        return "ecfr"
-    if source_url and str(source_url).startswith("http"):
-        return "html"
-    return None
+_USC_RE = re.compile(r"(\d+)\s+U\.?\s*S\.?\s*C\.?\s+§?\s*([\w.\-]+)")
+_GOVINFO_LINK = "https://www.govinfo.gov/link/uscode/{title}/{section}"
+
+
+def _pdf_text(pdf_bytes: bytes) -> str:
+    """Extract text from a PDF (govinfo U.S. Code granule)."""
+    import fitz  # pymupdf
+
+    with fitz.open(stream=pdf_bytes, filetype="pdf") as doc:
+        return _clean("\n".join(page.get_text() for page in doc))
+
+
+async def _fetch_uscode_body(client, citation: str):
+    """Official U.S. Code text via govinfo (NOT Cornell — ToS). The link service
+    resolves title/section to the official PDF granule; extract its text.
+    Returns (text, pdf_url) or None.
+
+    Known limitation: govinfo granules are page-based, so the text can open with
+    the tail of the neighboring section (e.g. §213's first page carries the end
+    of §212). That's the official artifact — deliberately not trimmed, since a
+    slicing heuristic risks cutting real notes."""
+    m = _USC_RE.search(citation or "")
+    if not m:
+        return None
+    title, section = m.group(1), m.group(2)
+    r = await client.get(_GOVINFO_LINK.format(title=title, section=section))
+    r.raise_for_status()
+    final = str(r.url)
+    # A successful resolution lands on the official PDF granule; a soft-404
+    # lands on an error/node URL. Guard on both the URL and the content type.
+    if not final.lower().endswith(".pdf") or "pdf" not in r.headers.get("content-type", "").lower():
+        return None
+    text = _pdf_text(r.content)
+    return (text, final) if text and len(text) >= 40 else None
 
 
 def _hash(text: str) -> str:
@@ -182,24 +236,29 @@ async def _fetch_ecfr_index(conn, index_row, items, client) -> Dict[str, Any]:
 
 
 async def _fetch_html_index(conn, index_row, items, client) -> Dict[str, Any]:
-    """Per-item best-effort HTML fetch off each item's source_url."""
+    """Per-item fetch: a U.S. Code citation goes to the official govinfo source;
+    anything else is a best-effort HTML extract off its source_url."""
     fetched = unchanged = failed = 0
     warnings: List[str] = []
     for it in items:
-        url = it.get("source_url")
-        if not url or not str(url).startswith("http"):
-            warnings.append(f"{it['citation']}: no http source_url")
-            continue
         try:
-            resp = await client.get(url)
-            resp.raise_for_status()
-            host = urlparse(url).hostname
-            text = extract_html_text(resp.text, host)
+            # U.S. Code → govinfo (official), regardless of the stored (Cornell) link.
+            usc = await _fetch_uscode_body(client, it["citation"])
+            if usc:
+                text, src = usc
+            else:
+                url = it.get("source_url")
+                if not url or not str(url).startswith("http"):
+                    warnings.append(f"{it['citation']}: no http source_url")
+                    continue
+                resp = await client.get(url)
+                resp.raise_for_status()
+                text, src = extract_html_text(resp.text), url
             if not text or len(text) < 40:
                 warnings.append(f"{it['citation']}: empty/too-short extract")
                 failed += 1
                 continue
-            status = await _store_body(conn, it["id"], text, url)
+            status = await _store_body(conn, it["id"], text, src)
             fetched += status == "fetched"
             unchanged += status == "unchanged"
         except Exception as exc:
@@ -209,12 +268,10 @@ async def _fetch_html_index(conn, index_row, items, client) -> Dict[str, Any]:
     return {"fetched": fetched, "unchanged": unchanged, "failed": failed, "warnings": warnings}
 
 
-BODY_FETCHERS = {"ecfr": _fetch_ecfr_index, "html": _fetch_html_index}
-
-
 async def fetch_bodies_for_index(conn, slug: str) -> Dict[str, Any]:
     """Fetch statute bodies for one authority index. Idempotent (hash-skips
-    unchanged). Groups items by strategy; never invents text."""
+    unchanged). eCFR indexes fetch as one batch XML; others go per-item
+    (U.S. Code → govinfo, else generic HTML). Never invents text."""
     index_row = await conn.fetchrow(
         "SELECT id, slug, source_type FROM authority_indexes WHERE slug = $1", slug
     )
@@ -230,8 +287,6 @@ async def fetch_bodies_for_index(conn, slug: str) -> Dict[str, Any]:
     if not items:
         return {"slug": slug, "fetched": 0, "unchanged": 0, "failed": 0, "warnings": []}
 
-    # An eCFR index fetches as one batch; otherwise per-item by source host.
-    strategy = fetcher_for(index_row["source_type"], items[0].get("source_url"))
     async with httpx.AsyncClient(timeout=_TIMEOUT, headers={"User-Agent": _UA},
                                  follow_redirects=True) as client:
         if index_row["source_type"] == "ecfr":
