@@ -1,6 +1,5 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from '../../api/client'
-import { HEALTHCARE_SPECIALTIES } from '../../data/industryConstants'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -28,6 +27,34 @@ type MatrixResponse = {
   industry_profile: { name: string; focused_categories: string[] } | null
   active_triggers: TriggerInfo[]
   categories: CategoryEntry[]
+}
+
+type Specialty = {
+  industry_tag: string
+  slug: string
+  label: string
+  /** 0 means ticking it selects nothing — the state the old hardcoded list hid. */
+  category_count: number
+  discovered_by: string
+  confirmed_at: string | null
+}
+
+type ProposedCategory = {
+  key: string
+  label?: string
+  description?: string
+  authority_sources?: string[]
+  is_existing?: boolean
+}
+
+type DiscoverResponse = {
+  industry: string
+  slug: string
+  label: string
+  industry_tag: string
+  categories: ProposedCategory[]
+  research_context: string
+  already_exists: boolean
 }
 
 // Values are the CANONICAL industry slugs produced by `_resolve_industry` on the
@@ -79,6 +106,141 @@ const SOURCE_BADGE: Record<string, { bg: string; text: string; border: string }>
 
 const GROUP_ORDER = ['Core Labor', 'Supplementary', 'Healthcare', 'Oncology', 'Medical Compliance', 'Life Sciences', 'Manufacturing']
 
+// ── Specialty discovery ────────────────────────────────────────────────────────
+
+/**
+ * Review step between Gemini's proposal and the DB write. Confirming creates
+ * `compliance_categories` rows with **zero requirements behind them** — that
+ * `0 jur · 0 reqs` state in the matrix is the scope output, i.e. the worklist of
+ * what to research and codify next.
+ */
+function SpecialtyReviewModal({
+  proposal,
+  industry,
+  onCancel,
+  onConfirmed,
+}: {
+  proposal: DiscoverResponse
+  industry: string
+  onCancel: () => void
+  onConfirmed: (slug: string) => void
+}) {
+  const novel = useMemo(() => proposal.categories.filter((c) => !c.is_existing), [proposal])
+  const [selected, setSelected] = useState<Set<string>>(() => new Set(novel.map((c) => c.key)))
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const existing = proposal.categories.filter((c) => c.is_existing)
+
+  const toggle = (key: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+
+  const confirm = async () => {
+    setSaving(true)
+    setError(null)
+    try {
+      await api.post(`/admin/industries/${encodeURIComponent(industry)}/specialties/confirm`, {
+        slug: proposal.slug,
+        label: proposal.label,
+        research_context: proposal.research_context,
+        categories: novel.filter((c) => selected.has(c.key)),
+      })
+      onConfirmed(proposal.slug)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to confirm specialty')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6">
+      <div className="w-full max-w-2xl max-h-[85vh] overflow-y-auto bg-zinc-950 border border-zinc-800 rounded-xl p-5">
+        <h2 className="text-base font-semibold text-zinc-100">
+          Add specialty: {proposal.label}
+        </h2>
+        <p className="text-xs text-zinc-500 mt-1">
+          Confirming records the <strong className="text-zinc-400">scope</strong> — these categories,
+          with no regulations behind them yet. They will appear in the matrix as{' '}
+          <span className="text-amber-400">need research</span>, which is the list to codify.
+        </p>
+        {proposal.already_exists && (
+          <p className="text-xs text-amber-400 mt-2">
+            This specialty already exists — confirming updates it and adds any new categories.
+          </p>
+        )}
+
+        <div className="mt-4 space-y-2">
+          {novel.map((cat) => (
+            <label
+              key={cat.key}
+              className="flex gap-2.5 items-start border border-zinc-800 rounded-lg p-2.5 cursor-pointer hover:border-zinc-700"
+            >
+              <input
+                type="checkbox"
+                checked={selected.has(cat.key)}
+                onChange={() => toggle(cat.key)}
+                className="mt-0.5 rounded border-zinc-600 bg-zinc-800 text-emerald-500 w-3.5 h-3.5"
+              />
+              <div className="min-w-0">
+                <p className="text-sm text-zinc-200">{cat.label || cat.key}</p>
+                <p className="text-[11px] text-zinc-600 font-mono">{cat.key}</p>
+                {cat.description && (
+                  <p className="text-xs text-zinc-500 mt-1">{cat.description}</p>
+                )}
+                {!!cat.authority_sources?.length && (
+                  <p className="text-[11px] text-zinc-600 mt-1">
+                    Authorities: {cat.authority_sources.join(', ')}
+                  </p>
+                )}
+              </div>
+            </label>
+          ))}
+          {!novel.length && (
+            <p className="text-sm text-zinc-500">
+              No new categories proposed — this specialty is fully covered by the existing baseline.
+            </p>
+          )}
+        </div>
+
+        {!!existing.length && (
+          <details className="mt-3 text-xs">
+            <summary className="cursor-pointer text-zinc-500">
+              {existing.length} already in the baseline — will not be re-created
+            </summary>
+            <ul className="mt-1.5 space-y-0.5 text-zinc-600 font-mono">
+              {existing.map((c) => <li key={c.key}>{c.key}</li>)}
+            </ul>
+          </details>
+        )}
+
+        {error && <p className="text-xs text-red-400 mt-3">{error}</p>}
+
+        <div className="flex justify-end gap-2 mt-5">
+          <button
+            onClick={onCancel}
+            className="px-3 py-1.5 text-xs rounded-lg border border-zinc-700 text-zinc-400 hover:text-zinc-200"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={confirm}
+            disabled={saving}
+            className="px-3 py-1.5 text-xs rounded-lg bg-emerald-600/90 hover:bg-emerald-600 text-white disabled:opacity-50"
+          >
+            {saving ? 'Saving…' : `Confirm scope (${selected.size})`}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Component ──────────────────────────────────────────────────────────────────
 
 export default function IndustryRequirements() {
@@ -89,14 +251,42 @@ export default function IndustryRequirements() {
   const [data, setData] = useState<MatrixResponse | null>(null)
   const [loading, setLoading] = useState(true)
 
+  // Specialties are DB-derived. The old hardcoded list offered seven healthcare
+  // checkboxes with no categories behind them, which silently did nothing.
+  const [available, setAvailable] = useState<Specialty[]>([])
+  const [newSpecialty, setNewSpecialty] = useState('')
+  const [discovering, setDiscovering] = useState(false)
+  const [proposal, setProposal] = useState<DiscoverResponse | null>(null)
+  const [specialtyError, setSpecialtyError] = useState<string | null>(null)
+  const [matrixNonce, setMatrixNonce] = useState(0)
+
+  const loadSpecialties = useCallback(async () => {
+    try {
+      const res = await api.get<{ specialties: Specialty[] }>(
+        `/admin/industries/${encodeURIComponent(industry)}/specialties`,
+      )
+      setAvailable(res.specialties)
+    } catch {
+      setAvailable([])
+    }
+  }, [industry])
+
+  useEffect(() => {
+    setSpecialties([])
+    setSpecialtyError(null)
+    loadSpecialties()
+  }, [industry, loadSpecialties])
+
   useEffect(() => {
     let cancelled = false
     async function fetch() {
       setLoading(true)
       try {
         const params = new URLSearchParams({ industry })
+        // Specialties apply to every industry (manufacturing has `quality`,
+        // `procurement`); only entity types and payers are healthcare-shaped.
+        if (specialties.length) params.set('specialties', specialties.join(','))
         if (industry === 'healthcare') {
-          if (specialties.length) params.set('specialties', specialties.join(','))
           if (entityType) params.set('entity_type', entityType)
           if (payers.length) params.set('payer_contracts', payers.join(','))
         }
@@ -110,7 +300,33 @@ export default function IndustryRequirements() {
     }
     fetch()
     return () => { cancelled = true }
-  }, [industry, specialties, entityType, payers])
+  }, [industry, specialties, entityType, payers, matrixNonce])
+
+  const discoverSpecialty = async () => {
+    const name = newSpecialty.trim()
+    if (!name || discovering) return
+    setDiscovering(true)
+    setSpecialtyError(null)
+    try {
+      const res = await api.post<DiscoverResponse>(
+        `/admin/industries/${encodeURIComponent(industry)}/specialties/discover`,
+        { name },
+      )
+      setProposal(res)
+    } catch (e) {
+      setSpecialtyError(e instanceof Error ? e.message : 'Discovery failed')
+    } finally {
+      setDiscovering(false)
+    }
+  }
+
+  const onSpecialtyConfirmed = async (slug: string) => {
+    setProposal(null)
+    setNewSpecialty('')
+    await loadSpecialties()
+    setSpecialties((prev) => (prev.includes(slug) ? prev : [...prev, slug]))
+    setMatrixNonce((n) => n + 1)
+  }
 
   function toggleSpecialty(val: string) {
     setSpecialties((prev) => prev.includes(val) ? prev.filter((s) => s !== val) : [...prev, val])
@@ -143,6 +359,15 @@ export default function IndustryRequirements() {
 
   return (
     <div className="flex gap-6">
+      {proposal && (
+        <SpecialtyReviewModal
+          proposal={proposal}
+          industry={industry}
+          onCancel={() => setProposal(null)}
+          onConfirmed={onSpecialtyConfirmed}
+        />
+      )}
+
       {/* ── Left Panel ── */}
       <div className="w-64 shrink-0 sticky top-0 self-start space-y-5">
         <div>
@@ -167,28 +392,60 @@ export default function IndustryRequirements() {
           </select>
         </div>
 
+        {/* Specialties — DB-derived, extensible */}
+        <div>
+          <label className="block text-[10px] uppercase tracking-wide text-zinc-500 font-medium mb-1.5">
+            Specialties
+          </label>
+          <div className="space-y-1 max-h-52 overflow-y-auto pr-1">
+            {available.map((sp) => (
+              <label
+                key={sp.slug}
+                className="flex items-center gap-2 text-xs text-zinc-400 hover:text-zinc-200 cursor-pointer"
+                title={`${sp.category_count} categor${sp.category_count === 1 ? 'y' : 'ies'}`}
+              >
+                <input
+                  type="checkbox"
+                  checked={specialties.includes(sp.slug)}
+                  onChange={() => toggleSpecialty(sp.slug)}
+                  className="rounded border-zinc-600 bg-zinc-800 text-emerald-500 focus:ring-emerald-500/30 w-3.5 h-3.5"
+                />
+                <span className="flex-1 truncate">{sp.label}</span>
+                <span className={sp.category_count ? 'text-zinc-600' : 'text-amber-500/70'}>
+                  {sp.category_count}
+                </span>
+              </label>
+            ))}
+            {!available.length && (
+              <p className="text-xs text-zinc-600">None yet — add one below.</p>
+            )}
+          </div>
+
+          <div className="flex gap-1 mt-2">
+            <input
+              value={newSpecialty}
+              onChange={(e) => setNewSpecialty(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') discoverSpecialty() }}
+              placeholder="+ Add specialty…"
+              disabled={discovering}
+              className="flex-1 min-w-0 bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-300 text-xs px-2 py-1.5 placeholder:text-zinc-600 disabled:opacity-50"
+            />
+            <button
+              onClick={discoverSpecialty}
+              disabled={discovering || !newSpecialty.trim()}
+              className="px-2 py-1.5 text-xs rounded-lg border border-zinc-700 text-zinc-400 hover:text-zinc-200 disabled:opacity-40"
+            >
+              {discovering ? '…' : '↵'}
+            </button>
+          </div>
+          {discovering && (
+            <p className="text-[11px] text-zinc-500 mt-1">Deriving regulatory scope…</p>
+          )}
+          {specialtyError && <p className="text-[11px] text-red-400 mt-1">{specialtyError}</p>}
+        </div>
+
         {industry === 'healthcare' && (
           <>
-            {/* Specialties */}
-            <div>
-              <label className="block text-[10px] uppercase tracking-wide text-zinc-500 font-medium mb-1.5">
-                Specialties
-              </label>
-              <div className="space-y-1 max-h-52 overflow-y-auto pr-1">
-                {HEALTHCARE_SPECIALTIES.map((sp) => (
-                  <label key={sp.value} className="flex items-center gap-2 text-xs text-zinc-400 hover:text-zinc-200 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={specialties.includes(sp.value)}
-                      onChange={() => toggleSpecialty(sp.value)}
-                      className="rounded border-zinc-600 bg-zinc-800 text-emerald-500 focus:ring-emerald-500/30 w-3.5 h-3.5"
-                    />
-                    {sp.label}
-                  </label>
-                ))}
-              </div>
-            </div>
-
             {/* Entity Type */}
             <div>
               <label className="block text-[10px] uppercase tracking-wide text-zinc-500 font-medium mb-1.5">

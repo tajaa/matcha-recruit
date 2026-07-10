@@ -8720,6 +8720,130 @@ async def get_industry_requirements_matrix(
 
 
 # ---------------------------------------------------------------------------
+# Industry specialties — runtime-extensible scope authoring
+#
+# Deriving a specialty (e.g. ophthalmology) produces SCOPE, not values: the
+# confirmed categories land with zero requirements behind them, and that
+# `0 jur · 0 reqs` state in the matrix is precisely the worklist of what to
+# research and codify next.
+# ---------------------------------------------------------------------------
+
+
+class SpecialtyDiscoverRequest(BaseModel):
+    name: str = Field(..., min_length=2, max_length=80)
+
+
+class ProposedCategory(BaseModel):
+    key: str
+    label: Optional[str] = None
+    description: Optional[str] = None
+    authority_sources: List[str] = Field(default_factory=list)
+
+
+class SpecialtyConfirmRequest(BaseModel):
+    slug: Optional[str] = None
+    label: str
+    research_context: Optional[str] = None
+    categories: List[ProposedCategory] = Field(default_factory=list)
+
+
+@router.get("/industries/{industry}/specialties", dependencies=[Depends(require_admin)])
+async def list_industry_specialties(industry: str):
+    """Specialties for an industry, each with the number of categories it resolves to.
+
+    `category_count == 0` marks a specialty that selects nothing when ticked —
+    the state seven of the frontend's hardcoded healthcare checkboxes were in.
+    """
+    from ..services import industry_specialties as spec
+
+    canonical = _resolve_industry(industry) or industry.strip().lower()
+    async with get_connection() as conn:
+        return {
+            "industry": canonical,
+            "specialties": await spec.list_specialties(conn, canonical),
+        }
+
+
+@router.post("/industries/{industry}/specialties/discover", dependencies=[Depends(require_admin)])
+async def discover_industry_specialty(industry: str, payload: SpecialtyDiscoverRequest):
+    """Derive the categories a specialty needs beyond its parent's baseline.
+
+    Persists nothing. The admin reviews the proposal and calls `/confirm`.
+    """
+    from ..services import industry_specialties as spec
+
+    canonical = _resolve_industry(industry) or industry.strip().lower()
+    slug = spec.slugify(payload.name)
+    if not slug:
+        raise HTTPException(status_code=400, detail="Specialty name must contain letters or digits")
+
+    async with get_connection() as conn:
+        existing = await conn.fetchrow(
+            "SELECT industry_tag FROM industry_specialties WHERE industry_tag = $1",
+            spec.industry_tag(canonical, slug),
+        )
+
+    try:
+        result = await spec.discover(canonical, payload.name)
+    except Exception as exc:
+        logger.exception("specialty discovery failed for %s/%s", canonical, slug)
+        raise HTTPException(status_code=502, detail=f"Discovery failed: {exc}") from exc
+
+    # `is_existing` is decided against the DB, not the in-code CATEGORY_KEYS
+    # constant — categories confirmed at runtime are absent from the constant and
+    # would otherwise be re-proposed as novel.
+    async with get_connection() as conn:
+        already = await spec.existing_category_slugs(
+            conn, [c.get("key") for c in result["categories"] if c.get("key")]
+        )
+    for cat in result["categories"]:
+        cat["is_existing"] = cat.get("key") in already
+
+    result["already_exists"] = existing is not None
+    result["industry"] = canonical
+    return result
+
+
+@router.post("/industries/{industry}/specialties/confirm", dependencies=[Depends(require_admin)])
+async def confirm_industry_specialty(
+    industry: str,
+    payload: SpecialtyConfirmRequest,
+    current_user=Depends(require_admin),
+):
+    """Persist the specialty and the categories the admin approved.
+
+    Busts the category cache so the new rows appear in the matrix immediately —
+    `_get_required_categories` is DB-derived and process-cached.
+    """
+    from ..services import industry_specialties as spec
+
+    canonical = _resolve_industry(industry) or industry.strip().lower()
+    slug = spec.slugify(payload.slug or payload.label)
+    if not slug:
+        raise HTTPException(status_code=400, detail="Specialty slug could not be derived")
+
+    try:
+        async with get_connection() as conn:
+            result = await spec.confirm(
+                conn,
+                parent_industry=canonical,
+                slug=slug,
+                label=payload.label.strip(),
+                research_context=payload.research_context,
+                categories=[c.model_dump() for c in payload.categories],
+                admin_id=current_user.id,
+            )
+    except spec.SpecialtyTooLong as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    await _get_required_categories(force_refresh=True)
+    redis = get_redis_cache()
+    if redis:
+        await cache_delete(redis, admin_jurisdiction_data_overview_key())
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Admin notifications / activity feed
 # ---------------------------------------------------------------------------
 
