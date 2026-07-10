@@ -39,6 +39,8 @@ async def main() -> int:
     parser.add_argument("--classify", action="store_true",
                         help="Gemini-classify indexes still carrying unclassified items (needs LIVE_API; "
                              "rows land provisional and are NOT auto-confirmed)")
+    parser.add_argument("--bodies", action="store_true",
+                        help="Fetch full statute/regulation text per index (eCFR full-text XML + .gov HTML)")
     args = parser.parse_args()
 
     from app.config import load_settings
@@ -50,6 +52,7 @@ async def main() -> int:
     from app.core.services.scope_registry.seed import apply_seed
     from app.core.services.scope_registry.classify import confirm_classifications, classify_index
     from app.core.services.scope_registry.resolve import resolve_scope
+    from app.core.services.scope_registry.body_fetch import fetch_bodies_for_index
 
     settings = load_settings()
     await init_pool(settings.database_url)
@@ -125,6 +128,20 @@ async def main() -> int:
                               f"inherited={cres['inherited']} left={cres['unclassified_count']}")
                     except Exception as exc:
                         print(f"  ! {row['slug']:16} classify FAILED: {exc}")
+
+            # ── 4b. Optional statute-body fetch ────────────────────────
+            if args.bodies:
+                print("── Fetch bodies (statute text) ──")
+                for row in await conn.fetch(
+                    "SELECT slug FROM authority_indexes ORDER BY slug"
+                ):
+                    try:
+                        b = await fetch_bodies_for_index(conn, row["slug"])
+                        print(f"  {row['slug']:16} fetched={b['fetched']} unchanged={b['unchanged']} "
+                              f"failed={b['failed']}"
+                              + (f"  warn[0]={b['warnings'][0]}" if b.get("warnings") else ""))
+                    except Exception as exc:
+                        print(f"  ! {row['slug']:16} bodies FAILED: {exc}")
 
             # ── 5. Summary + smoke resolve ─────────────────────────────
             print("── Summary ──")

@@ -124,6 +124,8 @@ def bucket_registry(
     for row in applicable:
         bucket = _level_bucket(row.get("level"))
         entry = {
+            "item_id": str(row["item_id"]) if row.get("item_id") else None,
+            "has_body": bool(row.get("has_body")),
             "citation": row.get("citation"),
             "heading": row.get("heading"),
             "source_url": row.get("source_url"),
@@ -220,7 +222,7 @@ async def labor_scope(
             """
             SELECT c.item_id, c.disposition, c.applies_to_categories,
                    c.excludes_categories, c.entity_condition, c.regulation_key,
-                   i.citation, i.heading, i.source_url,
+                   i.citation, i.heading, i.source_url, (i.body_text IS NOT NULL) AS has_body,
                    ai.slug AS index_slug, ai.level, ai.domain_categories
             FROM authority_item_classifications c
             JOIN authority_index_items i ON i.id = c.item_id

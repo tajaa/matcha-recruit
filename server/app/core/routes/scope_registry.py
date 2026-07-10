@@ -67,6 +67,37 @@ async def trigger_ingest(slug: str, current_user=Depends(require_admin)) -> Disp
     return DispatchResponse(status="running", dispatched_to="celery", slug=slug)
 
 
+@router.post("/authority/{slug}/fetch-bodies", dependencies=[Depends(require_admin)])
+async def trigger_fetch_bodies(slug: str, current_user=Depends(require_admin)) -> DispatchResponse:
+    """Fetch full statute/regulation text for one index's items (Celery)."""
+    from app.core.services.scope_registry.authority_sources import all_index_slugs
+    if slug not in all_index_slugs():
+        raise HTTPException(status_code=404, detail=f"Unknown authority index: {slug}")
+    from app.workers.tasks.scope_registry import fetch_authority_bodies
+    fetch_authority_bodies.delay(index_slug=slug, triggered_by=str(current_user.id))
+    return DispatchResponse(status="running", dispatched_to="celery", slug=slug)
+
+
+@router.get("/items/{item_id}/body", dependencies=[Depends(require_admin)])
+async def get_item_body(item_id: UUID):
+    """The full statute/regulation text for one authority item (statute reader)."""
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT i.id, i.citation, i.heading, i.source_url,
+                   i.body_text, i.body_source_url, i.body_fetched_at,
+                   ai.name AS index_name, ai.slug AS index_slug
+            FROM authority_index_items i
+            JOIN authority_indexes ai ON ai.id = i.authority_index_id
+            WHERE i.id = $1
+            """,
+            item_id,
+        )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Unknown authority item")
+    return dict(row)
+
+
 @router.get("/authority/{slug}/items", dependencies=[Depends(require_admin)])
 async def list_authority_items(
     slug: str,
