@@ -37,12 +37,26 @@ def test_1910_excludes_other_osha_domains():
     assert set(p.domain_excludes) == {"construction", "agriculture", "maritime"}
 
 
-def test_curated_indexes_are_non_enumerable_ca_state():
-    assert {c.slug for c in CURATED_INDEXES} == {"ca-labor-code", "ca-title-8", "ca-title-16"}
+def test_curated_index_set():
+    assert {c.slug for c in CURATED_INDEXES} == {
+        "us-flsa", "ca-labor-code", "ca-title-8", "ca-title-16",
+    }
     for c in CURATED_INDEXES:
+        assert c.domain_categories
+
+
+def test_ca_curated_indexes_are_ca_state():
+    for c in CURATED_INDEXES:
+        if c.slug == "us-flsa":
+            continue
         assert c.jurisdiction["state"] == "CA"
         assert c.jurisdiction["level"] == "state"
-        assert c.domain_categories
+
+
+def test_us_flsa_is_a_federal_curated_index():
+    flsa = next(c for c in CURATED_INDEXES if c.slug == "us-flsa")
+    assert flsa.level == "federal"
+    assert flsa.jurisdiction == {}  # NULL jurisdiction — applies to all US employers
 
 
 def test_every_curated_index_has_rows():
@@ -62,16 +76,23 @@ def test_curated_rows_well_formed_and_unique():
 
 
 def test_ab701_labor_code_range_present():
-    rows = CURATED_ROWS["ca-labor-code"]
+    """AB 701 (warehouse quotas) lives at Labor Code §§ 2100-2112 — still present
+    alongside the core wage-hour spine ca-labor-code now also carries."""
     sections = {
         int(m.group(1))
-        for r in rows
+        for r in CURATED_ROWS["ca-labor-code"]
         for m in [re.search(r"§\s*(\d+)", r["citation"])]
         if m
     }
-    # AB 701 lives at Labor Code §§ 2100–2112; assert the core provisions.
     assert {2100, 2101, 2102, 2103}.issubset(sections)
-    assert all(2100 <= s <= 2112 for s in sections)
+
+
+def test_ca_labor_code_carries_the_wage_hour_spine():
+    citations = {r["citation"] for r in CURATED_ROWS["ca-labor-code"]}
+    for core in ("Cal. Lab. Code § 1182.12", "Cal. Lab. Code § 510",
+                 "Cal. Lab. Code § 512", "Cal. Lab. Code § 246",
+                 "Cal. Lab. Code § 3700"):
+        assert core in citations, core
 
 
 def test_title16_has_optometry_slice():

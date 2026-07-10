@@ -70,6 +70,26 @@ def _conditional(condition: Dict[str, Any], applies_to: List[str] | None = None,
 # curated CA rows verbatim from curated_ca.CURATED_ROWS; federal subpart
 # citations in authority_parse's "29 CFR {part} Subpart {X}" form.
 SEED_CLASSIFICATIONS: Dict[str, Dict[str, Any]] = {
+    # ── us-flsa: the federal wage-hour floor (all US employers, universal) ──
+    "29 U.S.C. § 206": _universal(category_slug="minimum_wage", regulation_key="national_minimum_wage"),
+    "29 U.S.C. § 207": _universal(category_slug="overtime", regulation_key="daily_weekly_overtime"),
+    "29 U.S.C. § 213": _universal(category_slug="minimum_wage", regulation_key="exempt_salary_threshold"),
+    "29 CFR § 541.600": _universal(category_slug="minimum_wage", regulation_key="exempt_salary_threshold"),
+    # ── ca-labor-code: the core wage-hour spine (all CA employers, universal) ──
+    "Cal. Lab. Code § 1182.12": _universal(category_slug="minimum_wage", regulation_key="state_minimum_wage"),
+    "Cal. Lab. Code § 515": _universal(category_slug="minimum_wage", regulation_key="exempt_salary_threshold"),
+    "Cal. Lab. Code § 510": _universal(category_slug="overtime", regulation_key="daily_weekly_overtime"),
+    "Cal. Lab. Code § 512": _universal(category_slug="meal_breaks", regulation_key="meal_break"),
+    "Cal. Lab. Code § 226.7": _universal(category_slug="meal_breaks", regulation_key="rest_break"),
+    "Cal. Lab. Code § 201": _universal(category_slug="final_pay", regulation_key="final_pay_termination"),
+    "Cal. Lab. Code § 202": _universal(category_slug="final_pay", regulation_key="final_pay_resignation"),
+    "Cal. Lab. Code § 203": _universal(category_slug="final_pay", regulation_key="waiting_time_penalty"),
+    "Cal. Lab. Code § 246": _universal(category_slug="sick_leave", regulation_key="state_paid_sick_leave"),
+    "Cal. Lab. Code § 3700": _universal(category_slug="workers_comp", regulation_key="mandatory_coverage"),
+    # In scope but no RKD key yet ⇒ uncodified (the fetch queue). Adding a
+    # wage_statement key + RKD migration would codify these.
+    "Cal. Lab. Code § 204": _universal(category_slug="pay_frequency"),
+    "Cal. Lab. Code § 226": _universal(),
     # ── ca-labor-code: AB 701 — warehouse quotas (the taxonomy-split proof) ──
     "Cal. Lab. Code § 2100": _category(["warehousing"]),
     "Cal. Lab. Code § 2101": _category(["warehousing"]),

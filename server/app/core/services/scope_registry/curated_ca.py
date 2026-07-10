@@ -46,10 +46,88 @@ def _title8(section: str) -> str:
     return f"https://www.dir.ca.gov/title8/{section}.html"
 
 
-# ── ca-labor-code: AB 701 warehouse-quota provisions (Lab. Code §§ 2100–2112) ─
-# AB 701 (2021) added the warehouse distribution center quota law. Scope target:
-# NAICS 493110 (warehousing) — the taxonomy split commit 2 unblocked.
-_AB701: List[CuratedRow] = [
+# ── ca-labor-code: the core CA wage-hour spine + AB 701 ──────────────────────
+# The basic labor law every CA employer owes (§§ below, universal) plus AB 701's
+# warehouse-specific quota provisions (§§ 2100-2105, warehousing only). All
+# section numbers web-verified 2026-07-10 against leginfo/justia; unverified
+# flag stands until a human confirms each value on the page.
+_CA_LABOR: List[CuratedRow] = [
+    # ── core wage-hour (universal — every CA employer) ──
+    {
+        "citation": "Cal. Lab. Code § 1182.12",
+        "heading": "State minimum wage",
+        "hierarchy": {"code": "Labor Code", "part": "Wage & hour"},
+        "source_url": _leginfo("LAB", "1182.12"),
+    },
+    {
+        "citation": "Cal. Lab. Code § 515",
+        "heading": "Exemptions from overtime; salary basis for the white-collar exemptions (≥ 2× state minimum wage, full-time)",
+        "hierarchy": {"code": "Labor Code", "part": "Wage & hour"},
+        "source_url": _leginfo("LAB", "515"),
+    },
+    {
+        "citation": "Cal. Lab. Code § 510",
+        "heading": "Overtime — 1.5× over 8 hrs/day or 40 hrs/week and first 8 on the 7th day; 2× over 12 hrs/day and over 8 on the 7th day",
+        "hierarchy": {"code": "Labor Code", "part": "Wage & hour"},
+        "source_url": _leginfo("LAB", "510"),
+    },
+    {
+        "citation": "Cal. Lab. Code § 512",
+        "heading": "Meal periods — 30-min unpaid meal by the 5th hour; second meal by the 10th (waiver rules apply)",
+        "hierarchy": {"code": "Labor Code", "part": "Wage & hour"},
+        "source_url": _leginfo("LAB", "512"),
+    },
+    {
+        "citation": "Cal. Lab. Code § 226.7",
+        "heading": "No work required during a meal/rest/recovery period; one hour's premium pay per day for each violation (the Labor Code rest-period anchor; the operational rest rule is IWC Wage Order 12)",
+        "hierarchy": {"code": "Labor Code", "part": "Wage & hour"},
+        "source_url": _leginfo("LAB", "226.7"),
+    },
+    {
+        "citation": "Cal. Lab. Code § 201",
+        "heading": "Final wages due immediately on discharge",
+        "hierarchy": {"code": "Labor Code", "part": "Wage payment"},
+        "source_url": _leginfo("LAB", "201"),
+    },
+    {
+        "citation": "Cal. Lab. Code § 202",
+        "heading": "Final wages within 72 hrs of resignation (immediately if 72 hrs' notice given)",
+        "hierarchy": {"code": "Labor Code", "part": "Wage payment"},
+        "source_url": _leginfo("LAB", "202"),
+    },
+    {
+        "citation": "Cal. Lab. Code § 203",
+        "heading": "Waiting-time penalties — up to 30 days' wages for willful failure to pay final wages",
+        "hierarchy": {"code": "Labor Code", "part": "Wage payment"},
+        "source_url": _leginfo("LAB", "203"),
+    },
+    {
+        "citation": "Cal. Lab. Code § 204",
+        "heading": "Semi-monthly pay frequency and pay-timing rules",
+        "hierarchy": {"code": "Labor Code", "part": "Wage payment"},
+        "source_url": _leginfo("LAB", "204"),
+    },
+    {
+        "citation": "Cal. Lab. Code § 226",
+        "heading": "Itemized wage statement — the nine mandatory line items on every pay stub",
+        "hierarchy": {"code": "Labor Code", "part": "Wage payment"},
+        "source_url": _leginfo("LAB", "226"),
+    },
+    {
+        "citation": "Cal. Lab. Code § 246",
+        "heading": "Paid sick leave (Healthy Workplaces, Healthy Families Act) — ≥ 40 hrs / 5 days per year since 2024",
+        "hierarchy": {"code": "Labor Code", "part": "Paid sick days"},
+        "source_url": _leginfo("LAB", "246"),
+    },
+    {
+        "citation": "Cal. Lab. Code § 3700",
+        "heading": "Mandatory workers'-compensation coverage for every California employer",
+        "hierarchy": {"code": "Labor Code", "part": "Workers' compensation"},
+        "source_url": _leginfo("LAB", "3700"),
+    },
+    # ── AB 701 warehouse-quota provisions (§§ 2100-2105, warehousing only) ──
+    # AB 701 (2021) added the warehouse distribution center quota law. Scope
+    # target: NAICS 493110 (warehousing) — the taxonomy split commit 2 unblocked.
     {
         "citation": "Cal. Lab. Code § 2100",
         "heading": "Definitions — 'employee', 'employer', 'quota', 'warehouse distribution center' (by NAICS 493110, 423, 424, 454110)",
@@ -173,9 +251,45 @@ _TITLE16: List[CuratedRow] = [
 ]
 
 
+# ── us-flsa: the federal wage-hour floor (statute + the exempt-salary rule) ──
+# The FLSA rate/multiplier live in statute (29 U.S.C.), not eCFR, so they are
+# curated, not machine-ingestable. All universal (every US employer).
+def _cornell_usc(title: str, section: str) -> str:
+    return f"https://www.law.cornell.edu/uscode/text/{title}/{section}"
+
+
+_FLSA: List[CuratedRow] = [
+    {
+        "citation": "29 U.S.C. § 206",
+        "heading": "Federal minimum wage ($7.25/hr)",
+        "hierarchy": {"code": "U.S. Code", "part": "FLSA"},
+        "source_url": _cornell_usc("29", "206"),
+    },
+    {
+        "citation": "29 U.S.C. § 207",
+        "heading": "Overtime — 1.5× the regular rate over 40 hours in a workweek",
+        "hierarchy": {"code": "U.S. Code", "part": "FLSA"},
+        "source_url": _cornell_usc("29", "207"),
+    },
+    {
+        "citation": "29 U.S.C. § 213",
+        "heading": "Exemptions from minimum wage and overtime (executive, administrative, professional, outside sales)",
+        "hierarchy": {"code": "U.S. Code", "part": "FLSA"},
+        "source_url": _cornell_usc("29", "213"),
+    },
+    {
+        "citation": "29 CFR § 541.600",
+        "heading": "Exempt salary threshold — $684/week ($35,568/yr); the 2024 $58,656 rule was vacated in Texas v. DOL",
+        "hierarchy": {"code": "29 CFR", "part": "Part 541 (white-collar exemptions)"},
+        "source_url": "https://www.ecfr.gov/current/title-29/section-541.600",
+    },
+]
+
+
 # slug → rows. Consumed by authority_ingest.ingest_curated_index.
 CURATED_ROWS: Dict[str, List[CuratedRow]] = {
-    "ca-labor-code": _AB701,
+    "us-flsa": _FLSA,
+    "ca-labor-code": _CA_LABOR,
     "ca-title-8": _TITLE8,
     "ca-title-16": _TITLE16,
 }
