@@ -19,6 +19,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import { Microscope, Loader2, Check, BookOpen } from 'lucide-react'
 import { api, ensureFreshToken } from '../../api/client'
 import { Drawer } from '../../components/ui/Drawer'
+import { HelpHint } from '../../components/ui/HelpHint'
 
 const BASE = import.meta.env.VITE_API_URL ?? '/api'
 
@@ -780,7 +781,7 @@ export default function ScopeStudio() {
                     onlyGaps ? 'bg-amber-500/20 text-amber-300' : 'text-amber-400 hover:bg-amber-500/10'
                   }`}
                 >
-                  {matrix.summary.missing_data} to codify
+                  {matrix.summary.missing_data} to fetch
                 </button>
                 {matrix.scoped_to?.city && matrix.scoped_to.city_found === false && (
                   <span className="text-xs text-amber-400">city not found — state ∪ federal</span>
@@ -856,7 +857,7 @@ export default function ScopeStudio() {
                 <div className="flex gap-3 text-xs">
                   <span className="text-zinc-300">{resolveResult.counts.applicable} applicable</span>
                   <span className="text-emerald-400">{resolveResult.counts.codified} codified</span>
-                  <span className="text-amber-400">{resolveResult.counts.uncodified} to codify</span>
+                  <span className="text-amber-400">{resolveResult.counts.uncodified} to fetch</span>
                 </div>
                 {resolveResult.counts.provisional > 0 && (
                   <div className="mt-1 text-[11px] text-zinc-500">
@@ -1025,14 +1026,14 @@ export default function ScopeStudio() {
                   <div key={lvl} className="rounded border border-zinc-800 bg-zinc-950/40 p-3">
                     <div className="mb-1.5 flex items-center justify-between">
                       <span className="text-xs font-medium text-zinc-200">{label}</span>
-                      <span className={`rounded border px-1.5 py-0.5 text-[10px] ${badge}`} title={ex.note}>
-                        {badgeText}
+                      <span className="inline-flex items-center gap-1">
+                        <span className={`rounded border px-1.5 py-0.5 text-[10px] ${badge}`}>
+                          {badgeText}
+                        </span>
+                        {/* WHY this is (or isn't) the exhaustive list — on demand */}
+                        {ex.note && <HelpHint text={ex.note} align="right" />}
                       </span>
                     </div>
-                    {/* WHY this is (or isn't) the exhaustive list */}
-                    {ex.note && (
-                      <div className="mb-2 text-[11px] leading-snug text-zinc-500">{ex.note}</div>
-                    )}
                     {ex.enumeration && ex.enumeration.enumerated > 0 && (
                       <div className="mb-2 text-[11px] text-zinc-400">
                         {ex.enumeration.enumerated} sections enumerated across {ex.enumeration.indexes} authority {ex.enumeration.indexes === 1 ? 'index' : 'indexes'} ·{' '}
