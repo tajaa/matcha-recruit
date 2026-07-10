@@ -16,8 +16,9 @@
  * rows, the SSE read loop). See ONE_COMPLIANCE_SYSTEM.md for the architecture.
  */
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Microscope, Loader2, Check, BookOpen } from 'lucide-react'
+import { Microscope, Loader2, Check, BookOpen, Telescope } from 'lucide-react'
 import { api, ensureFreshToken } from '../../api/client'
+import { Button, Input, LABEL, Select } from '../../components/ui'
 import { Drawer } from '../../components/ui/Drawer'
 import { HelpHint } from '../../components/ui/HelpHint'
 
@@ -253,7 +254,7 @@ function SpecialtyReviewModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-      <div className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-lg border border-zinc-700 bg-zinc-900 p-6">
+      <div className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-xl border border-white/[0.08] bg-zinc-900 p-6">
         <h3 className="text-lg font-semibold text-zinc-100">
           Confirm scope for {proposal.label}
         </h3>
@@ -266,7 +267,7 @@ function SpecialtyReviewModal({
           {novel.map((c) => (
             <label
               key={c.key}
-              className="flex cursor-pointer gap-3 rounded border border-zinc-800 bg-zinc-950/50 p-3 hover:border-zinc-600"
+              className="flex cursor-pointer gap-3 rounded-lg border border-white/[0.06] bg-white/[0.02] p-3 hover:border-white/20"
             >
               <input
                 type="checkbox"
@@ -304,7 +305,7 @@ function SpecialtyReviewModal({
         <div className="mt-5 flex justify-end gap-2">
           <button
             onClick={onCancel}
-            className="rounded border border-zinc-700 px-4 py-2 text-sm text-zinc-300 hover:bg-zinc-800"
+            className="rounded-lg border border-white/[0.08] px-4 py-2 text-sm text-zinc-300 hover:bg-white/[0.04]"
           >
             Cancel
           </button>
@@ -317,6 +318,70 @@ function SpecialtyReviewModal({
           </button>
         </div>
       </div>
+    </div>
+  )
+}
+
+// ── Small presentational helpers ─────────────────────────────────────────────
+
+// Research (SSE) status — shared shape for the specialty-gap and fetch-queue runs.
+type ResearchState = {
+  source: 'gap' | 'queue'
+  running: boolean; message: string; completed: number; total: number; error: string | null
+}
+
+// One cell of the KPI stat strip — Legal Pilot's SystemsStrip idiom (divide-x
+// strip, mono tabular numbers, emerald live-accent, staggered fade-in).
+function Stat({
+  label, value, tone = 'text-zinc-100', hint, onClick, delay = 0,
+}: {
+  label: string; value: string; tone?: string; hint?: string; onClick?: () => void; delay?: number
+}) {
+  const [shown, setShown] = useState(false)
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setShown(true))
+    return () => cancelAnimationFrame(id)
+  }, [])
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={!onClick}
+      title={hint}
+      style={{ transitionDelay: `${delay}ms` }}
+      className={`flex min-w-0 flex-1 flex-col items-start gap-1 px-4 py-3 text-left transition-opacity duration-300 motion-reduce:transition-none ${
+        shown ? 'opacity-100' : 'opacity-0'
+      } ${onClick ? 'cursor-pointer hover:bg-white/[0.02]' : 'cursor-default'}`}
+    >
+      <span className={LABEL}>{label}</span>
+      <span className={`font-mono text-2xl font-semibold tabular-nums tracking-tight ${tone}`}>{value}</span>
+    </button>
+  )
+}
+
+// Research progress — pulse-dot live header + a real fill bar (completed/total).
+function ResearchProgress({ r }: { r: ResearchState }) {
+  const pct = r.total > 0 ? Math.min(100, Math.round((r.completed / r.total) * 100)) : r.running ? 0 : 100
+  return (
+    <div className="mt-3 rounded-lg border border-white/[0.06] bg-white/[0.02] p-3">
+      {r.error ? (
+        <div className="font-mono text-[11px] text-red-400">{r.error}</div>
+      ) : (
+        <>
+          <div className="flex items-center gap-2">
+            {r.running
+              ? <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
+              : <Check className="h-3.5 w-3.5 text-emerald-400" />}
+            <span className="font-mono text-[10px] uppercase tracking-[0.15em] text-emerald-300/90">{r.message}</span>
+            {r.total > 0 && <span className="ml-auto font-mono text-[10px] tabular-nums text-zinc-500">{r.completed}/{r.total}</span>}
+          </div>
+          {(r.running || r.total > 0) && (
+            <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-white/[0.06]">
+              <div className="h-full rounded-full bg-emerald-400 transition-all duration-500" style={{ width: `${pct}%` }} />
+            </div>
+          )}
+        </>
+      )}
     </div>
   )
 }
@@ -353,11 +418,14 @@ export default function ScopeStudio() {
 
   // Research (SSE) — reused from SpecializationResearch. `source` distinguishes
   // which flow started the run so only that panel shows the progress strip.
-  const [research, setResearch] = useState<{
-    source: 'gap' | 'queue'
-    running: boolean; message: string; completed: number; total: number; error: string | null
-  } | null>(null)
+  const [research, setResearch] = useState<ResearchState | null>(null)
   const abortRef = useRef<AbortController | null>(null)
+
+  // Labor scope is the primary answer; the "To fetch" KPI scrolls here.
+  const laborRef = useRef<HTMLDivElement>(null)
+  // The secondary industry/specialty section tabs between the two views that
+  // used to be a matrix + a permanently-half-empty right rail.
+  const [coverageTab, setCoverageTab] = useState<'matrix' | 'resolve'>('matrix')
 
   // Statute reader — full regulation text in a right drawer.
   type ItemBody = {
@@ -508,6 +576,26 @@ export default function ScopeStudio() {
       (a, b) => GROUP_ORDER.indexOf(a[0]) - GROUP_ORDER.indexOf(b[0]),
     )
   }, [matrix, onlyGaps])
+
+  // KPI headline numbers — driven by Labor scope (the jurisdiction-first engine
+  // that always resolves, incl. federal-only). The honest "what must we fetch"
+  // counts, summed across federal + state + city.
+  const kpis = useMemo(() => {
+    if (!laborScope) return null
+    const lv = laborScope.registry.levels
+    const sum = (pick: (l: LaborScopeLevel) => number) =>
+      pick(lv.federal) + pick(lv.state) + pick(lv.city)
+    const toClassify = (['federal', 'state', 'city'] as const).reduce(
+      (n, l) => n + (laborScope.exhaustiveness[l].enumeration?.unclassified ?? 0), 0,
+    )
+    return {
+      core: `${laborScope.core.present}/${laborScope.core.total}`,
+      coreComplete: laborScope.core.complete,
+      codified: sum((l) => l.counts.codified),
+      toFetch: sum((l) => l.counts.uncodified),
+      toClassify,
+    }
+  }, [laborScope])
 
   const toggleSpecialty = (slug: string) =>
     setSpecialties((prev) =>
@@ -667,308 +755,91 @@ export default function ScopeStudio() {
 
   return (
     <div className="mx-auto max-w-7xl p-6 text-zinc-200">
-      <div className="mb-6 flex items-start justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold">Scope Studio</h1>
-          <p className="mt-1 text-sm text-zinc-400">
-            One coordinate → coverage matrix, the registry’s grounded resolution, and
+      <div className="mb-6 flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <div className={LABEL}>Compliance scope registry</div>
+          <h1 className="mt-0.5 flex items-center gap-2 text-lg font-semibold tracking-tight text-zinc-100">
+            <Telescope className="h-4 w-4 text-emerald-400" /> Scope Studio
+          </h1>
+          <p className="mt-1 max-w-[70ch] text-sm leading-relaxed text-zinc-500">
+            One coordinate → the labor scope you must fetch, its grounded registry resolution, and
             derive → confirm → research the gap.
           </p>
         </div>
         {(() => {
           const info = MODEL_LABELS[modelMode] || MODEL_LABELS.light
+          const dot = modelMode === 'heavy' ? 'bg-purple-400' : 'bg-blue-400'
           return (
-            <div className={`shrink-0 rounded-md px-2.5 py-1 text-xs font-medium ${info.color}`}
+            <div className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-white/[0.06] bg-white/[0.02] px-2.5 py-1.5"
                  title={`Research model: ${info.model}`}>
-              {info.label}
-              <span className="ml-1.5 hidden opacity-60 sm:inline">{info.model}</span>
+              <span className={`h-1.5 w-1.5 rounded-full ${dot}`} />
+              <span className="font-mono text-[10px] uppercase tracking-[0.15em] text-zinc-300">{info.label}</span>
+              <span className="hidden font-mono text-[10px] tracking-wide text-zinc-600 sm:inline">{info.model}</span>
             </div>
           )
         })()}
       </div>
 
       {/* Coordinate bar */}
-      <div className="mb-6 flex flex-wrap items-end gap-4 rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
-        <label className="text-xs text-zinc-400">
-          Industry
-          <select
-            value={industry}
-            onChange={(e) => setIndustry(e.target.value)}
-            className="mt-1 block rounded border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100"
-          >
-            {INDUSTRIES.map((i) => (
-              <option key={i.value} value={i.value}>{i.label}</option>
-            ))}
-          </select>
-        </label>
-        <label className="text-xs text-zinc-400">
-          State
-          <input
-            value={state}
-            onChange={(e) => setState(e.target.value)}
-            placeholder="CA"
-            maxLength={2}
-            className="mt-1 block w-20 rounded border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm uppercase text-zinc-100"
-          />
-        </label>
-        <label className="text-xs text-zinc-400">
-          City (optional)
-          <input
-            value={city}
-            onChange={(e) => setCity(e.target.value)}
-            placeholder="Los Angeles"
-            className="mt-1 block w-40 rounded border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100"
-          />
-        </label>
-        <label className="text-xs text-zinc-400">
-          Headcount
-          <select
-            value={headcount}
-            onChange={(e) => setHeadcount(e.target.value)}
-            className="mt-1 block rounded border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100"
-          >
-            {HEADCOUNTS.map((h) => (
-              <option key={h} value={h}>{h || 'Any'}</option>
-            ))}
-          </select>
-        </label>
-      </div>
-
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        {/* Coverage matrix (2 cols) */}
-        <div className="lg:col-span-2">
-          {/* Specialties */}
-          <div className="mb-4 rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
-            <div className="mb-2 text-sm font-medium text-zinc-300">Specialties</div>
-            <div className="flex flex-wrap gap-2">
-              {available.map((s) => (
-                <button
-                  key={s.slug}
-                  onClick={() => toggleSpecialty(s.slug)}
-                  className={`rounded-full border px-3 py-1 text-xs ${
-                    specialties.includes(s.slug)
-                      ? 'border-purple-500/50 bg-purple-500/15 text-purple-200'
-                      : 'border-zinc-700 text-zinc-400 hover:border-zinc-500'
-                  }`}
-                  title={s.category_count === 0 ? 'No categories behind this specialty yet' : ''}
-                >
-                  {s.label}
-                  <span className={s.category_count === 0 ? 'ml-1 text-amber-400' : 'ml-1 text-zinc-500'}>
-                    {s.category_count}
-                  </span>
-                </button>
-              ))}
-            </div>
-            <div className="mt-3 flex gap-2">
-              <input
-                value={newSpecialty}
-                onChange={(e) => setNewSpecialty(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && discoverSpecialty()}
-                placeholder="Add a specialty (e.g. ophthalmology)…"
-                className="flex-1 rounded border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100"
-              />
-              <button
-                onClick={discoverSpecialty}
-                disabled={discovering || !newSpecialty.trim()}
-                className="rounded bg-zinc-700 px-3 py-2 text-sm text-zinc-100 hover:bg-zinc-600 disabled:opacity-50"
-              >
-                {discovering ? '…' : 'Derive ↵'}
-              </button>
-            </div>
-            {specialtyError && <div className="mt-2 text-xs text-red-400">{specialtyError}</div>}
-          </div>
-
-          {/* Summary + matrix */}
-          <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
-            {matrix && (
-              <div className="mb-3 flex items-center gap-4 text-sm">
-                <span className="text-zinc-300">{matrix.summary.total} applicable</span>
-                <span className="text-emerald-400">{matrix.summary.with_data} codified</span>
-                <button
-                  onClick={() => setOnlyGaps((v) => !v)}
-                  className={`rounded px-2 py-0.5 text-xs ${
-                    onlyGaps ? 'bg-amber-500/20 text-amber-300' : 'text-amber-400 hover:bg-amber-500/10'
-                  }`}
-                >
-                  {matrix.summary.missing_data} to fetch
-                </button>
-                {matrix.scoped_to?.city && matrix.scoped_to.city_found === false && (
-                  <span className="text-xs text-amber-400">city not found — state ∪ federal</span>
-                )}
-              </div>
-            )}
-            {matrixLoading ? (
-              <div className="py-8 text-center text-sm text-zinc-500">Loading…</div>
-            ) : !matrix ? (
-              <div className="py-8 text-center text-sm text-zinc-500">No matrix data.</div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm">
-                  <thead className="text-xs uppercase text-zinc-500">
-                    <tr>
-                      <th className="py-2">Category</th>
-                      <th className="py-2">Source</th>
-                      <th className="py-2">Data</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {grouped.map(([group, cats]) => (
-                      <Fragment key={group}>
-                        <tr>
-                          <td colSpan={3} className="pt-3 text-xs font-semibold uppercase text-zinc-500">
-                            {group}
-                          </td>
-                        </tr>
-                        {cats.map((c) => (
-                          <tr key={c.slug} className={!c.has_data ? 'bg-amber-950/10' : ''}>
-                            <td className="py-1.5 text-zinc-200">{c.name}</td>
-                            <td className="py-1.5">
-                              <span
-                                className={`rounded border px-1.5 py-0.5 text-[10px] ${
-                                  SOURCE_BADGE[c.source] || SOURCE_BADGE.focused
-                                }`}
-                              >
-                                {c.source}
-                              </span>
-                            </td>
-                            <td className="py-1.5 text-xs">
-                              {c.has_data ? (
-                                <span className="text-emerald-400">
-                                  {c.jurisdiction_count} jur · {c.requirement_count} reqs
-                                </span>
-                              ) : (
-                                <span className="text-amber-400">No data</span>
-                              )}
-                            </td>
-                          </tr>
-                        ))}
-                      </Fragment>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
+      <div className="mb-4 grid grid-cols-2 gap-4 rounded-xl border border-white/[0.06] bg-zinc-950 p-4 sm:grid-cols-4">
+        <div>
+          <label className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.15em] text-zinc-500">Industry</label>
+          <Select options={INDUSTRIES} value={industry} onChange={(e) => setIndustry(e.target.value)} />
         </div>
-
-        {/* Registry resolution + research (1 col) */}
-        <div className="space-y-4">
-          <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
-            <div className="mb-2 text-sm font-medium text-zinc-300">Registry resolution</div>
-            {!state.trim() ? (
-              <div className="text-xs text-zinc-500">Set a state to resolve scope.</div>
-            ) : resolveError ? (
-              <div className="text-xs text-red-400">{resolveError}</div>
-            ) : !resolveResult ? (
-              <div className="text-xs text-zinc-500">Resolving…</div>
-            ) : (
-              <>
-                <div className="flex gap-3 text-xs">
-                  <span className="text-zinc-300">{resolveResult.counts.applicable} applicable</span>
-                  <span className="text-emerald-400">{resolveResult.counts.codified} codified</span>
-                  <span className="text-amber-400">{resolveResult.counts.uncodified} to fetch</span>
-                </div>
-                {resolveResult.counts.provisional > 0 && (
-                  <div className="mt-1 text-[11px] text-zinc-500">
-                    {resolveResult.counts.provisional} provisional (unconfirmed, excluded from scope)
-                  </div>
-                )}
-                {resolveResult.uncodified.length > 0 && (
-                  <div className="mt-3">
-                    <div className="text-[11px] uppercase text-zinc-500">Fetch queue</div>
-                    <ul className="mt-1 space-y-1">
-                      {resolveResult.uncodified.slice(0, 12).map((it) => (
-                        <li key={it.citation} className="text-xs text-zinc-400">
-                          <CitationLink it={it} onOpen={openReader} />
-                          {it.heading ? ` — ${it.heading}` : ''}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-                {resolveResult.unmodeled_coordinates.length > 0 && (
-                  <div className="mt-3 rounded border border-amber-500/30 bg-amber-500/5 p-2 text-[11px] text-amber-300">
-                    {resolveResult.unmodeled_coordinates.map((u, i) => (
-                      <div key={i}>{u.kind}: {u.note}</div>
-                    ))}
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-
-          {/* Research the gap */}
-          <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
-            <div className="mb-2 text-sm font-medium text-zinc-300">Research the gap</div>
-            {researchTarget && researchTarget.categories.length > 0 ? (
-              <button
-                onClick={researchTargetGap}
-                disabled={research?.running || !state.trim()}
-                className="flex w-full items-center justify-between rounded border border-zinc-800 px-3 py-2 text-left text-xs text-zinc-200 hover:border-zinc-600 disabled:opacity-50"
-              >
-                <span>
-                  Research {researchTarget.label} — {researchTarget.categories.length} categories
-                  {!state.trim() && <span className="text-amber-400"> (set a state)</span>}
-                </span>
-                <Microscope className="h-3.5 w-3.5 text-zinc-500" />
-              </button>
-            ) : (
-              <div className="text-xs text-zinc-500">
-                Derive a specialty above, then research its categories here.
-              </div>
-            )}
-            {research && research.source === 'gap' && (
-              <div className="mt-3 rounded border border-zinc-800 bg-zinc-950/50 p-3 text-xs">
-                {research.error ? (
-                  <div className="text-red-400">{research.error}</div>
-                ) : (
-                  <div className="flex items-center gap-2 text-zinc-300">
-                    {research.running ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <Check className="h-3.5 w-3.5 text-emerald-400" />
-                    )}
-                    <span>{research.message}</span>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
+        <div>
+          <label className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.15em] text-zinc-500">State</label>
+          <Input value={state} onChange={(e) => setState(e.target.value)} placeholder="CA" maxLength={2} className="uppercase" />
+        </div>
+        <div>
+          <label className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.15em] text-zinc-500">City (optional)</label>
+          <Input value={city} onChange={(e) => setCity(e.target.value)} placeholder="Los Angeles" />
+        </div>
+        <div>
+          <label className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.15em] text-zinc-500">Headcount</label>
+          <Select options={HEADCOUNTS.map((h) => ({ value: h, label: h || 'Any' }))} value={headcount}
+                  onChange={(e) => setHeadcount(e.target.value)} />
         </div>
       </div>
 
-      {/* Labor scope — the authoritative "what must we fetch" view (jurisdiction-first) */}
-      <div className="mt-4 rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
-        <div className="mb-1 flex items-baseline justify-between">
-          <div className="text-sm font-medium text-zinc-300">
-            Labor scope{laborScope?.coordinate.state ? ` — ${laborScope.coordinate.state}${laborScope.coordinate.city ? `, ${laborScope.coordinate.city}` : ''}` : ' — Federal'}
-          </div>
-          <div className="flex items-center gap-3">
-            {laborScope
-              && (['federal', 'state', 'city'] as const).some((l) => laborScope.registry.levels[l].counts.uncodified > 0) && (
-              <button
-                onClick={researchFetchQueue}
-                disabled={research?.running}
-                className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-[11px] text-amber-200 hover:border-amber-400 disabled:opacity-50"
-              >
-                Research these · codify
-              </button>
-            )}
-            <div className="text-[11px] text-zinc-500">generic employer · federal + state + city</div>
-          </div>
-        </div>
-        {research && research.source === 'queue' && (
-          <div className="mb-3 rounded border border-zinc-800 bg-zinc-950/50 p-2 text-[11px]">
-            {research.error ? (
-              <span className="text-red-400">{research.error}</span>
-            ) : (
-              <span className="flex items-center gap-2 text-zinc-300">
-                {research.running ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3 text-emerald-400" />}
-                {research.message}
+      {/* KPI headline strip — the honest "what must we fetch" numbers (jurisdiction axis, from Labor scope) */}
+      <div className="mb-5 flex items-stretch divide-x divide-white/[0.06] overflow-x-auto rounded-xl border border-white/[0.06] bg-zinc-950">
+        <Stat label="Core labor" value={kpis ? kpis.core : '—'} delay={0}
+              tone={kpis ? (kpis.coreComplete ? 'text-emerald-400' : 'text-amber-400') : 'text-zinc-600'} />
+        <Stat label="Codified" value={kpis ? String(kpis.codified) : '—'} delay={40}
+              tone={kpis ? 'text-emerald-400' : 'text-zinc-600'} />
+        <Stat label="To fetch" value={kpis ? String(kpis.toFetch) : '—'} delay={80}
+              tone={kpis ? (kpis.toFetch > 0 ? 'text-amber-400' : 'text-emerald-400') : 'text-zinc-600'}
+              hint={kpis && kpis.toFetch > 0 ? 'Jump to the labor worklist' : undefined}
+              onClick={kpis && kpis.toFetch > 0
+                ? () => laborRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                : undefined} />
+        <Stat label="To classify" value={kpis ? String(kpis.toClassify) : '—'} delay={120}
+              tone={kpis && kpis.toClassify > 0 ? 'text-amber-400' : kpis ? 'text-zinc-300' : 'text-zinc-600'} />
+      </div>
+
+      {/* Labor scope — PRIMARY: the authoritative "what must we fetch" view (jurisdiction-first) */}
+      <div ref={laborRef} className="rounded-xl border border-white/[0.06] bg-zinc-950 p-4">
+        <div className="mb-2 flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className={LABEL}>Labor scope — what we must fetch</div>
+            <h2 className="mt-0.5 text-base font-semibold tracking-tight text-zinc-100">
+              {laborScope?.coordinate.state
+                ? `${laborScope.coordinate.state}${laborScope.coordinate.city ? `, ${laborScope.coordinate.city}` : ''}`
+                : 'Federal'}
+              <span className="ml-2 font-mono text-[10px] font-normal uppercase tracking-[0.15em] text-zinc-600">
+                generic employer · federal + state + city
               </span>
-            )}
+            </h2>
           </div>
-        )}
+          {laborScope
+            && (['federal', 'state', 'city'] as const).some((l) => laborScope.registry.levels[l].counts.uncodified > 0) && (
+            <Button variant="secondary" size="sm" onClick={researchFetchQueue} disabled={research?.running}>
+              <Microscope className="h-3.5 w-3.5" />
+              Research these · codify
+            </Button>
+          )}
+        </div>
+        {research && research.source === 'queue' && <ResearchProgress r={research} />}
         {laborError ? (
           <div className="text-xs text-red-400">{laborError}</div>
         ) : !laborScope ? (
@@ -982,9 +853,9 @@ export default function ScopeStudio() {
           <>
             {/* Core spine — the 12-key must-have labor checklist */}
             <div className="mb-4">
-              <div className="mb-1 flex items-center gap-2 text-[11px] uppercase text-zinc-500">
-                Core labor checklist
-                <span className={laborScope.core.complete ? 'text-emerald-400' : 'text-amber-400'}>
+              <div className="mb-1.5 flex items-center gap-2">
+                <span className={LABEL}>Core labor checklist</span>
+                <span className={`font-mono text-[10px] tabular-nums ${laborScope.core.complete ? 'text-emerald-400' : 'text-amber-400'}`}>
                   {laborScope.core.present}/{laborScope.core.total} codified
                 </span>
               </div>
@@ -1015,7 +886,7 @@ export default function ScopeStudio() {
                 // State/city need a state; federal is state-independent.
                 if (lvl !== 'federal' && !laborScope.coordinate.state) {
                   return (
-                    <div key={lvl} className="rounded border border-dashed border-zinc-800 bg-zinc-950/40 p-3">
+                    <div key={lvl} className="rounded-lg border border-dashed border-white/[0.08] bg-white/[0.02] p-3">
                       <div className="mb-1.5 text-xs font-medium text-zinc-400">{label}</div>
                       <div className="text-[11px] text-zinc-600">Set a state above to see {label.toLowerCase()} labor scope.</div>
                     </div>
@@ -1032,7 +903,7 @@ export default function ScopeStudio() {
                     : ex.basis === 'curated' ? 'curated core — not exhaustive'
                       : 'no indexes ingested'
                 return (
-                  <div key={lvl} className="rounded border border-zinc-800 bg-zinc-950/40 p-3">
+                  <div key={lvl} className="rounded-lg border border-white/[0.06] bg-white/[0.02] p-3">
                     <div className="mb-1.5 flex items-center justify-between">
                       <span className="text-xs font-medium text-zinc-200">{label}</span>
                       <span className="inline-flex items-center gap-1">
@@ -1162,6 +1033,187 @@ export default function ScopeStudio() {
               <div className="mt-2 text-[11px] text-zinc-500">
                 {laborScope.registry.skipped.category_specific} category-gated + {laborScope.registry.skipped.conditional} conditional items excluded (generic-employer view)
               </div>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* Industry & specialty coverage — SECONDARY: the specialization layer on top of core labor */}
+      <div className="mt-5 rounded-xl border border-white/[0.06] bg-zinc-950 p-4">
+        <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className={LABEL}>Industry &amp; specialty coverage</div>
+            <div className="mt-0.5 text-[11px] text-zinc-500">The specialization layer that rides on top of the core labor scope above.</div>
+          </div>
+          <div className="flex items-center gap-1 rounded-lg border border-white/[0.06] bg-white/[0.02] p-0.5">
+            {(['matrix', 'resolve'] as const).map((t) => (
+              <button key={t} onClick={() => setCoverageTab(t)}
+                className={`rounded px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.15em] transition-colors ${
+                  coverageTab === t ? 'bg-white/[0.06] text-zinc-200' : 'text-zinc-500 hover:text-zinc-300'
+                }`}>
+                {t === 'matrix' ? 'Coverage matrix' : 'Registry resolution'}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Specialties + research the gap */}
+        <div className="mb-4 rounded-lg border border-white/[0.06] bg-white/[0.02] p-4">
+          <div className={`mb-2 ${LABEL}`}>Specialties</div>
+          <div className="flex flex-wrap gap-2">
+            {available.map((s) => (
+              <button
+                key={s.slug}
+                onClick={() => toggleSpecialty(s.slug)}
+                className={`rounded-full border px-3 py-1 text-xs transition-colors ${
+                  specialties.includes(s.slug)
+                    ? 'border-purple-500/50 bg-purple-500/15 text-purple-200'
+                    : 'border-white/[0.08] text-zinc-400 hover:border-white/20'
+                }`}
+                title={s.category_count === 0 ? 'No categories behind this specialty yet' : ''}
+              >
+                {s.label}
+                <span className={s.category_count === 0 ? 'ml-1 text-amber-400' : 'ml-1 text-zinc-500'}>
+                  {s.category_count}
+                </span>
+              </button>
+            ))}
+          </div>
+          <div className="mt-3 flex gap-2">
+            <input
+              value={newSpecialty}
+              onChange={(e) => setNewSpecialty(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && discoverSpecialty()}
+              placeholder="Add a specialty (e.g. ophthalmology)…"
+              className="flex-1 rounded-lg border border-white/[0.08] bg-white/[0.02] px-3 py-2 text-sm text-zinc-100 placeholder-zinc-600 outline-none focus:border-white/20"
+            />
+            <Button variant="secondary" size="sm" onClick={discoverSpecialty} disabled={discovering || !newSpecialty.trim()}>
+              {discovering ? '…' : 'Derive ↵'}
+            </Button>
+          </div>
+          {specialtyError && <div className="mt-2 text-xs text-red-400">{specialtyError}</div>}
+          {researchTarget && researchTarget.categories.length > 0 && (
+            <div className="mt-3">
+              <Button variant="primary" size="sm" onClick={researchTargetGap} disabled={research?.running || !state.trim()}>
+                <Microscope className="h-3.5 w-3.5" />
+                Research {researchTarget.label} — {researchTarget.categories.length} categories
+                {!state.trim() && <span className="text-amber-300"> · set a state</span>}
+              </Button>
+            </div>
+          )}
+          {research && research.source === 'gap' && <ResearchProgress r={research} />}
+        </div>
+
+        {coverageTab === 'matrix' ? (
+          <>
+            {matrix && (
+              <div className="mb-3 flex items-center gap-4 text-sm">
+                <span className="text-zinc-300">{matrix.summary.total} applicable</span>
+                <span className="text-emerald-400">{matrix.summary.with_data} codified</span>
+                <button
+                  onClick={() => setOnlyGaps((v) => !v)}
+                  className={`rounded px-2 py-0.5 text-xs ${
+                    onlyGaps ? 'bg-amber-500/20 text-amber-300' : 'text-amber-400 hover:bg-amber-500/10'
+                  }`}
+                >
+                  {matrix.summary.missing_data} to fetch
+                </button>
+                {matrix.scoped_to?.city && matrix.scoped_to.city_found === false && (
+                  <span className="text-xs text-amber-400">city not found — state ∪ federal</span>
+                )}
+              </div>
+            )}
+            {matrixLoading ? (
+              <div className="py-8 text-center text-sm text-zinc-500">Loading…</div>
+            ) : !matrix ? (
+              <div className="py-8 text-center text-sm text-zinc-500">No matrix data.</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead className="text-xs uppercase text-zinc-500">
+                    <tr>
+                      <th className="py-2">Category</th>
+                      <th className="py-2">Source</th>
+                      <th className="py-2">Data</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {grouped.map(([group, cats]) => (
+                      <Fragment key={group}>
+                        <tr>
+                          <td colSpan={3} className="pt-3 text-xs font-semibold uppercase text-zinc-500">
+                            {group}
+                          </td>
+                        </tr>
+                        {cats.map((c) => (
+                          <tr key={c.slug} className={!c.has_data ? 'bg-amber-950/10' : ''}>
+                            <td className="py-1.5 text-zinc-200">{c.name}</td>
+                            <td className="py-1.5">
+                              <span
+                                className={`rounded border px-1.5 py-0.5 text-[10px] ${
+                                  SOURCE_BADGE[c.source] || SOURCE_BADGE.focused
+                                }`}
+                              >
+                                {c.source}
+                              </span>
+                            </td>
+                            <td className="py-1.5 text-xs">
+                              {c.has_data ? (
+                                <span className="text-emerald-400">
+                                  {c.jurisdiction_count} jur · {c.requirement_count} reqs
+                                </span>
+                              ) : (
+                                <span className="text-amber-400">No data</span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </Fragment>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </>
+        ) : (
+          <>
+            {!state.trim() ? (
+              <div className="py-6 text-center text-xs text-zinc-500">Set a state to resolve the grounded registry scope.</div>
+            ) : resolveError ? (
+              <div className="text-xs text-red-400">{resolveError}</div>
+            ) : !resolveResult ? (
+              <div className="py-6 text-center text-xs text-zinc-500">Resolving…</div>
+            ) : (
+              <>
+                <div className="flex flex-wrap gap-3 text-xs">
+                  <span className="text-zinc-300">{resolveResult.counts.applicable} applicable</span>
+                  <span className="text-emerald-400">{resolveResult.counts.codified} codified</span>
+                  <span className="text-amber-400">{resolveResult.counts.uncodified} to fetch</span>
+                  {resolveResult.counts.provisional > 0 && (
+                    <span className="text-zinc-500">{resolveResult.counts.provisional} provisional (excluded)</span>
+                  )}
+                </div>
+                {resolveResult.uncodified.length > 0 && (
+                  <div className="mt-3">
+                    <div className="text-[11px] uppercase text-zinc-500">To fetch</div>
+                    <ul className="mt-1 grid gap-1 sm:grid-cols-2">
+                      {resolveResult.uncodified.slice(0, 20).map((it) => (
+                        <li key={it.citation} className="text-xs text-zinc-400">
+                          <CitationLink it={it} onOpen={openReader} />
+                          {it.heading ? ` — ${it.heading}` : ''}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {resolveResult.unmodeled_coordinates.length > 0 && (
+                  <div className="mt-3 rounded border border-amber-500/30 bg-amber-500/5 p-2 text-[11px] text-amber-300">
+                    {resolveResult.unmodeled_coordinates.map((u, i) => (
+                      <div key={i}>{u.kind}: {u.note}</div>
+                    ))}
+                  </div>
+                )}
+              </>
             )}
           </>
         )}
