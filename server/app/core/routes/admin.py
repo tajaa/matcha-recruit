@@ -5379,7 +5379,7 @@ async def eval_onboarding_readiness(
 
     `depth=core` (default) scores the <=30-key must-have checklist — small enough
     that a human can verify the eval itself. `depth=full` scores the entire
-    registry sweep (201 keys for manufacturing). Industries without a curated core
+    registry sweep (180 keys for manufacturing). Industries without a curated core
     fall back to `full` rather than pretend a checklist exists.
     """
     from ..services.compliance_evals import onboarding_readiness
@@ -5407,7 +5407,7 @@ async def eval_core_checklist(
 ):
     """The <=30-key must-have checklist, one row per key, present/missing.
 
-    Deliberately small: the full sweep expects 201 keys for manufacturing and 268
+    Deliberately small: the full sweep expects 180 keys for manufacturing and 237
     for healthcare, which nobody can audit by hand, so a bad expectation set would
     go unnoticed. Every key here is individually defensible and every miss is
     critical by construction.

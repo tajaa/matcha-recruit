@@ -1,7 +1,7 @@
 """The <=30-key must-have checklist for manufacturing and healthcare.
 
-The full sweep expects 201 keys for manufacturing and 268 for healthcare. Nobody
-can read a 201-row gap list and tell whether the *expectation* is right, so a
+The full sweep expects 180 keys for manufacturing and 237 for healthcare. Nobody
+can read a 180-row gap list and tell whether the *expectation* is right, so a
 wrong expectation set would never be caught. These tests pin the small set: every
 key must exist in the registry (a typo would silently never match anything, which
 reads as a permanent gap), and the whole thing must stay auditable in one sitting.

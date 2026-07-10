@@ -72,8 +72,8 @@ INDUSTRY_PROFILE_NAMES: Dict[str, str] = {
 SUPPORTED_INDUSTRIES: List[str] = sorted(INDUSTRY_CATEGORY_SETS)
 
 # ── Core keysets ───────────────────────────────────────────────────────────────
-# The full expectation for manufacturing is 201 keys; healthcare is 268. No human
-# can eyeball a 201-row gap list and say whether the eval itself is right. The
+# The full expectation for manufacturing is 180 keys; healthcare is 237. No human
+# can eyeball a 180-row gap list and say whether the eval itself is right. The
 # core set is the opposite trade: ≤30 hand-picked keys per industry, each one
 # individually defensible as "an employer in this industry cannot operate without
 # knowing this", so a person can audit the entire checklist in one sitting.
@@ -148,9 +148,9 @@ def has_core(industry: Optional[str]) -> bool:
 def core_keys(industry: Optional[str]) -> Dict[str, Set[str]]:
     """The ≤30-key must-have checklist: labor core + the industry's core set.
 
-    Raises for industries without a curated core — falling back to the 200-key
-    full set would defeat the purpose, and silently returning the labor core
-    alone would claim an industry verdict the checklist doesn't support.
+    Raises for industries without a curated core — falling back to the full
+    registry sweep would defeat the purpose, and silently returning the labor
+    core alone would claim an industry verdict the checklist doesn't support.
     """
     if not has_core(industry):
         raise ValueError(
