@@ -206,11 +206,12 @@ async def fetch_queue_endpoint(
 
 
 @router.post("/reconcile", dependencies=[Depends(require_admin)])
-async def reconcile_endpoint(payload: ReconcileRequest = ReconcileRequest()):
+async def reconcile_endpoint(payload: Optional[ReconcileRequest] = None):
     """Persist the scope↔store codify linkage (scope_codifications) by matching
     confirmed keyed classifications against keyed catalog rows. No state =
     registry-wide backfill; a state narrows to that jurisdiction chain."""
     from app.core.services.scope_registry.codify import reconcile_codifications
+    payload = payload or ReconcileRequest()
     async with get_connection() as conn:
         return await reconcile_codifications(
             conn, state=payload.state, city=payload.city,
@@ -237,6 +238,7 @@ async def fetch_queue_research(payload: FetchQueueResearchRequest):
         return f"data: {_json.dumps(event)}\n\n"
 
     async def stream():
+      try:
         async with get_connection() as conn:
             work = await chain_uncodified(conn, state=state, city=city)
             units = group_research_units(
@@ -291,6 +293,9 @@ async def fetch_queue_research(payload: FetchQueueResearchRequest):
                         "linked": recon["inserted"] + recon["updated"],
                         "still_uncodified": len(after["keyed"]),
                         "unkeyed": len(after["unkeyed"])})
+      except Exception as exc:  # never leave the stream hanging with no terminal event
+        logger.warning("fetch-queue research stream failed: %s", exc)
+        yield _sse({"type": "error", "message": str(exc)})
 
     return StreamingResponse(stream(), media_type="text/event-stream")
 

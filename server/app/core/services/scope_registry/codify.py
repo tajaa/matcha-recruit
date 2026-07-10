@@ -64,20 +64,33 @@ def match_codifications(
 
 
 async def chain_uncodified(
-    conn, *, state: str, city: Optional[str] = None
+    conn, *, state: Optional[str] = None, city: Optional[str] = None,
+    labor_only: bool = True,
 ) -> Dict[str, Any]:
     """The chain's research worklist: confirmed applicable classifications with no
     codified value in the chain, split into ``keyed`` (researchable — has a
     regulation_key to codify against) and ``unkeyed`` (NULL key — needs a key
     minted before research can codify it).
 
+    ``state`` optional: federal-only chain when absent (mirrors labor_scope).
+    ``labor_only`` restricts to labor-domain indexes so the worklist matches
+    what the Labor scope panel shows (the surface that triggers research).
+
     Returns ``{chain, keyed: [...], unkeyed: [...]}``. Each keyed item carries
     ``classification_id``, ``regulation_key``, ``category_slug`` (RKD), ``level``,
     ``citation``, ``heading``.
     """
     from .resolve import classification_matches
+    from .labor_scope import is_labor_index
 
-    jur = await resolve_jurisdiction_chain(conn, state.strip().upper(), city)
+    if state and state.strip():
+        jur = await resolve_jurisdiction_chain(conn, state.strip().upper(), city)
+    else:
+        federal = await conn.fetchval(
+            "SELECT id FROM jurisdictions WHERE level::text = 'federal' LIMIT 1"
+        )
+        jur = {"ids": [federal] if federal else [], "state_found": False,
+               "city_found": False, "federal_id": federal, "state_id": None, "city_id": None}
     ids = jur["ids"]
 
     rows = [
@@ -86,7 +99,8 @@ async def chain_uncodified(
             SELECT c.id AS classification_id, c.disposition, c.applies_to_categories,
                    c.excludes_categories, c.entity_condition, c.regulation_key,
                    c.key_definition_id, rkd.category_slug,
-                   i.citation, i.heading, ai.level
+                   i.citation, i.heading, ai.level, ai.slug AS index_slug,
+                   ai.domain_categories
             FROM authority_item_classifications c
             JOIN authority_index_items i ON i.id = c.item_id
             JOIN authority_indexes ai ON ai.id = i.authority_index_id
@@ -97,6 +111,8 @@ async def chain_uncodified(
             ids,
         )
     ]
+    if labor_only:
+        rows = [r for r in rows if is_labor_index(r["index_slug"], r["domain_categories"])]
 
     # Generic-employer applicability (empty chain + attrs): universal matches,
     # category_specific/conditional don't — the same set the panel shows.
@@ -268,24 +284,29 @@ async def reconcile_codifications(
 
     inserted = updated = 0
     run_info_json = json.dumps(run_info) if run_info else None
-    for link in links:
-        row = await conn.fetchrow(
+    if links:
+        # One set-based upsert (unnest) instead of N round trips.
+        result = await conn.fetch(
             """
             INSERT INTO scope_codifications
                 (classification_id, jurisdiction_requirement_id, regulation_key,
                  jurisdiction_id, source, run_info)
-            VALUES ($1, $2, $3, $4, $5, $6::jsonb)
+            SELECT * FROM unnest(
+                $1::uuid[], $2::uuid[], $3::text[], $4::uuid[]
+            ) AS t(classification_id, jurisdiction_requirement_id, regulation_key, jurisdiction_id),
+            LATERAL (SELECT $5::varchar AS source, $6::jsonb AS run_info) s
             ON CONFLICT (classification_id, jurisdiction_requirement_id) DO UPDATE SET
                 codified_at = NOW(), source = EXCLUDED.source, run_info = EXCLUDED.run_info
             RETURNING (xmax = 0) AS inserted
             """,
-            link["classification_id"], link["jurisdiction_requirement_id"],
-            link["regulation_key"], link["jurisdiction_id"], source, run_info_json,
+            [link["classification_id"] for link in links],
+            [link["jurisdiction_requirement_id"] for link in links],
+            [link["regulation_key"] for link in links],
+            [link["jurisdiction_id"] for link in links],
+            source, run_info_json,
         )
-        if row and row["inserted"]:
-            inserted += 1
-        else:
-            updated += 1
+        inserted = sum(1 for r in result if r["inserted"])
+        updated = len(result) - inserted
 
     matched_classification_ids = {link["classification_id"] for link in links}
     unmatched_keys = sorted({

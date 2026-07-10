@@ -39,7 +39,10 @@ class ReconcileRequest(BaseModel):
 
 
 class FetchQueueResearchRequest(BaseModel):
-    """Drive the chain's fetch queue into research (POST /fetch-queue/research)."""
+    """Drive the chain's fetch queue into research (POST /fetch-queue/research).
 
-    state: str
+    ``state`` optional — no state researches the federal-only fetch queue.
+    """
+
+    state: Optional[str] = None
     city: Optional[str] = None

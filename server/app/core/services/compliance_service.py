@@ -1654,6 +1654,9 @@ async def _upsert_requirements_additive(
         meta_fragment = json.dumps(meta_dict) if meta_dict else None
 
         requirement_key, regulation_key = _compute_key_parts(req)
+        # RKD is keyed on the NORMALIZED category (same form as the bare key);
+        # the raw req category may be cased/aliased ('Meal-Breaks').
+        normalized_category = _normalize_category(req.get("category"))
         tc = req.get("trigger_conditions")
         tc_json = json.dumps(tc) if tc else None
         aet_raw = req.get("applicable_entity_types")
@@ -1679,7 +1682,7 @@ async def _upsert_requirements_additive(
                     $21::source_tier_enum,
                     $23,
                     (SELECT id FROM regulation_key_definitions
-                     WHERE key = $23::text AND category_slug = $3::text LIMIT 1))
+                     WHERE key = $23::text AND category_slug = $24::text LIMIT 1))
             ON CONFLICT (jurisdiction_id, requirement_key) DO UPDATE SET
                 category = EXCLUDED.category,
                 rate_type = EXCLUDED.rate_type,
@@ -1743,6 +1746,7 @@ async def _upsert_requirements_additive(
             source_tier,           # $21: source_tier enum value
             steps_json,            # $22: implementation_steps JSONB
             regulation_key,        # $23: bare regulation_key (store↔scope join key)
+            normalized_category,   # $24: normalized category for the RKD FK lookup
         )
 
 
@@ -9042,20 +9046,22 @@ async def research_specialization_for_jurisdiction(
     # If an industry_tag is provided, only skip categories where requirements
     # tagged with this specific specialization already exist — so cardiology
     # and neurology can both research billing_integrity independently.
-    if industry_tag:
-        existing = await conn.fetch(
-            """SELECT DISTINCT category FROM jurisdiction_requirements
-               WHERE jurisdiction_id = $1
-                 AND applicable_industries @> ARRAY[$2::text]""",
-            jurisdiction_id,
-            industry_tag,
-        )
-    else:
-        existing = await conn.fetch(
-            "SELECT DISTINCT category FROM jurisdiction_requirements WHERE jurisdiction_id = $1",
-            jurisdiction_id,
-        )
-    existing_cats = {r["category"] for r in existing} if skip_existing else set()
+    existing_cats: set = set()
+    if skip_existing:
+        if industry_tag:
+            existing = await conn.fetch(
+                """SELECT DISTINCT category FROM jurisdiction_requirements
+                   WHERE jurisdiction_id = $1
+                     AND applicable_industries @> ARRAY[$2::text]""",
+                jurisdiction_id,
+                industry_tag,
+            )
+        else:
+            existing = await conn.fetch(
+                "SELECT DISTINCT category FROM jurisdiction_requirements WHERE jurisdiction_id = $1",
+                jurisdiction_id,
+            )
+        existing_cats = {r["category"] for r in existing}
     missing = sorted(cat for cat in categories if cat not in existing_cats)
 
     if not missing:

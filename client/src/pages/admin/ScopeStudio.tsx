@@ -292,8 +292,10 @@ export default function ScopeStudio() {
   const [researchTarget, setResearchTarget] =
     useState<{ label: string; industry_tag: string; categories: string[] } | null>(null)
 
-  // Research (SSE) — reused from SpecializationResearch.
+  // Research (SSE) — reused from SpecializationResearch. `source` distinguishes
+  // which flow started the run so only that panel shows the progress strip.
   const [research, setResearch] = useState<{
+    source: 'gap' | 'queue'
     running: boolean; message: string; completed: number; total: number; error: string | null
   } | null>(null)
   const abortRef = useRef<AbortController | null>(null)
@@ -459,11 +461,11 @@ export default function ScopeStudio() {
   // ── Research the gap inline (reuses the SSE read loop) ──
   // Shared SSE research streamer — both the specialty-gap run and the
   // fetch-queue run POST a body and consume the same event types.
-  const streamResearch = async (url: string, body: unknown) => {
+  const streamResearch = async (source: 'gap' | 'queue', url: string, body: unknown) => {
     abortRef.current?.abort()
     const ctrl = new AbortController()
     abortRef.current = ctrl
-    setResearch({ running: true, message: 'Starting research…', completed: 0, total: 0, error: null })
+    setResearch({ source, running: true, message: 'Starting research…', completed: 0, total: 0, error: null })
 
     try {
       const token = await ensureFreshToken()
@@ -537,7 +539,7 @@ export default function ScopeStudio() {
     } catch (e) {
       if (e instanceof Error && e.name === 'AbortError') return
       setResearch({
-        running: false, message: '', completed: 0, total: 0,
+        source, running: false, message: '', completed: 0, total: 0,
         error: e instanceof Error ? e.message : 'Research failed',
       })
     }
@@ -550,11 +552,11 @@ export default function ScopeStudio() {
   const researchTargetGap = () => {
     if (!researchTarget || researchTarget.categories.length === 0) return
     if (!state.trim()) {
-      setResearch({ running: false, message: '', completed: 0, total: 0, error: 'Set a state first.' })
+      setResearch({ source: 'gap', running: false, message: '', completed: 0, total: 0, error: 'Set a state first.' })
       return
     }
     const cities = city.trim() ? [{ city: city.trim(), state: state.trim().toUpperCase() }] : []
-    streamResearch(`${BASE}/admin/specialization-research/run`, {
+    streamResearch('gap', `${BASE}/admin/specialization-research/run`, {
       specialization: researchTarget.label,
       parent_industry: industry,
       industry_tag: researchTarget.industry_tag,
@@ -568,12 +570,8 @@ export default function ScopeStudio() {
   // Researches the chain's fetch queue directly — the keyed-but-uncodified
   // obligations the Labor scope panel shows — then reconciles so they codify.
   const researchFetchQueue = () => {
-    if (!state.trim()) {
-      setResearch({ running: false, message: '', completed: 0, total: 0, error: 'Set a state first.' })
-      return
-    }
-    streamResearch(`${BASE}/admin/scope-registry/fetch-queue/research`, {
-      state: state.trim().toUpperCase(),
+    streamResearch('queue', `${BASE}/admin/scope-registry/fetch-queue/research`, {
+      state: state.trim() ? state.trim().toUpperCase() : null,
       city: city.trim() || null,
     })
   }
@@ -820,7 +818,7 @@ export default function ScopeStudio() {
                 Derive a specialty above, then research its categories here.
               </div>
             )}
-            {research && (
+            {research && research.source === 'gap' && (
               <div className="mt-3 rounded border border-zinc-800 bg-zinc-950/50 p-3 text-xs">
                 {research.error ? (
                   <div className="text-red-400">{research.error}</div>
@@ -847,7 +845,7 @@ export default function ScopeStudio() {
             Labor scope{laborScope?.coordinate.state ? ` — ${laborScope.coordinate.state}${laborScope.coordinate.city ? `, ${laborScope.coordinate.city}` : ''}` : ' — Federal'}
           </div>
           <div className="flex items-center gap-3">
-            {laborScope?.coordinate.state
+            {laborScope
               && (['federal', 'state', 'city'] as const).some((l) => laborScope.registry.levels[l].counts.uncodified > 0) && (
               <button
                 onClick={researchFetchQueue}
@@ -860,7 +858,7 @@ export default function ScopeStudio() {
             <div className="text-[11px] text-zinc-500">generic employer · federal + state + city</div>
           </div>
         </div>
-        {research && (
+        {research && research.source === 'queue' && (
           <div className="mb-3 rounded border border-zinc-800 bg-zinc-950/50 p-2 text-[11px]">
             {research.error ? (
               <span className="text-red-400">{research.error}</span>
