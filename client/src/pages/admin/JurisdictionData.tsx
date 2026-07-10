@@ -240,8 +240,8 @@ export default function JurisdictionData() {
     <div>
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-zinc-100">Jurisdiction Data</h1>
-          <p className="mt-1 text-sm text-zinc-500">Compliance data repository overview</p>
+          <h1 className="text-2xl font-semibold text-zinc-100">Compliance Library</h1>
+          <p className="mt-1 text-sm text-zinc-500">The codified compliance data — values, quality, keys, and evals</p>
         </div>
         <div className="flex items-center gap-2">
           {/* Industry profile selector */}
