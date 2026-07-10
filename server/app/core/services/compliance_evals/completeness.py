@@ -53,11 +53,19 @@ async def load_jurisdiction_graph(conn) -> Dict:
         key = normalize_key(r["category"], key, r["level"], r["country_code"])
         by_jur.setdefault(r["jurisdiction_id"], {}).setdefault(r["category"], set()).add(key)
 
+    # `federal` and `national` are NOT synonyms in this table: `federal` is the
+    # single US row, while `national` rows are the country roots for the UK,
+    # Mexico, and Singapore. Treating them as one bucket let a US city inherit
+    # from the United Kingdom (and, since the UK row is empty, silently lose the
+    # 50 real federal requirements — whichever row the query returned last won).
     federal_id = None
+    national_ids: Dict[str, object] = {}
     state_ids: Dict[str, object] = {}
     for j in jurs:
-        if j["level"] in ("federal", "national"):
+        if j["level"] == "federal":
             federal_id = j["id"]
+        elif j["level"] == "national":
+            national_ids[j["country_code"] or "US"] = j["id"]
         elif j["level"] == "state" and j["state"]:
             state_ids[j["state"]] = j["id"]
 
@@ -65,12 +73,18 @@ async def load_jurisdiction_graph(conn) -> Dict:
         "jurisdictions": {j["id"]: dict(j) for j in jurs},
         "keys_by_jurisdiction": by_jur,
         "federal_id": federal_id,
+        "national_ids": national_ids,
         "state_ids": state_ids,
     }
 
 
 def present_keys_for(graph: Dict, jurisdiction_id) -> Dict[str, Set[str]]:
-    """Category → keys held at this jurisdiction ∪ its state ∪ federal."""
+    """Category → keys held at this jurisdiction ∪ its state ∪ its country root.
+
+    The country root is the `federal` row for US jurisdictions and the matching
+    `national` row otherwise — a US city must never inherit UK law, nor a UK one
+    inherit the FLSA.
+    """
     jur = graph["jurisdictions"].get(jurisdiction_id)
     if not jur:
         return {}
@@ -80,8 +94,15 @@ def present_keys_for(graph: Dict, jurisdiction_id) -> Dict[str, Set[str]]:
         state_id = graph["state_ids"].get(jur["state"])
         if state_id and state_id != jurisdiction_id:
             chain.append(state_id)
-        if graph["federal_id"]:
-            chain.append(graph["federal_id"])
+
+        country = jur.get("country_code") or "US"
+        root = (
+            graph.get("federal_id")
+            if country == "US"
+            else graph.get("national_ids", {}).get(country)
+        )
+        if root:
+            chain.append(root)
 
     merged: Dict[str, Set[str]] = {}
     for jid in chain:
@@ -139,6 +160,36 @@ async def evaluate_pair(
         "country_code": country,
     }
     return {"score": score, "detail": detail}, findings
+
+
+def core_checklist(graph: Dict, jurisdiction_id, industry: str) -> Dict:
+    """The ≤30-key must-have list as an explicit per-key verdict.
+
+    Unlike the full-depth score (201 keys for manufacturing — unauditable by
+    hand), this returns every key with its own present/missing flag so a human
+    can read the whole thing and judge whether the *eval* is right, not just
+    whether the data is. Every miss is critical by construction: the core set
+    only contains keys whose absence is unambiguous.
+    """
+    present = present_keys_for(graph, jurisdiction_id)
+    expected = iks.core_keys(industry)
+
+    items: List[Dict] = []
+    hits = 0
+    for cat in sorted(expected):
+        for key in sorted(expected[cat]):
+            ok = key in present.get(cat, set())
+            hits += ok
+            items.append({"category": cat, "key": key, "present": ok})
+
+    total = len(items)
+    return {
+        "score": round(100.0 * hits / total, 2) if total else 0.0,
+        "present": hits,
+        "total": total,
+        "complete": hits == total,
+        "items": items,
+    }
 
 
 async def run_completeness(

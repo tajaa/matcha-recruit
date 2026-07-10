@@ -5373,17 +5373,79 @@ async def eval_onboarding_readiness(
     state: Optional[str] = None,
     city: Optional[str] = None,
     country_code: str = "US",
+    depth: str = Query("core", pattern="^(core|full)$"),
 ):
-    """Can a company in `industry` onboard into this location with the data we hold?"""
+    """Can a company in `industry` onboard into this location with the data we hold?
+
+    `depth=core` (default) scores the <=30-key must-have checklist — small enough
+    that a human can verify the eval itself. `depth=full` scores the entire
+    registry sweep (201 keys for manufacturing). Industries without a curated core
+    fall back to `full` rather than pretend a checklist exists.
+    """
     from ..services.compliance_evals import onboarding_readiness
+    from ..services.compliance_evals.industry_keysets import has_core, resolve_industry
 
     if not state:
         raise HTTPException(status_code=400, detail="state is required")
 
+    if depth == "core" and not has_core(resolve_industry(industry) or industry):
+        depth = "full"
+
     async with get_connection() as conn:
         return await onboarding_readiness(
-            conn, industry=industry, state=state, city=city, country_code=country_code
+            conn, industry=industry, state=state, city=city,
+            country_code=country_code, depth=depth,
         )
+
+
+@router.get("/jurisdictions/evals/core-checklist", dependencies=[Depends(require_admin)])
+async def eval_core_checklist(
+    industry: str,
+    state: str,
+    city: Optional[str] = None,
+    country_code: str = "US",
+):
+    """The <=30-key must-have checklist, one row per key, present/missing.
+
+    Deliberately small: the full sweep expects 201 keys for manufacturing and 268
+    for healthcare, which nobody can audit by hand, so a bad expectation set would
+    go unnoticed. Every key here is individually defensible and every miss is
+    critical by construction.
+    """
+    from ..services.compliance_evals import completeness as completeness_suite
+    from ..services.compliance_evals.industry_keysets import has_core, resolve_industry
+
+    canonical = resolve_industry(industry) or industry
+    if not has_core(canonical):
+        raise HTTPException(
+            status_code=400,
+            detail=f"No core checklist curated for industry '{canonical}'",
+        )
+
+    async with get_connection() as conn:
+        if city:
+            row = await conn.fetchrow(
+                "SELECT id FROM jurisdictions WHERE LOWER(city)=LOWER($1) AND state=$2 "
+                "AND COALESCE(country_code,'US')=$3 LIMIT 1",
+                city, state, country_code,
+            )
+        else:
+            row = await conn.fetchrow(
+                "SELECT id FROM jurisdictions WHERE level::text='state' AND state=$1 "
+                "AND COALESCE(country_code,'US')=$2 LIMIT 1",
+                state, country_code,
+            )
+        if not row:
+            raise HTTPException(status_code=404, detail="No jurisdiction record for this location")
+
+        graph = await completeness_suite.load_jurisdiction_graph(conn)
+        checklist = completeness_suite.core_checklist(graph, row["id"], canonical)
+
+    return {
+        "industry": canonical,
+        "jurisdiction": ", ".join(p for p in (city, state) if p),
+        **checklist,
+    }
 
 
 @router.post("/jurisdictions/evals/findings/{finding_id}/resolve")

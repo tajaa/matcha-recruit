@@ -314,6 +314,14 @@ async def run_evals(
     return run_id
 
 
+def _missing_from_checklist(core: Dict) -> Dict[str, List[str]]:
+    out: Dict[str, List[str]] = {}
+    for item in core["items"]:
+        if not item["present"]:
+            out.setdefault(item["category"], []).append(item["key"])
+    return out
+
+
 async def onboarding_readiness(
     conn,
     *,
@@ -321,6 +329,7 @@ async def onboarding_readiness(
     state: Optional[str],
     city: Optional[str],
     country_code: str = "US",
+    depth: str = "full",
 ) -> Dict:
     """The headline question, answerable without a stored run.
 
@@ -352,7 +361,31 @@ async def onboarding_readiness(
 
     jid = row["id"]
     graph = await completeness_suite.load_jurisdiction_graph(conn)
-    cell, findings = await completeness_suite.evaluate_pair(conn, graph, jid, canonical, {})
+
+    # `core` scores the ≤30-key must-have checklist; `full` scores the whole
+    # registry sweep (201 keys for manufacturing). The gate reads whichever the
+    # caller asked for, and the response always carries the core checklist when
+    # one exists so the verdict can be audited key by key.
+    core = None
+    if iks.has_core(canonical):
+        core = completeness_suite.core_checklist(graph, jid, canonical)
+
+    if depth == "core":
+        if core is None:
+            raise ValueError(f"no core keyset curated for industry {canonical!r}")
+        cell = {
+            "score": core["score"],
+            "detail": {
+                "missing_keys": _missing_from_checklist(core),
+                "focused_keys_complete": core["complete"],
+                "focused_categories": sorted({i["category"] for i in core["items"]}),
+            },
+        }
+        findings = []
+    else:
+        cell, findings = await completeness_suite.evaluate_pair(
+            conn, graph, jid, canonical, {}
+        )
 
     # The eval tables may not exist yet (migration jureval01 unapplied) or may
     # simply hold no run for this jurisdiction. Both mean "never measured", which
@@ -414,6 +447,7 @@ async def onboarding_readiness(
         "found": True,
         "jurisdiction_id": str(jid),
         "industry": canonical,
+        "depth": depth,
         "status": readiness.status,
         "ready": readiness.ready,
         "subscores": subs.as_dict(),
@@ -424,4 +458,7 @@ async def onboarding_readiness(
         "golden_fact_count": golden_count,
         "open_critical_findings": int(open_critical or 0),
         "live_missing_key_findings": len(findings),
+        # Always present when the industry has one, whatever `depth` scored the
+        # gate — it is the artifact a human can actually check line by line.
+        "core_checklist": core,
     }

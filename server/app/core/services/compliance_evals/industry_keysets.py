@@ -71,6 +71,97 @@ INDUSTRY_PROFILE_NAMES: Dict[str, str] = {
 
 SUPPORTED_INDUSTRIES: List[str] = sorted(INDUSTRY_CATEGORY_SETS)
 
+# ── Core keysets ───────────────────────────────────────────────────────────────
+# The full expectation for manufacturing is 201 keys; healthcare is 268. No human
+# can eyeball a 201-row gap list and say whether the eval itself is right. The
+# core set is the opposite trade: ≤30 hand-picked keys per industry, each one
+# individually defensible as "an employer in this industry cannot operate without
+# knowing this", so a person can audit the entire checklist in one sitting.
+#
+# Rules for membership:
+#   * Every key must exist in EXPECTED_REGULATION_KEYS for its category
+#     (tests enforce this — a typo here would silently never match).
+#   * Nationally applicable, not one state's specialty (no healthcare_minimum_wage
+#     — that is CA SB 525; a core miss must mean the same thing in NY and TX).
+#   * Missing a core key is unambiguous: not "coverage could be deeper" but
+#     "a company onboarding today is blind to a load-bearing obligation".
+
+CORE_LABOR_KEYS: Dict[str, FrozenSet[str]] = {
+    "minimum_wage": frozenset(["state_minimum_wage", "exempt_salary_threshold"]),
+    "overtime": frozenset(["daily_weekly_overtime"]),
+    "sick_leave": frozenset(["state_paid_sick_leave"]),
+    "leave": frozenset(["fmla"]),
+    "meal_breaks": frozenset(["meal_break", "rest_break"]),
+    "final_pay": frozenset(["final_pay_termination"]),
+    "workers_comp": frozenset(["mandatory_coverage"]),
+    "anti_discrimination": frozenset(["harassment_prevention_training"]),
+    "workplace_safety": frozenset(["osha_general_duty", "injury_illness_recordkeeping"]),
+}  # 12 keys
+
+CORE_INDUSTRY_KEYSETS: Dict[str, Dict[str, FrozenSet[str]]] = {
+    "manufacturing": {
+        # The four ways a factory physically hurts someone, per OSHA's own
+        # most-cited list: energized machines, unguarded machines, forklifts,
+        # confined spaces.
+        "machine_safety": frozenset([
+            "lockout_tagout", "machine_guarding",
+            "powered_industrial_trucks", "confined_space",
+        ]),
+        "chemical_safety": frozenset(["hazcom_ghs", "sds_management"]),
+        "process_safety": frozenset(["osha_psm", "emergency_action_plan"]),
+        "industrial_hygiene": frozenset([
+            "respiratory_protection", "noise_exposure", "personal_protective_equipment",
+        ]),
+        "environmental_compliance": frozenset([
+            "rcra_hazardous_waste", "stormwater_permit",
+            "air_quality_permit", "epcra_tri_reporting",
+        ]),
+    },  # 15 keys → 27 with labor core
+    "healthcare": {
+        "hipaa_privacy": frozenset([
+            "hipaa_privacy_rule", "hipaa_security_rule", "hipaa_breach_notification_rule",
+        ]),
+        # The federal spine of clinical operation: screening obligation, CMS
+        # participation, infection control, lab certification, consent.
+        "clinical_safety": frozenset([
+            "emtala", "cms_conditions_of_participation",
+            "infection_control_prevention_standards", "clia",
+            "informed_consent_requirements",
+        ]),
+        "billing_integrity": frozenset(["false_claims_act", "antikickback_statute"]),
+        "healthcare_workforce": frozenset([
+            "medical_staff_credentialing_privileging",
+            "oig_exclusion_list_screening", "background_check_requirements",
+        ]),
+        "state_licensing": frozenset(["state_facility_licensure"]),
+        "emergency_preparedness": frozenset(["cms_emergency_preparedness_rule"]),
+    },  # 15 keys → 27 with labor core
+}
+
+CORE_MAX_KEYS = 30
+
+
+def has_core(industry: Optional[str]) -> bool:
+    return industry in CORE_INDUSTRY_KEYSETS
+
+
+def core_keys(industry: Optional[str]) -> Dict[str, Set[str]]:
+    """The ≤30-key must-have checklist: labor core + the industry's core set.
+
+    Raises for industries without a curated core — falling back to the 200-key
+    full set would defeat the purpose, and silently returning the labor core
+    alone would claim an industry verdict the checklist doesn't support.
+    """
+    if not has_core(industry):
+        raise ValueError(
+            f"no core keyset curated for industry {industry!r}; "
+            f"available: {sorted(CORE_INDUSTRY_KEYSETS)}"
+        )
+    merged: Dict[str, Set[str]] = {cat: set(keys) for cat, keys in CORE_LABOR_KEYS.items()}
+    for cat, keys in CORE_INDUSTRY_KEYSETS[industry].items():
+        merged.setdefault(cat, set()).update(keys)
+    return merged
+
 # A category that belongs to exactly one industry's specific set. Used by the
 # tagging suite: a catalog row in one of these categories that carries no
 # matching ``applicable_industries`` tag is silently served to every company by

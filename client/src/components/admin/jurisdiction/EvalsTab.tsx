@@ -57,17 +57,27 @@ type RunDetail = {
   findings: Finding[]
 }
 
+type CoreChecklist = {
+  score: number
+  present: number
+  total: number
+  complete: boolean
+  items: { category: string; key: string; present: boolean }[]
+}
+
 type Readiness = {
   found: boolean
   status: string
   ready?: boolean
   industry: string
+  depth?: 'core' | 'full'
   composite: number | null
   subscores: Partial<Subscores>
   blocking: string[]
   missing_keys: Record<string, string[]>
   golden_fact_count: number
   open_critical_findings: number
+  core_checklist: CoreChecklist | null
 }
 
 type GoldenFact = {
@@ -100,6 +110,9 @@ const INDUSTRIES = [
   'technology',
   'fast food',
 ]
+
+/** Industries with a curated <=30-key must-have checklist. Others only have the full sweep. */
+const CORE_INDUSTRIES = new Set(['manufacturing', 'healthcare'])
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -148,19 +161,76 @@ function severityBadge(severity: string) {
 
 // ── Readiness widget ──────────────────────────────────────────────────────────
 
+/**
+ * The <=30-key must-have list, rendered in full. Small on purpose: the full sweep
+ * expects 201 keys for manufacturing, which nobody can check by hand, so a wrong
+ * expectation set would never be spotted. Every row here is individually auditable.
+ */
+function CoreChecklistPanel({ checklist }: { checklist: CoreChecklist }) {
+  const byCategory = useMemo(() => {
+    const groups = new Map<string, CoreChecklist['items']>()
+    for (const item of checklist.items) {
+      const bucket = groups.get(item.category)
+      if (bucket) bucket.push(item)
+      else groups.set(item.category, [item])
+    }
+    return [...groups.entries()]
+  }, [checklist])
+
+  return (
+    <div className="border border-zinc-800 rounded-lg p-3">
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-xs font-medium text-zinc-300">
+          Core checklist — every miss is critical
+        </p>
+        <p className={`text-sm font-bold ${scoreColor(checklist.score)}`}>
+          {checklist.present}/{checklist.total}
+        </p>
+      </div>
+      <div className="grid gap-x-6 gap-y-2 sm:grid-cols-2">
+        {byCategory.map(([category, items]) => (
+          <div key={category}>
+            <p className="text-[10px] uppercase tracking-wider text-zinc-500 mb-0.5">{category}</p>
+            <ul>
+              {items.map((item) => (
+                <li key={item.key} className="flex items-baseline gap-1.5 text-xs">
+                  <span
+                    aria-hidden
+                    className={item.present ? 'text-emerald-400' : 'text-red-400'}
+                  >
+                    {item.present ? '✓' : '✗'}
+                  </span>
+                  <span className={item.present ? 'text-zinc-400' : 'text-red-300'}>
+                    {item.key}
+                  </span>
+                  <span className="sr-only">{item.present ? 'present' : 'missing'}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function ReadinessWidget() {
   const [industry, setIndustry] = useState('manufacturing')
   const [state, setState] = useState('CA')
   const [city, setCity] = useState('Los Angeles')
+  const [depth, setDepth] = useState<'core' | 'full'>('core')
   const [data, setData] = useState<Readiness | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  const hasCore = CORE_INDUSTRIES.has(industry)
+  const effectiveDepth = hasCore ? depth : 'full'
 
   const check = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
-      const params = new URLSearchParams({ industry, state })
+      const params = new URLSearchParams({ industry, state, depth: effectiveDepth })
       if (city.trim()) params.set('city', city.trim())
       setData(await api.get<Readiness>(`/admin/jurisdictions/evals/onboarding-readiness?${params}`))
     } catch (e) {
@@ -169,7 +239,7 @@ function ReadinessWidget() {
     } finally {
       setLoading(false)
     }
-  }, [industry, state, city])
+  }, [industry, state, city, effectiveDepth])
 
   const missingCount = data ? Object.values(data.missing_keys || {}).reduce((n, ks) => n + ks.length, 0) : 0
 
@@ -210,10 +280,30 @@ function ReadinessWidget() {
             className="bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-sm text-zinc-200 w-44"
           />
         </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-[10px] uppercase tracking-wider text-zinc-500">Depth</span>
+          <select
+            value={effectiveDepth}
+            onChange={(e) => setDepth(e.target.value as 'core' | 'full')}
+            disabled={!hasCore}
+            title={hasCore ? undefined : `No core checklist curated for ${industry}`}
+            className="bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-sm text-zinc-200 disabled:opacity-50"
+          >
+            <option value="core">Core (≤30 keys)</option>
+            <option value="full">Full sweep</option>
+          </select>
+        </label>
         <Button size="sm" onClick={check} disabled={loading || !state.trim()}>
           {loading ? 'Checking…' : 'Check'}
         </Button>
       </div>
+
+      {!hasCore && (
+        <p className="text-[11px] text-zinc-500 mb-3">
+          No core checklist for <span className="text-zinc-400">{industry}</span> — scoring the full
+          registry sweep. Core sets exist for manufacturing and healthcare.
+        </p>
+      )}
 
       {error && <p className="text-sm text-red-400">{error}</p>}
 
@@ -254,10 +344,12 @@ function ReadinessWidget() {
             </div>
           )}
 
-          {missingCount > 0 && (
+          {data.core_checklist && <CoreChecklistPanel checklist={data.core_checklist} />}
+
+          {data.depth === 'full' && missingCount > 0 && (
             <details className="text-xs">
               <summary className="cursor-pointer text-zinc-400">
-                {missingCount} missing key{missingCount === 1 ? '' : 's'} across{' '}
+                Full sweep: {missingCount} missing key{missingCount === 1 ? '' : 's'} across{' '}
                 {Object.keys(data.missing_keys).length} categories
               </summary>
               <div className="mt-2 space-y-1.5 max-h-64 overflow-y-auto">
