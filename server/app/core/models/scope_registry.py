@@ -29,3 +29,17 @@ class DispatchResponse(BaseModel):
     status: str
     dispatched_to: Literal["celery", "inline"]
     slug: Optional[str] = None
+
+
+class ReconcileRequest(BaseModel):
+    """Codify-linkage sweep (POST /reconcile). No state = registry-wide."""
+
+    state: Optional[str] = None
+    city: Optional[str] = None
+
+
+class FetchQueueResearchRequest(BaseModel):
+    """Drive the chain's fetch queue into research (POST /fetch-queue/research)."""
+
+    state: str
+    city: Optional[str] = None

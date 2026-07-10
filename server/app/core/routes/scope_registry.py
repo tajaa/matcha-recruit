@@ -17,6 +17,7 @@ from ..models.scope_registry import (
     ClassificationProposal,
     ConfirmClassificationsRequest,
     DispatchResponse,
+    ReconcileRequest,
 )
 from ...database import get_connection
 
@@ -201,6 +202,19 @@ async def fetch_queue_endpoint(
     async with get_connection() as conn:
         items = await fetch_queue(conn, category=category, state=state)
     return {"items": items, "count": len(items)}
+
+
+@router.post("/reconcile", dependencies=[Depends(require_admin)])
+async def reconcile_endpoint(payload: ReconcileRequest = ReconcileRequest()):
+    """Persist the scope↔store codify linkage (scope_codifications) by matching
+    confirmed keyed classifications against keyed catalog rows. No state =
+    registry-wide backfill; a state narrows to that jurisdiction chain."""
+    from app.core.services.scope_registry.codify import reconcile_codifications
+    async with get_connection() as conn:
+        return await reconcile_codifications(
+            conn, state=payload.state, city=payload.city,
+            source="backfill" if not payload.state else "reconcile",
+        )
 
 
 @router.get("/labor-scope", dependencies=[Depends(require_admin)])
