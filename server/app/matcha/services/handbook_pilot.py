@@ -441,6 +441,7 @@ _SYSTEM = """You are an HR handbook and policy drafting assistant working for a 
 
 HARD RULES:
 - Cite ONLY the bracketed IDs that appear in the EVIDENCE CORPUS. NEVER invent a statute, dollar figure, deadline, or ID.
+- Put those corpus IDs ONLY in the `cited_ids` array. NEVER write a corpus ID (like `law:…` or `handbook:…`) into the `content` prose — `content` is employee-facing handbook text. (Placeholder tokens like [HR_CONTACT_EMAIL] are fine in content.)
 - When you assert a legal obligation (a required notice window, an accrual rate, a posting duty, a covered-employer threshold), cite the `law:` ID it comes from. If the corpus does not establish it, say so under open_questions instead of stating it as fact.
 - Revise rather than duplicate: if an existing `handbook:`/`policy:` record already covers the topic, cite it and build on it.
 - Write clear, enforceable, employee-facing prose. You MAY use the placeholder tokens the company resolves later, e.g. [HR_CONTACT_EMAIL], [HARASSMENT_REPORTING_HOTLINE], [ATTENDANCE_NOTICE_WINDOW].
@@ -488,9 +489,43 @@ LATEST ADMIN MESSAGE:
 """
 
 
+# Inline corpus-id tokens the model embeds in prose despite the prompt asking for
+# cited_ids only (e.g. "...report concerns [handbook:0e29…]."). Colon-form
+# (law:/handbook:/policy:/playbook:) is unambiguous; `profile` is the one bare
+# cid. `(?!\()` protects markdown links [text](url), mirroring the frontend
+# highlightPlaceholders guard; ALL-CAPS placeholder tokens like [HR_CONTACT_EMAIL]
+# never match (the prefixes are lowercase keywords). Leading `[ \t]*` eats the
+# space before the tag so removal doesn't leave a double space.
+_INLINE_CID = re.compile(
+    r"[ \t]*\[(?:(?:law|handbook|policy|playbook):[^\]\s]+|profile)\](?!\()"
+)
+
+
+def strip_corpus_citations(content: str) -> tuple[str, list[str]]:
+    """Remove inline corpus-id tags from a draft body. Returns
+    (clean_content, found_ids); found_ids are raw (not filtered against the
+    index — harvesting/validation is the caller's choice). Pure."""
+    found: list[str] = []
+
+    def _sub(m):
+        found.append(m.group(0).strip()[1:-1])  # the cid inside the brackets
+        return ""
+
+    clean = _INLINE_CID.sub(_sub, content or "")
+    clean = re.sub(r"[ \t]{2,}", " ", clean)          # squeeze spaces removal left
+    clean = re.sub(r"[ \t]+([.,;:])", r"\1", clean)   # no space before punctuation
+    clean = re.sub(r"[ \t]+\n", "\n", clean)          # no trailing spaces per line
+    return clean.strip(), found
+
+
 def _coerce_drafts(raw, index: dict) -> tuple[list[dict], list[str]]:
     """Clamp the model's proposed_drafts into the stored schema and filter each
     draft's citations against the corpus index. Returns (drafts, dropped_ids).
+
+    Inline corpus-id tags the model wrote into the prose are stripped from
+    `content` here; any that name a real corpus record are harvested into the
+    draft's cited_ids so groundedness survives even if the model only tagged
+    inline, and invented ones are reported as dropped (same gate as the field).
 
     Filters citations per-draft directly (same rule as the shared
     ``validate_citations`` gate — keep only ids present in ``index``) rather than
@@ -514,12 +549,16 @@ def _coerce_drafts(raw, index: dict) -> tuple[list[dict], list[str]]:
             kind = "handbook_section"
         title = str(d.get("title") or "").strip()[:300]
         content = str(d.get("content") or "").strip()[:_CONTENT_CAP]
+        content, inline_ids = strip_corpus_citations(content)
         if not (title and content):
             continue
         raw_ids = d.get("cited_ids")
         ids = [c for c in raw_ids if isinstance(c, str)] if isinstance(raw_ids, list) else []
         kept: list[str] = []
-        for c in ids:
+        # The separate cited_ids field first, then any real ids the model only
+        # wrote inline (now stripped from the prose above) — invented ids from
+        # either source are dropped identically.
+        for c in [*ids, *inline_ids]:
             if c not in index:
                 dropped.append(c)
                 continue
@@ -649,7 +688,10 @@ def _assemble_draft(d: dict, index: dict) -> dict:
         "kind": d.get("kind"),
         "title": d.get("title"),
         "section_key": d.get("section_key"),
-        "content": d.get("content") or "",
+        # Strip inline corpus-id tags on the read path too, so legacy drafts
+        # stored before this fix (and their edit textarea) render clean without a
+        # backfill. Coverage is unaffected — it reads the stored citations field.
+        "content": strip_corpus_citations(d.get("content") or "")[0],
         "status": d.get("status"),
         "promoted_ref": d.get("promoted_ref"),
         "citations": citations,

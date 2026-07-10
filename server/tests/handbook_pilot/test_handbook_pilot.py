@@ -290,6 +290,75 @@ def test_coerce_drafts_tolerates_garbage():
     assert drafts == []
 
 
+# --- inline corpus-id stripping --------------------------------------------
+
+def test_strip_corpus_citations_removes_all_cid_forms():
+    text = ("Accrue leave [law:ca-sick-accrual] and report concerns "
+            "[handbook:0e297b8f-58e6-4e21-9b6e-b6d4f98ee87c]; see [policy:pol1], "
+            "the [playbook:tips] baseline, and [profile].")
+    clean, found = hp.strip_corpus_citations(text)
+    assert "[law:" not in clean and "[handbook:" not in clean
+    assert "[policy:" not in clean and "[playbook:" not in clean and "[profile]" not in clean
+    assert found == ["law:ca-sick-accrual",
+                     "handbook:0e297b8f-58e6-4e21-9b6e-b6d4f98ee87c",
+                     "policy:pol1", "playbook:tips", "profile"]
+    # preceding space is consumed with the tag; no double spaces or space-before-punct
+    assert clean == "Accrue leave and report concerns; see, the baseline, and."
+
+
+def test_strip_corpus_citations_preserves_placeholders_and_links():
+    text = "Email [HR_CONTACT_EMAIL] or read our [handbook policy](https://x.test/p)."
+    clean, found = hp.strip_corpus_citations(text)
+    assert clean == text          # nothing stripped
+    assert found == []
+
+
+def test_strip_corpus_citations_leaves_bare_prose_untouched():
+    clean, found = hp.strip_corpus_citations("Just plain handbook text, no tags.")
+    assert found == [] and clean == "Just plain handbook text, no tags."
+
+
+def test_coerce_drafts_strips_inline_tags_and_harvests_valid_ids():
+    """A model that only tagged inline (empty cited_ids) still ends grounded:
+    real inline ids are harvested into cited_ids, the prose comes out clean, and
+    an invented inline id is stripped from prose AND reported as dropped."""
+    index = {"law:ca-meal-0": {}, "handbook:h1": {}}
+    raw = [{
+        "kind": "handbook_section", "title": "Meal & Rest Breaks",
+        "content": ("Employees receive a 30-minute unpaid meal period "
+                    "[law:ca-meal-0], building on [handbook:h1] "
+                    "and [law:invented-99]. Contact [HR_CONTACT_EMAIL]."),
+        "cited_ids": [],
+    }]
+    drafts, dropped = hp._coerce_drafts(raw, index)
+    assert len(drafts) == 1
+    c = drafts[0]["content"]
+    assert "[law:" not in c and "[handbook:" not in c
+    assert "[HR_CONTACT_EMAIL]" in c                 # placeholder preserved
+    assert drafts[0]["cited_ids"] == ["law:ca-meal-0", "handbook:h1"]  # harvested
+    assert dropped == ["law:invented-99"]
+
+
+def test_coerce_drafts_unions_field_and_inline_without_dupes():
+    index = {"law:ca-meal-0": {}}
+    raw = [{
+        "kind": "policy", "title": "Meal", "content": "Body [law:ca-meal-0].",
+        "cited_ids": ["law:ca-meal-0"],
+    }]
+    drafts, _ = hp._coerce_drafts(raw, index)
+    assert drafts[0]["cited_ids"] == ["law:ca-meal-0"]  # not duplicated
+    assert drafts[0]["content"] == "Body."
+
+
+def test_assemble_handbook_strips_inline_tags_from_legacy_content():
+    """Read path cleans drafts stored before the fix — no backfill needed."""
+    drafts = [{"id": "d1", "kind": "handbook_section", "title": "T",
+               "content": "Report to [handbook:old] as needed.",
+               "status": "pending", "citations": [], "promoted_ref": None}]
+    asm = hp.assemble_handbook({}, drafts, hp.build_corpus({}))
+    assert asm["sections"][0]["content"] == "Report to as needed."
+
+
 # --- handbook viewer: citation resolution ----------------------------------
 
 def _index():
