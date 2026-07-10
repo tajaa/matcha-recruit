@@ -78,8 +78,8 @@ async def load_jurisdiction_graph(conn) -> Dict:
     }
 
 
-def present_keys_for(graph: Dict, jurisdiction_id) -> Dict[str, Set[str]]:
-    """Category → keys held at this jurisdiction ∪ its state ∪ its country root.
+def chain_ids_for(graph: Dict, jurisdiction_id) -> List:
+    """This jurisdiction ∪ its state ∪ its country root — the inheritance chain.
 
     The country root is the `federal` row for US jurisdictions and the matching
     `national` row otherwise — a US city must never inherit UK law, nor a UK one
@@ -87,7 +87,7 @@ def present_keys_for(graph: Dict, jurisdiction_id) -> Dict[str, Set[str]]:
     """
     jur = graph["jurisdictions"].get(jurisdiction_id)
     if not jur:
-        return {}
+        return []
 
     chain = [jurisdiction_id]
     if jur["level"] not in ("federal", "national"):
@@ -103,12 +103,76 @@ def present_keys_for(graph: Dict, jurisdiction_id) -> Dict[str, Set[str]]:
         )
         if root:
             chain.append(root)
+    return chain
 
+
+def present_keys_for(graph: Dict, jurisdiction_id) -> Dict[str, Set[str]]:
+    """Category → keys held at this jurisdiction ∪ its state ∪ its country root."""
     merged: Dict[str, Set[str]] = {}
-    for jid in chain:
+    for jid in chain_ids_for(graph, jurisdiction_id):
         for cat, keys in graph["keys_by_jurisdiction"].get(jid, {}).items():
             merged.setdefault(cat, set()).update(keys)
     return merged
+
+
+async def registry_expected_keys(
+    conn, chain_ids: List, industry: Optional[str]
+) -> Optional[Dict[str, Set[str]]]:
+    """Expected keys from the scope registry, when it covers this coordinate.
+
+    The plan's denominator fix (§10): where confirmed strata exist for the
+    industry's business-category in this jurisdiction's chain, the *expected*
+    set is the registry's classified regulation keys — a grounded, cited
+    worklist — instead of `industry_keysets`' registry category-groups (a
+    taxonomy artifact that demands EU works-council rules of a machine shop).
+
+    ``chain_ids`` is the jurisdiction inheritance chain (from
+    :func:`chain_ids_for`), so a curated state index is matched even when a
+    county sits between the city and the state. Returns ``None`` when no
+    confirmed strata cover the coordinate, so the caller falls back to the
+    current behavior unchanged — until classification happens on a
+    jurisdiction, nothing here alters a single score.
+    """
+    try:
+        from app.core.services.scope_registry.categories import ancestry, resolve_category
+    except Exception:
+        return None
+
+    slug = resolve_category(industry) if industry else None
+    chain = ancestry(slug) if slug else []
+    if not chain:
+        return None
+
+    # Confirmed classifications whose index covers this jurisdiction chain
+    # (federal NULL always applies) and whose disposition selects the category.
+    rows = await conn.fetch(
+        """
+        SELECT c.regulation_key, c.disposition, c.applies_to_categories,
+               c.excludes_categories, kd.category_slug
+        FROM authority_item_classifications c
+        JOIN authority_index_items i ON i.id = c.item_id
+        JOIN authority_indexes ai ON ai.id = i.authority_index_id
+        LEFT JOIN regulation_key_definitions kd ON kd.id = c.key_definition_id
+        WHERE c.status = 'confirmed'
+          AND c.disposition <> 'excluded'
+          AND c.regulation_key IS NOT NULL
+          AND (ai.jurisdiction_id IS NULL OR ai.jurisdiction_id = ANY($1::uuid[]))
+        """,
+        list(chain_ids),
+    )
+    chain_set = set(chain)
+    expected: Dict[str, Set[str]] = {}
+    for r in rows:
+        applies = set(r["applies_to_categories"] or [])
+        excludes = set(r["excludes_categories"] or [])
+        if excludes & chain_set:
+            continue
+        if r["disposition"] != "universal_in_domain" and applies and not (applies & chain_set):
+            continue
+        cat = r["category_slug"] or "uncategorized"
+        expected.setdefault(cat, set()).add(r["regulation_key"])
+
+    return expected or None
 
 
 async def evaluate_pair(
@@ -126,7 +190,17 @@ async def evaluate_pair(
         weights_cache[industry or ""] = await iks.category_weights(conn, industry)
     weights = weights_cache.get(industry or "", {})
 
-    expected = iks.expected_keys(industry, country_code=country)
+    # Prefer the registry's grounded scope where it covers this coordinate;
+    # otherwise fall back to the category-group expectation (labeled honestly).
+    registry_expected = await registry_expected_keys(
+        conn, chain_ids_for(graph, jurisdiction_id), industry
+    )
+    if registry_expected is not None:
+        expected = registry_expected
+        expectation_source = "registry"
+    else:
+        expected = iks.expected_keys(industry, country_code=country)
+        expectation_source = "registry_groups"
     present = present_keys_for(graph, jurisdiction_id)
     focused = iks.focused_categories(industry, weights)
 
@@ -158,6 +232,9 @@ async def evaluate_pair(
         "focused_categories": sorted(focused),
         "focused_keys_complete": focused_complete,
         "country_code": country,
+        # 'registry' = grounded strata; 'registry_groups' = the taxonomy-artifact
+        # fallback the plan flags as an unfounded denominator.
+        "expectation_source": expectation_source,
     }
     return {"score": score, "detail": detail}, findings
 
