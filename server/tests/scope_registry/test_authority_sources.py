@@ -80,6 +80,31 @@ def test_title16_has_optometry_slice():
     assert "optometry" in blob or "optician" in blob
 
 
+def test_title16_citations_are_the_verified_set():
+    """Web-verified 2026-07-10 — pins the corrected citations.
+
+    An earlier draft invented §1516/§1517/§1524/§2541/§2559.2 (CE is §1536,
+    contact-lens dispensing is BPC §2542, RDO registration is BPC §2550).
+    Changing this set means re-verifying against the statute, not just
+    editing the test.
+    """
+    citations = {r["citation"] for r in CURATED_ROWS["ca-title-16"]}
+    assert citations == {
+        "Cal. Bus. & Prof. Code § 3041",
+        "Cal. Bus. & Prof. Code § 3041.3",
+        "16 CCR § 1536",
+        "Cal. Bus. & Prof. Code § 2542",
+        "Cal. Bus. & Prof. Code § 2550",
+    }
+
+
+def test_no_fabricated_westlaw_urls():
+    """calregs.westlaw permalinks use opaque GUIDs — a constructed one is fake."""
+    for rows in CURATED_ROWS.values():
+        for r in rows:
+            assert "govt.westlaw.com" not in r["source_url"], r["citation"]
+
+
 def test_unknown_slug_lookups_return_none():
     assert federal_part_by_slug("nope") is None
     assert curated_index_by_slug("nope") is None

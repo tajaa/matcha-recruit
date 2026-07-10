@@ -72,9 +72,12 @@ async def _resolve_jurisdiction_id(conn, spec: Dict[str, str]) -> Optional[str]:
             city, state,
         )
     else:
+        # country_code tolerant of NULL: rows created before the country_code
+        # migration may not be backfilled, and a US state row is US either way.
         row = await conn.fetchrow(
             "SELECT id FROM jurisdictions "
-            "WHERE state = $1 AND level = $2 AND country_code = 'US' "
+            "WHERE state = $1 AND level = $2 "
+            "AND (country_code = 'US' OR country_code IS NULL) "
             "AND city IS NULL LIMIT 1",
             state, level,
         )
@@ -99,12 +102,15 @@ async def _upsert_index(
     enumerable: bool,
 ) -> str:
     """Insert-or-update the authority_indexes row; return its id."""
+    # last_ingested_at is deliberately NOT stamped here — it's the ingest's
+    # commit marker, written by _recount as the final step so a torn run never
+    # looks fresh (the scheduled sweep keys on it to decline re-crawls).
     row = await conn.fetchrow(
         """
         INSERT INTO authority_indexes
             (slug, name, level, jurisdiction_id, source_type,
-             domain_categories, domain_excludes, enumerable, last_ingested_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+             domain_categories, domain_excludes, enumerable)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         ON CONFLICT (slug) DO UPDATE SET
             name = EXCLUDED.name,
             level = EXCLUDED.level,
@@ -112,8 +118,7 @@ async def _upsert_index(
             source_type = EXCLUDED.source_type,
             domain_categories = EXCLUDED.domain_categories,
             domain_excludes = EXCLUDED.domain_excludes,
-            enumerable = EXCLUDED.enumerable,
-            last_ingested_at = NOW()
+            enumerable = EXCLUDED.enumerable
         RETURNING id
         """,
         slug, name, level, jurisdiction_id, source_type,
@@ -125,65 +130,71 @@ async def _upsert_index(
 async def _upsert_items(conn, index_id: str, items: List[dict]) -> int:
     """Upsert items, then resolve parent_item_id from parent_citation.
 
-    Two passes: rows first (so every parent exists before linking), then a
-    single UPDATE join maps each child's parent_citation to the parent's id
-    within the same index. Returns the count upserted.
+    Two passes: rows first via executemany (so every parent exists before
+    linking), then one set-based UPDATE maps each child's parent_citation to
+    the parent's id within the same index. Returns the count upserted.
     """
     if not items:
         return 0
 
-    for it in items:
-        await conn.execute(
-            """
-            INSERT INTO authority_index_items
-                (authority_index_id, citation, heading, hierarchy,
-                 source_url, amendment_date)
-            VALUES ($1, $2, $3, $4::jsonb, $5, $6)
-            ON CONFLICT (authority_index_id, citation) DO UPDATE SET
-                heading = EXCLUDED.heading,
-                hierarchy = EXCLUDED.hierarchy,
-                source_url = EXCLUDED.source_url,
-                amendment_date = EXCLUDED.amendment_date
-            """,
-            index_id,
-            it["citation"],
-            it.get("heading"),
-            json.dumps(it.get("hierarchy") or {}),
-            it.get("source_url"),
-            it.get("amendment_date"),
-        )
+    await conn.executemany(
+        """
+        INSERT INTO authority_index_items
+            (authority_index_id, citation, heading, hierarchy,
+             source_url, amendment_date)
+        VALUES ($1, $2, $3, $4::jsonb, $5, $6)
+        ON CONFLICT (authority_index_id, citation) DO UPDATE SET
+            heading = EXCLUDED.heading,
+            hierarchy = EXCLUDED.hierarchy,
+            source_url = EXCLUDED.source_url,
+            amendment_date = EXCLUDED.amendment_date
+        """,
+        [
+            (
+                index_id,
+                it["citation"],
+                it.get("heading"),
+                json.dumps(it.get("hierarchy") or {}),
+                it.get("source_url"),
+                it.get("amendment_date"),
+            )
+            for it in items
+        ],
+    )
 
     # parent_citation is a parse artifact, not a column — resolve it to
-    # parent_item_id now that every row exists.
-    await _link_parents(conn, index_id, items)
+    # parent_item_id now that every row exists. One set-based UPDATE over the
+    # (child, parent) citation pairs.
+    pairs = [
+        (it["citation"], it["parent_citation"])
+        for it in items
+        if it.get("parent_citation")
+    ]
+    if pairs:
+        await conn.execute(
+            """
+            UPDATE authority_index_items child
+            SET parent_item_id = parent.id
+            FROM unnest($2::text[], $3::text[]) AS link(child_citation, parent_citation)
+            JOIN authority_index_items parent
+              ON parent.authority_index_id = $1
+             AND parent.citation = link.parent_citation
+            WHERE child.authority_index_id = $1
+              AND child.citation = link.child_citation
+            """,
+            index_id,
+            [p[0] for p in pairs],
+            [p[1] for p in pairs],
+        )
     return len(items)
 
 
-async def _link_parents(conn, index_id: str, items: List[dict]) -> None:
-    """Resolve parent_item_id for items whose parse carried a parent_citation."""
-    id_by_citation = {
-        r["citation"]: r["id"]
-        for r in await conn.fetch(
-            "SELECT id, citation FROM authority_index_items WHERE authority_index_id = $1",
-            index_id,
-        )
-    }
-    for it in items:
-        parent_citation = it.get("parent_citation")
-        if not parent_citation:
-            continue
-        parent_id = id_by_citation.get(parent_citation)
-        if parent_id is None:
-            continue
-        await conn.execute(
-            "UPDATE authority_index_items SET parent_item_id = $1 "
-            "WHERE authority_index_id = $2 AND citation = $3",
-            parent_id, index_id, it["citation"],
-        )
-
-
 async def _recount(conn, index_id: str) -> tuple[int, int]:
-    """Return (item_count, unclassified_count) and persist them on the index."""
+    """Persist (item_count, unclassified_count) and stamp last_ingested_at.
+
+    The timestamp is the ingest's commit marker — it lands only when the counts
+    do, so a run that dies mid-upsert never reads as fresh.
+    """
     item_count = await conn.fetchval(
         "SELECT COUNT(*) FROM authority_index_items WHERE authority_index_id = $1",
         index_id,
@@ -197,8 +208,8 @@ async def _recount(conn, index_id: str) -> tuple[int, int]:
         index_id,
     )
     await conn.execute(
-        "UPDATE authority_indexes SET item_count = $1, unclassified_count = $2 "
-        "WHERE id = $3",
+        "UPDATE authority_indexes SET item_count = $1, unclassified_count = $2, "
+        "last_ingested_at = NOW() WHERE id = $3",
         item_count, unclassified, index_id,
     )
     return int(item_count), int(unclassified)
@@ -231,19 +242,23 @@ async def ingest_ecfr_index(
     for it in items:  # part-level amendment date (eCFR versions API is part-granular)
         it["amendment_date"] = amendment
 
-    index_id = await _upsert_index(
-        conn,
-        slug=part.slug,
-        name=part.name,
-        level=part.level,
-        jurisdiction_id=None,
-        source_type="ecfr",
-        domain_categories=part.domain_categories,
-        domain_excludes=part.domain_excludes,
-        enumerable=True,
-    )
-    upserted = await _upsert_items(conn, index_id, items)
-    item_count, unclassified = await _recount(conn, index_id)
+    # All writes in one transaction: a mid-ingest failure rolls back rather
+    # than leaving a torn index (fetch/parse stay outside — no locks held
+    # while waiting on a .gov host).
+    async with conn.transaction():
+        index_id = await _upsert_index(
+            conn,
+            slug=part.slug,
+            name=part.name,
+            level=part.level,
+            jurisdiction_id=None,
+            source_type="ecfr",
+            domain_categories=part.domain_categories,
+            domain_excludes=part.domain_excludes,
+            enumerable=True,
+        )
+        upserted = await _upsert_items(conn, index_id, items)
+        item_count, unclassified = await _recount(conn, index_id)
     logger.info(
         "ingested %s: %d items (%d unclassified)", part.slug, item_count, unclassified
     )
@@ -258,17 +273,6 @@ async def ingest_curated_index(conn, spec: CuratedIndexSpec) -> IngestResult:
     rows = CURATED_ROWS.get(spec.slug, [])
     jurisdiction_id = await _resolve_jurisdiction_id(conn, spec.jurisdiction)
 
-    index_id = await _upsert_index(
-        conn,
-        slug=spec.slug,
-        name=spec.name,
-        level=spec.level,
-        jurisdiction_id=jurisdiction_id,
-        source_type="curated",
-        domain_categories=spec.domain_categories,
-        domain_excludes=spec.domain_excludes,
-        enumerable=False,
-    )
     items = [
         {
             "citation": r["citation"],
@@ -280,8 +284,20 @@ async def ingest_curated_index(conn, spec: CuratedIndexSpec) -> IngestResult:
         }
         for r in rows
     ]
-    upserted = await _upsert_items(conn, index_id, items)
-    item_count, unclassified = await _recount(conn, index_id)
+    async with conn.transaction():
+        index_id = await _upsert_index(
+            conn,
+            slug=spec.slug,
+            name=spec.name,
+            level=spec.level,
+            jurisdiction_id=jurisdiction_id,
+            source_type="curated",
+            domain_categories=spec.domain_categories,
+            domain_excludes=spec.domain_excludes,
+            enumerable=False,
+        )
+        upserted = await _upsert_items(conn, index_id, items)
+        item_count, unclassified = await _recount(conn, index_id)
     logger.info(
         "ingested curated %s: %d items (%d unclassified)", spec.slug, item_count, unclassified
     )
@@ -302,18 +318,26 @@ async def ingest_by_slug(conn, slug: str) -> IngestResult:
     raise ValueError(f"unknown authority index slug: {slug!r}")
 
 
-async def ingest_all(conn) -> List[IngestResult]:
-    """Ingest every catalog index. One shared httpx client for the federal parts."""
+async def ingest_all(conn) -> tuple[List[IngestResult], List[dict]]:
+    """Ingest every catalog index. One shared httpx client for the federal parts.
+
+    Returns ``(results, failures)`` — a failed index must surface in the task
+    result, not just a server-side log line, or a partial sweep reads as
+    "covered everything".
+    """
     results: List[IngestResult] = []
+    failures: List[dict] = []
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
         for part in FEDERAL_ECFR_PARTS:
             try:
                 results.append(await ingest_ecfr_index(conn, part, client=client))
             except Exception as exc:
                 logger.warning("federal ingest failed for %s: %s", part.slug, exc)
+                failures.append({"slug": part.slug, "error": str(exc)})
     for spec in CURATED_INDEXES:
         try:
             results.append(await ingest_curated_index(conn, spec))
         except Exception as exc:
             logger.warning("curated ingest failed for %s: %s", spec.slug, exc)
-    return results
+            failures.append({"slug": spec.slug, "error": str(exc)})
+    return results, failures

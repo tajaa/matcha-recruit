@@ -18,6 +18,10 @@ SourceType = Literal["ecfr", "federal_register", "curated"]
 class AuthorityItem(BaseModel):
     """One enumerated citation within an authority index.
 
+    Not consumed by the ingest layer (which passes plain dicts to asyncpg) —
+    this and `AuthorityIndex` are the response shapes for the commit-4 admin
+    endpoints (`GET /admin/scope-registry/authority*`).
+
     ``parent_citation`` links a section to its subpart (or a subpart to its
     part); the ingest layer resolves it to ``parent_item_id`` at write time.
     ``hierarchy`` mirrors the JSONB column: ``{title, part, subpart, section}``

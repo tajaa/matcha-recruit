@@ -132,42 +132,43 @@ _TITLE8: List[CuratedRow] = [
 
 # ── ca-title-16: professional licensing board slice (optometry / opticianry) ──
 # Ophthalmology's California obligations live in the licensing boards, not OSHA.
+# Every citation below was web-verified against the statute/board source on
+# 2026-07-10 (an earlier draft carried §1516/§1517/§1524/§2541/§2559.2, which
+# were wrong or unverifiable — CE is §1536, contact-lens dispensing is §2542,
+# RDO registration is §2550). CCR sections cite the board's official laws/regs
+# index — calregs.westlaw permalinks use opaque GUIDs and can't be constructed.
+_BOARD_LAWSREGS = "https://www.optometry.ca.gov/lawsregs/index.shtml"
+
 _TITLE16: List[CuratedRow] = [
     {
-        "citation": "Cal. Bus. & Prof. Code § 3040",
-        "heading": "Optometry Practice Act — scope of practice of optometry",
-        "hierarchy": {"code": "Business & Professions Code", "part": "Optometry"},
-        "source_url": _leginfo("BPC", "3040"),
+        "citation": "Cal. Bus. & Prof. Code § 3041",
+        "heading": "Practice of optometry — statutory scope (examination, refraction, lenses; anterior-segment treatment for certified optometrists)",
+        "hierarchy": {"code": "Business & Professions Code", "part": "Optometry (Ch. 7)"},
+        "source_url": _leginfo("BPC", "3041"),
     },
     {
-        "citation": "16 CCR § 1516",
-        "heading": "State Board of Optometry — continuing education requirements",
+        "citation": "Cal. Bus. & Prof. Code § 3041.3",
+        "heading": "Therapeutic pharmaceutical agent (TPA) certification for optometrists",
+        "hierarchy": {"code": "Business & Professions Code", "part": "Optometry (Ch. 7)"},
+        "source_url": _leginfo("BPC", "3041.3"),
+    },
+    {
+        "citation": "16 CCR § 1536",
+        "heading": "State Board of Optometry — continuing education (40 hrs / 2 yrs; 50 hrs incl. 35 ocular-disease for TPA-certified)",
         "hierarchy": {"code": "Title 16 CCR", "part": "Board of Optometry (Div. 15)"},
-        "source_url": "https://govt.westlaw.com/calregs/Document/16CCR1516",
+        "source_url": _BOARD_LAWSREGS,
     },
     {
-        "citation": "16 CCR § 1517",
-        "heading": "Minimum standards for the practice of optometry (examination requirements)",
-        "hierarchy": {"code": "Title 16 CCR", "part": "Board of Optometry (Div. 15)"},
-        "source_url": "https://govt.westlaw.com/calregs/Document/16CCR1517",
+        "citation": "Cal. Bus. & Prof. Code § 2542",
+        "heading": "Registered dispensing optician — contact lenses fitted/dispensed only on a valid prescription of a physician or optometrist",
+        "hierarchy": {"code": "Business & Professions Code", "part": "Opticianry (Ch. 5.5)"},
+        "source_url": _leginfo("BPC", "2542"),
     },
     {
-        "citation": "16 CCR § 1524",
-        "heading": "Therapeutic pharmaceutical agent (TPA) certification requirements",
-        "hierarchy": {"code": "Title 16 CCR", "part": "Board of Optometry (Div. 15)"},
-        "source_url": "https://govt.westlaw.com/calregs/Document/16CCR1524",
-    },
-    {
-        "citation": "Cal. Bus. & Prof. Code § 2541",
-        "heading": "Contact lens prescription — release and verification (Fairness to Contact Lens Consumers overlaps FTC rule)",
-        "hierarchy": {"code": "Business & Professions Code", "part": "Opticianry / contact lenses"},
-        "source_url": _leginfo("BPC", "2541"),
-    },
-    {
-        "citation": "Cal. Bus. & Prof. Code § 2559.2",
-        "heading": "Registered dispensing optician — registration and standards",
-        "hierarchy": {"code": "Business & Professions Code", "part": "Opticianry / contact lenses"},
-        "source_url": _leginfo("BPC", "2559.2"),
+        "citation": "Cal. Bus. & Prof. Code § 2550",
+        "heading": "Registered dispensing optician — registration with the State Board of Optometry (definitions incl. spectacle and contact lens dispensers)",
+        "hierarchy": {"code": "Business & Professions Code", "part": "Opticianry (Ch. 5.5)"},
+        "source_url": _leginfo("BPC", "2550"),
     },
 ]
 

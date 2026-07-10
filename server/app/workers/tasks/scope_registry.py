@@ -20,6 +20,12 @@ CHANNEL = "admin:scope_registry"
 
 
 async def _scheduled_run_is_due() -> bool:
+    """Decline the scheduled sweep if ANY ingest landed recently.
+
+    Deliberately keyed on last_ingested_at rather than a scheduled-only marker
+    (compliance_evals' approach): a manual ingest days ago makes a full
+    re-crawl of .gov redundant, and an admin can always trigger one manually.
+    """
     from app.workers.utils import get_db_connection
 
     conn = await get_db_connection()
@@ -55,10 +61,11 @@ def ingest_authority_index(index_slug: Optional[str] = None, trigger_source: str
             if index_slug:
                 result = await ingest_by_slug(conn, index_slug)
                 return {"status": "completed", "results": [result.model_dump(mode="json")]}
-            results = await ingest_all(conn)
+            results, failures = await ingest_all(conn)
             return {
-                "status": "completed",
+                "status": "completed_with_errors" if failures else "completed",
                 "results": [r.model_dump(mode="json") for r in results],
+                "failures": failures,
             }
         finally:
             await conn.close()
