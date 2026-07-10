@@ -48,6 +48,7 @@ celery_app = Celery(
         "app.workers.tasks.cappe_campaign_send",
         "app.workers.tasks.cba_clause_extraction",
         "app.workers.tasks.grievance_deadline_alerts",
+        "app.workers.tasks.scope_registry",
     ],
 )
 
@@ -155,6 +156,12 @@ def on_worker_ready(**kwargs):
         run_legislation_watch.delay()
     else:
         print("[Worker] Legislation watch scheduler is disabled, skipping.")
+
+    if _is_scheduler_enabled("scope_registry_authority"):
+        from app.workers.tasks.scope_registry import sync_all_authority_indexes
+        sync_all_authority_indexes.delay()
+    else:
+        print("[Worker] Scope registry authority sync scheduler is disabled, skipping.")
 
     if _is_scheduler_enabled("pattern_recognition"):
         run_pattern_recognition.delay()
