@@ -1,4 +1,4 @@
-from typing import Optional, List, AsyncGenerator, Dict, Any, Callable
+from typing import Optional, List, AsyncGenerator, Dict, Any, Callable, Tuple
 from uuid import UUID
 from datetime import date, datetime, timedelta
 import asyncio
@@ -1653,7 +1653,7 @@ async def _upsert_requirements_additive(
             meta_dict["penalties"] = penalties
         meta_fragment = json.dumps(meta_dict) if meta_dict else None
 
-        requirement_key = _compute_requirement_key(req)
+        requirement_key, regulation_key = _compute_key_parts(req)
         tc = req.get("trigger_conditions")
         tc_json = json.dumps(tc) if tc else None
         aet_raw = req.get("applicable_entity_types")
@@ -1667,7 +1667,8 @@ async def _upsert_requirements_additive(
                  title, description, current_value, numeric_value, source_url, source_name,
                  effective_date, expiration_date, last_verified_at, requires_written_policy,
                  applicable_industries, trigger_conditions, applicable_entity_types,
-                 implementation_steps, category_id, metadata, source_tier)
+                 implementation_steps, category_id, metadata, source_tier,
+                 regulation_key, key_definition_id)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), $15, $16, $17, $18,
                     $22::jsonb,
                     COALESCE(
@@ -1675,7 +1676,10 @@ async def _upsert_requirements_additive(
                         (SELECT id FROM compliance_categories LIMIT 1)
                     ),
                     CASE WHEN $20::text IS NOT NULL THEN $20::jsonb ELSE '{}'::jsonb END,
-                    $21::source_tier_enum)
+                    $21::source_tier_enum,
+                    $23,
+                    (SELECT id FROM regulation_key_definitions
+                     WHERE key = $23 AND category_slug = $3 LIMIT 1))
             ON CONFLICT (jurisdiction_id, requirement_key) DO UPDATE SET
                 category = EXCLUDED.category,
                 rate_type = EXCLUDED.rate_type,
@@ -1712,6 +1716,8 @@ async def _upsert_requirements_additive(
                     THEN EXCLUDED.source_tier
                     ELSE jurisdiction_requirements.source_tier
                 END,
+                regulation_key = COALESCE(EXCLUDED.regulation_key, jurisdiction_requirements.regulation_key),
+                key_definition_id = COALESCE(EXCLUDED.key_definition_id, jurisdiction_requirements.key_definition_id),
                 updated_at = NOW()
             """,
             jurisdiction_id,
@@ -1736,6 +1742,7 @@ async def _upsert_requirements_additive(
             meta_fragment,         # $20: research_source metadata
             source_tier,           # $21: source_tier enum value
             steps_json,            # $22: implementation_steps JSONB
+            regulation_key,        # $23: bare regulation_key (store↔scope join key)
         )
 
 
@@ -3056,7 +3063,17 @@ def _resolve_regulation_key(raw_key: str, category: str) -> Optional[str]:
     return norm
 
 
-def _compute_requirement_key(req) -> str:
+def _compute_key_parts(req) -> Tuple[str, Optional[str]]:
+    """(composite requirement_key, bare regulation_key in registry vocab). Pure.
+
+    The composite is the ON-CONFLICT identity and is byte-identical to the legacy
+    ``_compute_requirement_key`` output. The bare key is the value for the
+    ``regulation_key`` column — the store↔scope join key, in registry vocabulary
+    (``normalize_key`` maps the minimum_wage rate_type dialect; it is identity for
+    every other category, so a resolved regkey passes through unchanged).
+    """
+    from app.core.services.compliance_evals.keys import normalize_key
+
     cat = req.get("category") if isinstance(req, dict) else req.category
     title = req.get("title") if isinstance(req, dict) else req.title
     jname = (
@@ -3069,6 +3086,15 @@ def _compute_requirement_key(req) -> str:
         if isinstance(req, dict)
         else getattr(req, "rate_type", None)
     )
+    jlevel = (
+        req.get("jurisdiction_level")
+        if isinstance(req, dict)
+        else getattr(req, "jurisdiction_level", None)
+    )
+    country = (
+        (req.get("country_code") if isinstance(req, dict) else getattr(req, "country_code", None))
+        or "US"
+    )
     cat_key = _normalize_category(cat) or ""
 
     # Include rate_type in key for minimum_wage to allow multiple entries per jurisdiction.
@@ -3080,7 +3106,13 @@ def _compute_requirement_key(req) -> str:
             if isinstance(req, dict)
             else (_normalize_rate_type(rate_type) or "general")
         )
-        return f"{cat_key}:{normalized_rate_type}"
+        # Composite keeps the rate_type dialect (ON CONFLICT identity); the column
+        # gets the registry key (state_/local_/national_/tipped_… minimum wage).
+        bare = normalize_key("minimum_wage", normalized_rate_type, jlevel, country)
+        return f"{cat_key}:{normalized_rate_type}", bare
+
+    aet = req.get("applicable_entity_types") if isinstance(req, dict) else getattr(req, "applicable_entity_types", None)
+    aet_prefix = f"{aet[0]}:" if aet and isinstance(aet, list) and len(aet) > 0 else ""
 
     # Prefer Gemini-provided regulation_key when present — but validate it
     # against the known canonical keys. If Gemini invents a key not in the
@@ -3089,27 +3121,22 @@ def _compute_requirement_key(req) -> str:
     if reg_key and isinstance(reg_key, str):
         resolved = _resolve_regulation_key(reg_key, cat_key)
         if resolved:
-            aet = req.get("applicable_entity_types") if isinstance(req, dict) else getattr(req, "applicable_entity_types", None)
-            if aet and isinstance(aet, list) and len(aet) > 0:
-                return f"{aet[0]}:{cat_key}:{resolved}"
-            return f"{cat_key}:{resolved}"
+            return f"{aet_prefix}{cat_key}:{resolved}", resolved
 
     # Fallback: try to match title keywords to a canonical regulation key
     base_title = _base_title(title or "", jname)
     base_key = _normalize_title_key(base_title)
-    aet = req.get("applicable_entity_types") if isinstance(req, dict) else getattr(req, "applicable_entity_types", None)
 
     canonical = _match_title_to_canonical_key(base_key, cat_key)
     if canonical:
-        if aet and isinstance(aet, list) and len(aet) > 0:
-            return f"{aet[0]}:{cat_key}:{canonical}"
-        return f"{cat_key}:{canonical}"
+        return f"{aet_prefix}{cat_key}:{canonical}", canonical
 
     # Final fallback: raw normalized title (no canonical match)
-    if aet and isinstance(aet, list) and len(aet) > 0:
-        return f"{aet[0]}:{cat_key}:{base_key}"
+    return f"{aet_prefix}{cat_key}:{base_key}", base_key
 
-    return f"{cat_key}:{base_key}"
+
+def _compute_requirement_key(req) -> str:
+    return _compute_key_parts(req)[0]
 
 
 def score_verification_confidence(sources: List[dict]) -> float:

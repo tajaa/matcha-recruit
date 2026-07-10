@@ -181,6 +181,39 @@ def test_compute_requirement_key_includes_rate_type():
     assert cs._compute_requirement_key(overtime_req) == "overtime:overtime"
 
 
+def test_compute_key_parts_bare_key_per_shape():
+    """The bare regulation_key (store↔scope join key) per composite shape, and
+    composite parity with the legacy _compute_requirement_key."""
+    cases = [
+        # minimum_wage: composite keeps rate_type dialect; bare = registry vocab,
+        # level-sensitive for 'general'.
+        ({"category": "minimum_wage", "rate_type": "general"},
+         "minimum_wage:general", "state_minimum_wage"),
+        ({"category": "minimum_wage", "rate_type": "general", "jurisdiction_level": "city"},
+         "minimum_wage:general", "local_minimum_wage"),
+        ({"category": "minimum_wage", "rate_type": "general", "jurisdiction_level": "federal"},
+         "minimum_wage:general", "national_minimum_wage"),
+        ({"category": "minimum_wage", "rate_type": "tipped"},
+         "minimum_wage:tipped", "tipped_minimum_wage"),
+        # standard: a resolved registry regulation_key → bare is that key.
+        ({"category": "overtime", "regulation_key": "daily_weekly_overtime",
+          "title": "OT"},
+         "overtime:daily_weekly_overtime", "daily_weekly_overtime"),
+        # aet-prefixed: bare = the last segment (the true regkey), not the prefix.
+        ({"category": "leave", "regulation_key": "fmla", "title": "FMLA",
+          "applicable_entity_types": ["private_employer"]},
+         "private_employer:leave:fmla", "fmla"),
+    ]
+    for req, want_composite, want_bare in cases:
+        composite, bare = cs._compute_key_parts(req)
+        assert composite == want_composite, req
+        assert bare == want_bare, req
+        # parity: the wrapper still returns exactly the composite.
+        assert cs._compute_requirement_key(req) == want_composite, req
+        # invariant: bare is the last segment of the composite.
+        assert bare == composite.rsplit(":", 1)[-1] or req["category"] == "minimum_wage"
+
+
 def test_normalize_value_text_handles_wording_only_changes():
     assert cs._normalize_value_text("$16.90 / hour") == cs._normalize_value_text(
         "$16.90 per hour"
