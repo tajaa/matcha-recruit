@@ -112,7 +112,10 @@ exists" sits beside "what we've codified."
 
 ### B. The Scope Studio — merge surfaces 2 + 3 into one page
 
-One continuous flow for a `business-category × jurisdiction` coordinate:
+**Shipped** as `client/src/pages/admin/ScopeStudio.tsx` (`/admin/scope-studio`). The
+two source pages (`/admin/industry-requirements`, `/admin/specialization-research`)
+remain routed until the merge is verified on dev, then retire. One continuous flow for
+a `business-category × jurisdiction` coordinate:
 
 1. **Pick coordinate** — industry/specialty (one canonical vocabulary,
    `scope_registry/categories.py`) + jurisdiction chain.
