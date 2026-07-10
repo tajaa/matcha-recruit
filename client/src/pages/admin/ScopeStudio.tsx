@@ -16,8 +16,9 @@
  * rows, the SSE read loop). See ONE_COMPLIANCE_SYSTEM.md for the architecture.
  */
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Microscope, Loader2, Check } from 'lucide-react'
+import { Microscope, Loader2, Check, BookOpen } from 'lucide-react'
 import { api, ensureFreshToken } from '../../api/client'
+import { Drawer } from '../../components/ui/Drawer'
 
 const BASE = import.meta.env.VITE_API_URL ?? '/api'
 
@@ -135,13 +136,19 @@ type LaborScopeRequirement = {
   codify_source?: string | null
 }
 
+type CodifiedEntry = {
+  citation: string; heading: string | null; regulation_key: string | null
+  source_url?: string | null; item_id?: string | null; has_body?: boolean
+  requirement?: LaborScopeRequirement | null
+}
+type UncodifiedEntry = {
+  citation: string; heading: string | null; regulation_key: string | null
+  source_url?: string | null; item_id?: string | null; has_body?: boolean
+}
+
 type LaborScopeLevel = {
-  codified: {
-    citation: string; heading: string | null; regulation_key: string | null
-    source_url?: string | null
-    requirement?: LaborScopeRequirement | null
-  }[]
-  uncodified: { citation: string; heading: string | null; regulation_key: string | null }[]
+  codified: CodifiedEntry[]
+  uncodified: UncodifiedEntry[]
   counts: { codified: number; uncodified: number; provisional: number }
 }
 
@@ -319,6 +326,47 @@ export default function ScopeStudio() {
     running: boolean; message: string; completed: number; total: number; error: string | null
   } | null>(null)
   const abortRef = useRef<AbortController | null>(null)
+
+  // Statute reader — full regulation text in a right drawer.
+  type ItemBody = {
+    citation: string; heading: string | null; source_url: string | null
+    body_text: string | null; body_source_url: string | null
+    body_fetched_at: string | null; index_name: string | null
+  }
+  const [reader, setReader] = useState<{ open: boolean; loading: boolean; body: ItemBody | null }>(
+    { open: false, loading: false, body: null },
+  )
+  const openReader = useCallback(async (itemId: string) => {
+    setReader({ open: true, loading: true, body: null })
+    try {
+      const body = await api.get<ItemBody>(`/admin/scope-registry/items/${itemId}/body`)
+      setReader({ open: true, loading: false, body })
+    } catch {
+      setReader({ open: true, loading: false, body: null })
+    }
+  }, [])
+
+  // Reader-aware citation: opens the in-app statute drawer when we have the body
+  // text, else links out to the source, else plain text.
+  const CitationLink = ({ it }: { it: { citation: string; item_id?: string | null; has_body?: boolean; source_url?: string | null } }) => {
+    const cls = 'font-mono text-emerald-300/80 hover:text-emerald-200 hover:underline'
+    if (it.has_body && it.item_id) {
+      return (
+        <button onClick={() => openReader(it.item_id as string)} className={`${cls} inline-flex items-center gap-1`}
+                title="Read the full regulation text">
+          {it.citation}<BookOpen className="h-3 w-3 opacity-60" />
+        </button>
+      )
+    }
+    if (it.source_url) {
+      return (
+        <a href={it.source_url} target="_blank" rel="noreferrer" className={cls} title="Read the regulation (source)">
+          {it.citation}
+        </a>
+      )
+    }
+    return <span className="font-mono text-emerald-300/80">{it.citation}</span>
+  }
 
   // Research model tier (light/heavy) — display-only status, ported from the
   // retired Specialization Research page.
@@ -1039,16 +1087,8 @@ export default function ScopeStudio() {
                             return (
                               <li key={it.citation} className="text-[11px] text-zinc-400">
                                 <div>
-                                  {/* Citation → the actual statute/regulation text */}
-                                  {it.source_url ? (
-                                    <a href={it.source_url} target="_blank" rel="noreferrer"
-                                       className="font-mono text-emerald-300/80 hover:text-emerald-200 hover:underline"
-                                       title="Read the regulation (source)">
-                                      {it.citation}
-                                    </a>
-                                  ) : (
-                                    <span className="font-mono text-emerald-300/80">{it.citation}</span>
-                                  )}
+                                  {/* Citation → in-app statute reader (or source) */}
+                                  <CitationLink it={it} />
                                   {r?.title ? ` — ${r.title}` : it.regulation_key ? ` — ${it.regulation_key}` : ''}
                                   {policyHref && (
                                     <a href={policyHref}
@@ -1085,7 +1125,15 @@ export default function ScopeStudio() {
                         <ul className="mt-1 space-y-0.5">
                           {data.uncodified.slice(0, 10).map((it) => (
                             <li key={it.citation} className="text-[11px] text-amber-300/80">
-                              <span className="font-mono">{it.citation}</span>
+                              {it.has_body && it.item_id ? (
+                                <button onClick={() => openReader(it.item_id as string)}
+                                        className="inline-flex items-center gap-1 font-mono hover:underline"
+                                        title="Read the full regulation text">
+                                  {it.citation}<BookOpen className="h-3 w-3 opacity-60" />
+                                </button>
+                              ) : (
+                                <span className="font-mono">{it.citation}</span>
+                              )}
                               {it.heading ? <span className="text-zinc-500"> — {it.heading}</span> : ''}
                             </li>
                           ))}
@@ -1117,6 +1165,46 @@ export default function ScopeStudio() {
           onConfirmed={onSpecialtyConfirmed}
         />
       )}
+
+      {/* Statute reader — the full regulation text, in-app */}
+      <Drawer
+        open={reader.open}
+        onClose={() => setReader({ open: false, loading: false, body: null })}
+        width="xl"
+        title={reader.body?.citation ?? (reader.loading ? 'Loading…' : 'Statute')}
+        subtitle={reader.body ? (
+          <span className="flex flex-wrap items-center gap-2">
+            {reader.body.heading && <span className="text-zinc-400">{reader.body.heading}</span>}
+            {reader.body.index_name && <span>· {reader.body.index_name}</span>}
+            {(reader.body.body_source_url || reader.body.source_url) && (
+              <a href={reader.body.body_source_url || reader.body.source_url || undefined}
+                 target="_blank" rel="noreferrer" className="text-cyan-400/70 hover:underline">source ↗</a>
+            )}
+            {reader.body.body_fetched_at && <span>· fetched {reader.body.body_fetched_at.slice(0, 10)}</span>}
+          </span>
+        ) : null}
+      >
+        {reader.loading ? (
+          <div className="flex items-center gap-2 text-sm text-zinc-400">
+            <Loader2 className="h-4 w-4 animate-spin" /> Loading the regulation text…
+          </div>
+        ) : reader.body?.body_text ? (
+          <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed text-zinc-300">
+            {reader.body.body_text}
+          </pre>
+        ) : reader.body ? (
+          <div className="text-sm text-zinc-500">
+            No stored text for this item yet.{' '}
+            {(reader.body.source_url) && (
+              <a href={reader.body.source_url} target="_blank" rel="noreferrer" className="text-cyan-400/70 hover:underline">
+                Read at the source ↗
+              </a>
+            )}
+          </div>
+        ) : (
+          <div className="text-sm text-red-400">Failed to load.</div>
+        )}
+      </Drawer>
     </div>
   )
 }
