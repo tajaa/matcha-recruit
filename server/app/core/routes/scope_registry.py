@@ -25,14 +25,18 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+_JSONB_FIELDS = ("entity_condition", "unmodeled_coordinates")
+
+
 def _row_out(row) -> dict:
-    """dict(row) with entity_condition normalized — asyncpg returns JSONB as a
-    str on this pool, and the API must not leak strings where objects belong."""
+    """dict(row) with JSONB fields normalized — asyncpg returns JSONB as a str
+    on this pool, and the API must not leak strings where objects belong."""
     from app.core.services.scope_registry.resolve import parse_jsonb
 
     out = dict(row)
-    if "entity_condition" in out:
-        out["entity_condition"] = parse_jsonb(out["entity_condition"])
+    for field in _JSONB_FIELDS:
+        if field in out:
+            out[field] = parse_jsonb(out[field])
     return out
 
 
@@ -197,3 +201,28 @@ async def fetch_queue_endpoint(
     async with get_connection() as conn:
         items = await fetch_queue(conn, category=category, state=state)
     return {"items": items, "count": len(items)}
+
+
+@router.get("/shadow-log", dependencies=[Depends(require_admin)])
+async def list_shadow_log(limit: int = 50):
+    """resolve_scope vs expand_scope diffs recorded on onboarding finalize.
+
+    The confidence surface before the registry takes over the runtime path:
+    only_in_expand is usually the category-grab's conditional over-inclusion,
+    only_in_resolve is precision the registry adds.
+    """
+    limit = max(1, min(limit, 200))
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT s.id, s.session_id, s.company_id, c.name AS company_name,
+                   s.resolve_keys, s.expand_keys, s.only_in_resolve,
+                   s.only_in_expand, s.unmodeled_coordinates, s.created_at
+            FROM scope_shadow_log s
+            LEFT JOIN companies c ON c.id = s.company_id
+            ORDER BY s.created_at DESC
+            LIMIT $1
+            """,
+            limit,
+        )
+    return {"entries": [_row_out(r) for r in rows]}
