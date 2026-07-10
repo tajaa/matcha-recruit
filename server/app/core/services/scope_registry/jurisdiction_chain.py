@@ -43,6 +43,7 @@ async def resolve_jurisdiction_chain(
     if state_id:
         ids.append(state_id)
 
+    city_id = None
     city_found = False
     if city:
         city_row = await conn.fetchrow(
@@ -52,6 +53,7 @@ async def resolve_jurisdiction_chain(
         )
         if city_row:
             city_found = True
+            city_id = city_row["id"]
             ids.append(city_row["id"])
             if city_row["county"]:
                 county_id = await conn.fetchval(
@@ -66,4 +68,9 @@ async def resolve_jurisdiction_chain(
         "ids": ids,
         "state_found": state_id is not None,
         "city_found": city_found,
+        # Per-level ids for research targeting (additive; existing callers read
+        # ids/state_found/city_found only).
+        "federal_id": federal,
+        "state_id": state_id,
+        "city_id": city_id,
     }

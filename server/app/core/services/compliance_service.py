@@ -1669,7 +1669,7 @@ async def _upsert_requirements_additive(
                  applicable_industries, trigger_conditions, applicable_entity_types,
                  implementation_steps, category_id, metadata, source_tier,
                  regulation_key, key_definition_id)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), $15, $16, $17, $18,
+            VALUES ($1, $2, $3::text, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), $15, $16, $17, $18,
                     $22::jsonb,
                     COALESCE(
                         (SELECT id FROM compliance_categories WHERE slug = $19 LIMIT 1),
@@ -1679,7 +1679,7 @@ async def _upsert_requirements_additive(
                     $21::source_tier_enum,
                     $23,
                     (SELECT id FROM regulation_key_definitions
-                     WHERE key = $23 AND category_slug = $3 LIMIT 1))
+                     WHERE key = $23::text AND category_slug = $3::text LIMIT 1))
             ON CONFLICT (jurisdiction_id, requirement_key) DO UPDATE SET
                 category = EXCLUDED.category,
                 rate_type = EXCLUDED.rate_type,
@@ -8992,10 +8992,17 @@ async def research_specialization_for_jurisdiction(
     industry_context: str = "",
     batch_size: int = 4,
     progress_callback: Optional[Callable] = None,
+    *,
+    skip_existing: bool = True,
 ) -> Dict[str, Any]:
     """Research specialization-specific categories for a jurisdiction.
 
     Generalized version of _research_healthcare/_oncology/_medical_compliance functions.
+
+    ``skip_existing=False`` researches every requested category even if the
+    jurisdiction already has rows in it — the fetch-queue case, where the
+    category exists but a specific key was missed (the missing key is targeted
+    via ``industry_context``).
     """
     from .gemini_compliance import get_gemini_compliance_service
     from .jurisdiction_context import get_known_sources, build_context_prompt, get_global_authority_sources
@@ -9048,7 +9055,7 @@ async def research_specialization_for_jurisdiction(
             "SELECT DISTINCT category FROM jurisdiction_requirements WHERE jurisdiction_id = $1",
             jurisdiction_id,
         )
-    existing_cats = {r["category"] for r in existing}
+    existing_cats = {r["category"] for r in existing} if skip_existing else set()
     missing = sorted(cat for cat in categories if cat not in existing_cats)
 
     if not missing:
@@ -9085,7 +9092,7 @@ async def research_specialization_for_jurisdiction(
 
             for req in reqs:
                 _clamp_varchar_fields(req)
-                if not req.get("applicable_industries"):
+                if industry_tag and not req.get("applicable_industries"):
                     req["applicable_industries"] = [industry_tag]
 
             if reqs:

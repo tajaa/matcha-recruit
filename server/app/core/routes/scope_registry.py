@@ -17,6 +17,7 @@ from ..models.scope_registry import (
     ClassificationProposal,
     ConfirmClassificationsRequest,
     DispatchResponse,
+    FetchQueueResearchRequest,
     ReconcileRequest,
 )
 from ...database import get_connection
@@ -215,6 +216,83 @@ async def reconcile_endpoint(payload: ReconcileRequest = ReconcileRequest()):
             conn, state=payload.state, city=payload.city,
             source="backfill" if not payload.state else "reconcile",
         )
+
+
+@router.post("/fetch-queue/research", dependencies=[Depends(require_admin)])
+async def fetch_queue_research(payload: FetchQueueResearchRequest):
+    """Drive the chain's fetch queue into research, then reconcile — the wire that
+    closes scope→fetch→store. SSE, emitting the same event types Scope Studio's
+    research loop parses (status/researching/jurisdiction_complete/completed/error)."""
+    import json as _json
+    from fastapi.responses import StreamingResponse
+
+    from app.core.services.scope_registry.codify import (
+        chain_uncodified, group_research_units, reconcile_codifications,
+    )
+    from app.core.services.compliance_service import research_specialization_for_jurisdiction
+
+    state, city = payload.state, payload.city
+
+    def _sse(event: dict) -> str:
+        return f"data: {_json.dumps(event)}\n\n"
+
+    async def stream():
+        async with get_connection() as conn:
+            work = await chain_uncodified(conn, state=state, city=city)
+            units = group_research_units(
+                work["keyed"],
+                federal_id=work["chain"]["federal_id"],
+                state_id=work["chain"]["state_id"],
+                city_id=work["chain"]["city_id"],
+            )
+            yield _sse({"type": "status",
+                        "message": f"{len(units)} research unit(s) · "
+                                   f"{len(work['keyed'])} keyed · {len(work['unkeyed'])} unkeyed",
+                        "units": len(units), "unkeyed": len(work["unkeyed"])})
+
+            if not units:
+                yield _sse({"type": "completed",
+                            "summary": {"total_requirements": 0},
+                            "unkeyed": len(work["unkeyed"]),
+                            "message": "Nothing researchable — unkeyed items need a "
+                                       "regulation key (mint in RKD, then set the classification)."})
+                return
+
+            total_new = 0
+            for idx, unit in enumerate(units, start=1):
+                label = await conn.fetchval(
+                    "SELECT COALESCE(display_name, CONCAT_WS(', ', city, state)) "
+                    "FROM jurisdictions WHERE id = $1", unit["jurisdiction_id"],
+                ) or "jurisdiction"
+                yield _sse({"type": "researching", "jurisdiction": label,
+                            "progress": idx, "total": len(units)})
+                try:
+                    res = await research_specialization_for_jurisdiction(
+                        conn, unit["jurisdiction_id"], unit["categories"],
+                        industry_tag="", industry_context=unit["context"],
+                        skip_existing=False,
+                    )
+                    total_new += res.get("new", 0)
+                    yield _sse({"type": "jurisdiction_complete", "jurisdiction": label,
+                                "new": res.get("new", 0), "failed": res.get("failed", [])})
+                except Exception as exc:  # a unit failing must not kill the stream
+                    logger.warning("fetch-queue research failed for %s: %s", label, exc)
+                    yield _sse({"type": "jurisdiction_complete", "jurisdiction": label,
+                                "new": 0, "error": str(exc)})
+
+            recon = await reconcile_codifications(
+                conn, state=state, city=city, source="research_run",
+                run_info={"endpoint": "fetch-queue/research",
+                          "units": len(units), "new_requirements": total_new},
+            )
+            after = await chain_uncodified(conn, state=state, city=city)
+            yield _sse({"type": "completed",
+                        "summary": {"total_requirements": total_new},
+                        "linked": recon["inserted"] + recon["updated"],
+                        "still_uncodified": len(after["keyed"]),
+                        "unkeyed": len(after["unkeyed"])})
+
+    return StreamingResponse(stream(), media_type="text/event-stream")
 
 
 @router.get("/labor-scope", dependencies=[Depends(require_admin)])

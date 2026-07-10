@@ -63,6 +63,136 @@ def match_codifications(
     return links
 
 
+async def chain_uncodified(
+    conn, *, state: str, city: Optional[str] = None
+) -> Dict[str, Any]:
+    """The chain's research worklist: confirmed applicable classifications with no
+    codified value in the chain, split into ``keyed`` (researchable — has a
+    regulation_key to codify against) and ``unkeyed`` (NULL key — needs a key
+    minted before research can codify it).
+
+    Returns ``{chain, keyed: [...], unkeyed: [...]}``. Each keyed item carries
+    ``classification_id``, ``regulation_key``, ``category_slug`` (RKD), ``level``,
+    ``citation``, ``heading``.
+    """
+    from .resolve import classification_matches
+
+    jur = await resolve_jurisdiction_chain(conn, state.strip().upper(), city)
+    ids = jur["ids"]
+
+    rows = [
+        dict(r) for r in await conn.fetch(
+            """
+            SELECT c.id AS classification_id, c.disposition, c.applies_to_categories,
+                   c.excludes_categories, c.entity_condition, c.regulation_key,
+                   c.key_definition_id, rkd.category_slug,
+                   i.citation, i.heading, ai.level
+            FROM authority_item_classifications c
+            JOIN authority_index_items i ON i.id = c.item_id
+            JOIN authority_indexes ai ON ai.id = i.authority_index_id
+            LEFT JOIN regulation_key_definitions rkd ON rkd.id = c.key_definition_id
+            WHERE c.status = 'confirmed' AND c.disposition <> 'excluded'
+              AND (ai.jurisdiction_id IS NULL OR ai.jurisdiction_id = ANY($1::uuid[]))
+            """,
+            ids,
+        )
+    ]
+
+    # Generic-employer applicability (empty chain + attrs): universal matches,
+    # category_specific/conditional don't — the same set the panel shows.
+    applicable = [r for r in rows if classification_matches(r, [], {})]
+
+    # Codified keys already present in the chain.
+    codified_keys = set(await conn.fetchval(
+        """
+        SELECT COALESCE(array_agg(DISTINCT regulation_key), '{}')
+        FROM jurisdiction_requirements
+        WHERE jurisdiction_id = ANY($1::uuid[])
+          AND regulation_key IS NOT NULL
+          AND COALESCE(status, 'active') = 'active'
+        """,
+        ids,
+    ) or [])
+
+    keyed, unkeyed = [], []
+    for r in applicable:
+        item = {
+            "classification_id": r["classification_id"],
+            "regulation_key": r["regulation_key"],
+            "category_slug": r["category_slug"],
+            "level": r["level"],
+            "citation": r["citation"],
+            "heading": r["heading"],
+        }
+        if not r["regulation_key"]:
+            unkeyed.append(item)
+        elif r["regulation_key"] not in codified_keys:
+            keyed.append(item)
+    return {
+        "chain": {"federal_id": jur["federal_id"], "state_id": jur["state_id"],
+                  "city_id": jur["city_id"], "state_found": jur["state_found"],
+                  "city_found": jur["city_found"]},
+        "keyed": keyed,
+        "unkeyed": unkeyed,
+    }
+
+
+def build_research_context(items: List[Dict[str, Any]]) -> str:
+    """Target the specific missed obligations in the Gemini research prompt."""
+    lines = []
+    for it in items:
+        cite = it.get("citation") or ""
+        heading = it.get("heading") or ""
+        key = it.get("regulation_key") or ""
+        lines.append(f"- {key} ({cite}{' — ' + heading if heading else ''})")
+    return (
+        "Target these specific obligations that are in scope but not yet codified "
+        "for this jurisdiction:\n" + "\n".join(lines)
+    )
+
+
+def group_research_units(
+    keyed_items: List[Dict[str, Any]],
+    *,
+    federal_id: Any,
+    state_id: Any,
+    city_id: Any,
+) -> List[Dict[str, Any]]:
+    """Group keyed worklist items into (target jurisdiction × category) research
+    units. Level → target: federal→federal_id, state→state_id, city/county/local→
+    city_id (falls back to state_id when there's no city row). Items whose target
+    jurisdiction can't be resolved are dropped (reported by the caller). Pure."""
+    def target(level: str) -> Any:
+        lvl = (level or "").lower()
+        if lvl == "federal":
+            return federal_id
+        if lvl in ("city", "county", "local", "special_district"):
+            return city_id or state_id
+        return state_id
+
+    by_jur: Dict[Any, Dict[str, Any]] = {}
+    for it in keyed_items:
+        jid = target(it["level"])
+        if not jid or not it.get("category_slug"):
+            continue  # no target jurisdiction row, or no RKD category to research
+        unit = by_jur.setdefault(jid, {"jurisdiction_id": jid, "categories": set(),
+                                       "keys": [], "items": []})
+        unit["categories"].add(it["category_slug"])
+        unit["keys"].append(it["regulation_key"])
+        unit["items"].append(it)
+
+    units = []
+    for unit in by_jur.values():
+        units.append({
+            "jurisdiction_id": unit["jurisdiction_id"],
+            "categories": sorted(unit["categories"]),
+            "keys": unit["keys"],
+            "items": unit["items"],
+            "context": build_research_context(unit["items"]),
+        })
+    return units
+
+
 async def reconcile_codifications(
     conn,
     *,
