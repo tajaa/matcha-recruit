@@ -42,12 +42,17 @@ LABOR_DOMAINS = {"all_industry", "general_industry", "all_ca_employers"}
 LEVEL_ORDER = ("city", "county", "state", "federal")
 
 ENUMERATED_NOTE = (
-    "exhaustive within the enumerated eCFR parts (+ the curated FLSA statute "
-    "supplement); the part list itself is curated"
+    "Why exhaustive: each eCFR part below is ingested in full from the "
+    "government's official eCFR structure API — every section is captured, none "
+    "hand-picked. The FLSA wage-hour statute (29 U.S.C., not in eCFR) is curated "
+    "separately. Bound: exhaustive within these parts; the part selection is the "
+    "curated federal-labor backbone (safety, recordkeeping, leave, wage-hour)."
 )
 CURATED_NOTE = (
-    "curated core, not exhaustive — unclassified_count=0 means the curated slice "
-    "is fully classified, never that all law at this level is scoped"
+    "Why not exhaustive: no open, machine-readable index of this jurisdiction's "
+    "full labor code exists, so these are hand-curated core provisions. A fully "
+    "classified curated slice means only that the slice is complete — never that "
+    "all law at this level is scoped."
 )
 NO_INDEX_NOTE = "no authority indexes ingested at this level"
 
@@ -149,9 +154,10 @@ def build_exhaustiveness(index_rows: List[Dict[str, Any]]) -> Dict[str, Any]:
         bucket = _level_bucket(r.get("level"))
         out[bucket]["indexes"].append({
             "slug": r.get("slug"), "name": r.get("name"),
+            "source_type": r.get("source_type"),
             "enumerable": r.get("enumerable"),
-            "item_count": r.get("item_count"),
-            "unclassified_count": r.get("unclassified_count"),
+            "item_count": r.get("item_count") or 0,
+            "unclassified_count": r.get("unclassified_count") or 0,
         })
     for bucket, data in out.items():
         if not data["indexes"]:
@@ -160,6 +166,17 @@ def build_exhaustiveness(index_rows: List[Dict[str, Any]]) -> Dict[str, Any]:
             data["basis"], data["note"] = "enumerated", ENUMERATED_NOTE
         else:
             data["basis"], data["note"] = "curated", CURATED_NOTE
+        # Enumeration vs classification: the exhaustive claim is over enumerated
+        # items, but only classified ones reach the fetch queue. Surface the gap
+        # so "N to fetch" reads as a lower bound until classification finishes.
+        total = sum(ix["item_count"] for ix in data["indexes"])
+        unclassified = sum(ix["unclassified_count"] for ix in data["indexes"])
+        data["enumeration"] = {
+            "indexes": len(data["indexes"]),
+            "enumerated": total,
+            "classified": total - unclassified,
+            "unclassified": unclassified,
+        }
     return out
 
 
@@ -277,8 +294,8 @@ async def labor_scope(
     index_rows = [
         dict(r) for r in await conn.fetch(
             """
-            SELECT slug, name, level, enumerable, item_count, unclassified_count,
-                   domain_categories
+            SELECT slug, name, level, source_type, enumerable, item_count,
+                   unclassified_count, domain_categories
             FROM authority_indexes
             WHERE jurisdiction_id IS NULL OR jurisdiction_id = ANY($1::uuid[])
             """,

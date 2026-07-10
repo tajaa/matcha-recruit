@@ -128,11 +128,15 @@ type LaborScopeLevel = {
 type LaborExhaustiveness = {
   basis: 'enumerated' | 'curated' | 'none'
   note: string
-  indexes: { slug: string; name: string; enumerable: boolean; item_count: number; unclassified_count: number }[]
+  indexes: {
+    slug: string; name: string; source_type: string | null
+    enumerable: boolean; item_count: number; unclassified_count: number
+  }[]
+  enumeration?: { indexes: number; enumerated: number; classified: number; unclassified: number }
 }
 
 type LaborScopeResponse = {
-  coordinate: { state: string; city: string | null; state_found: boolean; city_found: boolean }
+  coordinate: { state: string | null; city: string | null; state_found: boolean; city_found: boolean }
   core: {
     items: { category: string; key: string; present: boolean; level: string | null }[]
     present: number; total: number; complete: boolean
@@ -895,17 +899,41 @@ export default function ScopeStudio() {
                         {badgeText}
                       </span>
                     </div>
-                    {ex.indexes.length > 0 && (
-                      <div className="mb-2 space-y-0.5">
-                        {ex.indexes.map((ix) => (
-                          <div key={ix.slug} className="text-[10px] text-zinc-500">
-                            <span className="font-mono text-zinc-400">{ix.slug}</span> · {ix.item_count} items
-                            {ix.unclassified_count > 0 && (
-                              <span className="text-amber-500/80"> · {ix.unclassified_count} unclassified</span>
-                            )}
-                          </div>
-                        ))}
+                    {/* WHY this is (or isn't) the exhaustive list */}
+                    {ex.note && (
+                      <div className="mb-2 text-[11px] leading-snug text-zinc-500">{ex.note}</div>
+                    )}
+                    {ex.enumeration && ex.enumeration.enumerated > 0 && (
+                      <div className="mb-2 text-[11px] text-zinc-400">
+                        {ex.enumeration.enumerated} sections enumerated across {ex.enumeration.indexes} authority {ex.enumeration.indexes === 1 ? 'index' : 'indexes'} ·{' '}
+                        <span className="text-emerald-400/90">{ex.enumeration.classified} classified</span>
+                        {ex.enumeration.unclassified > 0 && (
+                          <>
+                            {' · '}
+                            <span className="text-amber-400/90">{ex.enumeration.unclassified} still to classify</span>
+                          </>
+                        )}
                       </div>
+                    )}
+                    {ex.indexes.length > 0 && (
+                      <ul className="mb-2 space-y-1">
+                        {ex.indexes.map((ix) => (
+                          <li key={ix.slug} className="text-[11px] leading-snug">
+                            <div className="text-zinc-300">{ix.name || ix.slug}</div>
+                            <div className="text-[10px] text-zinc-500">
+                              <span className={ix.source_type === 'ecfr' ? 'text-emerald-400/80' : 'text-zinc-400'}>
+                                {ix.source_type === 'ecfr'
+                                  ? 'eCFR-enumerated (full part, official structure API)'
+                                  : 'curated from statute'}
+                              </span>
+                              {' · '}{ix.item_count} sections
+                              {ix.unclassified_count > 0 && (
+                                <span className="text-amber-500/80"> · {ix.unclassified_count} unclassified</span>
+                              )}
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
                     )}
                     <div className="flex gap-3 text-[11px]">
                       <span className="text-emerald-400">{data.counts.codified} codified</span>
