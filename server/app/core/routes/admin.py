@@ -30,6 +30,7 @@ from ..compliance_registry import (
     MEDICAL_COMPLIANCE_CATEGORIES, SUPPLEMENTARY_CATEGORIES,
 )
 from ..services.compliance_service import (
+    _resolve_industry,
     update_auto_check_settings,
     _jurisdiction_row_to_dict,
     run_compliance_check_background,
@@ -8546,6 +8547,29 @@ async def delete_industry_profile(profile_id: UUID):
 # Industry requirements matrix
 # ---------------------------------------------------------------------------
 
+async def _load_industry_profile_row(conn, canonical: str):
+    """Profile row for a canonical industry slug.
+
+    Looks the profile up by its exact seeded name via `INDUSTRY_PROFILE_NAMES`
+    rather than pattern-matching the caller's string. The old `name ILIKE $1`
+    against the raw frontend value silently returned nothing for
+    `construction_manufacturing` / `restaurant_hospitality` / `tech_professional`
+    — SQL `_` is a single-char wildcard, so only `fast_food` ever matched, and it
+    matched by accident with the `_` standing in for the space in "Fast Food".
+
+    Not every canonical industry has a profile row (`biotech` has none); those
+    still resolve their categories through `industry_tag`.
+    """
+    from ..services.compliance_evals.industry_keysets import INDUSTRY_PROFILE_NAMES
+
+    profile_name = INDUSTRY_PROFILE_NAMES.get(canonical)
+    if not profile_name:
+        return None
+    return await conn.fetchrow(
+        "SELECT * FROM industry_compliance_profiles WHERE name = $1", profile_name
+    )
+
+
 @router.get("/industry-requirements-matrix", dependencies=[Depends(require_admin)])
 async def get_industry_requirements_matrix(
     industry: str = Query("healthcare"),
@@ -8559,12 +8583,14 @@ async def get_industry_requirements_matrix(
     specialty_list = [s.strip() for s in specialties.split(",") if s.strip()] if specialties else []
     payer_list = [p.strip() for p in payer_contracts.split(",") if p.strip()] if payer_contracts else []
 
+    # Canonicalize before anything looks the industry up. The runtime compliance
+    # path always does this; this endpoint used to compare raw frontend tokens
+    # against `compliance_categories.industry_tag` and matched nothing.
+    canonical = _resolve_industry(industry) or industry.strip().lower()
+
     async with get_connection() as conn:
         # 1. Load the industry profile
-        profile_row = await conn.fetchrow(
-            "SELECT * FROM industry_compliance_profiles WHERE name ILIKE $1",
-            industry,
-        )
+        profile_row = await _load_industry_profile_row(conn, canonical)
         # 2. Load all compliance categories
         cat_rows = await conn.fetch(
             "SELECT slug, name, description, domain::text, \"group\", industry_tag, sort_order "
@@ -8610,14 +8636,14 @@ async def get_industry_requirements_matrix(
         if slug in focused_categories:
             sources.append("focused")
 
-        # base: industry_tag matches industry exactly
-        if tag.lower() == industry.lower():
+        # base: industry_tag matches the canonical industry exactly
+        if tag.lower() == canonical.lower():
             sources.append("base")
 
         # specialty: industry_tag starts with "industry:" and suffix matches a selected specialty
         if ":" in tag:
             prefix, suffix = tag.split(":", 1)
-            if prefix.lower() == industry.lower() and suffix.lower() in [s.lower() for s in specialty_list]:
+            if prefix.lower() == canonical.lower() and suffix.lower() in [s.lower() for s in specialty_list]:
                 sources.append("specialty")
 
         # triggered: appears in an activated trigger profile
@@ -8637,7 +8663,7 @@ async def get_industry_requirements_matrix(
         return {
             "summary": {"total": 0, "with_data": 0, "missing_data": 0},
             "industry_profile": {
-                "name": profile_row["name"] if profile_row else industry,
+                "name": profile_row["name"] if profile_row else canonical,
                 "focused_categories": focused_categories,
             },
             "active_triggers": active_triggers,
@@ -8685,7 +8711,7 @@ async def get_industry_requirements_matrix(
             "missing_data": len(categories_out) - with_data,
         },
         "industry_profile": {
-            "name": profile_row["name"] if profile_row else industry,
+            "name": profile_row["name"] if profile_row else canonical,
             "focused_categories": focused_categories,
         },
         "active_triggers": active_triggers,

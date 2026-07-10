@@ -30,14 +30,19 @@ type MatrixResponse = {
   categories: CategoryEntry[]
 }
 
+// Values are the CANONICAL industry slugs produced by `_resolve_industry` on the
+// backend. They previously used their own vocabulary (`construction_manufacturing`,
+// `tech_professional`, …), which matched neither `industry_compliance_profiles.name`
+// nor `compliance_categories.industry_tag` — so those industries rendered an empty
+// matrix.
 const INDUSTRIES = [
   { value: 'healthcare', label: 'Healthcare' },
   { value: 'biotech', label: 'Biotech / Life Sciences' },
-  { value: 'restaurant_hospitality', label: 'Restaurant / Hospitality' },
+  { value: 'hospitality', label: 'Restaurant / Hospitality' },
   { value: 'retail', label: 'Retail' },
-  { value: 'tech_professional', label: 'Tech / Professional Services' },
-  { value: 'fast_food', label: 'Fast Food' },
-  { value: 'construction_manufacturing', label: 'Construction / Manufacturing' },
+  { value: 'technology', label: 'Tech / Professional Services' },
+  { value: 'fast food', label: 'Fast Food' },
+  { value: 'manufacturing', label: 'Construction / Manufacturing' },
 ]
 
 const ENTITY_TYPES = [
