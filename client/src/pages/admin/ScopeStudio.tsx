@@ -138,6 +138,7 @@ type LaborScopeRequirement = {
 type LaborScopeLevel = {
   codified: {
     citation: string; heading: string | null; regulation_key: string | null
+    source_url?: string | null
     requirement?: LaborScopeRequirement | null
   }[]
   uncodified: { citation: string; heading: string | null; regulation_key: string | null }[]
@@ -1038,16 +1039,24 @@ export default function ScopeStudio() {
                             return (
                               <li key={it.citation} className="text-[11px] text-zinc-400">
                                 <div>
-                                  {policyHref ? (
-                                    <a href={policyHref}
+                                  {/* Citation → the actual statute/regulation text */}
+                                  {it.source_url ? (
+                                    <a href={it.source_url} target="_blank" rel="noreferrer"
                                        className="font-mono text-emerald-300/80 hover:text-emerald-200 hover:underline"
-                                       title="Open in Compliance Library">
+                                       title="Read the regulation (source)">
                                       {it.citation}
                                     </a>
                                   ) : (
                                     <span className="font-mono text-emerald-300/80">{it.citation}</span>
                                   )}
                                   {r?.title ? ` — ${r.title}` : it.regulation_key ? ` — ${it.regulation_key}` : ''}
+                                  {policyHref && (
+                                    <a href={policyHref}
+                                       className="ml-1.5 text-[10px] text-cyan-400/70 hover:underline"
+                                       title="Open the codified value in the Compliance Library">
+                                      library ↗
+                                    </a>
+                                  )}
                                 </div>
                                 {r?.current_value && (
                                   <div className="text-emerald-200/70">{r.current_value}</div>
