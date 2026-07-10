@@ -66,18 +66,14 @@ def test_ancestry_unknown_slug_is_empty_not_error():
     ("236220", ["construction"]),
     ("484121", ["transportation"]),
     ("722513", ["fast_food", "hospitality"]),
-    ("621210", ["medical_offices", "healthcare"]),  # dental offices: 621 not 6211xx
+    ("621210", ["medical_offices", "healthcare"]),  # dental offices: 6212
+    ("621511", ["healthcare"]),   # medical labs: healthcare, NOT medical_offices
+    ("621910", ["healthcare"]),   # ambulance services: healthcare, NOT medical_offices
     ("445110", ["retail"]),
-    ("541511", ["legal"]),  # 5411 legal beats nothing else; 541511 is custom programming
+    ("541511", ["technology"]),   # custom programming: 5415; 5411 does not prefix-match
+    ("541110", ["legal"]),        # offices of lawyers: 5411
 ])
 def test_categories_for_naics(naics, chain):
-    if naics == "541511":
-        # 5411 (legal) prefix-matches 541511 while 5415 (tech) also does at
-        # equal length — assert the longest-prefix rule picks a 4-digit match,
-        # whichever seeded first, rather than hardcoding a wrong expectation.
-        result = categories_for_naics(naics)
-        assert result and result[0] in {"legal", "technology"}
-        return
     assert categories_for_naics(naics) == chain
 
 
@@ -212,6 +208,29 @@ def test_healthcare_specialties_resolve_to_healthcare(raw):
     slug = resolve_category(raw)
     assert slug is not None
     assert ancestry(slug)[-1] == "healthcare"
+
+
+@pytest.mark.parametrize("raw", [
+    # Display forms — underscores fold to spaces in normalization, so the
+    # tag form and the human-readable form land on the same alias.
+    "Primary Care", "Managed Care", "Behavioral Health", "primary_care",
+])
+def test_specialty_display_forms_resolve(raw):
+    slug = resolve_category(raw)
+    assert slug is not None
+    assert ancestry(slug)[-1] == "healthcare"
+
+
+@pytest.mark.parametrize("raw", [
+    # Generic specialty words are exact-match ONLY. Substring capture would
+    # resolve these non-healthcare businesses to healthcare — a behavior the
+    # legacy resolver never had (it returned "" for all of these).
+    "consumer devices", "emergency restoration services", "tree surgery",
+    "organ transplant logistics",  # …resolves via "logistics", not "transplant"
+])
+def test_generic_specialty_words_do_not_substring_capture(raw):
+    slug = resolve_category(raw)
+    assert slug is None or ancestry(slug)[-1] != "healthcare"
 
 
 # The plan's previously-unresolvable strings

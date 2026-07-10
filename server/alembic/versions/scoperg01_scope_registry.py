@@ -75,7 +75,7 @@ def upgrade() -> None:
         ('healthcare', 'Healthcare', NULL, '{62}',
          '{health,medical,clinic,hospital,nursing,pharmacy,dental,physician,outpatient,ambulatory,oncology,primary_care,cardiology,pediatric,behavioral_health,telehealth,managed_care,devices,transplant,orthopedics,neurology,dermatology,emergency,surgery}',
          'healthcare'),
-        ('medical_offices', 'Medical Offices', 'healthcare', '{621}',
+        ('medical_offices', 'Medical Offices', 'healthcare', '{6211,6212,6213}',
          '{"medical office","medical offices","doctors office"}', 'healthcare'),
         ('ophthalmology', 'Ophthalmology', 'medical_offices', '{621111,621320}',
          '{ophthalmology,optometry,"eye care"}', 'healthcare'),
@@ -171,8 +171,7 @@ def upgrade() -> None:
                 CHECK (proposed_by IN ('gemini', 'seed', 'admin')),
             confirmed_by UUID REFERENCES users(id) ON DELETE SET NULL,
             confirmed_at TIMESTAMP,
-            created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-            updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+            created_at TIMESTAMP NOT NULL DEFAULT NOW()
         )
     """)
     conn.exec_driver_sql(

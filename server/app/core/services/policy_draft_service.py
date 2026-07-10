@@ -139,34 +139,21 @@ for _pt in POLICY_TYPES:
             f"Add it to compliance_registry.CATEGORIES or fix the policy type."
         )
 
-# Map free-text industry values to canonical names for filtering.
-_INDUSTRY_ALIASES: Dict[str, str] = {
-    "health": "healthcare", "healthcare": "healthcare", "medical": "healthcare",
-    "clinic": "healthcare", "hospital": "healthcare", "nursing": "healthcare",
-    "pharmacy": "healthcare", "dental": "healthcare", "physician": "healthcare",
-    "outpatient": "healthcare", "ambulatory": "healthcare",
-    "restaurant": "hospitality", "hospitality": "hospitality", "food": "hospitality",
-    "hotel": "hospitality",
-    "retail": "retail", "store": "retail",
-    "manufacturing": "manufacturing", "warehouse": "manufacturing",
-    "construction": "manufacturing",
-    "technology": "technology", "software": "technology", "saas": "technology",
-}
-
-
 def _resolve_industry(raw: str) -> str:
     """Resolve a free-text industry string to a canonical industry name.
 
-    Tries exact match first, then substring match against alias keys.
+    Thin shim over the scope-registry taxonomy
+    (``app.core.services.scope_registry.categories``) — this module used to
+    carry its own private alias dict, which had drifted from
+    ``compliance_service``'s (it still mapped ``warehouse`` to
+    ``manufacturing`` after that mapping was killed). One resolver, one
+    answer. Outputs here only key ``_INDUSTRY_POLICY_CONTEXT.get(..., "")``
+    and the company tag set, both of which degrade safely for values the old
+    dict never produced ("biotech", "fast food").
     """
-    raw = raw.lower().strip()
-    canonical = _INDUSTRY_ALIASES.get(raw)
-    if canonical:
-        return canonical
-    for alias_key, alias_val in _INDUSTRY_ALIASES.items():
-        if alias_key in raw or raw in alias_key:
-            return alias_val
-    return ""
+    from app.core.services.scope_registry.categories import resolve_legacy_industry
+
+    return resolve_legacy_industry(raw)
 
 # Industry-specific prompt context appended to the policy draft prompt.
 _INDUSTRY_POLICY_CONTEXT: Dict[str, str] = {

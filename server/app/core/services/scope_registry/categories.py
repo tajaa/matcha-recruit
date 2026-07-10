@@ -70,6 +70,11 @@ class BusinessCategory:
     parent: Optional[str] = None
     naics_codes: Tuple[str, ...] = ()
     aliases: Tuple[str, ...] = ()
+    # Exact-match only — excluded from the bidirectional substring fallback.
+    # For generic words (devices, emergency, surgery) whose substring capture
+    # would resolve non-members ("consumer devices" is not a healthcare
+    # company), and for any alias where only the whole word is evidence.
+    exact_aliases: Tuple[str, ...] = ()
     legacy_industry: Optional[str] = None
 
 
@@ -103,9 +108,13 @@ _SEED: Tuple[BusinessCategory, ...] = (
         aliases=(
             "health", "medical", "clinic", "hospital", "nursing", "pharmacy",
             "dental", "physician", "outpatient", "ambulatory",
-            # HEALTHCARE_SPECIALTIES (industryConstants.ts) — sub-industry
-            # tags, runtime-extensible via `industry_specialties`; they resolve
-            # to their parent here.
+        ),
+        # HEALTHCARE_SPECIALTIES (industryConstants.ts) — sub-industry tags,
+        # runtime-extensible via `industry_specialties`; they resolve to their
+        # parent here. Exact-only: substring capture of generic words would
+        # resolve "consumer devices" or "emergency restoration services" to
+        # healthcare, a behavior change the legacy resolver never had.
+        exact_aliases=(
             "oncology", "primary_care", "cardiology", "pediatric",
             "behavioral_health", "telehealth", "managed_care", "devices",
             "transplant", "orthopedics", "neurology", "dermatology",
@@ -117,7 +126,11 @@ _SEED: Tuple[BusinessCategory, ...] = (
         slug="medical_offices",
         label="Medical Offices",
         parent="healthcare",
-        naics_codes=("621",),
+        # Offices of physicians / dentists / other practitioners only. NOT the
+        # whole of 621 (Ambulatory Health Care Services) — labs (6215), home
+        # health (6216), and ambulance services (6219) are healthcare, not
+        # medical offices; they fall back to the 62 prefix above.
+        naics_codes=("6211", "6212", "6213"),
         aliases=("medical office", "medical offices", "doctors office"),
         legacy_industry="healthcare",
     ),
@@ -233,26 +246,37 @@ _SEED: Tuple[BusinessCategory, ...] = (
     ),
 )
 
-CATEGORIES: Dict[str, BusinessCategory] = {c.slug: c for c in _SEED}
-
-for _c in _SEED:  # fail at import time, not at resolve time
+# Built incrementally so the parent check genuinely enforces declaration
+# order (a completed-dict check would only catch unknown parents — the
+# migration's self-FK seed relies on parents-first order).
+CATEGORIES: Dict[str, BusinessCategory] = {}
+for _c in _SEED:
     if _c.parent is not None and _c.parent not in CATEGORIES:
         raise RuntimeError(
             f"business category {_c.slug!r} declares unknown or later-declared "
             f"parent {_c.parent!r} — parents must be seeded before children"
         )
+    CATEGORIES[_c.slug] = _c
 
 
 def _normalize(raw: str) -> str:
-    return " ".join(raw.lower().strip().split())
+    # Underscores fold to spaces so "primary_care" (tag form) and
+    # "Primary Care" (display form) land on the same key.
+    return " ".join(raw.lower().replace("_", " ").strip().split())
 
 
-# Exact-match lookup: every slug + every alias → slug. Built in seed order so
-# overlapping aliases resolve deterministically (first definition wins), which
-# also preserves the legacy dict-order semantics for fuzzy inputs.
+# Exact-match lookup: every slug + every alias (both kinds) → slug. Built in
+# seed order so overlapping aliases resolve deterministically (first
+# definition wins), which also preserves the legacy dict-order semantics for
+# fuzzy inputs. The substring fallback pool deliberately excludes
+# exact_aliases — see BusinessCategory.
 _ALIAS_TO_SLUG: Dict[str, str] = {}
+_SUBSTRING_POOL: Dict[str, str] = {}
 for _c in _SEED:
-    for _name in (_c.slug, _normalize(_c.slug.replace("_", " ")), *_c.aliases):
+    for _name in (_c.slug, *_c.aliases):
+        _ALIAS_TO_SLUG.setdefault(_normalize(_name), _c.slug)
+        _SUBSTRING_POOL.setdefault(_normalize(_name), _c.slug)
+    for _name in _c.exact_aliases:
         _ALIAS_TO_SLUG.setdefault(_normalize(_name), _c.slug)
 
 
@@ -283,7 +307,8 @@ def resolve_category(raw: Optional[str]) -> Optional[str]:
 
     # Substring fallback, preserving the legacy resolver's bidirectional
     # semantics ("healthcare provider" → healthcare; "tech" → technology).
-    for alias, slug in _ALIAS_TO_SLUG.items():
+    # exact_aliases are not in this pool.
+    for alias, slug in _SUBSTRING_POOL.items():
         if alias in normalized or normalized in alias:
             return slug
 
