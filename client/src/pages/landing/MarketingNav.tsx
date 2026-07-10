@@ -12,6 +12,7 @@ const PRODUCT_LINKS = [
   // { to: '/matcha-work', label: 'Matcha Work' }, // beta — hidden until launch
   { to: "/matcha-lite", label: "Matcha Lite" },
   { to: "/matcha-compliance", label: "Compliance", isNew: true },
+  { to: "/risk-analysis", label: "Risk Analysis", isNew: true },
   { to: "/matcha-brokers", label: "Brokers", isNew: true },
   { to: "/services", label: "Consulting" },
 ];
