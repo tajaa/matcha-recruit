@@ -178,8 +178,8 @@ async def _upsert_classification(
                 (SELECT id FROM regulation_key_definitions
                  WHERE key = $7 AND ($12::text IS NULL OR category_slug = $12)
                  ORDER BY category_slug LIMIT 1),
-                $8, $9, $10, $11,
-                CASE WHEN $9 = 'confirmed' THEN NOW() ELSE NULL END)
+                $8, $9::text, $10, $11,
+                CASE WHEN $9::text = 'confirmed' THEN NOW() ELSE NULL END)
         ON CONFLICT (item_id) DO UPDATE SET
             disposition = EXCLUDED.disposition,
             applies_to_categories = EXCLUDED.applies_to_categories,
