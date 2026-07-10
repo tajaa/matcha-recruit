@@ -1,12 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import {
+  useCallback, useEffect, useMemo, useRef, useState,
+  type MouseEvent as ReactMouseEvent, type ReactNode,
+} from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import {
   AlertTriangle, BookOpen, CheckCircle2, ExternalLink, FileText, Loader2,
-  Scale, ShieldCheck, Sparkles,
+  Pencil, Save, Scale, ShieldCheck, Sparkles, X,
 } from 'lucide-react'
 import {
-  getPilotHandbook, runComplianceScan,
+  getPilotHandbook, runComplianceScan, updatePilotDraft,
   type AssembledHandbook, type AssembledSection, type ComplianceScanResult, type ComplianceGap,
   type CoverageEntry,
 } from '../../../api/handbookPilot'
@@ -18,7 +21,8 @@ import RequirementsPanel, { SEVERITY_STYLE } from './RequirementsPanel'
 // readable, cataloged document. Click a section/policy to see how it's grounded
 // (which real jurisdiction requirements it cites) and, after a compliance scan,
 // which required topics are still missing (the "why this isn't compliant" gaps).
-// Purely additive to Handbook Pilot's Build mode — read-only, no editing here.
+// Pending drafts are editable in place (raw markdown → PATCH); promoted drafts
+// are locked (the backend rejects edits to them).
 // ---------------------------------------------------------------------------
 
 // Placeholder tokens the pilot leaves for the admin to resolve, e.g.
@@ -154,7 +158,7 @@ export default function HandbookViewer({ sessionId, refreshKey, onDraftRequireme
           ) : (
             <div className="max-w-[90ch] mx-auto space-y-8">
               {handbook!.sections.map((s) => (
-                <DocBlock key={s.id} item={s} selected={s.id === selectedId}
+                <DocBlock key={s.id} item={s} selected={s.id === selectedId} onSaved={load}
                   refCb={(el) => { sectionRefs.current[s.id] = el }} onSelect={() => setSelectedId(s.id)} />
               ))}
               {handbook!.policies.length > 0 && (
@@ -164,7 +168,7 @@ export default function HandbookViewer({ sessionId, refreshKey, onDraftRequireme
                   </div>
                   <div className="space-y-8">
                     {handbook!.policies.map((s) => (
-                      <DocBlock key={s.id} item={s} selected={s.id === selectedId}
+                      <DocBlock key={s.id} item={s} selected={s.id === selectedId} onSaved={load}
                         refCb={(el) => { sectionRefs.current[s.id] = el }} onSelect={() => setSelectedId(s.id)} />
                     ))}
                   </div>
@@ -223,16 +227,57 @@ function NavGroup({ label, items, selectedId, onSelect }: {
   )
 }
 
-function DocBlock({ item, selected, refCb, onSelect }: {
-  item: AssembledSection; selected: boolean; refCb: (el: HTMLDivElement | null) => void; onSelect: () => void
+function DocBlock({ item, selected, refCb, onSelect, onSaved }: {
+  item: AssembledSection; selected: boolean; refCb: (el: HTMLDivElement | null) => void
+  onSelect: () => void; onSaved: () => void | Promise<void>
 }) {
+  const [editing, setEditing] = useState(false)
+  const [text, setText] = useState(item.content)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const editable = item.status !== 'promoted'
+
   const promotedHref = item.promoted_ref?.handbook_id
     ? `/app/handbook/${item.promoted_ref.handbook_id}`
     : item.promoted_ref?.policy_id ? '/app/policies' : null
+
+  const startEdit = (e: ReactMouseEvent) => {
+    e.stopPropagation()
+    setText(item.content)
+    setError(null)
+    setEditing(true)
+  }
+  const cancelEdit = (e: ReactMouseEvent) => {
+    e.stopPropagation()
+    setEditing(false)
+    setError(null)
+  }
+  const save = async (e: ReactMouseEvent) => {
+    e.stopPropagation()
+    const next = text.trim()
+    if (!next || next === item.content.trim() || saving) {
+      // Nothing changed — just exit edit mode rather than a no-op round-trip.
+      if (next === item.content.trim()) setEditing(false)
+      if (!next) setError('A section can’t be empty.')
+      return
+    }
+    setSaving(true)
+    setError(null)
+    try {
+      await updatePilotDraft(item.id, { content: next })
+      setEditing(false)
+      await onSaved()  // re-fetch so citations/grounding re-resolve against the edit
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Save failed — please try again.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   return (
-    <div ref={refCb} onClick={onSelect}
-      className={`scroll-mt-4 rounded-lg -mx-3 px-3 py-2 cursor-pointer transition ${
-        selected ? 'bg-emerald-500/[0.04] ring-1 ring-emerald-500/20' : 'hover:bg-zinc-900/40'}`}>
+    <div ref={refCb} onClick={editing ? undefined : onSelect}
+      className={`scroll-mt-4 rounded-lg -mx-3 px-3 py-2 transition ${editing ? '' : 'cursor-pointer'} ${
+        selected && !editing ? 'bg-emerald-500/[0.04] ring-1 ring-emerald-500/20' : editing ? 'ring-1 ring-emerald-500/30 bg-zinc-900/40' : 'hover:bg-zinc-900/40'}`}>
       <div className="flex items-baseline justify-between gap-3 mb-1.5">
         <h2 className="text-lg font-semibold text-zinc-100">{item.title}</h2>
         <div className="flex items-center gap-2 shrink-0">
@@ -250,11 +295,45 @@ function DocBlock({ item, selected, refCb, onSelect }: {
           {item.status !== 'promoted' && (
             <span className="text-[10px] uppercase tracking-wide text-zinc-600">draft</span>
           )}
+          {editable && !editing && (
+            <button onClick={startEdit}
+              className="inline-flex items-center gap-1 text-[10px] text-zinc-400 hover:text-emerald-400 px-1.5 py-0.5 rounded border border-transparent hover:border-emerald-500/30 transition"
+              title="Edit this draft">
+              <Pencil className="h-3 w-3" /> Edit
+            </button>
+          )}
         </div>
       </div>
-      <div className="prose prose-sm prose-invert prose-zinc max-w-none text-sm leading-relaxed text-zinc-300 prose-headings:text-zinc-100 prose-p:my-2 prose-code:text-emerald-300 prose-code:bg-emerald-500/10 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:before:content-[''] prose-code:after:content-['']">
-        <Markdown remarkPlugins={[remarkGfm]}>{highlightPlaceholders(item.content)}</Markdown>
-      </div>
+      {editing ? (
+        <div className="space-y-2" onClick={(e) => e.stopPropagation()}>
+          <textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            disabled={saving}
+            rows={Math.min(28, Math.max(8, text.split('\n').length + 2))}
+            className="w-full resize-y rounded-lg border border-zinc-700 bg-zinc-950/60 p-3 font-mono text-[12.5px] leading-relaxed text-zinc-200 focus:border-emerald-500/50 focus:outline-none focus:ring-1 focus:ring-emerald-500/30 disabled:opacity-50"
+            placeholder="Draft content (Markdown)…"
+            spellCheck
+          />
+          {error && <p className="text-[12px] text-amber-400">⚠ {error}</p>}
+          <div className="flex items-center gap-2">
+            <button onClick={save} disabled={saving}
+              className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white">
+              {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+              Save changes
+            </button>
+            <button onClick={cancelEdit} disabled={saving}
+              className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-zinc-700 text-zinc-300 hover:bg-zinc-800/60 disabled:opacity-40">
+              <X className="h-3.5 w-3.5" /> Cancel
+            </button>
+            <span className="text-[11px] text-zinc-600">Markdown — placeholders like <code className="text-emerald-400">[HR_CONTACT_EMAIL]</code> stay as-is.</span>
+          </div>
+        </div>
+      ) : (
+        <div className="prose prose-sm prose-invert prose-zinc max-w-none text-sm leading-relaxed text-zinc-300 prose-headings:text-zinc-100 prose-p:my-2 prose-code:text-emerald-300 prose-code:bg-emerald-500/10 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:before:content-[''] prose-code:after:content-['']">
+          <Markdown remarkPlugins={[remarkGfm]}>{highlightPlaceholders(item.content)}</Markdown>
+        </div>
+      )}
     </div>
   )
 }
