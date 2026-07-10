@@ -1,0 +1,90 @@
+{
+  "type": "title",
+  "identifier": "29",
+  "label": "Title 29 — Labor",
+  "children": [
+    {
+      "type": "part",
+      "identifier": "1910",
+      "label": "Part 1910",
+      "label_description": "Occupational Safety and Health Standards",
+      "children": [
+        {
+          "type": "subpart",
+          "identifier": "A",
+          "label": "Subpart A",
+          "label_description": "General",
+          "children": [
+            {
+              "type": "section",
+              "identifier": "1910.1",
+              "label": "§ 1910.1",
+              "label_description": "Purpose and scope."
+            },
+            {
+              "type": "section",
+              "identifier": "1910.2",
+              "label": "§ 1910.2",
+              "label_description": "Definitions."
+            }
+          ]
+        },
+        {
+          "type": "subpart",
+          "identifier": "B",
+          "label": "Subpart B",
+          "label_description": "[Reserved]",
+          "reserved": true,
+          "children": []
+        },
+        {
+          "type": "subpart",
+          "identifier": "H",
+          "label": "Subpart H",
+          "label_description": "Hazardous Materials",
+          "children": [
+            {
+              "type": "section",
+              "identifier": "1910.119",
+              "label": "§ 1910.119",
+              "label_description": "Process safety management of highly hazardous chemicals."
+            },
+            {
+              "type": "section",
+              "identifier": "1910.120",
+              "label": "§ 1910.120",
+              "label_description": "[Reserved]"
+            }
+          ]
+        },
+        {
+          "type": "subpart",
+          "identifier": "J",
+          "label": "Subpart J",
+          "label_description": "General Environmental Controls",
+          "children": [
+            {
+              "type": "section",
+              "identifier": "1910.141",
+              "label": "§ 1910.141",
+              "label_description": "Sanitation."
+            },
+            {
+              "type": "subject_group",
+              "identifier": "sg-lockout",
+              "label": "Control of Hazardous Energy",
+              "children": [
+                {
+                  "type": "section",
+                  "identifier": "1910.147",
+                  "label": "§ 1910.147",
+                  "label_description": "The control of hazardous energy (lockout/tagout)."
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

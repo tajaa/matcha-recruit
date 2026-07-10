@@ -85,63 +85,22 @@ from ..compliance_registry import (
     INDUSTRY_TAGS as MEDICAL_COMPLIANCE_INDUSTRY_TAGS,
 )
 
-# Map free-text company.industry values to canonical industry profile names.
-# Reuses the same aliases as handbook_service.GUIDED_INDUSTRY_ALIASES.
-_INDUSTRY_ALIASES: Dict[str, str] = {
-    "restaurant": "hospitality",
-    "hospitality": "hospitality",
-    "food": "hospitality",
-    "hotel": "hospitality",
-    "health": "healthcare",
-    "healthcare": "healthcare",
-    "medical": "healthcare",
-    "clinic": "healthcare",
-    "hospital": "healthcare",
-    "nursing": "healthcare",
-    "pharmacy": "healthcare",
-    "dental": "healthcare",
-    "physician": "healthcare",
-    "outpatient": "healthcare",
-    "ambulatory": "healthcare",
-    "retail": "retail",
-    "store": "retail",
-    "shop": "retail",
-    "warehouse": "manufacturing",
-    "manufacturing": "manufacturing",
-    "industrial": "manufacturing",
-    "construction": "manufacturing",
-    "technology": "technology",
-    "software": "technology",
-    "saas": "technology",
-    "professional services": "technology",
-    "consulting": "technology",
-    "fast food": "fast food",
-    "fast_food": "fast food",
-    "biotech": "biotech",
-    "pharma": "biotech",
-    "pharmaceutical": "biotech",
-    "pharmaceuticals": "biotech",
-    "life_sciences": "biotech",
-    "life sciences": "biotech",
-    "biopharma": "biotech",
-}
-
-
 def _resolve_industry(raw: Optional[str]) -> str:
-    """Resolve a free-text industry string to a canonical industry name."""
-    if not raw:
-        return ""
+    """Resolve a free-text industry string to a canonical industry name.
 
-    normalized = raw.lower().strip()
-    canonical = _INDUSTRY_ALIASES.get(normalized)
-    if canonical:
-        return canonical
+    Thin shim over the scope-registry taxonomy — the module-level
+    ``_INDUSTRY_ALIASES`` dict this used to carry now lives (absorbed with the
+    six other legacy vocabularies) in
+    ``app.core.services.scope_registry.categories``, which is the single
+    canonical vocabulary going forward. Same outputs as before for every
+    legacy input, with one deliberate change: ``warehouse`` no longer resolves
+    to ``manufacturing`` (SCOPE_REGISTRY_PLAN.md §1 — a warehouse is general
+    industry, and scoping it as a factory served it RCRA/EPCRA while making
+    CA AB 701 unreachable).
+    """
+    from app.core.services.scope_registry.categories import resolve_legacy_industry
 
-    for alias_key, alias_val in _INDUSTRY_ALIASES.items():
-        if alias_key in normalized or normalized in alias_key:
-            return alias_val
-
-    return ""
+    return resolve_legacy_industry(raw)
 
 
 async def _get_company_canonical_industry(
