@@ -270,7 +270,7 @@ function MatterWorkbench({ matter, evidence, research, researching, onRunResearc
                 />}
           </div>
         </div>
-        <div className="flex w-80 shrink-0 flex-col border-l border-white/[0.06]">
+        <div className="flex min-h-0 w-80 shrink-0 flex-col border-l border-white/[0.06]">
           <LegalContextPanel legalContext={evidence?.legal_context} research={research}
             onRunResearch={onRunResearch} researching={researching}
             matterId={matter.id} onRefresh={onRefresh} />
