@@ -472,15 +472,22 @@ async def generate_packet(matter_id: str, body: PacketIn, request: Request, curr
 
         research_row = None
         if body.include_research:
-            # Same jurisdiction guard as _gather_case_law: a run grounded in a
-            # different state than the matter's CURRENT jurisdiction is stale
-            # and must not ride along in the packet.
+            # Same staleness guards as _gather_case_law, BOTH axes: a run
+            # grounded in a different state than the matter's CURRENT
+            # jurisdiction, or in a different subject than it currently
+            # carries (including pre-theory-column runs, whose search had no
+            # subject anchor), must not ride along in the packet. The packet's
+            # apply_theory=False above widens the company's OWN records on
+            # purpose — external case law is the opposite case: stale research
+            # becomes citable case: evidence in an attorney deliverable.
             current_state = (corpus.get("legal_context") or {}).get("state")
+            current_theory, _ = ld.resolve_matter_theory(matter)
             research_row = await conn.fetchrow(
                 "SELECT * FROM legal_matter_research WHERE matter_id = $1 AND status = 'complete' "
                 "AND ($2::varchar IS NULL OR jurisdiction_state IS NULL OR jurisdiction_state = $2) "
+                "AND ($3::varchar IS NULL OR theory = $3) "
                 "ORDER BY created_at DESC LIMIT 1",
-                matter_id, current_state,
+                matter_id, current_state, current_theory,
             )
             research_row = legal_research.parse_research_row(dict(research_row)) if research_row else None
 

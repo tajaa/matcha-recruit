@@ -423,6 +423,236 @@ def test_compliance_sources_pass_through_non_registry_categories():
     assert captured["vocab"] == ld._COMPLIANCE_CATEGORIES
 
 
+# --- signal-less categories: classify by text, demote only on another subject --
+
+def test_matches_other_subject_needs_a_positive_read_on_another_subject():
+    # the matter's own keywords always win, whatever else the text mentions
+    assert not ld._matches_other_subject("Off-the-clock work; FMLA retaliation", "wage_hour")
+    # a clear other-subject read, with none of the matter's own keywords
+    assert ld._matches_other_subject("FMLA interference complaint", "wage_hour")
+    assert ld._matches_other_subject("HIPAA violation — patient records", "wage_hour")
+    # unclassifiable text stays in every corpus (fail-open)
+    assert not ld._matches_other_subject("Telehealth licensure renewal", "wage_hour")
+    assert not ld._matches_other_subject("", "wage_hour")
+    # the broad topic never demotes anything
+    assert not ld._matches_other_subject("HIPAA violation", None)
+
+
+def test_classify_probes_read_subjects_no_matter_can_carry():
+    """A record can be about a subject no theory covers. Without these a HIPAA
+    write-up reads as 'no subject detected' and fails open into every corpus."""
+    assert ld._matches_other_subject("Gunshot wrongful death on premises", "wage_hour")
+    # ...but that same record is the safety matter's own subject, not another's
+    assert not ld._matches_other_subject("Gunshot wrongful death on premises", "safety")
+    # classify-only words never re-theme a matter — derivation ignores them
+    assert ld.resolve_matter_theory(
+        {"matter_type": "class_action", "allegation": "gunshot"})[0] == "wage_hour"
+
+
+def test_unpaid_is_a_modifier_not_a_subject():
+    """Found against real data: a `hipaa` discipline record described as a
+    '3-day unpaid suspension following confirmed HIPAA disclosure' survived a
+    wage-and-hour matter, because bare 'unpaid' scored as one of the matter's own
+    keywords and short-circuited the demotion."""
+    assert ld._matches_other_subject(
+        "Hipaa 3-day unpaid suspension following confirmed HIPAA disclosure.", "wage_hour")
+    # the phrases that actually name a wage claim still score
+    for t in ("unpaid wages", "unpaid overtime", "unpaid work", "unpaid time"):
+        assert not ld._matches_other_subject(f"HIPAA breach and {t}", "wage_hour"), t
+    # ...and derivation is unchanged: these allegations still read as wage-hour
+    assert ld.resolve_matter_theory(
+        {"matter_type": "class_action", "allegation": "unpaid wages"})[0] == "wage_hour"
+
+
+def test_privacy_probes_read_the_common_misspelling():
+    """'Potential HIPPA Violation' is a real ER case title in the tenant that
+    reported this bug — its category is the generic 'policy_violation' bucket, so
+    the title is the only thing naming the subject."""
+    assert ld._matches_other_subject("Potential HIPPA Violation", "wage_hour")
+
+
+def test_is_signalless_second_guesses_only_uninformative_categories():
+    # an explicit, specific human categorization is never overridden by text
+    assert not ld._is_signalless("wage_hour", ld._ER_CATEGORIES, ld._GENERIC_ER_CATEGORIES)
+    # ...but a bucket, a NULL, or a company-defined slug tells us nothing
+    assert ld._is_signalless("other", ld._ER_CATEGORIES, ld._GENERIC_ER_CATEGORIES)
+    assert ld._is_signalless("policy_violation", ld._ER_CATEGORIES, ld._GENERIC_ER_CATEGORIES)
+    assert ld._is_signalless(None, ld._ER_CATEGORIES, ld._GENERIC_ER_CATEGORIES)
+    assert ld._is_signalless("hipaa", ld._INFRACTIONS)          # per-company infraction
+    assert not ld._is_signalless("attendance", ld._INFRACTIONS)
+
+
+class _RowConn:
+    """Returns fixed rows for whichever table the query names."""
+    def __init__(self, rows):
+        self.rows = rows
+
+    async def fetch(self, sql, *args):
+        return self.rows
+
+
+def _er_rows():
+    return [
+        {"id": "1", "case_number": "ER-1", "title": "FMLA interference complaint",
+         "description": "Leave request denied.", "category": "other",
+         "status": "open", "outcome": None, "created_at": None},
+        {"id": "2", "case_number": "ER-2", "title": "Unpaid overtime dispute",
+         "description": "Off-the-clock work alleged.", "category": "other",
+         "status": "open", "outcome": None, "created_at": None},
+        {"id": "3", "case_number": "ER-3", "title": "Meal break waiver",
+         "description": None, "category": "wage_hour",
+         "status": "open", "outcome": None, "created_at": None},
+        {"id": "4", "case_number": "ER-4", "title": "Team conflict",
+         "description": None, "category": None,
+         "status": "open", "outcome": None, "created_at": None},
+    ]
+
+
+def test_er_generic_categories_are_classified_by_the_case_text():
+    """The reported bug: 'other' and 'policy_violation' are in EVERY theory's ER
+    allowlist because they might be about anything, so a HIPAA / FMLA case filed
+    under one passed the SQL filter legitimately into a wage-and-hour corpus."""
+    recs = asyncio.run(ld._src_er_cases(
+        _RowConn(_er_rows()), "cid", None, None, None, None, ld._THEORIES["wage_hour"]))
+    ids = [r["cid"] for r in recs]
+    assert "er_case:1" not in ids          # 'other' + FMLA text → other subject
+    assert "er_case:2" in ids              # 'other' + wage text → the matter's own
+    assert "er_case:3" in ids              # explicitly categorized: never second-guessed
+    assert "er_case:4" in ids              # NULL + unclassifiable → fail-open
+
+    # the same FMLA case belongs in an EEO corpus, and in every broad one
+    eeo = asyncio.run(ld._src_er_cases(
+        _RowConn(_er_rows()), "cid", None, None, None, None, ld._THEORIES["eeo"]))
+    assert "er_case:1" in [r["cid"] for r in eeo]
+    broad = asyncio.run(ld._src_er_cases(_RowConn(_er_rows()), "cid", None, None, None, None))
+    assert len(broad) == 4
+
+
+def test_company_defined_infractions_are_classified_by_their_slug():
+    """720 Behavioral configures `hipaa` / `patient_safety` infraction types.
+    They are outside DEFAULT_INFRACTION_TYPES, so the SQL filter read them as
+    'company-defined' and passed every one into a wage-and-hour corpus."""
+    rows = [
+        {"id": "1", "discipline_type": "written_warning", "infraction_type": "hipaa",
+         "description": "Accessed a chart without cause.", "severity": "severe",
+         "status": "active", "issued_date": None},
+        {"id": "2", "discipline_type": "verbal_warning", "infraction_type": "attendance",
+         "description": None, "severity": "minor", "status": "active", "issued_date": None},
+        {"id": "3", "discipline_type": "coaching", "infraction_type": "documentation",
+         "description": "Charting late.", "severity": "moderate",
+         "status": "active", "issued_date": None},
+    ]
+    wage = asyncio.run(ld._src_discipline(
+        _RowConn(rows), "cid", None, None, None, None, ld._THEORIES["wage_hour"]))
+    ids = [r["cid"] for r in wage]
+    assert "discipline:1" not in ids   # `hipaa` names a subject, and it isn't wages
+    assert "discipline:2" in ids       # in the theory's allowlist
+    assert "discipline:3" in ids       # company-defined but unclassifiable → stays
+
+    broad = asyncio.run(ld._src_discipline(_RowConn(rows), "cid", None, None, None, None))
+    assert len(broad) == 3
+
+
+def test_minted_compliance_categories_land_in_the_matter_they_name():
+    """A minted `cardiac_catheterization_safety` requirement belongs in a safety
+    matter's corpus — the reason the passthrough arm exists. The same mechanism
+    must keep a minted privacy category out of a wage-and-hour one."""
+    rows = [
+        {"id": "1", "title": "Annual notice of privacy practices",
+         "category": "hipaa_privacy_notices", "current_value": None,
+         "jurisdiction_name": None, "last_changed_at": None,
+         "location_name": None, "statute_citation": None},
+        {"id": "2", "title": "Cath lab sterile field protocol",
+         "category": "cardiac_catheterization_safety", "current_value": None,
+         "jurisdiction_name": None, "last_changed_at": None,
+         "location_name": None, "statute_citation": None},
+        {"id": "3", "title": "Telehealth licensure renewal",
+         "category": "telehealth_licensure", "current_value": None,
+         "jurisdiction_name": None, "last_changed_at": None,
+         "location_name": None, "statute_citation": None},
+    ]
+    safety = asyncio.run(ld._src_compliance(
+        _RowConn(rows), "cid", None, None, None, None, ld._THEORIES["safety"]))
+    assert [r["cid"] for r in safety] == ["compliance_req:2", "compliance_req:3"]
+
+    wage = asyncio.run(ld._src_compliance(
+        _RowConn(rows), "cid", None, None, None, None, ld._THEORIES["wage_hour"]))
+    # both classifiable minted keys name another subject; the third names none
+    assert [r["cid"] for r in wage] == ["compliance_req:3"]
+
+
+def test_demotion_is_inert_on_the_broad_topic_and_unfiltered_sources():
+    """It may only ever narrow a corpus the SQL already intended to narrow —
+    otherwise the packet path (apply_theory=False) would quietly lose records."""
+    rows = _er_rows()
+    assert ld._demote_off_subject(rows, ld._BROAD.slug, None, ld._ER_CATEGORIES, "category") == rows
+    # a theory that doesn't filter this source (allowlist None) is left alone too
+    topic = ld._THEORIES["wage_hour"]._replace(er=None)
+    assert ld._demote_off_subject(rows, topic.slug, topic.er, ld._ER_CATEGORIES, "category") == rows
+
+
+def test_generic_discipline_bucket_is_classified_by_text():
+    """'policy_violation' is a real default infraction AND is in every theory's
+    discipline allowlist — the same 'human picked a bucket, not a subject'
+    situation as ER's 'other'. Without a generic set on the discipline source, a
+    PHI-disclosure write-up filed under it rides into a wage-and-hour corpus."""
+    rows = [
+        {"id": "1", "discipline_type": "written_warning", "infraction_type": "policy_violation",
+         "description": "Disclosed patient PHI without authorization.", "severity": "severe",
+         "status": "active", "issued_date": None},
+        {"id": "2", "discipline_type": "verbal_warning", "infraction_type": "policy_violation",
+         "description": "Repeatedly clocked out and kept working.", "severity": "minor",
+         "status": "active", "issued_date": None},
+    ]
+    wage = asyncio.run(ld._src_discipline(
+        _RowConn(rows), "cid", None, None, None, None, ld._THEORIES["wage_hour"]))
+    assert [r["cid"] for r in wage] == ["discipline:2"]
+
+
+def test_retaliation_is_the_wage_matters_own_word_too():
+    """wage_hour's ER allowlist claims 'retaliation' as its own category, so the
+    word must never be the sole reason a generic-bucket record is demoted from a
+    wage corpus — an FLSA retaliation case IS a wage case."""
+    assert not ld._matches_other_subject("Retaliation after internal complaint", "wage_hour")
+    # ...but one stray 'retaliated' still doesn't DERIVE a wage theory
+    slug, _ = ld.resolve_matter_theory({
+        "matter_type": "eeoc_charge", "allegation": "retaliation after complaint"})
+    assert slug == "eeo"
+
+
+def test_classification_vocab_is_decoupled_from_derivation_vocab():
+    """The two jobs share a word list but not its adjustments. Removing bare
+    'unpaid' from derivation flipped real tie-breaks (class_action 'unpaid PTO
+    after workplace injury' went wage_hour → safety); keeping it in
+    classification kept HIPAA 'unpaid suspension' write-ups in wage corpora.
+    So: derivation keeps it, classification excludes it."""
+    # derivation: bare 'unpaid' still scores, preserving the tie-break
+    slug, _ = ld.resolve_matter_theory({
+        "matter_type": "class_action", "title": "",
+        "allegation": "unpaid PTO after a workplace injury"})
+    assert slug == "wage_hour"
+    # classification: 'unpaid suspension' is not a wage record's own keyword
+    assert ld._matches_other_subject(
+        "Hipaa 3-day unpaid suspension following confirmed HIPAA disclosure.", "wage_hour")
+
+
+def test_classify_probe_maps_cover_every_theory():
+    """_matches_other_subject indexes _CLASSIFY_PROBES[slug] bare — a theory
+    added to _THEORIES without a keyword entry is a production KeyError on
+    every source, invisible to a green suite without this assertion."""
+    assert set(ld._THEORY_KEYWORDS) == set(ld._THEORIES)
+    assert set(ld._THEORIES) <= set(ld._CLASSIFY_PROBES)
+    for slug in ld._CLASSIFY_ONLY_KEYWORDS:
+        assert slug in ld._THEORIES
+    for slug, excluded in ld._CLASSIFY_EXCLUDE_KEYWORDS.items():
+        assert slug in ld._THEORIES
+        assert excluded <= set(ld._THEORY_KEYWORDS[slug])  # excludes real words
+    # slug field mirrors the dict key by construction
+    for slug, topic in ld._THEORIES.items():
+        assert topic.slug == slug
+    assert ld._BROAD.slug is None
+
+
 def test_resolve_theory_falls_back_to_matter_type_when_text_is_silent():
     assert ld.resolve_matter_theory({"matter_type": "eeoc_charge"})[0] == "eeo"
     assert ld.resolve_matter_theory({"matter_type": "class_action"})[0] == "wage_hour"
@@ -590,6 +820,28 @@ def test_gather_evidence_broad_theory_passes_null_allowlists():
     assert conn.incident_topic is None            # NULL allowlist = no filter
     assert corpus["theory"] is None
     assert not any("theory" in n for n in corpus["notes"])
+
+
+def test_gather_case_law_scopes_a_run_to_the_matters_state_and_subject():
+    """A research run is grounded in BOTH axes. A run made under another subject
+    — or, for rows predating the column, under none, when the search had no
+    subject anchor and could return an in-state case about anything — is stale
+    for a themed matter, exactly as a run in another state is."""
+    captured = {}
+
+    class _Conn:
+        async def fetchrow(self, sql, *args):
+            captured["sql"] = sql
+            captured["args"] = args
+            return None
+
+    asyncio.run(ld._gather_case_law(_Conn(), "m1", "CA", "wage_hour"))
+    assert captured["args"] == ("m1", "CA", "wage_hour")
+    assert "theory = $3" in captured["sql"]
+    # a broad matter passes NULL and still accepts any run, as it always has
+    assert "$3::varchar IS NULL" in captured["sql"]
+    asyncio.run(ld._gather_case_law(_Conn(), "m1"))
+    assert captured["args"] == ("m1", None, None)
 
 
 # --- packet rendering guards -------------------------------------------------

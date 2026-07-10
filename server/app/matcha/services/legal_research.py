@@ -9,12 +9,20 @@ persisted here) — the Gemini guidance text is never cited, per
 ``legal_defense.validate_citations``'s index-membership invariant.
 
 Because persisted rows become citable, retrieval precision is a correctness
-concern, not a UX one. Three mechanisms keep a matter's results inside its
-context: the matter's jurisdiction selects a ``court`` filter (``_STATE_COURTS``)
-rather than a free-text state name; the query ladder searches the allegation's
-keywords and falls back to curated legal concepts (``_MATTER_TYPE_TERMS``),
-never a humanized enum label; and ``_filter_rank`` dedupes and drops hits
-scoring below a fraction of the top hit's BM25.
+concern, not a UX one. Two axes must hold, and they fail independently:
+
+*Jurisdiction* — the matter's state selects a ``court`` filter
+(``_STATE_COURTS``) rather than a free-text state name.
+
+*Subject* — the matter's resolved theory (``legal_defense.resolve_matter_theory``,
+the same one that scopes the evidence corpus) anchors EVERY query-ladder tier to
+that theory's legal concepts, and gates the returned cases against their own text
+afterwards. Jurisdiction alone is not relevance: a San Diego gunshot-wrongful-death
+opinion is validly inside a California wage-and-hour matter's court set, and
+before the subject axis existed it was retrieved for one — its opinion mentions
+employees who "worked", took "breaks", and were "unpaid". ``_filter_rank``'s BM25
+floor cannot catch that: it compares hits against each other within one query, so
+a uniformly off-subject field survives intact.
 """
 
 import asyncio
@@ -31,7 +39,7 @@ from app.core.services.rate_limiter import get_rate_limiter
 from app.database import get_connection
 
 from .legal_defense import MODEL as _GEMINI_MODEL
-from .legal_defense import _hum, _parse_json
+from .legal_defense import _hum, _matches_other_subject, _parse_json, resolve_matter_theory
 
 logger = logging.getLogger(__name__)
 
@@ -172,6 +180,23 @@ _MATTER_TYPE_TERMS: dict[str, str] = {
 }
 _DEFAULT_MATTER_TERMS = _MATTER_TYPE_TERMS["other"]
 
+# The SUBJECT anchor, keyed by ``legal_defense`` theory slug. Where
+# _EMPLOYMENT_ANCHOR only keeps the broadest tier inside employment law, these
+# keep every tier inside the matter's own subject — the allegation keywords alone
+# never did. "Nurses were required to work through meal breaks off the clock"
+# reduces to tokens (nurses required work meal breaks clock) that a
+# wrongful-death opinion satisfies as readily as a wage opinion.
+#
+# Code-authored like _MATTER_TYPE_TERMS: quotes and OR reach CourtListener's
+# parser verbatim (``sanitize=False``). Keyword tiers are alphabetic by
+# construction (``_WORD_RE``), so ANDing them onto an anchor stays parser-safe.
+_THEORY_ANCHORS: dict[str, str] = {
+    "wage_hour": ('("wage and hour" OR overtime OR "meal period" OR "meal break" '
+                  'OR "off the clock" OR "unpaid wages")'),
+    "eeo": '(discrimination OR harassment OR retaliation OR "hostile work environment")',
+    "safety": '(OSHA OR "workplace safety" OR "workplace injury" OR "workers compensation")',
+}
+
 
 _RESERVED_QUERY_CHARS_RE = re.compile(r'[\[\]{}()"~^:/&|]')
 
@@ -212,25 +237,58 @@ def _keywords(text: str, limit: int) -> list[str]:
     return out
 
 
-def build_query_ladder(matter_type: str | None, allegation: str | None) -> list[str]:
+def build_query_ladder(matter_type: str | None, allegation: str | None,
+                       theory: str | None = None) -> list[str]:
     """Ordered narrow→broad CourtListener queries: 6 allegation keywords, then
-    3, then a curated legal-concept expression for the matter type. Distinct,
-    never empty. Pure (unit-tested).
+    3, then a curated legal-concept expression. Distinct, never empty. Pure
+    (unit-tested).
 
     The matter-type label is deliberately absent from the keyword tiers — ANDed
     into free text it constrained on UI wording ("Eeoc Charge") rather than on
-    law. Matter-type meaning now enters only through the curated bottom tier,
-    and jurisdiction only through the ``court`` filter."""
+    law. Matter-type meaning enters only through the curated bottom tier, and
+    jurisdiction only through the ``court`` filter.
+
+    ``theory`` (a ``legal_defense`` slug) ANDs the matter's SUBJECT onto every
+    tier, including the bottom one, where it outranks the matter-type concept —
+    a "class action" is a posture, ``wage_hour`` is what the case is about. Every
+    tier of an anchored ladder therefore stays on-subject: broadening can widen
+    the terms but never leave the theory. Without a theory (broad matters:
+    subpoena / audit / other, or an ambiguous allegation) the ladder is unchanged
+    — a records subpoena must reach whatever the records are about."""
+    anchor = _THEORY_ANCHORS.get(theory or "")
     kws = _keywords(allegation or "", 6)
     ladder: list[str] = []
     for n in (6, 3):
         q = " ".join(kws[:n]).strip()
-        if q and q not in ladder:
-            ladder.append(q)
-    concept = _MATTER_TYPE_TERMS.get((matter_type or "").lower(), _DEFAULT_MATTER_TERMS)
+        if q:
+            q = f"{q} AND {anchor}" if anchor else q
+            if q not in ladder:
+                ladder.append(q)
+    concept = (f"{anchor} AND {_EMPLOYMENT_ANCHOR}" if anchor
+               else _MATTER_TYPE_TERMS.get((matter_type or "").lower(), _DEFAULT_MATTER_TERMS))
     if concept not in ladder:
         ladder.append(concept)
     return ladder
+
+
+def gate_cases_to_subject(cases: list[dict], theory: str | None) -> list[dict]:
+    """Drop hits whose own text is plainly about another subject. Pure.
+
+    The anchors constrain what CourtListener is ASKED for; this constrains what
+    it RETURNS. Both are needed: an opinion can satisfy a boolean anchor in a
+    passing citation ("...unlike the plaintiff's wage and hour claim...") while
+    being about something else entirely, and these rows become citable ``case:``
+    evidence in an attorney-facing packet.
+
+    Reuses ``legal_defense._matches_other_subject``, so an unclassifiable case —
+    no snippet, or a snippet naming no subject — is KEPT, exactly as an
+    unclassifiable internal record is. Under-retrieval is the failure mode this
+    module can't detect; over-retrieval is the one the reviewer can."""
+    if not theory:
+        return list(cases)
+    return [c for c in cases
+            if not _matches_other_subject(
+                f"{c.get('case_name') or ''} {c.get('snippet') or ''}", theory)]
 
 
 def _sanitize_query(query: str) -> str:
@@ -384,21 +442,38 @@ async def search_case_law(
         return _filter_rank(_parse_search_results(resp.json()), limit)
 
 
-async def synthesize_guidance(matter: dict, juris_display: str | None, cases: list[dict]) -> dict:
+async def synthesize_guidance(matter: dict, juris_display: str | None, cases: list[dict],
+                              subject: str | None = None) -> dict:
     """Grounded-Gemini public-guidance briefing. Raises on failure — callers
-    isolate this (see ``run_research``)."""
+    isolate this (see ``run_research``).
+
+    ``subject`` is the matter's theory label. A matter type is a posture, not a
+    subject: "Class Action" alone sends the model looking for class-certification
+    guidance for a meal-break case. ``None`` (a broad matter — subpoena / audit /
+    ambiguous allegation) omits the subject constraint entirely: telling the
+    model to stay on an "unspecified" subject would suppress exactly the
+    whole-landscape overview a broad matter is supposed to get."""
     label = _hum(matter.get("matter_type")) or "Employment matter"
     allegation = (matter.get("allegation") or "")[:300]
     case_names = ", ".join(c["case_name"] for c in cases[:5]) or "(none located)"
 
+    subject_field = f". Subject: {subject}" if subject else ""
+    subject_rule = (
+        "relevant to this matter's SUBJECT (EEOC enforcement guidance, DOL opinion letters, "
+        "state agency rules), each with its source URL. Stay on that subject: guidance about "
+        "any other area of employment law is out of scope, even if it is about this matter type. "
+    ) if subject else (
+        "relevant to this matter type (EEOC enforcement guidance, DOL opinion letters, "
+        "state agency rules), each with its source URL. "
+    )
     prompt = (
         "You are compiling an INFORMATIONAL briefing of the public legal landscape "
-        "for outside counsel. Matter type: " + label + ". Jurisdiction: "
+        "for outside counsel. Matter type: " + label + subject_field + ". Jurisdiction: "
         + (juris_display or "unspecified") + ". Allegation summary: " + allegation
         + ". Cases already located (do not re-verify): " + case_names
         + ". Using web search, summarize current federal and state agency guidance "
-        "relevant to this matter type (EEOC enforcement guidance, DOL opinion letters, "
-        "state agency rules), each with its source URL. Do NOT give legal advice, do NOT "
+        + subject_rule +
+        "Do NOT give legal advice, do NOT "
         "assess the company's position, do NOT invent case citations. Return STRICT JSON: "
         '{"summary": "<neutral 2-4 paragraph overview>", "key_authorities": '
         '[{"name","url","publisher","relevance"}]}'
@@ -473,13 +548,19 @@ async def run_research(matter: dict, created_by, include_guidance: bool = True) 
     async with get_connection() as conn:
         state = await _resolve_state(conn, matter)
         allegation = (matter.get("allegation") or "")[:300]
-        ladder = build_query_ladder(matter.get("matter_type"), allegation)
+        # The SAME theory that scopes the evidence corpus, resolved the same way
+        # (stored override > matter_type > keywords). Persisted alongside the
+        # results so _gather_case_law can tell a run made under this matter's
+        # current subject from a stale one made under another — a re-themed
+        # matter must not keep citing the old subject's case law.
+        theory, _topic = resolve_matter_theory(matter)
+        ladder = build_query_ladder(matter.get("matter_type"), allegation, theory)
         query = ladder[0]
         row = await conn.fetchrow(
             """INSERT INTO legal_matter_research
-                   (matter_id, company_id, query, created_by, jurisdiction_state)
-               VALUES ($1, $2, $3, $4, $5) RETURNING id""",
-            matter["id"], matter["company_id"], query, created_by, state,
+                   (matter_id, company_id, query, created_by, jurisdiction_state, theory)
+               VALUES ($1, $2, $3, $4, $5, $6) RETURNING id""",
+            matter["id"], matter["company_id"], query, created_by, state, theory,
         )
         research_id = row["id"]
 
@@ -496,8 +577,14 @@ async def run_research(matter: dict, created_by, include_guidance: bool = True) 
         #
         # ``sanitize=False``: every tier is built from alphabetic keywords or a
         # curated constant (see build_query_ladder), never raw user text.
+        #
+        # The subject gate runs INSIDE the loop, so a tier whose every hit is
+        # off-subject broadens like an empty one rather than persisting cases
+        # that would become citable ``case:`` evidence — the same reasoning the
+        # relevance floor already applies to weak hits.
         for q in ladder:
-            cases = await search_case_law(q, state=state, sanitize=False)
+            cases = gate_cases_to_subject(
+                await search_case_law(q, state=state, sanitize=False), theory)
             query = q
             if cases:
                 break
@@ -510,7 +597,8 @@ async def run_research(matter: dict, created_by, include_guidance: bool = True) 
     if include_guidance:
         try:
             juris_display = _STATE_NAMES.get(state) if state else None
-            guidance = await synthesize_guidance(matter, juris_display, cases)
+            guidance = await synthesize_guidance(
+                matter, juris_display, cases, subject=_topic.label if theory else None)
         except Exception as e:  # noqa: BLE001
             logger.warning("legal_research: guidance synthesis failed: %s", e)
             guid_err = str(e)

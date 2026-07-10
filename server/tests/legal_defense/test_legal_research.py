@@ -340,7 +340,7 @@ def test_run_research_persists_only_api_rows(monkeypatch):
     async def fake_search(query, state=None, limit=8, sanitize=True):
         return _CASES
 
-    async def fake_guidance(matter, juris_display, cases):
+    async def fake_guidance(matter, juris_display, cases, subject=None):
         return _GUIDANCE
 
     monkeypatch.setattr(lr, "search_case_law", fake_search)
@@ -353,8 +353,11 @@ def test_run_research_persists_only_api_rows(monkeypatch):
     assert result["status"] == "complete"
     assert result["cases"] == _CASES
     assert result["guidance"] == _GUIDANCE
-    # the state the run was grounded in is persisted with the row
+    # the state AND the subject the run was grounded in are persisted with the
+    # row — _gather_case_law refuses a run scoped to either a different state or
+    # a different subject than the matter currently carries
     assert conn.insert_args[4] == "CA"
+    assert conn.insert_args[5] == "wage_hour"
     # persisted cases are exactly the API rows — no fabricated entries mixed in
     complete_update = conn.updates[-1]
     assert json.loads(complete_update["cases"]) == _CASES
@@ -364,7 +367,7 @@ def test_run_research_partial_failure_completes(monkeypatch):
     async def failing_search(query, state=None, limit=8, sanitize=True):
         raise RuntimeError("courtlistener down")
 
-    async def fake_guidance(matter, juris_display, cases):
+    async def fake_guidance(matter, juris_display, cases, subject=None):
         return _GUIDANCE
 
     monkeypatch.setattr(lr, "search_case_law", failing_search)
@@ -384,7 +387,7 @@ def test_run_research_total_failure_marks_failed(monkeypatch):
     async def failing_search(query, state=None, limit=8, sanitize=True):
         raise RuntimeError("courtlistener down")
 
-    async def failing_guidance(matter, juris_display, cases):
+    async def failing_guidance(matter, juris_display, cases, subject=None):
         raise RuntimeError("gemini down")
 
     monkeypatch.setattr(lr, "search_case_law", failing_search)
@@ -404,7 +407,7 @@ def test_run_research_skips_guidance_when_disabled(monkeypatch):
     async def fake_search(query, state=None, limit=8, sanitize=True):
         return _CASES
 
-    async def fake_guidance(matter, juris_display, cases):
+    async def fake_guidance(matter, juris_display, cases, subject=None):
         called["guidance"] = True
         return _GUIDANCE
 
@@ -426,7 +429,7 @@ def test_run_research_case_failure_marks_failed_when_guidance_skipped(monkeypatc
     async def failing_search(query, state=None, limit=8, sanitize=True):
         raise RuntimeError("courtlistener down")
 
-    async def fake_guidance(matter, juris_display, cases):
+    async def fake_guidance(matter, juris_display, cases, subject=None):
         raise AssertionError("guidance must not be attempted when include_guidance=False")
 
     monkeypatch.setattr(lr, "search_case_law", failing_search)
@@ -502,6 +505,90 @@ def test_matter_type_terms_are_all_anchored_to_employment():
         assert term.endswith(f"AND {lr._EMPLOYMENT_ANCHOR}"), mt
 
 
+# --- subject anchoring (in-jurisdiction, off-subject results) ------------------
+
+def test_theory_anchors_cover_every_theory():
+    from app.matcha.services import legal_defense as ld
+    assert set(lr._THEORY_ANCHORS) == set(ld._THEORIES)
+
+
+def test_every_ladder_tier_is_anchored_to_the_matters_subject():
+    """The reported bug: a Los Angeles wage-and-hour matter returned a San Diego
+    gunshot-wrongful-death opinion. San Diego (`casd`) is validly in California's
+    court set — jurisdiction was right. Only the curated BOTTOM tier carried a
+    subject, and the keyword tiers ('employees required work meal breaks') match
+    a wrongful-death opinion as readily as a wage one."""
+    ladder = lr.build_query_ladder(
+        "class_action",
+        "employees were required to work off the clock during meal breaks and were not paid overtime",
+        "wage_hour",
+    )
+    assert len(ladder) == 3
+    anchor = lr._THEORY_ANCHORS["wage_hour"]
+    for tier in ladder:
+        assert anchor in tier
+    # the subject outranks the posture on the broadest tier: a class action is
+    # not a subject, wage-and-hour is
+    assert ladder[-1] == f"{anchor} AND {lr._EMPLOYMENT_ANCHOR}"
+    assert ladder[-1] != lr._MATTER_TYPE_TERMS["class_action"]
+
+
+def test_unthemed_ladder_is_unchanged():
+    # a records subpoena must still reach whatever the records are about
+    plain = lr.build_query_ladder("audit", "unpaid overtime")
+    assert plain == lr.build_query_ladder("audit", "unpaid overtime", None)
+    assert plain == ["unpaid overtime", lr._MATTER_TYPE_TERMS["audit"]]
+
+
+def _hit(name, snippet=None):
+    return {"id": "1", "case_name": name, "snippet": snippet}
+
+
+def test_gate_cases_to_subject_drops_in_jurisdiction_off_subject_hits():
+    gunshot = _hit("Estate of Ruiz v. Acme", "wrongful death; the decedent was shot")
+    wage = _hit("Lopez v. Acme", "meal period premiums and off the clock work")
+    assert lr.gate_cases_to_subject([gunshot, wage], "wage_hour") == [wage]
+    # the same opinion is on-subject for a safety matter
+    assert lr.gate_cases_to_subject([gunshot], "safety") == [gunshot]
+    # unclassifiable hits are kept — under-retrieval is the failure mode this
+    # module cannot detect, and these rows are only ever informational
+    assert lr.gate_cases_to_subject([_hit("Doe v. Roe")], "wage_hour") == [_hit("Doe v. Roe")]
+    # no theory, no gate
+    assert lr.gate_cases_to_subject([gunshot], None) == [gunshot]
+
+
+def test_run_research_broadens_past_a_tier_whose_every_hit_is_off_subject(monkeypatch):
+    """An off-subject tier must broaden like an empty one — persisting its hits
+    would mint citable ``case:`` evidence for an attorney packet."""
+    off = [{"id": "x", "case_name": "Estate of Ruiz", "snippet": "wrongful death, gunshot"}]
+    calls: list[str] = []
+
+    async def fake_search(query, state=None, limit=8, sanitize=True):
+        calls.append(query)
+        return off if len(calls) == 1 else _CASES
+
+    monkeypatch.setattr(lr, "search_case_law", fake_search)
+    conn = _FakeResearchConn()
+    _patch_conn(monkeypatch, conn)
+    result = asyncio.run(lr.run_research(_MATTER, created_by=None, include_guidance=False))
+
+    assert len(calls) == 2                     # tier 1 gated to empty → broadened
+    assert result["cases"] == _CASES
+    assert conn.updates[-1]["query"] == calls[-1]
+
+
+def test_run_research_persists_no_theory_for_a_broad_matter(monkeypatch):
+    async def fake_search(query, state=None, limit=8, sanitize=True):
+        return _CASES
+
+    monkeypatch.setattr(lr, "search_case_law", fake_search)
+    conn = _FakeResearchConn()
+    _patch_conn(monkeypatch, conn)
+    asyncio.run(lr.run_research(
+        {**_MATTER, "matter_type": "subpoena"}, created_by=None, include_guidance=False))
+    assert conn.insert_args[5] is None
+
+
 def test_run_research_broadens_until_cases_found(monkeypatch):
     calls: list[str] = []
 
@@ -519,8 +606,11 @@ def test_run_research_broadens_until_cases_found(monkeypatch):
     ))
 
     assert len(calls) == 3
-    assert calls == lr.build_query_ladder("class_action",
-        "employees required to work off the clock during meal breaks unpaid overtime")
+    assert calls == lr.build_query_ladder(
+        "class_action",
+        "employees required to work off the clock during meal breaks unpaid overtime",
+        "wage_hour",   # run_research resolves the theory and anchors every tier
+    )
     assert result["status"] == "complete"
     assert result["cases"] == _CASES
     # the tier that actually matched is persisted with the row

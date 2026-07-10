@@ -207,52 +207,77 @@ _SAFETY = ["workplace_safety", "workers_comp", "industrial_hygiene", "machine_sa
 # semantics by looking "company-defined". A slug outside these lists really is
 # company-defined (discipline infraction types are per-company configurable,
 # er_cases.category has no CHECK constraint, and the Specialization Research
-# Wizard mints compliance categories outside the registry) and always passes the
-# filter — silently dropping an unrecognized record from a legal corpus is the
-# one failure mode worse than over-inclusion.
+# Wizard mints compliance categories outside the registry).
+#
+# Such a slug still passes the SQL allowlist — silently dropping an unrecognized
+# record from a legal corpus is the one failure mode worse than over-inclusion —
+# but it is no longer passed UNCONDITIONALLY. A category that carries no usable
+# subject signal (company-defined slug, NULL, or a generic bucket like ER's
+# "other") is classified from the record's own TEXT instead, and dropped only
+# when that text speaks clearly for a DIFFERENT subject: see
+# ``_matches_other_subject`` and the per-source demotion below. 720 Behavioral's
+# `hipaa` discipline infractions were the reported failure — unknown to
+# _INFRACTIONS, so every one of them surfaced in a wage-and-hour matter.
 _INCIDENT_TYPES = list(get_args(IRIncidentType))
 _ER_CATEGORIES = list(get_args(ERCaseCategory))
 _INFRACTIONS = [d["infraction_type"] for d in DEFAULT_INFRACTION_TYPES]
 _COMPLIANCE_CATEGORIES = sorted(CATEGORY_KEYS)
+
+# Values that exist in a source's closed vocabulary but say nothing about
+# subject — a human picking "other" or "policy violation" for an FMLA-interference
+# complaint has not told us the case is about FMLA; the title has. Each vocabulary
+# names its own generic buckets HERE, next to nothing: leaving one out means those
+# records read as explicit human categorizations and are never text-classified —
+# the exact cross-subject leak the demotion pass exists to close.
+_GENERIC_ER_CATEGORIES = frozenset({"other", "policy_violation"})
+_GENERIC_INFRACTIONS = frozenset({"policy_violation"})
 
 
 class _Topic(NamedTuple):
     """Per-source allowlists for one theory. ``None`` = don't filter that source.
     An EMPTY list is meaningful and different: no value in that source's
     vocabulary relates to the theory, so the source drops out entirely (a
-    wage-and-hour claim has no relevant IR/OSHA incident type)."""
+    wage-and-hour claim has no relevant IR/OSHA incident type).
+
+    ``slug`` is the theory's own key (``None`` on the broad topic). Sources need
+    it to know which keyword probes are "the matter's own" when they fall back
+    to classifying a signal-less record by its text."""
     label: str
     compliance: list[str] | None
     incidents: list[str] | None
     er: list[str] | None
     discipline: list[str] | None
+    slug: str | None = None
 
 
 _BROAD = _Topic("all records", None, None, None, None)
 
 _THEORIES: dict[str, _Topic] = {
-    "wage_hour": _Topic(
-        label="wage-and-hour",
-        compliance=_WAGE_HOUR,
-        incidents=[],  # no IR/OSHA incident type describes a pay practice
-        er=["wage_hour", "retaliation", "policy_violation", "other"],
-        discipline=["attendance", "performance", "policy_violation"],
-    ),
-    "eeo": _Topic(
-        label="discrimination / EEO",
-        compliance=_EEO,
-        incidents=["behavioral", "other"],
-        er=["harassment", "discrimination", "retaliation", "misconduct",
-            "policy_violation", "other"],
-        discipline=["harassment", "gross_misconduct", "policy_violation", "performance"],
-    ),
-    "safety": _Topic(
-        label="workplace-safety",
-        compliance=_SAFETY,
-        incidents=["safety", "near_miss", "property", "other"],
-        er=["safety", "policy_violation", "other"],
-        discipline=["safety", "policy_violation", "gross_misconduct"],
-    ),
+    slug: topic._replace(slug=slug)   # slug mirrors the key; derived so they can't diverge
+    for slug, topic in {
+        "wage_hour": _Topic(
+            label="wage-and-hour",
+            compliance=_WAGE_HOUR,
+            incidents=[],  # no IR/OSHA incident type describes a pay practice
+            er=["wage_hour", "retaliation", "policy_violation", "other"],
+            discipline=["attendance", "performance", "policy_violation"],
+        ),
+        "eeo": _Topic(
+            label="discrimination / EEO",
+            compliance=_EEO,
+            incidents=["behavioral", "other"],
+            er=["harassment", "discrimination", "retaliation", "misconduct",
+                "policy_violation", "other"],
+            discipline=["harassment", "gross_misconduct", "policy_violation", "performance"],
+        ),
+        "safety": _Topic(
+            label="workplace-safety",
+            compliance=_SAFETY,
+            incidents=["safety", "near_miss", "property", "other"],
+            er=["safety", "policy_violation", "other"],
+            discipline=["safety", "policy_violation", "gross_misconduct"],
+        ),
+    }.items()
 }
 
 # Word-boundary probes against the matter's title + allegation, lowercased.
@@ -290,6 +315,114 @@ def _compile_probes(kws: tuple[str, ...]) -> list[re.Pattern]:
 _THEORY_PROBES: dict[str, list[re.Pattern]] = {
     slug: _compile_probes(kws) for slug, kws in _THEORY_KEYWORDS.items()
 }
+
+# Vocabulary for CLASSIFYING a record (or a case-law hit) whose category carries
+# no subject signal — a separate JOB from deriving a matter's theory, with its
+# own precision needs, so it gets its own adjustments in BOTH directions rather
+# than edits to the shared _THEORY_KEYWORDS (where a change silently re-themes
+# whole matters — resolve_matter_theory scores on those words).
+#
+# _CLASSIFY_ONLY_KEYWORDS adds words that name a subject without arguing for it:
+# a wrongful-death opinion is a safety record, but "gunshot" in an allegation
+# must not retheme the matter; "retaliation" names a subject wage_hour's own ER
+# allowlist claims, so it must never be the sole reason a wage record is demoted
+# — but one stray "retaliated" shouldn't derive a wage theory either.
+#
+# _CLASSIFY_EXCLUDE_KEYWORDS removes derivation words that are modifiers, not
+# subjects, at record granularity: an "unpaid suspension" is a discipline record
+# and "unpaid leave" is a leave record, and either one, read as a wage keyword,
+# keeps an off-subject record in a wage corpus by short-circuiting
+# _matches_other_subject. Derivation keeps bare "unpaid" — an allegation is ABOUT
+# nonpayment in a way a discipline write-up is not.
+#
+# ``privacy`` is a subject a RECORD can be about while no MATTER can — a HIPAA
+# write-up would otherwise classify as "no subject detected" and fail open into
+# a wage-and-hour corpus. That was the reported bug (a behavioral-health tenant's
+# `hipaa` infraction type).
+#
+# Every probe here can only ever cause a record to be EXCLUDED, so a loose word
+# ("confidential", "records", "assault") would silently shrink a legal corpus —
+# "sexual assault" is an EEO record, not a safety one. Add a word only when the
+# word alone names the subject.
+_CLASSIFY_ONLY_KEYWORDS: dict[str, tuple[str, ...]] = {
+    # the "unpaid X" phrases restore the wage readings the bare-"unpaid"
+    # exclusion below would otherwise cost ("unpaid wages"/"unpaid overtime"
+    # already score on their second word)
+    "wage_hour": ("retaliat*", "unpaid work*", "unpaid time"),
+    "safety": ("wrongful death", "gunshot", "gun shot", "shooting", "homicide",
+               "decedent", "fatalit*", "fatally"),
+}
+_CLASSIFY_EXCLUDE_KEYWORDS: dict[str, frozenset] = {
+    "wage_hour": frozenset({"unpaid"}),
+}
+_OFF_THEORY_KEYWORDS: dict[str, tuple[str, ...]] = {
+    # "hippa" is not a typo here: it is THE typo — these probes read text users
+    # type into case titles, where that misspelling is common enough to name the
+    # subject as unambiguously as the correct spelling.
+    "privacy": ("hipaa", "hippa", "phi", "patient privacy", "patient record*",
+                "medical record*", "data breach", "protected health"),
+}
+
+_CLASSIFY_PROBES: dict[str, list[re.Pattern]] = {
+    **{slug: _compile_probes(
+           tuple(k for k in kws if k not in _CLASSIFY_EXCLUDE_KEYWORDS.get(slug, frozenset()))
+           + _CLASSIFY_ONLY_KEYWORDS.get(slug, ()))
+       for slug, kws in _THEORY_KEYWORDS.items()},
+    **{slug: _compile_probes(kws) for slug, kws in _OFF_THEORY_KEYWORDS.items()},
+}
+
+
+def _is_signalless(value, vocabulary, generic=frozenset()) -> bool:
+    """Does this category/type value tell us the record's subject? NULL doesn't;
+    a slug outside the source's known vocabulary doesn't (it is company-defined —
+    ``hipaa``, ``cardiac_catheterization_safety`` — and the allowlist was written
+    without it); a generic in-vocabulary bucket doesn't either. Anything else is
+    a human's explicit categorization and is never second-guessed by text."""
+    return not value or value in generic or value not in vocabulary
+
+
+def _matches_other_subject(text: str, theory_slug: str | None) -> bool:
+    """True only when ``text`` speaks clearly for a subject OTHER than the
+    matter's, and carries none of the matter's own keywords.
+
+    This is the single condition under which a signal-less record — company-
+    defined slug, NULL category, or a generic bucket — is dropped instead of
+    failing open. Both halves are load-bearing: the own-keyword short-circuit
+    keeps "off-the-clock work; FMLA retaliation" in a wage matter (it IS a wage
+    record, whatever else it mentions), and requiring a positive hit on another
+    subject keeps an unclassifiable record ("telehealth licensure renewal") in
+    every corpus. Ambiguity resolves to inclusion, always."""
+    if not theory_slug:
+        return False
+    t = (text or "").lower()
+    if any(p.search(t) for p in _CLASSIFY_PROBES[theory_slug]):
+        return False
+    return any(p.search(t)
+               for slug, probes in _CLASSIFY_PROBES.items() if slug != theory_slug
+               for p in probes)
+
+
+def _demote_off_subject(rows, slug: str | None, allowlist, vocabulary, cat_col: str,
+                        *text_cols: str, generic=frozenset()) -> list:
+    """Second pass over a themed source's rows: drop the ones whose category
+    couldn't be filtered in SQL and whose text is plainly about another subject.
+
+    Inert on the broad topic (``slug is None``) and on sources this theory
+    doesn't filter (``allowlist is None``), so it can never narrow a corpus the
+    SQL didn't already intend to narrow. The category is humanized into the
+    classified text — ``hipaa`` and ``cardiac_catheterization_safety`` name
+    their own subject, which is the only signal a company-defined slug carries."""
+    if not slug or allowlist is None:
+        return list(rows)
+    vocab = frozenset(vocabulary)   # rows × in-list scans → rows × O(1)
+    kept = []
+    for r in rows:
+        if _is_signalless(r[cat_col], vocab, generic):
+            text = " ".join([_hum(r[cat_col])] + [str(r[c] or "") for c in text_cols])
+            if _matches_other_subject(text, slug):
+                continue
+        kept.append(r)
+    return kept
 
 # matter_type -> theory when the allegation text is silent or ambiguous.
 # None = broad (no subject filter).
@@ -471,9 +604,16 @@ async def _src_incidents(conn, company_id, start, end, loc_id, state, topic=_BRO
 
 
 async def _src_er_cases(conn, company_id, start, end, loc_id, state, topic=_BROAD) -> list[dict]:
+    # The SQL allowlist can only see the category, and for ER that is frequently
+    # a bucket rather than a subject: "other" and "policy_violation" are in every
+    # theory's allowlist precisely because they might be about anything. A HIPAA
+    # or FMLA-interference case filed under either one passed the filter legally
+    # and landed in a wage-and-hour corpus. Where the category doesn't speak, the
+    # case text does — demote only on a clear other-subject read.
     rows = await conn.fetch(
         f"""
-        SELECT ec.id, ec.case_number, ec.title, ec.category, ec.status, ec.outcome, ec.created_at
+        SELECT ec.id, ec.case_number, ec.title, ec.description, ec.category,
+               ec.status, ec.outcome, ec.created_at
         FROM er_cases ec
         WHERE ec.company_id = $1
           AND ($2::date IS NULL OR ec.created_at >= $2)
@@ -484,6 +624,8 @@ async def _src_er_cases(conn, company_id, start, end, loc_id, state, topic=_BROA
         """,
         company_id, start, end, loc_id, state, topic.er, _ER_CATEGORIES,
     )
+    rows = _demote_off_subject(rows, topic.slug, topic.er, _ER_CATEGORIES, "category",
+                               "title", "description", generic=_GENERIC_ER_CATEGORIES)
     return [{
         "cid": f"er_case:{r['id']}",
         "ref": r["case_number"],
@@ -501,9 +643,11 @@ async def _src_compliance(conn, company_id, start, end, loc_id, state, topic=_BR
     # so the scope params bind $2/$3 here, not $4/$5.
     # The category vocabulary is NOT closed: compliance_service's Specialization
     # Research Wizard has Gemini mint snake_case keys outside CATEGORY_KEYS and
-    # writes them onto requirements. Those go through _topic_filter's passthrough
-    # arm rather than being dropped — a hospital's `cardiac_catheterization_safety`
-    # requirement belongs in a safety matter's corpus.
+    # writes them onto requirements. Those survive _topic_filter's passthrough
+    # arm — a hospital's `cardiac_catheterization_safety` requirement belongs in a
+    # safety matter's corpus — but they are then read as text: the same minted key
+    # naming a plainly different subject (`hipaa_privacy_notices` in a wage matter)
+    # is demoted. Unclassifiable keys still pass, as before.
     rows = await conn.fetch(
         f"""
         SELECT cr.id, cr.title, cr.category, cr.current_value, cr.jurisdiction_name,
@@ -518,6 +662,8 @@ async def _src_compliance(conn, company_id, start, end, loc_id, state, topic=_BR
         """,
         company_id, loc_id, state, topic.compliance, _COMPLIANCE_CATEGORIES,
     )
+    rows = _demote_off_subject(rows, topic.slug, topic.compliance, _COMPLIANCE_CATEGORIES,
+                              "category", "title")
     return [{
         "cid": f"compliance_req:{r['id']}",
         "ref": _hum(r["category"]),
@@ -532,9 +678,15 @@ async def _src_compliance(conn, company_id, start, end, loc_id, state, topic=_BR
 
 
 async def _src_discipline(conn, company_id, start, end, loc_id, state, topic=_BROAD) -> list[dict]:
+    # Infraction types are per-company configurable (discipline_policy_mapping),
+    # so _INFRACTIONS — the DEFAULTS — is a floor, not the vocabulary. A
+    # behavioral-health tenant's `hipaa` / `patient_safety` infractions are
+    # unknown here, passed the SQL filter as "company-defined", and filled a
+    # wage-and-hour corpus. The slug names its own subject; read it.
     rows = await conn.fetch(
         f"""
-        SELECT pd.id, pd.discipline_type, pd.infraction_type, pd.severity, pd.status, pd.issued_date
+        SELECT pd.id, pd.discipline_type, pd.infraction_type, pd.description,
+               pd.severity, pd.status, pd.issued_date
         FROM progressive_discipline pd
         JOIN employees e ON e.id = pd.employee_id
         WHERE pd.company_id = $1
@@ -546,6 +698,9 @@ async def _src_discipline(conn, company_id, start, end, loc_id, state, topic=_BR
         """,
         company_id, start, end, loc_id, state, topic.discipline, _INFRACTIONS,
     )
+    rows = _demote_off_subject(rows, topic.slug, topic.discipline, _INFRACTIONS,
+                               "infraction_type", "description",
+                               generic=_GENERIC_INFRACTIONS)
     return [{
         "cid": f"discipline:{r['id']}",
         "ref": _hum(r["discipline_type"]),
@@ -653,6 +808,8 @@ async def _src_compliance_alerts(conn, company_id, start, end, loc_id, state, to
         """,
         company_id, start, end, loc_id, state, topic.compliance, _COMPLIANCE_CATEGORIES,
     )
+    rows = _demote_off_subject(rows, topic.slug, topic.compliance, _COMPLIANCE_CATEGORIES,
+                               "category", "title")
     return [{
         "cid": f"compliance_alert:{r['id']}",
         "ref": _hum(r["category"]) or "Alert",
@@ -809,24 +966,30 @@ async def _gather_law_cached(conn, matter: dict, juris: dict, topic: _Topic = _B
     return law_src, bill_src
 
 
-async def _gather_case_law(conn, matter_id, state: str | None = None) -> dict | None:
+async def _gather_case_law(conn, matter_id, state: str | None = None,
+                           theory: str | None = None) -> dict | None:
     """Externally-researched case law from the most recent completed
     ``legal_matter_research`` run (see ``services/legal_research.py``).
     ``case:`` cids are minted only from these persisted CourtListener API
     rows — never from model text.
 
-    When ``state`` is given (the matter's currently-resolved jurisdiction
-    state), research runs recorded under a *different* state are skipped —
-    a matter whose location was corrected after research ran must not pair
-    the new jurisdiction's governing law with the old state's case law."""
+    A run must match the matter's CURRENT scope on both axes to be served.
+    ``state``: a matter whose location was corrected after research ran must not
+    pair the new jurisdiction's governing law with the old state's case law.
+    ``theory``: likewise for subject — a run made under another theory (or, for
+    rows predating the column, under none at all, when the search had no subject
+    anchor and could return an in-state case about anything) is stale for a
+    themed matter. Both degrade to "no case law" until research is re-run, which
+    is the honest answer; a broad matter still accepts any run, as it always has."""
     from .legal_research import parse_research_row  # lazy: legal_research imports from this module
 
     row = await conn.fetchrow(
         """SELECT cases, guidance, jurisdiction_state FROM legal_matter_research
              WHERE matter_id = $1 AND status = 'complete' AND cases IS NOT NULL
                AND ($2::varchar IS NULL OR jurisdiction_state IS NULL OR jurisdiction_state = $2)
+               AND ($3::varchar IS NULL OR theory = $3)
              ORDER BY created_at DESC LIMIT 1""",
-        matter_id, state,
+        matter_id, state, theory,
     )
     if not row or not row["cases"]:
         return None
@@ -962,7 +1125,7 @@ async def gather_evidence(conn, company_id, start, end, features: dict, matter: 
                 notes.append("Governing requirements (jurisdiction): unavailable")
         try:
             case_src = await _gather_case_law(
-                conn, matter.get("id"), (legal_context or {}).get("state"))
+                conn, matter.get("id"), (legal_context or {}).get("state"), theory)
             if case_src and case_src["records"]:
                 sources["case_law"] = case_src
         except Exception as e:  # noqa: BLE001
