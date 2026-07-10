@@ -126,6 +126,25 @@ def test_no_fabricated_westlaw_urls():
             assert "govt.westlaw.com" not in r["source_url"], r["citation"]
 
 
+def test_curated_cfr_rows_dont_collide_with_enumerated_parts():
+    """A curated CFR row (e.g. us-flsa's 29 CFR § 541.600) and an eCFR-enumerated
+    part must never cover the same (title, part) — the eCFR ingest cites it as
+    '29 CFR 541.600' while the curated row is '29 CFR § 541.600', so both would
+    materialize as two distinct authority items for one obligation, splitting its
+    classification and double-counting it in resolve. Guards adding a curated
+    part to FEDERAL_ECFR_PARTS (or vice versa) without deduping."""
+    enumerated = {(p.title, p.part) for p in FEDERAL_ECFR_PARTS}
+    cfr_re = re.compile(r"^(\d{2}) CFR § (\d+)")
+    for slug, rows in CURATED_ROWS.items():
+        for r in rows:
+            m = cfr_re.match(r["citation"])
+            if m:
+                coord = (int(m.group(1)), int(m.group(2)))
+                assert coord not in enumerated, (
+                    f"{r['citation']} in curated {slug} collides with enumerated part {coord}"
+                )
+
+
 def test_unknown_slug_lookups_return_none():
     assert federal_part_by_slug("nope") is None
     assert curated_index_by_slug("nope") is None

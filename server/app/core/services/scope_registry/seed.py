@@ -71,6 +71,9 @@ def _conditional(condition: Dict[str, Any], applies_to: List[str] | None = None,
 # citations in authority_parse's "29 CFR {part} Subpart {X}" form.
 SEED_CLASSIFICATIONS: Dict[str, Dict[str, Any]] = {
     # ── us-flsa: the federal wage-hour floor (all US employers, universal) ──
+    # national_minimum_wage is the platform's federal-canonical minimum-wage key
+    # (keys.normalize_key maps a federal-level 'general' rate to it) — the FLSA
+    # floor, not the intl reuse the key's name might suggest.
     "29 U.S.C. § 206": _universal(category_slug="minimum_wage", regulation_key="national_minimum_wage"),
     "29 U.S.C. § 207": _universal(category_slug="overtime", regulation_key="daily_weekly_overtime"),
     "29 U.S.C. § 213": _universal(category_slug="minimum_wage", regulation_key="exempt_salary_threshold"),
@@ -80,7 +83,8 @@ SEED_CLASSIFICATIONS: Dict[str, Dict[str, Any]] = {
     "Cal. Lab. Code § 515": _universal(category_slug="minimum_wage", regulation_key="exempt_salary_threshold"),
     "Cal. Lab. Code § 510": _universal(category_slug="overtime", regulation_key="daily_weekly_overtime"),
     "Cal. Lab. Code § 512": _universal(category_slug="meal_breaks", regulation_key="meal_break"),
-    "Cal. Lab. Code § 226.7": _universal(category_slug="meal_breaks", regulation_key="rest_break"),
+    "Cal. Lab. Code § 226.7(b)": _universal(category_slug="meal_breaks", regulation_key="rest_break"),
+    "Cal. Lab. Code § 226.7(c)": _universal(category_slug="meal_breaks", regulation_key="missed_break_penalty"),
     "Cal. Lab. Code § 201": _universal(category_slug="final_pay", regulation_key="final_pay_termination"),
     "Cal. Lab. Code § 202": _universal(category_slug="final_pay", regulation_key="final_pay_resignation"),
     "Cal. Lab. Code § 203": _universal(category_slug="final_pay", regulation_key="waiting_time_penalty"),

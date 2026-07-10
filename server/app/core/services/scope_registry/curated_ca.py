@@ -77,9 +77,19 @@ _CA_LABOR: List[CuratedRow] = [
         "hierarchy": {"code": "Labor Code", "part": "Wage & hour"},
         "source_url": _leginfo("LAB", "512"),
     },
+    # § 226.7 carries two distinct obligations, split into two authority items
+    # so each maps to its own regulation_key (one item = one key): (b) the
+    # no-work prohibition (rest_break anchor) and (c) the premium-pay penalty
+    # (missed_break_penalty). The operational rest rule itself is IWC Wage Order 12.
     {
-        "citation": "Cal. Lab. Code § 226.7",
-        "heading": "No work required during a meal/rest/recovery period; one hour's premium pay per day for each violation (the Labor Code rest-period anchor; the operational rest rule is IWC Wage Order 12)",
+        "citation": "Cal. Lab. Code § 226.7(b)",
+        "heading": "No work required during a meal/rest/recovery period (the Labor Code rest-period anchor; the operational rest rule is IWC Wage Order 12)",
+        "hierarchy": {"code": "Labor Code", "part": "Wage & hour"},
+        "source_url": _leginfo("LAB", "226.7"),
+    },
+    {
+        "citation": "Cal. Lab. Code § 226.7(c)",
+        "heading": "One additional hour of pay per workday for each meal/rest/recovery period not provided (the premium-pay penalty)",
         "hierarchy": {"code": "Labor Code", "part": "Wage & hour"},
         "source_url": _leginfo("LAB", "226.7"),
     },

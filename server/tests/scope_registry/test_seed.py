@@ -11,9 +11,12 @@ _CURATED_CITATIONS = {r["citation"] for rows in CURATED_ROWS.values() for r in r
 # Federal citations from authority_parse: "29 CFR 1910.147" / "29 CFR 825 Subpart A"
 _FEDERAL_RE = re.compile(r"^\d{2} CFR (?:\d+ Subpart [A-Z]+|\d+\.\d+)$")
 
-# Synthetic RKD covering the keys the seed cites (all confirmed present in the
-# real regulation_key_definitions). The real gate runs at apply time against
-# the live table; here we assert the proposals are well-formed + keyed right.
+# Synthetic RKD covering the keys the seed cites. NOTE: this is deliberately
+# NOT the veracity gate — asserting the seed against a hand-written dict is
+# circular (see test_seed_keys_match_the_real_registry below, which cross-checks
+# every seeded (category, key) against the canonical compliance_registry map so a
+# mis-categorized key that would silently degrade to uncodified at apply time
+# actually fails a test). This dict just drives validate_proposal well-formedness.
 _RKD = {
     "leave": {"fmla"},
     "workplace_safety": {"osha_general_duty", "injury_illness_recordkeeping"},
@@ -103,7 +106,8 @@ _CA_LABOR_SPINE = {
     "Cal. Lab. Code § 515": "exempt_salary_threshold",
     "Cal. Lab. Code § 510": "daily_weekly_overtime",
     "Cal. Lab. Code § 512": "meal_break",
-    "Cal. Lab. Code § 226.7": "rest_break",
+    "Cal. Lab. Code § 226.7(b)": "rest_break",
+    "Cal. Lab. Code § 226.7(c)": "missed_break_penalty",
     "Cal. Lab. Code § 201": "final_pay_termination",
     "Cal. Lab. Code § 202": "final_pay_resignation",
     "Cal. Lab. Code § 203": "waiting_time_penalty",
@@ -170,3 +174,35 @@ def test_all_core_labor_keys_are_mapped_or_explicitly_deferred():
     unmapped = core_keys - seeded_keys - _DEFERRED_CORE_KEYS
     # injury_illness_recordkeeping is seeded (29 CFR 1904 Subpart C).
     assert not unmapped, f"CORE_LABOR keys neither mapped nor deferred: {unmapped}"
+
+
+def test_seed_keys_match_the_real_registry():
+    """The non-circular veracity gate: every seeded (category_slug, regulation_key)
+    must agree with the canonical compliance_registry vocabulary the RKD migration
+    is generated from. A key stated under the wrong category degrades to NULL
+    (uncodified) at apply time — validate_proposal filters keys per category — so
+    without this cross-check a mis-categorized obligation silently falls into the
+    fetch queue while every hand-written-dict test stays green.
+
+    Only keys the registry actually tracks are checked; a key absent from the
+    registry entirely is out of scope here (it degrades by design, with a warning).
+    """
+    from app.core.compliance_registry import EXPECTED_REGULATION_KEYS
+
+    key_categories: dict[str, set[str]] = {}
+    for cat, keys in EXPECTED_REGULATION_KEYS.items():
+        for k in keys:
+            key_categories.setdefault(k, set()).add(cat)
+
+    mismatched = []
+    for citation, proposal in SEED_CLASSIFICATIONS.items():
+        key = proposal.get("regulation_key")
+        cat = proposal.get("category_slug")
+        if not key or not cat or key not in key_categories:
+            continue
+        if cat not in key_categories[key]:
+            mismatched.append(
+                f"{citation}: key {key!r} stated under {cat!r} but registry files it "
+                f"under {sorted(key_categories[key])}"
+            )
+    assert not mismatched, "seed category/key pairings disagree with the registry:\n" + "\n".join(mismatched)
