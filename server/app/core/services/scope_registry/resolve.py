@@ -28,6 +28,20 @@ from .jurisdiction_chain import resolve_jurisdiction_chain
 logger = logging.getLogger(__name__)
 
 
+def parse_jsonb(value: Any) -> Any:
+    """asyncpg returns JSONB as str on this pool — normalize to objects.
+
+    (workers/utils has an equivalent, but a core service importing from the
+    workers layer is the wrong direction.)
+    """
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except (TypeError, ValueError):
+            return None
+    return value
+
+
 def coordinate_hash(
     category_chain: List[str],
     jurisdiction_ids: List[Any],
@@ -77,12 +91,9 @@ def classification_matches(
     if disposition == "conditional":
         if applies and not (applies & chain):
             return False
-        condition = row.get("entity_condition")
-        if isinstance(condition, str):
-            try:
-                condition = json.loads(condition)
-            except (TypeError, ValueError):
-                return False
+        condition = parse_jsonb(row.get("entity_condition"))
+        if condition is None and row.get("entity_condition") is not None:
+            return False  # unparseable stored condition never silently applies
         return evaluate_trigger_conditions(condition, facility_attributes or {})
     return False
 
@@ -107,8 +118,12 @@ async def resolve_scope(
           "uncodified": [ {citation, heading, disposition, applies_to} ],   # fetch queue
           "counts":     {applicable, codified, uncodified, provisional, conditional_skipped},
           "unmodeled_coordinates": [ ... ],
-          "cache": "hit"|"miss"|"stale",
+          "cache": "hit"|"miss",
         }
+
+    ``provisional`` is deliberately chain-wide, not coordinate-filtered: it is
+    an authoring-work-remains signal for the preview, and filtering it to the
+    queried category would hide pending work from the admin.
 
     Company-wide resolution (per-location union off `business_locations` +
     roster-injected facility attributes) arrives with the commit-5 shadow.
@@ -159,6 +174,8 @@ async def resolve_scope(
         cache_state = "hit" if cached else "miss"
         # Cached counts prove reuse ("second warehouse = zero work"), but the
         # full item detail is cheap SQL — recompute the payload either way.
+        # stratum_ids tracking (serving wholly from cache) lands with the
+        # commit-5/6 read path.
 
     # One pass over confirmed classifications in the chain. Disposition and
     # exclude logic runs in Python (classification_matches) so the conditional
@@ -315,7 +332,7 @@ async def fetch_queue(
         where.append(f"(ai.jurisdiction_id IS NULL OR ai.jurisdiction_id = ANY(${len(params)}::uuid[]))")
 
     rows = [
-        dict(r)
+        {**dict(r), "entity_condition": parse_jsonb(r["entity_condition"])}
         for r in await conn.fetch(
             f"""
             SELECT c.item_id, c.disposition, c.applies_to_categories,

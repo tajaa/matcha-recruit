@@ -113,3 +113,14 @@ def test_hash_empty_attributes_equals_none():
     assert coordinate_hash(["warehousing"], ["j1"], {}) == coordinate_hash(
         ["warehousing"], ["j1"], None
     )
+
+
+# ── JSONB normalization ──────────────────────────────────────────────────────
+
+def test_parse_jsonb_normalizes_strings_and_passes_objects():
+    from app.core.services.scope_registry.resolve import parse_jsonb
+
+    assert parse_jsonb('{"op": "and", "conditions": []}') == {"op": "and", "conditions": []}
+    assert parse_jsonb({"already": "parsed"}) == {"already": "parsed"}
+    assert parse_jsonb(None) is None
+    assert parse_jsonb("{broken json") is None

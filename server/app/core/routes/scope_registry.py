@@ -25,6 +25,17 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _row_out(row) -> dict:
+    """dict(row) with entity_condition normalized — asyncpg returns JSONB as a
+    str on this pool, and the API must not leak strings where objects belong."""
+    from app.core.services.scope_registry.resolve import parse_jsonb
+
+    out = dict(row)
+    if "entity_condition" in out:
+        out["entity_condition"] = parse_jsonb(out["entity_condition"])
+    return out
+
+
 @router.get("/authority", dependencies=[Depends(require_admin)])
 async def list_authority_indexes():
     async with get_connection() as conn:
@@ -87,7 +98,7 @@ async def list_authority_items(
             """,
             *params,
         )
-    return {"slug": slug, "items": [dict(r) for r in rows]}
+    return {"slug": slug, "items": [_row_out(r) for r in rows]}
 
 
 @router.post("/authority/{slug}/classify", dependencies=[Depends(require_admin)])
@@ -148,7 +159,7 @@ async def list_strata():
             ORDER BY s.level, s.category_slug NULLS FIRST
             """
         )
-    return {"strata": [dict(r) for r in rows]}
+    return {"strata": [_row_out(r) for r in rows]}
 
 
 @router.get("/resolve", dependencies=[Depends(require_admin)])

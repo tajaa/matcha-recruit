@@ -118,7 +118,11 @@ async def apply_seed(conn) -> Dict[str, Any]:
     Missing citations are reported, not errors — the seed is written against
     the full commit-3 catalog, but an admin may ingest indexes one at a time.
     """
-    from .classify import _refresh_unclassified_count, _upsert_classification
+    from .classify import (
+        _refresh_unclassified_count,
+        _upsert_classification,
+        materialize_inherited_children,
+    )
 
     rkd = await fetch_rkd_keys_by_category(conn)
     applied = 0
@@ -155,7 +159,17 @@ async def apply_seed(conn) -> Dict[str, Any]:
         touched_indexes.add(row["authority_index_id"])
         applied += 1
 
+    # Seeding a subpart leaves its ingested child sections unclassified —
+    # materialize their inheritance now or they're unreachable (classify only
+    # targets unclassified items, and these have classified parents).
+    inherited = 0
     for index_id in touched_indexes:
+        inherited += await materialize_inherited_children(conn, index_id)
         await _refresh_unclassified_count(conn, index_id)
 
-    return {"applied": applied, "missing_citations": missing, "warnings": warnings}
+    return {
+        "applied": applied,
+        "inherited": inherited,
+        "missing_citations": missing,
+        "warnings": warnings,
+    }

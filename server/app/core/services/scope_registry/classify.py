@@ -165,13 +165,20 @@ async def _upsert_classification(
     inherits_from_item_id=None,
     confirmed_by=None,
 ) -> None:
+    # key_definition_id resolves inline from the (validated) regulation_key so
+    # the RKD FK is live, not dead weight. ORDER BY keeps the ambiguous case
+    # (same key in two categories, no category hint) deterministic.
     await conn.execute(
         """
         INSERT INTO authority_item_classifications
             (item_id, disposition, applies_to_categories, excludes_categories,
-             entity_condition, excluded_reason, regulation_key,
+             entity_condition, excluded_reason, regulation_key, key_definition_id,
              inherits_from_item_id, status, proposed_by, confirmed_by, confirmed_at)
-        VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11,
+        VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7,
+                (SELECT id FROM regulation_key_definitions
+                 WHERE key = $7 AND ($12::text IS NULL OR category_slug = $12)
+                 ORDER BY category_slug LIMIT 1),
+                $8, $9, $10, $11,
                 CASE WHEN $9 = 'confirmed' THEN NOW() ELSE NULL END)
         ON CONFLICT (item_id) DO UPDATE SET
             disposition = EXCLUDED.disposition,
@@ -180,6 +187,7 @@ async def _upsert_classification(
             entity_condition = EXCLUDED.entity_condition,
             excluded_reason = EXCLUDED.excluded_reason,
             regulation_key = EXCLUDED.regulation_key,
+            key_definition_id = EXCLUDED.key_definition_id,
             inherits_from_item_id = EXCLUDED.inherits_from_item_id,
             status = EXCLUDED.status,
             proposed_by = EXCLUDED.proposed_by,
@@ -197,6 +205,7 @@ async def _upsert_classification(
         status,
         proposed_by,
         confirmed_by,
+        normalized.get("category_slug"),
     )
 
 
@@ -214,6 +223,61 @@ async def _refresh_unclassified_count(conn, index_id) -> int:
         unclassified, index_id,
     )
     return int(unclassified)
+
+
+def child_classification_of(parent: Dict[str, Any]) -> Dict[str, Any]:
+    """The content a child section inherits from its parent's classification.
+
+    Everything copies except ``regulation_key`` — keys are per-obligation, not
+    inherited (a subpart's key would wrongly claim every section codified).
+    The set-based SQL in :func:`materialize_inherited_children` mirrors this
+    mapping; keep the two in sync.
+    """
+    return {
+        "disposition": parent["disposition"],
+        "applies_to_categories": list(parent.get("applies_to_categories") or []),
+        "excludes_categories": list(parent.get("excludes_categories") or []),
+        "entity_condition": parent.get("entity_condition"),
+        "excluded_reason": parent.get("excluded_reason"),
+        "regulation_key": None,
+        "category_slug": None,
+    }
+
+
+async def materialize_inherited_children(conn, index_id) -> int:
+    """Materialize inheriting rows for unclassified children of classified parents.
+
+    This is the NORMAL post-seed state, not an edge case: `apply_seed`
+    classifies subparts while their ingested child sections stay unclassified.
+    Without this sweep those children are unreachable — `classify_index` only
+    targets unclassified items, so a child whose parent is already classified
+    never gets a row and `unclassified_count` can never reach 0.
+
+    Children copy the parent's content AND its status/proposed_by/confirmed_by:
+    a confirmed parent's missing children must land confirmed, because the
+    confirm cascade would have caught them had the rows existed. Content
+    mapping mirrors :func:`child_classification_of`.
+    """
+    rows = await conn.fetch(
+        """
+        INSERT INTO authority_item_classifications
+            (item_id, disposition, applies_to_categories, excludes_categories,
+             entity_condition, excluded_reason, regulation_key, key_definition_id,
+             inherits_from_item_id, status, proposed_by, confirmed_by, confirmed_at)
+        SELECT child.id, pc.disposition, pc.applies_to_categories,
+               pc.excludes_categories, pc.entity_condition, pc.excluded_reason,
+               NULL, NULL,
+               pc.item_id, pc.status, pc.proposed_by, pc.confirmed_by, pc.confirmed_at
+        FROM authority_index_items child
+        JOIN authority_item_classifications pc ON pc.item_id = child.parent_item_id
+        LEFT JOIN authority_item_classifications cc ON cc.item_id = child.id
+        WHERE child.authority_index_id = $1 AND cc.id IS NULL
+        ON CONFLICT (item_id) DO NOTHING
+        RETURNING id
+        """,
+        index_id,
+    )
+    return len(rows)
 
 
 def _build_classify_prompt(
@@ -274,6 +338,11 @@ async def classify_index(conn, slug: str, *, proposed_by: str = "gemini") -> Dic
         raise ValueError(f"unknown authority index slug: {slug!r}")
     index = dict(index_row)
 
+    # Sweep first: children whose parents were classified in an earlier run
+    # (or by the seed) inherit now — otherwise they'd be unreachable below,
+    # which only targets unclassified items.
+    inherited = await materialize_inherited_children(conn, index["id"])
+
     items = [
         dict(r)
         for r in await conn.fetch(
@@ -288,7 +357,7 @@ async def classify_index(conn, slug: str, *, proposed_by: str = "gemini") -> Dic
         )
     ]
     if not items:
-        return {"slug": slug, "classified": 0, "inherited": 0, "warnings": [],
+        return {"slug": slug, "classified": 0, "inherited": inherited, "warnings": [],
                 "unclassified_count": await _refresh_unclassified_count(conn, index["id"])}
 
     # Classification targets: items with no parent (subparts + flat/curated
@@ -300,6 +369,13 @@ async def classify_index(conn, slug: str, *, proposed_by: str = "gemini") -> Dic
         pid = str(i["parent_item_id"]) if i["parent_item_id"] else None
         if pid and pid in by_id:
             children_by_target.setdefault(pid, []).append(i["citation"])
+
+    if not targets:
+        # Only children of still-unclassified parents remain — nothing Gemini
+        # can act on directly; don't waste the model call.
+        return {"slug": slug, "classified": 0, "inherited": inherited,
+                "warnings": ["no unclassified subpart-level targets"],
+                "unclassified_count": await _refresh_unclassified_count(conn, index["id"])}
 
     service = get_gemini_compliance_service()
     rkd = await fetch_rkd_keys_by_category(conn)
@@ -324,7 +400,6 @@ async def classify_index(conn, slug: str, *, proposed_by: str = "gemini") -> Dic
     }
 
     classified = 0
-    inherited = 0
     warnings: List[str] = []
     target_norm: Dict[str, Dict[str, Any]] = {}
 
@@ -348,10 +423,9 @@ async def classify_index(conn, slug: str, *, proposed_by: str = "gemini") -> Dic
     for i in items:
         pid = str(i["parent_item_id"]) if i["parent_item_id"] else None
         if pid and pid in target_norm:
-            child = dict(target_norm[pid])
-            child["regulation_key"] = None  # keys are per-obligation, not inherited
             await _upsert_classification(
-                conn, i["id"], child, proposed_by=proposed_by,
+                conn, i["id"], child_classification_of(target_norm[pid]),
+                proposed_by=proposed_by,
                 status="provisional", inherits_from_item_id=UUID(pid),
             )
             inherited += 1
@@ -374,24 +448,35 @@ async def confirm_classifications(conn, item_ids: List[UUID], admin_id: UUID) ->
     """
     from .strata import recompute_strata
 
-    result = await conn.fetch(
-        """
-        UPDATE authority_item_classifications
-        SET status = 'confirmed', confirmed_by = $2, confirmed_at = NOW()
-        WHERE (item_id = ANY($1::uuid[]) OR inherits_from_item_id = ANY($1::uuid[]))
-          AND status = 'provisional'
-        RETURNING id
-        """,
-        item_ids, admin_id,
-    )
-    strata = await recompute_strata(conn)
+    # One outer transaction so a recompute failure rolls the confirms back —
+    # confirmed rows must never sit unmaterialized. recompute_strata's own
+    # transaction nests as a savepoint.
+    async with conn.transaction():
+        result = await conn.fetch(
+            """
+            UPDATE authority_item_classifications
+            SET status = 'confirmed', confirmed_by = $2, confirmed_at = NOW()
+            WHERE (item_id = ANY($1::uuid[]) OR inherits_from_item_id = ANY($1::uuid[]))
+              AND status = 'provisional'
+            RETURNING id
+            """,
+            item_ids, admin_id,
+        )
+        strata = await recompute_strata(conn)
     return {"confirmed": len(result), "strata": strata}
 
 
 async def override_classification(
     conn, item_id: UUID, proposal: Dict[str, Any], admin_id: UUID
 ) -> Dict[str, Any]:
-    """Manual admin classification — gates still apply; lands confirmed."""
+    """Manual admin classification — gates still apply; lands confirmed.
+
+    Propagates to rows that still INHERIT from this item, so a subpart
+    override can't silently diverge from its sections. Deliberate per-section
+    overrides are protected by construction: an admin override writes
+    ``inherits_from_item_id = NULL`` (severing the link), so the propagation
+    target `inherits_from_item_id = item_id` never touches them.
+    """
     from .strata import recompute_strata
 
     rkd = await fetch_rkd_keys_by_category(conn)
@@ -405,13 +490,40 @@ async def override_classification(
     if not exists:
         raise ValueError(f"unknown authority item: {item_id}")
 
-    await _upsert_classification(
-        conn, item_id, normalized,
-        proposed_by="admin", status="confirmed", confirmed_by=admin_id,
-    )
-    index_id = await conn.fetchval(
-        "SELECT authority_index_id FROM authority_index_items WHERE id = $1", item_id
-    )
-    await _refresh_unclassified_count(conn, index_id)
-    strata = await recompute_strata(conn)
-    return {"item_id": str(item_id), "warnings": warnings, "strata": strata}
+    async with conn.transaction():
+        await _upsert_classification(
+            conn, item_id, normalized,
+            proposed_by="admin", status="confirmed", confirmed_by=admin_id,
+        )
+        # Re-materialize still-inheriting children from the new content
+        # (mirrors child_classification_of: everything copies except the key).
+        propagated = await conn.fetch(
+            """
+            UPDATE authority_item_classifications
+            SET disposition = $2, applies_to_categories = $3,
+                excludes_categories = $4, entity_condition = $5::jsonb,
+                excluded_reason = $6, regulation_key = NULL,
+                key_definition_id = NULL, status = 'confirmed',
+                proposed_by = 'admin', confirmed_by = $7, confirmed_at = NOW()
+            WHERE inherits_from_item_id = $1
+            RETURNING id
+            """,
+            item_id,
+            normalized["disposition"],
+            normalized["applies_to_categories"],
+            normalized["excludes_categories"],
+            json.dumps(normalized["entity_condition"]) if normalized["entity_condition"] else None,
+            normalized["excluded_reason"],
+            admin_id,
+        )
+        index_id = await conn.fetchval(
+            "SELECT authority_index_id FROM authority_index_items WHERE id = $1", item_id
+        )
+        await _refresh_unclassified_count(conn, index_id)
+        strata = await recompute_strata(conn)
+    return {
+        "item_id": str(item_id),
+        "propagated_to_children": len(propagated),
+        "warnings": warnings,
+        "strata": strata,
+    }

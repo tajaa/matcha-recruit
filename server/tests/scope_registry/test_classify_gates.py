@@ -150,3 +150,32 @@ def test_key_without_category_matches_any_category():
     })
     assert normalized["regulation_key"] == "fmla"
     assert warnings == []
+
+
+# ── inheritance content mapping ──────────────────────────────────────────────
+
+def test_child_classification_copies_everything_except_the_key():
+    """Sections inherit the subpart's classification content but never its
+    regulation_key — a subpart's key would wrongly claim every section
+    codified. materialize_inherited_children's SQL mirrors this mapping."""
+    from app.core.services.scope_registry.classify import child_classification_of
+
+    parent = {
+        "disposition": "conditional",
+        "applies_to_categories": ["healthcare"],
+        "excludes_categories": ["retail"],
+        "entity_condition": FMLA,
+        "excluded_reason": None,
+        "regulation_key": "fmla",
+        "category_slug": "leave",
+    }
+    child = child_classification_of(parent)
+    assert child["disposition"] == "conditional"
+    assert child["applies_to_categories"] == ["healthcare"]
+    assert child["excludes_categories"] == ["retail"]
+    assert child["entity_condition"] == FMLA
+    assert child["regulation_key"] is None
+    assert child["category_slug"] is None
+    # Defensive copies — mutating the child must not touch the parent.
+    child["applies_to_categories"].append("biotech")
+    assert parent["applies_to_categories"] == ["healthcare"]
