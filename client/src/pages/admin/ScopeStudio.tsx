@@ -21,6 +21,12 @@ import { api, ensureFreshToken } from '../../api/client'
 
 const BASE = import.meta.env.VITE_API_URL ?? '/api'
 
+// Research model tier (ported from the retired Specialization Research page).
+const MODEL_LABELS: Record<string, { label: string; model: string; color: string }> = {
+  light: { label: 'Light', model: 'Gemini 3 Flash', color: 'bg-blue-900/50 text-blue-300' },
+  heavy: { label: 'Pro', model: 'Gemini 3.1 Pro', color: 'bg-purple-900/50 text-purple-300' },
+}
+
 // Canonical industry slugs — what the matrix and /scope-registry/resolve expect.
 const INDUSTRIES = [
   { value: 'healthcare', label: 'Healthcare' },
@@ -312,6 +318,15 @@ export default function ScopeStudio() {
   } | null>(null)
   const abortRef = useRef<AbortController | null>(null)
 
+  // Research model tier (light/heavy) — display-only status, ported from the
+  // retired Specialization Research page.
+  const [modelMode, setModelMode] = useState<string>('light')
+  useEffect(() => {
+    api.get<{ jurisdiction_research_model_mode?: string }>('/admin/platform-settings')
+      .then((d) => setModelMode(d.jurisdiction_research_model_mode || 'light'))
+      .catch(() => {})
+  }, [])
+
   // ── Specialties for the current industry ──
   const loadSpecialties = useCallback(async () => {
     try {
@@ -592,12 +607,24 @@ export default function ScopeStudio() {
 
   return (
     <div className="mx-auto max-w-7xl p-6 text-zinc-200">
-      <div className="mb-6">
-        <h1 className="text-2xl font-semibold">Scope Studio</h1>
-        <p className="mt-1 text-sm text-zinc-400">
-          One coordinate → coverage matrix, the registry’s grounded resolution, and
-          derive → confirm → research the gap.
-        </p>
+      <div className="mb-6 flex items-start justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold">Scope Studio</h1>
+          <p className="mt-1 text-sm text-zinc-400">
+            One coordinate → coverage matrix, the registry’s grounded resolution, and
+            derive → confirm → research the gap.
+          </p>
+        </div>
+        {(() => {
+          const info = MODEL_LABELS[modelMode] || MODEL_LABELS.light
+          return (
+            <div className={`shrink-0 rounded-md px-2.5 py-1 text-xs font-medium ${info.color}`}
+                 title={`Research model: ${info.model}`}>
+              {info.label}
+              <span className="ml-1.5 hidden opacity-60 sm:inline">{info.model}</span>
+            </div>
+          )
+        })()}
       </div>
 
       {/* Coordinate bar */}
