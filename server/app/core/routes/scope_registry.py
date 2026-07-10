@@ -204,7 +204,7 @@ async def fetch_queue_endpoint(
 
 
 @router.get("/labor-scope", dependencies=[Depends(require_admin)])
-async def labor_scope_endpoint(state: str, city: Optional[str] = None):
+async def labor_scope_endpoint(state: Optional[str] = None, city: Optional[str] = None):
     """Per-jurisdiction labor scope for a generic employer — federal/state/city
     codified-vs-fetch split + the core-labor checklist + honest exhaustiveness.
 

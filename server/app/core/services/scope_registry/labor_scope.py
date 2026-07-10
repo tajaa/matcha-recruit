@@ -164,10 +164,21 @@ def build_exhaustiveness(index_rows: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 
 async def labor_scope(
-    conn, *, state: str, city: Optional[str] = None
+    conn, *, state: Optional[str] = None, city: Optional[str] = None
 ) -> Dict[str, Any]:
-    """Resolve the labor scope for a (state, city). See module docstring."""
-    jur = await resolve_jurisdiction_chain(conn, state.upper(), city)
+    """Resolve the labor scope for a (state, city). See module docstring.
+
+    ``state`` is optional: federal labor law is state-independent, so with no
+    state the chain is federal-only and the federal column resolves fully while
+    the state/city columns stay empty (prompt for a state).
+    """
+    if state and state.strip():
+        jur = await resolve_jurisdiction_chain(conn, state.strip().upper(), city)
+    else:
+        federal = await conn.fetchval(
+            "SELECT id FROM jurisdictions WHERE level::text = 'federal' LIMIT 1"
+        )
+        jur = {"ids": [federal] if federal else [], "state_found": False, "city_found": False}
     ids = jur["ids"]
 
     # ── core spine: present keys over the chain ────────────────────────────
@@ -279,7 +290,7 @@ async def labor_scope(
 
     return {
         "coordinate": {
-            "state": state.upper(),
+            "state": state.strip().upper() if state and state.strip() else None,
             "city": city,
             "state_found": jur["state_found"],
             "city_found": jur["city_found"],

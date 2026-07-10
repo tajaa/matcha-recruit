@@ -371,18 +371,21 @@ export default function ScopeStudio() {
   }, [industry, state, city, headcount, matrixNonce])
 
   // ── Labor scope (jurisdiction-only; NOT keyed on industry/headcount) ──
+  // Federal labor law is state-independent, so this loads with no state too —
+  // the federal column always resolves; state/city fill in once a state is set.
   useEffect(() => {
     let cancelled = false
-    if (!state.trim()) {
-      setLaborScope(null)
-      setLaborError(null)
-      return
-    }
     ;(async () => {
       try {
-        const params = new URLSearchParams({ state: state.trim().toUpperCase() })
-        if (city.trim()) params.set('city', city.trim())
-        const res = await api.get<LaborScopeResponse>(`/admin/scope-registry/labor-scope?${params.toString()}`)
+        const params = new URLSearchParams()
+        if (state.trim()) {
+          params.set('state', state.trim().toUpperCase())
+          if (city.trim()) params.set('city', city.trim())
+        }
+        const qs = params.toString()
+        const res = await api.get<LaborScopeResponse>(
+          `/admin/scope-registry/labor-scope${qs ? `?${qs}` : ''}`,
+        )
         if (!cancelled) {
           setLaborScope(res)
           setLaborError(null)
@@ -818,13 +821,11 @@ export default function ScopeStudio() {
       <div className="mt-4 rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
         <div className="mb-1 flex items-baseline justify-between">
           <div className="text-sm font-medium text-zinc-300">
-            Labor scope{laborScope ? ` — ${laborScope.coordinate.state}${laborScope.coordinate.city ? `, ${laborScope.coordinate.city}` : ''}` : ''}
+            Labor scope{laborScope?.coordinate.state ? ` — ${laborScope.coordinate.state}${laborScope.coordinate.city ? `, ${laborScope.coordinate.city}` : ''}` : ' — Federal'}
           </div>
           <div className="text-[11px] text-zinc-500">generic employer · federal + state + city</div>
         </div>
-        {!state.trim() ? (
-          <div className="text-xs text-zinc-500">Set a state to see the labor scope.</div>
-        ) : laborError ? (
+        {laborError ? (
           <div className="text-xs text-red-400">{laborError}</div>
         ) : !laborScope ? (
           <div className="text-xs text-zinc-500">Loading…</div>
@@ -867,6 +868,15 @@ export default function ScopeStudio() {
               {LEVEL_LABELS.map(([lvl, label]) => {
                 const data = laborScope.registry.levels[lvl]
                 const ex = laborScope.exhaustiveness[lvl]
+                // State/city need a state; federal is state-independent.
+                if (lvl !== 'federal' && !laborScope.coordinate.state) {
+                  return (
+                    <div key={lvl} className="rounded border border-dashed border-zinc-800 bg-zinc-950/40 p-3">
+                      <div className="mb-1.5 text-xs font-medium text-zinc-400">{label}</div>
+                      <div className="text-[11px] text-zinc-600">Set a state above to see {label.toLowerCase()} labor scope.</div>
+                    </div>
+                  )
+                }
                 const badge =
                   ex.basis === 'enumerated'
                     ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
