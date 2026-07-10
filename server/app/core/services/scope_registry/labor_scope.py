@@ -244,19 +244,37 @@ async def labor_scope(
         elif row["disposition"] in skipped:
             skipped[row["disposition"]] += 1
 
-    # Key-precise, most-local codified join (mirrors resolve.py).
+    # Key-precise, most-local codified join (mirrors resolve.py) + provenance:
+    # the stored value's own source/freshness and the codify-linkage timestamp,
+    # so a codified obligation shows WHY it's codified inline.
     keys = sorted({r["regulation_key"] for r in applicable if r["regulation_key"]})
     requirements_by_key: Dict[str, Dict[str, Any]] = {}
     if keys:
+        # scope_codifications may be absent on a DB without codify02 — degrade.
+        have_links = await conn.fetchval("SELECT to_regclass('public.scope_codifications')")
+        link_select = (
+            "sc.codified_at, sc.source AS codify_source"
+            if have_links else "NULL::timestamp AS codified_at, NULL::text AS codify_source"
+        )
+        link_join = (
+            """LEFT JOIN LATERAL (
+                   SELECT codified_at, source FROM scope_codifications s
+                   WHERE s.jurisdiction_requirement_id = jr.id
+                   ORDER BY codified_at DESC LIMIT 1
+               ) sc ON TRUE"""
+            if have_links else ""
+        )
         for req in await conn.fetch(
-            """
-            SELECT regulation_key, title, current_value, source_url,
-                   jurisdiction_level, jurisdiction_name
-            FROM jurisdiction_requirements
-            WHERE jurisdiction_id = ANY($1::uuid[])
-              AND regulation_key = ANY($2::text[])
-              AND COALESCE(status, 'active') = 'active'
-            ORDER BY CASE LOWER(jurisdiction_level)
+            f"""
+            SELECT jr.regulation_key, jr.title, jr.current_value, jr.source_url,
+                   jr.source_name, jr.jurisdiction_level, jr.jurisdiction_name,
+                   jr.last_verified_at, {link_select}
+            FROM jurisdiction_requirements jr
+            {link_join}
+            WHERE jr.jurisdiction_id = ANY($1::uuid[])
+              AND jr.regulation_key = ANY($2::text[])
+              AND COALESCE(jr.status, 'active') = 'active'
+            ORDER BY CASE LOWER(jr.jurisdiction_level)
                 WHEN 'city' THEN 0 WHEN 'county' THEN 1
                 WHEN 'state' THEN 2 ELSE 3 END
             """,

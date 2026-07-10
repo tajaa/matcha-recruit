@@ -116,10 +116,22 @@ type ResolveResult = {
 
 // ── Labor scope (jurisdiction-first, industry-agnostic) ──────────────────────
 
+type LaborScopeRequirement = {
+  title?: string | null
+  current_value?: string | null
+  source_url?: string | null
+  source_name?: string | null
+  jurisdiction_name?: string | null
+  jurisdiction_level?: string | null
+  last_verified_at?: string | null
+  codified_at?: string | null
+  codify_source?: string | null
+}
+
 type LaborScopeLevel = {
   codified: {
     citation: string; heading: string | null; regulation_key: string | null
-    requirement?: { title?: string | null } | null
+    requirement?: LaborScopeRequirement | null
   }[]
   uncodified: { citation: string; heading: string | null; regulation_key: string | null }[]
   counts: { codified: number; uncodified: number; provisional: number }
@@ -988,13 +1000,34 @@ export default function ScopeStudio() {
                         <summary className="cursor-pointer text-[10px] uppercase text-zinc-500">
                           Codified ({data.codified.length})
                         </summary>
-                        <ul className="mt-1 space-y-0.5">
-                          {data.codified.map((it) => (
-                            <li key={it.citation} className="text-[11px] text-zinc-400">
-                              <span className="font-mono text-emerald-300/80">{it.citation}</span>
-                              {it.requirement?.title ? ` — ${it.requirement.title}` : it.regulation_key ? ` — ${it.regulation_key}` : ''}
-                            </li>
-                          ))}
+                        <ul className="mt-1 space-y-1.5">
+                          {data.codified.map((it) => {
+                            const r = it.requirement
+                            const when = r?.codified_at ?? r?.last_verified_at
+                            return (
+                              <li key={it.citation} className="text-[11px] text-zinc-400">
+                                <div>
+                                  <span className="font-mono text-emerald-300/80">{it.citation}</span>
+                                  {r?.title ? ` — ${r.title}` : it.regulation_key ? ` — ${it.regulation_key}` : ''}
+                                </div>
+                                {r?.current_value && (
+                                  <div className="text-emerald-200/70">{r.current_value}</div>
+                                )}
+                                <div className="flex flex-wrap gap-x-2 text-[10px] text-zinc-500">
+                                  {r?.source_url ? (
+                                    <a href={r.source_url} target="_blank" rel="noreferrer"
+                                       className="text-cyan-400/70 hover:underline">
+                                      {r.source_name || 'source'}
+                                    </a>
+                                  ) : r?.source_name ? <span>{r.source_name}</span> : null}
+                                  {r?.jurisdiction_name && <span>{r.jurisdiction_name}</span>}
+                                  {when && (
+                                    <span>{r?.codified_at ? 'codified' : 'verified'} {when.slice(0, 10)}</span>
+                                  )}
+                                </div>
+                              </li>
+                            )
+                          })}
                         </ul>
                       </details>
                     )}
