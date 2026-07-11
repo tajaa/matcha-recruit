@@ -1,8 +1,10 @@
 """codify layer pure core — match_codifications + group_research_units. No DB."""
 from app.core.services.scope_registry.codify import (
+    build_citation_stamps,
     build_research_context,
     group_research_units,
     match_codifications,
+    select_primary_citation,
 )
 
 
@@ -121,3 +123,81 @@ def test_multi_jurisdiction_one_link_per_pair():
     )
     assert len(links) == 2
     assert {l["jurisdiction_id"] for l in links} == {"CA", "SF"}
+
+
+# ── select_primary_citation ────────────────────────────────────────────────
+
+def _cand(cite, item_id="i", level="federal", src="ecfr", hier=None):
+    return {"item_id": item_id, "citation": cite, "jurisdiction_level": level,
+            "source_type": src, "hierarchy": hier or {}}
+
+
+def test_select_primary_empty_is_none():
+    assert select_primary_citation([]) is None
+
+
+def test_select_primary_level_match_beats_regulation():
+    # A state statute should win over a federal regulation when the requirement
+    # is a state row — jurisdiction match is the top rule.
+    cands = [
+        _cand("29 CFR 541.600", level="federal", src="ecfr"),
+        _cand("Cal. Lab. Code § 515", level="state", src="curated"),
+    ]
+    got = select_primary_citation(cands, requirement_level="state")
+    assert got["citation"] == "Cal. Lab. Code § 515"
+
+
+def test_select_primary_regulation_over_statute_same_level():
+    # 29 CFR 541.600 (regulation, carries the dollar amount) beats 29 U.S.C. 213.
+    cands = [
+        _cand("29 U.S.C. § 213", level="federal", src="ecfr"),
+        _cand("29 CFR § 541.600", level="federal", src="ecfr"),
+    ]
+    got = select_primary_citation(cands, requirement_level="federal")
+    assert got["citation"] == "29 CFR § 541.600"
+
+
+def test_select_primary_deeper_hierarchy_wins():
+    cands = [
+        _cand("29 CFR 541", hier={"title": "29", "part": "541"}),
+        _cand("29 CFR 541.600", hier={"title": "29", "part": "541", "section": "600"}),
+    ]
+    got = select_primary_citation(cands, requirement_level="federal")
+    assert got["citation"] == "29 CFR 541.600"
+
+
+def test_select_primary_lexicographic_tiebreak_is_deterministic():
+    cands = [_cand("29 CFR 500.2"), _cand("29 CFR 500.1")]
+    assert select_primary_citation(cands, requirement_level="federal")["citation"] == "29 CFR 500.1"
+
+
+# ── build_citation_stamps ──────────────────────────────────────────────────
+
+def _link(rid, item_id, cite, src="ecfr", level="federal", slug="us-flsa"):
+    return {"jurisdiction_requirement_id": rid, "classification_id": "c",
+            "item_id": item_id, "citation": cite, "hierarchy": {},
+            "index_slug": slug, "source_type": src, "jurisdiction_level": level}
+
+
+def test_stamp_multi_classification_primary_plus_full_set():
+    links = [
+        _link("r1", "i_usc", "29 U.S.C. § 213"),
+        _link("r1", "i_cfr", "29 CFR § 541.600"),
+    ]
+    stamps = build_citation_stamps(links, {"r1": "federal"})
+    assert stamps["r1"]["statute_citation"] == "29 CFR § 541.600"  # regulation wins
+    assert stamps["r1"]["citation_item_id"] == "i_cfr"
+    cites = [v["citation"] for v in stamps["r1"]["verified_citations"]]
+    assert cites == ["29 CFR § 541.600", "29 U.S.C. § 213"]  # sorted, full set
+
+
+def test_stamp_dedupes_same_item_reached_twice():
+    links = [_link("r1", "i_cfr", "29 CFR § 541.600"),
+             _link("r1", "i_cfr", "29 CFR § 541.600")]
+    stamps = build_citation_stamps(links, {"r1": "federal"})
+    assert len(stamps["r1"]["verified_citations"]) == 1
+
+
+def test_stamp_skips_links_without_item_or_citation():
+    links = [{"jurisdiction_requirement_id": "r1", "item_id": None, "citation": None}]
+    assert build_citation_stamps(links, {}) == {}

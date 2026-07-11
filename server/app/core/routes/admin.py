@@ -5685,6 +5685,7 @@ class RequirementUpdate(BaseModel):
     effective_date: Optional[str] = None
     source_url: Optional[str] = None
     source_name: Optional[str] = None
+    statute_citation: Optional[str] = None
 
 
 @router.patch("/jurisdictions/requirements/{requirement_id}", dependencies=[Depends(require_admin)])
@@ -5706,6 +5707,12 @@ async def update_requirement(requirement_id: UUID, body: RequirementUpdate):
         set_parts.append("source_url_status = 'unchecked'")
         set_parts.append("source_checked_at = NULL")
 
+    # A hand-edited statute_citation is not registry-verified — only reconcile
+    # (against a real authority_index_item) may stamp a citation as verified.
+    if "statute_citation" in updates:
+        set_parts.append("citation_verified_at = NULL")
+        set_parts.append("citation_item_id = NULL")
+
     params.append(requirement_id)
     id_idx = len(params)
 
@@ -5716,6 +5723,7 @@ async def update_requirement(requirement_id: UUID, body: RequirementUpdate):
         RETURNING id, jurisdiction_id, requirement_key, category, jurisdiction_level, jurisdiction_name,
                   title, description, current_value, numeric_value,
                   source_url, source_url_status, source_name, effective_date, expiration_date,
+                  statute_citation, citation_verified_at,
                   previous_value, last_changed_at, last_verified_at, is_bookmarked,
                   sort_order, created_at, updated_at
     """
@@ -5747,6 +5755,8 @@ async def update_requirement(requirement_id: UUID, body: RequirementUpdate):
         "source_url": row["source_url"],
         "source_url_status": row["source_url_status"],
         "source_name": row["source_name"],
+        "statute_citation": row["statute_citation"],
+        "citation_verified_at": fmt_date(row["citation_verified_at"]),
         "effective_date": fmt_date(row["effective_date"]),
         "expiration_date": fmt_date(row["expiration_date"]),
         "previous_value": row["previous_value"],

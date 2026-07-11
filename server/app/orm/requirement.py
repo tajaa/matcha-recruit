@@ -123,6 +123,14 @@ class JurisdictionRequirement(TimestampMixin, Base):
     statute_citation: Mapped[Optional[str]] = mapped_column(
         String(500), nullable=True
     )
+    # citeverify01: registry-verified citation provenance. Verified =
+    # statute_citation set AND citation_verified_at set (stamped by reconcile).
+    citation_verified_at: Mapped[Optional[datetime]] = mapped_column(
+        nullable=True
+    )
+    citation_item_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
     fetch_hash: Mapped[Optional[str]] = mapped_column(
         String(64), nullable=True
     )

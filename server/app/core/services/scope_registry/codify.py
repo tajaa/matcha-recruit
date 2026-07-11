@@ -63,6 +63,109 @@ def match_codifications(
     return links
 
 
+# Registry source_type / slug heuristics for the regulation-over-statute rule.
+# The regulation carries the operative value (29 CFR 541.600 states the dollar
+# amount; 29 U.S.C. 213 only authorizes the exemption), so it's the citation an
+# admin should re-check first.
+def _is_regulation_citation(citation: str, source_type: Optional[str]) -> bool:
+    c = (citation or "").upper()
+    if " CFR " in c or " CCR " in c or "TITLE 8" in c or "TITLE 16" in c:
+        return True
+    if " U.S.C" in c or " USC " in c or "LAB. CODE" in c or "LABOR CODE" in c:
+        return False
+    # curated regulatory indexes (ca-title-8/16) vs statutory (us-flsa, ca-labor-code)
+    return (source_type or "") == "ecfr"
+
+
+def _hierarchy_depth(hierarchy: Any) -> int:
+    """How specific the citation is — section beats subpart beats part. Pure."""
+    if isinstance(hierarchy, str):
+        try:
+            hierarchy = json.loads(hierarchy)
+        except (ValueError, TypeError):
+            return 0
+    if not isinstance(hierarchy, dict):
+        return 0
+    return sum(1 for k in ("title", "part", "subpart", "section") if hierarchy.get(k))
+
+
+def select_primary_citation(
+    candidates: List[Dict[str, Any]], *, requirement_level: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """Pick the one citation that goes in ``statute_citation`` when several
+    classifications codify the same requirement key. Pure + deterministic.
+
+    Each candidate: ``{item_id, citation, hierarchy, index_slug, source_type,
+    jurisdiction_level}``. Precedence (highest first):
+      1. authority index jurisdiction level matches the requirement's level
+         (a state row's citation should be the state code, not federal CFR).
+      2. regulation over statute (the regulation carries the operative value).
+      3. deepest hierarchy (section > subpart > part).
+      4. lexicographic citation (stable tie-break for tests).
+    """
+    if not candidates:
+        return None
+    want_level = (requirement_level or "").lower()
+
+    def sort_key(c: Dict[str, Any]):
+        level_match = (c.get("jurisdiction_level") or "").lower() == want_level and bool(want_level)
+        return (
+            0 if level_match else 1,
+            0 if _is_regulation_citation(c.get("citation", ""), c.get("source_type")) else 1,
+            -_hierarchy_depth(c.get("hierarchy")),
+            c.get("citation") or "",
+        )
+
+    return sorted(candidates, key=sort_key)[0]
+
+
+def build_citation_stamps(
+    links: List[Dict[str, Any]],
+    requirement_levels: Optional[Dict[Any, str]] = None,
+) -> Dict[Any, Dict[str, Any]]:
+    """Collapse per-(classification×requirement) links carrying item metadata into
+    a per-requirement stamp: the primary ``statute_citation`` + ``citation_item_id``
+    plus the full ``verified_citations`` set for ``metadata``. Pure.
+
+    Each link must carry ``jurisdiction_requirement_id`` and item fields
+    (``item_id``, ``citation``, ``hierarchy``, ``index_slug``, ``source_type``,
+    ``jurisdiction_level``). ``requirement_levels`` maps requirement id → its
+    ``jurisdiction_level`` (drives the level-match rule in select_primary_citation).
+    """
+    requirement_levels = requirement_levels or {}
+    by_req: Dict[Any, List[Dict[str, Any]]] = {}
+    for link in links:
+        rid = link.get("jurisdiction_requirement_id")
+        if rid is None or not link.get("item_id") or not link.get("citation"):
+            continue
+        by_req.setdefault(rid, []).append(link)
+
+    stamps: Dict[Any, Dict[str, Any]] = {}
+    for rid, cands in by_req.items():
+        # de-dupe on item_id (same citation reached via two classifications)
+        seen: Dict[Any, Dict[str, Any]] = {}
+        for c in cands:
+            seen.setdefault(c["item_id"], c)
+        uniq = list(seen.values())
+        primary = select_primary_citation(uniq, requirement_level=requirement_levels.get(rid))
+        if primary is None:
+            continue
+        verified = sorted(
+            (
+                {"citation": c["citation"], "item_id": str(c["item_id"]),
+                 "index_slug": c.get("index_slug")}
+                for c in uniq
+            ),
+            key=lambda v: v["citation"],
+        )
+        stamps[rid] = {
+            "statute_citation": primary["citation"],
+            "citation_item_id": primary["item_id"],
+            "verified_citations": verified,
+        }
+    return stamps
+
+
 async def chain_uncodified(
     conn, *, state: Optional[str] = None, city: Optional[str] = None,
     labor_only: bool = True,
@@ -243,7 +346,9 @@ async def reconcile_codifications(
     classifications = [
         dict(r) for r in await conn.fetch(
             f"""
-            SELECT c.id, c.regulation_key, c.key_definition_id
+            SELECT c.id, c.regulation_key, c.key_definition_id,
+                   i.id AS item_id, i.citation, i.hierarchy,
+                   ai.slug AS index_slug, ai.source_type, ai.level AS jurisdiction_level
             FROM authority_item_classifications c
             JOIN authority_index_items i ON i.id = c.item_id
             JOIN authority_indexes ai ON ai.id = i.authority_index_id
@@ -262,7 +367,8 @@ async def reconcile_codifications(
     requirement_rows = [
         dict(r) for r in await conn.fetch(
             f"""
-            SELECT id, regulation_key, jurisdiction_id, category
+            SELECT id, regulation_key, jurisdiction_id, category,
+                   jurisdiction_level, statute_citation, citation_verified_at
             FROM jurisdiction_requirements
             WHERE {' AND '.join(req_where)}
             """,
@@ -308,6 +414,62 @@ async def reconcile_codifications(
         inserted = sum(1 for r in result if r["inserted"])
         updated = len(result) - inserted
 
+    # Stamp verified citations onto the requirement rows. The citation comes from
+    # the classification's authority_index_item — verified by construction, never
+    # from model free-recall. Registry wins over a hand-edited citation (the
+    # overwrite is counted, not silent).
+    class_meta = {c["id"]: c for c in classifications}
+    req_levels = {r["id"]: r.get("jurisdiction_level") for r in requirement_rows}
+    # A prior manual citation = citation present but never registry-verified.
+    manual_before = {
+        r["id"] for r in requirement_rows
+        if r.get("statute_citation") and r.get("citation_verified_at") is None
+    }
+    stamp_links = []
+    for link in links:
+        meta = class_meta.get(link["classification_id"], {})
+        stamp_links.append({**link, **{
+            "item_id": meta.get("item_id"),
+            "citation": meta.get("citation"),
+            "hierarchy": meta.get("hierarchy"),
+            "index_slug": meta.get("index_slug"),
+            "source_type": meta.get("source_type"),
+            "jurisdiction_level": meta.get("jurisdiction_level"),
+        }})
+    stamps = build_citation_stamps(stamp_links, req_levels)
+
+    citations_stamped = 0
+    overwrote_manual = 0
+    if stamps:
+        req_ids = list(stamps.keys())
+        citations = [stamps[r]["statute_citation"] for r in req_ids]
+        item_ids = [stamps[r]["citation_item_id"] for r in req_ids]
+        verified_json = [
+            json.dumps({"verified_citations": stamps[r]["verified_citations"]})
+            for r in req_ids
+        ]
+        await conn.execute(
+            """
+            UPDATE jurisdiction_requirements AS jr
+            SET statute_citation = t.citation,
+                citation_item_id = t.item_id,
+                citation_verified_at = NOW(),
+                metadata = COALESCE(jr.metadata, '{}'::jsonb) || t.verified::jsonb
+            FROM unnest($1::uuid[], $2::text[], $3::uuid[], $4::jsonb[])
+                AS t(req_id, citation, item_id, verified)
+            WHERE jr.id = t.req_id
+            """,
+            req_ids, citations, item_ids, verified_json,
+        )
+        citations_stamped = len(stamps)
+        overwrote_manual = sum(
+            1 for rid in stamps
+            if rid in manual_before
+            and stamps[rid]["statute_citation"] != next(
+                (r.get("statute_citation") for r in requirement_rows if r["id"] == rid), None
+            )
+        )
+
     matched_classification_ids = {link["classification_id"] for link in links}
     unmatched_keys = sorted({
         c["regulation_key"] for c in classifications
@@ -320,4 +482,6 @@ async def reconcile_codifications(
         "inserted": inserted,
         "updated": updated,
         "unmatched_keys": unmatched_keys,
+        "citations_stamped": citations_stamped,
+        "overwrote_manual": overwrote_manual,
     }
