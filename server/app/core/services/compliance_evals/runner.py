@@ -275,6 +275,14 @@ async def run_evals(
             for f in all_findings:
                 if f.get("severity") != "critical":
                     continue
+                # Baseline scores the federal + CA-state BASE layer; its criticals
+                # are a data-side signal on those jurisdictions, not a per-company
+                # gate. Folding them into critical_by_jur would (a) block CA-state's
+                # every-industry composite the moment a base-layer key is missing and
+                # (b) do nothing for federal (excluded from jur_ids). Keep baseline
+                # out of the onboarding-readiness gate — it has its own scorecard.
+                if f.get("suite") == "baseline":
+                    continue
                 jid = f.get("jurisdiction_id")
                 if jid is None:
                     continue
@@ -474,6 +482,7 @@ async def onboarding_readiness(
             """
             SELECT COUNT(*) FROM compliance_eval_findings
             WHERE jurisdiction_id = $1 AND status = 'open' AND severity = 'critical'
+              AND suite <> 'baseline'
               AND (industry IS NULL OR industry = $2)
             """,
             jid, canonical,

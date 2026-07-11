@@ -1791,8 +1791,9 @@ async def get_company_gap_dashboard(
                 SELECT id FROM jurisdictions
                 WHERE (level::text = 'federal' AND COALESCE(country_code,'US') = 'US')
                    OR (level::text = 'state' AND state IN (
-                        SELECT DISTINCT state FROM business_locations
-                        WHERE company_id = $1 AND state IS NOT NULL))
+                        SELECT DISTINCT UPPER(state) FROM business_locations
+                        WHERE company_id = $1 AND state IS NOT NULL
+                          AND is_active = TRUE))
                 """,
                 company_id,
             )

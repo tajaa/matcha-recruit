@@ -10,45 +10,20 @@ is whether the base layer itself exists, since every city inherits it. A master-
 key with no matching catalog row for that jurisdiction is a critical
 `baseline_missing_key` finding carrying the citation to research next.
 
-Read-only over the catalog. The diff (`diff_masterlist`) is pure and unit-tests
-without a DB.
+Read-only over the catalog. The per-jurisdiction resolve→diff (`baseline_scorecard`)
+is shared by the suite and the admin checklist endpoint so the two can never report a
+different number for "is this base layer done?".
 """
 from __future__ import annotations
 
 import logging
 from typing import Any, Dict, List, Optional, Tuple
 
-from .baseline_masterlist import (
-    BASELINE_JURISDICTIONS,
-    BaselineObligation,
-    masterlist_keys,
-)
-from .golden import _rows_for
+from .baseline_masterlist import BASELINE_JURISDICTIONS, BaselineObligation
+from .golden import GoldenJurisdiction, _resolve_jurisdiction_id, _rows_for
 from .scoring import baseline_score
 
 logger = logging.getLogger(__name__)
-
-
-async def resolve_baseline_jid(conn, spec: Dict[str, Any]) -> Optional[Any]:
-    """Resolve a baseline spec to a jurisdiction id — US-pinned.
-
-    NOT golden._resolve_jurisdiction_id: that resolves federal as
-    ``level IN ('federal','national') LIMIT 1``, which can return a foreign
-    ``national`` row (UK/Mexico/Singapore all share that level). The baseline is US
-    labor law, so federal must pin ``country_code='US'``.
-    """
-    if spec["level"] == "federal":
-        row = await conn.fetchrow(
-            "SELECT id FROM jurisdictions WHERE level::text = 'federal' "
-            "AND COALESCE(country_code,'US') = 'US' LIMIT 1"
-        )
-    else:  # state
-        row = await conn.fetchrow(
-            "SELECT id FROM jurisdictions WHERE level::text = 'state' "
-            "AND state = $1 AND COALESCE(country_code,'US') = 'US' LIMIT 1",
-            spec.get("state"),
-        )
-    return row["id"] if row else None
 
 
 def diff_masterlist(
@@ -64,35 +39,62 @@ def diff_masterlist(
     return present, missing
 
 
+def _checklist_items(entries: List[BaselineObligation], present_keys: set) -> List[Dict]:
+    return [
+        {"category": e.category, "key": e.key, "citation": e.citation,
+         "authority_url": e.authority_url, "applies_note": e.applies_note,
+         "present": f"{e.category}:{e.key}" in present_keys}
+        for e in entries
+    ]
+
+
+async def baseline_scorecard(conn) -> List[Dict[str, Any]]:
+    """Resolve + score each base jurisdiction against the master-list — the single
+    shared computation behind both the eval suite and the admin checklist endpoint.
+
+    Returns one dict per spec: ``{spec, jid, entries, present, missing, expected,
+    score, items}``. ``jid`` is None when the jurisdiction row doesn't exist.
+    """
+    out: List[Dict[str, Any]] = []
+    for spec in BASELINE_JURISDICTIONS:
+        gj = GoldenJurisdiction(level=spec["level"], state=spec.get("state"))
+        jid = await _resolve_jurisdiction_id(conn, gj)
+        entries = spec["entries"]
+        present_keys = set((await _rows_for(conn, jid)).keys()) if jid is not None else set()
+        present, missing = diff_masterlist(entries, present_keys)
+        out.append({
+            "spec": spec, "jid": jid, "entries": entries,
+            "present": present, "missing": missing,
+            "expected": len(entries),
+            "score": baseline_score(len(present), len(missing)),
+            "items": _checklist_items(entries, present_keys),
+        })
+    return out
+
+
 async def run_baseline(conn) -> Dict:
     """Score the federal + CA-state jurisdictions against the labor master-list.
 
-    Returns ``{results: {jid: {score, detail}}, findings, totals}``. Missing keys are
-    ``critical`` findings and block the readiness gate through the runner's
-    open-critical count — same path every suite uses.
+    Returns ``{results: {jid: {score, detail}}, findings, totals}``. Misses are
+    ``critical`` findings, but baseline is a base-layer measure with its OWN
+    scorecard — the runner deliberately does NOT fold baseline criticals into any
+    per-(jurisdiction, industry) onboarding-readiness gate (that would let a base-layer
+    gap flip a company's readiness; Step 1 is admin/data-side only).
     """
     findings: List[Dict] = []
     results: Dict = {}
     totals: Dict[str, int] = {}
 
-    for spec in BASELINE_JURISDICTIONS:
-        jid = await resolve_baseline_jid(conn, spec)
+    for card in await baseline_scorecard(conn):
+        spec, jid = card["spec"], card["jid"]
+        slug = spec["slug"]
+        totals[f"{slug}_expected"] = card["expected"]
+        totals[f"{slug}_present"] = len(card["present"])
         if jid is None:
             logger.warning("baseline: jurisdiction not found for %s", spec["label"])
             continue
 
-        # OWN rows only, indexed exactly like golden (category:normalized_key).
-        catalog = await _rows_for(conn, jid)  # {f"{cat}:{normkey}": row}
-        present_keys = set(catalog.keys())
-
-        entries = spec["entries"]
-        present, missing = diff_masterlist(entries, present_keys)
-
-        label = spec["label"]
-        totals[f"{label}_expected"] = len(entries)
-        totals[f"{label}_present"] = len(present)
-
-        for e in missing:
+        for e in card["missing"]:
             findings.append({
                 "suite": "baseline", "finding_type": "baseline_missing_key",
                 "severity": "critical",
@@ -103,20 +105,11 @@ async def run_baseline(conn) -> Dict:
             })
 
         results[jid] = {
-            "score": baseline_score(len(present), len(missing)),
-            "detail": {"label": label, "expected": len(entries),
-                       "present": len(present), "missing": len(missing),
-                       "missing_keys": [f"{e.category}:{e.key}" for e in missing]},
+            "score": card["score"],
+            "detail": {"label": spec["label"], "slug": slug,
+                       "expected": card["expected"], "present": len(card["present"]),
+                       "missing": len(card["missing"]),
+                       "missing_keys": [f"{e.category}:{e.key}" for e in card["missing"]]},
         }
 
     return {"results": results, "findings": findings, "totals": totals}
-
-
-def baseline_checklist(entries: List[BaselineObligation], present_keys: set) -> List[Dict]:
-    """Per-entry present/missing list for the admin checklist endpoint. Pure."""
-    return [
-        {"category": e.category, "key": e.key, "citation": e.citation,
-         "authority_url": e.authority_url, "applies_note": e.applies_note,
-         "present": f"{e.category}:{e.key}" in present_keys}
-        for e in entries
-    ]

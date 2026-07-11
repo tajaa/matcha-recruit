@@ -183,17 +183,62 @@ function severityBadge(severity: string) {
  * expects 201 keys for manufacturing, which nobody can check by hand, so a wrong
  * expectation set would never be spotted. Every row here is individually auditable.
  */
-function CoreChecklistPanel({ checklist }: { checklist: CoreChecklist }) {
+/** Shared ✓/✗ checklist grouped by category. Used by both the Core and Baseline
+ * checklists so their styling + a11y can't drift. `linkFor` optionally turns each
+ * key into an authority link (Baseline); omit it for a plain label (Core). */
+type ChecklistRow = { category: string; key: string; present: boolean }
+
+function ChecklistByCategory<T extends ChecklistRow>({
+  items,
+  linkFor,
+}: {
+  items: T[]
+  linkFor?: (item: T) => { href: string; title?: string } | undefined
+}) {
   const byCategory = useMemo(() => {
-    const groups = new Map<string, CoreChecklist['items']>()
-    for (const item of checklist.items) {
+    const groups = new Map<string, T[]>()
+    for (const item of items) {
       const bucket = groups.get(item.category)
       if (bucket) bucket.push(item)
       else groups.set(item.category, [item])
     }
     return [...groups.entries()]
-  }, [checklist])
+  }, [items])
 
+  return (
+    <div className="grid gap-x-6 gap-y-2 sm:grid-cols-2">
+      {byCategory.map(([category, rows]) => (
+        <div key={category}>
+          <p className="text-[10px] uppercase tracking-wider text-zinc-500 mb-0.5">{category}</p>
+          <ul>
+            {rows.map((item) => {
+              const link = linkFor?.(item)
+              const keyClass = item.present ? 'text-zinc-400' : 'text-red-300'
+              return (
+                <li key={item.key} className="flex items-baseline gap-1.5 text-xs">
+                  <span aria-hidden className={item.present ? 'text-emerald-400' : 'text-red-400'}>
+                    {item.present ? '✓' : '✗'}
+                  </span>
+                  {link ? (
+                    <a href={link.href} target="_blank" rel="noreferrer"
+                       className={`${keyClass} hover:underline`} title={link.title}>
+                      {item.key}
+                    </a>
+                  ) : (
+                    <span className={keyClass}>{item.key}</span>
+                  )}
+                  <span className="sr-only">{item.present ? 'present' : 'missing'}</span>
+                </li>
+              )
+            })}
+          </ul>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function CoreChecklistPanel({ checklist }: { checklist: CoreChecklist }) {
   return (
     <div className="border border-zinc-800 rounded-lg p-3">
       <div className="flex items-center justify-between mb-2">
@@ -204,29 +249,7 @@ function CoreChecklistPanel({ checklist }: { checklist: CoreChecklist }) {
           {checklist.present}/{checklist.total}
         </p>
       </div>
-      <div className="grid gap-x-6 gap-y-2 sm:grid-cols-2">
-        {byCategory.map(([category, items]) => (
-          <div key={category}>
-            <p className="text-[10px] uppercase tracking-wider text-zinc-500 mb-0.5">{category}</p>
-            <ul>
-              {items.map((item) => (
-                <li key={item.key} className="flex items-baseline gap-1.5 text-xs">
-                  <span
-                    aria-hidden
-                    className={item.present ? 'text-emerald-400' : 'text-red-400'}
-                  >
-                    {item.present ? '✓' : '✗'}
-                  </span>
-                  <span className={item.present ? 'text-zinc-400' : 'text-red-300'}>
-                    {item.key}
-                  </span>
-                  <span className="sr-only">{item.present ? 'present' : 'missing'}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        ))}
-      </div>
+      <ChecklistByCategory items={checklist.items} />
     </div>
   )
 }
@@ -248,52 +271,29 @@ function BaselinePanel() {
     <div className="space-y-4">
       <p className="text-xs text-zinc-500">
         The enumerated federal + CA-state labor obligations a general employer owes, scored against
-        each base jurisdiction's own catalog. Every miss is a critical gap carrying the citation to
-        research next — the checkable answer to "is federal/state actually done?".
+        each base jurisdiction's own catalog. Every miss is a gap carrying the citation to research
+        next — the checkable answer to "is federal/state actually done?".
       </p>
-      {data.map((jur) => {
-        const byCategory = [...jur.items.reduce((m, i) => {
-          const b = m.get(i.category); if (b) b.push(i); else m.set(i.category, [i]); return m
-        }, new Map<string, BaselineItem[]>()).entries()]
-        return (
-          <div key={jur.label} className="border border-zinc-800 rounded-lg p-3">
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-sm font-medium text-zinc-200">{jur.label}</p>
-              <p className={`text-sm font-bold ${scoreColor(jur.score)}`}>
-                {jur.present}/{jur.expected}
-              </p>
-            </div>
-            {!jur.jurisdiction_found && (
-              <p className="text-[11px] text-amber-400 mb-2">No jurisdiction record found.</p>
-            )}
-            <div className="grid gap-x-6 gap-y-2 sm:grid-cols-2">
-              {byCategory.map(([category, items]) => (
-                <div key={category}>
-                  <p className="text-[10px] uppercase tracking-wider text-zinc-500 mb-0.5">{category}</p>
-                  <ul>
-                    {items.map((item) => (
-                      <li key={item.key} className="flex items-baseline gap-1.5 text-xs">
-                        <span aria-hidden className={item.present ? 'text-emerald-400' : 'text-red-400'}>
-                          {item.present ? '✓' : '✗'}
-                        </span>
-                        <a
-                          href={item.authority_url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className={`${item.present ? 'text-zinc-400' : 'text-red-300'} hover:underline`}
-                          title={`${item.citation}${item.applies_note ? ' — ' + item.applies_note : ''}`}
-                        >
-                          {item.key}
-                        </a>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ))}
-            </div>
+      {data.map((jur) => (
+        <div key={jur.label} className="border border-zinc-800 rounded-lg p-3">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-sm font-medium text-zinc-200">{jur.label}</p>
+            <p className={`text-sm font-bold ${scoreColor(jur.score)}`}>
+              {jur.present}/{jur.expected}
+            </p>
           </div>
-        )
-      })}
+          {!jur.jurisdiction_found && (
+            <p className="text-[11px] text-amber-400 mb-2">No jurisdiction record found.</p>
+          )}
+          <ChecklistByCategory
+            items={jur.items}
+            linkFor={(i) => ({
+              href: i.authority_url,
+              title: `${i.citation}${i.applies_note ? ' — ' + i.applies_note : ''}`,
+            })}
+          />
+        </div>
+      ))}
     </div>
   )
 }

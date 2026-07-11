@@ -64,16 +64,11 @@ async def baseline_readiness_for_chain(conn, jurisdiction_ids: List[Any]) -> Lis
         """,
         jurisdiction_ids,
     )
+    from .resolve import parse_jsonb
+
     out: List[Dict[str, Any]] = []
     for r in rows:
-        detail = r["detail"]
-        if isinstance(detail, str):
-            import json
-            try:
-                detail = json.loads(detail)
-            except Exception:
-                detail = {}
-        detail = detail or {}
+        detail = parse_jsonb(r["detail"]) or {}
         out.append({
             "jurisdiction_id": str(r["jurisdiction_id"]),
             "label": detail.get("label") or r["display_name"],

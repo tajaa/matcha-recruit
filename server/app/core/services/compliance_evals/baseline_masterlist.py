@@ -65,7 +65,9 @@ FEDERAL_LABOR_MASTERLIST: List[BaselineObligation] = [
     BaselineObligation("daily_weekly_overtime", "overtime",
                        "29 U.S.C. § 207", _lii_usc(29, "207"),
                        "1.5× regular rate over 40 hrs/week"),
-    BaselineObligation("exempt_salary_threshold", "overtime",
+    # Filed under minimum_wage (not overtime) to match the catalog's canonical home
+    # for this obligation (scope_registry/seed.py maps 29 CFR 541 → minimum_wage).
+    BaselineObligation("exempt_salary_threshold", "minimum_wage",
                        "29 C.F.R. Part 541", _ecfr(29, "541"),
                        "white-collar exemption salary + duties tests"),
     BaselineObligation("flsa_recordkeeping", "employee_classification",
@@ -160,7 +162,7 @@ CA_STATE_LABOR_MASTERLIST: List[BaselineObligation] = [
     BaselineObligation("daily_weekly_overtime", "overtime",
                        "Cal. Lab. Code § 510", _leginfo("LAB", "510"),
                        "daily OT >8h, double time >12h, 7th-day"),
-    BaselineObligation("exempt_salary_threshold", "overtime",
+    BaselineObligation("exempt_salary_threshold", "minimum_wage",
                        "Cal. Lab. Code § 515", _leginfo("LAB", "515")),
     BaselineObligation("meal_break", "meal_breaks",
                        "Cal. Lab. Code § 512", _leginfo("LAB", "512")),
@@ -214,16 +216,20 @@ CA_STATE_LABOR_MASTERLIST: List[BaselineObligation] = [
 
 
 def masterlist_keys(entries: List[BaselineObligation]) -> Dict[str, FrozenSet[str]]:
-    """Flatten a master-list to `{category: frozenset(keys)}` for the eval diff."""
+    """Flatten a master-list to `{category: frozenset(keys)}`. Used by the vocabulary
+    test (every key must exist in EXPECTED_REGULATION_KEYS[category])."""
     out: Dict[str, set] = {}
     for e in entries:
         out.setdefault(e.category, set()).add(e.key)
     return {cat: frozenset(keys) for cat, keys in out.items()}
 
 
-# Convenience: the two jurisdictions the baseline suite scores, by resolver spec.
+# The jurisdictions the baseline suite scores. `slug` is the STABLE key used for
+# totals + result detail (display `label` may change; slug must not — downstream
+# reads `federal_present` etc.).
 BASELINE_JURISDICTIONS = (
-    {"level": "federal", "label": "US Federal", "entries": FEDERAL_LABOR_MASTERLIST},
-    {"level": "state", "state": "CA", "label": "California",
+    {"slug": "federal", "level": "federal", "label": "US Federal",
+     "entries": FEDERAL_LABOR_MASTERLIST},
+    {"slug": "ca", "level": "state", "state": "CA", "label": "California",
      "entries": CA_STATE_LABOR_MASTERLIST},
 )

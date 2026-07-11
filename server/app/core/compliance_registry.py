@@ -7407,9 +7407,12 @@ _LABOR_REGULATION_KEYS: Dict[str, FrozenSet[str]] = {
         "whistleblower_protection", "age_discrimination_adea",
         "genetic_information_gina",
     ]),
-    # ── Federal-baseline categories (baseline_masterlist.py). These 11 labor
+    # ── Federal-baseline categories (baseline_masterlist.py). These 12 labor
     # categories had no enumerated keys; the baseline master-list references
     # these, and baseline01 seeds regulation_key_definitions rows for them.
+    # Non-focused categories (not in any INDUSTRY_CATEGORY_SET, no ≥0.85 profile
+    # weight) → their completeness misses are `warn`, not `critical`, so widening
+    # the vocabulary drops scores but does NOT flip onboarding readiness.
     "employee_classification": frozenset([
         "flsa_recordkeeping", "exempt_classification",
     ]),

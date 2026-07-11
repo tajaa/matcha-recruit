@@ -178,8 +178,15 @@ def compare(fact: GoldenFact, row: Optional[Dict]) -> Dict:
 
 async def _resolve_jurisdiction_id(conn, jur: GoldenJurisdiction):
     if jur.level in ("federal", "national"):
+        # Pin country_code: 'national' is shared by every country's root (US
+        # 'federal' + UK/MX/SG 'national'), so an unpinned LIMIT 1 could resolve a
+        # US-federal fixture to a foreign row. `level='federal' DESC` keeps the US
+        # root deterministic even if a stray US 'national' row exists.
         row = await conn.fetchrow(
-            "SELECT id FROM jurisdictions WHERE level::text IN ('federal','national') LIMIT 1"
+            "SELECT id FROM jurisdictions WHERE level::text IN ('federal','national') "
+            "AND COALESCE(country_code,'US') = $1 "
+            "ORDER BY (level::text = 'federal') DESC LIMIT 1",
+            jur.country_code,
         )
     elif jur.level == "state":
         row = await conn.fetchrow(

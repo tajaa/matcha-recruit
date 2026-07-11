@@ -84,6 +84,6 @@ def run_compliance_evals(
 def run_scheduled_compliance_evals():
     """Weekly sweep entrypoint — all deterministic suites over every jurisdiction."""
     return run_compliance_evals(
-        suites=["completeness", "tagging", "golden", "authority"],
+        suites=["completeness", "tagging", "golden", "authority", "baseline"],
         trigger_source="scheduled",
     )

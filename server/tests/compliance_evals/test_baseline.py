@@ -6,7 +6,7 @@ never match a catalog row) and (2) the diff splits correctly.
 """
 from app.core.compliance_registry import EXPECTED_REGULATION_KEYS
 from app.core.services.compliance_evals.baseline import (
-    baseline_checklist, diff_masterlist,
+    _checklist_items, diff_masterlist,
 )
 from app.core.services.compliance_evals.baseline_masterlist import (
     CA_STATE_LABOR_MASTERLIST, FEDERAL_LABOR_MASTERLIST, masterlist_keys,
@@ -54,9 +54,9 @@ def test_diff_splits_present_and_missing():
 
 def test_checklist_marks_presence():
     e = FEDERAL_LABOR_MASTERLIST[0]
-    rows = baseline_checklist([e], {f"{e.category}:{e.key}"})
+    rows = _checklist_items([e], {f"{e.category}:{e.key}"})
     assert rows[0]["present"] is True and rows[0]["citation"] == e.citation
-    rows = baseline_checklist([e], set())
+    rows = _checklist_items([e], set())
     assert rows[0]["present"] is False
 
 
