@@ -60,3 +60,9 @@ class IngestResult(BaseModel):
     item_count: int
     unclassified_count: int
     enumerable: bool
+    # Drift vs the previous ingest of this index — the "a new/changed/repealed
+    # federal section appeared" signal. All zero on an index's first ingest
+    # (no baseline to diff against).
+    new_count: int = 0
+    amended_count: int = 0
+    removed_count: int = 0

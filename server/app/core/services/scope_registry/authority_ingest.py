@@ -189,6 +189,88 @@ async def _upsert_items(conn, index_id: str, items: List[dict]) -> int:
     return len(items)
 
 
+def diff_authority_items(
+    prior: List[dict], items: List[dict]
+) -> List[tuple]:
+    """Pure diff of freshly-parsed items against the prior snapshot.
+
+    ``prior`` rows expose ``citation`` / ``heading`` / ``amendment_date`` (dict or
+    asyncpg Record — both index by key). ``items`` are the parse dicts. Returns a
+    list of ``(change_type, citation, heading, old_amendment_date,
+    new_amendment_date)`` tuples:
+
+      * new      — citation not previously present
+      * amended  — citation present but its HEADING changed (a real per-section
+                   structural signal)
+      * removed  — citation previously present, absent from the new parse
+
+    ``amendment_date`` is deliberately NOT an amended trigger: eCFR's versions API
+    is part-granular, so the ingest stamps the SAME part-level date on every
+    section — any part republish would then flag hundreds of unchanged sections as
+    "amended" and drown the review queue. The old/new dates are still recorded on
+    the row for context; they just don't, alone, constitute drift. (Section text
+    changes aren't visible to a structure-based ingest regardless — that's what
+    the statute-body layer is for.)
+
+    An index's FIRST ingest has no baseline (``prior`` empty) — every item would
+    read as "new", which is noise not drift — so an empty prior yields an empty
+    diff. No I/O: unit-tested directly.
+    """
+    if not prior:
+        return []
+
+    prior_by_cite = {r["citation"]: r for r in prior}
+    new_cites = {it["citation"] for it in items}
+
+    drift: List[tuple] = []
+    for it in items:
+        cite = it["citation"]
+        old = prior_by_cite.get(cite)
+        if old is None:
+            drift.append(("new", cite, it.get("heading"), None, it.get("amendment_date")))
+            continue
+        if (old["heading"] or "") != (it.get("heading") or ""):
+            drift.append(
+                ("amended", cite, it.get("heading"), old["amendment_date"], it.get("amendment_date"))
+            )
+    for cite, old in prior_by_cite.items():
+        if cite not in new_cites:
+            drift.append(("removed", cite, old["heading"], old["amendment_date"], None))
+    return drift
+
+
+async def _record_drift(conn, index_id: str, items: List[dict]) -> tuple[int, int, int]:
+    """Diff freshly-parsed items against the index's prior state and log drift.
+
+    Must run INSIDE the ingest transaction, BEFORE `_upsert_items` — it reads the
+    pre-upsert `authority_index_items` snapshot as the baseline. Records one
+    `authority_index_drift` row per change (a removed citation is recorded only —
+    the item is NOT deleted; orphan removal stays deferred, matching
+    `_upsert_items`' idempotent upsert). Returns (new, amended, removed).
+    """
+    prior = await conn.fetch(
+        "SELECT citation, heading, amendment_date "
+        "FROM authority_index_items WHERE authority_index_id = $1",
+        index_id,
+    )
+    drift_rows = diff_authority_items(prior, items)
+    if drift_rows:
+        await conn.executemany(
+            """
+            INSERT INTO authority_index_drift
+                (authority_index_id, change_type, citation, heading,
+                 old_amendment_date, new_amendment_date)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            """,
+            [(index_id, ct, cite, heading, od, nd) for (ct, cite, heading, od, nd) in drift_rows],
+        )
+
+    counts = {"new": 0, "amended": 0, "removed": 0}
+    for ct, *_ in drift_rows:
+        counts[ct] += 1
+    return (counts["new"], counts["amended"], counts["removed"])
+
+
 async def _recount(conn, index_id: str) -> tuple[int, int]:
     """Persist (item_count, unclassified_count) and stamp last_ingested_at.
 
@@ -257,14 +339,17 @@ async def ingest_ecfr_index(
             domain_excludes=part.domain_excludes,
             enumerable=True,
         )
+        new_c, amended_c, removed_c = await _record_drift(conn, index_id, items)
         upserted = await _upsert_items(conn, index_id, items)
         item_count, unclassified = await _recount(conn, index_id)
     logger.info(
-        "ingested %s: %d items (%d unclassified)", part.slug, item_count, unclassified
+        "ingested %s: %d items (%d unclassified); drift +%d ~%d -%d",
+        part.slug, item_count, unclassified, new_c, amended_c, removed_c,
     )
     return IngestResult(
         slug=part.slug, source_type="ecfr", items_upserted=upserted,
         item_count=item_count, unclassified_count=unclassified, enumerable=True,
+        new_count=new_c, amended_count=amended_c, removed_count=removed_c,
     )
 
 
@@ -304,14 +389,17 @@ async def ingest_curated_index(conn, spec: CuratedIndexSpec) -> IngestResult:
             domain_excludes=spec.domain_excludes,
             enumerable=False,
         )
+        new_c, amended_c, removed_c = await _record_drift(conn, index_id, items)
         upserted = await _upsert_items(conn, index_id, items)
         item_count, unclassified = await _recount(conn, index_id)
     logger.info(
-        "ingested curated %s: %d items (%d unclassified)", spec.slug, item_count, unclassified
+        "ingested curated %s: %d items (%d unclassified); drift +%d ~%d -%d",
+        spec.slug, item_count, unclassified, new_c, amended_c, removed_c,
     )
     return IngestResult(
         slug=spec.slug, source_type="curated", items_upserted=upserted,
         item_count=item_count, unclassified_count=unclassified, enumerable=False,
+        new_count=new_c, amended_count=amended_c, removed_count=removed_c,
     )
 
 

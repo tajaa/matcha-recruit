@@ -67,6 +67,45 @@ async def trigger_ingest(slug: str, current_user=Depends(require_admin)) -> Disp
     return DispatchResponse(status="running", dispatched_to="celery", slug=slug)
 
 
+@router.get("/drift", dependencies=[Depends(require_admin)])
+async def list_authority_drift(
+    slug: Optional[str] = None,
+    change_type: Optional[str] = None,
+    limit: int = 100,
+):
+    """Recorded authority drift — new/amended/removed citations detected on
+    re-ingest. This is the "a federal law changed or was added" review queue.
+
+    Filter by ``slug`` (one index) and/or ``change_type`` ('new'|'amended'|
+    'removed'); newest first.
+    """
+    limit = max(1, min(limit, 500))
+    where = ["1=1"]
+    params: list = []
+    if slug:
+        params.append(slug)
+        where.append(f"ai.slug = ${len(params)}")
+    if change_type:
+        params.append(change_type)
+        where.append(f"d.change_type = ${len(params)}")
+    params.append(limit)
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            f"""
+            SELECT d.id, d.authority_index_id, ai.slug AS index_slug,
+                   ai.name AS index_name, d.change_type, d.citation, d.heading,
+                   d.old_amendment_date, d.new_amendment_date, d.detected_at
+            FROM authority_index_drift d
+            JOIN authority_indexes ai ON ai.id = d.authority_index_id
+            WHERE {' AND '.join(where)}
+            ORDER BY d.detected_at DESC, d.change_type
+            LIMIT ${len(params)}
+            """,
+            *params,
+        )
+    return {"drift": [dict(r) for r in rows]}
+
+
 @router.post("/authority/{slug}/fetch-bodies", dependencies=[Depends(require_admin)])
 async def trigger_fetch_bodies(slug: str, current_user=Depends(require_admin)) -> DispatchResponse:
     """Fetch full statute/regulation text for one index's items (Celery)."""

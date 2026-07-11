@@ -637,7 +637,15 @@ def _clamp_varchar_fields(req: dict) -> dict:
 
 
 async def _validate_source_urls(reqs: List[Dict]) -> List[Dict]:
-    """Validate source_url fields via HEAD requests; clear any that 404/fail."""
+    """Liveness-check source_url via HEAD requests and FLAG the result.
+
+    A dead link is the pointer back to the authority — it's how a stale policy
+    gets re-verified once the URL is fixed — so a 404/timeout must NOT erase it.
+    Instead we stamp ``source_url_status`` ('ok' | 'dead') on the req dict; the
+    jurisdiction_requirements upsert persists it (and ``source_checked_at``) so
+    admins can see which sources need attention without losing the URL. Reqs
+    without a source_url are left untouched (column default 'unchecked').
+    """
     url_map: Dict[str, List[Dict]] = {}
     for req in reqs:
         url = req.get("source_url")
@@ -663,12 +671,13 @@ async def _validate_source_urls(reqs: List[Dict]) -> List[Dict]:
     results = await asyncio.gather(*[_check(u) for u in url_map])
 
     for url, status in results:
-        if status is None or status >= 400:
+        alive = status is not None and status < 400
+        if not alive:
             label = f"status {status}" if status else "connection error"
-            print(f"[Compliance] Dropped invalid source URL: {url} ({label})")
-            for req in url_map[url]:
-                req["source_url"] = ""
-                req["source_name"] = ""
+            print(f"[Compliance] Flagged dead source URL (retained): {url} ({label})")
+        for req in url_map[url]:
+            # Preserve source_url/source_name; only record liveness.
+            req["source_url_status"] = "ok" if alive else "dead"
 
     return reqs
 
@@ -1671,7 +1680,7 @@ async def _upsert_requirements_additive(
                  effective_date, expiration_date, last_verified_at, requires_written_policy,
                  applicable_industries, trigger_conditions, applicable_entity_types,
                  implementation_steps, category_id, metadata, source_tier,
-                 regulation_key, key_definition_id)
+                 regulation_key, key_definition_id, source_url_status, source_checked_at)
             VALUES ($1, $2, $3::text, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), $15, $16, $17, $18,
                     $22::jsonb,
                     COALESCE(
@@ -1682,7 +1691,9 @@ async def _upsert_requirements_additive(
                     $21::source_tier_enum,
                     $23,
                     (SELECT id FROM regulation_key_definitions
-                     WHERE key = $23::text AND category_slug = $24::text LIMIT 1))
+                     WHERE key = $23::text AND category_slug = $24::text LIMIT 1),
+                    COALESCE($25::text, 'unchecked'),
+                    CASE WHEN $25::text IS NOT NULL THEN NOW() ELSE NULL END)
             ON CONFLICT (jurisdiction_id, requirement_key) DO UPDATE SET
                 category = EXCLUDED.category,
                 rate_type = EXCLUDED.rate_type,
@@ -1721,6 +1732,12 @@ async def _upsert_requirements_additive(
                 END,
                 regulation_key = COALESCE(EXCLUDED.regulation_key, jurisdiction_requirements.regulation_key),
                 key_definition_id = COALESCE(EXCLUDED.key_definition_id, jurisdiction_requirements.key_definition_id),
+                source_url_status = CASE
+                    WHEN $25::text IS NOT NULL THEN $25::text
+                    ELSE jurisdiction_requirements.source_url_status END,
+                source_checked_at = CASE
+                    WHEN $25::text IS NOT NULL THEN NOW()
+                    ELSE jurisdiction_requirements.source_checked_at END,
                 updated_at = NOW()
             """,
             jurisdiction_id,
@@ -1747,6 +1764,7 @@ async def _upsert_requirements_additive(
             steps_json,            # $22: implementation_steps JSONB
             regulation_key,        # $23: bare regulation_key (store↔scope join key)
             normalized_category,   # $24: normalized category for the RKD FK lookup
+            req.get("source_url_status"),  # $25: liveness flag from _validate_source_urls
         )
 
 
@@ -2563,12 +2581,14 @@ async def _upsert_jurisdiction_requirements(
                  title, description, current_value, numeric_value, source_url, source_name,
                  effective_date, expiration_date, last_verified_at, requires_written_policy,
                  applicable_industries, trigger_conditions, applicable_entity_types,
-                 category_id)
+                 category_id, source_url_status, source_checked_at)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), $15, $16, $17, $18,
                     COALESCE(
                         (SELECT id FROM compliance_categories WHERE slug = $19 LIMIT 1),
                         (SELECT id FROM compliance_categories LIMIT 1)
-                    ))
+                    ),
+                    COALESCE($20::text, 'unchecked'),
+                    CASE WHEN $20::text IS NOT NULL THEN NOW() ELSE NULL END)
             ON CONFLICT (jurisdiction_id, requirement_key) DO UPDATE SET
                 category = EXCLUDED.category,
                 rate_type = EXCLUDED.rate_type,
@@ -2596,6 +2616,12 @@ async def _upsert_jurisdiction_requirements(
                 last_changed_at = CASE
                     WHEN jurisdiction_requirements.current_value IS DISTINCT FROM EXCLUDED.current_value
                     THEN NOW() ELSE jurisdiction_requirements.last_changed_at END,
+                source_url_status = CASE
+                    WHEN $20::text IS NOT NULL THEN $20::text
+                    ELSE jurisdiction_requirements.source_url_status END,
+                source_checked_at = CASE
+                    WHEN $20::text IS NOT NULL THEN NOW()
+                    ELSE jurisdiction_requirements.source_checked_at END,
                 updated_at = NOW()
             """,
             jurisdiction_id,
@@ -2617,6 +2643,7 @@ async def _upsert_jurisdiction_requirements(
             tc_json,
             aet,
             req.get("category"),  # $19: duplicate for category_id subquery
+            req.get("source_url_status"),  # $20: liveness flag from _validate_source_urls
         )
 
     # Remove jurisdiction rows not in new result set

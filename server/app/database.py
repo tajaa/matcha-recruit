@@ -3063,6 +3063,17 @@ async def init_db():
             ALTER TABLE jurisdiction_requirements
             ADD COLUMN IF NOT EXISTS implementation_steps JSONB
         """)
+        # Source-liveness tracking: flag a dead source_url instead of erasing it
+        # (the URL is the re-check pointer to the authority). See
+        # compliance_service._validate_source_urls.
+        await conn.execute("""
+            ALTER TABLE jurisdiction_requirements
+            ADD COLUMN IF NOT EXISTS source_url_status VARCHAR(20) DEFAULT 'unchecked'
+        """)
+        await conn.execute("""
+            ALTER TABLE jurisdiction_requirements
+            ADD COLUMN IF NOT EXISTS source_checked_at TIMESTAMP
+        """)
 
         # compliance_requirements → catalog link. Added here (not in the
         # compliance_requirements block above) because the FK REFERENCES

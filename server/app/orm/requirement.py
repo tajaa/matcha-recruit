@@ -65,6 +65,14 @@ class JurisdictionRequirement(TimestampMixin, Base):
     source_name: Mapped[Optional[str]] = mapped_column(
         String(100), nullable=True
     )
+    # Liveness of source_url: 'unchecked' | 'ok' | 'dead'. A dead link is
+    # flagged, not erased, so the re-check pointer survives.
+    source_url_status: Mapped[Optional[str]] = mapped_column(
+        String(20), nullable=True, server_default="unchecked"
+    )
+    source_checked_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, nullable=True
+    )
     effective_date: Mapped[Optional[date]] = mapped_column(
         Date, nullable=True
     )
