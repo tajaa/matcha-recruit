@@ -4101,6 +4101,20 @@ async def get_quality_audit(
             return cached
 
     async with get_connection() as conn:
+        # A citation is "registry-verified" only while its backing authority item
+        # still exists: citation_item_id is nulled by ON DELETE SET NULL when the
+        # item is deleted, so verified_at alone would render a phantom ✓ badge with
+        # a dead statute-reader link. Kept as one predicate so the filter and the
+        # summary counters below can never diverge.
+        cite_verified_sql = (
+            "jr.statute_citation IS NOT NULL AND jr.citation_verified_at IS NOT NULL "
+            "AND jr.citation_item_id IS NOT NULL"
+        )
+        cite_unverified_sql = (
+            "(jr.statute_citation IS NULL OR jr.citation_verified_at IS NULL "
+            "OR jr.citation_item_id IS NULL)"
+        )
+
         # Base WHERE conditions for paginated results
         conditions = ["jr.status = 'active'"]
         params: List[Any] = []
@@ -4123,9 +4137,9 @@ async def get_quality_audit(
         if stale_only:
             conditions.append("(jr.last_verified_at IS NULL OR jr.last_verified_at < NOW() - INTERVAL '90 days')")
         if citation == "verified":
-            conditions.append("jr.statute_citation IS NOT NULL AND jr.citation_verified_at IS NOT NULL")
+            conditions.append(cite_verified_sql)
         elif citation == "unverified":
-            conditions.append("(jr.statute_citation IS NULL OR jr.citation_verified_at IS NULL)")
+            conditions.append(cite_unverified_sql)
         if needs_review:
             conditions.append("jr.change_status = 'needs_review'")
 
@@ -4145,9 +4159,9 @@ async def get_quality_audit(
                 COUNT(*) FILTER (WHERE jr.last_verified_at IS NULL OR jr.last_verified_at < NOW() - INTERVAL '90 days') AS stale_count,
                 COUNT(*) FILTER (WHERE jr.source_url IS NULL OR jr.source_url = '') AS missing_source_url,
                 COUNT(*) FILTER (WHERE jr.source_url_status = 'dead') AS dead_source_url,
-                COUNT(*) FILTER (WHERE jr.statute_citation IS NOT NULL AND jr.citation_verified_at IS NOT NULL) AS verified_citation,
-                COUNT(*) FILTER (WHERE jr.statute_citation IS NULL OR jr.citation_verified_at IS NULL) AS unverified_citation,
-                COUNT(*) FILTER (WHERE (jr.statute_citation IS NULL OR jr.citation_verified_at IS NULL)
+                COUNT(*) FILTER (WHERE {cite_verified_sql}) AS verified_citation,
+                COUNT(*) FILTER (WHERE {cite_unverified_sql}) AS unverified_citation,
+                COUNT(*) FILTER (WHERE {cite_unverified_sql}
                                    AND jr.metadata->>'research_source' = 'gemini') AS gemini_unverified,
                 COUNT(*) FILTER (WHERE jr.change_status = 'needs_review') AS needs_review
             FROM jurisdiction_requirements jr
@@ -4195,7 +4209,8 @@ async def get_quality_audit(
                 SELECT
                     jr.id, jr.jurisdiction_id, jr.category, jr.title, jr.description,
                     jr.source_url, jr.source_url_status,
-                    jr.statute_citation, jr.citation_verified_at, jr.change_status,
+                    jr.statute_citation, jr.citation_verified_at, jr.citation_item_id,
+                    jr.change_status,
                     jr.source_tier::text AS source_tier, jr.status::text AS status,
                     jr.current_value, jr.effective_date, jr.last_verified_at, jr.is_bookmarked,
                     jr.created_at, jr.updated_at, jr.metadata,
@@ -4258,7 +4273,7 @@ async def get_quality_audit(
                     "staleness_days": r["staleness_days"],
                     "research_source": _row_metadata(r["metadata"]).get("research_source"),
                     "statute_citation": r["statute_citation"],
-                    "citation_verified": r["citation_verified_at"] is not None,
+                    "citation_verified": r["citation_verified_at"] is not None and r["citation_item_id"] is not None,
                     "change_status": r["change_status"],
                 }
                 for r in rows
@@ -5122,7 +5137,7 @@ async def get_policy_detail(key_definition_id: UUID):
                     "source_url_status": r["source_url_status"],
                     "statute_citation": r["statute_citation"],
                     "citation_item_id": str(r["citation_item_id"]) if r["citation_item_id"] else None,
-                    "citation_verified": r["citation_verified_at"] is not None,
+                    "citation_verified": r["citation_verified_at"] is not None and r["citation_item_id"] is not None,
                     "drift": _row_metadata(r["drift"]) or None,
                     "requires_written_policy": r["requires_written_policy"],
                     "last_verified_at": fmt_date(r["last_verified_at"]),
@@ -5804,7 +5819,12 @@ async def update_requirement(requirement_id: UUID, body: RequirementUpdate):
 async def resolve_requirement_review(requirement_id: UUID):
     """Clear a drift-raised ``needs_review`` after an admin has re-checked the row
     against the (changed) authority: restore the pre-drift change_status, drop the
-    metadata.drift breadcrumb, and re-stamp last_verified_at. Idempotent."""
+    metadata.drift breadcrumb, and re-stamp last_verified_at.
+
+    Guarded on the ``drift`` breadcrumb so it is a true no-op on a row that was
+    never drift-flagged: without it, a stray call (or a double-click after the
+    breadcrumb is already gone) would force ``change_status='unchanged'`` and
+    re-stamp ``last_verified_at``, silently wiping a real ``changed`` signal."""
     async with get_connection() as conn:
         row = await conn.fetchrow(
             """
@@ -5813,21 +5833,35 @@ async def resolve_requirement_review(requirement_id: UUID):
                 metadata = COALESCE(metadata, '{}'::jsonb) - 'drift',
                 last_verified_at = NOW(),
                 updated_at = NOW()
-            WHERE id = $1
+            WHERE id = $1 AND metadata ? 'drift'
             RETURNING id, jurisdiction_id, category, change_status
             """,
             requirement_id,
         )
         if not row:
-            raise HTTPException(status_code=404, detail="Requirement not found")
+            # Nothing to resolve. Distinguish a missing id (404) from an
+            # already-resolved / never-flagged row (return current state, untouched).
+            existing = await conn.fetchrow(
+                "SELECT id, jurisdiction_id, category, change_status "
+                "FROM jurisdiction_requirements WHERE id = $1",
+                requirement_id,
+            )
+            if not existing:
+                raise HTTPException(status_code=404, detail="Requirement not found")
+            return {"id": str(existing["id"]), "change_status": existing["change_status"],
+                    "resolved": False}
 
     redis = get_redis_cache()
     if redis:
         await cache_delete(redis, admin_jurisdiction_detail_key(row["jurisdiction_id"]))
         await cache_delete(redis, admin_jurisdiction_policy_overview_key(row["category"]))
         await cache_delete(redis, admin_jurisdiction_policy_overview_key(None))
+        # The quality-audit surface (needs_review flag + verified/gemini counters)
+        # is cached per param-combo under a hashed key — drop the whole namespace so
+        # the just-resolved row doesn't read as still pending for up to the TTL.
+        await cache_delete_pattern(redis, "admin:quality-audit:v2:")
 
-    return {"id": str(row["id"]), "change_status": row["change_status"]}
+    return {"id": str(row["id"]), "change_status": row["change_status"], "resolved": True}
 
 
 @router.post("/jurisdictions/requirements/{requirement_id}/bookmark", dependencies=[Depends(require_admin)])
