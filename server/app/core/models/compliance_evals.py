@@ -7,7 +7,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-EvalSuite = Literal["completeness", "authority", "tagging", "golden", "scope"]
+EvalSuite = Literal["completeness", "authority", "tagging", "golden", "scope", "grounding"]
 FindingStatus = Literal["open", "confirmed", "dismissed", "fixed"]
 Severity = Literal["critical", "warn", "info"]
 

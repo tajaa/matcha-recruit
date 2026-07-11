@@ -42,6 +42,30 @@ def parse_jsonb(value: Any) -> Any:
     return value
 
 
+# Sub-index scope levels — the one vocabulary shared by the write-side gate
+# (classify.validate_proposal) and the read-side matcher (jurisdiction_scope_matches).
+SCOPE_LEVELS = ("county", "city")
+
+
+def penalties_from_metadata(raw: Any) -> Optional[Dict[str, Any]]:
+    """Extract the penalties block from a requirement row's metadata (pure).
+
+    Returns the dict only when it carries at least one substantive value —
+    a `{grounding: ...}`-only shell or junk metadata yields None, so payloads
+    never render an empty penalty chip. Reuses grounded.penalty_is_substantive
+    so read-side and write-side agree on "substantive".
+    """
+    from .grounded import penalty_is_substantive
+
+    metadata = parse_jsonb(raw)
+    if not isinstance(metadata, dict):
+        return None
+    penalties = metadata.get("penalties")
+    if not isinstance(penalties, dict):
+        return None
+    return penalties if penalty_is_substantive(penalties) else None
+
+
 def coordinate_hash(
     category_chain: List[str],
     jurisdiction_ids: List[Any],
@@ -60,14 +84,46 @@ def coordinate_hash(
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
+def jurisdiction_scope_matches(scope: Any, geo: Optional[Dict[str, Any]]) -> bool:
+    """Does a classification's sub-index ``jurisdiction_scope`` reach this geo? (pure)
+
+    ``scope`` (already parsed): ``None`` → whole-index reach → always True. A
+    well-formed narrowing is ``{"level": "county"|"city", "names": [...]}``; the
+    tag reaches ``geo`` only when ``geo``'s name at that level is in ``names``
+    (case-insensitive). Conservative on every uncertainty — a malformed scope, a
+    missing ``geo``, or a ``geo`` lacking the needed name → False (an unparseable
+    or unresolvable narrowing never silently applies, mirroring the entity_condition
+    rule). ``geo``: ``{"state", "city", "county"}`` from the resolved chain rows.
+    """
+    if scope is None:
+        return True
+    if not isinstance(scope, dict):
+        return False
+    level = (scope.get("level") or "").lower()
+    names = scope.get("names")
+    if level not in SCOPE_LEVELS or not isinstance(names, list) or not names:
+        return False
+    if not geo:
+        return False
+    want = geo.get(level)
+    if not want:
+        return False
+    want = str(want).strip().lower()
+    return any(str(n).strip().lower() == want for n in names)
+
+
 def classification_matches(
     row: Dict[str, Any],
     category_chain: List[str],
     facility_attributes: Optional[Dict[str, Any]],
+    geo: Optional[Dict[str, Any]] = None,
 ) -> bool:
     """Does one confirmed classification apply to this coordinate? (pure)
 
     * excluded            → never
+    * jurisdiction_scope  → a sub-index-scoped tag reaches only its named
+                            counties/cities (``geo``); ``geo=None`` (the generic,
+                            geography-blind callers) ⇒ a scoped tag doesn't match
     * excludes ∩ ancestry → never (an exclude anywhere in the chain wins)
     * universal_in_domain → yes
     * category_specific   → applies_to ∩ ancestry
@@ -78,6 +134,8 @@ def classification_matches(
 
     disposition = row["disposition"]
     if disposition == "excluded":
+        return False
+    if not jurisdiction_scope_matches(parse_jsonb(row.get("jurisdiction_scope")), geo):
         return False
     chain = set(category_chain)
     if set(row.get("excludes_categories") or []) & chain:
@@ -186,6 +244,7 @@ async def resolve_scope(
             """
             SELECT c.item_id, c.disposition, c.applies_to_categories,
                    c.excludes_categories, c.entity_condition, c.regulation_key,
+                   c.jurisdiction_scope,
                    i.citation, i.heading, i.source_url, (i.body_text IS NOT NULL) AS has_body,
                    ai.slug AS index_slug, ai.level, ai.jurisdiction_id
             FROM authority_item_classifications c
@@ -197,6 +256,9 @@ async def resolve_scope(
             jur["ids"],
         )
     ]
+    # Geo from the resolved chain rows (canonical names, 1:1 with the ids already
+    # in the coordinate hash) — never raw user input, so the cache stays sound.
+    geo = {"state": state.upper(), "city": jur.get("city_name"), "county": jur.get("county_name")}
     provisional_count = await conn.fetchval(
         """
         SELECT COUNT(*)
@@ -212,7 +274,7 @@ async def resolve_scope(
     applicable: List[Dict[str, Any]] = []
     conditional_skipped = 0
     for row in rows:
-        if classification_matches(row, chain_slugs, facility_attributes):
+        if classification_matches(row, chain_slugs, facility_attributes, geo):
             applicable.append(row)
         elif row["disposition"] == "conditional":
             conditional_skipped += 1
@@ -228,7 +290,8 @@ async def resolve_scope(
         for req in await conn.fetch(
             """
             SELECT regulation_key, title, current_value, source_url,
-                   jurisdiction_level, jurisdiction_name
+                   jurisdiction_level, jurisdiction_name,
+                   effective_date, expiration_date, metadata
             FROM jurisdiction_requirements
             WHERE jurisdiction_id = ANY($1::uuid[])
               AND regulation_key = ANY($2::text[])
@@ -239,7 +302,10 @@ async def resolve_scope(
             """,
             jur["ids"], keys,
         ):
-            requirements_by_key.setdefault(req["regulation_key"], dict(req))
+            entry = dict(req)
+            # metadata stays server-side; only its penalties block ships.
+            entry["penalties"] = penalties_from_metadata(entry.pop("metadata", None))
+            requirements_by_key.setdefault(req["regulation_key"], entry)
 
     codified = []
     uncodified = []
@@ -334,11 +400,13 @@ async def fetch_queue(
         where.append(f"(ai.jurisdiction_id IS NULL OR ai.jurisdiction_id = ANY(${len(params)}::uuid[]))")
 
     rows = [
-        {**dict(r), "entity_condition": parse_jsonb(r["entity_condition"])}
+        {**dict(r), "entity_condition": parse_jsonb(r["entity_condition"]),
+         "jurisdiction_scope": parse_jsonb(r["jurisdiction_scope"])}
         for r in await conn.fetch(
             f"""
             SELECT c.item_id, c.disposition, c.applies_to_categories,
                    c.excludes_categories, c.entity_condition, c.regulation_key,
+                   c.jurisdiction_scope,
                    i.citation, i.heading, i.source_url,
                    ai.slug AS index_slug, ai.level
             FROM authority_item_classifications c

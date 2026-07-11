@@ -28,7 +28,7 @@ from app.core.services.compliance_evals.industry_keysets import CORE_LABOR_KEYS
 from app.core.services.compliance_evals.keys import normalize_key
 
 from .jurisdiction_chain import resolve_jurisdiction_chain
-from .resolve import classification_matches
+from .resolve import classification_matches, parse_jsonb, penalties_from_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -115,8 +115,8 @@ def bucket_registry(
     ``applicable`` rows are confirmed labor classifications that matched a generic
     employer (already ``classification_matches``-filtered); each carries ``level``,
     ``citation``, ``heading``, ``source_url``, ``index_slug``, ``disposition``,
-    ``regulation_key``. ``requirements_by_key`` maps a codified key to its
-    ``jurisdiction_requirements`` row.
+    ``regulation_key``, ``severity`` (RKD, may be None). ``requirements_by_key``
+    maps a codified key to its ``jurisdiction_requirements`` row.
     """
     levels: Dict[str, Dict[str, Any]] = {
         b: {"codified": [], "uncodified": []} for b in ("federal", "state", "city")
@@ -131,6 +131,8 @@ def bucket_registry(
             "source_url": row.get("source_url"),
             "index": row.get("index_slug"),
             "disposition": row.get("disposition"),
+            "severity": row.get("severity"),
+            "jurisdiction_scope": parse_jsonb(row.get("jurisdiction_scope")),
         }
         key = row.get("regulation_key")
         if key and key in requirements_by_key:
@@ -222,11 +224,14 @@ async def labor_scope(
             """
             SELECT c.item_id, c.disposition, c.applies_to_categories,
                    c.excludes_categories, c.entity_condition, c.regulation_key,
+                   c.jurisdiction_scope,
                    i.citation, i.heading, i.source_url, (i.body_text IS NOT NULL) AS has_body,
-                   ai.slug AS index_slug, ai.level, ai.domain_categories
+                   ai.slug AS index_slug, ai.level, ai.domain_categories,
+                   rkd.severity
             FROM authority_item_classifications c
             JOIN authority_index_items i ON i.id = c.item_id
             JOIN authority_indexes ai ON ai.id = i.authority_index_id
+            LEFT JOIN regulation_key_definitions rkd ON rkd.id = c.key_definition_id
             WHERE c.status = 'confirmed'
               AND (ai.jurisdiction_id IS NULL OR ai.jurisdiction_id = ANY($1::uuid[]))
             """,
@@ -238,6 +243,12 @@ async def labor_scope(
     # Generic-employer semantics: empty category chain + empty attributes.
     # universal_in_domain matches; category_specific never; conditional only if
     # its trigger fires against no attributes (FMLA ≥50 won't).
+    #
+    # NOTE: no geo passed → sub-index jurisdiction_scope is NOT filtered here.
+    # This is a chain-wide AUTHORING/worklist view (like the empty category
+    # chain), so a city-scoped obligation must still appear — annotated with its
+    # scope chip — even on a state-only (city-less) query. Only resolve_scope,
+    # which models a specific business coordinate, filters by geo.
     applicable: List[Dict[str, Any]] = []
     skipped = {"category_specific": 0, "conditional": 0}
     for row in labor_rows:
@@ -270,7 +281,8 @@ async def labor_scope(
             f"""
             SELECT jr.regulation_key, jr.key_definition_id, jr.title, jr.current_value,
                    jr.source_url, jr.source_name, jr.jurisdiction_level,
-                   jr.jurisdiction_name, jr.last_verified_at, {link_select}
+                   jr.jurisdiction_name, jr.last_verified_at,
+                   jr.effective_date, jr.expiration_date, jr.metadata, {link_select}
             FROM jurisdiction_requirements jr
             {link_join}
             WHERE jr.jurisdiction_id = ANY($1::uuid[])
@@ -282,7 +294,10 @@ async def labor_scope(
             """,
             ids, keys,
         ):
-            requirements_by_key.setdefault(req["regulation_key"], dict(req))
+            entry = dict(req)
+            # metadata stays server-side; only its penalties block ships.
+            entry["penalties"] = penalties_from_metadata(entry.pop("metadata", None))
+            requirements_by_key.setdefault(req["regulation_key"], entry)
 
     levels = bucket_registry(applicable, requirements_by_key)
 

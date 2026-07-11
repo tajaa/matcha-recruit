@@ -3895,7 +3895,8 @@ async def get_penalty_overview():
         coverage = await conn.fetch("""
             SELECT category,
                    COUNT(*) as total,
-                   SUM(CASE WHEN metadata ? 'penalties' THEN 1 ELSE 0 END) as has_penalty
+                   SUM(CASE WHEN metadata ? 'penalties' THEN 1 ELSE 0 END) as has_penalty,
+                   SUM(CASE WHEN metadata->'penalties'->>'grounding' = 'grounded' THEN 1 ELSE 0 END) as grounded
             FROM jurisdiction_requirements WHERE status = 'active'
             GROUP BY category ORDER BY total DESC
         """)
@@ -3912,7 +3913,8 @@ async def get_penalty_overview():
                    metadata->'penalties'->>'criminal' as criminal,
                    metadata->'penalties'->>'summary' as summary,
                    metadata->'penalties'->>'source_url' as source_url,
-                   metadata->'penalties'->>'verified_date' as verified_date
+                   metadata->'penalties'->>'verified_date' as verified_date,
+                   metadata->'penalties'->>'grounding' as grounding
             FROM jurisdiction_requirements
             WHERE status = 'active' AND metadata ? 'penalties'
             ORDER BY category, jurisdiction_level ASC
@@ -3939,6 +3941,7 @@ async def get_penalty_overview():
                 "category": r["category"],
                 "total": r["total"],
                 "has_penalty": r["has_penalty"],
+                "grounded": r["grounded"],
                 "pct": round(r["has_penalty"] / r["total"] * 100) if r["total"] > 0 else 0,
             }
             for r in coverage
@@ -3956,6 +3959,7 @@ async def get_penalty_overview():
                 "summary": r["summary"],
                 "source_url": r["source_url"],
                 "verified_date": r["verified_date"],
+                "grounding": r["grounding"],
             }
             for r in details
         ],
@@ -5194,7 +5198,7 @@ async def trigger_eval_run(
     current_user=Depends(require_admin),
 ):
     """Start an eval run. Network-touching suites go to Celery; the rest run inline."""
-    from ..services.compliance_evals import NETWORK_SUITES, run_evals
+    from ..services.compliance_evals import network_suites, run_evals
 
     suites = list(payload.suites)
     if not suites:
@@ -5217,7 +5221,7 @@ async def trigger_eval_run(
         )
     run_id = row["id"]
 
-    if NETWORK_SUITES & set(suites):
+    if network_suites() & set(suites):
         from app.workers.tasks.compliance_evals import run_compliance_evals
 
         run_compliance_evals.delay(

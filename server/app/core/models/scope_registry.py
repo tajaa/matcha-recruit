@@ -19,6 +19,8 @@ class ClassificationProposal(BaseModel):
     excluded_reason: Optional[str] = None
     regulation_key: Optional[str] = None
     category_slug: Optional[str] = None
+    # Sub-index reach: {"level": "county"|"city", "names": [...]}; null = whole index.
+    jurisdiction_scope: Optional[Dict[str, Any]] = None
 
 
 class ConfirmClassificationsRequest(BaseModel):

@@ -1666,8 +1666,13 @@ async def _upsert_requirements_additive(
             meta_dict["grounding"] = req["grounding"]
         if req.get("grounded_citations"):
             meta_dict["grounded_citations"] = req["grounded_citations"]
-        penalties = req.get("penalties")
-        if isinstance(penalties, dict) and any(penalties.values()):
+        # Sink-side penalty guard for EVERY research path (grounded or not): drop
+        # the run-local cited_sources transport key and any insubstantive shell,
+        # so ungrounded runs can't persist corpus-local S-ids or inflate the
+        # penalty-coverage counter with an empty block.
+        from .scope_registry.grounded import sanitize_penalties_for_persist
+        penalties = sanitize_penalties_for_persist(req.get("penalties"))
+        if penalties is not None:
             meta_dict["penalties"] = penalties
         meta_fragment = json.dumps(meta_dict) if meta_dict else None
 
@@ -1741,10 +1746,22 @@ async def _upsert_requirements_additive(
                         WHEN jurisdiction_requirements.current_value IS DISTINCT FROM EXCLUDED.current_value
                         THEN 'changed' ELSE 'unchanged' END)
                     ELSE jurisdiction_requirements.change_status END,
-                metadata = CASE
-                    WHEN jurisdiction_requirements.change_status = 'needs_review'
-                    THEN (COALESCE(jurisdiction_requirements.metadata, '{}'::jsonb) - 'drift') || EXCLUDED.metadata
-                    ELSE COALESCE(jurisdiction_requirements.metadata, '{}'::jsonb) || EXCLUDED.metadata END,
+                metadata = (
+                    CASE
+                        WHEN jurisdiction_requirements.change_status = 'needs_review'
+                        THEN (COALESCE(jurisdiction_requirements.metadata, '{}'::jsonb) - 'drift') || EXCLUDED.metadata
+                        ELSE COALESCE(jurisdiction_requirements.metadata, '{}'::jsonb) || EXCLUDED.metadata END
+                    -- jsonb || is a SHALLOW merge, so a new penalties block would
+                    -- wholesale-replace an existing one and drop keys the new block
+                    -- omits (e.g. a skill-written source_url that grounded
+                    -- re-research never sets). Deep-merge the penalties sub-object:
+                    -- old penalties overlaid by new (new wins per key, old keys kept).
+                    || CASE WHEN EXCLUDED.metadata ? 'penalties'
+                        THEN jsonb_build_object('penalties',
+                            COALESCE(jurisdiction_requirements.metadata->'penalties', '{}'::jsonb)
+                            || (EXCLUDED.metadata->'penalties'))
+                        ELSE '{}'::jsonb END
+                ),
                 source_tier = CASE
                     WHEN EXCLUDED.source_tier IS NOT NULL
                      AND (jurisdiction_requirements.source_tier IS NULL
@@ -9074,7 +9091,7 @@ async def research_specialization_for_jurisdiction(
     real corpus id upsert as ``research_source='gemini_grounded'``; ungrounded
     ones stay ``'gemini'`` + ``metadata.grounding='ungrounded'``.
     """
-    from .scope_registry.grounded import validate_requirement_citations
+    from .scope_registry.grounded import validate_requirement_citations, validate_penalty_citations
     from .gemini_compliance import get_gemini_compliance_service
     from .jurisdiction_context import get_known_sources, build_context_prompt, get_global_authority_sources
 
@@ -9136,6 +9153,7 @@ async def research_specialization_for_jurisdiction(
 
     service = get_gemini_compliance_service()
     total_new = 0
+    penalties_stripped = 0  # ungrounded penalty blocks dropped in grounded runs
     failed_categories: List[str] = []
     added_requirements: List[Dict[str, Any]] = []
 
@@ -9175,6 +9193,20 @@ async def research_specialization_for_jurisdiction(
                     # (cited a real statute excerpt) upsert as gemini_grounded;
                     # the rest stay gemini + a metadata.grounding marker.
                     validate_requirement_citations(reqs, citation_index)
+                    # Penalties are values too: gate them on the same corpus,
+                    # independently of the req-level verdict (penalty text often
+                    # lives in a different section). Any penalty block that isn't
+                    # grounded in the fetched statute is dropped rather than
+                    # persisted from recall — the locator invariant — which also
+                    # keeps a recall pass from clobbering skill-written penalties
+                    # (real source_url/verified_date) via the metadata merge.
+                    validate_penalty_citations(
+                        reqs, citation_index, verified_date=date.today().isoformat())
+                    for r in reqs:
+                        p = r.get("penalties")
+                        if isinstance(p, dict) and p.get("grounding") != "grounded":
+                            r["penalties"] = None
+                            penalties_stripped += 1
                     grounded = [r for r in reqs if r.get("grounded")]
                     ungrounded = [r for r in reqs if not r.get("grounded")]
                     for r in grounded:
@@ -9195,12 +9227,21 @@ async def research_specialization_for_jurisdiction(
             failed_categories.extend(batch)
             print(f"[Specialization Research] Error researching {batch_label} for {location_name}: {e}")
 
+    if penalties_stripped:
+        # Grounded runs drop penalty blocks not backed by the fetched corpus; the
+        # corpus is the requirement's own sections, so enforcement-subpart penalties
+        # are routinely stripped. Surface it so a coverage dip reads as expected,
+        # not as a regression.
+        print(f"[Specialization Research] {location_name}: dropped {penalties_stripped} "
+              f"ungrounded penalty block(s) (not in the fetched corpus)")
+
     return {
         "new": total_new,
         "location": location_name,
         "categories": [c for c in missing if c not in failed_categories],
         "failed": failed_categories,
         "requirements": added_requirements,
+        "penalties_stripped": penalties_stripped,
     }
 
 

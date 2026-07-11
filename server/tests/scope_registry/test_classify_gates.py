@@ -179,3 +179,82 @@ def test_child_classification_copies_everything_except_the_key():
     # Defensive copies — mutating the child must not touch the parent.
     child["applies_to_categories"].append("biotech")
     assert parent["applies_to_categories"] == ["healthcare"]
+
+
+# ── jurisdiction_scope gate (WS4) ────────────────────────────────────────────
+
+def test_no_jurisdiction_scope_is_none():
+    n, _ = _ok({"disposition": "universal_in_domain"})
+    assert n["jurisdiction_scope"] is None
+
+
+def test_valid_city_scope_kept_and_normalized():
+    n, _ = _ok({"disposition": "universal_in_domain",
+                "jurisdiction_scope": {"level": "city", "names": [" Los Angeles ", "los angeles", "Oakland"]}})
+    # trimmed, case-insensitively deduped, sorted; display casing preserved.
+    assert n["jurisdiction_scope"] == {"level": "city", "names": ["Los Angeles", "Oakland"]}
+
+
+def test_valid_county_scope_kept():
+    n, _ = _ok({"disposition": "category_specific", "applies_to_categories": ["healthcare"],
+                "jurisdiction_scope": {"level": "county", "names": ["Cook"]}})
+    assert n["jurisdiction_scope"] == {"level": "county", "names": ["Cook"]}
+
+
+def test_level_case_insensitive():
+    # a title-cased level (Gemini reads title-cased headings) must not be rejected.
+    n, _ = _ok({"disposition": "universal_in_domain",
+                "jurisdiction_scope": {"level": "County", "names": ["Cook"]}})
+    assert n["jurisdiction_scope"] == {"level": "county", "names": ["Cook"]}
+
+
+def test_names_canonicalized_to_bare_db_form():
+    # statute/Gemini phrasing → the bare form the jurisdictions table stores.
+    n, _ = _ok({"disposition": "universal_in_domain",
+                "jurisdiction_scope": {"level": "county",
+                                       "names": ["Los Angeles County", "County of Cook"]}})
+    assert n["jurisdiction_scope"] == {"level": "county", "names": ["Cook", "Los Angeles"]}
+    n2, _ = _ok({"disposition": "universal_in_domain",
+                 "jurisdiction_scope": {"level": "city", "names": ["City of Oakland"]}})
+    assert n2["jurisdiction_scope"] == {"level": "city", "names": ["Oakland"]}
+
+
+def test_city_suffix_not_stripped():
+    # a trailing 'City' is part of the name (Kansas City) — must survive.
+    n, _ = _ok({"disposition": "universal_in_domain",
+                "jurisdiction_scope": {"level": "city", "names": ["Kansas City"]}})
+    assert n["jurisdiction_scope"] == {"level": "city", "names": ["Kansas City"]}
+
+
+@pytest.mark.parametrize("scope", [
+    {"level": "state", "names": ["CA"]},        # bad level
+    {"level": "city", "names": []},             # empty names
+    {"level": "city", "names": "Los Angeles"},  # names not a list
+    {"level": "city", "names": ["  "]},         # blank name
+    {"level": "city"},                          # missing names
+    {"names": ["LA"]},                          # missing level
+    "los angeles",                              # not an object
+])
+def test_malformed_jurisdiction_scope_downgraded_not_rejected(scope):
+    # A bad OPTIONAL scope must not sink an otherwise-valid disposition — it is
+    # dropped to None with a warning (mirrors the unknown-regulation_key path).
+    n, warnings = _ok({"disposition": "universal_in_domain", "jurisdiction_scope": scope})
+    assert n["jurisdiction_scope"] is None
+    assert warnings  # the drop is surfaced
+
+
+def test_jurisdiction_scope_on_excluded_dropped():
+    n, _ = _ok({"disposition": "excluded", "excluded_reason": "definitional",
+                "jurisdiction_scope": {"level": "city", "names": ["LA"]}})
+    assert n["jurisdiction_scope"] is None
+
+
+def test_child_inherits_jurisdiction_scope():
+    from app.core.services.scope_registry.classify import child_classification_of
+    parent = {
+        "disposition": "universal_in_domain", "applies_to_categories": [],
+        "excludes_categories": [], "entity_condition": None, "excluded_reason": None,
+        "regulation_key": "x", "category_slug": "c",
+        "jurisdiction_scope": {"level": "city", "names": ["Los Angeles"]},
+    }
+    assert child_classification_of(parent)["jurisdiction_scope"] == {"level": "city", "names": ["Los Angeles"]}

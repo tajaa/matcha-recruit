@@ -63,6 +63,76 @@ def _condition_shape_error(node: Any) -> Optional[str]:
     return "condition must be a compound {op, conditions} or an attribute leaf"
 
 
+from .resolve import SCOPE_LEVELS
+
+# Phrasings Gemini/statutes use that the jurisdictions table does NOT store: it
+# holds bare names ("Los Angeles", "Cook"), so strip the level word to match.
+# Suffix stripping is county-only — a trailing "City" is part of many real city
+# names (Kansas City, Salt Lake City) and must be kept.
+_SCOPE_PREFIXES = {
+    "county": ("county of ", "parish of ", "borough of "),
+    "city": ("city of ", "town of ", "village of "),
+}
+_SCOPE_SUFFIXES = {
+    "county": (" county", " parish", " borough"),
+    "city": (),
+}
+
+
+def _jurisdiction_scope_shape_error(node: Any) -> Optional[str]:
+    """Validate a jurisdiction_scope against ``{"level","names"}``. Pure.
+
+    Shape: ``{"level": "county"|"city", "names": [non-empty str, ...]}``. Level is
+    matched case-insensitively (the read-side matcher lowercases too, so the gate
+    must not reject "County"). Returns an error string, or None when valid.
+    """
+    if not isinstance(node, dict):
+        return "jurisdiction_scope must be an object"
+    level = (node.get("level") or "").lower() if isinstance(node.get("level"), str) else node.get("level")
+    if level not in SCOPE_LEVELS:
+        return f"jurisdiction_scope level must be one of {SCOPE_LEVELS}, got {node.get('level')!r}"
+    names = node.get("names")
+    if not isinstance(names, list) or not names:
+        return "jurisdiction_scope requires a non-empty names list"
+    for n in names:
+        if not isinstance(n, str) or not n.strip():
+            return "jurisdiction_scope names must be non-empty strings"
+    return None
+
+
+def _canonicalize_scope_name(name: str, level: str) -> str:
+    """Strip the level word so a name matches the jurisdictions table's bare form.
+
+    'County of Los Angeles' / 'Los Angeles County' → 'Los Angeles'; 'City of
+    Oakland' → 'Oakland'. Leaves an already-bare name and a genuine trailing word
+    (Kansas City) alone. Display casing of the remainder is preserved.
+    """
+    s = name.strip()
+    low = s.lower()
+    for pre in _SCOPE_PREFIXES.get(level, ()):
+        if low.startswith(pre):
+            s = s[len(pre):].strip()
+            low = s.lower()
+            break
+    for suf in _SCOPE_SUFFIXES.get(level, ()):
+        if low.endswith(suf):
+            s = s[: len(s) - len(suf)].strip()
+            break
+    return s
+
+
+def _normalize_jurisdiction_scope(node: Dict[str, Any]) -> Dict[str, Any]:
+    """Lowercase the level; canonicalize + trim/dedupe/sort names (display casing
+    preserved). Assumes shape-valid."""
+    level = node["level"].lower()
+    seen: Dict[str, str] = {}
+    for n in node["names"]:
+        canon = _canonicalize_scope_name(n, level)
+        if canon:
+            seen.setdefault(canon.lower(), canon)
+    return {"level": level, "names": [seen[k] for k in sorted(seen)]}
+
+
 def validate_proposal(
     proposal: Dict[str, Any],
     rkd_keys_by_category: Dict[str, Set[str]],
@@ -116,6 +186,25 @@ def validate_proposal(
         # A condition on a non-conditional disposition is a modeling error.
         return None, [f"entity_condition is only valid on 'conditional' (got {disposition!r})"]
 
+    # Sub-index jurisdiction scope (optional; narrows the item's own reach).
+    # A bad scope is a non-fatal DOWNGRADE, not a rejection: it's an optional
+    # annotation, so discarding it (with a warning) preserves the otherwise-valid
+    # disposition — the same policy as an unknown regulation_key above. Rejecting
+    # the whole proposal would leave a correctly-classified item unclassified.
+    jurisdiction_scope = proposal.get("jurisdiction_scope")
+    if jurisdiction_scope is not None:
+        if disposition == "excluded":
+            # An excluded item applies to no one — a scope on it is meaningless,
+            # not a value worth keeping. Drop it silently.
+            jurisdiction_scope = None
+        else:
+            err = _jurisdiction_scope_shape_error(jurisdiction_scope)
+            if err:
+                warnings.append(f"{err} — dropped (item stored without a sub-jurisdiction scope)")
+                jurisdiction_scope = None
+            else:
+                jurisdiction_scope = _normalize_jurisdiction_scope(jurisdiction_scope)
+
     regulation_key = (proposal.get("regulation_key") or "").strip() or None
     if regulation_key is not None:
         category_slug = (proposal.get("category_slug") or "").strip() or None
@@ -141,6 +230,7 @@ def validate_proposal(
             "excluded_reason": (proposal.get("excluded_reason") or "").strip() or None,
             "regulation_key": regulation_key,
             "category_slug": (proposal.get("category_slug") or "").strip() or None,
+            "jurisdiction_scope": jurisdiction_scope,
         },
         warnings,
     )
@@ -173,13 +263,15 @@ async def _upsert_classification(
         INSERT INTO authority_item_classifications
             (item_id, disposition, applies_to_categories, excludes_categories,
              entity_condition, excluded_reason, regulation_key, key_definition_id,
-             inherits_from_item_id, status, proposed_by, confirmed_by, confirmed_at)
+             inherits_from_item_id, status, proposed_by, confirmed_by, confirmed_at,
+             jurisdiction_scope)
         VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7,
                 (SELECT id FROM regulation_key_definitions
                  WHERE key = $7 AND ($12::text IS NULL OR category_slug = $12)
                  ORDER BY category_slug LIMIT 1),
                 $8, $9::text, $10, $11,
-                CASE WHEN $9::text = 'confirmed' THEN NOW() ELSE NULL END)
+                CASE WHEN $9::text = 'confirmed' THEN NOW() ELSE NULL END,
+                $13::jsonb)
         ON CONFLICT (item_id) DO UPDATE SET
             disposition = EXCLUDED.disposition,
             applies_to_categories = EXCLUDED.applies_to_categories,
@@ -192,7 +284,8 @@ async def _upsert_classification(
             status = EXCLUDED.status,
             proposed_by = EXCLUDED.proposed_by,
             confirmed_by = EXCLUDED.confirmed_by,
-            confirmed_at = EXCLUDED.confirmed_at
+            confirmed_at = EXCLUDED.confirmed_at,
+            jurisdiction_scope = EXCLUDED.jurisdiction_scope
         """,
         item_id,
         normalized["disposition"],
@@ -206,6 +299,7 @@ async def _upsert_classification(
         proposed_by,
         confirmed_by,
         normalized.get("category_slug"),
+        json.dumps(normalized["jurisdiction_scope"]) if normalized.get("jurisdiction_scope") else None,
     )
 
 
@@ -241,6 +335,8 @@ def child_classification_of(parent: Dict[str, Any]) -> Dict[str, Any]:
         "excluded_reason": parent.get("excluded_reason"),
         "regulation_key": None,
         "category_slug": None,
+        # A subpart scoped to named counties/cities scopes its sections too.
+        "jurisdiction_scope": parent.get("jurisdiction_scope"),
     }
 
 
@@ -263,11 +359,13 @@ async def materialize_inherited_children(conn, index_id) -> int:
         INSERT INTO authority_item_classifications
             (item_id, disposition, applies_to_categories, excludes_categories,
              entity_condition, excluded_reason, regulation_key, key_definition_id,
-             inherits_from_item_id, status, proposed_by, confirmed_by, confirmed_at)
+             inherits_from_item_id, status, proposed_by, confirmed_by, confirmed_at,
+             jurisdiction_scope)
         SELECT child.id, pc.disposition, pc.applies_to_categories,
                pc.excludes_categories, pc.entity_condition, pc.excluded_reason,
                NULL, NULL,
-               pc.item_id, pc.status, pc.proposed_by, pc.confirmed_by, pc.confirmed_at
+               pc.item_id, pc.status, pc.proposed_by, pc.confirmed_by, pc.confirmed_at,
+               pc.jurisdiction_scope
         FROM authority_index_items child
         JOIN authority_item_classifications pc ON pc.item_id = child.parent_item_id
         LEFT JOIN authority_item_classifications cc ON cc.item_id = child.id
@@ -309,10 +407,12 @@ For EACH item below, decide exactly one disposition:
 - "conditional" — applies only when an entity attribute crosses a threshold; set entity_condition as {{"type":"attribute","key":"<attr>","operator":"gte|eq|...","value":<v>}} (e.g. FMLA: employee_count gte 50).
 - "excluded" — definitional/administrative text with no employer obligation; set excluded_reason.
 
+If — and ONLY if — an item's own citation or heading limits it to specific named counties or cities (not the whole index's jurisdiction), set "jurisdiction_scope" to {{"level":"county"|"city","names":["Exact Name",...]}}. Otherwise use null. Do not infer a narrowing that the text does not state — null (whole-index reach) is the safe default.
+
 ITEMS:
 {items_block}
 
-Return ONLY a JSON object: {{"classifications": [{{"citation": "...", "disposition": "...", "applies_to_categories": [], "excludes_categories": [], "entity_condition": null, "excluded_reason": null, "rationale": "one sentence"}}]}}
+Return ONLY a JSON object: {{"classifications": [{{"citation": "...", "disposition": "...", "applies_to_categories": [], "excludes_categories": [], "entity_condition": null, "excluded_reason": null, "jurisdiction_scope": null, "rationale": "one sentence"}}]}}
 Every citation above must appear exactly once. Do not invent regulation keys — omit regulation_key entirely unless you are certain of an existing catalog key."""
 
 
@@ -478,6 +578,17 @@ async def override_classification(
     target `inherits_from_item_id = item_id` never touches them.
     """
     from .strata import recompute_strata
+    from .resolve import parse_jsonb
+
+    # PATCH semantics: an override that doesn't mention jurisdiction_scope keeps
+    # the existing one, rather than defaulting it to None (which would widen a
+    # narrowed classification to whole-index reach). An explicit null still clears.
+    if "jurisdiction_scope" not in proposal:
+        existing_scope = await conn.fetchval(
+            "SELECT jurisdiction_scope FROM authority_item_classifications WHERE item_id = $1",
+            item_id,
+        )
+        proposal = {**proposal, "jurisdiction_scope": parse_jsonb(existing_scope)}
 
     rkd = await fetch_rkd_keys_by_category(conn)
     normalized, warnings = validate_proposal(proposal, rkd)
@@ -504,7 +615,8 @@ async def override_classification(
                 excludes_categories = $4, entity_condition = $5::jsonb,
                 excluded_reason = $6, regulation_key = NULL,
                 key_definition_id = NULL, status = 'confirmed',
-                proposed_by = 'admin', confirmed_by = $7, confirmed_at = NOW()
+                proposed_by = 'admin', confirmed_by = $7, confirmed_at = NOW(),
+                jurisdiction_scope = $8::jsonb
             WHERE inherits_from_item_id = $1
             RETURNING id
             """,
@@ -515,6 +627,7 @@ async def override_classification(
             json.dumps(normalized["entity_condition"]) if normalized["entity_condition"] else None,
             normalized["excluded_reason"],
             admin_id,
+            json.dumps(normalized["jurisdiction_scope"]) if normalized.get("jurisdiction_scope") else None,
         )
         index_id = await conn.fetchval(
             "SELECT authority_index_id FROM authority_index_items WHERE id = $1", item_id

@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-_JSONB_FIELDS = ("entity_condition", "unmodeled_coordinates")
+_JSONB_FIELDS = ("entity_condition", "unmodeled_coordinates", "jurisdiction_scope")
 
 
 def _row_out(row) -> dict:
@@ -220,7 +220,7 @@ async def list_authority_items(
             SELECT i.id, i.citation, i.heading, i.parent_item_id, i.source_url,
                    c.disposition, c.applies_to_categories, c.excludes_categories,
                    c.entity_condition, c.regulation_key, c.status,
-                   c.proposed_by, c.inherits_from_item_id
+                   c.proposed_by, c.inherits_from_item_id, c.jurisdiction_scope
             FROM authority_index_items i
             LEFT JOIN authority_item_classifications c ON c.item_id = i.id
             WHERE {' AND '.join(where)}
@@ -267,10 +267,15 @@ async def override_classification_endpoint(
     current_user=Depends(require_admin),
 ):
     from app.core.services.scope_registry.classify import override_classification
+    # PATCH semantics for jurisdiction_scope: only overwrite it when the client
+    # explicitly sends it. Without this, a disposition-only edit would default
+    # the field to None and silently WIDEN a narrowed classification to
+    # whole-index reach (there is no FE editor to re-supply it).
+    body = payload.model_dump(exclude_unset=True)
     async with get_connection() as conn:
         try:
             return await override_classification(
-                conn, item_id, payload.model_dump(), current_user.id
+                conn, item_id, body, current_user.id
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
@@ -439,7 +444,8 @@ async def fetch_queue_research(payload: FetchQueueResearchRequest):
                     total_new += res.get("new", 0)
                     yield _sse({"type": "jurisdiction_complete", "jurisdiction": label,
                                 "new": res.get("new", 0), "failed": res.get("failed", []),
-                                "grounded": bool(corpus)})
+                                "grounded": bool(corpus),
+                                "penalties_stripped": res.get("penalties_stripped", 0)})
                 except Exception as exc:  # a unit failing must not kill the stream
                     logger.warning("fetch-queue research failed for %s: %s", label, exc)
                     yield _sse({"type": "jurisdiction_complete", "jurisdiction": label,

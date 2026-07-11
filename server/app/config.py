@@ -171,6 +171,13 @@ class Settings:
     # only gap-driven (missing-category) research. Flip on later to restore
     # selective TTL-based re-checks once a diff-scheduler exists (E6).
     repository_ttl_enabled: bool = False
+    # Grounding eval tier-2b: when True, the grounding suite makes one adversarial
+    # Gemini call per row tier-1 can't settle (value_unverifiable / value_not_in_text)
+    # to check the value against its cited statute text. Off = tier-1 + golden
+    # cross-check only, no network (today's behavior). Flipping this on makes the
+    # grounding suite a NETWORK_SUITE (routes to Celery). Verdicts are cached by
+    # (requirement, input_hash) so a re-run with unchanged data costs 0 calls.
+    grounding_llm_verifier_enabled: bool = False
 
     # Gemini API Rate Limits (research at scale needs higher ceilings)
     gemini_hourly_limit: int = 200
@@ -344,6 +351,7 @@ def load_settings() -> Settings:
         celery_result_backend=os.getenv("CELERY_RESULT_BACKEND"),
         compliance_emails_enabled=os.getenv("COMPLIANCE_EMAILS_ENABLED", "true").lower() in ("true", "1", "yes"),
         repository_ttl_enabled=os.getenv("REPOSITORY_TTL_ENABLED", "false").lower() in ("true", "1", "yes"),
+        grounding_llm_verifier_enabled=os.getenv("GROUNDING_LLM_VERIFIER_ENABLED", "false").lower() in ("true", "1", "yes"),
         gemini_hourly_limit=int(os.getenv("GEMINI_HOURLY_LIMIT", "200")),
         gemini_daily_limit=int(os.getenv("GEMINI_DAILY_LIMIT", "5000")),
         openstates_api_key=os.getenv("OPENSTATES_API_KEY"),

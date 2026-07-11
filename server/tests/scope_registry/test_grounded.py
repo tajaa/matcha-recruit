@@ -1,6 +1,7 @@
 """Grounded extraction pure core — corpus builder + citation gate. No DB, no AI."""
 from app.core.services.scope_registry.grounded import (
     build_grounded_corpus,
+    validate_penalty_citations,
     validate_requirement_citations,
 )
 
@@ -80,3 +81,67 @@ def test_validate_empty_index():
     reqs = [{"cited_sources": ["S1"]}]
     out, dropped = validate_requirement_citations(reqs, None)
     assert out[0]["grounded"] is False and dropped == ["S1"]
+
+
+# ── validate_penalty_citations (WS2) ─────────────────────────────────────────
+
+_IDX = {"S1": {"item_id": "i1", "citation": "29 CFR 541.600"},
+        "S2": {"item_id": "i2", "citation": "29 CFR 1903.15"}}
+
+
+def test_penalty_grounded_on_valid_id():
+    reqs = [{"penalties": {"summary": "up to $16,131", "civil_penalty_max": 16131,
+                           "cited_sources": ["S2"]}}]
+    out, dropped = validate_penalty_citations(reqs, _IDX, verified_date="2026-07-11")
+    p = out[0]["penalties"]
+    assert p["grounding"] == "grounded"
+    assert p["grounded_citations"] == ["29 CFR 1903.15"]
+    assert p["verified_date"] == "2026-07-11"
+    assert "cited_sources" not in p          # corpus-run-local, popped
+    assert dropped == []
+
+
+def test_penalty_ungrounded_when_ids_absent():
+    reqs = [{"penalties": {"summary": "fines", "civil_penalty_max": 500,
+                           "cited_sources": ["S9"]}}]
+    out, dropped = validate_penalty_citations(reqs, _IDX)
+    assert out[0]["penalties"]["grounding"] == "ungrounded"
+    assert "grounded_citations" not in out[0]["penalties"]
+    assert dropped == ["S9"]
+
+
+def test_penalty_no_cited_sources_is_ungrounded():
+    reqs = [{"penalties": {"summary": "fines", "enforcing_agency": "OSHA"}}]
+    out, _ = validate_penalty_citations(reqs, _IDX)
+    assert out[0]["penalties"]["grounding"] == "ungrounded"
+
+
+def test_missing_penalties_untouched():
+    reqs = [{"regulation_key": "x"}]
+    out, dropped = validate_penalty_citations(reqs, _IDX)
+    assert "penalties" not in out[0] and dropped == []
+
+
+def test_non_dict_penalties_untouched():
+    reqs = [{"penalties": "n/a"}, {"penalties": None}]
+    out, _ = validate_penalty_citations(reqs, _IDX)
+    assert out[0]["penalties"] == "n/a"
+    assert out[1]["penalties"] is None
+
+
+def test_insubstantive_penalties_stripped_to_none():
+    # a grounding-only shell (or all-null) must not persist — guards the upsert's
+    # any(penalties.values()) check.
+    reqs = [{"penalties": {"grounding": "x", "grounded_citations": []}},
+            {"penalties": {"civil_penalty_max": None, "summary": None}}]
+    out, _ = validate_penalty_citations(reqs, _IDX)
+    assert out[0]["penalties"] is None
+    assert out[1]["penalties"] is None
+
+
+def test_penalty_independent_of_req_grounded_flag():
+    # a value-grounded req can carry ungrounded penalties (different section).
+    reqs = [{"grounded": True, "cited_sources": ["S1"],
+             "penalties": {"summary": "recalled fine", "cited_sources": ["S9"]}}]
+    out, _ = validate_penalty_citations(reqs, _IDX)
+    assert out[0]["penalties"]["grounding"] == "ungrounded"

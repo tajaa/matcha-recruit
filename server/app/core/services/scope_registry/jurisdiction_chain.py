@@ -45,17 +45,21 @@ async def resolve_jurisdiction_chain(
 
     city_id = None
     city_found = False
+    city_name = None
+    county_name = None
     if city:
         city_row = await conn.fetchrow(
-            "SELECT id, county FROM jurisdictions WHERE LOWER(city) = LOWER($1) AND state = $2 "
+            "SELECT id, city, county FROM jurisdictions WHERE LOWER(city) = LOWER($1) AND state = $2 "
             "AND COALESCE(country_code,'US') = 'US' LIMIT 1",
             city, state,
         )
         if city_row:
             city_found = True
             city_id = city_row["id"]
+            city_name = city_row["city"]   # canonical stored casing
             ids.append(city_row["id"])
             if city_row["county"]:
+                county_name = city_row["county"]
                 county_id = await conn.fetchval(
                     "SELECT id FROM jurisdictions WHERE level::text = 'county' "
                     "AND LOWER(county) = LOWER($1) AND state = $2 LIMIT 1",
@@ -73,4 +77,7 @@ async def resolve_jurisdiction_chain(
         "federal_id": federal,
         "state_id": state_id,
         "city_id": city_id,
+        # Canonical names for sub-index jurisdiction_scope matching (additive).
+        "city_name": city_name,
+        "county_name": county_name,
     }

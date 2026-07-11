@@ -19,6 +19,7 @@ from app.database import get_connection
 from . import authority as authority_suite
 from . import completeness as completeness_suite
 from . import golden as golden_suite
+from . import grounding as grounding_suite
 from . import scope as scope_suite
 from . import industry_keysets as iks
 from . import tagging as tagging_suite
@@ -26,12 +27,25 @@ from .scoring import Subscores, composite_score, evaluate_readiness
 
 logger = logging.getLogger(__name__)
 
-ALL_SUITES = ("completeness", "authority", "tagging", "golden", "scope")
+ALL_SUITES = ("completeness", "authority", "tagging", "golden", "scope", "grounding")
 DEFAULT_STALENESS_DAYS = 90
 
 # Suites that reach the network. Routed to Celery rather than BackgroundTasks so a
-# slow regulator host cannot occupy a uvicorn worker for minutes.
+# slow regulator host cannot occupy a uvicorn worker for minutes. `authority` is
+# always network; `grounding` is network ONLY when its LLM verifier (tier-2b) is
+# enabled — otherwise it's pure tier-1 + golden and stays inline. Use
+# network_suites() (not this base set) to decide routing.
 NETWORK_SUITES = frozenset({"authority"})
+
+
+def network_suites() -> frozenset:
+    """Suites that reach the network for the CURRENT config. Adds `grounding` when
+    the tier-2b LLM verifier flag is on (that's the only thing that makes grounding
+    do I/O)."""
+    from app.config import get_settings
+
+    extra = {"grounding"} if get_settings().grounding_llm_verifier_enabled else set()
+    return NETWORK_SUITES | extra
 
 
 def _progress(run_id: UUID, message: str, pct: int) -> None:
@@ -188,6 +202,7 @@ async def run_evals(
             tagging_results: Dict = {}
             golden_results: Dict = {}
             golden_counts: Dict = {}
+            grounding_results: Dict = {}
 
             if "completeness" in suites:
                 _progress(run_id, "Building jurisdiction graph", 5)
@@ -230,6 +245,13 @@ async def run_evals(
                 all_findings.extend(out["findings"])
                 totals.update(out["totals"])
 
+            if "grounding" in suites:
+                _progress(run_id, "Verifying grounded values against cited text", 83)
+                out = await grounding_suite.run_grounding(conn, jur_ids)
+                grounding_results = out["results"]
+                all_findings.extend(out["findings"])
+                totals.update({f"grounding_{k}": v for k, v in out["totals"].items()})
+
             _progress(run_id, "Computing freshness", 85)
             freshness_results = await _freshness_by_jurisdiction(conn, jur_ids)
 
@@ -259,6 +281,7 @@ async def run_evals(
                     ("tagging", tagging_results),
                     ("golden", golden_results),
                     ("freshness", freshness_results),
+                    ("grounding", grounding_results),
                 ):
                     cell = res.get(jid)
                     if cell:
