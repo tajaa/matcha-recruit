@@ -36,7 +36,7 @@ export function PacketsPanel({ matterId, packets, toast, onShare }: {
   const older = packets.filter((p) => !latestIds.has(p.id))
 
   return (
-    <div className="max-h-[45%] shrink-0 overflow-y-auto border-t border-white/[0.06]">
+    <div className="shrink-0 border-t border-white/[0.06]">
       <div className="flex items-center gap-1.5 px-4 pb-1 pt-3 text-[10px] font-medium uppercase tracking-[0.15em] text-zinc-500">
         Work product
         <HelpHint text="The PDF is a defense memo that cites only real records; the ZIP bundles the underlying source documents. Shared links are logged for chain of custody." />
