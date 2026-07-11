@@ -198,8 +198,8 @@ async def chain_uncodified(
     what the Labor scope panel shows (the surface that triggers research).
 
     Returns ``{chain, keyed: [...], unkeyed: [...]}``. Each keyed item carries
-    ``classification_id``, ``regulation_key``, ``category_slug`` (RKD), ``level``,
-    ``citation``, ``heading``.
+    ``classification_id``, ``regulation_key``, ``category_slug`` (RKD),
+    ``severity`` (RKD, may be None), ``level``, ``citation``, ``heading``.
     """
     from .resolve import classification_matches
     from .labor_scope import is_labor_index
@@ -219,7 +219,8 @@ async def chain_uncodified(
             """
             SELECT c.id AS classification_id, c.disposition, c.applies_to_categories,
                    c.excludes_categories, c.entity_condition, c.regulation_key,
-                   c.key_definition_id, rkd.category_slug,
+                   c.jurisdiction_scope,
+                   c.key_definition_id, rkd.category_slug, rkd.severity,
                    i.id AS item_id, i.citation, i.heading,
                    (i.body_text IS NOT NULL) AS has_body,
                    ai.level, ai.slug AS index_slug,
@@ -239,6 +240,10 @@ async def chain_uncodified(
 
     # Generic-employer applicability (empty chain + attrs): universal matches,
     # category_specific/conditional don't — the same set the panel shows.
+    # No geo → sub-index jurisdiction_scope is NOT filtered: this is the chain's
+    # research worklist, so a city-scoped obligation must still be surfaced (and
+    # researched) even on a state-only sweep. resolve_scope filters by geo; this
+    # authoring view does not (see labor_scope for the same rationale).
     applicable = [r for r in rows if classification_matches(r, [], {})]
 
     # Codified keys already present in the chain.
@@ -259,6 +264,7 @@ async def chain_uncodified(
             "classification_id": r["classification_id"],
             "regulation_key": r["regulation_key"],
             "category_slug": r["category_slug"],
+            "severity": r["severity"],
             "level": r["level"],
             "citation": r["citation"],
             "heading": r["heading"],
@@ -293,6 +299,20 @@ def build_research_context(items: List[Dict[str, Any]]) -> str:
     )
 
 
+# Severity → sort rank (lower researches first). Derived from the single severity
+# vocabulary in compliance_registry so a new/reordered level can't silently rank
+# at the default. Unknown/None sits at 'moderate' so an unmapped key never jumps
+# ahead of a curated critical one.
+from app.core.compliance_registry import SEVERITY_LEVELS
+
+_SEVERITY_RANK = {s: i for i, s in enumerate(SEVERITY_LEVELS)}
+_DEFAULT_SEVERITY_RANK = _SEVERITY_RANK.get("moderate", len(SEVERITY_LEVELS))
+
+
+def _severity_rank(severity: Any) -> int:
+    return _SEVERITY_RANK.get((severity or "").lower(), _DEFAULT_SEVERITY_RANK)
+
+
 def group_research_units(
     keyed_items: List[Dict[str, Any]],
     *,
@@ -303,7 +323,11 @@ def group_research_units(
     """Group keyed worklist items into (target jurisdiction × category) research
     units. Level → target: federal→federal_id, state→state_id, city/county/local→
     city_id (falls back to state_id when there's no city row). Items whose target
-    jurisdiction can't be resolved are dropped (reported by the caller). Pure."""
+    jurisdiction can't be resolved are dropped (reported by the caller).
+
+    Severity-ordered: items sort by RKD severity (critical first) before grouping,
+    and units sort by their most-severe item, so the SSE research loop drains the
+    highest-severity gaps first. Stable within a severity band (input order). Pure."""
     def target(level: str) -> Any:
         lvl = (level or "").lower()
         if lvl == "federal":
@@ -312,8 +336,10 @@ def group_research_units(
             return city_id or state_id
         return state_id
 
+    ordered_items = sorted(keyed_items, key=lambda it: _severity_rank(it.get("severity")))
+
     by_jur: Dict[Any, Dict[str, Any]] = {}
-    for it in keyed_items:
+    for it in ordered_items:
         jid = target(it["level"])
         if not jid or not it.get("category_slug"):
             continue  # no target jurisdiction row, or no RKD category to research
@@ -325,13 +351,16 @@ def group_research_units(
 
     units = []
     for unit in by_jur.values():
+        best = min((_severity_rank(it.get("severity")) for it in unit["items"]), default=2)
         units.append({
             "jurisdiction_id": unit["jurisdiction_id"],
             "categories": sorted(unit["categories"]),
             "keys": unit["keys"],
             "items": unit["items"],
             "context": build_research_context(unit["items"]),
+            "severity_rank": best,
         })
+    units.sort(key=lambda u: u["severity_rank"])
     return units
 
 

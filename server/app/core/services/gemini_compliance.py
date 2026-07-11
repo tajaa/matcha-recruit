@@ -386,6 +386,10 @@ GROUNDING RULES (override any prior knowledge):
   the excerpt(s) the value came from. Cite ONLY ids that appear above — never invent one.
 - If the text above does not state the value, set "needs_body_review": true and
   "cited_sources": [] rather than guessing.
+- Penalty amounts are values too: fill "penalties" ONLY from penalty/enforcement
+  figures stated in the statute text above, and set "penalties.cited_sources" to the
+  bracketed ids of the excerpt(s) that state them. If the text above does not state
+  the penalties, return "penalties": null rather than recalling amounts from memory.
 """
 
 
@@ -453,7 +457,8 @@ Respond with JSON:
         "per_violation": <true if per-violation, false if flat>,
         "annual_cap": <annual cap USD or null>,
         "criminal": "Brief criminal penalty description or null",
-        "summary": "One-line human-readable penalty summary"
+        "summary": "One-line human-readable penalty summary",
+        "cited_sources": <when statute text is provided above: array of bracketed ids like ["S2"] whose text states these penalty amounts; else omit>
       }},
       "implementation_steps": ["Concrete step an employer takes to comply", "Next step", "..."]
     }}

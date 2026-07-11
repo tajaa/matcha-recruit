@@ -102,3 +102,83 @@ def validate_requirement_citations(
         req["grounded"] = bool(valid)
         req["grounded_citations"] = [citation_index[i]["citation"] for i in valid]
     return reqs, dropped
+
+
+# Penalty amounts are values too (§ WS2): a fine figure must come from the
+# fetched statute text, not model recall. These are the keys that make a
+# penalties block worth persisting — a grounding-only (or cited_sources-only)
+# shell is not. This is the ONE definition of "substantive"; the read-side
+# extractor (resolve.penalties_from_metadata) and the persist sink both reuse it,
+# so the two can't drift.
+PENALTY_SUBSTANTIVE_KEYS = (
+    "enforcing_agency", "civil_penalty_min", "civil_penalty_max",
+    "per_violation", "annual_cap", "criminal", "summary",
+)
+
+
+def penalty_is_substantive(penalties: Dict[str, Any]) -> bool:
+    return any(penalties.get(k) not in (None, "", []) for k in PENALTY_SUBSTANTIVE_KEYS)
+
+
+def sanitize_penalties_for_persist(penalties: Any) -> Any:
+    """Sink-side guard for EVERY research path (not just the grounded one).
+
+    ``cited_sources`` are corpus-run-local S-ids the model is asked to emit only
+    when statute text is supplied; on ungrounded paths the model may emit them
+    anyway. Drop the transport key so it never lands in ``metadata.penalties``,
+    then collapse an insubstantive block (cited_sources-only / all-null) to None
+    so it neither persists nor inflates the penalty-coverage counter. Idempotent;
+    leaves non-dict values (None/absent) untouched. Mutates a dict in place.
+    """
+    if not isinstance(penalties, dict):
+        return penalties
+    penalties.pop("cited_sources", None)
+    return penalties if penalty_is_substantive(penalties) else None
+
+
+def validate_penalty_citations(
+    reqs: List[Dict[str, Any]],
+    citation_index: Optional[Dict[str, Dict[str, Any]]],
+    *,
+    verified_date: Optional[str] = None,
+) -> Tuple[List[Dict[str, Any]], List[str]]:
+    """Gate each requirement's ``penalties.cited_sources`` on the fetched corpus.
+
+    Mirrors :func:`validate_requirement_citations` but for the nested penalties
+    block, and INDEPENDENTLY of the requirement-level grounding — penalty text
+    routinely lives in a different section (e.g. an enforcement subpart) than
+    the value, so a value-grounded req can carry ungrounded penalties and vice
+    versa.
+
+    For each req with a dict ``penalties``:
+      * insubstantive block (grounding-only shell, all-null) → ``penalties=None``
+        so the additive upsert's ``any(penalties.values())`` check drops it;
+      * ``cited_sources`` normalized to bare S-ids; ids present in the corpus →
+        ``grounding='grounded'`` + ``grounded_citations=[resolved]`` (+
+        ``verified_date`` when given); no valid id → ``grounding='ungrounded'``;
+      * ``cited_sources`` is popped either way — the S-ids are corpus-run-local,
+        only resolved citations persist.
+
+    Mutates each req in place; returns ``(reqs, dropped_ids)``. Pure (no DB/AI).
+    """
+    citation_index = citation_index or {}
+    dropped: List[str] = []
+    for req in reqs:
+        penalties = req.get("penalties")
+        if not isinstance(penalties, dict):
+            continue
+        if not penalty_is_substantive(penalties):
+            req["penalties"] = None
+            continue
+        ids = _normalize_ids(penalties.get("cited_sources"))
+        valid = [i for i in ids if i in citation_index]
+        dropped.extend(i for i in ids if i not in citation_index)
+        penalties.pop("cited_sources", None)
+        if valid:
+            penalties["grounding"] = "grounded"
+            penalties["grounded_citations"] = [citation_index[i]["citation"] for i in valid]
+            if verified_date:
+                penalties["verified_date"] = verified_date
+        else:
+            penalties["grounding"] = "ungrounded"
+    return reqs, dropped

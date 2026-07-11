@@ -41,7 +41,7 @@ class FakeConn:
 async def test_full_chain_city_county_state_federal():
     conn = FakeConn(
         states={"CA": CA},
-        cities={("los angeles", "CA"): {"id": LA_CITY, "county": "Los Angeles"}},
+        cities={("los angeles", "CA"): {"id": LA_CITY, "city": "Los Angeles", "county": "Los Angeles"}},
         counties={("los angeles", "CA"): LA_COUNTY},
     )
     chain = await _resolve_jurisdiction_chain(conn, "CA", "Los Angeles")
@@ -85,7 +85,7 @@ async def test_city_without_a_county_row_still_chains():
     """New York City has no county jurisdiction row in dev."""
     conn = FakeConn(
         states={"NY": "ny-id"},
-        cities={("new york city", "NY"): {"id": "nyc-id", "county": None}},
+        cities={("new york city", "NY"): {"id": "nyc-id", "city": "New York City", "county": None}},
     )
     chain = await _resolve_jurisdiction_chain(conn, "NY", "New York City")
     assert chain["ids"] == [FEDERAL, "ny-id", "nyc-id"]
@@ -96,7 +96,7 @@ async def test_city_without_a_county_row_still_chains():
 async def test_city_names_county_but_county_row_is_absent():
     conn = FakeConn(
         states={"CA": CA},
-        cities={("malibu", "CA"): {"id": "malibu-id", "county": "Los Angeles"}},
+        cities={("malibu", "CA"): {"id": "malibu-id", "city": "Malibu", "county": "Los Angeles"}},
         counties={},
     )
     chain = await _resolve_jurisdiction_chain(conn, "CA", "Malibu")

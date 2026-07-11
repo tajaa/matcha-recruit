@@ -46,6 +46,46 @@ def test_group_drops_items_without_target_or_category():
     assert units[0]["keys"] == ["k1"]
 
 
+def _sev_item(key, category, level, severity):
+    it = _item(key, category, level)
+    it["severity"] = severity
+    return it
+
+
+def test_group_units_sorted_most_severe_first():
+    # each in its own jurisdiction level → one unit apiece; units order by severity.
+    items = [
+        _sev_item("a", "sick_leave", "state", "low"),
+        _sev_item("b", "overtime", "federal", "critical"),
+        _sev_item("c", "min_wage", "city", "high"),
+    ]
+    units = group_research_units(items, federal_id="F", state_id="S", city_id="C")
+    assert [u["jurisdiction_id"] for u in units] == ["F", "C", "S"]
+    assert units[0]["severity_rank"] == 0
+
+
+def test_group_unit_severity_is_its_most_severe_item():
+    # two items land in one federal unit; the unit ranks by the worst of them.
+    items = [
+        _sev_item("a", "overtime", "federal", "moderate"),
+        _sev_item("b", "min_wage", "federal", "critical"),
+    ]
+    units = group_research_units(items, federal_id="F", state_id="S", city_id=None)
+    assert len(units) == 1 and units[0]["severity_rank"] == 0
+    # within the unit, the critical item sorts ahead of the moderate one.
+    assert units[0]["items"][0]["regulation_key"] == "b"
+
+
+def test_group_none_severity_ranks_as_moderate():
+    items = [
+        _sev_item("a", "overtime", "federal", None),   # None → moderate band
+        _sev_item("b", "min_wage", "state", "low"),
+    ]
+    units = group_research_units(items, federal_id="F", state_id="S", city_id=None)
+    # federal (None→moderate=2) before state (low=3)
+    assert [u["jurisdiction_id"] for u in units] == ["F", "S"]
+
+
 def test_build_research_context_targets_the_keys():
     ctx = build_research_context([_item("meal_break", "meal_breaks", "state",
                                         cite="Lab 512", heading="Meal periods")])

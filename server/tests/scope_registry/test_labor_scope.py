@@ -127,6 +127,19 @@ def test_bucket_registry_codified_vs_uncodified_by_level():
     assert levels["city"]["uncodified"][0]["citation"] == "Ord 1"
 
 
+def test_bucket_registry_carries_severity():
+    applicable = [
+        {**_cls("federal", "national_minimum_wage", "29 USC 206"), "severity": "critical"},
+        {**_cls("state", "meal_break", "Lab 512"), "severity": "high"},
+        _cls("state", None, "Lab 226"),  # no severity key → None passthrough
+    ]
+    reqs = {"national_minimum_wage": {"regulation_key": "national_minimum_wage", "title": "x"}}
+    levels = bucket_registry(applicable, reqs)
+    assert levels["federal"]["codified"][0]["severity"] == "critical"
+    sev_by_cite = {e["citation"]: e["severity"] for e in levels["state"]["uncodified"]}
+    assert sev_by_cite == {"Lab 512": "high", "Lab 226": None}
+
+
 # ── 4. exhaustiveness basis ──────────────────────────────────────────────────
 
 def _ix(slug, level, enumerable, item_count=10, unclassified=0, name=None):

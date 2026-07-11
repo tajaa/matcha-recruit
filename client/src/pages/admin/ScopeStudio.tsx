@@ -145,6 +145,17 @@ type ResolveResult = {
 
 // ── Labor scope (jurisdiction-first, industry-agnostic) ──────────────────────
 
+type RequirementPenalties = {
+  enforcing_agency?: string | null
+  civil_penalty_min?: number | string | null
+  civil_penalty_max?: number | string | null
+  per_violation?: boolean | string | null
+  annual_cap?: number | string | null
+  criminal?: string | null
+  summary?: string | null
+  grounding?: string | null
+}
+
 type LaborScopeRequirement = {
   title?: string | null
   key_definition_id?: string | null
@@ -156,16 +167,23 @@ type LaborScopeRequirement = {
   last_verified_at?: string | null
   codified_at?: string | null
   codify_source?: string | null
+  effective_date?: string | null
+  expiration_date?: string | null
+  penalties?: RequirementPenalties | null
 }
+
+type JurisdictionScope = { level: string; names: string[] }
 
 type CodifiedEntry = {
   citation: string; heading: string | null; regulation_key: string | null
   source_url?: string | null; item_id?: string | null; has_body?: boolean
+  severity?: string | null; jurisdiction_scope?: JurisdictionScope | null
   requirement?: LaborScopeRequirement | null
 }
 type UncodifiedEntry = {
   citation: string; heading: string | null; regulation_key: string | null
   source_url?: string | null; item_id?: string | null; has_body?: boolean
+  severity?: string | null; jurisdiction_scope?: JurisdictionScope | null
 }
 
 type LaborScopeLevel = {
@@ -200,6 +218,49 @@ type LaborScopeResponse = {
 const LEVEL_LABELS: [keyof LaborScopeResponse['registry']['levels'], string][] = [
   ['federal', 'Federal'], ['state', 'State'], ['city', 'City / Local'],
 ]
+
+// Compact penalty chip text: "≤ $10,000" from civil_penalty_max, else the
+// summary truncated. Null when the block has nothing displayable.
+function penaltyChipText(p: RequirementPenalties | null | undefined): string | null {
+  if (!p) return null
+  const max = p.civil_penalty_max
+  if (max !== null && max !== undefined && max !== '') {
+    const n = typeof max === 'number' ? max : Number(max)
+    return Number.isFinite(n) ? `≤ $${n.toLocaleString()}` : `≤ ${max}`
+  }
+  if (p.summary) return p.summary.length > 40 ? `${p.summary.slice(0, 40)}…` : p.summary
+  return null
+}
+
+// Obligation severity (RKD) — 'critical' | 'high' | 'moderate' | 'low'. Only the
+// two urgent bands render a badge; moderate/low stay quiet to avoid noise.
+const SEVERITY_BADGE: Record<string, string> = {
+  critical: 'bg-rose-500/15 text-rose-300 border-rose-500/30',
+  high: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
+}
+function SeverityBadge({ severity }: { severity?: string | null }) {
+  const key = (severity || '').toLowerCase()
+  const cls = SEVERITY_BADGE[key]
+  if (!cls) return null
+  return (
+    <span className={`ml-1.5 rounded border px-1 text-[9px] uppercase tracking-wide ${cls}`}
+          title={`Severity: ${key}`}>
+      {key}
+    </span>
+  )
+}
+
+// Sub-index jurisdiction narrowing — this tag reaches only named counties/cities.
+function ScopeChip({ scope }: { scope?: JurisdictionScope | null }) {
+  if (!scope || !scope.names?.length) return null
+  const plural = scope.level === 'city' ? 'cities' : scope.level === 'county' ? 'counties' : `${scope.level}s`
+  return (
+    <span className="ml-1.5 rounded border border-sky-500/30 bg-sky-500/15 px-1 text-[9px] text-sky-300"
+          title={`Applies only to these ${plural}`}>
+      {scope.level}: {scope.names.join(', ')}
+    </span>
+  )
+}
 
 // Reader-aware citation: opens the in-app statute drawer when body text exists,
 // else links to the source, else plain text. Module-scope so it isn't a new
@@ -1029,6 +1090,7 @@ export default function ScopeStudio() {
                           {data.codified.map((it) => {
                             const r = it.requirement
                             const when = r?.codified_at ?? r?.last_verified_at
+                            const penaltyChip = penaltyChipText(r?.penalties)
                             const policyHref = r?.key_definition_id
                               ? `/admin/jurisdiction-data/policy/${r.key_definition_id}`
                               : null
@@ -1038,6 +1100,8 @@ export default function ScopeStudio() {
                                   {/* Citation → in-app statute reader (or source) */}
                                   <CitationLink it={it} onOpen={openReader} />
                                   {r?.title ? ` — ${r.title}` : it.regulation_key ? ` — ${it.regulation_key}` : ''}
+                                  <SeverityBadge severity={it.severity} />
+                                  <ScopeChip scope={it.jurisdiction_scope} />
                                   {policyHref && (
                                     <a href={policyHref}
                                        className="ml-1.5 text-[10px] text-cyan-400/70 hover:underline"
@@ -1059,6 +1123,15 @@ export default function ScopeStudio() {
                                   {r?.jurisdiction_name && <span>{r.jurisdiction_name}</span>}
                                   {when && (
                                     <span>{r?.codified_at ? 'codified' : 'verified'} {when.slice(0, 10)}</span>
+                                  )}
+                                  {r?.effective_date && (
+                                    <span>effective {r.effective_date.slice(0, 10)}</span>
+                                  )}
+                                  {penaltyChip && (
+                                    <span className="text-amber-400/80"
+                                          title={r?.penalties?.summary || undefined}>
+                                      penalty {penaltyChip}
+                                    </span>
                                   )}
                                 </div>
                               </li>
@@ -1083,6 +1156,8 @@ export default function ScopeStudio() {
                                 <span className="font-mono">{it.citation}</span>
                               )}
                               {it.heading ? <span className="text-zinc-500"> — {it.heading}</span> : ''}
+                              <SeverityBadge severity={it.severity} />
+                              <ScopeChip scope={it.jurisdiction_scope} />
                             </li>
                           ))}
                           {data.uncodified.length > 10 && (

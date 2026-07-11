@@ -8,6 +8,7 @@ import pytest
 from app.core.services.scope_registry.resolve import (
     classification_matches,
     coordinate_hash,
+    jurisdiction_scope_matches,
 )
 
 WAREHOUSE = ["warehousing"]
@@ -124,3 +125,78 @@ def test_parse_jsonb_normalizes_strings_and_passes_objects():
     assert parse_jsonb({"already": "parsed"}) == {"already": "parsed"}
     assert parse_jsonb(None) is None
     assert parse_jsonb("{broken json") is None
+
+
+# ── jurisdiction_scope (WS4): sub-index reach ────────────────────────────────
+
+_LA = {"state": "CA", "city": "Los Angeles", "county": "Los Angeles"}
+_SF = {"state": "CA", "city": "San Francisco", "county": "San Francisco"}
+
+
+def test_scope_none_is_whole_index():
+    assert jurisdiction_scope_matches(None, _LA) is True
+    assert jurisdiction_scope_matches(None, None) is True
+
+
+def test_scope_city_match_case_insensitive():
+    scope = {"level": "city", "names": ["Los Angeles", "Oakland"]}
+    assert jurisdiction_scope_matches(scope, _LA) is True
+    assert jurisdiction_scope_matches(scope, {"state": "CA", "city": "los angeles"}) is True
+
+
+def test_scope_city_no_match():
+    scope = {"level": "city", "names": ["Los Angeles"]}
+    assert jurisdiction_scope_matches(scope, _SF) is False
+
+
+def test_scope_county_level():
+    scope = {"level": "county", "names": ["Cook"]}
+    assert jurisdiction_scope_matches(scope, {"state": "IL", "county": "Cook"}) is True
+    assert jurisdiction_scope_matches(scope, {"state": "IL", "county": "DuPage"}) is False
+
+
+def test_scope_no_geo_is_conservative_false():
+    scope = {"level": "city", "names": ["Los Angeles"]}
+    assert jurisdiction_scope_matches(scope, None) is False
+    # geo present but missing the needed name (unresolved city) → False
+    assert jurisdiction_scope_matches(scope, {"state": "CA", "city": None}) is False
+
+
+def test_scope_malformed_never_applies():
+    assert jurisdiction_scope_matches({"level": "state", "names": ["CA"]}, _LA) is False
+    assert jurisdiction_scope_matches("junk", _LA) is False
+    assert jurisdiction_scope_matches({"level": "city", "names": []}, _LA) is False
+
+
+# ── classification_matches geo integration + back-compat ─────────────────────
+
+def _scoped_row(disposition, scope, applies=None):
+    r = _row(disposition, applies=applies)
+    r["jurisdiction_scope"] = scope
+    return r
+
+
+def test_classification_matches_scoped_needs_geo():
+    row = _scoped_row("universal_in_domain", {"level": "city", "names": ["Los Angeles"]})
+    # scoped tag reaches LA
+    assert classification_matches(row, WAREHOUSE, {}, _LA)
+    # not SF
+    assert not classification_matches(row, WAREHOUSE, {}, _SF)
+    # geo-blind caller (default None) → scoped tag doesn't match
+    assert not classification_matches(row, WAREHOUSE, {})
+
+
+def test_classification_matches_null_scope_backcompat():
+    # a row without jurisdiction_scope behaves exactly as before, 3-arg or 4-arg.
+    row = _row("universal_in_domain")
+    assert classification_matches(row, WAREHOUSE, {})
+    assert classification_matches(row, WAREHOUSE, {}, _LA)
+
+
+def test_classification_matches_scope_parses_json_string():
+    # asyncpg hands jsonb back as a str on this pool.
+    import json
+    row = _row("universal_in_domain")
+    row["jurisdiction_scope"] = json.dumps({"level": "city", "names": ["Los Angeles"]})
+    assert classification_matches(row, WAREHOUSE, {}, _LA)
+    assert not classification_matches(row, WAREHOUSE, {}, _SF)
