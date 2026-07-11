@@ -258,6 +258,7 @@ export interface QualityRequirement {
   title: string | null
   description: string | null
   source_url: string | null
+  source_url_status?: 'unchecked' | 'ok' | 'dead' | null
   source_tier: string | null
   current_value: string | null
   effective_date: string | null
@@ -278,6 +279,7 @@ export interface QualityAuditSummary {
   avg_completeness: number
   stale_count: number
   missing_source_url: number
+  dead_source_url?: number
   tier_breakdown: Record<string, number>
   provenance_breakdown: Record<string, number>
 }

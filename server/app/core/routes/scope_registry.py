@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from ..dependencies import require_admin
 from ..models.scope_registry import (
+    AcknowledgeDriftRequest,
     ClassificationProposal,
     ConfirmClassificationsRequest,
     DispatchResponse,
@@ -71,13 +72,15 @@ async def trigger_ingest(slug: str, current_user=Depends(require_admin)) -> Disp
 async def list_authority_drift(
     slug: Optional[str] = None,
     change_type: Optional[Literal["new", "amended", "removed"]] = None,
+    status: Optional[Literal["open", "acknowledged"]] = None,
     limit: int = 100,
 ):
     """Recorded authority drift — new/amended/removed citations detected on
     re-ingest. This is the "a federal law changed or was added" review queue.
 
-    Filter by ``slug`` (one index) and/or ``change_type`` ('new'|'amended'|
-    'removed'); newest first.
+    Filter by ``slug`` (one index), ``change_type``, and/or ``status``
+    ('open' = awaiting review); newest first. ``open_count`` always reflects
+    the whole queue regardless of filters, so the UI can badge it.
     """
     limit = max(1, min(limit, 500))
     where = ["1=1"]
@@ -88,13 +91,17 @@ async def list_authority_drift(
     if change_type:
         params.append(change_type)
         where.append(f"d.change_type = ${len(params)}")
+    if status:
+        params.append(status)
+        where.append(f"d.status = ${len(params)}")
     params.append(limit)
     async with get_connection() as conn:
         rows = await conn.fetch(
             f"""
             SELECT d.id, d.authority_index_id, ai.slug AS index_slug,
                    ai.name AS index_name, d.change_type, d.citation, d.heading,
-                   d.old_amendment_date, d.new_amendment_date, d.detected_at
+                   d.old_amendment_date, d.new_amendment_date, d.detected_at,
+                   d.status, d.acknowledged_by, d.acknowledged_at
             FROM authority_index_drift d
             JOIN authority_indexes ai ON ai.id = d.authority_index_id
             WHERE {' AND '.join(where)}
@@ -103,7 +110,45 @@ async def list_authority_drift(
             """,
             *params,
         )
-    return {"drift": [dict(r) for r in rows]}
+        open_count = await conn.fetchval(
+            "SELECT COUNT(*) FROM authority_index_drift WHERE status = 'open'"
+        )
+    return {"drift": [dict(r) for r in rows], "open_count": int(open_count or 0)}
+
+
+@router.post("/drift/acknowledge", dependencies=[Depends(require_admin)])
+async def acknowledge_drift(
+    payload: AcknowledgeDriftRequest,
+    current_user=Depends(require_admin),
+):
+    """Mark drift rows reviewed. Rows are kept (audit trail; the ingest
+    removed-dedupe reads latest change_type regardless of status) — they just
+    leave the open queue. Idempotent: already-acknowledged ids are skipped.
+    """
+    async with get_connection() as conn:
+        acknowledged = await conn.fetchval(
+            """
+            WITH updated AS (
+                UPDATE authority_index_drift
+                SET status = 'acknowledged',
+                    acknowledged_by = $2,
+                    acknowledged_at = NOW()
+                WHERE id = ANY($1::uuid[]) AND status = 'open'
+                RETURNING 1
+            )
+            SELECT COUNT(*) FROM updated
+            """,
+            payload.ids,
+            current_user.id,
+        )
+        open_count = await conn.fetchval(
+            "SELECT COUNT(*) FROM authority_index_drift WHERE status = 'open'"
+        )
+    return {
+        "acknowledged": int(acknowledged or 0),
+        "skipped": len(payload.ids) - int(acknowledged or 0),
+        "open_count": int(open_count or 0),
+    }
 
 
 @router.post("/authority/{slug}/fetch-bodies", dependencies=[Depends(require_admin)])

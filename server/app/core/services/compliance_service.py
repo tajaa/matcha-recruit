@@ -6070,9 +6070,15 @@ async def get_location_requirements(
         state = loc["state"]
         has_local_ordinance = loc["has_local_ordinance"]
 
+        # source_url_status lives on the catalog row (jurisdiction_requirements)
+        # and is joined through the SSOT FK at read time — never mirrored, so it
+        # can't go stale. Null-FK (Gemini-fresh) rows read as NULL = unchecked.
         query = """
-            SELECT r.* FROM compliance_requirements r
+            SELECT r.*, cat.source_url_status
+            FROM compliance_requirements r
             JOIN business_locations l ON r.location_id = l.id
+            LEFT JOIN jurisdiction_requirements cat
+              ON cat.id = r.jurisdiction_requirement_id
             WHERE l.id = $1 AND l.company_id = $2
         """
         params = [location_id, company_id]
@@ -6126,6 +6132,7 @@ async def get_location_requirements(
                 if row.get("numeric_value") is not None
                 else None,
                 source_url=row["source_url"],
+                source_url_status=row.get("source_url_status"),
                 source_name=row["source_name"],
                 effective_date=row["effective_date"].isoformat()
                 if row["effective_date"]
@@ -8511,7 +8518,7 @@ async def resolve_jurisdiction_stacks(
             SELECT jr.id, jr.jurisdiction_id, jr.requirement_key, jr.category,
                    jr.jurisdiction_level, jr.jurisdiction_name, jr.title,
                    jr.description, jr.current_value, jr.numeric_value,
-                   jr.source_url, jr.source_name, jr.effective_date,
+                   jr.source_url, jr.source_url_status, jr.source_name, jr.effective_date,
                    jr.last_verified_at, jr.previous_value,
                    jr.previous_description, jr.change_status,
                    jr.last_changed_at, jr.expiration_date,
@@ -8861,6 +8868,7 @@ async def get_hierarchical_requirements(
                     "last_changed_at": row["last_changed_at"].isoformat() if row.get("last_changed_at") else None,
                     "numeric_value": float(row["numeric_value"]) if row.get("numeric_value") is not None else None,
                     "source_url": row.get("source_url"),
+                    "source_url_status": row.get("source_url_status"),
                     "statute_citation": row.get("statute_citation"),
                     "status": row.get("req_status", "active"),
                     "canonical_key": row.get("canonical_key"),
@@ -8896,6 +8904,7 @@ async def get_hierarchical_requirements(
                     "last_changed_at": gov["last_changed_at"].isoformat() if gov.get("last_changed_at") else None,
                     "numeric_value": float(gov["numeric_value"]) if gov.get("numeric_value") is not None else None,
                     "source_url": gov.get("source_url"),
+                    "source_url_status": gov.get("source_url_status"),
                     "statute_citation": gov.get("statute_citation"),
                     "status": gov.get("req_status", "active"),
                     "canonical_key": gov.get("canonical_key"),

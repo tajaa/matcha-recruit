@@ -61,6 +61,13 @@ const SOURCE_BADGE: Record<string, string> = {
   focused: 'bg-zinc-500/15 text-zinc-300 border-zinc-500/30',
 }
 
+// Authority drift (re-ingest diff) change types — the "a law changed" queue.
+const DRIFT_BADGE: Record<string, string> = {
+  new: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
+  amended: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
+  removed: 'bg-red-500/15 text-red-300 border-red-500/30',
+}
+
 // ── Types (mirror the matrix + scope-registry endpoints) ─────────────────────
 
 type CategoryEntry = {
@@ -341,6 +348,55 @@ export default function ScopeStudio() {
 
   const [laborScope, setLaborScope] = useState<LaborScopeResponse | null>(null)
   const [laborError, setLaborError] = useState<string | null>(null)
+
+  // Authority drift review queue — registry-global (not coordinate-driven).
+  type DriftRow = {
+    id: string
+    index_slug: string
+    index_name: string
+    change_type: 'new' | 'amended' | 'removed'
+    citation: string
+    heading: string | null
+    old_amendment_date: string | null
+    new_amendment_date: string | null
+    detected_at: string
+    status: 'open' | 'acknowledged'
+  }
+  const [drift, setDrift] = useState<{ drift: DriftRow[]; open_count: number } | null>(null)
+  const [driftError, setDriftError] = useState<string | null>(null)
+  const [driftShowAll, setDriftShowAll] = useState(false)
+  const [driftNonce, setDriftNonce] = useState(0)
+  const [ackBusy, setAckBusy] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const qs = driftShowAll ? '' : '?status=open'
+        const res = await api.get<{ drift: DriftRow[]; open_count: number }>(
+          `/admin/scope-registry/drift${qs}`,
+        )
+        if (!cancelled) { setDrift(res); setDriftError(null) }
+      } catch (e) {
+        if (!cancelled) setDriftError(e instanceof Error ? e.message : 'Failed to load drift')
+      }
+    })()
+    return () => { cancelled = true }
+    // matrixNonce: re-sweep after ingest/research mutations elsewhere on the page.
+  }, [driftShowAll, driftNonce, matrixNonce])
+
+  const acknowledgeDrift = useCallback(async (ids: string[]) => {
+    if (!ids.length) return
+    setAckBusy(true)
+    try {
+      await api.post('/admin/scope-registry/drift/acknowledge', { ids })
+      setDriftNonce((n) => n + 1)
+    } catch (e) {
+      setDriftError(e instanceof Error ? e.message : 'Failed to acknowledge')
+    } finally {
+      setAckBusy(false)
+    }
+  }, [])
 
   const [newSpecialty, setNewSpecialty] = useState('')
   const [discovering, setDiscovering] = useState(false)
@@ -1164,6 +1220,92 @@ export default function ScopeStudio() {
               </div>
             )}
           </>
+        )}
+      </div>
+
+      {/* Authority drift — new/amended/removed citations detected on re-ingest */}
+      <div className="mt-4 rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <h2 className="text-sm font-semibold text-zinc-200">Authority drift</h2>
+            <HelpHint text="What changed at the source since the last ingest of each authority index — a new section appeared, a heading was amended, or a citation vanished upstream. Review each row, act on it (research / reclassify), then acknowledge it to clear the queue." />
+            {drift && drift.open_count > 0 && (
+              <span className={`rounded border px-1.5 py-0.5 text-[10px] ${DRIFT_BADGE.amended}`}>
+                {drift.open_count} open
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setDriftShowAll((v) => !v)}
+              className="rounded border border-zinc-800 px-2 py-1 text-[11px] text-zinc-400 hover:border-zinc-600">
+              {driftShowAll ? 'Show open only' : 'Show all (incl. acknowledged)'}
+            </button>
+            {drift && drift.drift.some((d) => d.status === 'open') && (
+              <button
+                disabled={ackBusy}
+                onClick={() => acknowledgeDrift(drift.drift.filter((d) => d.status === 'open').map((d) => d.id))}
+                className="rounded border border-zinc-800 px-2 py-1 text-[11px] text-emerald-300 hover:border-zinc-600 disabled:opacity-50">
+                {ackBusy ? 'Acknowledging…' : 'Acknowledge all shown'}
+              </button>
+            )}
+          </div>
+        </div>
+
+        {driftError ? (
+          <div className="text-xs text-red-400">{driftError}</div>
+        ) : !drift ? (
+          <div className="text-xs text-zinc-500">Loading…</div>
+        ) : drift.drift.length === 0 ? (
+          <div className="text-xs text-zinc-500">
+            {driftShowAll
+              ? 'No drift recorded yet — run an ingest twice to establish a baseline and diff against it.'
+              : 'No open drift. The authority indexes match their last-reviewed state.'}
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead className="text-xs uppercase text-zinc-500">
+                <tr>
+                  <th className="py-2">Change</th>
+                  <th className="py-2">Citation</th>
+                  <th className="py-2">Index</th>
+                  <th className="py-2">Detected</th>
+                  <th className="py-2" />
+                </tr>
+              </thead>
+              <tbody>
+                {drift.drift.map((d) => (
+                  <tr key={d.id} className={d.status === 'acknowledged' ? 'opacity-50' : ''}>
+                    <td className="py-1.5">
+                      <span className={`rounded border px-1.5 py-0.5 text-[10px] ${DRIFT_BADGE[d.change_type]}`}>
+                        {d.change_type}
+                      </span>
+                    </td>
+                    <td className="py-1.5 text-zinc-200">
+                      <span className="font-mono">{d.citation}</span>
+                      {d.heading && <span className="text-zinc-500"> — {d.heading}</span>}
+                    </td>
+                    <td className="py-1.5 text-xs text-zinc-400">{d.index_slug}</td>
+                    <td className="py-1.5 text-xs text-zinc-500">{d.detected_at.slice(0, 10)}</td>
+                    <td className="py-1.5 text-right">
+                      {d.status === 'open' ? (
+                        <button
+                          disabled={ackBusy}
+                          onClick={() => acknowledgeDrift([d.id])}
+                          className="rounded border border-zinc-800 px-2 py-0.5 text-[11px] text-zinc-300 hover:border-zinc-600 disabled:opacity-50"
+                          title="Mark reviewed — clears it from the open queue (kept for audit)">
+                          <Check className="inline h-3 w-3" /> Ack
+                        </button>
+                      ) : (
+                        <span className="text-[10px] uppercase text-zinc-600">acknowledged</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
 

@@ -38,6 +38,12 @@ class ReconcileRequest(BaseModel):
     city: Optional[str] = None
 
 
+class AcknowledgeDriftRequest(BaseModel):
+    """Bulk-acknowledge drift rows (POST /drift/acknowledge)."""
+
+    ids: List[UUID] = Field(min_length=1)
+
+
 class FetchQueueResearchRequest(BaseModel):
     """Drive the chain's fetch queue into research (POST /fetch-queue/research).
 

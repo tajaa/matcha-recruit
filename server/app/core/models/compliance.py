@@ -241,6 +241,9 @@ class RequirementResponse(BaseModel):
     current_value: Optional[str] = None
     numeric_value: Optional[float] = None
     source_url: Optional[str] = None
+    # Liveness of source_url on the catalog row: 'unchecked' | 'ok' | 'dead'
+    # (None for rows with no catalog link). Dead links are retained + badged.
+    source_url_status: Optional[str] = None
     source_name: Optional[str] = None
     effective_date: Optional[str] = None
     previous_value: Optional[str] = None

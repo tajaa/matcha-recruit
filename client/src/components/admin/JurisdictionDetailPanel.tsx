@@ -20,6 +20,7 @@ type JurisdictionReq = {
   description: string | null
   current_value: string | null
   source_url: string | null
+  source_url_status?: 'unchecked' | 'ok' | 'dead' | null
   source_name: string | null
   effective_date: string | null
   is_bookmarked: boolean
@@ -452,6 +453,12 @@ export default function JurisdictionDetailPanel({ id, city, state, categoriesMis
               req.source_url
                 ? <a href={req.source_url} target="_blank" rel="noopener noreferrer" className="text-[11px] text-zinc-600 hover:text-zinc-400 underline">{req.source_name}</a>
                 : <span className="text-[11px] text-zinc-600">{req.source_name}</span>
+            )}
+            {req.source_url_status === 'dead' && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded border border-red-500/30 bg-red-500/15 text-red-400"
+                title="Source URL failed its last liveness check — kept for re-verification; fix via Edit.">
+                dead link
+              </span>
             )}
           </div>
         </div>

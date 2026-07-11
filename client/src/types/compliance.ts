@@ -89,6 +89,8 @@ export interface ComplianceRequirement {
   current_value: string | null
   numeric_value: number | null
   source_url: string | null
+  /** Liveness of source_url: 'unchecked' | 'ok' | 'dead' (null = no catalog link). */
+  source_url_status?: 'unchecked' | 'ok' | 'dead' | null
   source_name: string | null
   effective_date: string | null
   previous_value: string | null
@@ -328,6 +330,8 @@ export interface JurisdictionLevelRequirement {
   current_value: string | null
   numeric_value: number | null
   source_url: string | null
+  /** Liveness of source_url: 'unchecked' | 'ok' | 'dead'. */
+  source_url_status?: 'unchecked' | 'ok' | 'dead' | null
   statute_citation: string | null
   status: string
   canonical_key: string | null

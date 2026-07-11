@@ -57,6 +57,7 @@ function qualityFlags(req: QualityRequirement) {
   const flags: string[] = []
   if (!req.description) flags.push('⚠ desc')
   if (!req.source_url) flags.push('🔗')
+  if (req.source_url && req.source_url_status === 'dead') flags.push('🔗💀 dead')
   if (!req.effective_date) flags.push('📅')
   if (flags.length === 0) return null
   return <span className="text-[10px] text-zinc-500 space-x-1">{flags.join(' ')}</span>
@@ -173,6 +174,9 @@ export default function RequirementAuditTable({ onEditRequirement }: Requirement
         <span>Avg completeness: <span className="text-zinc-300 font-mono">{Math.round(data.summary.avg_completeness)}%</span></span>
         <span>Stale: <span className={`font-mono ${data.summary.stale_count > 0 ? 'text-amber-400' : 'text-emerald-400'}`}>{data.summary.stale_count}</span></span>
         <span>Missing URL: <span className={`font-mono ${data.summary.missing_source_url > 0 ? 'text-red-400' : 'text-emerald-400'}`}>{data.summary.missing_source_url}</span></span>
+        <span title="source_url failed its last liveness check — retained for re-verification">
+          Dead URL: <span className={`font-mono ${(data.summary.dead_source_url ?? 0) > 0 ? 'text-red-400' : 'text-emerald-400'}`}>{data.summary.dead_source_url ?? 0}</span>
+        </span>
       </div>
 
       {/* Filter bar */}

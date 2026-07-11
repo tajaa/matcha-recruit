@@ -170,10 +170,19 @@ export function ComplianceRequirementsTab({ requirements, loading, onPin, checkM
                     )}
                   </div>
                   {req.source_url && (
-                    <a href={req.source_url} target="_blank" rel="noopener noreferrer"
-                      className="text-[11px] text-zinc-500 hover:text-zinc-300 transition-colors">
-                      Source &rarr;
-                    </a>
+                    <span className="flex items-center gap-1.5">
+                      {req.source_url_status === 'dead' && (
+                        <span
+                          className="rounded border border-red-500/30 bg-red-500/15 px-1 py-px text-[10px] text-red-400"
+                          title="This source link failed its last liveness check. The citation is kept so it can be re-verified once the authority fixes or moves the page.">
+                          link broken
+                        </span>
+                      )}
+                      <a href={req.source_url} target="_blank" rel="noopener noreferrer"
+                        className="text-[11px] text-zinc-500 hover:text-zinc-300 transition-colors">
+                        Source &rarr;
+                      </a>
+                    </span>
                   )}
                 </div>
               </div>
@@ -431,10 +440,19 @@ export function ComplianceRequirementsTab({ requirements, loading, onPin, checkM
                                 )}
                               </div>
                               {req.source_url && (
-                                <a href={req.source_url} target="_blank" rel="noopener noreferrer"
-                                  className="text-[11px] text-zinc-500 hover:text-zinc-300 transition-colors">
-                                  Source &rarr;
-                                </a>
+                                <span className="flex items-center gap-1.5">
+                                  {req.source_url_status === 'dead' && (
+                                    <span
+                                      className="rounded border border-red-500/30 bg-red-500/15 px-1 py-px text-[10px] text-red-400"
+                                      title="This source link failed its last liveness check. The citation is kept so it can be re-verified once the authority fixes or moves the page.">
+                                      link broken
+                                    </span>
+                                  )}
+                                  <a href={req.source_url} target="_blank" rel="noopener noreferrer"
+                                    className="text-[11px] text-zinc-500 hover:text-zinc-300 transition-colors">
+                                    Source &rarr;
+                                  </a>
+                                </span>
                               )}
                             </div>
                           </div>

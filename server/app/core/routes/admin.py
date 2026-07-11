@@ -4118,7 +4118,8 @@ async def get_quality_audit(
                     CASE WHEN jr.current_value IS NOT NULL AND jr.current_value != '' THEN 10 ELSE 0 END
                 )::int AS avg_completeness,
                 COUNT(*) FILTER (WHERE jr.last_verified_at IS NULL OR jr.last_verified_at < NOW() - INTERVAL '90 days') AS stale_count,
-                COUNT(*) FILTER (WHERE jr.source_url IS NULL OR jr.source_url = '') AS missing_source_url
+                COUNT(*) FILTER (WHERE jr.source_url IS NULL OR jr.source_url = '') AS missing_source_url,
+                COUNT(*) FILTER (WHERE jr.source_url_status = 'dead') AS dead_source_url
             FROM jurisdiction_requirements jr
             JOIN jurisdictions j ON j.id = jr.jurisdiction_id
             WHERE {where_clause}
@@ -4163,7 +4164,8 @@ async def get_quality_audit(
             FROM (
                 SELECT
                     jr.id, jr.jurisdiction_id, jr.category, jr.title, jr.description,
-                    jr.source_url, jr.source_tier::text AS source_tier, jr.status::text AS status,
+                    jr.source_url, jr.source_url_status,
+                    jr.source_tier::text AS source_tier, jr.status::text AS status,
                     jr.current_value, jr.effective_date, jr.last_verified_at, jr.is_bookmarked,
                     jr.created_at, jr.updated_at, jr.metadata,
                     j.display_name AS jurisdiction_name, j.state, j.city,
@@ -4194,6 +4196,7 @@ async def get_quality_audit(
                 "avg_completeness": summary_row["avg_completeness"] or 0,
                 "stale_count": summary_row["stale_count"],
                 "missing_source_url": summary_row["missing_source_url"],
+                "dead_source_url": summary_row["dead_source_url"],
                 "tier_breakdown": {r["tier"]: r["cnt"] for r in tier_rows},
                 "provenance_breakdown": {r["src"]: r["cnt"] for r in provenance_rows},
             },
@@ -4205,6 +4208,7 @@ async def get_quality_audit(
                     "title": r["title"],
                     "description": r["description"],
                     "source_url": r["source_url"],
+                    "source_url_status": r["source_url_status"],
                     "source_tier": r["source_tier"],
                     "current_value": r["current_value"],
                     "effective_date": fmt(r["effective_date"]),
@@ -5545,7 +5549,7 @@ async def get_jurisdiction_detail(jurisdiction_id: UUID):
         requirements = await conn.fetch("""
             SELECT id, requirement_key, category, jurisdiction_level, jurisdiction_name,
                    title, description, current_value, numeric_value,
-                   source_url, source_name, effective_date, expiration_date,
+                   source_url, source_url_status, source_name, effective_date, expiration_date,
                    previous_value, previous_description, change_status,
                    last_changed_at, last_verified_at, is_bookmarked,
                    sort_order, created_at, updated_at
@@ -5605,6 +5609,7 @@ async def get_jurisdiction_detail(jurisdiction_id: UUID):
                     "current_value": r["current_value"],
                     "numeric_value": fmt_decimal(r["numeric_value"]),
                     "source_url": r["source_url"],
+                    "source_url_status": r["source_url_status"],
                     "source_name": r["source_name"],
                     "effective_date": fmt_date(r["effective_date"]),
                     "expiration_date": fmt_date(r["expiration_date"]),
@@ -5682,6 +5687,12 @@ async def update_requirement(requirement_id: UUID, body: RequirementUpdate):
         set_parts.append(f"{col} = ${i}")
         params.append(val)
 
+    # A hand-edited source_url invalidates the old liveness verdict — it was
+    # about the previous URL. Reset to 'unchecked' until the next research pass.
+    if "source_url" in updates:
+        set_parts.append("source_url_status = 'unchecked'")
+        set_parts.append("source_checked_at = NULL")
+
     params.append(requirement_id)
     id_idx = len(params)
 
@@ -5691,7 +5702,7 @@ async def update_requirement(requirement_id: UUID, body: RequirementUpdate):
         WHERE id = ${id_idx}
         RETURNING id, jurisdiction_id, requirement_key, category, jurisdiction_level, jurisdiction_name,
                   title, description, current_value, numeric_value,
-                  source_url, source_name, effective_date, expiration_date,
+                  source_url, source_url_status, source_name, effective_date, expiration_date,
                   previous_value, last_changed_at, last_verified_at, is_bookmarked,
                   sort_order, created_at, updated_at
     """
@@ -5721,6 +5732,7 @@ async def update_requirement(requirement_id: UUID, body: RequirementUpdate):
         "current_value": row["current_value"],
         "numeric_value": float(row["numeric_value"]) if row["numeric_value"] is not None else None,
         "source_url": row["source_url"],
+        "source_url_status": row["source_url_status"],
         "source_name": row["source_name"],
         "effective_date": fmt_date(row["effective_date"]),
         "expiration_date": fmt_date(row["expiration_date"]),
@@ -5767,7 +5779,8 @@ async def list_bookmarked_requirements():
         rows = await conn.fetch("""
             SELECT jr.id, jr.requirement_key, jr.category, jr.jurisdiction_level,
                    jr.jurisdiction_name, jr.title, jr.description, jr.current_value,
-                   jr.numeric_value, jr.source_url, jr.source_name, jr.effective_date,
+                   jr.numeric_value, jr.source_url, jr.source_url_status, jr.source_name,
+                   jr.effective_date,
                    jr.expiration_date, jr.previous_value, jr.last_changed_at,
                    jr.last_verified_at, jr.is_bookmarked, jr.sort_order,
                    jr.created_at, jr.updated_at,
@@ -5794,6 +5807,7 @@ async def list_bookmarked_requirements():
             "current_value": r["current_value"],
             "numeric_value": float(r["numeric_value"]) if r["numeric_value"] is not None else None,
             "source_url": r["source_url"],
+            "source_url_status": r["source_url_status"],
             "source_name": r["source_name"],
             "effective_date": fmt_date(r["effective_date"]),
             "expiration_date": fmt_date(r["expiration_date"]),
