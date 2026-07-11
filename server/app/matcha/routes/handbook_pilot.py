@@ -501,7 +501,10 @@ async def promote(session_id: UUID, body: PromoteIn, request: Request,
         sections = [{
             "section_key": d.get("section_key"),
             "title": d["title"],
-            "content": d["content"],
+            # Belt-and-suspenders: strip any inline corpus-id tags before the
+            # text lands in the real handbook (covers legacy/edited drafts that
+            # predate the generation-time strip).
+            "content": hp.strip_corpus_citations(d["content"])[0],
             "section_type": "custom",
         } for d in section_drafts]
         title = (body.handbook_title or session.get("title") or "Handbook Pilot draft")[:300]
@@ -526,8 +529,9 @@ async def promote(session_id: UUID, body: PromoteIn, request: Request,
             try:
                 policy = await PolicyService.create_policy(
                     str(company_id),
-                    PolicyCreate(title=d["title"], content=d["content"], status="draft",
-                                 source_type="manual"),
+                    PolicyCreate(title=d["title"],
+                                 content=hp.strip_corpus_citations(d["content"])[0],
+                                 status="draft", source_type="manual"),
                     str(user_id) if user_id else None,
                 )
                 pid = str(policy.id)
