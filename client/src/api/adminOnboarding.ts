@@ -279,7 +279,24 @@ export type GapAnalysisDossier = {
     credentials: number
     suggestions: number
     coverage_pct?: number
+    // Engine overlay (additive). 'engine' when the scope-registry definitively
+    // classifies every one of the company's coordinates; else 'bank'.
+    coverage_source?: 'engine' | 'bank'
+    engine_coverage_pct?: number
+    engine_covered?: number
+    engine_gaps?: number
   }
+}
+
+// Scope-registry verdict for the company (present when the dashboard could run
+// the engine overlay; null on failure). Additive — the dossier's bank arrays
+// remain the actionable worklist.
+export type GapEngineCoverage = {
+  coverage_source: 'engine' | 'bank'
+  coverage_pct: number
+  counts: { locations: number; codified: number; uncodified: number; provisional: number }
+  gate: { total: number; engine: number; fallback: number }
+  degraded: boolean
 }
 
 // Drift signals computed cheaply on the persistent dashboard — how much the
@@ -299,6 +316,7 @@ export type GapDashboardResponse = {
   dossier: GapAnalysisDossier | null
   drift: GapDrift | null
   complexity?: ComplexityScore | null
+  engine?: GapEngineCoverage | null
 }
 
 // Deterministic compliance-complexity score (0–100) + explainable breakdown.
