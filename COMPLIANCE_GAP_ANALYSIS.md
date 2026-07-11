@@ -115,7 +115,7 @@ _Part I above is the audit. Part II below is the implementation blueprint for cl
 # Part II — Implementation Blueprint
 
 Conventions that apply to every step:
-- **Migrations are author-only** — write to `server/alembic/versions/`, user applies via `./scripts/migrate-dev.sh` → `./scripts/migrate-prod.sh`. Current head: `groundver01`.
+- **Migrations are author-only** — write to `server/alembic/versions/`, user applies via `./scripts/migrate-dev.sh` → `./scripts/migrate-prod.sh`. Current head: `groundver01`. The four blueprint migrations are authored **sequentially chained** — `baseline01 → authsrc01 → discover01 → chglog01` — to keep a single alembic head regardless of which step lands first.
 - **asyncpg pool has no JSONB codec** — every new JSONB read goes through `scope_registry/resolve.py:parse_jsonb`.
 - **Gemini is a locator, never a source** — any path that creates/updates a catalog VALUE goes through the grounded corpus + citation gate (`scope_registry/grounded.py`), then the grounding eval verifies it. No auto-insert of values from recall or from feed summaries.
 - **Evals are read-only over the catalog** — eval-owned state gets its own tables (precedent: `compliance_eval_grounding_verdicts`).
@@ -156,6 +156,7 @@ CA list: mirror from the existing 64 CA rows + close known gaps (SB 553 WVPP, PO
 ### 1.3 Key vocabulary + RKD seeding
 - Every masterlist `key` must exist in `compliance_registry._LABOR_REGULATION_KEYS` (Gemini dedup vocabulary) — add missing keys there (e.g. `leave: fmla` exists; `warn_act: federal_warn_notice`, `i9_everify: form_i9_verification`, `erisa_benefits: spd_disclosure`, `nlra_organizing: protected_concerted_activity`… will be new). Pure test: every masterlist key ∈ EXPECTED_REGULATION_KEYS[category] (same enforcement pattern as CORE_LABOR_KEYS).
 - Migration `baseline01` (parent `groundver01`): seed `regulation_key_definitions` rows for masterlist keys not yet in RKD (INSERT ... ON CONFLICT DO NOTHING; severity from `compliance_registry.resolve_severity`; citation + authority_source_urls from the masterlist entry). Exact precedent: `oshakeys01_osha_machine_safety_keys.py`.
+- **Known side effect (expected, not a regression):** adding ~40 federal keys to `_LABOR_REGULATION_KEYS` widens the *full* completeness expectation for every jurisdiction — all city completeness scores will **drop** when Step 1 lands and recover as Step 2 fills federal (cities inherit the federal rows via the chain union). Land Step 1 with this stated in the PR.
 
 ### 1.4 The baseline suite
 New file `server/app/core/services/compliance_evals/baseline.py`:
@@ -164,13 +165,19 @@ New file `server/app/core/services/compliance_evals/baseline.py`:
   - fetch that jurisdiction's OWN catalog rows (not the chain union — the point is "does the base layer itself exist"), index by `category:normalize_key(...)` (reuse `golden._rows_for`);
   - diff against `masterlist_keys(...)`; each miss → finding `baseline_missing_key`, **severity critical**, `expected={citation, authority_url}`;
   - score = present/expected per jurisdiction (reuse `scoring._pct` shape; add `baseline_score` to `scoring.py`).
-- Wire into `runner.py`: `ALL_SUITES += ("baseline",)`, dispatch block (pure+DB, not network), totals `baseline_*`. `EvalSuite` Literal in `models/compliance_evals.py` += "baseline". **Important:** baseline passes its own explicit jurisdiction ids — do NOT rely on `_resolve_jurisdiction_ids` (which excludes federal).
+- Wire into `runner.py`: `ALL_SUITES += ("baseline",)`, dispatch block (pure+DB, not network), totals `baseline_*`. `EvalSuite` Literal in `models/compliance_evals.py` += "baseline". **Important:** baseline passes its own explicit jurisdiction ids — do NOT rely on `_resolve_jurisdiction_ids` (which excludes federal). Scorecard rows persist with `industry = NULL` (the industry-agnostic convention authority/tagging already use). Default `EvalRunRequest.suites` stays as-is; the admin "Run evals" suite picker adds "baseline" so it runs when explicitly selected.
 - Endpoint `GET /admin/jurisdictions/evals/baseline-checklist` (mirror the existing `core-checklist` endpoint in `admin.py`): per-entry present/missing with citation — the admin's "federal: 71/88 ✓" view.
 - FE: Evals tab in `JurisdictionData.tsx` renders the new suite row + checklist (same pattern as core-checklist).
 
 ### 1.5 Verification
 - Pure: masterlist keys all in vocabulary; `masterlist_keys` shape; miss-diff logic with fake rows.
 - Live (scratch script, dev): `run_baseline` → expect federal ≈ 5–10% present (that IS the finding), CA-state materially higher. Checklist endpoint renders every entry with citation.
+
+### 1.6 Wire baseline into the /admin Gap Analysis system
+The gap-analysis surfaces (GapAnalysisHome/GapDashboard/GapOverview → `admin_onboarding.py`) already read the scope-registry engine — `gap_surfaces.resolve_company_scope` (`admin_onboarding.py:1715`) and `resolve_chain_category_coverage` (`admin.py:8853`) — so **Steps 2–3 enrich the gap dashboard automatically** (denser classifications/codifications = better engine verdicts, no wiring needed). But the baseline verdict would land only in the Compliance Library evals tab, while the persona *starts* at Gap Analysis. Add:
+- `gap_surfaces.baseline_readiness_for_chain(conn, jurisdiction_ids)` — latest baseline present/expected per base-layer jurisdiction (federal + each state in the company's chain), reading `compliance_eval_results` for the baseline suite.
+- Surface as a **base-layer readiness banner** on the company Gap Analysis dashboard: "Federal labor baseline: 71/88 · CA state: 62/74 — base layers this company inherits." Additive per the module's design rule (never replaces the bank arrays the FE actions consume).
+- (Step 4 tie-in, optional/defer: pending `catalog_change_proposals` for the company's jurisdictions on the same dashboard.)
 
 ---
 
@@ -180,7 +187,7 @@ New file `server/app/core/services/compliance_evals/baseline.py`:
 
 ### 2.1 Authority sources first
 The pipeline can only ground on ingested text. Extend `scope_registry/authority_sources.py`:
-- **eCFR live parts (cheap — fetcher already handles any title/part):** add `FederalPart` entries for 29 CFR 541 (exempt tests), 29 CFR 1602 (EEO-1), 29 CFR 1604 (sex discrimination), 8 CFR 274a (I-9), 29 CFR 4022/2560 (ERISA disclosures as needed), 20 CFR 1002 (USERRA).
+- **eCFR live parts (cheap — fetcher already handles any title/part):** add `FederalPart` entries for 29 CFR 541 (exempt tests), 29 CFR 1602 (EEO-1), 29 CFR 1604 (sex discrimination), 8 CFR 274a (I-9), 29 CFR 2520 (ERISA reporting/disclosure — EBSA; not 4022=PBGC or 2560=claims procedure), 20 CFR 1002 (USERRA).
 - **USC-based statutes (no eCFR part):** new `curated_us.py` mirroring `curated_ca.py` (`CuratedRow` shape: citation/heading/hierarchy/source_url → uscode.house.gov), new `CuratedIndexSpec` entries: `us-title-vii`, `us-ada`, `us-adea`, `us-warn`, `us-nlra`, `us-cobra-erisa`, `us-userra`, `us-fcra`. Follow the curated_ca verification doctrine: `curated_by='claude-research'`, `verified=False`, unverified until human opens URL.
 - Ingest each (admin "sync" button or `sync_all_authority_indexes` scratch call — writes `authority_indexes`/`authority_index_items`).
 
@@ -205,10 +212,10 @@ The pipeline can only ground on ingested text. Extend `scope_registry/authority_
 ### 3.1 DB-backed curated authority sources
 Today `ingest_curated_index` reads only in-code `CURATED_ROWS[slug]`. Make curated rows data:
 - Migration `authsrc01`: table `authority_source_rows` (`id`, `index_slug` text, `citation` text, `heading` text, `hierarchy` jsonb, `source_url` text, `sort_order` int, `curated_by` text, `verified` bool default false, `created_at`, UNIQUE(index_slug, citation)) + table `authority_index_specs` (`slug` PK, `name`, `level`, `jurisdiction_spec` jsonb — same fields `CuratedIndexSpec` carries) so an index itself is admin-creatable.
-- `authority_sources.py`: `curated_index_by_slug` / `all_index_slugs` become async-aware unions of code-defined + DB-defined specs (code entries win on slug collision). `ingest_curated_index` reads `CURATED_ROWS.get(slug)` first, falls back to `SELECT ... FROM authority_source_rows WHERE index_slug=$1 ORDER BY sort_order`.
+- `authority_sources.py`: **keep the code registry sync** — `curated_index_by_slug`/`all_index_slugs` have 4 sync callsites (`core/routes/scope_registry.py:62/166/236`, `authority_ingest.py:436`) and must not go async. The DB-defined specs are an **async fallback in the route/ingest layer**: when a slug isn't in the code registry, the (already-async) route/ingest code queries `authority_index_specs` before 404ing. `ingest_curated_index` reads `CURATED_ROWS.get(slug)` first, falls back to `SELECT ... FROM authority_source_rows WHERE index_slug=$1 ORDER BY sort_order`. Code entries win on slug collision.
 - Routes (`core/routes/scope_registry.py`, `require_admin`): CRUD for specs + rows (`POST/PUT/DELETE /scope-registry/indexes`, `/indexes/{slug}/rows`), plus reuse the existing ingest trigger. `_JSONB_FIELDS` += hierarchy/jurisdiction_spec.
 - FE (ScopeStudio.tsx): "New index" modal (slug/name/level/jurisdiction picker) + curated-row editor (citation/heading/url) + Ingest button. After ingest, rows appear in the existing classify→key→research→codify flow untouched.
-- `body_fetch.py`: curated rows have `source_url` but no body — the existing body-fetch step (used for CA leginfo pages) must accept municipal-code URLs (municode/qcode/amlegal); keep the fetch generic (GET + readability strip), degrade to stub (grounding eval's `corpus_stub` already polices thin bodies).
+- `body_fetch.py`: curated rows have `source_url` but no body — the existing body-fetch step (used for CA leginfo pages) must accept municipal-code URLs; keep the fetch generic (GET + readability strip), degrade to stub. **Fetch risk:** municode/amlegal hosts are JS-rendered SPAs — plain GET yields stubs. Mitigation: prefer server-rendered .gov ordinance pages (e.g. San Diego's own municipal-code site) when curating `source_url`s; stub-degradation remains the honest fallback — values then can't ground and land ungrounded/unresearched, **visible** in the grounding eval (`corpus_stub`) rather than silently wrong.
 
 ### 3.2 Industry keysets for the persona
 `industry_keysets.py`:
@@ -240,8 +247,11 @@ title text, summary text, source_url text,
 payload jsonb,                            -- raw feed item / drift record
 status varchar(12) DEFAULT 'pending'      -- pending|accepted|rejected|duplicate
   CHECK (...), resolved_by uuid NULL, resolved_at timestamptz,
-created_at timestamptz DEFAULT now(),
-UNIQUE (source, source_url, COALESCE(proposed_key,''))
+created_at timestamptz DEFAULT now()
+-- dedupe: Postgres forbids expressions in UNIQUE constraints — use a unique INDEX
+-- (exact precedent: jureval01's COALESCE(industry,'') index):
+-- CREATE UNIQUE INDEX uq_catalog_change_proposals
+--   ON catalog_change_proposals (source, source_url, COALESCE(proposed_key,''));
 ```
 - `legislation_watch.create_proactive_alerts` additionally INSERTs a proposal per qualifying item (alerts stay — tenant-facing; proposals are admin-facing).
 - `codify.propagate_drift_to_requirements`: drift on items with NO codified row → proposal (`source='authority_drift'`) instead of the current silent nothing.
@@ -261,7 +271,7 @@ Table `jurisdiction_requirement_changes` (`requirement_id`, `changed_at`, `chang
 **Goal:** what the tenant sees = exactly what applies.
 
 ### 5.1 Headcount gating (FMLA-50 class)
-- Compute active headcount where requirements are read: in `get_location_requirements` + `get_hierarchical_requirements`, build `attrs = {**facility_attributes, "employee_count": n}` with `n = SELECT count(*) FROM employees WHERE org_id=$1 AND termination_date IS NULL` (company-wide; per-worksite refinement later). Pass into `evaluate_trigger_conditions` at `determine_governing_requirement` (`compliance_service.py:8658/8684`). Read-time derivation — nothing stored, no staleness.
+- Compute active headcount where requirements are read: in `get_location_requirements` + `get_hierarchical_requirements`, build `attrs = {**facility_attributes, "employee_count": n}` with `n = SELECT count(*) FROM employees WHERE org_id=$1 AND termination_date IS NULL` (company-wide; per-worksite refinement later). (`employees.org_id` carries the company id directly — existing queries bind `company_id` to it, e.g. `employees/crud.py` `WHERE e.org_id = $1`; no resolution step.) Pass into `evaluate_trigger_conditions` at `determine_governing_requirement` (`compliance_service.py:8658/8684`). Read-time derivation — nothing stored, no staleness.
 - Trigger authoring: Step-2 classifications already carry `entity_condition` thresholds; codify/research must copy them onto the catalog rows' `trigger_conditions` (today research writes NULL). One data backfill for existing FMLA/WARN/COBRA/EEO-1 rows.
 - **UX rule:** a threshold-excluded requirement renders as "not applicable at your size (applies at ≥50)" — visible-but-gated, never silently dropped (audit trail for "why don't I see FMLA?").
 - Pure tests: 30-person CA employer excludes FMLA-50, includes CFRA-5; 60-person includes both.
