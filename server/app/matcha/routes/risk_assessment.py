@@ -4,6 +4,7 @@ Snapshots are computed by the master admin and stored in risk_assessment_snapsho
 Clients read the last stored snapshot — no live computation on page load.
 """
 
+import asyncio
 import json
 import logging
 from dataclasses import asdict
@@ -21,7 +22,7 @@ from ..dependencies import require_admin_or_client, get_client_company_id
 from ..services.risk_assessment_service import (
     compute_risk_assessment,
     generate_recommendations,
-    DEFAULT_WEIGHTS,
+    load_risk_weights,
 )
 from ..services.monte_carlo_service import (
     run_monte_carlo,
@@ -34,8 +35,6 @@ from ..services.anomaly_detection_service import detect_anomalies
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-_WEIGHT_KEYS = {"compliance", "incidents", "er_cases", "workforce", "legislative"}
 
 
 # ─── Response models ──────────────────────────────────────────────────────────
@@ -75,14 +74,7 @@ class WeightsResponse(BaseModel):
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
 async def _get_weights(conn) -> dict[str, float]:
-    row = await conn.fetchval(
-        "SELECT value FROM platform_settings WHERE key = 'risk_assessment_weights'"
-    )
-    if row:
-        raw = json.loads(row) if isinstance(row, str) else row
-        if isinstance(raw, dict):
-            return {**DEFAULT_WEIGHTS, **{k: float(v) for k, v in raw.items() if k in _WEIGHT_KEYS}}
-    return dict(DEFAULT_WEIGHTS)
+    return await load_risk_weights(conn)
 
 
 def _snapshot_to_response(row) -> RiskAssessmentResponse:
@@ -314,7 +306,7 @@ async def run_risk_assessment(
             {key: asdict(dim) for key, dim in result.dimensions.items()}
         )
         if line_items:
-            mc_result = run_monte_carlo(line_items)
+            mc_result = await asyncio.to_thread(run_monte_carlo, line_items)
             async with get_connection() as conn2:
                 await conn2.execute(
                     "UPDATE risk_assessment_snapshots SET monte_carlo = $1::jsonb WHERE company_id = $2",
@@ -641,7 +633,7 @@ async def run_monte_carlo_simulation(
             detail="No cost-of-risk data found in the snapshot.",
         )
 
-    result = run_monte_carlo(line_items)
+    result = await asyncio.to_thread(run_monte_carlo, line_items)
 
     # Store on snapshot
     async with get_connection() as conn:
@@ -696,7 +688,7 @@ async def get_monte_carlo(
 @router.get("/cohorts")
 async def get_cohort_analysis(
     current_user=Depends(require_admin_or_client),
-    dimension: str = Query("department", pattern="^(department|location|hire_quarter|tenure)$"),
+    dimension: str = Query("department", pattern="^(department|location|hire_quarter|tenure|manager)$"),
     company_id_override: str | None = Query(None, alias="company_id"),
 ):
     """Cohort-level risk metrics grouped by department, location, hire quarter, or tenure."""

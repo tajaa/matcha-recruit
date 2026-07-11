@@ -1,17 +1,22 @@
-"""Composite client risk index — one 0–100 rolling up the WC, EPL, and
-compliance engines Matcha already computes (higher = lower risk, matching the
-EPL convention). The report's "Risk Index Model" / "Risk Intelligence Central"
-(WTW p.10, p.29). No new data — a weighted roll-up of existing scores.
+"""Composite client risk index — one 0–100 rolling up the WC, EPL,
+compliance, and (when enabled) commercial-property engines Matcha already
+computes (higher = lower risk, matching the EPL convention). The report's
+"Risk Index Model" / "Risk Intelligence Central" (WTW p.10, p.29). A weighted
+roll-up of existing component scores (the property component adds catastrophe
+tiers, ITV, and loss-development inputs).
 
 Used by the broker portfolio (one benchmarkable number per client) and the
 client-facing risk portal (the business's own insurability at a glance).
 """
 
+import logging
 from datetime import date
 from typing import Optional
 from uuid import UUID
 
 from . import epl_readiness, wc_depth
+
+logger = logging.getLogger(__name__)
 
 # severity_band → sub-score (lower band = higher risk = lower score)
 _WC_BAND_SCORE = {"good": 90, "fair": 70, "at_risk": 45, "critical": 20}
@@ -89,7 +94,9 @@ async def _wc_reserve_confidence(conn, company_id: UUID) -> str:
     the WC component so a client whose reserves are volatile (thin/holed
     triangle) doesn't read high-confidence in the composite. "high" when there's
     no loss-run triangle — no volatility signal to downgrade, same as the WC
-    metrics' own current-state read. Best-effort: never raises into the index."""
+    metrics' own current-state read. Best-effort: degrades to a conservative
+    "low" on unexpected failure rather than inflating the composite to "high"."""
+    import asyncpg
     try:
         from . import loss_development
         snaps = await loss_development.list_company_snapshots(conn, company_id, line="wc")
@@ -98,8 +105,14 @@ async def _wc_reserve_confidence(conn, company_id: UUID) -> str:
         wc_line = next((ln for ln in loss_development.build_triangle(snaps)["lines"]
                         if ln["line"] == "wc"), None)
         return wc_line["summary"]["reserve_confidence"] if wc_line else "high"
-    except Exception:
+    except (asyncpg.UndefinedTableError, asyncpg.UndefinedColumnError):
+        # Loss-run table not provisioned yet — genuinely no volatility signal.
         return "high"
+    except Exception:
+        # A real loss_development failure must not silently read as high
+        # confidence in an underwriting-facing index.
+        logger.exception("reserve_confidence failed for %s — defaulting low", company_id)
+        return "low"
 
 
 async def _compliance_component(conn, company_id: UUID):
@@ -140,8 +153,14 @@ def _top_fixes(components: list[dict], epl: dict) -> list[str]:
     )
     fixes = [f"Raise {c['label'].lower()} ({c['score']}/100)" for c in weak][:3]
     gap = epl_readiness.top_gap(epl)
-    if gap and (msg := f"EPL: address {gap['label'].lower()}") not in fixes:
-        fixes.append(msg)
+    if gap:
+        msg = f"EPL: address {gap['label'].lower()}"
+        # Don't stack the specific EPL sub-gap on top of a generic "raise EPL
+        # readiness" line already emitted from the epl component. (The old guard
+        # compared differently-formatted strings and so never fired.)
+        already_flags_epl = msg in fixes or any("epl" in f.lower() for f in fixes)
+        if not already_flags_epl:
+            fixes.append(msg)
     return fixes[:4]
 
 
@@ -279,7 +298,24 @@ async def _property_component(conn, company_id: UUID):
 
 
 async def compute_risk_index(conn, company_id: UUID) -> dict:
-    """Composite 0–100 index for an on-platform (tenant) client: WC + EPL + compliance."""
+    """Composite 0–100 index for an on-platform (tenant) client: WC + EPL +
+    compliance, plus commercial property when that feature is enabled."""
+    from app.core.feature_flags import merge_company_features
+
+    company = await conn.fetchrow(
+        "SELECT enabled_features, signup_source FROM companies WHERE id = $1", company_id
+    )
+    features = merge_company_features(
+        company["enabled_features"] if company else None,
+        signup_source=company["signup_source"] if company else None,
+    )
+    # Property is a default-off, unbundled module — a company without it can
+    # never produce the property component, so it must not sit in the universe
+    # (otherwise coverage is permanently < 1.0 with an unactionable "missing"
+    # component). WC/EPL/compliance are universal.
+    property_enabled = bool(features.get("property"))
+    universe = ("wc", "epl", "compliance", "property") if property_enabled else ("wc", "epl", "compliance")
+
     components: list[dict] = []
 
     wc = await _wc_component(conn, company_id)
@@ -297,13 +333,14 @@ async def compute_risk_index(conn, company_id: UUID) -> dict:
         components.append({"key": "compliance", "label": "Compliance coverage", "weight": _WEIGHTS["compliance"],
                            "score": comp[0], "detail": comp[1], "confidence": "high"})
 
-    prop = await _property_component(conn, company_id)
-    if prop is not None:
-        components.append({"key": "property", "label": "Commercial Property", "weight": _WEIGHTS["property"],
-                           "score": prop[0], "detail": prop[1], "confidence": prop[2]})
+    if property_enabled:
+        prop = await _property_component(conn, company_id)
+        if prop is not None:
+            components.append({"key": "property", "label": "Commercial Property", "weight": _WEIGHTS["property"],
+                               "score": prop[0], "detail": prop[1], "confidence": prop[2]})
 
     return {"company_id": str(company_id),
-            **_assemble(components, epl, universe=("wc", "epl", "compliance", "property"))}
+            **_assemble(components, epl, universe=universe)}
 
 
 _BANDS = ("strong", "adequate", "developing", "exposed")

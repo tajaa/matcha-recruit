@@ -397,10 +397,20 @@ def assess_from_statuses(statuses: dict) -> dict:
 
 
 def top_gap(assessment: dict) -> Optional[dict]:
-    """The factor losing the most points (weight × shortfall) — the headline gap."""
+    """The factor losing the most points (weight × shortfall) — the headline gap.
+
+    Only considers ``assessed`` factors: an unassessed factor (module not
+    bought, attestation never reviewed) was excluded from the composite and
+    carries a placeholder score of 0, so counting it here would surface a
+    "gap" for something the engine itself declared "not tracked".
+    """
     worst = None
     worst_loss = -1.0
     for f in assessment["factors"]:
+        # Skip factors the tenant path explicitly excluded (assessed=False).
+        # The off-platform path omits the key entirely — those all participate.
+        if f.get("assessed") is False:
+            continue
         loss = f["weight"] * (100 - f["score"]) / 100.0
         if loss > worst_loss:
             worst_loss = loss

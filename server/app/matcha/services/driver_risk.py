@@ -6,7 +6,8 @@ commercial-auto exposure (the #1 auto underwriting input is driver/fleet risk).
 Reuses the existing ``mvr_reviews`` table (now with scoring columns); resident_care
 keeps its simpler currency view on the same rows.
 
-Pure ``score_driver`` (unit-tested) + a DB ``build_fleet`` wrapper (never raises)
+Pure ``score_driver`` (unit-tested) + a DB ``build_fleet`` wrapper (degrades to
+empty only when the table isn't provisioned; real DB errors propagate)
 + a deterministic insurer-facing PDF. Directional — driver-entered MVR data, not
 a pulled motor-vehicle record (that needs a paid provider; future integration).
 """
@@ -15,6 +16,8 @@ import asyncio
 import html
 import logging
 from uuid import UUID
+
+import asyncpg
 
 from app.core.services.pdf import safe_url_fetcher
 
@@ -80,7 +83,13 @@ def summarize(drivers: list[dict]) -> dict:
 
 
 async def build_fleet(conn, company_id: UUID) -> dict:
-    """Scored driver list + fleet summary for a company. Never raises."""
+    """Scored driver list + fleet summary for a company.
+
+    Degrades to an empty fleet ONLY when the mvr_reviews table/columns don't
+    exist yet (fresh deploy before the migration). Any other DB error
+    (transient failures, pool exhaustion) propagates — returning a confident
+    "no drivers on file" on a real error would land in the insurer-facing PDF.
+    """
     company_name = "Client"
     rows: list[dict] = []
     try:
@@ -95,8 +104,8 @@ async def build_fleet(conn, company_id: UUID) -> dict:
                ORDER BY driver_name""",
             company_id,
         )]
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.warning("driver_risk.build_fleet fetch failed: %s", exc)
+    except (asyncpg.UndefinedTableError, asyncpg.UndefinedColumnError) as exc:
+        logger.warning("driver_risk.build_fleet degrading to empty (schema not ready): %s", exc)
 
     drivers = []
     for r in rows:

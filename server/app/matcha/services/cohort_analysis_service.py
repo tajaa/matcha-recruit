@@ -149,20 +149,13 @@ async def compute_cohort_analysis(
             for eid in (row["involved_employee_ids"] or []):
                 incident_by_emp_id[eid] = incident_by_emp_id.get(eid, 0) + 1
 
-        # Fetch ER case counts
-        er_rows = await conn.fetch(
-            """
-            SELECT COUNT(*) AS cnt
-            FROM er_cases
-            WHERE company_id = $1 AND status != 'closed'
-            """,
-            company_id,
-        )
-        total_er_cases = int(er_rows[0]["cnt"]) if er_rows else 0
-
-        # Build results
+        # Build results.
+        # NOTE: ER cases and discipline are not attributable to a specific
+        # cohort (they don't reliably link to a department/manager), so
+        # risk_concentration is measured over incidents only — the one risk
+        # event we can place in a cohort. Including total_er_cases in the
+        # denominator would understate every cohort's concentration.
         results: list[CohortResult] = []
-        total_risk_events = total_incidents + total_er_cases
 
         for label, emps in cohorts.items():
             headcount = len(emps)
@@ -181,9 +174,9 @@ async def compute_cohort_analysis(
             er_case_count = 0
             discipline_count = 0
 
-            # Risk concentration: (cohort's % of risk events) / (cohort's % of headcount)
-            if total_risk_events > 0 and headcount_pct > 0:
-                cohort_risk_pct = (cohort_incidents / max(total_risk_events, 1)) * 100
+            # Risk concentration: (cohort's % of incidents) / (cohort's % of headcount)
+            if total_incidents > 0 and headcount_pct > 0:
+                cohort_risk_pct = (cohort_incidents / total_incidents) * 100
                 risk_concentration = round(cohort_risk_pct / headcount_pct, 2)
             else:
                 risk_concentration = 0.0

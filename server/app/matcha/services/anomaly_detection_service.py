@@ -173,7 +173,7 @@ def _detect_anomalies_in_series(
             rolling_std=round(std, 2),
             z_score=round(z, 2),
             severity=severity,
-            description=f"{label} jumped {abs(z):.1f}σ {direction} {window}-month average",
+            description=f"{label} jumped {abs(z):.1f}σ {direction} its trailing {window}-point average",
         ))
 
     # Current state (most recent window)
@@ -280,7 +280,10 @@ async def detect_anomalies(
     er_series: list[tuple[str, float]] = []
 
     for row in history_rows:
-        period = row["computed_at"].strftime("%Y-%m")
+        # Snapshots are per-run (≈weekly by default), not monthly — use a full
+        # date so two snapshots in the same calendar month don't collide onto
+        # one period label. (The count series below ARE month-bucketed.)
+        period = row["computed_at"].strftime("%Y-%m-%d")
         overall_series.append((period, float(row["overall_score"])))
 
         dims = row["dimensions"]

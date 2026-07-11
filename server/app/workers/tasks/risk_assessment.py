@@ -17,21 +17,11 @@ from ..notifications import publish_task_complete, publish_task_error
 from ..utils import get_db_connection
 
 
-_WEIGHT_KEYS = {"compliance", "incidents", "er_cases", "workforce", "legislative"}
-
-
 async def _get_weights(conn) -> dict[str, float]:
-    """Load risk assessment weights from platform_settings."""
-    from app.matcha.services.risk_assessment_service import DEFAULT_WEIGHTS
+    """Load risk assessment weights from platform_settings (shared loader)."""
+    from app.matcha.services.risk_assessment_service import load_risk_weights
 
-    row = await conn.fetchval(
-        "SELECT value FROM platform_settings WHERE key = 'risk_assessment_weights'"
-    )
-    if row:
-        raw = json.loads(row) if isinstance(row, str) else row
-        if isinstance(raw, dict):
-            return {**DEFAULT_WEIGHTS, **{k: float(v) for k, v in raw.items() if k in _WEIGHT_KEYS}}
-    return dict(DEFAULT_WEIGHTS)
+    return await load_risk_weights(conn)
 
 
 async def _run_assessment(company_id: str) -> dict:

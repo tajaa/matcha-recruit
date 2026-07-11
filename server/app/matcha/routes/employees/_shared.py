@@ -24,7 +24,7 @@ from app.matcha.services.onboarding_orchestrator import (
 from app.matcha.services.risk_assessment_service import (
     compute_risk_assessment,
     generate_recommendations,
-    DEFAULT_WEIGHTS,
+    load_risk_weights,
 )
 
 logger = logging.getLogger(__name__)
@@ -373,12 +373,15 @@ async def _refresh_risk_assessment(company_id: UUID) -> None:
     """Background task: recompute risk assessment snapshot after a wage change."""
     # Pass 1: save updated dimensions immediately so violations reflect right away
     try:
-        result = await compute_risk_assessment(company_id)
+        async with get_connection() as conn:
+            weights = await load_risk_weights(conn)
+        result = await compute_risk_assessment(company_id, weights=weights)
         from dataclasses import asdict as _asdict
         dims_json = json.dumps(
             {k: _asdict(v) for k, v in result.dimensions.items()},
             default=str,
         )
+        weights_json = json.dumps(weights)
         async with get_connection() as conn:
             await conn.execute(
                 """
@@ -397,7 +400,22 @@ async def _refresh_risk_assessment(company_id: UUID) -> None:
                 result.overall_score,
                 result.overall_band,
                 dims_json,
-                json.dumps(DEFAULT_WEIGHTS),
+                weights_json,
+                result.computed_at,
+            )
+            # Record in history so trend / anomaly / correlation views see this
+            # recompute (the manual + scheduled writers both do this).
+            await conn.execute(
+                """
+                INSERT INTO risk_assessment_history
+                    (company_id, overall_score, overall_band, dimensions, weights, computed_at, source)
+                VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6, 'auto')
+                """,
+                company_id,
+                result.overall_score,
+                result.overall_band,
+                dims_json,
+                weights_json,
                 result.computed_at,
             )
         logger.info("Risk assessment dimensions refreshed for company %s", company_id)
