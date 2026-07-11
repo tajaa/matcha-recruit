@@ -246,6 +246,32 @@ N6  % of a jurisdiction's rows re-verified inside their key's SLA
     └── reuses existing SLA machinery; does not re-model it
 ```
 
+### 2.6 `grounding` — per `gemini_grounded` catalog row
+
+Does a scope-registry-researched value actually appear in the statute text it
+cites? `metadata.grounding='grounded'` proves the model cited a REAL excerpt
+(`scope_registry.grounded.validate_requirement_citations`), NOT that the value is
+in it — a recalled number can wear a genuine citation. This suite closes that gap.
+
+```
+N5b tier-1, deterministic, no network (pure evaluate_row):
+    ├── pull each grounded row's cited excerpts' authority_index_items.body_text
+    ├── strip citation references from the value (29 CFR 1904, § 207 — pointers, not values)
+    ├── extract numeric tokens; check each in the text (comma + spelled-out legal forms)
+    └── verdict:
+        ├── value_in_text      → grounded for real (no finding)
+        ├── value_not_in_text  → CRITICAL: real citation, number absent → blocks
+        │                        readiness via the existing open-critical gate (N8)
+        ├── corpus_stub        → cited body < 500ch (a heading) → grounding hollow (warn)
+        └── value_unverifiable → prose, no numeric claim tier-1 can judge (info; tier-2 TODO)
+    score = value_in_text / (value_in_text + value_not_in_text); stubs/prose excluded
+            from the denominator (unmeasured ≠ 100). Its own scorecard row, NOT in the
+            composite (a hallucinated value gates through the critical-finding path, not
+            a reweight).
+    extension points (in-file, unwired): tier-2 adversarial LLM verifier on the
+    unresolved rows; golden cross-check (grounded row vs a golden fact = grounded_but_wrong).
+```
+
 ---
 
 ## 3. Persist

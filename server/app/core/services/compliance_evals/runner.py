@@ -19,6 +19,7 @@ from app.database import get_connection
 from . import authority as authority_suite
 from . import completeness as completeness_suite
 from . import golden as golden_suite
+from . import grounding as grounding_suite
 from . import scope as scope_suite
 from . import industry_keysets as iks
 from . import tagging as tagging_suite
@@ -26,7 +27,7 @@ from .scoring import Subscores, composite_score, evaluate_readiness
 
 logger = logging.getLogger(__name__)
 
-ALL_SUITES = ("completeness", "authority", "tagging", "golden", "scope")
+ALL_SUITES = ("completeness", "authority", "tagging", "golden", "scope", "grounding")
 DEFAULT_STALENESS_DAYS = 90
 
 # Suites that reach the network. Routed to Celery rather than BackgroundTasks so a
@@ -188,6 +189,7 @@ async def run_evals(
             tagging_results: Dict = {}
             golden_results: Dict = {}
             golden_counts: Dict = {}
+            grounding_results: Dict = {}
 
             if "completeness" in suites:
                 _progress(run_id, "Building jurisdiction graph", 5)
@@ -230,6 +232,13 @@ async def run_evals(
                 all_findings.extend(out["findings"])
                 totals.update(out["totals"])
 
+            if "grounding" in suites:
+                _progress(run_id, "Verifying grounded values against cited text", 83)
+                out = await grounding_suite.run_grounding(conn, jur_ids)
+                grounding_results = out["results"]
+                all_findings.extend(out["findings"])
+                totals.update({f"grounding_{k}": v for k, v in out["totals"].items()})
+
             _progress(run_id, "Computing freshness", 85)
             freshness_results = await _freshness_by_jurisdiction(conn, jur_ids)
 
@@ -259,6 +268,7 @@ async def run_evals(
                     ("tagging", tagging_results),
                     ("golden", golden_results),
                     ("freshness", freshness_results),
+                    ("grounding", grounding_results),
                 ):
                     cell = res.get(jid)
                     if cell:

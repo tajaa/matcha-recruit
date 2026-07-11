@@ -164,6 +164,18 @@ def tagging_score(
     return base
 
 
+def grounding_score(verified: int, contradicted: int) -> Optional[float]:
+    """Fraction of judgeable grounded values that actually appear in their cited
+    text. None when nothing was judgeable (all stubs / prose) — unmeasured is not
+    100, same rule as every other subscore. Stubs and prose don't enter the
+    denominator; they surface as findings, not a laundered pass.
+    """
+    total = verified + contradicted
+    if total == 0:
+        return None
+    return _pct(verified, total)
+
+
 def composite_score(s: Subscores) -> Optional[float]:
     """Mean of the measured subscores. None if nothing was measured."""
     vals = [v for v in s.as_dict().values() if v is not None]
