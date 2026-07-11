@@ -101,9 +101,18 @@ async def list_authority_drift(
             SELECT d.id, d.authority_index_id, ai.slug AS index_slug,
                    ai.name AS index_name, d.change_type, d.citation, d.heading,
                    d.old_amendment_date, d.new_amendment_date, d.detected_at,
-                   d.status, d.acknowledged_by, d.acknowledged_at
+                   d.status, d.acknowledged_by, d.acknowledged_at,
+                   COALESCE(aff.n, 0) AS affected_requirements
             FROM authority_index_drift d
             JOIN authority_indexes ai ON ai.id = d.authority_index_id
+            LEFT JOIN LATERAL (
+                SELECT COUNT(DISTINCT sc.jurisdiction_requirement_id) AS n
+                FROM authority_index_items i
+                JOIN authority_item_classifications c ON c.item_id = i.id
+                JOIN scope_codifications sc ON sc.classification_id = c.id
+                WHERE i.authority_index_id = d.authority_index_id
+                  AND i.citation = d.citation
+            ) aff ON TRUE
             WHERE {' AND '.join(where)}
             ORDER BY d.detected_at DESC, d.change_type
             LIMIT ${len(params)}

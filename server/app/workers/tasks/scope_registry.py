@@ -52,6 +52,7 @@ def ingest_authority_index(index_slug: Optional[str] = None, trigger_source: str
         ingest_all,
         ingest_by_slug,
     )
+    from app.core.services.scope_registry.codify import propagate_drift_to_requirements
 
     async def _run():
         if trigger_source == "scheduled" and not await _scheduled_run_is_due():
@@ -60,13 +61,19 @@ def ingest_authority_index(index_slug: Optional[str] = None, trigger_source: str
         try:
             if index_slug:
                 result = await ingest_by_slug(conn, index_slug)
-                return {"status": "completed", "results": [result.model_dump(mode="json")]}
-            results, failures = await ingest_all(conn)
-            return {
-                "status": "completed_with_errors" if failures else "completed",
-                "results": [r.model_dump(mode="json") for r in results],
-                "failures": failures,
-            }
+                out = {"status": "completed", "results": [result.model_dump(mode="json")]}
+            else:
+                results, failures = await ingest_all(conn)
+                out = {
+                    "status": "completed_with_errors" if failures else "completed",
+                    "results": [r.model_dump(mode="json") for r in results],
+                    "failures": failures,
+                }
+            # Fan freshly-detected amended/removed drift out to the codified
+            # requirement rows (change_status='needs_review'). Outside the ingest
+            # transaction, idempotent — safe to run every ingest.
+            out["propagation"] = await propagate_drift_to_requirements(conn)
+            return out
         finally:
             await conn.close()
 

@@ -5768,6 +5768,36 @@ async def update_requirement(requirement_id: UUID, body: RequirementUpdate):
     }
 
 
+@router.post("/jurisdictions/requirements/{requirement_id}/resolve-review", dependencies=[Depends(require_admin)])
+async def resolve_requirement_review(requirement_id: UUID):
+    """Clear a drift-raised ``needs_review`` after an admin has re-checked the row
+    against the (changed) authority: restore the pre-drift change_status, drop the
+    metadata.drift breadcrumb, and re-stamp last_verified_at. Idempotent."""
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            UPDATE jurisdiction_requirements
+            SET change_status = COALESCE(metadata->'drift'->>'prior_change_status', 'unchanged'),
+                metadata = COALESCE(metadata, '{}'::jsonb) - 'drift',
+                last_verified_at = NOW(),
+                updated_at = NOW()
+            WHERE id = $1
+            RETURNING id, jurisdiction_id, category, change_status
+            """,
+            requirement_id,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Requirement not found")
+
+    redis = get_redis_cache()
+    if redis:
+        await cache_delete(redis, admin_jurisdiction_detail_key(row["jurisdiction_id"]))
+        await cache_delete(redis, admin_jurisdiction_policy_overview_key(row["category"]))
+        await cache_delete(redis, admin_jurisdiction_policy_overview_key(None))
+
+    return {"id": str(row["id"]), "change_status": row["change_status"]}
+
+
 @router.post("/jurisdictions/requirements/{requirement_id}/bookmark", dependencies=[Depends(require_admin)])
 async def toggle_requirement_bookmark(requirement_id: UUID):
     """Toggle the is_bookmarked flag on a jurisdiction requirement."""

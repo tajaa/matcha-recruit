@@ -1722,7 +1722,20 @@ async def _upsert_requirements_additive(
                     WHEN jurisdiction_requirements.current_value IS DISTINCT FROM EXCLUDED.current_value
                     THEN NOW() ELSE jurisdiction_requirements.last_changed_at END,
                 implementation_steps = EXCLUDED.implementation_steps,
-                metadata = COALESCE(jurisdiction_requirements.metadata, '{}'::jsonb) || EXCLUDED.metadata,
+                -- A re-research pass IS "we re-read the law", so it clears a
+                -- drift-raised needs_review: recompute the status from the value
+                -- diff and drop the metadata.drift breadcrumb. Other statuses are
+                -- left untouched (this upsert has never owned change_status).
+                change_status = CASE
+                    WHEN jurisdiction_requirements.change_status = 'needs_review'
+                    THEN (CASE
+                        WHEN jurisdiction_requirements.current_value IS DISTINCT FROM EXCLUDED.current_value
+                        THEN 'changed' ELSE 'unchanged' END)
+                    ELSE jurisdiction_requirements.change_status END,
+                metadata = CASE
+                    WHEN jurisdiction_requirements.change_status = 'needs_review'
+                    THEN (COALESCE(jurisdiction_requirements.metadata, '{}'::jsonb) - 'drift') || EXCLUDED.metadata
+                    ELSE COALESCE(jurisdiction_requirements.metadata, '{}'::jsonb) || EXCLUDED.metadata END,
                 source_tier = CASE
                     WHEN EXCLUDED.source_tier IS NOT NULL
                      AND (jurisdiction_requirements.source_tier IS NULL

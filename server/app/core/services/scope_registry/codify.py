@@ -312,6 +312,150 @@ def group_research_units(
     return units
 
 
+def affected_requirement_updates(
+    drift_rows: List[Dict[str, Any]],
+    codification_links: List[Dict[str, Any]],
+) -> Dict[Any, Dict[str, Any]]:
+    """Map authority drift → the requirement rows whose codified value it puts in
+    doubt. Pure.
+
+    ``drift_rows``: ``{drift_id, change_type, citation, detected_at,
+    authority_index_id}``. Only ``amended``/``removed`` propagate — a ``new``
+    citation has no classification yet, so it can't join to any requirement (it
+    stays a drift-queue-only "go classify this" signal).
+
+    ``codification_links``: the resolved item→classification→codification join,
+    ``{authority_index_id, citation, requirement_id, prior_change_status}``.
+
+    Returns ``{requirement_id: {drift_id, change_type, citation, detected_at,
+    prior_change_status}}`` — one entry per requirement, latest ``detected_at``
+    winning when two drift rows hit the same row.
+    """
+    links_by_key: Dict[tuple, List[Dict[str, Any]]] = {}
+    for link in codification_links:
+        links_by_key.setdefault(
+            (link.get("authority_index_id"), link.get("citation")), []
+        ).append(link)
+
+    def _dt_key(v):
+        return v if v is not None else 0
+
+    updates: Dict[Any, Dict[str, Any]] = {}
+    for d in drift_rows:
+        if d.get("change_type") not in ("amended", "removed"):
+            continue
+        key = (d.get("authority_index_id"), d.get("citation"))
+        for link in links_by_key.get(key, []):
+            rid = link.get("requirement_id")
+            if rid is None:
+                continue
+            candidate = {
+                "drift_id": d.get("drift_id"),
+                "change_type": d.get("change_type"),
+                "citation": d.get("citation"),
+                "detected_at": d.get("detected_at"),
+                "prior_change_status": link.get("prior_change_status"),
+            }
+            existing = updates.get(rid)
+            if existing is None or _dt_key(candidate["detected_at"]) >= _dt_key(existing["detected_at"]):
+                updates[rid] = candidate
+    return updates
+
+
+async def propagate_drift_to_requirements(conn) -> Dict[str, Any]:
+    """Fan unpropagated amended/removed drift out to the requirement rows whose
+    value is codified from the drifted citation: flag ``change_status =
+    'needs_review'`` + a ``metadata.drift`` breadcrumb, then stamp
+    ``propagated_at`` on every processed drift row (idempotent — reruns are no-ops).
+
+    Runs after ingest completes (a changed authority makes its codified values
+    suspect immediately, before anyone acknowledges the drift). Returns counts.
+    """
+    drift_rows = [
+        dict(r) for r in await conn.fetch(
+            """
+            SELECT id AS drift_id, authority_index_id, change_type, citation, detected_at
+            FROM authority_index_drift
+            WHERE propagated_at IS NULL AND change_type IN ('amended', 'removed')
+            """
+        )
+    ]
+    if not drift_rows:
+        # Still stamp any unpropagated 'new' rows so they don't re-scan forever.
+        marked = await conn.fetchval(
+            """
+            WITH u AS (
+                UPDATE authority_index_drift SET propagated_at = NOW()
+                WHERE propagated_at IS NULL RETURNING 1
+            ) SELECT COUNT(*) FROM u
+            """
+        )
+        return {"drift_processed": int(marked or 0), "requirements_flagged": 0}
+
+    # Resolve the join: drifted citation → item → classification → codification →
+    # requirement (the stored linkage, not a raw key match which would over-flag).
+    index_ids = list({d["authority_index_id"] for d in drift_rows})
+    citations = list({d["citation"] for d in drift_rows})
+    links = [
+        dict(r) for r in await conn.fetch(
+            """
+            SELECT i.authority_index_id, i.citation,
+                   sc.jurisdiction_requirement_id AS requirement_id,
+                   jr.change_status AS prior_change_status
+            FROM authority_index_items i
+            JOIN authority_item_classifications c ON c.item_id = i.id
+            JOIN scope_codifications sc ON sc.classification_id = c.id
+            JOIN jurisdiction_requirements jr ON jr.id = sc.jurisdiction_requirement_id
+            WHERE i.authority_index_id = ANY($1::uuid[]) AND i.citation = ANY($2::text[])
+            """,
+            index_ids, citations,
+        )
+    ]
+
+    updates = affected_requirement_updates(drift_rows, links)
+    flagged = 0
+    if updates:
+        req_ids = list(updates.keys())
+        breadcrumbs = [
+            json.dumps({"drift": {
+                "drift_id": str(updates[r]["drift_id"]),
+                "change_type": updates[r]["change_type"],
+                "citation": updates[r]["citation"],
+                "detected_at": (updates[r]["detected_at"].isoformat()
+                                if hasattr(updates[r]["detected_at"], "isoformat")
+                                else updates[r]["detected_at"]),
+                "prior_change_status": updates[r]["prior_change_status"],
+            }})
+            for r in req_ids
+        ]
+        flagged = await conn.fetchval(
+            """
+            WITH u AS (
+                UPDATE jurisdiction_requirements AS jr
+                SET change_status = 'needs_review',
+                    metadata = COALESCE(jr.metadata, '{}'::jsonb) || t.crumb::jsonb,
+                    updated_at = NOW()
+                FROM unnest($1::uuid[], $2::jsonb[]) AS t(req_id, crumb)
+                WHERE jr.id = t.req_id
+                RETURNING 1
+            ) SELECT COUNT(*) FROM u
+            """,
+            req_ids, breadcrumbs,
+        )
+
+    # Stamp every unpropagated drift row (amended/removed we just processed, plus
+    # any 'new' rows) so the worklist drains.
+    processed = await conn.fetchval(
+        """
+        WITH u AS (
+            UPDATE authority_index_drift SET propagated_at = NOW()
+            WHERE propagated_at IS NULL RETURNING 1
+        ) SELECT COUNT(*) FROM u
+        """
+    )
+    return {"drift_processed": int(processed or 0), "requirements_flagged": int(flagged or 0)}
+
+
 async def reconcile_codifications(
     conn,
     *,
