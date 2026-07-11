@@ -5,6 +5,7 @@ and computes per-cohort risk metrics for department heat maps.
 """
 
 import logging
+import math
 from dataclasses import dataclass, asdict
 from datetime import date, datetime
 from typing import Any
@@ -23,10 +24,17 @@ class CohortResult:
     headcount_pct: float
     incident_count: int
     incident_rate: float  # per 100 FTE annualized
-    er_case_count: int
+    er_case_count: int         # always 0 — ER cases carry no employee link (not cohort-attributable)
     discipline_count: int
     risk_concentration: float  # cohort's % of risk / % of headcount
     flags: list[str]
+    # How trustworthy the concentration ratio is given the cohort's event count
+    # (a 1-person / 1-event cohort reads as extreme by chance). high/moderate/low.
+    concentration_confidence: str = "low"
+    # ER cases are not attributable to a cohort (er_cases has no employee_id and
+    # no party link table), so er_case_count stays 0 for every cohort. Surfaced
+    # so consumers can label it rather than read the 0 as "no ER exposure".
+    er_attributable: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -36,6 +44,30 @@ def _quarter_label(dt: date) -> str:
     """Convert a date to a quarter label like 'Q1-2025'."""
     q = (dt.month - 1) // 3 + 1
     return f"Q{q}-{dt.year}"
+
+
+def _concentration_confidence(
+    observed: int, total_events: int, headcount: int, total_headcount: int
+) -> str:
+    """How credible is a cohort's risk concentration, vs. small-sample noise.
+
+    Null model: risk events land proportional to headcount, so the cohort's
+    expected count is ``total_events × headcount/total_headcount`` and, treated
+    as Poisson, has sd ≈ √expected. A concentration is only trustworthy when the
+    cohort has enough events AND sits several sd above its expectation.
+    Returns 'high' / 'moderate' / 'low'.
+    """
+    if observed < 2 or total_events <= 0 or headcount <= 0 or total_headcount <= 0:
+        return "low"
+    expected = total_events * (headcount / total_headcount)
+    if expected <= 0:
+        return "low"
+    z = (observed - expected) / math.sqrt(expected)
+    if observed >= 3 and z >= 2.0:
+        return "high"
+    if observed >= 2 and z >= 1.0:
+        return "moderate"
+    return "low"
 
 
 def _tenure_band(start_date: date, today: date) -> str:
@@ -154,12 +186,29 @@ async def compute_cohort_analysis(
             for eid in (row["involved_employee_ids"] or []):
                 incident_by_emp_id[eid] = incident_by_emp_id.get(eid, 0) + 1
 
-        # Build results.
-        # NOTE: ER cases and discipline are not attributable to a specific
-        # cohort (they don't reliably link to a department/manager), so
-        # risk_concentration is measured over incidents only — the one risk
-        # event we can place in a cohort. Including total_er_cases in the
-        # denominator would understate every cohort's concentration.
+        # Discipline IS cohort-attributable — progressive_discipline.employee_id
+        # links each record to an employee, so place it in cohorts the same way
+        # as incidents (last 24 months, matching the discipline lookback window).
+        discipline_rows = await conn.fetch(
+            """
+            SELECT employee_id, COUNT(*) AS cnt
+            FROM progressive_discipline
+            WHERE company_id = $1
+              AND issued_date >= CURRENT_DATE - INTERVAL '24 months'
+            GROUP BY employee_id
+            """,
+            company_id,
+        )
+        discipline_by_emp_id: dict[UUID, int] = {
+            row["employee_id"]: int(row["cnt"]) for row in discipline_rows
+        }
+        total_discipline = sum(discipline_by_emp_id.values())
+
+        # Risk concentration is now measured over the risk events we CAN place in
+        # a cohort: incidents + discipline. ER cases stay excluded — er_cases has
+        # no employee link (no FK, no party table), so they are not attributable
+        # to any cohort (er_case_count is reported as 0, er_attributable=False).
+        total_risk_events = total_incidents + total_discipline
         results: list[CohortResult] = []
 
         for label, emps in cohorts.items():
@@ -174,17 +223,26 @@ async def compute_cohort_analysis(
             # Annualized incident rate per 100 FTE
             incident_rate = round((cohort_incidents / headcount) * 100, 2) if headcount > 0 else 0.0
 
-            # ER cases and discipline — approximate by proportion if not available per-cohort
-            # (ER cases don't always link to specific departments)
+            # Discipline is attributable (see lookup above); ER is not.
+            discipline_count = sum(discipline_by_emp_id.get(emp["id"], 0) for emp in emps)
             er_case_count = 0
-            discipline_count = 0
+            cohort_risk_events = cohort_incidents + discipline_count
 
-            # Risk concentration: (cohort's % of incidents) / (cohort's % of headcount)
-            if total_incidents > 0 and headcount_pct > 0:
-                cohort_risk_pct = (cohort_incidents / total_incidents) * 100
+            # Risk concentration: (cohort's % of risk events) / (cohort's % of headcount).
+            # Risk events = incidents + discipline (the ones we can place in a cohort).
+            if total_risk_events > 0 and headcount_pct > 0:
+                cohort_risk_pct = (cohort_risk_events / total_risk_events) * 100
                 risk_concentration = round(cohort_risk_pct / headcount_pct, 2)
             else:
                 risk_concentration = 0.0
+
+            # Significance: is this concentration real or small-sample noise?
+            # Under a null of events spread proportional to headcount, the cohort's
+            # expected event count is total_risk_events × headcount share; compare
+            # the observed count to that Poisson expectation (sd = sqrt(expected)).
+            concentration_confidence = _concentration_confidence(
+                cohort_risk_events, total_risk_events, headcount, total_headcount
+            )
 
             # Compute average incident rate across all cohorts for comparison
             avg_incident_rate = round((total_incidents / total_headcount) * 100, 2) if total_headcount > 0 else 0.0
@@ -194,10 +252,12 @@ async def compute_cohort_analysis(
                 ratio = incident_rate / avg_incident_rate
                 if ratio >= 2.0:
                     flags.append(f"{ratio:.1f}x incident rate vs avg")
-            if risk_concentration > 2.0:
+            # Only flag an elevated concentration when it's statistically credible —
+            # a 1-person cohort with 1 event no longer reads as an extreme hot-spot.
+            if risk_concentration > 2.0 and concentration_confidence != "low":
                 flags.append(f"Risk concentration {risk_concentration:.1f}x")
-            if headcount_pct < 15 and cohort_incidents >= 3:
-                flags.append(f"Small cohort ({headcount_pct}%) with {cohort_incidents} incidents")
+            if headcount_pct < 15 and cohort_risk_events >= 3:
+                flags.append(f"Small cohort ({headcount_pct}%) with {cohort_risk_events} risk events")
 
             results.append(CohortResult(
                 label=label,
@@ -209,6 +269,8 @@ async def compute_cohort_analysis(
                 discipline_count=discipline_count,
                 risk_concentration=risk_concentration,
                 flags=flags,
+                concentration_confidence=concentration_confidence,
+                er_attributable=False,
             ))
 
         # Sort by risk_concentration descending (highest risk first)

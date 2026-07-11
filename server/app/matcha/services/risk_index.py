@@ -46,10 +46,26 @@ _CONF_RANK = {"low": 0, "moderate": 1, "high": 2}
 _CAT_PENALTY_WEIGHT = {True: 1.0, False: 0.7}  # keyed by "documented?"
 _LOSS_PENALTY_WEIGHT = {"high": 1.0, "moderate": 0.8, "low": 0.6}
 
+# Per-component score standard deviation (± index points) implied by its
+# confidence label. Turns the qualitative confidence each component already
+# carries into a variance we can propagate into an index_low/index_high band.
+# "high" = well-documented signal (hazard-agency cat, Mack-CI loss dev, derived
+# EPL/WC); "low" = directional/thin. medium is an alias for moderate.
+_CONF_VARIANCE = {"high": 3.0, "moderate": 8.0, "medium": 8.0, "low": 15.0}
+# Band half-width in sigmas. 1.0 = a one-sigma range (~68% under normality);
+# deliberately conservative so the band reads as "roughly this wide", not a
+# precise CI (the per-component sigmas are themselves assumed, not fitted).
+_INDEX_Z = 1.0
+
 
 def _worst_conf(confs: list) -> str:
     ranked = [c for c in confs if c in _CONF_RANK]
     return min(ranked, key=lambda c: _CONF_RANK[c]) if ranked else "high"
+
+
+def _component_sigma(component: dict) -> float:
+    """Score sigma (± points) for one component from its confidence label."""
+    return _CONF_VARIANCE.get(component.get("confidence", "high"), _CONF_VARIANCE["high"])
 
 
 def _cat_is_documented(cat: dict) -> bool:
@@ -182,6 +198,18 @@ def _assemble(components: list[dict], epl: dict,
         {"key": k, "label": _COMPONENT_META[k][0], "weight": _COMPONENT_META[k][1]}
         for k in universe if k not in present
     ]
+    # Confidence-interval band: propagate each component's confidence-implied
+    # score variance through the SAME renormalized weights (components assumed
+    # independent, so variances combine in quadrature):
+    #   sigma_index = sqrt( Σ (w_i / Σw)^2 · sigma_i^2 )
+    # A low-confidence component (directional cat baseline, thin loss run) widens
+    # the band; an all-high index reads tight. Clamped to [0, 100].
+    index_low = index_high = index_sigma = None
+    if index is not None and total_w:
+        var = sum(((c["weight"] / total_w) ** 2) * (_component_sigma(c) ** 2) for c in components)
+        index_sigma = round(var ** 0.5, 1)
+        index_low = max(0, round(index - _INDEX_Z * index_sigma))
+        index_high = min(100, round(index + _INDEX_Z * index_sigma))
     return {
         "index": index,
         "band": band(index) if index is not None else None,
@@ -189,11 +217,14 @@ def _assemble(components: list[dict], epl: dict,
         "top_fixes": _top_fixes(components, epl),
         "coverage": round(total_w / universe_weight, 2) if universe_weight else None,
         "components_missing": components_missing,
-        # Worst confidence across scored components. WC/EPL/compliance have no
-        # variance model yet (default "high"); property's flows from its own
-        # cat/loss-dev documentation. NOT an index_low/index_high range — that
-        # would need every component to carry real variance, not just property.
+        # Worst confidence across scored components (kept for back-compat).
         "index_confidence": _worst_conf([c.get("confidence", "high") for c in components]),
+        # One-sigma uncertainty band around the index, derived from the same
+        # component confidences (see _CONF_VARIANCE). A directional signal reads
+        # as a wider [index_low, index_high]; a fully-documented index reads tight.
+        "index_low": index_low,
+        "index_high": index_high,
+        "index_sigma": index_sigma,
     }
 
 
