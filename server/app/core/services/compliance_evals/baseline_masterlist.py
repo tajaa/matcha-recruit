@@ -72,8 +72,11 @@ FEDERAL_LABOR_MASTERLIST: List[BaselineObligation] = [
                        "white-collar exemption salary + duties tests"),
     BaselineObligation("flsa_recordkeeping", "employee_classification",
                        "29 C.F.R. Part 516", _ecfr(29, "516")),
+    # The duties test, not the salary level — 29 U.S.C. § 213 / § 541.600 already
+    # carry exempt_salary_threshold, and an authority citation maps to ONE key.
     BaselineObligation("exempt_classification", "employee_classification",
-                       "29 U.S.C. § 213", _lii_usc(29, "213")),
+                       "29 C.F.R. § 541.100", _ecfr(29, "541"),
+                       "executive/administrative/professional duties tests"),
     BaselineObligation("pump_act_lactation", "pregnancy_accommodation",
                        "29 U.S.C. § 218d", _lii_usc(29, "218d"),
                        "reasonable break time + space to express milk"),
