@@ -119,25 +119,41 @@ def select_primary_citation(
     return sorted(candidates, key=sort_key)[0]
 
 
+def _authority_governs(link: Dict[str, Any], req_state: Optional[str]) -> bool:
+    """A citation may stamp a requirement only if its authority actually governs
+    that jurisdiction: federal authorities (no jurisdiction) govern everyone; a
+    state/local authority governs only same-state requirements. Without this a
+    key-equality codification link would let e.g. Cal. Lab. Code stamp an Arizona
+    row (match_codifications is jurisdiction-blind by design)."""
+    if link.get("authority_jurisdiction_id") is None:
+        return True  # federal / global
+    astate = (link.get("authority_state") or "").upper()
+    rstate = (req_state or "").upper()
+    return bool(astate) and astate == rstate
+
+
 def build_citation_stamps(
     links: List[Dict[str, Any]],
-    requirement_levels: Optional[Dict[Any, str]] = None,
+    requirement_meta: Optional[Dict[Any, Dict[str, Any]]] = None,
 ) -> Dict[Any, Dict[str, Any]]:
     """Collapse per-(classification×requirement) links carrying item metadata into
     a per-requirement stamp: the primary ``statute_citation`` + ``citation_item_id``
     plus the full ``verified_citations`` set for ``metadata``. Pure.
 
-    Each link must carry ``jurisdiction_requirement_id`` and item fields
+    Each link must carry ``jurisdiction_requirement_id`` and item/authority fields
     (``item_id``, ``citation``, ``hierarchy``, ``index_slug``, ``source_type``,
-    ``jurisdiction_level``). ``requirement_levels`` maps requirement id → its
-    ``jurisdiction_level`` (drives the level-match rule in select_primary_citation).
+    ``jurisdiction_level``, ``authority_jurisdiction_id``, ``authority_state``).
+    ``requirement_meta`` maps requirement id → ``{level, state}`` — ``level`` drives
+    the primary-citation tie-break, ``state`` the jurisdiction guard.
     """
-    requirement_levels = requirement_levels or {}
+    requirement_meta = requirement_meta or {}
     by_req: Dict[Any, List[Dict[str, Any]]] = {}
     for link in links:
         rid = link.get("jurisdiction_requirement_id")
         if rid is None or not link.get("item_id") or not link.get("citation"):
             continue
+        if not _authority_governs(link, (requirement_meta.get(rid) or {}).get("state")):
+            continue  # a state authority can't codify another state's row
         by_req.setdefault(rid, []).append(link)
 
     stamps: Dict[Any, Dict[str, Any]] = {}
@@ -147,7 +163,8 @@ def build_citation_stamps(
         for c in cands:
             seen.setdefault(c["item_id"], c)
         uniq = list(seen.values())
-        primary = select_primary_citation(uniq, requirement_level=requirement_levels.get(rid))
+        primary = select_primary_citation(
+            uniq, requirement_level=(requirement_meta.get(rid) or {}).get("level"))
         if primary is None:
             continue
         verified = sorted(
@@ -497,10 +514,13 @@ async def reconcile_codifications(
             f"""
             SELECT c.id, c.regulation_key, c.key_definition_id,
                    i.id AS item_id, i.citation, i.hierarchy,
-                   ai.slug AS index_slug, ai.source_type, ai.level AS jurisdiction_level
+                   ai.slug AS index_slug, ai.source_type, ai.level AS jurisdiction_level,
+                   ai.jurisdiction_id AS authority_jurisdiction_id,
+                   aij.state AS authority_state
             FROM authority_item_classifications c
             JOIN authority_index_items i ON i.id = c.item_id
             JOIN authority_indexes ai ON ai.id = i.authority_index_id
+            LEFT JOIN jurisdictions aij ON aij.id = ai.jurisdiction_id
             WHERE {' AND '.join(class_where)}
             """,
             *class_params,
@@ -508,17 +528,19 @@ async def reconcile_codifications(
     ]
 
     # Active keyed catalog rows (chain-filtered on the requirement's jurisdiction).
-    req_where = ["regulation_key IS NOT NULL", "COALESCE(status, 'active') = 'active'"]
+    req_where = ["jr.regulation_key IS NOT NULL", "COALESCE(jr.status, 'active') = 'active'"]
     req_params: List[Any] = []
     if chain_ids is not None:
         req_params.append(chain_ids)
-        req_where.append(f"jurisdiction_id = ANY(${len(req_params)}::uuid[])")
+        req_where.append(f"jr.jurisdiction_id = ANY(${len(req_params)}::uuid[])")
     requirement_rows = [
         dict(r) for r in await conn.fetch(
             f"""
-            SELECT id, regulation_key, jurisdiction_id, category,
-                   jurisdiction_level, statute_citation, citation_verified_at
-            FROM jurisdiction_requirements
+            SELECT jr.id, jr.regulation_key, jr.jurisdiction_id, jr.category,
+                   jr.jurisdiction_level, jr.statute_citation, jr.citation_verified_at,
+                   j.state AS requirement_state
+            FROM jurisdiction_requirements jr
+            JOIN jurisdictions j ON j.id = jr.jurisdiction_id
             WHERE {' AND '.join(req_where)}
             """,
             *req_params,
@@ -568,7 +590,10 @@ async def reconcile_codifications(
     # from model free-recall. Registry wins over a hand-edited citation (the
     # overwrite is counted, not silent).
     class_meta = {c["id"]: c for c in classifications}
-    req_levels = {r["id"]: r.get("jurisdiction_level") for r in requirement_rows}
+    req_meta = {
+        r["id"]: {"level": r.get("jurisdiction_level"), "state": r.get("requirement_state")}
+        for r in requirement_rows
+    }
     # A prior manual citation = citation present but never registry-verified.
     manual_before = {
         r["id"] for r in requirement_rows
@@ -584,8 +609,10 @@ async def reconcile_codifications(
             "index_slug": meta.get("index_slug"),
             "source_type": meta.get("source_type"),
             "jurisdiction_level": meta.get("jurisdiction_level"),
+            "authority_jurisdiction_id": meta.get("authority_jurisdiction_id"),
+            "authority_state": meta.get("authority_state"),
         }})
-    stamps = build_citation_stamps(stamp_links, req_levels)
+    stamps = build_citation_stamps(stamp_links, req_meta)
 
     citations_stamped = 0
     overwrote_manual = 0
@@ -619,6 +646,28 @@ async def reconcile_codifications(
             )
         )
 
+    # Self-correct: a row that was registry-verified but no longer has a supporting
+    # citation this run (classification removed, or the jurisdiction guard now
+    # rejects a cross-state link written by an older reconcile) loses its verified
+    # stamp. Only clears registry stamps (verified_at set) — hand-curated citations
+    # (verified_at NULL) are untouched.
+    stamped_ids = list(stamps.keys())
+    cleared = await conn.fetchval(
+        """
+        WITH c AS (
+            UPDATE jurisdiction_requirements AS jr
+            SET statute_citation = NULL, citation_item_id = NULL,
+                citation_verified_at = NULL,
+                metadata = COALESCE(jr.metadata, '{}'::jsonb) - 'verified_citations'
+            WHERE jr.id = ANY($1::uuid[])
+              AND jr.citation_verified_at IS NOT NULL
+              AND NOT (jr.id = ANY($2::uuid[]))
+            RETURNING 1
+        ) SELECT COUNT(*) FROM c
+        """,
+        [r["id"] for r in requirement_rows], stamped_ids,
+    )
+
     matched_classification_ids = {link["classification_id"] for link in links}
     unmatched_keys = sorted({
         c["regulation_key"] for c in classifications
@@ -633,4 +682,5 @@ async def reconcile_codifications(
         "unmatched_keys": unmatched_keys,
         "citations_stamped": citations_stamped,
         "overwrote_manual": overwrote_manual,
+        "citations_cleared": int(cleared or 0),
     }

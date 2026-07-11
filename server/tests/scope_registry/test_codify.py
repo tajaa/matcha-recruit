@@ -173,10 +173,16 @@ def test_select_primary_lexicographic_tiebreak_is_deterministic():
 
 # ── build_citation_stamps ──────────────────────────────────────────────────
 
-def _link(rid, item_id, cite, src="ecfr", level="federal", slug="us-flsa"):
+def _link(rid, item_id, cite, src="ecfr", level="federal", slug="us-flsa",
+          auth_jur=None, auth_state=None):
     return {"jurisdiction_requirement_id": rid, "classification_id": "c",
             "item_id": item_id, "citation": cite, "hierarchy": {},
-            "index_slug": slug, "source_type": src, "jurisdiction_level": level}
+            "index_slug": slug, "source_type": src, "jurisdiction_level": level,
+            "authority_jurisdiction_id": auth_jur, "authority_state": auth_state}
+
+
+def _meta(level, state=None):
+    return {"level": level, "state": state}
 
 
 def test_stamp_multi_classification_primary_plus_full_set():
@@ -184,7 +190,7 @@ def test_stamp_multi_classification_primary_plus_full_set():
         _link("r1", "i_usc", "29 U.S.C. § 213"),
         _link("r1", "i_cfr", "29 CFR § 541.600"),
     ]
-    stamps = build_citation_stamps(links, {"r1": "federal"})
+    stamps = build_citation_stamps(links, {"r1": _meta("federal")})
     assert stamps["r1"]["statute_citation"] == "29 CFR § 541.600"  # regulation wins
     assert stamps["r1"]["citation_item_id"] == "i_cfr"
     cites = [v["citation"] for v in stamps["r1"]["verified_citations"]]
@@ -194,10 +200,35 @@ def test_stamp_multi_classification_primary_plus_full_set():
 def test_stamp_dedupes_same_item_reached_twice():
     links = [_link("r1", "i_cfr", "29 CFR § 541.600"),
              _link("r1", "i_cfr", "29 CFR § 541.600")]
-    stamps = build_citation_stamps(links, {"r1": "federal"})
+    stamps = build_citation_stamps(links, {"r1": _meta("federal")})
     assert len(stamps["r1"]["verified_citations"]) == 1
 
 
 def test_stamp_skips_links_without_item_or_citation():
     links = [{"jurisdiction_requirement_id": "r1", "item_id": None, "citation": None}]
     assert build_citation_stamps(links, {}) == {}
+
+
+def test_stamp_state_authority_cannot_cross_state_lines():
+    # A California authority must not stamp an Arizona requirement, even though
+    # both share the exempt_salary_threshold key (match is jurisdiction-blind).
+    links = [_link("r_az", "i_ca", "Cal. Lab. Code § 515",
+                   src="curated", level="state", slug="ca-labor-code",
+                   auth_jur="CA_ID", auth_state="CA")]
+    stamps = build_citation_stamps(links, {"r_az": _meta("state", state="AZ")})
+    assert stamps == {}  # CA statute rejected for the AZ row
+
+
+def test_stamp_federal_authority_governs_any_state():
+    links = [_link("r_az", "i_cfr", "29 CFR § 541.600",
+                   auth_jur=None, auth_state=None)]  # federal
+    stamps = build_citation_stamps(links, {"r_az": _meta("state", state="AZ")})
+    assert stamps["r_az"]["statute_citation"] == "29 CFR § 541.600"
+
+
+def test_stamp_state_authority_governs_same_state():
+    links = [_link("r_ca", "i_ca", "Cal. Lab. Code § 515",
+                   src="curated", level="state", slug="ca-labor-code",
+                   auth_jur="CA_ID", auth_state="CA")]
+    stamps = build_citation_stamps(links, {"r_ca": _meta("state", state="CA")})
+    assert stamps["r_ca"]["statute_citation"] == "Cal. Lab. Code § 515"
