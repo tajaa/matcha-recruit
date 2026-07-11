@@ -15,6 +15,7 @@ a pulled motor-vehicle record (that needs a paid provider; future integration).
 import asyncio
 import html
 import logging
+import math
 from uuid import UUID
 
 import asyncpg
@@ -25,29 +26,62 @@ logger = logging.getLogger(__name__)
 
 TIER_RANK = {"high_risk": 0, "marginal": 1, "clean": 2, "unknown": 3}
 
+# Severity weight per event class — how strongly each predicts an auto loss.
+# We only have aggregate counts (no per-violation class on mvr_reviews), so the
+# classes we can separate are: an invalid license, a major violation
+# (DUI/reckless), an accident, and a generic moving violation.
+_SEVERITY_WEIGHT = {
+    "license_invalid": 12.0,   # suspended / expired — worst single signal
+    "major": 10.0,             # DUI / reckless
+    "accident": 5.0,           # at-fault-equivalent (only a count is captured)
+    "moving_violation": 1.5,   # speeding / minor moving
+}
+# Event load at which the 0-100 score is ~63% saturated. Keeps one severe event
+# from pegging every comparison while staying monotonic. Tuned so a lone speeding
+# ticket ≈ 10, a major ≈ 49, and the high-risk override set (susp+major+2acc+4viol)
+# lands in the 90s.
+_SCORE_SATURATION = 15.0
+
 
 def score_driver(d: dict) -> dict:
-    """Risk tier + points for one driver's MVR record. Pure.
+    """Risk tier + a 0-100 severity score for one driver's MVR record. Pure.
 
+    Tier (unchanged hard overrides — authoritative) —
     high_risk: suspended/expired license, a major violation (DUI/reckless), 2+
     at-fault accidents, or 4+ moving violations. marginal: any accident, any
     violation, a flagged review, or unknown license. else clean.
+
+    ``score`` (0-100, higher = riskier) is a frequency×severity load: each event
+    count weighted by its class severity (``_SEVERITY_WEIGHT``), passed through a
+    saturating curve. Counts are the review-period frequency (MVR reviews are
+    ~annual); it orders drivers WITHIN a tier and drives future thresholds — the
+    tier gates above stay the decision boundary. Directional: self-entered MVR
+    data, no mileage/exposure base. ``points`` retained for PDF back-compat.
     """
     lic = (d.get("license_status") or "valid").lower()
     major = bool(d.get("major_violation"))
     viol = int(d.get("violation_count") or 0)
     acc = int(d.get("accident_count") or 0)
     status = d.get("status")
+    lic_invalid = lic in ("suspended", "expired")
 
-    if lic in ("suspended", "expired") or major or acc >= 2 or viol >= 4:
+    if lic_invalid or major or acc >= 2 or viol >= 4:
         tier = "high_risk"
     elif acc >= 1 or viol >= 1 or status == "flagged" or lic == "unknown":
         tier = "marginal"
     else:
         tier = "clean"
 
-    points = viol + acc * 2 + (5 if major else 0) + (5 if lic in ("suspended", "expired") else 0)
-    return {"tier": tier, "points": points}
+    severity_load = (
+        viol * _SEVERITY_WEIGHT["moving_violation"]
+        + acc * _SEVERITY_WEIGHT["accident"]
+        + (_SEVERITY_WEIGHT["major"] if major else 0.0)
+        + (_SEVERITY_WEIGHT["license_invalid"] if lic_invalid else 0.0)
+    )
+    score = round(100 * (1 - math.exp(-severity_load / _SCORE_SATURATION)), 1)
+    points = viol + acc * 2 + (5 if major else 0) + (5 if lic_invalid else 0)
+    return {"tier": tier, "points": points, "score": score,
+            "severity_load": round(severity_load, 1)}
 
 
 def _fleet_grade(clean_pct: float, high_risk: int, total: int) -> str:
@@ -117,7 +151,10 @@ async def build_fleet(conn, company_id: UUID) -> dict:
                 r[k] = str(r[k])
         r.update(score_driver(r))
         drivers.append(r)
-    drivers.sort(key=lambda d: (TIER_RANK.get(d["tier"], 3), -d["points"], d["driver_name"]))
+    # Within a tier, order by the continuous severity score (points kept as a
+    # stable tie-breaker for back-compat).
+    drivers.sort(key=lambda d: (TIER_RANK.get(d["tier"], 3), -d["score"], -d["points"],
+                                d["driver_name"]))
     return {"company_id": str(company_id), "company_name": company_name,
             "drivers": drivers, "summary": summarize(drivers)}
 

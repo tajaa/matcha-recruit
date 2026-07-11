@@ -35,6 +35,22 @@ def test_points():
     assert _s(license_status="suspended")["points"] == 5
 
 
+def test_severity_score():
+    # clean driver scores 0
+    assert _s()["score"] == 0.0
+    # score is 0-100, higher = riskier, and monotonic in severity
+    minor = _s(violation_count=1)["score"]          # one speeding ticket
+    major = _s(major_violation=True)["score"]       # DUI/reckless
+    susp = _s(license_status="suspended")["score"]  # invalid license
+    assert 0 < minor < major < susp <= 100
+    # a major violation weighs far more than several minor ones
+    assert _s(major_violation=True)["score"] > _s(violation_count=3)["score"]
+    # the worst record saturates high but never exceeds 100
+    worst = _s(license_status="suspended", major_violation=True,
+               accident_count=3, violation_count=6)["score"]
+    assert 90 <= worst <= 100
+
+
 def test_summarize_and_grade():
     drivers = [
         {"tier": "clean", "overdue": False}, {"tier": "clean", "overdue": True},

@@ -280,3 +280,111 @@ async def mod_proxy_trajectory(conn, company_id: UUID) -> dict:
         "expected_annual_losses": round(expected_annual),
         "basis": "actual incurred ÷ expected losses (pure-premium rate × payroll); directional, not the bureau mod.",
     }
+
+
+# --- credibility-weighted experience mod (NCCI-style approximation) -------------
+#
+# The published NCCI mod splits each CLAIM into a primary part (≤ a state split
+# point) and an excess part, credibility-weights the excess, and adds ballast so
+# small accounts pull toward 1.0. We DON'T have per-claim amounts (wc_loss_runs
+# stores only aggregate claim_count + incurred), so the split below is
+# APPROXIMATED from average severity, and the split point / D-ratio / ballast /
+# weighting are ILLUSTRATIVE seeds (like wc_class_codes) — pending a licensed
+# NCCI feed. This is a documented directional mod, NOT the bureau's published
+# calculation; ``proxy_mod`` stays the fallback when inputs are missing.
+_SPLIT_POINT = 18_000.0     # per-claim primary/excess split (illustrative; NCCI ~$18k)
+_CRED_W_K = 750_000.0       # excess-credibility scale: W = E/(E+K) (bigger accounts credible on excess)
+_BALLAST_FACTOR = 0.10      # ballast B = factor × expected losses (damps small accounts toward 1.0)
+
+
+def _primary_fraction(claim_count: int, total_incurred: float,
+                      split_point: float = _SPLIT_POINT) -> Optional[float]:
+    """Share of losses that is primary (≤ split point per claim), from aggregate
+    claim_count + incurred assuming claims sit at average severity. None when the
+    inputs can't support a split. Pure.
+    """
+    if claim_count <= 0 or total_incurred <= 0:
+        return None
+    avg_sev = total_incurred / claim_count
+    return min(avg_sev, split_point) / avg_sev
+
+
+def credibility_mod(claim_count: int, total_incurred: float, expected_losses: float,
+                    *, split_point: float = _SPLIT_POINT) -> Optional[float]:
+    """Credibility-weighted experience mod (NCCI-style approximation). Pure.
+
+    ``Mod = (Ap + W·Ae + (1-W)·Ee + B) / (Ep + W·Ee + (1-W)·Ee + B)`` where
+    A=actual, E=expected, subscripts p/e = primary/excess, W=excess weighting,
+    B=ballast. The primary fraction is derived from observed average severity and
+    applied to BOTH actual and expected, so on-plan (actual==expected) gives 1.0;
+    partial excess credibility + ballast damp small accounts toward 1.0 (unlike
+    the raw ``proxy_mod`` ratio). None when there's no expected-loss base or no
+    claim count to split. Directional, not the bureau mod — see the module note.
+    """
+    if not expected_losses or expected_losses <= 0:
+        return None
+    pf = _primary_fraction(claim_count, total_incurred, split_point)
+    if pf is None:
+        return None
+    act_primary, act_excess = pf * total_incurred, (1.0 - pf) * total_incurred
+    exp_primary, exp_excess = pf * expected_losses, (1.0 - pf) * expected_losses
+    w = expected_losses / (expected_losses + _CRED_W_K)   # excess credibility, 0..1
+    ballast = _BALLAST_FACTOR * expected_losses
+    numer = act_primary + w * act_excess + (1.0 - w) * exp_excess + ballast
+    denom = exp_primary + w * exp_excess + (1.0 - w) * exp_excess + ballast
+    if denom <= 0:
+        return None
+    return round(numer / denom, 3)
+
+
+async def credibility_mod_trajectory(conn, company_id: UUID) -> dict:
+    """Credibility-weighted mod per loss-run valuation, with the raw proxy alongside.
+
+    Same data as ``mod_proxy_trajectory`` (``wc_loss_runs`` + class payroll) plus
+    the per-valuation claim count for the primary/excess split. Each point carries
+    both ``experience_mod`` (credibility) and ``proxy_mod`` (raw ratio) so the UI
+    can show the credibility damping; ``source`` is ``ncci_approx``. Falls back to
+    proxy-only (``credibility_mod`` None) when a valuation has no claim count.
+    """
+    expected_annual = await expected_annual_losses(conn, company_id)
+    if expected_annual <= 0:
+        return {"points": [], "expected_annual_losses": 0.0, "source": "ncci_approx",
+                "basis": "Add WC class payroll exposures to enable the credibility mod."}
+    rows = await conn.fetch(
+        """
+        SELECT valuation_date,
+               COUNT(DISTINCT policy_period_label) AS periods,
+               SUM(COALESCE(claim_count, 0)) AS claims,
+               SUM(COALESCE(paid, 0) + COALESCE(reserved, 0)) AS incurred
+        FROM wc_loss_runs
+        WHERE subject_kind = 'company' AND subject_id = $1 AND line = 'wc'
+        GROUP BY valuation_date
+        ORDER BY valuation_date ASC
+        """,
+        company_id,
+    )
+    points: list[dict] = []
+    for r in rows:
+        periods = int(r["periods"]) or 1
+        claims = int(r["claims"] or 0)
+        actual = float(r["incurred"] or 0)
+        expected = expected_annual * periods
+        cred = credibility_mod(claims, actual, expected)
+        proxy = proxy_mod(actual, expected)
+        if cred is None and proxy is None:
+            continue
+        points.append({
+            "valuation_date": r["valuation_date"].isoformat() if r["valuation_date"] else None,
+            "experience_mod": cred if cred is not None else proxy,
+            "credibility_mod": cred, "proxy_mod": proxy,
+            "actual_losses": round(actual), "expected_losses": round(expected),
+            "claim_count": claims, "periods": periods,
+            "source": "ncci_approx" if cred is not None else "proxy",
+        })
+    return {
+        "points": points,
+        "expected_annual_losses": round(expected_annual),
+        "split_point": _SPLIT_POINT,
+        "basis": "credibility-weighted primary/excess mod (approximated from aggregate "
+                 "claim_count + incurred); directional, illustrative NCCI parameters, not the bureau mod.",
+    }
