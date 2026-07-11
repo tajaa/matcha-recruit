@@ -1777,6 +1777,31 @@ async def get_company_gap_dashboard(
         except Exception:
             logger.exception("gap-dashboard: drift calc failed for company %s", company_id)
 
+        # Base-layer readiness (Step 1.6): the federal + state labor baselines this
+        # company inherits, scored against the enumerated master-list. Answers "is
+        # the foundation complete?" above the per-company gaps. Additive/best-effort.
+        baseline = []
+        try:
+            from app.core.services.scope_registry.gap_surfaces import (
+                baseline_readiness_for_chain,
+            )
+
+            base_rows = await conn.fetch(
+                """
+                SELECT id FROM jurisdictions
+                WHERE (level::text = 'federal' AND COALESCE(country_code,'US') = 'US')
+                   OR (level::text = 'state' AND state IN (
+                        SELECT DISTINCT state FROM business_locations
+                        WHERE company_id = $1 AND state IS NOT NULL))
+                """,
+                company_id,
+            )
+            baseline = await baseline_readiness_for_chain(
+                conn, [r["id"] for r in base_rows]
+            )
+        except Exception:
+            logger.exception("gap-dashboard: baseline readiness failed for %s", company_id)
+
         return {
             "status": "ok",
             "company": {"id": str(company_id), "name": company["name"]},
@@ -1785,6 +1810,7 @@ async def get_company_gap_dashboard(
             "drift": drift,
             "complexity": complexity,
             "engine": engine_block,
+            "baseline": baseline,
         }
 
 

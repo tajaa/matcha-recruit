@@ -176,6 +176,17 @@ def grounding_score(verified: int, contradicted: int) -> Optional[float]:
     return _pct(verified, total)
 
 
+def baseline_score(present: int, missing: int) -> Optional[float]:
+    """Fraction of the enumerated labor master-list present in a base jurisdiction's
+    own catalog. None when the master-list is empty (nothing to measure) — unmeasured
+    is not 100, same rule as every other subscore. Not folded into the composite: a
+    baseline miss gates through its critical finding, like grounding."""
+    total = present + missing
+    if total == 0:
+        return None
+    return _pct(present, total)
+
+
 def composite_score(s: Subscores) -> Optional[float]:
     """Mean of the measured subscores. None if nothing was measured."""
     vals = [v for v in s.as_dict().values() if v is not None]

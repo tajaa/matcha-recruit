@@ -7351,6 +7351,7 @@ EXPECTED_REGULATION_KEYS: Dict[str, FrozenSet[str]] = {
 # stable keys for Gemini dedup. Add them directly.
 _LABOR_REGULATION_KEYS: Dict[str, FrozenSet[str]] = {
     "minimum_wage": frozenset([
+        "national_minimum_wage",
         "state_minimum_wage", "tipped_minimum_wage", "exempt_salary_threshold",
         "fast_food_minimum_wage", "healthcare_minimum_wage", "large_employer_minimum_wage",
         "small_employer_minimum_wage", "youth_minimum_wage", "tip_credit_prohibition",
@@ -7403,8 +7404,30 @@ _LABOR_REGULATION_KEYS: Dict[str, FrozenSet[str]] = {
     "anti_discrimination": frozenset([
         "protected_classes", "pay_transparency", "salary_history_ban",
         "harassment_prevention_training", "reasonable_accommodation",
-        "whistleblower_protection",
+        "whistleblower_protection", "age_discrimination_adea",
+        "genetic_information_gina",
     ]),
+    # ── Federal-baseline categories (baseline_masterlist.py). These 11 labor
+    # categories had no enumerated keys; the baseline master-list references
+    # these, and baseline01 seeds regulation_key_definitions rows for them.
+    "employee_classification": frozenset([
+        "flsa_recordkeeping", "exempt_classification",
+    ]),
+    "pregnancy_accommodation": frozenset([
+        "pregnancy_accommodation", "pump_act_lactation",
+    ]),
+    "equal_pay": frozenset(["federal_equal_pay"]),
+    "warn_act": frozenset(["federal_warn_notice"]),
+    "i9_everify": frozenset(["form_i9_verification"]),
+    "erisa_benefits": frozenset(["spd_disclosure", "form_5500"]),
+    "cobra": frozenset(["cobra_continuation"]),
+    "nlra_organizing": frozenset(["protected_concerted_activity"]),
+    "userra": frozenset(["userra_reemployment"]),
+    "background_checks": frozenset([
+        "fcra_disclosure_authorization", "adverse_action_process",
+    ]),
+    "eeo_reporting": frozenset(["eeo1_report"]),
+    "garnishment": frozenset(["garnishment_limits"]),
     "business_license": frozenset([
         "state_business_registration", "local_business_license",
         "professional_licensing", "dba_registration",

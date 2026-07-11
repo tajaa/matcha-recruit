@@ -36,6 +36,56 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 
+# ── Baseline readiness (Step 1.6) ───────────────────────────────────────────
+
+async def baseline_readiness_for_chain(conn, jurisdiction_ids: List[Any]) -> List[Dict[str, Any]]:
+    """Latest baseline present/expected for the base-layer jurisdictions a company
+    inherits (federal + each state in its chain).
+
+    The baseline suite scores federal + CA-state against the enumerated labor
+    master-list. This surfaces that verdict on the company Gap Analysis dashboard as
+    a base-layer readiness banner, so "is the foundation this company stands on
+    complete?" is answered before per-company gaps. Reads the most-recent baseline
+    scorecard row per jurisdiction (`compliance_eval_results.suite='baseline'`);
+    returns [] when the baseline suite has never run. Additive — never replaces the
+    bank arrays the FE gap actions consume.
+    """
+    if not jurisdiction_ids:
+        return []
+    rows = await conn.fetch(
+        """
+        SELECT DISTINCT ON (r.jurisdiction_id)
+               r.jurisdiction_id, r.score, r.detail, r.created_at,
+               j.display_name, j.level::text AS level
+        FROM compliance_eval_results r
+        JOIN jurisdictions j ON j.id = r.jurisdiction_id
+        WHERE r.suite = 'baseline' AND r.jurisdiction_id = ANY($1::uuid[])
+        ORDER BY r.jurisdiction_id, r.created_at DESC
+        """,
+        jurisdiction_ids,
+    )
+    out: List[Dict[str, Any]] = []
+    for r in rows:
+        detail = r["detail"]
+        if isinstance(detail, str):
+            import json
+            try:
+                detail = json.loads(detail)
+            except Exception:
+                detail = {}
+        detail = detail or {}
+        out.append({
+            "jurisdiction_id": str(r["jurisdiction_id"]),
+            "label": detail.get("label") or r["display_name"],
+            "level": r["level"],
+            "score": float(r["score"]) if r["score"] is not None else None,
+            "present": detail.get("present"),
+            "expected": detail.get("expected"),
+            "missing": detail.get("missing"),
+        })
+    return out
+
+
 # ── Pure aggregation ────────────────────────────────────────────────────────
 
 

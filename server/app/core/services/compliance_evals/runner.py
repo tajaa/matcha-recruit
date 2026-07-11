@@ -17,6 +17,7 @@ import asyncpg
 from app.database import get_connection
 
 from . import authority as authority_suite
+from . import baseline as baseline_suite
 from . import completeness as completeness_suite
 from . import golden as golden_suite
 from . import grounding as grounding_suite
@@ -27,7 +28,7 @@ from .scoring import Subscores, composite_score, evaluate_readiness
 
 logger = logging.getLogger(__name__)
 
-ALL_SUITES = ("completeness", "authority", "tagging", "golden", "scope", "grounding")
+ALL_SUITES = ("completeness", "authority", "tagging", "golden", "scope", "grounding", "baseline")
 DEFAULT_STALENESS_DAYS = 90
 
 # Suites that reach the network. Routed to Celery rather than BackgroundTasks so a
@@ -203,6 +204,7 @@ async def run_evals(
             golden_results: Dict = {}
             golden_counts: Dict = {}
             grounding_results: Dict = {}
+            baseline_results: Dict = {}
 
             if "completeness" in suites:
                 _progress(run_id, "Building jurisdiction graph", 5)
@@ -251,6 +253,15 @@ async def run_evals(
                 grounding_results = out["results"]
                 all_findings.extend(out["findings"])
                 totals.update({f"grounding_{k}": v for k, v in out["totals"].items()})
+
+            if "baseline" in suites:
+                _progress(run_id, "Scoring federal + CA labor baseline", 84)
+                # Resolves its OWN base jurisdictions (federal + CA-state) — does
+                # NOT use jur_ids, which excludes federal by default.
+                out = await baseline_suite.run_baseline(conn)
+                baseline_results = out["results"]
+                all_findings.extend(out["findings"])
+                totals.update({f"baseline_{k}": v for k, v in out["totals"].items()})
 
             _progress(run_id, "Computing freshness", 85)
             freshness_results = await _freshness_by_jurisdiction(conn, jur_ids)
@@ -326,6 +337,14 @@ async def run_evals(
                         },
                         readiness.ready,
                     )
+
+            # Baseline persists on its own jurisdictions (federal + CA-state), which
+            # are not in jur_ids — so it can't ride the per-jur scorecard loop above.
+            for jid, cell in baseline_results.items():
+                await _insert_result(
+                    conn, run_id, jid, None, "baseline",
+                    cell["score"], cell["detail"],
+                )
 
             totals["findings"] = len(all_findings)
             await conn.execute(

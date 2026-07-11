@@ -5517,6 +5517,42 @@ async def eval_core_checklist(
     }
 
 
+@router.get("/jurisdictions/evals/baseline-checklist", dependencies=[Depends(require_admin)])
+async def eval_baseline_checklist():
+    """The enumerated federal + CA-state labor master-list, one row per obligation,
+    present/missing against each base jurisdiction's own catalog (with citation).
+
+    This is the answer to "is federal/state actually done?" — the baseline suite's
+    per-entry detail. Missing entries carry the citation to research next.
+    """
+    from ..services.compliance_evals import baseline as baseline_suite
+    from ..services.compliance_evals.baseline import resolve_baseline_jid
+    from ..services.compliance_evals.baseline_masterlist import BASELINE_JURISDICTIONS
+    from ..services.compliance_evals.golden import _rows_for
+    from ..services.compliance_evals.scoring import baseline_score
+
+    out = []
+    async with get_connection() as conn:
+        for spec in BASELINE_JURISDICTIONS:
+            jid = await resolve_baseline_jid(conn, spec)
+            entries = spec["entries"]
+            if jid is None:
+                items = baseline_suite.baseline_checklist(entries, set())
+            else:
+                catalog = await _rows_for(conn, jid)
+                items = baseline_suite.baseline_checklist(entries, set(catalog.keys()))
+            present = sum(1 for i in items if i["present"])
+            out.append({
+                "label": spec["label"],
+                "jurisdiction_found": jid is not None,
+                "expected": len(entries),
+                "present": present,
+                "score": baseline_score(present, len(entries) - present),
+                "items": items,
+            })
+    return {"jurisdictions": out}
+
+
 @router.post("/jurisdictions/evals/findings/{finding_id}/resolve")
 async def resolve_eval_finding(
     finding_id: UUID,
