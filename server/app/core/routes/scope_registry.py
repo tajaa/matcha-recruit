@@ -7,7 +7,7 @@ endpoints admin-gated. The service layer lives in
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import Literal, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -70,7 +70,7 @@ async def trigger_ingest(slug: str, current_user=Depends(require_admin)) -> Disp
 @router.get("/drift", dependencies=[Depends(require_admin)])
 async def list_authority_drift(
     slug: Optional[str] = None,
-    change_type: Optional[str] = None,
+    change_type: Optional[Literal["new", "amended", "removed"]] = None,
     limit: int = 100,
 ):
     """Recorded authority drift — new/amended/removed citations detected on

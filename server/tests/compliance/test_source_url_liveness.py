@@ -40,7 +40,7 @@ def test_dead_url_is_flagged_not_erased(monkeypatch):
         {"source_url": "https://labor.example.gov/boom", "source_name": "State DOL"},
     ]
     monkeypatch.setattr(cs.httpx, "AsyncClient", _FakeClient)
-    asyncio.get_event_loop().run_until_complete(cs._validate_source_urls(reqs))
+    asyncio.run(cs._validate_source_urls(reqs))
 
     dead, live, err = reqs
     # URL + name RETAINED in every case (the whole point of the fix)
@@ -59,6 +59,6 @@ def test_dead_url_is_flagged_not_erased(monkeypatch):
 def test_missing_url_is_left_untouched(monkeypatch):
     reqs = [{"source_name": "Whatever"}]  # no source_url
     monkeypatch.setattr(cs.httpx, "AsyncClient", _FakeClient)
-    asyncio.get_event_loop().run_until_complete(cs._validate_source_urls(reqs))
+    asyncio.run(cs._validate_source_urls(reqs))
     # no url ⇒ not checked ⇒ no status stamped (column default 'unchecked' applies)
     assert "source_url_status" not in reqs[0]

@@ -247,6 +247,12 @@ async def _record_drift(conn, index_id: str, items: List[dict]) -> tuple[int, in
     `authority_index_drift` row per change (a removed citation is recorded only —
     the item is NOT deleted; orphan removal stays deferred, matching
     `_upsert_items`' idempotent upsert). Returns (new, amended, removed).
+
+    Because the orphaned item row persists, every LATER ingest would re-diff it
+    as removed and re-log the same drift row forever ('new'/'amended' converge
+    via the upsert; 'removed' alone doesn't). So a removal is only logged when
+    the citation's LATEST drift row isn't already 'removed' — latest-row, not
+    mere existence, so a remove → re-add ('new') → remove again still logs.
     """
     prior = await conn.fetch(
         "SELECT citation, heading, amendment_date "
@@ -254,6 +260,25 @@ async def _record_drift(conn, index_id: str, items: List[dict]) -> tuple[int, in
         index_id,
     )
     drift_rows = diff_authority_items(prior, items)
+
+    removed_cites = [row[1] for row in drift_rows if row[0] == "removed"]
+    if removed_cites:
+        latest = await conn.fetch(
+            """
+            SELECT DISTINCT ON (citation) citation, change_type
+            FROM authority_index_drift
+            WHERE authority_index_id = $1 AND citation = ANY($2::text[])
+            ORDER BY citation, detected_at DESC
+            """,
+            index_id, removed_cites,
+        )
+        already_removed = {r["citation"] for r in latest if r["change_type"] == "removed"}
+        if already_removed:
+            drift_rows = [
+                row for row in drift_rows
+                if not (row[0] == "removed" and row[1] in already_removed)
+            ]
+
     if drift_rows:
         await conn.executemany(
             """
