@@ -10,6 +10,7 @@ from uuid import UUID
 
 from ...core.services.secret_crypto import decrypt_secret
 from ...core.services.roster_jurisdictions import run_jurisdiction_drift_check
+from ...core.us_states import US_STATE_CODES
 from ...database import get_connection
 from .hris_service import PROVIDER_HRIS, HRISProvisioningError, get_hris_service
 
@@ -39,18 +40,6 @@ def _parse_date(value: Optional[str]) -> Optional[date]:
         return None
 
 
-# 50 states + DC + US territories, USPS 2-letter codes — the same gate the
-# CSV/manual employee paths apply (routes/employees/_shared.py:
-# _VALID_WORK_STATE_CODES; kept local because services must not import from the
-# routes package). A provider location with a missing country and a non-US
-# 2-letter region (e.g. "ON") must not create an ungrounded US jurisdiction.
-_US_STATE_CODES = frozenset({
-    "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "DC", "FL", "GA", "HI", "ID",
-    "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS", "MO",
-    "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA",
-    "RI", "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY",
-    "AS", "GU", "MP", "PR", "VI",
-})
 
 
 async def _sync_company_locations(conn, company_id, service, config, secrets) -> int:
@@ -81,8 +70,10 @@ async def _sync_company_locations(conn, company_id, service, config, secrets) ->
         zipcode = (loc.get("postal_code") or "").strip()[:10]
         country = (loc.get("country") or "").strip().upper()
         # business_locations requires city/state(2)/zipcode and models US
-        # jurisdictions — skip anything incomplete or non-US.
-        if not city or not zipcode or state not in _US_STATE_CODES:
+        # jurisdictions — skip anything incomplete or non-US. Gating on the
+        # canonical USPS set (not len==2) rejects a foreign region like "ON"
+        # even when the provider omits country.
+        if not city or not zipcode or state not in US_STATE_CODES:
             continue
         if country not in ("", "US", "USA"):
             continue

@@ -14,6 +14,7 @@ from uuid import UUID
 from fastapi import BackgroundTasks, HTTPException
 
 from app.database import get_connection
+from app.core.us_states import US_STATE_CODES
 from app.core.services.compliance_service import ensure_location_for_employee
 from app.core.services.email import get_email_service
 from app.matcha.services.onboarding_orchestrator import (
@@ -31,18 +32,11 @@ logger = logging.getLogger(__name__)
 
 INVITATION_SEND_FAILED_DETAIL = "Invitation email could not be sent. Check email delivery settings and try again."
 
-# 50 states + DC + US territories, USPS 2-letter codes. `work_state` values
-# (CSV bulk-upload and single-employee create/update) are validated against
-# this set (case-insensitive; full state names also normalized) so a typo
-# doesn't silently create an ungrounded compliance jurisdiction (Phase D2
-# stopgap — see COMPLIANCE_REMEDIATION_PLAN.md).
-_VALID_WORK_STATE_CODES = {
-    "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "DC", "FL", "GA", "HI", "ID",
-    "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS", "MO",
-    "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA",
-    "RI", "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY",
-    "AS", "GU", "MP", "PR", "VI",
-}
+# `work_state` values (CSV bulk-upload and single-employee create/update) are
+# validated against the canonical US jurisdiction set (case-insensitive; full
+# state names also normalized) so a typo doesn't silently create an ungrounded
+# compliance jurisdiction (Phase D2 stopgap — see COMPLIANCE_REMEDIATION_PLAN.md).
+_VALID_WORK_STATE_CODES = US_STATE_CODES
 
 _STATE_NAME_TO_CODE = {
     "alabama": "AL", "alaska": "AK", "arizona": "AZ", "arkansas": "AR",
