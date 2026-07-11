@@ -13,7 +13,7 @@ import math
 import random
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -219,17 +219,20 @@ def _simulate_totals(
     item: dict[str, Any],
     iterations: int,
     rng: random.Random,
-) -> tuple[list[float], int]:
+) -> tuple[list[float], int, Optional[tuple[bool, str, float, float, float]]]:
     """Run one Monte Carlo pass for a line item.
 
-    Returns (per-iteration loss totals, count of zero-loss iterations).
+    Returns (per-iteration loss totals, count of zero-loss iterations, params).
+    ``params`` is the ``_category_params`` tuple the caller reuses to build the
+    category result (None for a zero-loss item, which has no derived params).
     """
     low = item.get("low", 0)
     high = item.get("high", 0)
     if low <= 0 and high <= 0:
-        return [0.0] * iterations, iterations
+        return [0.0] * iterations, iterations, None
 
-    is_stochastic, _frequency_type, lam, mu, sigma = _category_params(item)
+    params = _category_params(item)
+    is_stochastic, _frequency_type, lam, mu, sigma = params
 
     totals: list[float] = []
     zero_count = 0
@@ -243,7 +246,7 @@ def _simulate_totals(
         for _ in range(n_events):
             iteration_total += rng.lognormvariate(mu, sigma) if sigma > 0 else math.exp(mu)
         totals.append(iteration_total)
-    return totals, zero_count
+    return totals, zero_count, params
 
 
 def _poisson(lam: float, rng: random.Random) -> int:
@@ -375,7 +378,7 @@ def run_monte_carlo(
         low = item.get("low", 0)
         high = item.get("high", 0)
 
-        totals, zero_count = _simulate_totals(item, iterations, rng)
+        totals, zero_count, params = _simulate_totals(item, iterations, rng)
         for i, t in enumerate(totals):
             aggregate_totals[i] += t
 
@@ -392,7 +395,7 @@ def run_monte_carlo(
             cat_sorted[key] = totals
             continue
 
-        _is_stochastic, frequency_type, lam, _mu, _sigma = _category_params(item)
+        _is_stochastic, frequency_type, lam, _mu, _sigma = params
         expected_loss = sum(totals) / len(totals) if totals else 0.0
         zero_loss_pct = round((zero_count / iterations) * 100, 2) if iterations > 0 else 0.0
         sorted_totals = sorted(totals)

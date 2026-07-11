@@ -6,7 +6,9 @@ top fixes — "your insurability at a glance, and how to improve your terms."
 The same `risk_index` engine the broker sees, scoped to the caller's own company.
 """
 
-from fastapi import APIRouter, Depends
+import logging
+
+from fastapi import APIRouter, Depends, HTTPException
 
 from ...database import get_connection
 from ..dependencies import require_admin_or_client, get_client_company_id
@@ -16,7 +18,20 @@ from ..services import submission_readiness
 from ..services import venue_severity
 from ..services import exclusion_gap
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
+
+
+def _degrade_503(exc: Exception, what: str) -> HTTPException:
+    """Turn an unexpected best-effort service failure into a clean 503.
+
+    The underlying services now propagate real DB errors (rather than reporting
+    a falsely-clean profile off a partial read). At the client portal we don't
+    want a bare 500 — surface a retryable 503 instead of leaking a stack.
+    """
+    logger.exception("risk-profile %s failed", what)
+    return HTTPException(status_code=503, detail=f"{what} temporarily unavailable, please retry")
 
 
 @router.get("")
@@ -38,16 +53,26 @@ async def get_submission_readiness(current_user=Depends(require_admin_or_client)
 async def get_venue_exposure(current_user=Depends(require_admin_or_client)):
     """Per-location venue / nuclear-verdict severity exposure (casualty severity lens)."""
     company_id = await get_client_company_id(current_user)
-    async with get_connection() as conn:
-        return await venue_severity.company_venue_exposure(conn, company_id)
+    try:
+        async with get_connection() as conn:
+            return await venue_severity.company_venue_exposure(conn, company_id)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _degrade_503(exc, "Venue exposure")
 
 
 @router.get("/exclusions")
 async def get_exclusion_gap(current_user=Depends(require_admin_or_client)):
     """Grounded emerging-exclusion exposure (PFAS, A&M, biometric, silent-cyber/AI…)."""
     company_id = await get_client_company_id(current_user)
-    async with get_connection() as conn:
-        return await exclusion_gap.company_exclusions(conn, company_id)
+    try:
+        async with get_connection() as conn:
+            return await exclusion_gap.company_exclusions(conn, company_id)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _degrade_503(exc, "Exclusion exposure")
 
 
 @router.post("/narrative")

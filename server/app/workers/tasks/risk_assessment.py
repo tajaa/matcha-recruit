@@ -27,7 +27,10 @@ async def _get_weights(conn) -> dict[str, float]:
 async def _run_assessment(company_id: str) -> dict:
     """Compute and store a risk assessment for a single company (no recommendations)."""
     from uuid import UUID
-    from app.matcha.services.risk_assessment_service import compute_risk_assessment
+    from app.matcha.services.risk_assessment_service import (
+        compute_risk_assessment,
+        write_risk_history,
+    )
 
     conn = await get_db_connection()
     try:
@@ -46,18 +49,15 @@ async def _run_assessment(company_id: str) -> dict:
     conn = await get_db_connection()
     try:
         # Insert into history
-        await conn.execute(
-            """
-            INSERT INTO risk_assessment_history
-                (company_id, overall_score, overall_band, dimensions, weights, source, computed_at)
-            VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, 'scheduled', $6)
-            """,
+        await write_risk_history(
+            conn,
             cid,
-            result.overall_score,
-            result.overall_band,
-            dims_json,
-            json.dumps(weights),
-            result.computed_at,
+            overall_score=result.overall_score,
+            overall_band=result.overall_band,
+            dims_json=dims_json,
+            weights_json=json.dumps(weights),
+            computed_at=result.computed_at,
+            source="scheduled",
         )
 
         # Upsert snapshot — update scores but preserve existing report/recommendations

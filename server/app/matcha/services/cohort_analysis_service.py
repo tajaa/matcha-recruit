@@ -11,6 +11,7 @@ from typing import Any
 from uuid import UUID
 
 from ...database import get_connection
+from .flight_risk_service import _calendar_months_between
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +40,10 @@ def _quarter_label(dt: date) -> str:
 
 def _tenure_band(start_date: date, today: date) -> str:
     """Classify tenure into bands."""
-    months = (today.year - start_date.year) * 12 + (today.month - start_date.month)
+    # Shared day-of-month-aware month count (a start day-of-month later than
+    # today's means the final month hasn't completed) so boundary hires land
+    # in the same band the flight-risk tenure score uses.
+    months = _calendar_months_between(start_date, today)
     if months < 6:
         return "0-6mo"
     elif months < 12:
@@ -89,9 +93,10 @@ async def compute_cohort_analysis(
                 mgr_rows = await conn.fetch(
                     """
                     SELECT id, first_name, last_name FROM employees
-                    WHERE id = ANY($1::uuid[])
+                    WHERE id = ANY($1::uuid[]) AND org_id = $2
                     """,
                     list(mgr_ids),
+                    company_id,
                 )
                 for row in mgr_rows:
                     fn = row["first_name"] or ""

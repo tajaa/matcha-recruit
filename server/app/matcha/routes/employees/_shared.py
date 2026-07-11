@@ -25,6 +25,7 @@ from app.matcha.services.risk_assessment_service import (
     compute_risk_assessment,
     generate_recommendations,
     load_risk_weights,
+    write_risk_history,
 )
 
 logger = logging.getLogger(__name__)
@@ -405,18 +406,15 @@ async def _refresh_risk_assessment(company_id: UUID) -> None:
             )
             # Record in history so trend / anomaly / correlation views see this
             # recompute (the manual + scheduled writers both do this).
-            await conn.execute(
-                """
-                INSERT INTO risk_assessment_history
-                    (company_id, overall_score, overall_band, dimensions, weights, computed_at, source)
-                VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6, 'auto')
-                """,
+            await write_risk_history(
+                conn,
                 company_id,
-                result.overall_score,
-                result.overall_band,
-                dims_json,
-                weights_json,
-                result.computed_at,
+                overall_score=result.overall_score,
+                overall_band=result.overall_band,
+                dims_json=dims_json,
+                weights_json=weights_json,
+                computed_at=result.computed_at,
+                source="auto",
             )
         logger.info("Risk assessment dimensions refreshed for company %s", company_id)
     except Exception:
