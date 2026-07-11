@@ -30,7 +30,7 @@ from uuid import UUID
 
 from app.database import get_connection
 
-from .resolve import parse_jsonb, resolve_scope
+from .gap_surfaces import resolve_company_scope
 
 logger = logging.getLogger(__name__)
 
@@ -71,40 +71,16 @@ async def record_shadow(
         async with get_connection() as conn:
             expand_keys = await _expand_keys(conn, existing_items)
 
+            # Same per-location union the gap surfaces use, but a shadow read must
+            # not pollute the resolution cache (use_cache=False).
             resolve_keys: set = set()
             unmodeled: List[Dict[str, Any]] = []
-            locations = []
             if company_id:
-                locations = await conn.fetch(
-                    """
-                    SELECT state, city, facility_attributes
-                    FROM business_locations
-                    WHERE company_id = $1 AND COALESCE(is_active, true)
-                      AND state IS NOT NULL AND NOT COALESCE(is_company_wide, false)
-                    """,
-                    company_id,
+                agg = await resolve_company_scope(
+                    conn, company_id, industry=industry, use_cache=False,
                 )
-
-            for loc in locations:
-                try:
-                    res = await resolve_scope(
-                        conn,
-                        category=industry,
-                        state=loc["state"],
-                        city=loc["city"],
-                        facility_attributes=parse_jsonb(loc["facility_attributes"]) or {},
-                        use_cache=False,  # a shadow read must not pollute the cache
-                    )
-                except Exception:
-                    logger.exception(
-                        "scope shadow: resolve failed for company %s loc %s/%s",
-                        company_id, loc["state"], loc["city"],
-                    )
-                    continue
-                resolve_keys |= {
-                    c["regulation_key"] for c in res["codified"] if c.get("regulation_key")
-                }
-                unmodeled.extend(res["unmodeled_coordinates"])
+                resolve_keys = set(agg["codified_keys"])
+                unmodeled = agg["unmodeled_coordinates"]
 
             only_in_resolve = sorted(resolve_keys - expand_keys)
             only_in_expand = sorted(expand_keys - resolve_keys)

@@ -8824,6 +8824,8 @@ async def get_industry_requirements_matrix(
     # 5. Query jurisdiction data counts for applicable categories, scoped to the
     #    establishment's chain when a location was given.
     scoped_to: Optional[Dict[str, Any]] = None
+    # Engine augmentation (per-cell, gated) — only meaningful with a chain.
+    engine_cov: Dict[str, Any] = {"registry_definitive": False, "by_category": {}}
     async with get_connection() as conn:
         if state:
             chain = await _resolve_jurisdiction_chain(conn, state.upper(), city)
@@ -8838,6 +8840,23 @@ async def get_industry_requirements_matrix(
                 "GROUP BY category",
                 applicable_slugs, chain["ids"],
             )
+            # Registry-grounded codified/to-codify per category, but ONLY where the
+            # registry definitively classifies this chain's coordinate. Applied
+            # per cell in the loop below (never chain-level: a chain covered only
+            # by fully-classified labor indexes would otherwise zero out the real
+            # bank counts of categories the registry doesn't model yet).
+            try:
+                from app.core.services.scope_registry.gap_surfaces import (
+                    resolve_chain_category_coverage,
+                )
+                engine_cov = await resolve_chain_category_coverage(
+                    conn, chain_ids=chain["ids"], industry=canonical,
+                )
+            except Exception:
+                logger.exception(
+                    "industry-matrix: engine coverage failed for %s in %s",
+                    canonical, state.upper(),
+                )
             scoped_to = {
                 "state": state.upper(),
                 "city": city,
@@ -8859,14 +8878,24 @@ async def get_industry_requirements_matrix(
     data_map = {r["category"]: {"req_count": r["req_count"], "jur_count": r["jur_count"]} for r in data_rows}
 
     # 6. Build response
+    engine_by_cat = engine_cov["by_category"] if engine_cov["registry_definitive"] else {}
     categories_out = []
     with_data = 0
+    engine_cells = 0
+    engine_to_codify_total = 0
     for slug in applicable_slugs:
         cat = cats_by_slug[slug]
         counts = data_map.get(slug, {"req_count": 0, "jur_count": 0})
         has_data = counts["jur_count"] > 0
         if has_data:
             with_data += 1
+        # Per-cell gate: engine only where the registry actually models this
+        # category (slug present in the definitive expected set). Cells the
+        # registry doesn't model stay on their bank count.
+        engine_cell = engine_by_cat.get(slug)
+        if engine_cell:
+            engine_cells += 1
+            engine_to_codify_total += engine_cell["to_codify"]
         categories_out.append({
             "slug": slug,
             "name": cat["name"],
@@ -8878,6 +8907,10 @@ async def get_industry_requirements_matrix(
             "jurisdiction_count": counts["jur_count"],
             "requirement_count": counts["req_count"],
             "has_data": has_data,
+            "registry_source": "engine" if engine_cell else "bank",
+            "engine_codified": engine_cell["codified"] if engine_cell else None,
+            "engine_to_codify": engine_cell["to_codify"] if engine_cell else None,
+            "engine_expected": engine_cell["expected"] if engine_cell else None,
         })
 
     return {
@@ -8885,6 +8918,8 @@ async def get_industry_requirements_matrix(
             "total": len(categories_out),
             "with_data": with_data,
             "missing_data": len(categories_out) - with_data,
+            "engine_cells": engine_cells,
+            "engine_to_codify": engine_to_codify_total,
         },
         "industry_profile": {
             "name": profile_row["name"] if profile_row else canonical,
@@ -8892,6 +8927,7 @@ async def get_industry_requirements_matrix(
         },
         "scoped_to": scoped_to,
         "active_triggers": active_triggers,
+        "registry_definitive": engine_cov["registry_definitive"],
         "categories": categories_out,
     }
 

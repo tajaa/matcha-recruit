@@ -1715,6 +1715,34 @@ async def get_company_gap_dashboard(
         denom = counts["covered"] + counts["gaps"]
         counts["coverage_pct"] = round(100 * counts["covered"] / denom) if denom else 100
 
+        # Engine overlay (additive, guarded). The scope-registry's grounded
+        # verdict for this company, used where it definitively classifies the
+        # coordinate. The bank arrays (coverage.covered/gaps) stay authoritative —
+        # the frontend's "Research a gap" actions consume their shape — so this
+        # only annotates counts + adds an `engine` block; it never overwrites them.
+        engine_block = None
+        try:
+            from app.core.services.scope_registry.gap_surfaces import resolve_company_scope
+            headcount = sum(
+                int(size.get(k) or 0)
+                for k in ("full_time", "part_time", "contractor", "unknown")
+            )
+            engine_block = await resolve_company_scope(
+                conn, company_id,
+                industry=basics.get("industry"),
+                specialty=basics.get("specialty"),
+                employee_count=headcount or None,
+                use_cache=True,
+            )
+            counts["coverage_source"] = engine_block["coverage_source"]
+            if engine_block["coverage_source"] == "engine":
+                counts["engine_coverage_pct"] = engine_block["coverage_pct"]
+                counts["engine_covered"] = engine_block["counts"]["codified"]
+                counts["engine_gaps"] = engine_block["counts"]["uncodified"]
+        except Exception:
+            logger.exception("gap-dashboard: engine overlay failed for company %s", company_id)
+            counts["coverage_source"] = "bank"
+
         complexity = complexity_from_session(
             ai_scope=ai_scope, resolved=resolved, locations=locations, size=size,
             industry=basics.get("industry"), specialty=basics.get("specialty"),
@@ -1751,6 +1779,7 @@ async def get_company_gap_dashboard(
             "dossier": dossier,
             "drift": drift,
             "complexity": complexity,
+            "engine": engine_block,
         }
 
 
