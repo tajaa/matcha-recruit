@@ -174,27 +174,44 @@ def test_compute_requirement_key_includes_rate_type():
         "jurisdiction_name": "Colorado",
     }
 
-    # Different rate_types produce different keys
-    assert cs._compute_requirement_key(general_req) == "minimum_wage:general"
-    assert cs._compute_requirement_key(tipped_req) == "minimum_wage:tipped"
+    # Different rate_types produce different keys — via the CANONICAL registry
+    # vocabulary (anti-polymorphy: the composite no longer speaks the raw
+    # rate_type dialect, so both dialects collapse to one write identity).
+    assert cs._compute_requirement_key(general_req) == "minimum_wage:state_minimum_wage"
+    assert cs._compute_requirement_key(tipped_req) == "minimum_wage:tipped_minimum_wage"
     # Non-minimum_wage categories don't use rate_type
     assert cs._compute_requirement_key(overtime_req) == "overtime:overtime"
+
+
+def test_minimum_wage_dialects_collapse_to_one_identity():
+    """The polymorphy fix: a pass keying on rate_type and one keying on the
+    registry vocabulary must produce the SAME composite, so a re-research
+    UPDATEs in place instead of minting a twin (the NY exempt ×2 bug)."""
+    by_rate_type = {"category": "minimum_wage", "rate_type": "exempt_salary",
+                    "title": "Exempt Salary Threshold"}
+    by_registry_key = {"category": "minimum_wage",
+                       "regulation_key": "exempt_salary_threshold",
+                       "rate_type": "exempt_salary",
+                       "title": "Exempt Employee Salary Threshold"}
+    assert (cs._compute_requirement_key(by_rate_type)
+            == cs._compute_requirement_key(by_registry_key)
+            == "minimum_wage:exempt_salary_threshold")
 
 
 def test_compute_key_parts_bare_key_per_shape():
     """The bare regulation_key (store↔scope join key) per composite shape, and
     composite parity with the legacy _compute_requirement_key."""
     cases = [
-        # minimum_wage: composite keeps rate_type dialect; bare = registry vocab,
-        # level-sensitive for 'general'.
+        # minimum_wage: composite AND bare both use the registry vocab (the
+        # anti-polymorphy canonicalization); bare is level-sensitive for 'general'.
         ({"category": "minimum_wage", "rate_type": "general"},
-         "minimum_wage:general", "state_minimum_wage"),
+         "minimum_wage:state_minimum_wage", "state_minimum_wage"),
         ({"category": "minimum_wage", "rate_type": "general", "jurisdiction_level": "city"},
-         "minimum_wage:general", "local_minimum_wage"),
+         "minimum_wage:local_minimum_wage", "local_minimum_wage"),
         ({"category": "minimum_wage", "rate_type": "general", "jurisdiction_level": "federal"},
-         "minimum_wage:general", "national_minimum_wage"),
+         "minimum_wage:national_minimum_wage", "national_minimum_wage"),
         ({"category": "minimum_wage", "rate_type": "tipped"},
-         "minimum_wage:tipped", "tipped_minimum_wage"),
+         "minimum_wage:tipped_minimum_wage", "tipped_minimum_wage"),
         # standard: a resolved registry regulation_key → bare is that key.
         ({"category": "overtime", "regulation_key": "daily_weekly_overtime",
           "title": "OT"},
