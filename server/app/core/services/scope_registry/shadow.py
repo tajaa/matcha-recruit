@@ -72,12 +72,14 @@ async def record_shadow(
             expand_keys = await _expand_keys(conn, existing_items)
 
             # Same per-location union the gap surfaces use, but a shadow read must
-            # not pollute the resolution cache (use_cache=False).
+            # not pollute the resolution cache (use_cache=False), and shadow never
+            # reads the engine verdict — skip the definitiveness gate (gate=False)
+            # so finalize doesn't pay per-chain gate queries for discarded output.
             resolve_keys: set = set()
             unmodeled: List[Dict[str, Any]] = []
             if company_id:
                 agg = await resolve_company_scope(
-                    conn, company_id, industry=industry, use_cache=False,
+                    conn, company_id, industry=industry, use_cache=False, gate=False,
                 )
                 resolve_keys = set(agg["codified_keys"])
                 unmodeled = agg["unmodeled_coordinates"]

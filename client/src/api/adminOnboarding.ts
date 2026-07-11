@@ -294,7 +294,13 @@ export type GapAnalysisDossier = {
 export type GapEngineCoverage = {
   coverage_source: 'engine' | 'bank'
   coverage_pct: number
-  counts: { locations: number; codified: number; uncodified: number; provisional: number }
+  counts: {
+    locations: number
+    locations_failed: number
+    codified: number
+    uncodified: number
+    provisional: number
+  }
   gate: { total: number; engine: number; fallback: number }
   degraded: boolean
 }

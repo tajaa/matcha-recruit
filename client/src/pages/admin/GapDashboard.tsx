@@ -27,6 +27,13 @@ import { useResearchGaps, type ResearchGapItem } from '../../hooks/useResearchGa
 import GapCard, { humanizeCategory, jurisdictionLabel } from '../../features/admin-onboarding/GapCard'
 import { complexityBandClass } from './GapOverview'
 
+// Provenance chip for the Coverage stat card — engine = scope-registry grounded,
+// bank = compliance-catalog fallback. Same chip idiom as ScopeStudio's badge maps.
+const COVERAGE_SOURCE_BADGE: Record<'engine' | 'bank', string> = {
+  engine: 'border-emerald-500/30 bg-emerald-500/15 text-emerald-300',
+  bank: 'border-zinc-500/30 bg-zinc-500/15 text-zinc-400',
+}
+
 type CoveredItem = {
   requirement_id?: string
   category_slug?: string
@@ -235,8 +242,8 @@ export default function GapDashboard() {
   const jurisdictionCount = dossier?.scope.applicable_jurisdictions?.length ?? 0
   const coveragePct = counts?.coverage_pct ?? 0
   const coverageSource = counts?.coverage_source
-  const displayCoveragePct =
-    coverageSource === 'engine' ? counts?.engine_coverage_pct ?? coveragePct : coveragePct
+  // engine_coverage_pct is only present when coverage_source === 'engine'
+  const displayCoveragePct = counts?.engine_coverage_pct ?? coveragePct
   const cx = data?.complexity
 
   const suggestionCount =
@@ -333,11 +340,7 @@ export default function GapDashboard() {
               {coverageSource && (
                 <div className="mt-1.5 text-[10px]">
                   <span
-                    className={`rounded border px-1 py-0.5 ${
-                      coverageSource === 'engine'
-                        ? 'border-emerald-500/30 bg-emerald-500/15 text-emerald-300'
-                        : 'border-zinc-500/30 bg-zinc-500/15 text-zinc-400'
-                    }`}
+                    className={`rounded border px-1 py-0.5 ${COVERAGE_SOURCE_BADGE[coverageSource]}`}
                     title={
                       coverageSource === 'engine'
                         ? 'Grounded in the scope-registry engine (registry classifies every coordinate)'

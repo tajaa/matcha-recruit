@@ -59,13 +59,17 @@ async def test_company_scope_shape_and_source():
 
     industry = os.getenv("GAP_TEST_INDUSTRY", "healthcare")
     async with get_connection() as conn:
+        # use_cache=False keeps this genuinely read-only — use_cache=True would
+        # INSERT into scope_resolutions, violating this file's contract.
         agg = await resolve_company_scope(
-            conn, UUID(company_id), industry=industry, use_cache=True,
+            conn, UUID(company_id), industry=industry, use_cache=False,
         )
     assert agg["coverage_source"] in ("engine", "bank")
     assert 0 <= agg["coverage_pct"] <= 100
     assert agg["gate"]["engine"] + agg["gate"]["fallback"] == agg["gate"]["total"]
-    # Engine verdict requires EVERY resolved coordinate definitive AND none degraded.
+    assert agg["counts"]["locations"] + agg["counts"]["locations_failed"] == agg["gate"]["total"]
+    # Engine verdict requires every coordinate resolved + definitive, none degraded.
     if agg["coverage_source"] == "engine":
         assert agg["gate"]["fallback"] == 0
+        assert agg["counts"]["locations_failed"] == 0
         assert not agg["degraded"]

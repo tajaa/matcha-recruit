@@ -1189,7 +1189,7 @@ export default function ScopeStudio() {
                   <span className="text-xs text-amber-400">city not found — state ∪ federal</span>
                 )}
                 {(matrix.summary.engine_cells ?? 0) > 0 && (
-                  <span className="rounded border border-emerald-500/30 bg-emerald-500/15 px-2 py-0.5 text-xs text-emerald-300">
+                  <span className={`rounded border px-2 py-0.5 text-xs ${SOURCE_BADGE.base}`}>
                     {matrix.summary.engine_cells} engine-grounded · {matrix.summary.engine_to_codify ?? 0} to codify
                   </span>
                 )}
@@ -1239,7 +1239,7 @@ export default function ScopeStudio() {
                               )}
                               {c.registry_source === 'engine' && (
                                 <span className="ml-2 inline-flex items-center gap-1">
-                                  <span className="rounded border border-emerald-500/30 bg-emerald-500/15 px-1.5 py-0.5 text-[10px] text-emerald-300">
+                                  <span className={`rounded border px-1.5 py-0.5 text-[10px] ${SOURCE_BADGE.base}`}>
                                     engine
                                   </span>
                                   <span className="text-zinc-400">

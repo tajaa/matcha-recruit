@@ -8878,25 +8878,17 @@ async def get_industry_requirements_matrix(
     data_map = {r["category"]: {"req_count": r["req_count"], "jur_count": r["jur_count"]} for r in data_rows}
 
     # 6. Build response
-    engine_by_cat = engine_cov["by_category"] if engine_cov["registry_definitive"] else {}
+    engine_by_cat = engine_cov["by_category"]
     categories_out = []
     with_data = 0
     engine_cells = 0
-    engine_to_codify_total = 0
     for slug in applicable_slugs:
         cat = cats_by_slug[slug]
         counts = data_map.get(slug, {"req_count": 0, "jur_count": 0})
         has_data = counts["jur_count"] > 0
         if has_data:
             with_data += 1
-        # Per-cell gate: engine only where the registry actually models this
-        # category (slug present in the definitive expected set). Cells the
-        # registry doesn't model stay on their bank count.
-        engine_cell = engine_by_cat.get(slug)
-        if engine_cell:
-            engine_cells += 1
-            engine_to_codify_total += engine_cell["to_codify"]
-        categories_out.append({
+        entry = {
             "slug": slug,
             "name": cat["name"],
             "domain": cat["domain"],
@@ -8907,11 +8899,27 @@ async def get_industry_requirements_matrix(
             "jurisdiction_count": counts["jur_count"],
             "requirement_count": counts["req_count"],
             "has_data": has_data,
-            "registry_source": "engine" if engine_cell else "bank",
-            "engine_codified": engine_cell["codified"] if engine_cell else None,
-            "engine_to_codify": engine_cell["to_codify"] if engine_cell else None,
-            "engine_expected": engine_cell["expected"] if engine_cell else None,
-        })
+            "registry_source": "bank",
+        }
+        # Per-cell gate: engine only where the registry actually models this
+        # category (slug present in the definitive expected set). Cells the
+        # registry doesn't model stay on their bank count.
+        engine_cell = engine_by_cat.get(slug)
+        if engine_cell:
+            engine_cells += 1
+            entry.update(
+                registry_source="engine",
+                engine_codified=engine_cell["codified"],
+                engine_to_codify=engine_cell["to_codify"],
+                engine_expected=engine_cell["expected"],
+            )
+        categories_out.append(entry)
+
+    # Summary to-codify totals the ENTIRE definitive worklist for the chain —
+    # including registry categories bucketed 'uncategorized' or outside this
+    # industry's applicable tags — so the chip is the complete codify backlog
+    # even when some of it has no matching cell below.
+    engine_to_codify_total = sum(c["to_codify"] for c in engine_by_cat.values())
 
     return {
         "summary": {

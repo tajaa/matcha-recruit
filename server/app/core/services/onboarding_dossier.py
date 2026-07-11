@@ -27,12 +27,20 @@ def _jurisdiction_label(item: dict[str, Any]) -> str:
     return ", ".join(parts) if parts else "Federal"
 
 
-def build_gap_analysis_dossier(session: dict[str, Any]) -> dict[str, Any]:
+def build_gap_analysis_dossier(
+    session: dict[str, Any], engine: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Assemble the full onboarding dossier from a pre-parsed session dict.
 
     Expects ``session`` keys: id, status, basics, size, locations,
     ai_scope, resolved_scope — with the JSONB ones already parsed to
     dict/list. Missing/None fields degrade to empty.
+
+    ``engine`` is the optional scope-registry verdict for the company
+    (``gap_surfaces.resolve_company_scope`` output). Still pure — the caller
+    resolves it; this only stamps the provenance fields into ``counts`` so
+    every dossier consumer (dashboard, export, PDF) sees one shape.
+    ``coverage_source`` defaults to ``"bank"`` when no engine verdict exists.
     """
     basics = session.get("basics") or {}
     size = session.get("size") or {}
@@ -93,17 +101,33 @@ def build_gap_analysis_dossier(session: dict[str, Any]) -> dict[str, Any]:
             "ambiguous": ambiguous,
         },
         "ai_suggestions": gap_check,
-        "counts": {
-            "covered": len(covered),
-            "gaps": len(gaps),
-            "ambiguous": len(ambiguous),
-            "certifications": len(certifications),
-            "licenses": len(licenses),
-            "policies": len(policies),
-            "credentials": len(credentials),
-            "suggestions": suggestions_count,
-        },
+        "counts": _counts_with_engine(
+            {
+                "covered": len(covered),
+                "gaps": len(gaps),
+                "ambiguous": len(ambiguous),
+                "certifications": len(certifications),
+                "licenses": len(licenses),
+                "policies": len(policies),
+                "credentials": len(credentials),
+                "suggestions": suggestions_count,
+            },
+            engine,
+        ),
     }
+
+
+def _counts_with_engine(
+    counts: dict[str, Any], engine: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Stamp scope-registry provenance into the dossier counts (pure)."""
+    counts["coverage_source"] = (engine or {}).get("coverage_source") or "bank"
+    if engine and engine.get("coverage_source") == "engine":
+        engine_counts = engine.get("counts") or {}
+        counts["engine_coverage_pct"] = engine.get("coverage_pct")
+        counts["engine_covered"] = engine_counts.get("codified")
+        counts["engine_gaps"] = engine_counts.get("uncodified")
+    return counts
 
 
 # ── Markdown render ─────────────────────────────────────────────────────
