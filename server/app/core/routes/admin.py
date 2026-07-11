@@ -4078,14 +4078,20 @@ async def get_quality_audit(
     stale_only: bool = False,
     tier: Optional[str] = None,
     source: Optional[str] = None,
+    citation: Optional[str] = None,
+    needs_review: bool = False,
     limit: int = 200,
     offset: int = 0,
 ):
-    """Data quality audit: requirements with completeness scores, staleness, and provenance."""
+    """Data quality audit: requirements with completeness scores, staleness, and provenance.
+
+    ``citation=verified|unverified`` filters on registry-verified statute
+    citations; ``needs_review=true`` surfaces the drift-flagged re-verify queue.
+    """
     import hashlib
 
-    cache_key = "admin:quality-audit:" + hashlib.md5(
-        f"{state}:{category}:{min_completeness}:{max_completeness}:{stale_only}:{tier}:{source}:{limit}:{offset}".encode()
+    cache_key = "admin:quality-audit:v2:" + hashlib.md5(
+        f"{state}:{category}:{min_completeness}:{max_completeness}:{stale_only}:{tier}:{source}:{citation}:{needs_review}:{limit}:{offset}".encode()
     ).hexdigest()
 
     redis = get_redis_cache()
@@ -4116,6 +4122,12 @@ async def get_quality_audit(
                 conditions.append(f"jr.metadata->>'research_source' = ${len(params)}")
         if stale_only:
             conditions.append("(jr.last_verified_at IS NULL OR jr.last_verified_at < NOW() - INTERVAL '90 days')")
+        if citation == "verified":
+            conditions.append("jr.statute_citation IS NOT NULL AND jr.citation_verified_at IS NOT NULL")
+        elif citation == "unverified":
+            conditions.append("(jr.statute_citation IS NULL OR jr.citation_verified_at IS NULL)")
+        if needs_review:
+            conditions.append("jr.change_status = 'needs_review'")
 
         where_clause = " AND ".join(conditions)
 
@@ -4132,7 +4144,12 @@ async def get_quality_audit(
                 )::int AS avg_completeness,
                 COUNT(*) FILTER (WHERE jr.last_verified_at IS NULL OR jr.last_verified_at < NOW() - INTERVAL '90 days') AS stale_count,
                 COUNT(*) FILTER (WHERE jr.source_url IS NULL OR jr.source_url = '') AS missing_source_url,
-                COUNT(*) FILTER (WHERE jr.source_url_status = 'dead') AS dead_source_url
+                COUNT(*) FILTER (WHERE jr.source_url_status = 'dead') AS dead_source_url,
+                COUNT(*) FILTER (WHERE jr.statute_citation IS NOT NULL AND jr.citation_verified_at IS NOT NULL) AS verified_citation,
+                COUNT(*) FILTER (WHERE jr.statute_citation IS NULL OR jr.citation_verified_at IS NULL) AS unverified_citation,
+                COUNT(*) FILTER (WHERE (jr.statute_citation IS NULL OR jr.citation_verified_at IS NULL)
+                                   AND jr.metadata->>'research_source' = 'gemini') AS gemini_unverified,
+                COUNT(*) FILTER (WHERE jr.change_status = 'needs_review') AS needs_review
             FROM jurisdiction_requirements jr
             JOIN jurisdictions j ON j.id = jr.jurisdiction_id
             WHERE {where_clause}
@@ -4178,6 +4195,7 @@ async def get_quality_audit(
                 SELECT
                     jr.id, jr.jurisdiction_id, jr.category, jr.title, jr.description,
                     jr.source_url, jr.source_url_status,
+                    jr.statute_citation, jr.citation_verified_at, jr.change_status,
                     jr.source_tier::text AS source_tier, jr.status::text AS status,
                     jr.current_value, jr.effective_date, jr.last_verified_at, jr.is_bookmarked,
                     jr.created_at, jr.updated_at, jr.metadata,
@@ -4210,6 +4228,10 @@ async def get_quality_audit(
                 "stale_count": summary_row["stale_count"],
                 "missing_source_url": summary_row["missing_source_url"],
                 "dead_source_url": summary_row["dead_source_url"],
+                "verified_citation": summary_row["verified_citation"],
+                "unverified_citation": summary_row["unverified_citation"],
+                "gemini_unverified": summary_row["gemini_unverified"],
+                "needs_review": summary_row["needs_review"],
                 "tier_breakdown": {r["tier"]: r["cnt"] for r in tier_rows},
                 "provenance_breakdown": {r["src"]: r["cnt"] for r in provenance_rows},
             },
@@ -4235,6 +4257,9 @@ async def get_quality_audit(
                     "completeness_score": r["completeness_score"],
                     "staleness_days": r["staleness_days"],
                     "research_source": _row_metadata(r["metadata"]).get("research_source"),
+                    "statute_citation": r["statute_citation"],
+                    "citation_verified": r["citation_verified_at"] is not None,
+                    "change_status": r["change_status"],
                 }
                 for r in rows
             ],
