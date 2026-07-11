@@ -160,9 +160,22 @@ N3  for each row (joined to its jurisdiction):
 │                     row to EVERY tenant. This is not untidiness — a restaurant receives
 │                     the factory's RCRA and EPCRA obligations. 345 rows in dev.
 │
-└── N3.2  micro-averaged precision/recall vs fixtures/tagging_labels.json
-    └── mismatch → F:tag_precision_error (warn)
-        └── WHY a second mechanism: D10 can only see tags that are ABSENT.
+├── N3.2  micro-averaged precision/recall vs fixtures/tagging_labels.json
+│   └── mismatch → F:tag_precision_error (warn)
+│       └── WHY a second mechanism: D10 can only see tags that are ABSENT.
+│
+└── N3.3  anti-polymorphy (find_duplicate_obligations, pure): one
+    (jurisdiction, category, regulation_key) = ONE active row. Rows whose
+    applicable_entity_types differ are a legitimate split (fqhc vs general).
+    ├── >1 active row per key → F:duplicate_active_obligation  severity=CRITICAL
+    │   └── CONSEQUENCE: the scope_codifications binding joins on regulation_key —
+    │       two rows wearing one tag means the binding no longer identifies one
+    │       obligation (isomorphy broken) and a re-research can't know which row
+    │       to update (idempotency broken). Both true duplicates (two rows, one
+    │       obligation) and key collisions ('Cal-COBRA' + 'Federal COBRA' both
+    │       keyed cobra_continuation) are flagged; remedy differs — supersede via
+    │       scripts/dedup_jurisdiction_requirements.py vs re-key the mis-keyed row.
+    └── counts as a structural violation → caps the tagging score.
             Only labels can see a tag that is WRONG — e.g. a universal CA overtime rule
             tagged `healthcare:behavioral_health`, which HIDES it from everyone else.
 ```
@@ -349,6 +362,7 @@ T-READY                                            D20  completeness ≥ 75
 |---|---|---|---|
 | `missing_key` | completeness | critical / warn | expected key absent at this jurisdiction chain |
 | `industry_tag_missing` | tagging | **critical** | untagged industry row → served to every tenant |
+| `duplicate_active_obligation` | tagging | **critical** | one tag, many active rows → codification binding ambiguous (polymorphy) |
 | `tag_precision_error` | tagging | warn | tag present but wrong (vs labeled sample) |
 | `invalid_category` | tagging | warn | category not in the registry |
 | `invalid_key` | tagging | info | key not in `EXPECTED_REGULATION_KEYS[category]` |

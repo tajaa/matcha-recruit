@@ -102,18 +102,67 @@ def label_metrics(
     return precision, recall, errors
 
 
+def find_duplicate_obligations(rows: List[Dict]) -> List[Dict]:
+    """Anti-polymorphy check (pure): one (jurisdiction, category, regulation_key)
+    must map to ONE active row — one tag, one policy.
+
+    Rows whose ``applicable_entity_types`` differ are a legitimate split (the same
+    key deliberately varies by entity type, e.g. fqhc vs general) and are NOT
+    duplicates. Everything else sharing a key is either a true duplicate (two rows
+    for one obligation) or a key collision (two obligations wearing one tag —
+    e.g. 'Cal-COBRA' and 'Federal COBRA' both keyed cobra_continuation). Both break
+    codification's isomorphy — a scope_codifications binding on that key no longer
+    identifies one row — so both are critical findings.
+    """
+    groups: Dict[tuple, List[Dict]] = {}
+    for r in rows:
+        key = r.get("regulation_key")
+        if not key:
+            continue
+        aet = tuple(sorted(r.get("applicable_entity_types") or []))
+        groups.setdefault((r["jurisdiction_id"], r["category"], key, aet), []).append(r)
+
+    findings: List[Dict] = []
+    for (jid, category, key, _aet), members in sorted(
+        groups.items(), key=lambda kv: (str(kv[0][0]), kv[0][1], kv[0][2])
+    ):
+        if len(members) <= 1:
+            continue
+        findings.append({
+            "suite": "tagging",
+            "finding_type": "duplicate_active_obligation",
+            "severity": "critical",
+            "jurisdiction_id": jid,
+            "requirement_key": key,
+            "category": category,
+            "expected": {"active_rows_per_key": 1},
+            "observed": {
+                "active_rows": len(members),
+                "titles": [m.get("title") for m in members],
+                "row_ids": [str(m.get("id")) for m in members],
+                "remedy": "same obligation → supersede the duplicate "
+                          "(scripts/dedup_jurisdiction_requirements.py); different "
+                          "obligation → re-key the mis-keyed row",
+            },
+        })
+    return findings
+
+
 async def run_tagging(conn, jurisdiction_ids: Optional[List] = None) -> Dict:
     sql = """
         SELECT jr.id, jr.jurisdiction_id, jr.category, jr.regulation_key,
                jr.requirement_key, jr.applicable_industries,
+               jr.applicable_entity_types, jr.title,
                j.state, j.city, j.level::text AS level,
                COALESCE(j.country_code, 'US') AS country_code
         FROM jurisdiction_requirements jr
         JOIN jurisdictions j ON j.id = jr.jurisdiction_id
+        WHERE COALESCE(jr.status, 'active') = 'active'
+          AND jr.superseded_by_id IS NULL
     """
     params: List = []
     if jurisdiction_ids:
-        sql += " WHERE jr.jurisdiction_id = ANY($1::uuid[])"
+        sql += " AND jr.jurisdiction_id = ANY($1::uuid[])"
         params.append(jurisdiction_ids)
     rows = await conn.fetch(sql, *params)
 
@@ -198,6 +247,17 @@ async def run_tagging(conn, jurisdiction_ids: Optional[List] = None) -> Dict:
             "expected": {"applicable_industries": err["expected"]},
             "observed": {"applicable_industries": err["observed"]},
         })
+
+    # Anti-polymorphy: one (jurisdiction, category, regulation_key) = one active
+    # row. A duplicate is a structural violation — it breaks the codification
+    # binding's identity — so it caps the tagging score like the other structural
+    # findings, and its critical severity blocks readiness.
+    dup_findings = find_duplicate_obligations([dict(r) for r in rows])
+    findings.extend(dup_findings)
+    for f in dup_findings:
+        s = per_jur.get(f["jurisdiction_id"])
+        if s is not None:
+            s["structural"] += 1
 
     results = {
         jid: {

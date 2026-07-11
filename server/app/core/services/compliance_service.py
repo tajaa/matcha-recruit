@@ -3176,10 +3176,16 @@ def _compute_key_parts(req) -> Tuple[str, Optional[str]]:
             if isinstance(req, dict)
             else (_normalize_rate_type(rate_type) or "general")
         )
-        # Composite keeps the rate_type dialect (ON CONFLICT identity); the column
-        # gets the registry key (state_/local_/national_/tipped_… minimum wage).
+        # ANTI-POLYMORPHY: the composite (the ON CONFLICT write identity) uses the
+        # SAME registry key the column gets — not the rate_type dialect. The catalog
+        # spoke two dialects for minimum_wage (keys.py), so a pass keying on
+        # rate_type ('minimum_wage:exempt_salary') and one keying on the registry
+        # vocabulary ('minimum_wage:exempt_salary_threshold') produced two composites
+        # for ONE obligation, both survived ON CONFLICT, and the row forked. Keying
+        # both on `bare` collapses the dialects to one identity, so a re-research
+        # UPDATEs in place instead of minting a twin.
         bare = normalize_key("minimum_wage", normalized_rate_type, jlevel, country)
-        return f"{cat_key}:{normalized_rate_type}", bare
+        return f"{cat_key}:{bare}", bare
 
     aet = req.get("applicable_entity_types") if isinstance(req, dict) else getattr(req, "applicable_entity_types", None)
     aet_prefix = f"{aet[0]}:" if aet and isinstance(aet, list) and len(aet) > 0 else ""
