@@ -188,84 +188,62 @@ def _compute_percentiles(values: list[float]) -> dict[str, float]:
     }
 
 
-def _simulate_category(
-    item: dict[str, Any],
-    iterations: int,
-    rng: random.Random,
-) -> CategorySimResult:
-    """Run Monte Carlo simulation for a single cost-of-risk line item."""
+def _category_params(item: dict[str, Any]) -> tuple[bool, str, float, float, float]:
+    """Derive (is_stochastic, frequency_type, lambda, mu, sigma) for a line item.
+
+    Severity per event is always the per-unit lognormal (low/high divided by
+    affected_count), for both stochastic and deterministic frequency.
+    """
     key = item["key"]
-    label = item.get("label", key)
     low = item.get("low", 0)
     high = item.get("high", 0)
     affected_count = item.get("affected_count", 0)
 
-    if low <= 0 and high <= 0:
-        return CategorySimResult(
-            key=key,
-            label=label,
-            frequency_type="deterministic",
-            frequency_lambda=0.0,
-            expected_loss=0.0,
-            percentiles={k: 0.0 for k in ("p5", "p10", "p25", "p50", "p75", "p90", "p95", "p99")},
-            zero_loss_pct=100.0,
-        )
-
-    mu, sigma = _lognormal_params(max(low, 1), max(high, 1))
     is_stochastic = key in STOCHASTIC_LAMBDA_OVERRIDES
-
     if is_stochastic:
-        # Stochastic: lambda is a per-unit probability × affected count
-        base_rate = STOCHASTIC_LAMBDA_OVERRIDES[key]
-        lam = base_rate * max(affected_count, 1)
+        # Stochastic: lambda is a per-unit probability × affected count.
+        lam = STOCHASTIC_LAMBDA_OVERRIDES[key] * max(affected_count, 1)
         frequency_type = "stochastic"
-        # For stochastic items, severity per event is derived from
-        # the per-unit cost (low/high divided by affected_count)
-        per_unit_low = low / max(affected_count, 1)
-        per_unit_high = high / max(affected_count, 1)
-        mu, sigma = _lognormal_params(max(per_unit_low, 1), max(per_unit_high, 1))
     else:
-        # Deterministic: all affected_count events occur, severity varies
+        # Deterministic: all affected_count events occur, severity varies.
         lam = float(affected_count) if affected_count > 0 else 1.0
         frequency_type = "deterministic"
-        # Severity per event
-        per_unit_low = low / max(affected_count, 1)
-        per_unit_high = high / max(affected_count, 1)
-        mu, sigma = _lognormal_params(max(per_unit_low, 1), max(per_unit_high, 1))
+
+    per_unit_low = low / max(affected_count, 1)
+    per_unit_high = high / max(affected_count, 1)
+    mu, sigma = _lognormal_params(max(per_unit_low, 1), max(per_unit_high, 1))
+    return is_stochastic, frequency_type, lam, mu, sigma
+
+
+def _simulate_totals(
+    item: dict[str, Any],
+    iterations: int,
+    rng: random.Random,
+) -> tuple[list[float], int]:
+    """Run one Monte Carlo pass for a line item.
+
+    Returns (per-iteration loss totals, count of zero-loss iterations).
+    """
+    low = item.get("low", 0)
+    high = item.get("high", 0)
+    if low <= 0 and high <= 0:
+        return [0.0] * iterations, iterations
+
+    is_stochastic, _frequency_type, lam, mu, sigma = _category_params(item)
 
     totals: list[float] = []
     zero_count = 0
-
     for _ in range(iterations):
-        if is_stochastic:
-            n_events = rng.poisson(lam) if hasattr(rng, 'poisson') else _poisson(lam, rng)
-        else:
-            n_events = int(lam)
-
+        n_events = _poisson(lam, rng) if is_stochastic else int(lam)
         if n_events == 0:
             totals.append(0.0)
             zero_count += 1
             continue
-
         iteration_total = 0.0
         for _ in range(n_events):
-            cost = rng.lognormvariate(mu, sigma) if sigma > 0 else math.exp(mu)
-            iteration_total += cost
+            iteration_total += rng.lognormvariate(mu, sigma) if sigma > 0 else math.exp(mu)
         totals.append(iteration_total)
-
-    expected_loss = sum(totals) / len(totals) if totals else 0.0
-    percentiles = _compute_percentiles(totals)
-    zero_loss_pct = round((zero_count / iterations) * 100, 2) if iterations > 0 else 0.0
-
-    return CategorySimResult(
-        key=key,
-        label=label,
-        frequency_type=frequency_type,
-        frequency_lambda=round(lam, 4),
-        expected_loss=round(expected_loss, 2),
-        percentiles=percentiles,
-        zero_loss_pct=zero_loss_pct,
-    )
+    return totals, zero_count
 
 
 def _poisson(lam: float, rng: random.Random) -> int:
@@ -384,48 +362,50 @@ def run_monte_carlo(
     rng = random.Random(seed)
 
     categories: dict[str, CategorySimResult] = {}
-
-    for item in cost_of_risk_items:
-        result = _simulate_category(item, iterations, rng)
-        categories[result.key] = result
-
-    # Compute aggregate by summing across categories per iteration
-    # Re-run with same seed to get correlated totals
-    rng2 = random.Random(seed)
+    cat_sorted: dict[str, list[float]] = {}
     aggregate_totals: list[float] = [0.0] * iterations
 
+    # Single simulation pass: each category is simulated once. Its per-iteration
+    # totals feed the category result, the per-category histogram, AND the
+    # aggregate (summed position-wise), so all three are drawn from the same
+    # samples instead of three independent re-simulations.
     for item in cost_of_risk_items:
         key = item["key"]
+        label = item.get("label", key)
         low = item.get("low", 0)
         high = item.get("high", 0)
-        affected_count = item.get("affected_count", 0)
+
+        totals, zero_count = _simulate_totals(item, iterations, rng)
+        for i, t in enumerate(totals):
+            aggregate_totals[i] += t
 
         if low <= 0 and high <= 0:
+            categories[key] = CategorySimResult(
+                key=key,
+                label=label,
+                frequency_type="deterministic",
+                frequency_lambda=0.0,
+                expected_loss=0.0,
+                percentiles={k: 0.0 for k in ("p5", "p10", "p25", "p50", "p75", "p90", "p95", "p99")},
+                zero_loss_pct=100.0,
+            )
+            cat_sorted[key] = totals
             continue
 
-        is_stochastic = key in STOCHASTIC_LAMBDA_OVERRIDES
-
-        if is_stochastic:
-            base_rate = STOCHASTIC_LAMBDA_OVERRIDES[key]
-            lam = base_rate * max(affected_count, 1)
-            per_unit_low = low / max(affected_count, 1)
-            per_unit_high = high / max(affected_count, 1)
-        else:
-            lam = float(affected_count) if affected_count > 0 else 1.0
-            per_unit_low = low / max(affected_count, 1)
-            per_unit_high = high / max(affected_count, 1)
-
-        mu, sigma = _lognormal_params(max(per_unit_low, 1), max(per_unit_high, 1))
-
-        for i in range(iterations):
-            if is_stochastic:
-                n_events = _poisson(lam, rng2)
-            else:
-                n_events = int(lam)
-
-            for _ in range(n_events):
-                cost = rng2.lognormvariate(mu, sigma) if sigma > 0 else math.exp(mu)
-                aggregate_totals[i] += cost
+        _is_stochastic, frequency_type, lam, _mu, _sigma = _category_params(item)
+        expected_loss = sum(totals) / len(totals) if totals else 0.0
+        zero_loss_pct = round((zero_count / iterations) * 100, 2) if iterations > 0 else 0.0
+        sorted_totals = sorted(totals)
+        categories[key] = CategorySimResult(
+            key=key,
+            label=label,
+            frequency_type=frequency_type,
+            frequency_lambda=round(lam, 4),
+            expected_loss=round(expected_loss, 2),
+            percentiles=_compute_percentiles(sorted_totals),
+            zero_loss_pct=zero_loss_pct,
+        )
+        cat_sorted[key] = sorted_totals
 
     aggregate_totals.sort()
     expected_annual_loss = sum(aggregate_totals) / len(aggregate_totals) if aggregate_totals else 0.0
@@ -447,45 +427,8 @@ def run_monte_carlo(
     exc_curve = _compute_exceedance_curve(aggregate_totals, n_points=200)
     dist_stats = _compute_distribution_stats(aggregate_totals, var_95, cvar_95) if aggregate_totals else None
 
-    # Per-category sparkline histograms (re-derive sorted totals from percentiles is lossy,
-    # so we re-simulate once more with same seed for per-category sorted arrays)
-    rng3 = random.Random(seed)
-    cat_sorted: dict[str, list[float]] = {}
-    for item in cost_of_risk_items:
-        cat_totals: list[float] = []
-        key = item["key"]
-        low = item.get("low", 0)
-        high = item.get("high", 0)
-        affected_count = item.get("affected_count", 0)
-        is_stochastic = key in STOCHASTIC_LAMBDA_OVERRIDES
-        if low <= 0 and high <= 0:
-            for _ in range(iterations):
-                cat_totals.append(0.0)
-            cat_sorted[key] = cat_totals
-            continue
-        if is_stochastic:
-            base_rate = STOCHASTIC_LAMBDA_OVERRIDES[key]
-            lam = base_rate * max(affected_count, 1)
-            per_unit_low = low / max(affected_count, 1)
-            per_unit_high = high / max(affected_count, 1)
-        else:
-            lam = float(affected_count) if affected_count > 0 else 1.0
-            per_unit_low = low / max(affected_count, 1)
-            per_unit_high = high / max(affected_count, 1)
-        mu, sigma = _lognormal_params(max(per_unit_low, 1), max(per_unit_high, 1))
-        for _ in range(iterations):
-            if is_stochastic:
-                n_events = _poisson(lam, rng3)
-            else:
-                n_events = int(lam)
-            it_total = 0.0
-            for _ in range(n_events):
-                cost = rng3.lognormvariate(mu, sigma) if sigma > 0 else math.exp(mu)
-                it_total += cost
-            cat_totals.append(it_total)
-        cat_totals.sort()
-        cat_sorted[key] = cat_totals
-
+    # Per-category sparkline histograms, built from the sorted per-category
+    # totals captured during the single simulation pass above.
     for key, cat_result in categories.items():
         if key in cat_sorted:
             cat_result.histogram_bins = _compute_histogram(cat_sorted[key], n_bins=30)

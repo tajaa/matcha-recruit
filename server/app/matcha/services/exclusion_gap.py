@@ -16,6 +16,8 @@ typically faces), not a coverage determination.
 
 from uuid import UUID
 
+import asyncpg
+
 from . import wc_depth
 
 WILDFIRE_STATES = {"CA", "OR", "WA", "CO", "MT", "ID", "AZ", "NV", "UT", "NM", "TX", "WY"}
@@ -107,7 +109,10 @@ async def _gather_signals(conn, company_id: UUID, states: list[str]) -> dict:
     async def cnt(q) -> int:
         try:
             return int(await conn.fetchval(q, company_id) or 0)
-        except Exception:  # pragma: no cover - defensive (table/feature absent)
+        except (asyncpg.UndefinedTableError, asyncpg.UndefinedColumnError):
+            # Table/feature not provisioned → treat as absent. A transient
+            # error must NOT propagate here as 0, which would silently flip a
+            # mitigated exclusion (e.g. documented BIPA consent) to "exposed".
             return 0
 
     bio = await cnt("SELECT count(*) FROM biometric_consent_points WHERE company_id = $1 AND COALESCE(is_active, true)")
@@ -125,12 +130,17 @@ async def _gather_signals(conn, company_id: UUID, states: list[str]) -> dict:
 
 
 async def company_exclusions(conn, company_id: UUID) -> dict:
-    """Grounded exclusion exposure for a tenant. Never raises."""
+    """Grounded exclusion exposure for a tenant.
+
+    Degrades signal-by-signal only when a table isn't provisioned; a real DB
+    error propagates rather than silently reporting a clean (mitigated)
+    exclusion profile off a partial read.
+    """
     company = await conn.fetchrow("SELECT industry FROM companies WHERE id = $1", company_id)
     industry = company["industry"] if company else None
     try:
         states = await wc_depth.resolve_company_states(conn, company_id)
-    except Exception:  # pragma: no cover
+    except (asyncpg.UndefinedTableError, asyncpg.UndefinedColumnError):
         states = []
     signals = await _gather_signals(conn, company_id, states)
     return analyze(industry, signals)

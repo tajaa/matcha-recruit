@@ -1244,6 +1244,24 @@ DEFAULT_WEIGHTS: dict[str, float] = {
     "legislative": 0.05,
 }
 
+_WEIGHT_KEYS = set(DEFAULT_WEIGHTS)
+
+
+async def load_risk_weights(conn) -> dict[str, float]:
+    """Load admin-configured dimension weights overlaid on DEFAULT_WEIGHTS.
+
+    Single source of truth for every snapshot writer (route, Celery task,
+    and the wage-change background refresh) so they can't drift apart.
+    """
+    row = await conn.fetchval(
+        "SELECT value FROM platform_settings WHERE key = 'risk_assessment_weights'"
+    )
+    if row:
+        raw = json.loads(row) if isinstance(row, str) else row
+        if isinstance(raw, dict):
+            return {**DEFAULT_WEIGHTS, **{k: float(v) for k, v in raw.items() if k in _WEIGHT_KEYS}}
+    return dict(DEFAULT_WEIGHTS)
+
 
 async def compute_risk_assessment(
     company_id: UUID,

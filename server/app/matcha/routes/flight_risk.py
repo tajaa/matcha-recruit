@@ -12,7 +12,7 @@ from typing import List, Optional
 from uuid import UUID
 
 import asyncpg
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from ...core.models.auth import CurrentUser
@@ -152,7 +152,10 @@ async def get_employee_score(
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         raise HTTPException(status_code=404, detail="Not found")
-    results = await compute_for_company(company_id)
+    try:
+        results = await compute_for_company(company_id)
+    except asyncpg.UndefinedTableError:
+        raise HTTPException(status_code=404, detail="Employee not found in active roster")
     target = next((r for r in results if r.employee_id == str(employee_id)), None)
     if not target:
         raise HTTPException(status_code=404, detail="Employee not found in active roster")
@@ -170,7 +173,7 @@ async def get_employee_score(
 @router.get("/employees/{employee_id}/history", response_model=FlightRiskHistoryResponse)
 async def get_employee_history_endpoint(
     employee_id: UUID,
-    limit: int = 30,
+    limit: int = Query(30, ge=1, le=365),
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Trend view from snapshot table."""

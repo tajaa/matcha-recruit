@@ -60,8 +60,12 @@ async def narrative(result: dict, *, company_name: Optional[str] = None, audienc
     actions = out.get("actions") if isinstance(out.get("actions"), list) else []
     actions = [str(a) for a in actions if isinstance(a, str)][:5]
     summary = out.get("summary") if isinstance(out.get("summary"), str) else ""
+    # `available` reflects whether the AI actually produced usable content, not
+    # merely whether it returned *something* — a malformed-but-truthy response
+    # (wrong types) still falls back, and must not be badged as AI-generated.
+    ai_generated = bool(summary or actions)
     if not summary and not actions:
         # deterministic fallback from the index itself
         summary = f"Risk index {result['index']}/100 ({result['band']}). Focus on the lowest-scoring areas below."
         actions = result.get("top_fixes") or []
-    return {"summary": summary, "actions": actions, "available": bool(out)}
+    return {"summary": summary, "actions": actions, "available": ai_generated}

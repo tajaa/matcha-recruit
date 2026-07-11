@@ -22,17 +22,27 @@ _COLS = ("id, driver_name, employee_id, review_type, review_date, status, next_d
          "violation_count, accident_count, major_violation, license_status")
 
 
+async def _require_company_id(current_user) -> UUID:
+    """Resolve the caller's company, 403 if they have none (mirrors flight_risk)."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=403, detail="No company associated with this account")
+    return company_id
+
+
 @router.get("/fleet")
 async def get_fleet(current_user=Depends(require_admin_or_client)):
     """Scored driver list + fleet summary (grade, tier counts, overdue MVRs)."""
     company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        return {"company_id": None, "company_name": "", "drivers": [], "summary": dr.summarize([])}
     async with get_connection() as conn:
         return await dr.build_fleet(conn, company_id)
 
 
 @router.post("/drivers")
 async def create_driver(body: DriverReviewCreate, current_user=Depends(require_admin_or_client)):
-    company_id = await get_client_company_id(current_user)
+    company_id = await _require_company_id(current_user)
     async with get_connection() as conn:
         await conn.execute(
             """
@@ -51,7 +61,7 @@ async def create_driver(body: DriverReviewCreate, current_user=Depends(require_a
 @router.put("/drivers/{review_id}")
 async def update_driver(review_id: UUID, body: DriverReviewUpdate,
                         current_user=Depends(require_admin_or_client)):
-    company_id = await get_client_company_id(current_user)
+    company_id = await _require_company_id(current_user)
     async with get_connection() as conn:
         row = await conn.fetchrow(
             """
@@ -75,17 +85,19 @@ async def update_driver(review_id: UUID, body: DriverReviewUpdate,
 
 @router.delete("/drivers/{review_id}")
 async def delete_driver(review_id: UUID, current_user=Depends(require_admin_or_client)):
-    company_id = await get_client_company_id(current_user)
+    company_id = await _require_company_id(current_user)
     async with get_connection() as conn:
-        await conn.execute(
+        result = await conn.execute(
             "DELETE FROM mvr_reviews WHERE id = $1 AND company_id = $2", review_id, company_id,
         )
+        if result == "DELETE 0":
+            raise HTTPException(status_code=404, detail="Driver record not found")
         return await dr.build_fleet(conn, company_id)
 
 
 @router.get("/fleet.pdf")
 async def fleet_pdf(current_user=Depends(require_admin_or_client)):
-    company_id = await get_client_company_id(current_user)
+    company_id = await _require_company_id(current_user)
     async with get_connection() as conn:
         fleet = await dr.build_fleet(conn, company_id)
     pdf = await dr.render_fleet_pdf(fleet["company_name"], fleet)

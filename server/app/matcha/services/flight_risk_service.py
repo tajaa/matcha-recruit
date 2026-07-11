@@ -128,7 +128,7 @@ class FlightRiskCompanySummary:
     top_driver: Optional[str]             # most-common top_factor across high/critical
     top_driver_count: int
     early_tenure_count: int               # of high+critical, how many in 30-180 day window
-    manager_hotspots: list[dict[str, Any]]  # [{manager_id, manager_name, count}]
+    manager_hotspots: list[dict[str, Any]]  # [{manager_id, manager_name, flagged_count}]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -186,6 +186,20 @@ def _score_wage(
     )
 
 
+def _calendar_months_between(start_date: date, today: date) -> int:
+    """Whole calendar months elapsed, day-of-month aware, clamped at 0.
+
+    A start day-of-month later than today's means the final month hasn't
+    completed yet, so it must not be counted (e.g. start 06-30, today 07-01
+    is 0 months, not 1). Future start dates clamp to 0 rather than going
+    negative.
+    """
+    months = (today.year - start_date.year) * 12 + (today.month - start_date.month)
+    if today.day < start_date.day:
+        months -= 1
+    return max(0, months)
+
+
 def _score_tenure(start_date: Optional[date], today: date) -> FlightRiskFactor:
     if start_date is None:
         return FlightRiskFactor(
@@ -196,8 +210,8 @@ def _score_tenure(start_date: Optional[date], today: date) -> FlightRiskFactor:
         )
     if isinstance(start_date, datetime):
         start_date = start_date.date()
-    months = (today.year - start_date.year) * 12 + (today.month - start_date.month)
-    days = (today - start_date).days
+    months = _calendar_months_between(start_date, today)
+    days = max(0, (today - start_date).days)
     multiplier = 0.10  # tail
     for bucket_max, mult in TENURE_BUCKETS:
         if months < bucket_max:
@@ -227,7 +241,7 @@ def _score_er(open_count: int, recent_closed_count: int) -> FlightRiskFactor:
             name="er_case",
             contribution=0,
             color="green",
-            narrative="No ER case involvement in last 12 months",
+            narrative="No open ER cases and none closed in last 90 days",
         )
     # Open case = full weight; recent closed = half.
     contribution = min(W_ER, open_count * W_ER + recent_closed_count * (W_ER // 2))
@@ -348,7 +362,7 @@ def _quarter_label(dt: date) -> str:
 
 
 def _tenure_band(start_date: date, today: date) -> str:
-    months = (today.year - start_date.year) * 12 + (today.month - start_date.month)
+    months = _calendar_months_between(start_date, today)
     if months < 6:
         return "0-6mo"
     if months < 12:
@@ -475,9 +489,10 @@ async def compute_for_company(company_id: UUID) -> list[FlightRiskResult]:
             mgr_rows = await conn.fetch(
                 """
                 SELECT id, first_name, last_name FROM employees
-                WHERE id = ANY($1::uuid[])
+                WHERE id = ANY($1::uuid[]) AND org_id = $2
                 """,
                 list(manager_ids),
+                company_id,
             )
             for row in mgr_rows:
                 fn = row["first_name"] or ""
@@ -675,9 +690,10 @@ async def compute_company_summary(company_id: UUID) -> FlightRiskCompanySummary:
             mgr_rows = await conn.fetch(
                 """
                 SELECT id, first_name, last_name FROM employees
-                WHERE id = ANY($1::uuid[])
+                WHERE id = ANY($1::uuid[]) AND org_id = $2
                 """,
                 hotspot_ids,
+                company_id,
             )
         name_by_id = {
             row["id"]: f"{row['first_name'] or ''} {row['last_name'] or ''}".strip() or "Unassigned"

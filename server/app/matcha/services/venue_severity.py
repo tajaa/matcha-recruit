@@ -10,6 +10,8 @@ control). Severity is a directional reputational flag, not an actuarial price.
 
 from uuid import UUID
 
+import asyncpg
+
 _TIER_RANK = {"severe": 5, "high": 4, "elevated": 3, "moderate": 2, "low": 1, "unknown": 0}
 
 
@@ -57,21 +59,28 @@ def summarize(locations: list[dict]) -> dict:
 
 
 async def company_venue_exposure(conn, company_id: UUID) -> dict:
-    """Per-location venue severity for a tenant + a rollup. Never raises (best-effort)."""
-    locs = await conn.fetch(
-        "SELECT city, state, county FROM business_locations "
-        "WHERE company_id = $1 AND COALESCE(is_active, true) = true",
-        company_id,
-    )
-    states = sorted({(l["state"] or "").upper() for l in locs if l["state"]})
-    by_state: dict[str, list[dict]] = {}
-    if states:
-        rows = await conn.fetch(
-            "SELECT state, county, tier, score, source, note FROM venue_severity WHERE state = ANY($1)",
-            states,
+    """Per-location venue severity for a tenant + a rollup.
+
+    Degrades to empty only when a table isn't provisioned yet; real DB errors
+    propagate rather than masquerading as "no venue exposure".
+    """
+    try:
+        locs = await conn.fetch(
+            "SELECT city, state, county FROM business_locations "
+            "WHERE company_id = $1 AND COALESCE(is_active, true) = true",
+            company_id,
         )
-        for r in rows:
-            by_state.setdefault(r["state"], []).append(dict(r))
+        states = sorted({(l["state"] or "").upper() for l in locs if l["state"]})
+        by_state: dict[str, list[dict]] = {}
+        if states:
+            rows = await conn.fetch(
+                "SELECT state, county, tier, score, source, note FROM venue_severity WHERE state = ANY($1)",
+                states,
+            )
+            for r in rows:
+                by_state.setdefault(r["state"], []).append(dict(r))
+    except (asyncpg.UndefinedTableError, asyncpg.UndefinedColumnError):
+        return {"locations": [], "summary": summarize([])}
 
     locations: list[dict] = []
     for l in locs:
