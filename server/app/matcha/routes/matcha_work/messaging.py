@@ -37,7 +37,8 @@ from app.matcha.routes.matcha_work._shared import THREAD_FILE_TEXT_CAP, _row_to_
 from app.matcha.services import matcha_work_document as doc_svc
 from app.matcha.services import token_budget_service
 from app.matcha.services.escalation_service import should_escalate, create_escalation
-from app.matcha.services.matcha_work_node import build_compliance_context, build_node_context, build_payer_staff_context, ComplianceContextResult
+from app.matcha.services.matcha_work_modes import THREAD_MODES
+from app.matcha.services.matcha_work_node import build_compliance_context, build_payer_staff_context, ComplianceContextResult
 from app.matcha.services.matcha_work_ai import (
     _build_company_context,
     _infer_skill_from_state,
@@ -660,14 +661,24 @@ async def send_message_stream(
             # NOT ctx, which feeds the cacheable static prompt (H4: putting
             # per-turn context in the static prompt broke the cache every turn).
             dyn_ctx = ""
-            if thread.get("node_mode"):
-                yield _sse_data({"type": "status", "message": "Loading internal company data..."})
+            # Registry-driven modes (node, benefits, legal, risk, training, …).
+            # Compliance and payer are custom_dispatch — their bespoke blocks
+            # follow below (reasoning-chain statuses + RAG; prompt-swap path).
+            for _mode in THREAD_MODES:
+                if _mode.custom_dispatch or _mode.build_context is None:
+                    continue
+                if not thread.get(_mode.column):
+                    continue
+                yield _sse_data({"type": "status", "message": _mode.status_loading})
                 try:
-                    node_ctx = await build_node_context(company_id)
-                    dyn_ctx += "\n\n" + node_ctx
+                    _mode_ctx = await _mode.build_context(company_id)
+                    if _mode_ctx:
+                        dyn_ctx += "\n\n" + _mode_ctx
+                    else:
+                        yield _sse_data({"type": "status", "message": f"No {_mode.label.lower()} data on file yet — continuing without it..."})
                 except Exception:
-                    logger.exception("Node context failed for company %s", company_id)
-                    yield _sse_data({"type": "status", "message": "Internal data unavailable — continuing without it..."})
+                    logger.exception("%s context failed for company %s", _mode.label, company_id)
+                    yield _sse_data({"type": "status", "message": _mode.status_unavailable})
 
             if thread.get("compliance_mode"):
                 yield _sse_data({"type": "status", "message": "Loading compliance data for your locations..."})
@@ -787,6 +798,13 @@ async def send_message_stream(
                 compliance_mode=bool(thread.get("compliance_mode")),
                 payer_mode=bool(thread.get("payer_mode")),
                 node_mode=bool(thread.get("node_mode")),
+                # Any registry mode with grounded context active → the model
+                # should reason over injected records (bumps thinking level).
+                grounded_mode=any(
+                    bool(thread.get(m.column))
+                    for m in THREAD_MODES
+                    if not m.custom_dispatch
+                ),
                 blog_mode_state=stream_blog_mode_state,
                 thread_id=str(thread_id),
             ))

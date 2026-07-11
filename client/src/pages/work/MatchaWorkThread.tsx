@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Send, Loader2, Pencil, Check, X, Database, Shield, Stethoscope, MapPin, Sun, Moon, Paperclip, Bot, FileText, Users, Presentation, Package, ClipboardList, Scale, BookOpen, FileCheck, MessageSquare, Briefcase, Languages } from 'lucide-react'
-import type { MWMessage, MWThreadDetail, MWSendResponse, MWStreamEvent } from '../../types/matcha-work'
-import { getThread, sendMessageStream, uploadResumes, uploadInventory, sendCandidateInterviews, syncInterviewStatuses, addProjectSection, updateTitle, getPdfProxyUrl, setNodeMode, setComplianceMode, setPayerMode, fetchUsageSummary, fetchUsageSummary24h } from '../../api/matchaWork'
+import { ArrowLeft, Send, Loader2, Pencil, Check, X, MapPin, Sun, Moon, Paperclip, Bot, FileText, Users, Presentation, Package, ClipboardList, Scale, BookOpen, FileCheck, MessageSquare, Briefcase, Languages } from 'lucide-react'
+import type { MWMessage, MWModeKey, MWThreadDetail, MWSendResponse, MWStreamEvent } from '../../types/matcha-work'
+import { getThread, sendMessageStream, uploadResumes, uploadInventory, sendCandidateInterviews, syncInterviewStatuses, addProjectSection, updateTitle, getPdfProxyUrl, setThreadMode, fetchUsageSummary, fetchUsageSummary24h } from '../../api/matchaWork'
 import type { UsageSummary } from '../../api/matchaWork'
 import { ThreadSocket } from '../../api/threadSocket'
 import ThreadCollaborators from '../../components/matcha-work/ThreadCollaborators'
@@ -16,7 +16,7 @@ import InventoryPanel from '../../components/matcha-work/InventoryPanel'
 import ProjectPanel from '../../components/matcha-work/ProjectPanel'
 import AgentPanel from '../../components/matcha-work/AgentPanel'
 import LanguageTutorPanel from '../../components/matcha-work/LanguageTutorPanel'
-import { MODEL_OPTIONS, formatTokens } from '../../components/matcha-work/constants'
+import { MODEL_OPTIONS, THREAD_MODE_TOGGLES, formatTokens } from '../../components/matcha-work/constants'
 import { useWorkBase } from '../../routes/WorkSurfaceContext'
 
 const RESUME_EXTENSIONS = ['.pdf', '.doc', '.docx', '.txt']
@@ -106,10 +106,9 @@ export default function MatchaWorkThread() {
   const lastTypingSentRef = useRef(0)
 
   // Mode toggles — derived from thread, only toggling state is local
-  const [togglingMode, setTogglingMode] = useState<'node' | 'compliance' | 'payer' | null>(null)
-  const nodeMode = thread?.node_mode ?? false
-  const complianceMode = thread?.compliance_mode ?? false
-  const payerMode = thread?.payer_mode ?? false
+  const [togglingMode, setTogglingMode] = useState<MWModeKey | null>(null)
+  const modeValue = (key: MWModeKey) => thread?.[`${key}_mode`] ?? false
+  const complianceMode = modeValue('compliance')
 
   // Compliance locations — loaded when compliance mode is on
   const [locations, setLocations] = useState<BusinessLocation[]>([])
@@ -463,13 +462,12 @@ export default function MatchaWorkThread() {
     } catch {}
   }
 
-  async function handleModeToggle(mode: 'node' | 'compliance' | 'payer') {
+  async function handleModeToggle(mode: MWModeKey) {
     if (!threadId || togglingMode) return
-    const apiFn = { node: setNodeMode, compliance: setComplianceMode, payer: setPayerMode }[mode]
-    const current = { node: nodeMode, compliance: complianceMode, payer: payerMode }[mode]
+    const current = modeValue(mode)
     setTogglingMode(mode)
     try {
-      await apiFn(threadId, !current)
+      await setThreadMode(threadId, mode, !current)
       setThread((prev) => prev ? { ...prev, [`${mode}_mode`]: !current } : prev)
     } catch (e) {
       // A silently-failed toggle leaves the user believing the mode is on
@@ -643,53 +641,24 @@ export default function MatchaWorkThread() {
             </div>
           )}
 
-          {!isIndividual && (
-          <button
-            onClick={() => handleModeToggle('node')}
-            disabled={togglingMode === 'node'}
-            title={nodeMode ? 'Node ON — query employees, policies, handbooks' : 'Node OFF'}
-            className={`hidden sm:inline-flex shrink-0 items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-full transition-colors disabled:opacity-50 ${
-              nodeMode
-                ? 'bg-purple-600 text-white hover:bg-purple-500'
-                : th.modeOff
-            }`}
-          >
-            <Database size={12} />
-            Node
-          </button>
-          )}
-
-          {!isIndividual && (
-          <button
-            onClick={() => handleModeToggle('compliance')}
-            disabled={togglingMode === 'compliance'}
-            title={complianceMode ? 'Compliance ON — jurisdiction requirements injected' : 'Compliance OFF'}
-            className={`hidden sm:inline-flex shrink-0 items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-full transition-colors disabled:opacity-50 ${
-              complianceMode
-                ? 'bg-cyan-600 text-white hover:bg-cyan-500'
-                : th.modeOff
-            }`}
-          >
-            <Shield size={12} />
-            Compliance
-          </button>
-          )}
-
-          {!isIndividual && (
-          <button
-            onClick={() => handleModeToggle('payer')}
-            disabled={togglingMode === 'payer'}
-            title={payerMode ? 'Payer ON — Medicare NCD/LCD search active' : 'Payer OFF'}
-            className={`hidden sm:inline-flex shrink-0 items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-full transition-colors disabled:opacity-50 ${
-              payerMode
-                ? 'bg-emerald-600 text-white hover:bg-emerald-500'
-                : th.modeOff
-            }`}
-          >
-            <Stethoscope size={12} />
-            Payer
-          </button>
-          )}
+          {!isIndividual && THREAD_MODE_TOGGLES.map((m) => {
+            const active = modeValue(m.key)
+            const Icon = m.icon
+            return (
+              <button
+                key={m.key}
+                onClick={() => handleModeToggle(m.key)}
+                disabled={togglingMode === m.key}
+                title={active ? m.tipOn : m.tipOff}
+                className={`hidden sm:inline-flex shrink-0 items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-full transition-colors disabled:opacity-50 ${
+                  active ? m.onClass : th.modeOff
+                }`}
+              >
+                <Icon size={12} />
+                {m.label}
+              </button>
+            )
+          })}
 
           <button
             onClick={() => setAgentMode(!agentMode)}

@@ -7,6 +7,7 @@ import type { ChannelSummary } from '../../api/channels'
 import { listThreads, createThread, pinThread, archiveThread, createProjectNew, fetchTaskBoard, createTask, updateTask, deleteTask, dismissAutoTask } from '../../api/matchaWork'
 import type { TaskBoardResponse } from '../../api/matchaWork'
 import TaskBoard from '../../components/work/TaskBoard'
+import { THREAD_MODE_TOGGLES } from '../../components/matcha-work/constants'
 import { useMe } from '../../hooks/useMe'
 import OnboardingWizard, { ONBOARDING_STORAGE_KEY } from '../../components/work/OnboardingWizard'
 import { useWorkBase, useWorkBrand } from '../../routes/WorkSurfaceContext'
@@ -293,16 +294,14 @@ export default function MatchaWorkList() {
                       {TASK_LABELS[t.task_type] ?? t.task_type}
                     </span>
                   )}
-                  {t.node_mode && (
-                    <span className="shrink-0 px-1.5 py-0.5 text-[11px] sm:text-[10px] font-medium rounded-full bg-purple-700 text-purple-200">
-                      Node
+                  {THREAD_MODE_TOGGLES.filter((m) => t[`${m.key}_mode`]).map((m) => (
+                    <span
+                      key={m.key}
+                      className={`shrink-0 px-1.5 py-0.5 text-[11px] sm:text-[10px] font-medium rounded-full ${m.badgeClass}`}
+                    >
+                      {m.label}
                     </span>
-                  )}
-                  {t.compliance_mode && (
-                    <span className="shrink-0 px-1.5 py-0.5 text-[11px] sm:text-[10px] font-medium rounded-full bg-cyan-700 text-cyan-200">
-                      Compliance
-                    </span>
-                  )}
+                  ))}
                 </div>
                 <div className="mt-1 flex items-center gap-3 text-xs text-zinc-500">
                   <span>v{t.version}</span>

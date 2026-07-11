@@ -775,6 +775,7 @@ def classify_thinking_level(
     compliance_mode: bool,
     payer_mode: bool,
     node_mode: bool,
+    grounded_mode: bool = False,
 ) -> str:
     """Return Gemini thinking level: "none", "low", or "high".
 
@@ -795,7 +796,7 @@ def classify_thinking_level(
     if current_skill in {"offer_letter", "review", "workbook", "handbook",
                          "policy", "presentation", "project", "onboarding"}:
         return "high"
-    if node_mode:
+    if node_mode or grounded_mode:
         return "high"
     if any(kw in msg for kw in _HIGH_THINK_KEYWORDS):
         return "high"
@@ -836,6 +837,7 @@ class MatchaWorkAIProvider:
         compliance_mode: bool = False,
         payer_mode: bool = False,
         node_mode: bool = False,
+        grounded_mode: bool = False,
         blog_mode_state: Optional[str] = None,
         thread_id: Optional[str] = None,
         dynamic_context: str = "",
@@ -918,6 +920,7 @@ class GeminiProvider(MatchaWorkAIProvider):
         compliance_mode: bool = False,
         payer_mode: bool = False,
         node_mode: bool = False,
+        grounded_mode: bool = False,
         blog_mode_state: Optional[str] = None,
         thread_id: Optional[str] = None,
         dynamic_context: str = "",
@@ -1102,6 +1105,7 @@ class GeminiProvider(MatchaWorkAIProvider):
             compliance_mode=compliance_mode,
             payer_mode=payer_mode,
             node_mode=node_mode,
+            grounded_mode=grounded_mode,
         )
 
         try:

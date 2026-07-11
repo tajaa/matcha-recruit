@@ -192,9 +192,10 @@ async def _fetch_roster_stats(conn, company_id: UUID) -> tuple[int, dict[str, in
     return total, state_counts, dept_counts
 
 
-async def build_node_context(company_id: UUID) -> str:
-    """Fetch internal company data and format as AI context string."""
-    cache_key = f"mw:node_ctx:{company_id}"
+async def cached_context(cache_key: str, builder) -> str:
+    """Run a string-context builder through the shared Redis/local cache with
+    a per-key build lock. Reused by every mode's context builder (see
+    matcha_work_mode_contexts.py)."""
     cached = await _ctx_cache_get(cache_key)
     if isinstance(cached, str):
         return cached
@@ -202,9 +203,17 @@ async def build_node_context(company_id: UUID) -> str:
         cached = await _ctx_cache_get(cache_key)
         if isinstance(cached, str):
             return cached
-        result = await _build_node_context_uncached(company_id)
+        result = await builder()
         await _ctx_cache_set(cache_key, result)
         return result
+
+
+async def build_node_context(company_id: UUID) -> str:
+    """Fetch internal company data and format as AI context string."""
+    return await cached_context(
+        f"mw:node_ctx:{company_id}",
+        lambda: _build_node_context_uncached(company_id),
+    )
 
 
 async def _build_node_context_uncached(company_id: UUID) -> str:

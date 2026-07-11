@@ -44,6 +44,7 @@ from app.matcha.models.matcha_work import (
     SaveDraftResponse,
     SendMessageResponse,
     PinThreadRequest,
+    ThreadModeRequest,
     NodeModeRequest,
     ComplianceModeRequest,
     PayerModeRequest,
@@ -1736,6 +1737,40 @@ async def set_thread_pin(
         raise HTTPException(status_code=404, detail="Thread not found")
 
     return ThreadListItem(**row)
+
+
+@router.post("/threads/{thread_id}/modes/{mode_key}", response_model=ThreadListItem)
+async def set_thread_mode(
+    thread_id: UUID,
+    mode_key: str,
+    body: ThreadModeRequest,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Enable or disable any registered grounding mode for a thread.
+
+    mode_key is validated against matcha_work_modes.THREAD_MODES. The
+    per-mode endpoints below (/node-mode, /compliance-mode, /payer-mode)
+    are legacy aliases kept for older clients (Werk desktop)."""
+    from app.matcha.services.matcha_work_modes import MODES_BY_KEY
+
+    if mode_key not in MODES_BY_KEY:
+        raise HTTPException(status_code=404, detail="Unknown thread mode")
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    row = await doc_svc.set_thread_mode(thread_id, company_id, mode_key, body.enabled)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    row_dict = dict(row)
+    current_state = _json_object(row_dict.pop("current_state", {}))
+    return ThreadListItem(
+        **{
+            **row_dict,
+            "task_type": _infer_skill_from_state(current_state),
+        }
+    )
 
 
 @router.post("/threads/{thread_id}/node-mode", response_model=ThreadListItem)

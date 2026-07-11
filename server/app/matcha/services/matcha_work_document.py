@@ -19,6 +19,7 @@ from ...config import get_settings
 from ...core.services.compliance_service import get_locations
 from ...core.services.email import EmailService
 from ...core.services.storage import get_storage
+from .matcha_work_modes import MODE_COLUMNS_SQL, MODES_BY_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -823,11 +824,11 @@ async def create_thread(
     async with get_connection() as conn:
         async with conn.transaction():
             row = await conn.fetchrow(
-                """
+                f"""
                 INSERT INTO mw_threads(company_id, created_by, title, current_state)
                 VALUES($1, $2, $3, $4::jsonb)
                 RETURNING id, company_id, created_by, title, status,
-                          current_state, version, is_pinned, node_mode, compliance_mode, linked_offer_letter_id,
+                          current_state, version, is_pinned, {MODE_COLUMNS_SQL}, linked_offer_letter_id,
                           created_at, updated_at
                 """,
                 company_id,
@@ -847,9 +848,9 @@ async def get_thread(thread_id: UUID, company_id: UUID, *, user_id: UUID | None 
             # Allow access if company matches OR user is a thread collaborator OR
             # user is an active collaborator on the thread's parent project
             row = await conn.fetchrow(
-                """
+                f"""
                 SELECT id, company_id, created_by, title, status,
-                       current_state, version, is_pinned, node_mode, compliance_mode, payer_mode,
+                       current_state, version, is_pinned, {MODE_COLUMNS_SQL},
                        linked_offer_letter_id, project_id,
                        created_at, updated_at
                 FROM mw_threads
@@ -869,9 +870,9 @@ async def get_thread(thread_id: UUID, company_id: UUID, *, user_id: UUID | None 
             )
         else:
             row = await conn.fetchrow(
-                """
+                f"""
                 SELECT id, company_id, created_by, title, status,
-                       current_state, version, is_pinned, node_mode, compliance_mode, payer_mode,
+                       current_state, version, is_pinned, {MODE_COLUMNS_SQL},
                        linked_offer_letter_id, project_id,
                        created_at, updated_at
                 FROM mw_threads
@@ -931,7 +932,7 @@ async def list_threads(
             if user_id is not None:
                 rows = await conn.fetch(
                     f"""
-                    SELECT id, title, status, version, is_pinned, node_mode, compliance_mode, created_at, updated_at,
+                    SELECT id, title, status, version, is_pinned, {MODE_COLUMNS_SQL}, created_at, updated_at,
                            {task_type_sql},
                            {collab_count_sql}
                     FROM mw_threads
@@ -948,7 +949,7 @@ async def list_threads(
             else:
                 rows = await conn.fetch(
                     f"""
-                    SELECT id, title, status, version, is_pinned, node_mode, compliance_mode, created_at, updated_at,
+                    SELECT id, title, status, version, is_pinned, {MODE_COLUMNS_SQL}, created_at, updated_at,
                            {task_type_sql},
                            {collab_count_sql}
                     FROM mw_threads
@@ -965,7 +966,7 @@ async def list_threads(
             if user_id is not None:
                 rows = await conn.fetch(
                     f"""
-                    SELECT id, title, status, version, is_pinned, node_mode, compliance_mode, created_at, updated_at,
+                    SELECT id, title, status, version, is_pinned, {MODE_COLUMNS_SQL}, created_at, updated_at,
                            {task_type_sql},
                            {collab_count_sql}
                     FROM mw_threads
@@ -981,7 +982,7 @@ async def list_threads(
             else:
                 rows = await conn.fetch(
                     f"""
-                    SELECT id, title, status, version, is_pinned, node_mode, compliance_mode, created_at, updated_at,
+                    SELECT id, title, status, version, is_pinned, {MODE_COLUMNS_SQL}, created_at, updated_at,
                            {task_type_sql},
                            {collab_count_sql}
                     FROM mw_threads
@@ -1135,11 +1136,11 @@ async def set_thread_pinned(
 ) -> Optional[dict]:
     async with get_connection() as conn:
         row = await conn.fetchrow(
-            """
+            f"""
             UPDATE mw_threads
             SET is_pinned=$1, updated_at=NOW()
             WHERE id=$2 AND company_id=$3
-            RETURNING id, title, status, version, is_pinned, node_mode, compliance_mode, payer_mode, created_at, updated_at, current_state
+            RETURNING id, title, status, version, is_pinned, {MODE_COLUMNS_SQL}, created_at, updated_at, current_state
             """,
             is_pinned,
             thread_id,
@@ -1151,26 +1152,44 @@ async def set_thread_pinned(
         return _thread_list_item_from_row(dict(row))
 
 
-async def set_thread_node_mode(
+async def set_thread_mode(
     thread_id: UUID,
     company_id: UUID,
-    node_mode: bool,
+    mode_key: str,
+    enabled: bool,
 ) -> Optional[dict]:
+    """Registry-driven mode toggle. mode_key must exist in
+    matcha_work_modes.MODES_BY_KEY — the column name comes from the registry,
+    never from the caller, so the f-string SQL stays injection-safe."""
+    mode = MODES_BY_KEY.get(mode_key)
+    if mode is None:
+        raise ValueError(f"Unknown thread mode: {mode_key}")
     async with get_connection() as conn:
         row = await conn.fetchrow(
-            """
+            f"""
             UPDATE mw_threads
-            SET node_mode=$1, updated_at=NOW()
+            SET {mode.column}=$1, updated_at=NOW()
             WHERE id=$2 AND company_id=$3
-            RETURNING id, title, status, version, is_pinned, node_mode, compliance_mode, payer_mode, created_at, updated_at, current_state
+            RETURNING id, title, status, version, is_pinned, {MODE_COLUMNS_SQL}, created_at, updated_at, current_state
             """,
-            node_mode,
+            enabled,
             thread_id,
             company_id,
         )
         if row is None:
             return None
         return _thread_list_item_from_row(dict(row))
+
+
+# Legacy named setters — kept for pre-registry callsites. New code goes
+# through set_thread_mode.
+
+async def set_thread_node_mode(
+    thread_id: UUID,
+    company_id: UUID,
+    node_mode: bool,
+) -> Optional[dict]:
+    return await set_thread_mode(thread_id, company_id, "node", node_mode)
 
 
 async def set_thread_compliance_mode(
@@ -1178,21 +1197,7 @@ async def set_thread_compliance_mode(
     company_id: UUID,
     compliance_mode: bool,
 ) -> Optional[dict]:
-    async with get_connection() as conn:
-        row = await conn.fetchrow(
-            """
-            UPDATE mw_threads
-            SET compliance_mode=$1, updated_at=NOW()
-            WHERE id=$2 AND company_id=$3
-            RETURNING id, title, status, version, is_pinned, node_mode, compliance_mode, payer_mode, created_at, updated_at, current_state
-            """,
-            compliance_mode,
-            thread_id,
-            company_id,
-        )
-        if row is None:
-            return None
-        return _thread_list_item_from_row(dict(row))
+    return await set_thread_mode(thread_id, company_id, "compliance", compliance_mode)
 
 
 async def set_thread_payer_mode(
@@ -1200,21 +1205,7 @@ async def set_thread_payer_mode(
     company_id: UUID,
     payer_mode: bool,
 ) -> Optional[dict]:
-    async with get_connection() as conn:
-        row = await conn.fetchrow(
-            """
-            UPDATE mw_threads
-            SET payer_mode=$1, updated_at=NOW()
-            WHERE id=$2 AND company_id=$3
-            RETURNING id, title, status, version, is_pinned, node_mode, compliance_mode, payer_mode, created_at, updated_at, current_state
-            """,
-            payer_mode,
-            thread_id,
-            company_id,
-        )
-        if row is None:
-            return None
-        return _thread_list_item_from_row(dict(row))
+    return await set_thread_mode(thread_id, company_id, "payer", payer_mode)
 
 
 async def get_thread_messages(thread_id: UUID, limit: int | None = None) -> list[dict]:
