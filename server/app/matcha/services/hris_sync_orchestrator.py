@@ -39,6 +39,20 @@ def _parse_date(value: Optional[str]) -> Optional[date]:
         return None
 
 
+# 50 states + DC + US territories, USPS 2-letter codes — the same gate the
+# CSV/manual employee paths apply (routes/employees/_shared.py:
+# _VALID_WORK_STATE_CODES; kept local because services must not import from the
+# routes package). A provider location with a missing country and a non-US
+# 2-letter region (e.g. "ON") must not create an ungrounded US jurisdiction.
+_US_STATE_CODES = frozenset({
+    "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "DC", "FL", "GA", "HI", "ID",
+    "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS", "MO",
+    "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA",
+    "RI", "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY",
+    "AS", "GU", "MP", "PR", "VI",
+})
+
+
 async def _sync_company_locations(conn, company_id, service, config, secrets) -> int:
     """Upsert HRIS company work locations into business_locations. Returns #created.
 
@@ -68,7 +82,7 @@ async def _sync_company_locations(conn, company_id, service, config, secrets) ->
         country = (loc.get("country") or "").strip().upper()
         # business_locations requires city/state(2)/zipcode and models US
         # jurisdictions — skip anything incomplete or non-US.
-        if not city or len(state) != 2 or not zipcode:
+        if not city or not zipcode or state not in _US_STATE_CODES:
             continue
         if country not in ("", "US", "USA"):
             continue
