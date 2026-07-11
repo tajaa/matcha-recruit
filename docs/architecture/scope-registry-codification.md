@@ -160,17 +160,29 @@ check each against the cited `body_text` (comma + spelled-out legal forms). Verd
 - `value_not_in_text` — **critical**: real citation, absent number → blocks onboarding
   readiness via the existing open-critical gate.
 - `corpus_stub` — the cited body is a heading (< 500 chars); "grounded" is hollow.
-- `value_unverifiable` — prose value, no numeric claim tier-1 can judge (tier-2's job).
+- `value_unverifiable` — prose value, no numeric claim tier-1 can judge.
 
 Session result over the 8 federal grounded rows: **6 `value_in_text`, 0
 `value_not_in_text`, 1 stub, 1 prose → score 100** (stubs/prose excluded from the
 denominator — unmeasured ≠ pass). Independent confirmation that "50 volts", "7 feet",
 etc. are genuinely in the CFR text, not recalled.
 
-Follow-ups (documented in `grounding.py`): tier-2 adversarial LLM verifier for the
-prose rows; a golden cross-check (grounded row vs a hand-verified fact); and having
-`build_grounded_corpus` exclude sub-threshold stubs so a heading can't "ground" a value
-(it then honestly lands ungrounded).
+**Tier-2a — golden cross-check** (`cross_check_rows`, pure): a grounded value that
+DISAGREES with a hand-verified golden fact for the same key is a critical
+`grounded_but_wrong` — the pipeline extracted the wrong number (harder than
+not-in-cited-text). Reuses `golden.compare`; overrides the tier-1 verdict for scoring.
+
+**Tier-2b — adversarial LLM verifier** (`grounding_verifier.py`, flag-gated by
+`GROUNDING_LLM_VERIFIER_ENABLED`): for the rows tier-1 can't settle, ONE refute-framed
+Gemini call over the cited excerpt ("does the text state this value? default false, no
+outside knowledge") — `llm_refuted` → critical `grounded_value_refuted`, `llm_confirmed`
+on a prose row → now verified. Verdicts cached by `(requirement_id, input_hash)` in
+`compliance_eval_grounding_verdicts` (migration `groundver01`) so unchanged data costs 0
+calls; flag ON makes grounding a Celery-routed network suite, OFF keeps it inline.
+
+Remaining follow-up: spot-check sampling — re-run the verifier on random `value_in_text`
+rows (golden is curated, not exhaustive); and having `build_grounded_corpus` exclude
+sub-threshold stubs so a heading can't "ground" a value (it then honestly lands ungrounded).
 
 ---
 

@@ -263,13 +263,36 @@ N5b tier-1, deterministic, no network (pure evaluate_row):
         ├── value_not_in_text  → CRITICAL: real citation, number absent → blocks
         │                        readiness via the existing open-critical gate (N8)
         ├── corpus_stub        → cited body < 500ch (a heading) → grounding hollow (warn)
-        └── value_unverifiable → prose, no numeric claim tier-1 can judge (info; tier-2 TODO)
-    score = value_in_text / (value_in_text + value_not_in_text); stubs/prose excluded
-            from the denominator (unmeasured ≠ 100). Its own scorecard row, NOT in the
-            composite (a hallucinated value gates through the critical-finding path, not
-            a reweight).
-    extension points (in-file, unwired): tier-2 adversarial LLM verifier on the
-    unresolved rows; golden cross-check (grounded row vs a golden fact = grounded_but_wrong).
+        └── value_unverifiable → prose, no numeric claim tier-1 can judge (info)
+
+N5c tier-2a golden cross-check, pure (cross_check_rows, reuses golden.compare):
+    grounded rows indexed by category:normalized_key, matched to active golden facts.
+    ├── grounded_but_wrong → CRITICAL: grounded value DISAGREES with a hand-verified
+    │                        fact (wrong value, not just absent from the cited excerpt).
+    │                        Overrides the tier-1 verdict for scoring; blocks readiness.
+    └── no matching fact / agrees → nothing (golden absence is the golden suite's job)
+
+N5d tier-2b adversarial LLM verifier, NETWORK, flag-gated
+    (settings.grounding_llm_verifier_enabled; grounding_verifier.verify_rows):
+    candidates = rows tier-1 couldn't settle (value_unverifiable / value_not_in_text)
+    and golden didn't override. ONE refute-framed Gemini call (gemini-3.1-flash-lite,
+    temp 0) per candidate over the cited excerpt — "does the text state this value?
+    default false, no outside knowledge". Verdict cached by (requirement_id, input_hash)
+    in compliance_eval_grounding_verdicts (migration groundver01) so unchanged data = 0
+    calls; hard per-run call cap; per-row try/except → llm_unclear (suite never dies).
+        ├── llm_refuted    → CRITICAL grounded_value_refuted; scored as contradiction
+        ├── llm_confirmed  → on unverifiable: now verified. on not_in_text: keep the
+        │                    tier-1 critical (string check is hard evidence), annotate.
+        └── llm_unclear    → tier-1 verdict stands
+    Flag ON makes grounding a network suite (runner.network_suites()) → routed to Celery.
+    Flag OFF (default): tier-1 + golden only, inline, no network — unchanged behavior.
+
+    score = value_in_text / (value_in_text + value_not_in_text + grounded_but_wrong
+            + llm_refuted); stubs/prose excluded from the denominator (unmeasured ≠ 100).
+            Its own scorecard row, NOT in the composite (a hallucinated value gates
+            through the critical-finding path, not a reweight).
+    remaining extension point (in-file): spot-check sampling — periodically re-run the
+    verifier on random value_in_text rows (golden is curated, not exhaustive).
 ```
 
 ---

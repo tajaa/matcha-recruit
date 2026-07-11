@@ -31,8 +31,21 @@ ALL_SUITES = ("completeness", "authority", "tagging", "golden", "scope", "ground
 DEFAULT_STALENESS_DAYS = 90
 
 # Suites that reach the network. Routed to Celery rather than BackgroundTasks so a
-# slow regulator host cannot occupy a uvicorn worker for minutes.
+# slow regulator host cannot occupy a uvicorn worker for minutes. `authority` is
+# always network; `grounding` is network ONLY when its LLM verifier (tier-2b) is
+# enabled — otherwise it's pure tier-1 + golden and stays inline. Use
+# network_suites() (not this base set) to decide routing.
 NETWORK_SUITES = frozenset({"authority"})
+
+
+def network_suites() -> frozenset:
+    """Suites that reach the network for the CURRENT config. Adds `grounding` when
+    the tier-2b LLM verifier flag is on (that's the only thing that makes grounding
+    do I/O)."""
+    from app.config import get_settings
+
+    extra = {"grounding"} if get_settings().grounding_llm_verifier_enabled else set()
+    return NETWORK_SUITES | extra
 
 
 def _progress(run_id: UUID, message: str, pct: int) -> None:

@@ -5198,7 +5198,7 @@ async def trigger_eval_run(
     current_user=Depends(require_admin),
 ):
     """Start an eval run. Network-touching suites go to Celery; the rest run inline."""
-    from ..services.compliance_evals import NETWORK_SUITES, run_evals
+    from ..services.compliance_evals import network_suites, run_evals
 
     suites = list(payload.suites)
     if not suites:
@@ -5221,7 +5221,7 @@ async def trigger_eval_run(
         )
     run_id = row["id"]
 
-    if NETWORK_SUITES & set(suites):
+    if network_suites() & set(suites):
         from app.workers.tasks.compliance_evals import run_compliance_evals
 
         run_compliance_evals.delay(

@@ -96,6 +96,9 @@ VALUE_UNVERIFIABLE = "value_unverifiable"
 # failure than value_not_in_text (which only proves the value isn't in the *cited*
 # excerpt; golden proves it's the wrong value, period). CRITICAL.
 GROUNDED_BUT_WRONG = "grounded_but_wrong"
+# Tier-2b: the adversarial LLM verifier read the cited text and REFUTED the value.
+# Scored as a contradiction; CRITICAL finding grounded_value_refuted.
+LLM_REFUTED_BUCKET = "llm_refuted"
 
 
 def _fmt_numeric(numeric_value: Any) -> Optional[str]:
@@ -279,31 +282,26 @@ async def run_grounding(conn, jurisdiction_ids: Optional[List] = None) -> Dict:
     per_jur: Dict = defaultdict(lambda: defaultdict(int))
     totals = {"grounded_rows": len(rows), VALUE_IN_TEXT: 0, VALUE_NOT_IN_TEXT: 0,
               CORPUS_STUB: 0, VALUE_UNVERIFIABLE: 0, GROUNDED_BUT_WRONG: 0}
-    # row id → (jid, tier-1 verdict) so the golden override can move a contradicted
-    # row out of whatever bucket tier-1 put it in.
+    # row id → (jid, current verdict bucket) so tier-2 overrides can move a row
+    # out of whatever bucket tier-1 put it in.
     verdict_by_row: Dict[Any, Tuple[Any, str]] = {}
+    row_by_id: Dict[Any, Dict] = {r["id"]: r for r in rows}
+    corpus_by_id: Dict[Any, str] = {}
+    # Findings for the two LLM-eligible verdicts are DEFERRED past the tier-2b pass
+    # (the verifier can resolve or override them). {rid: tier-1 res}.
+    pending: Dict[Any, Dict] = {}
 
     for r in rows:
         # The corpus the value was grounded on = the union of its cited excerpts.
         corpus = "\n\n".join(bodies.get(c, "") for c in (r["cited"] or []))
+        corpus_by_id[r["id"]] = corpus
         res = evaluate_row(r["current_value"], r["numeric_value"], corpus)
         verdict = res["verdict"]
         totals[verdict] += 1
         per_jur[r["jurisdiction_id"]][verdict] += 1
         verdict_by_row[r["id"]] = (r["jurisdiction_id"], verdict)
 
-        if verdict == VALUE_NOT_IN_TEXT:
-            findings.append({
-                "suite": "grounding", "finding_type": "grounded_value_not_in_text",
-                "severity": "critical",
-                "jurisdiction_id": r["jurisdiction_id"], "requirement_id": r["id"],
-                "requirement_key": r["requirement_key"], "category": r["category"],
-                "expected": {"tokens_in_cited_text": res["found"] + res["missing"]},
-                "observed": {"current_value": r["current_value"],
-                             "missing_from_text": res["missing"],
-                             "cited": r["cited"]},
-            })
-        elif verdict == CORPUS_STUB:
+        if verdict == CORPUS_STUB:
             findings.append({
                 "suite": "grounding", "finding_type": "grounded_on_stub",
                 "severity": "warn",
@@ -312,22 +310,14 @@ async def run_grounding(conn, jurisdiction_ids: Optional[List] = None) -> Dict:
                 "expected": {"cited_body_chars": f">= {STUB_BODY_THRESHOLD}"},
                 "observed": {"cited_body_chars": res["body_len"], "cited": r["cited"]},
             })
-        elif verdict == VALUE_UNVERIFIABLE:
-            findings.append({
-                "suite": "grounding", "finding_type": "grounded_value_unverifiable",
-                "severity": "info",
-                "jurisdiction_id": r["jurisdiction_id"], "requirement_id": r["id"],
-                "requirement_key": r["requirement_key"], "category": r["category"],
-                "observed": {"current_value": r["current_value"],
-                             "reason": "prose value; tier-1 has no numeric claim to check"},
-            })
+        elif verdict in (VALUE_NOT_IN_TEXT, VALUE_UNVERIFIABLE):
+            pending[r["id"]] = res
+        # VALUE_IN_TEXT: verified, no finding.
 
     # ── Tier-2a: golden cross-check ──────────────────────────────────────────
     # Grounded rows vs hand-verified facts. A contradiction is the wrong VALUE
     # (not just "not in the cited excerpt"), so it overrides the tier-1 verdict
-    # for scoring: move the row out of its tier-1 bucket into grounded_but_wrong.
-    # The tier-1 finding (if the row was also value_not_in_text) stands — distinct
-    # evidence — but the row is only counted once in the score.
+    # for scoring and settles the row (drops it from the pending tier-1 findings).
     grounded_index: Dict[Any, Dict[str, Dict]] = defaultdict(dict)
     for r in rows:
         gk = _grounded_key(r)
@@ -350,16 +340,104 @@ async def run_grounding(conn, jurisdiction_ids: Optional[List] = None) -> Dict:
                 per_jur[old_jid][GROUNDED_BUT_WRONG] += 1
                 totals[GROUNDED_BUT_WRONG] += 1
                 verdict_by_row[rid] = (old_jid, GROUNDED_BUT_WRONG)
+                pending.pop(rid, None)  # golden settled it — no tier-1 finding
+
+    # ── Tier-2b: adversarial LLM verifier (flag-gated, network) ──────────────
+    from app.config import get_settings
+
+    if get_settings().grounding_llm_verifier_enabled and pending:
+        from . import grounding_verifier as gv
+
+        candidates = [
+            {"id": rid, "current_value": row_by_id[rid]["current_value"],
+             "corpus": corpus_by_id[rid]}
+            for rid in list(pending)
+        ]
+        verdicts = await gv.verify_rows(conn, candidates)
+        counts = {"llm_calls": 0, "llm_cache_hits": 0,
+                  "llm_confirmed": 0, "llm_refuted": 0, "llm_unclear": 0}
+        for rid, resd in verdicts.items():
+            v = resd["verdict"]
+            if resd.get("cached"):
+                counts["llm_cache_hits"] += 1
+            elif not resd.get("skipped"):
+                counts["llm_calls"] += 1
+            jid, tier1 = verdict_by_row[rid]
+            r = row_by_id[rid]
+
+            if v == gv.LLM_CONFIRMED:
+                counts["llm_confirmed"] += 1
+                if tier1 == VALUE_UNVERIFIABLE:
+                    # LLM read the prose value in the cited text → now verified.
+                    per_jur[jid][VALUE_UNVERIFIABLE] -= 1
+                    totals[VALUE_UNVERIFIABLE] -= 1
+                    per_jur[jid][VALUE_IN_TEXT] += 1
+                    totals[VALUE_IN_TEXT] += 1
+                    verdict_by_row[rid] = (jid, VALUE_IN_TEXT)
+                    pending.pop(rid, None)
+                else:
+                    # tier1 == VALUE_NOT_IN_TEXT: the pure string check is hard
+                    # evidence the number isn't in the excerpt; LLM agreement does
+                    # not erase it. Keep the tier-1 critical, annotate it.
+                    pending[rid] = {**pending[rid], "_llm": "confirmed"}
+            elif v == gv.LLM_REFUTED:
+                counts["llm_refuted"] += 1
+                per_jur[jid][tier1] -= 1
+                totals[tier1] -= 1
+                per_jur[jid][LLM_REFUTED_BUCKET] += 1
+                totals[LLM_REFUTED_BUCKET] = totals.get(LLM_REFUTED_BUCKET, 0) + 1
+                verdict_by_row[rid] = (jid, LLM_REFUTED_BUCKET)
+                findings.append({
+                    "suite": "grounding", "finding_type": "grounded_value_refuted",
+                    "severity": "critical",
+                    "jurisdiction_id": jid, "requirement_id": rid,
+                    "requirement_key": r["requirement_key"], "category": r["category"],
+                    "observed": {"current_value": r["current_value"],
+                                 "cited": r["cited"],
+                                 "reason": "LLM verifier refuted the value against "
+                                           "its cited text"},
+                })
+                pending.pop(rid, None)  # refuted finding emitted; suppress tier-1
+            else:  # llm_unclear / skipped — tier-1 verdict stands
+                counts["llm_unclear"] += 1
+        totals.update(counts)
+
+    # ── Emit deferred tier-1 findings for rows tier-2 didn't settle ──────────
+    for rid, res in pending.items():
+        r = row_by_id[rid]
+        if res["verdict"] == VALUE_NOT_IN_TEXT:
+            observed = {"current_value": r["current_value"],
+                        "missing_from_text": res["missing"], "cited": r["cited"]}
+            if res.get("_llm"):
+                observed["llm"] = res["_llm"]
+            findings.append({
+                "suite": "grounding", "finding_type": "grounded_value_not_in_text",
+                "severity": "critical",
+                "jurisdiction_id": r["jurisdiction_id"], "requirement_id": r["id"],
+                "requirement_key": r["requirement_key"], "category": r["category"],
+                "expected": {"tokens_in_cited_text": res["found"] + res["missing"]},
+                "observed": observed,
+            })
+        else:  # VALUE_UNVERIFIABLE
+            findings.append({
+                "suite": "grounding", "finding_type": "grounded_value_unverifiable",
+                "severity": "info",
+                "jurisdiction_id": r["jurisdiction_id"], "requirement_id": r["id"],
+                "requirement_key": r["requirement_key"], "category": r["category"],
+                "observed": {"current_value": r["current_value"],
+                             "reason": "prose value; tier-1 has no numeric claim to check"},
+            })
 
     from .scoring import grounding_score
 
     results = {
         jid: {
-            # a golden contradiction counts against grounding just like a
-            # not-in-text miss does.
+            # golden contradictions + LLM refutals count against grounding just
+            # like a not-in-text miss does.
             "score": grounding_score(
                 counts[VALUE_IN_TEXT],
-                counts[VALUE_NOT_IN_TEXT] + counts.get(GROUNDED_BUT_WRONG, 0),
+                counts[VALUE_NOT_IN_TEXT] + counts.get(GROUNDED_BUT_WRONG, 0)
+                + counts.get(LLM_REFUTED_BUCKET, 0),
             ),
             "detail": {"verdict_counts": dict(counts)},
         }
