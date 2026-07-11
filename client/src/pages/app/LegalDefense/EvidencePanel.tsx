@@ -14,7 +14,7 @@ export function EvidencePanel({ evidence }: { evidence: EvidencePreview | null }
   const [selected, setSelected] = useState<ViewerTarget | null>(null)
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="flex flex-col">
       <div className="flex items-baseline justify-between px-4 pb-2 pt-4">
         <span className="inline-flex items-center gap-1.5">
           <span className={LABEL}>Evidence</span>
@@ -24,7 +24,7 @@ export function EvidencePanel({ evidence }: { evidence: EvidencePreview | null }
           {evidence ? `${evidence.total} records` : '…'}
         </span>
       </div>
-      <div className="flex-1 overflow-y-auto">
+      <div>
         {!evidence ? (
           <p className="px-4 py-2 text-xs text-zinc-600">Loading the record…</p>
         ) : evidence.total === 0 ? (
