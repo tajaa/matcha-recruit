@@ -5,12 +5,20 @@ import { Button, Input, Textarea } from '../../components/ui'
 
 // -- Types -------------------------------------------------------------------
 
+interface DriftInfo {
+  drift_id: string; change_type: 'amended' | 'removed'; citation: string
+  detected_at: string | null; prior_change_status: string | null
+}
+
 interface JurisdictionEntry {
   requirement_id: string; jurisdiction_id: string; state: string; city: string | null
   display_name: string; level: string; title: string; description: string | null
   current_value: string | null; previous_value: string | null; previous_description: string | null
   change_status: 'new' | 'changed' | 'unchanged' | 'needs_review' | null
   effective_date: string | null; source_url: string | null; source_name: string | null
+  source_url_status: 'unchecked' | 'ok' | 'dead' | null
+  statute_citation: string | null; citation_item_id: string | null; citation_verified: boolean
+  drift: DriftInfo | null
   requires_written_policy: boolean; last_verified_at: string | null; last_changed_at: string | null
 }
 
@@ -62,6 +70,63 @@ function VarianceBadge({ variance }: { variance: string }) {
   return <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800/50 text-zinc-500">{variance}</span>
 }
 
+// Registry-verified statute citation. Emerald shield = stamped from a real
+// authority_index_item; zinc = a citation with no registry backing (unverified).
+function CitationCell({ j, onView }: { j: JurisdictionEntry; onView: () => void }) {
+  if (!j.statute_citation) return <span className="text-zinc-600 text-xs">—</span>
+  const verified = j.citation_verified
+  return (
+    <button
+      onClick={(e) => { e.stopPropagation(); if (j.citation_item_id) onView() }}
+      title={verified ? 'Registry-verified against the authority text' : 'Citation not registry-verified'}
+      className={`text-[11px] font-mono inline-flex items-center gap-1 ${j.citation_item_id ? 'hover:underline' : 'cursor-default'} ${verified ? 'text-emerald-400' : 'text-zinc-400'}`}
+    >
+      {verified ? '✓' : '○'} {truncate(j.statute_citation, 26)}
+    </button>
+  )
+}
+
+// Statute reader — fetches the fetched body text for one authority item.
+function StatuteDrawer({ itemId, onClose }: { itemId: string; onClose: () => void }) {
+  const [body, setBody] = useState<{ citation: string; heading: string | null; body_text: string | null; body_source_url: string | null; index_name: string } | null>(null)
+  const [loading, setLoading] = useState(true)
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    api.get<typeof body>(`/admin/scope-registry/items/${itemId}/body`)
+      .then((d) => { if (!cancelled) setBody(d) })
+      .catch(() => { if (!cancelled) setBody(null) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [itemId])
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end bg-black/40" onClick={onClose}>
+      <div className="w-full max-w-xl h-full bg-zinc-950 border-l border-zinc-800 overflow-y-auto p-5" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start justify-between gap-3 mb-3">
+          <div>
+            <div className="font-mono text-sm text-emerald-400">{body?.citation ?? 'Statute'}</div>
+            {body?.heading && <div className="text-sm text-zinc-300 mt-0.5">{body.heading}</div>}
+            {body?.index_name && <div className="text-xs text-zinc-500 mt-0.5">{body.index_name}</div>}
+          </div>
+          <button className="text-zinc-500 hover:text-zinc-200 text-lg leading-none" onClick={onClose}>×</button>
+        </div>
+        {loading ? (
+          <div className="text-zinc-500 text-sm py-8 text-center">Loading statute text…</div>
+        ) : body?.body_text ? (
+          <>
+            {body.body_source_url && (
+              <a href={body.body_source_url} target="_blank" rel="noreferrer" className="text-blue-400 hover:underline text-xs">View at source ↗</a>
+            )}
+            <pre className="whitespace-pre-wrap text-xs text-zinc-300 mt-3 leading-relaxed font-sans">{body.body_text}</pre>
+          </>
+        ) : (
+          <div className="text-zinc-500 text-sm py-8 text-center">No fetched text for this citation yet.</div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // -- Component ---------------------------------------------------------------
 
 export default function PolicyDetailPage() {
@@ -76,6 +141,23 @@ export default function PolicyDetailPage() {
   const [search, setSearch] = useState('')
   const [stateFilter, setStateFilter] = useState('')
   const [cityFilter, setCityFilter] = useState('')
+  const [statuteItemId, setStatuteItemId] = useState<string | null>(null)
+  const [resolvingId, setResolvingId] = useState<string | null>(null)
+
+  async function resolveReview(j: JurisdictionEntry) {
+    if (!data) return
+    setResolvingId(j.requirement_id)
+    try {
+      const res = await api.post<{ change_status: string }>(`/admin/jurisdictions/requirements/${j.requirement_id}/resolve-review`, {})
+      setData({
+        ...data,
+        jurisdictions: data.jurisdictions.map((x) =>
+          x.requirement_id === j.requirement_id
+            ? { ...x, change_status: res.change_status as JurisdictionEntry['change_status'], drift: null }
+            : x),
+      })
+    } finally { setResolvingId(null) }
+  }
 
   useEffect(() => {
     if (!id) return
@@ -224,7 +306,8 @@ export default function PolicyDetailPage() {
               <th className="px-3 py-2">Jurisdiction</th>
               <th className="px-3 py-2">Title</th>
               <th className="px-3 py-2 w-44">Value</th>
-              <th className="px-3 py-2 w-28">Eff. Date</th>
+              <th className="px-3 py-2 w-40">Citation</th>
+              <th className="px-3 py-2 w-24">Eff. Date</th>
               <th className="px-3 py-2 w-20">Status</th>
               <th className="px-3 py-2 w-28">Verified</th>
               <th className="px-3 py-2 w-20">Actions</th>
@@ -244,6 +327,9 @@ export default function PolicyDetailPage() {
                 onEdit={() => startEditing(j)}
                 onSave={saveEdit}
                 onCancel={() => setEditingId(null)}
+                onViewStatute={() => j.citation_item_id && setStatuteItemId(j.citation_item_id)}
+                onResolve={() => resolveReview(j)}
+                resolving={resolvingId === j.requirement_id}
               />
             ))}
           </tbody>
@@ -295,21 +381,24 @@ export default function PolicyDetailPage() {
           )
         )}
       </div>
+
+      {statuteItemId && <StatuteDrawer itemId={statuteItemId} onClose={() => setStatuteItemId(null)} />}
     </div>
   )
 }
 
 // -- Jurisdiction row --------------------------------------------------------
 
-function JurisdictionRow({ j, expanded, editing, editForm, setEditForm, saving, onToggle, onEdit, onSave, onCancel }: {
+function JurisdictionRow({ j, expanded, editing, editForm, setEditForm, saving, onToggle, onEdit, onSave, onCancel, onViewStatute, onResolve, resolving }: {
   j: JurisdictionEntry; expanded: boolean; editing: boolean; editForm: EditForm
   setEditForm: (f: EditForm) => void; saving: boolean
   onToggle: () => void; onEdit: () => void; onSave: () => void; onCancel: () => void
+  onViewStatute: () => void; onResolve: () => void; resolving: boolean
 }) {
   if (editing) {
     return (
       <tr>
-        <td colSpan={7} className="px-4 py-3 bg-zinc-900/50">
+        <td colSpan={8} className="px-4 py-3 bg-zinc-900/50">
           <div className="space-y-2">
             <div className="text-xs text-zinc-400 font-medium mb-1">{j.display_name}</div>
             <Input label="Title" value={editForm.title} onChange={(e) => setEditForm({ ...editForm, title: e.target.value })} />
@@ -338,6 +427,7 @@ function JurisdictionRow({ j, expanded, editing, editForm, setEditForm, saving, 
         <td className="px-3 py-2 text-zinc-200">{j.display_name}</td>
         <td className="px-3 py-2 text-zinc-300 text-xs">{truncate(j.title, 50)}</td>
         <td className="px-3 py-2 text-xs text-zinc-400 font-mono">{truncate(j.current_value, 30)}</td>
+        <td className="px-3 py-2"><CitationCell j={j} onView={onViewStatute} /></td>
         <td className="px-3 py-2 text-xs text-zinc-500">{fmtDate(j.effective_date)}</td>
         <td className="px-3 py-2"><StatusBadge status={j.change_status} /></td>
         <td className="px-3 py-2 text-xs text-zinc-500">{fmtDate(j.last_verified_at)}</td>
@@ -350,12 +440,40 @@ function JurisdictionRow({ j, expanded, editing, editForm, setEditForm, saving, 
       </tr>
       {expanded && (
         <tr className="bg-zinc-800/20">
-          <td colSpan={7} className="px-6 py-3 text-xs text-zinc-400 space-y-2">
+          <td colSpan={8} className="px-6 py-3 text-xs text-zinc-400 space-y-2">
+            {/* Drift: the authority behind this row's value changed upstream. */}
+            {j.change_status === 'needs_review' && j.drift && (
+              <div className="flex items-center gap-2 rounded border border-purple-500/30 bg-purple-500/10 px-3 py-2">
+                <span className="text-purple-300">
+                  Law changed — <span className="font-mono">{j.drift.citation}</span> was {j.drift.change_type} upstream. Re-check this value against the authority.
+                </span>
+                <button
+                  disabled={resolving}
+                  onClick={(e) => { e.stopPropagation(); onResolve() }}
+                  className="ml-auto text-[11px] px-2 py-1 rounded bg-purple-500/20 text-purple-200 hover:bg-purple-500/30 disabled:opacity-50"
+                >{resolving ? 'Resolving…' : 'Mark reviewed'}</button>
+              </div>
+            )}
+            {j.statute_citation && (
+              <p className="flex items-center gap-2">
+                <span className="text-zinc-500">Authority:</span>{' '}
+                <button
+                  onClick={(e) => { e.stopPropagation(); if (j.citation_item_id) onViewStatute() }}
+                  className={`font-mono ${j.citation_item_id ? 'hover:underline' : 'cursor-default'} ${j.citation_verified ? 'text-emerald-400' : 'text-zinc-400'}`}
+                >{j.citation_verified ? '✓ ' : '○ '}{j.statute_citation}</button>
+                {j.citation_verified
+                  ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400">verified</span>
+                  : <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-700/40 text-zinc-400">unverified</span>}
+              </p>
+            )}
             {j.description && <p>{j.description}</p>}
             {j.source_url && (
-              <p>
+              <p className="flex items-center gap-1.5">
                 <span className="text-zinc-500">Source:</span>{' '}
                 <a href={j.source_url} target="_blank" rel="noreferrer" className="text-blue-400 hover:underline">{j.source_name || j.source_url}</a>
+                {j.source_url_status === 'dead' && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-500/15 text-red-400" title="This source link failed its last liveness check. The citation is kept so it can be re-verified once the authority fixes or moves the page.">link broken</span>
+                )}
               </p>
             )}
             {j.change_status === 'changed' && (

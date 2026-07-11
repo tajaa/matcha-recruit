@@ -426,6 +426,7 @@ export default function ScopeStudio() {
     new_amendment_date: string | null
     detected_at: string
     status: 'open' | 'acknowledged'
+    affected_requirements: number
   }
   const [drift, setDrift] = useState<{ drift: DriftRow[]; open_count: number } | null>(null)
   const [driftError, setDriftError] = useState<string | null>(null)
@@ -1322,6 +1323,7 @@ export default function ScopeStudio() {
                   <th className="py-2">Change</th>
                   <th className="py-2">Citation</th>
                   <th className="py-2">Index</th>
+                  <th className="py-2">Affected</th>
                   <th className="py-2">Detected</th>
                   <th className="py-2" />
                 </tr>
@@ -1339,6 +1341,16 @@ export default function ScopeStudio() {
                       {d.heading && <span className="text-zinc-500"> — {d.heading}</span>}
                     </td>
                     <td className="py-1.5 text-xs text-zinc-400">{d.index_slug}</td>
+                    <td className="py-1.5 text-xs">
+                      {d.affected_requirements > 0 ? (
+                        <span className="rounded bg-purple-500/15 px-1.5 py-0.5 text-[10px] text-purple-300"
+                              title="Codified policy rows flagged needs_review by this change">
+                          {d.affected_requirements} {d.affected_requirements === 1 ? 'policy' : 'policies'}
+                        </span>
+                      ) : (
+                        <span className="text-zinc-600">—</span>
+                      )}
+                    </td>
                     <td className="py-1.5 text-xs text-zinc-500">{d.detected_at.slice(0, 10)}</td>
                     <td className="py-1.5 text-right">
                       {d.status === 'open' ? (

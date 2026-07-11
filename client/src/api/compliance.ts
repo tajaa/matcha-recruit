@@ -272,6 +272,9 @@ export interface QualityRequirement {
   completeness_score: number
   staleness_days: number | null
   research_source: string | null
+  statute_citation?: string | null
+  citation_verified?: boolean
+  change_status?: string | null
 }
 
 export interface QualityAuditSummary {
@@ -280,6 +283,10 @@ export interface QualityAuditSummary {
   stale_count: number
   missing_source_url: number
   dead_source_url?: number
+  verified_citation?: number
+  unverified_citation?: number
+  gemini_unverified?: number
+  needs_review?: number
   tier_breakdown: Record<string, number>
   provenance_breakdown: Record<string, number>
 }
@@ -312,6 +319,8 @@ export function fetchQualityAudit(params: {
   stale_only?: boolean
   tier?: string
   source?: string
+  citation?: 'verified' | 'unverified'
+  needs_review?: boolean
   limit?: number
   offset?: number
 }): Promise<QualityAuditResponse> {
@@ -323,6 +332,8 @@ export function fetchQualityAudit(params: {
   if (params.stale_only) searchParams.set('stale_only', 'true')
   if (params.tier) searchParams.set('tier', params.tier)
   if (params.source) searchParams.set('source', params.source)
+  if (params.citation) searchParams.set('citation', params.citation)
+  if (params.needs_review) searchParams.set('needs_review', 'true')
   if (params.limit != null) searchParams.set('limit', String(params.limit))
   if (params.offset != null) searchParams.set('offset', String(params.offset))
 

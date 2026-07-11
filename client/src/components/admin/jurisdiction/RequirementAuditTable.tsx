@@ -59,6 +59,7 @@ function qualityFlags(req: QualityRequirement) {
   if (!req.source_url) flags.push('🔗')
   if (req.source_url && req.source_url_status === 'dead') flags.push('🔗💀 dead')
   if (!req.effective_date) flags.push('📅')
+  if (req.change_status === 'needs_review') flags.push('⚖ review')
   if (flags.length === 0) return null
   return <span className="text-[10px] text-zinc-500 space-x-1">{flags.join(' ')}</span>
 }
@@ -71,6 +72,7 @@ export default function RequirementAuditTable({ onEditRequirement }: Requirement
   const [filterState, setFilterState] = useState('')
   const [filterCategory, setFilterCategory] = useState('')
   const [filterSource, setFilterSource] = useState<SourceFilter>('All')
+  const [filterCitation, setFilterCitation] = useState<'All' | 'Verified' | 'Unverified'>('All')
   const [staleOnly, setStaleOnly] = useState(false)
   const [sortKey, setSortKey] = useState<SortKey>('completeness')
   const [sortDir, setSortDir] = useState<SortDir>('asc')
@@ -103,6 +105,8 @@ export default function RequirementAuditTable({ onEditRequirement }: Requirement
     if (filterState) rows = rows.filter((r) => r.state === filterState)
     if (filterCategory) rows = rows.filter((r) => r.category === filterCategory)
     if (staleOnly) rows = rows.filter((r) => r.staleness_days != null && r.staleness_days > 90)
+    if (filterCitation === 'Verified') rows = rows.filter((r) => r.citation_verified)
+    else if (filterCitation === 'Unverified') rows = rows.filter((r) => !r.citation_verified)
     if (filterSource !== 'All') {
       const sourceMap: Record<string, string> = {
         API: 'official_api',
@@ -117,7 +121,7 @@ export default function RequirementAuditTable({ onEditRequirement }: Requirement
       })
     }
     return rows
-  }, [data, filterState, filterCategory, staleOnly, filterSource])
+  }, [data, filterState, filterCategory, staleOnly, filterSource, filterCitation])
 
   const sorted = useMemo(() => {
     const arr = [...filtered]
@@ -177,6 +181,15 @@ export default function RequirementAuditTable({ onEditRequirement }: Requirement
         <span title="source_url failed its last liveness check — retained for re-verification">
           Dead URL: <span className={`font-mono ${(data.summary.dead_source_url ?? 0) > 0 ? 'text-red-400' : 'text-emerald-400'}`}>{data.summary.dead_source_url ?? 0}</span>
         </span>
+        <span title="statute_citation stamped from a real authority_index_item">
+          Verified cites: <span className="font-mono text-emerald-400">{data.summary.verified_citation ?? 0}</span>
+        </span>
+        <span title="Gemini-sourced rows with no registry-verified citation — the re-verify queue">
+          Gemini unverified: <span className={`font-mono ${(data.summary.gemini_unverified ?? 0) > 0 ? 'text-violet-400' : 'text-emerald-400'}`}>{data.summary.gemini_unverified ?? 0}</span>
+        </span>
+        <span title="Flagged needs_review by an upstream authority change">
+          Needs review: <span className={`font-mono ${(data.summary.needs_review ?? 0) > 0 ? 'text-purple-400' : 'text-emerald-400'}`}>{data.summary.needs_review ?? 0}</span>
+        </span>
       </div>
 
       {/* Filter bar */}
@@ -207,6 +220,16 @@ export default function RequirementAuditTable({ onEditRequirement }: Requirement
           {(['All', 'API', 'Gemini', 'Skill', 'Manual', 'Unknown'] as SourceFilter[]).map((s) => (
             <option key={s} value={s}>{s}</option>
           ))}
+        </select>
+        <select
+          value={filterCitation}
+          onChange={(e) => { setFilterCitation(e.target.value as 'All' | 'Verified' | 'Unverified'); setPage(0) }}
+          className="bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-300 text-xs px-2.5 py-1.5"
+          title="Registry-verified statute citation"
+        >
+          <option value="All">All citations</option>
+          <option value="Verified">Verified cite</option>
+          <option value="Unverified">Unverified cite</option>
         </select>
         <button
           type="button"

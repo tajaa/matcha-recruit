@@ -5060,6 +5060,8 @@ async def get_policy_detail(key_definition_id: UUID):
             SELECT jr.id, jr.jurisdiction_id, jr.title, jr.description,
                    jr.current_value, jr.previous_value, jr.previous_description,
                    jr.change_status, jr.effective_date, jr.source_url, jr.source_name,
+                   jr.source_url_status, jr.statute_citation, jr.citation_item_id,
+                   jr.citation_verified_at, jr.metadata->'drift' AS drift,
                    jr.last_verified_at, jr.last_changed_at, jr.requires_written_policy,
                    j.city, j.state, j.display_name, j.level::text AS jur_level
             FROM jurisdiction_requirements jr
@@ -5117,6 +5119,11 @@ async def get_policy_detail(key_definition_id: UUID):
                     "effective_date": fmt_date(r["effective_date"]),
                     "source_url": r["source_url"],
                     "source_name": r["source_name"],
+                    "source_url_status": r["source_url_status"],
+                    "statute_citation": r["statute_citation"],
+                    "citation_item_id": str(r["citation_item_id"]) if r["citation_item_id"] else None,
+                    "citation_verified": r["citation_verified_at"] is not None,
+                    "drift": _row_metadata(r["drift"]) or None,
                     "requires_written_policy": r["requires_written_policy"],
                     "last_verified_at": fmt_date(r["last_verified_at"]),
                     "last_changed_at": fmt_date(r["last_changed_at"]),
