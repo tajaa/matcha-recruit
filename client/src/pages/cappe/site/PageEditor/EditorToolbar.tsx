@@ -1,4 +1,5 @@
 import { ArrowLeft, Loader2, MousePointerClick, Pencil, Redo2, Save, Undo2 } from 'lucide-react'
+import { EditorHelp } from './EditorHelp'
 import { PromosPanel } from './PromosPanel'
 import { ThemeMenu } from './ThemeMenu'
 import type { useThemeEditor } from './useThemeEditor'
@@ -55,6 +56,9 @@ export function EditorToolbar({
           <button onClick={onUndo} disabled={!canUndo} title="Undo (⌘Z)" className="rounded-md px-1.5 py-1 text-zinc-400 hover:text-zinc-100 disabled:opacity-30"><Undo2 className="h-4 w-4" /></button>
           <button onClick={onRedo} disabled={!canRedo} title="Redo (⌘⇧Z)" className="rounded-md px-1.5 py-1 text-zinc-400 hover:text-zinc-100 disabled:opacity-30"><Redo2 className="h-4 w-4" /></button>
         </div>
+
+        {/* "What can I do here?" helper */}
+        <EditorHelp designerUnlocked={designerUnlocked} />
 
         {/* Site-wide promos (announcement bar + pop-up) */}
         <PromosPanel meta={meta} premium={designerUnlocked} dirty={promosDirty} onChange={(m) => { setMeta(m); setPromosDirty(true) }} />

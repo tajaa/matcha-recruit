@@ -1,4 +1,5 @@
-import { Check, Palette, Sparkles, Wand2 } from 'lucide-react'
+import { useEffect } from 'react'
+import { Check, Palette, Sparkles, Wand2, X } from 'lucide-react'
 import { CAPPE_THEMES, FONT_PAIRINGS, RADII } from '../../../../data/cappeThemes'
 import { CappeFontPicker } from './CappeFontPicker'
 import { DCheck, DNum, DSelect, GradientPicker, PremiumLock } from './DesignPrimitives'
@@ -31,6 +32,14 @@ export function ThemeMenu({ themeEditor, designerUnlocked }: {
   const numOr = (k: string, def: number) => Number(style[k]) || def
   const setNum = (k: string, v: number, def: number) => setStyleKey(k, v === def ? '' : v)
 
+  // Close the docked drawer on Escape.
+  useEffect(() => {
+    if (!themeOpen) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setThemeOpen(false) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [themeOpen, setThemeOpen])
+
   return (
     <div className="relative">
       <button
@@ -41,9 +50,13 @@ export function ThemeMenu({ themeEditor, designerUnlocked }: {
       </button>
       {themeOpen && (
         <>
-          <div className="fixed inset-0 z-20" onClick={() => setThemeOpen(false)} />
-          <div className="absolute right-0 z-30 mt-1 max-h-[80vh] w-80 overflow-y-auto rounded-xl border border-zinc-700 bg-zinc-900 p-3 shadow-2xl shadow-black/50">
-            <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Theme</p>
+          {/* Docked right drawer (not an overlay) so the live preview stays fully
+              visible to its left — the editor content pads right to make room. */}
+          <div className="fixed right-0 top-14 bottom-0 z-40 flex w-[21rem] flex-col overflow-y-auto border-l border-zinc-800 bg-zinc-900 p-3 shadow-2xl shadow-black/50">
+            <div className="mb-1 flex items-center justify-between">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Theme</p>
+              <button onClick={() => setThemeOpen(false)} className="rounded p-0.5 text-zinc-500 hover:text-zinc-200" title="Close (Esc)"><X className="h-4 w-4" /></button>
+            </div>
             <div className="grid grid-cols-3 gap-1.5">
               {CAPPE_THEMES.map((preset) => {
                 const active = theme.preset === preset.id
@@ -66,6 +79,22 @@ export function ThemeMenu({ themeEditor, designerUnlocked }: {
                 )
               })}
             </div>
+
+            {/* Your saved looks — sit right under the built-in presets since both
+                apply a whole-site look in one click. */}
+            {designerUnlocked && (
+              <div className="mt-3 border-t border-zinc-800 pt-3">
+                <StylePresetsPanel
+                  kind="theme"
+                  label="Your saved looks"
+                  currentData={theme}
+                  // Replace (not merge): a saved look is a full theme, so switching
+                  // between them must reset keys the target look doesn't set —
+                  // otherwise the current theme's values bleed through.
+                  onApply={(data) => { loadTheme(data); markDirty() }}
+                />
+              </div>
+            )}
 
             <div className="mt-3 space-y-2.5 border-t border-zinc-800 pt-3">
               <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Tweak</p>
@@ -171,15 +200,6 @@ export function ThemeMenu({ themeEditor, designerUnlocked }: {
                     <DNum label="Header padding (px)" value={numOr('headerPad', 17)} min={8} max={28} onChange={(v) => setNum('headerPad', v, 17)} />
                     <DNum label="Brand size (px)" value={numOr('brandSize', 19)} min={14} max={32} onChange={(v) => setNum('brandSize', v, 19)} />
                     <DNum label="Footer padding (px)" value={numOr('footerPad', 40)} min={16} max={80} step={2} onChange={(v) => setNum('footerPad', v, 40)} />
-                  </div>
-
-                  <div className="border-t border-zinc-800 pt-2.5">
-                    <StylePresetsPanel
-                      kind="theme"
-                      label="Saved themes"
-                      currentData={theme}
-                      onApply={(data) => { loadTheme({ ...theme, ...data }); markDirty() }}
-                    />
                   </div>
                 </>
               )}

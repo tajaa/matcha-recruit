@@ -234,6 +234,12 @@ export default function PageEditor() {
           canRedo={history.canRedo}
         />
 
+        {/* Shift the preview/canvas left of the Theme drawer so nothing hides
+            behind it while you tune the look. */}
+        <div
+          className="flex min-h-0 flex-1 transition-[padding] duration-200 ease-out"
+          style={{ paddingRight: themeEditor.themeOpen ? '21rem' : undefined }}
+        >
         {editMode === 'canvas' ? (
           /* canvas: click a section on the page → a floating editor pops up at it (Pro & Business) */
           <CanvasModeView
@@ -266,6 +272,7 @@ export default function PageEditor() {
             canPasteStyle={!!styleClip}
           />
         )}
+        </div>
       </div>
     </SiteCtx.Provider>
   )
