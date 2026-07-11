@@ -26,6 +26,12 @@ from app.matcha.models.ir_incident import (
     Osha300ASaveRequest,
     OshaPrivacyCaseEntry,
     OshaRecordabilityUpdate,
+    ItaCredentialUpdate,
+    ItaCredentialStatus,
+    ItaSubmitRequest,
+    ItaSubmitResponse,
+    ItaSubmission,
+    ItaSubmissionListResponse,
 )
 from ._shared import (
     log_audit,
@@ -1221,6 +1227,189 @@ async def export_ita_csv(
         media_type="text/csv",
         headers={"Content-Disposition": f"attachment; filename=osha_ita_{year}.csv"},
     )
+
+
+@router.get("/osha/ita/credentials", response_model=ItaCredentialStatus)
+async def get_ita_credentials_status(
+    current_user=Depends(require_admin_or_client),
+):
+    """Whether an OSHA ITA API token is on file. Never returns the token."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=400, detail="No company associated with user")
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            "SELECT updated_at FROM osha_ita_credentials WHERE company_id = $1",
+            company_id,
+        )
+    return ItaCredentialStatus(configured=row is not None, updated_at=row["updated_at"] if row else None)
+
+
+@router.put("/osha/ita/credentials", response_model=ItaCredentialStatus)
+async def set_ita_credentials(
+    payload: ItaCredentialUpdate,
+    current_user=Depends(require_admin_or_client),
+):
+    """Store/replace the company's OSHA ITA API token (encrypted at rest)."""
+    from app.core.services.secret_crypto import encrypt_secret
+
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=400, detail="No company associated with user")
+
+    token = (payload.api_token or "").strip()
+    if not token:
+        raise HTTPException(status_code=400, detail="API token is required")
+
+    encrypted = encrypt_secret(token)
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            INSERT INTO osha_ita_credentials (company_id, api_token, created_by, updated_at)
+            VALUES ($1, $2, $3, NOW())
+            ON CONFLICT (company_id) DO UPDATE
+                SET api_token = EXCLUDED.api_token, updated_at = NOW()
+            RETURNING updated_at
+            """,
+            company_id, encrypted, str(current_user.id),
+        )
+        # Never log the token — only that credentials were set.
+        await log_audit(
+            conn, None, str(current_user.id), "osha_ita_credentials_set",
+            entity_type="osha_ita", entity_id=None, details=None,
+        )
+    return ItaCredentialStatus(configured=True, updated_at=row["updated_at"])
+
+
+@router.post("/osha/ita/submit", response_model=ItaSubmitResponse)
+async def submit_ita(
+    payload: ItaSubmitRequest,
+    current_user=Depends(require_admin_or_client),
+):
+    """Directly file the ITA Establishment-and-Summary batch via the OSHA API.
+
+    Same reviewer-attestation + field-validation gates as the CSV export, then a
+    single API call whose numbers are byte-identical to the validated CSV. Every
+    attempt is recorded in osha_ita_submissions for an auditable filing history.
+    A missing/invalid token yields a clean `not_configured` result, not a 500.
+    """
+    from app.matcha.services.ir_ita_submission import submit_establishments
+
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=400, detail="No company associated with user")
+
+    year = payload.year
+    async with get_connection() as conn:
+        # Reviewer attestation (403 + disclaimer when not attested) — same gate
+        # as every OSHA export, since this IS the filing.
+        await _attest_export(conn, current_user, form="ita_submit", year=year, attested=payload.attested)
+
+        establishments = await _gather_ita_establishments(conn, company_id, year)
+        if not establishments:
+            raise HTTPException(
+                status_code=400,
+                detail="No active business locations to file. Add at least one establishment.",
+            )
+
+        problems = []
+        for est in establishments:
+            missing = _missing_ita_fields(est)
+            if missing:
+                problems.append({
+                    "location_id": est["location_id"],
+                    "establishment_name": est["establishment_name"],
+                    "missing": missing,
+                })
+        if problems:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "message": "Cannot submit ITA filing — establishments are missing required fields.",
+                    "establishments": problems,
+                },
+            )
+
+        token_row = await conn.fetchrow(
+            "SELECT api_token FROM osha_ita_credentials WHERE company_id = $1",
+            company_id,
+        )
+        encrypted_token = token_row["api_token"] if token_row else None
+
+        result = await submit_establishments(encrypted_token, establishments, year)
+
+        # Persist every attempt (including not_configured) for the filing history.
+        row = await conn.fetchrow(
+            """
+            INSERT INTO osha_ita_submissions
+                (company_id, location_id, year, status, ita_submission_id,
+                 establishment_count, response_payload, error_detail, submitted_by)
+            VALUES ($1, NULL, $2, $3, $4, $5, $6, $7, $8)
+            RETURNING id
+            """,
+            company_id, year, result.status, result.submission_id,
+            len(establishments),
+            json.dumps(result.response) if result.response else None,
+            result.error, str(current_user.id),
+        )
+        await log_audit(
+            conn, None, str(current_user.id), "osha_ita_submitted",
+            entity_type="osha_ita_submission", entity_id=str(row["id"]),
+            details={"year": year, "status": result.status,
+                     "establishment_count": len(establishments)},
+        )
+
+    return ItaSubmitResponse(
+        status=result.status,
+        submission_id=result.submission_id,
+        establishment_count=len(establishments),
+        error=result.error,
+    )
+
+
+@router.get("/osha/ita/submissions", response_model=ItaSubmissionListResponse)
+async def list_ita_submissions(
+    year: Optional[int] = Query(None),
+    current_user=Depends(require_admin_or_client),
+):
+    """ITA filing history for this company (optionally one year)."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=400, detail="No company associated with user")
+
+    params = [company_id]
+    year_clause = ""
+    if year is not None:
+        params.append(year)
+        year_clause = "AND year = $2"
+
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            f"""
+            SELECT id, location_id, year, status, ita_submission_id,
+                   establishment_count, error_detail, submitted_by, submitted_at
+            FROM osha_ita_submissions
+            WHERE company_id = $1 {year_clause}
+            ORDER BY submitted_at DESC
+            LIMIT 100
+            """,
+            *params,
+        )
+    submissions = [
+        ItaSubmission(
+            id=r["id"],
+            location_id=r["location_id"],
+            year=r["year"],
+            status=r["status"],
+            ita_submission_id=r["ita_submission_id"],
+            establishment_count=r["establishment_count"],
+            error_detail=r["error_detail"],
+            submitted_by=r["submitted_by"],
+            submitted_at=r["submitted_at"],
+        )
+        for r in rows
+    ]
+    return ItaSubmissionListResponse(submissions=submissions, total=len(submissions))
 
 
 @router.put("/{incident_id}/osha")

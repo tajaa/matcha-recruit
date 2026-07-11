@@ -4,6 +4,7 @@ import { Badge } from '../ui'
 import type { IRIncident, IRAnalyticsSummary, IRTrendPoint, IRLocationData } from '../../types/ir'
 import { severityLabel, statusLabel, SEVERITY_BADGE, STATUS_BADGE } from '../../types/ir'
 import { IRStatHero } from './IRStatHero'
+import { IRKpiStrip } from './IRKpiStrip'
 
 type Props = {
   incidents: IRIncident[]
@@ -30,6 +31,10 @@ export function IRDashboardTab({ incidents, summary, onNavigate }: Props) {
   return (
     <div className="space-y-8">
       {summary && <IRStatHero summary={summary} />}
+
+      {/* Safety KPIs — TRIR/DART/streak + leading indicators, elevated from
+          the Risk Insights tab onto the primary dashboard. */}
+      <IRKpiStrip />
 
       {/* Weekly trends */}
       {trends.length > 0 && (

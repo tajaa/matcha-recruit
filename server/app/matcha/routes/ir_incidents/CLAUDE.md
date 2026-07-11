@@ -14,6 +14,7 @@ Backend routes for matcha-lite's Incident Reporting product. Package was split f
 | `ai_analysis.py` | Categorize, severity, root-cause, recommendations, similar, policy-mapping, clear-cache | 9 |
 | `investigation_interviews.py` | Create, batch, resend, generate-link, list, cancel witness interviews | 6 |
 | `people.py` | Per-person identity (no-roster): search + per-person role-aware history | 2 |
+| `capa.py` | Structured corrective actions (CAPA): per-incident list/create + per-action update/delete + company-wide open/overdue list. Table `ir_corrective_actions` (migration `ircapa01`); accountable layer over the free-text `corrective_actions` column. Owner/due-date/status/effectiveness. The deadline worker (`ir_deadline_alerts`) chases these. | 5 |
 | `osha.py` | 300/301/300A logs + CSV + **300A PDF + save** + recordability + AI determine + **ITA bulk export/validate** (per-establishment; `_osha_pdf.py` holds the WeasyPrint Form 300A template) | 11 |
 | `documents.py` | Upload, list, delete incident documents | 3 |
 | `anonymous_reporting.py` | Token mgmt: company-wide `/report/:token` + per-location `/intake/:token` magic links | 6 |

@@ -13,6 +13,7 @@ the user can accept inline. Endpoints:
 import asyncio
 import json
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
@@ -1470,6 +1471,69 @@ def _build_recommendations_corrective_card(recs) -> Optional[dict]:
     }
 
 
+# Trailing "(<priority> priority)" tag that _build_recommendations_corrective_card
+# appends to each bullet — parsed back out so the seeded structured rows keep the
+# AI's priority instead of defaulting.
+_ACTION_PRIORITY_RE = re.compile(r"\s*\((immediate|short_term|long_term)\s+priority\)\s*$", re.I)
+
+
+def _parse_action_bullets(field_value) -> list[tuple[str, str]]:
+    """Parse the "• action (priority)" bullets the recommendations card produced
+    into (description, priority) pairs. Pure — unit-tested.
+
+    Non-bullet lines (e.g. the leading summary paragraph) are skipped; a bullet
+    with no recognized priority tag defaults to 'short_term'.
+    """
+    out: list[tuple[str, str]] = []
+    for raw_line in str(field_value or "").splitlines():
+        line = raw_line.strip()
+        if not line.startswith("•"):
+            continue
+        body = line.lstrip("•").strip()
+        priority = "short_term"
+        m = _ACTION_PRIORITY_RE.search(body)
+        if m:
+            priority = m.group(1).lower()
+            body = _ACTION_PRIORITY_RE.sub("", body).strip()
+        if body:
+            out.append((body[:2000], priority))
+    return out
+
+
+async def _seed_structured_corrective_actions(conn, incident_id, company_id, user_id, field_value) -> int:
+    """Materialize the AI's recommended corrective actions as tracked CAPA rows.
+
+    Bridges the free-text recommendations card (which only ever wrote the
+    ir_incidents.corrective_actions notes blob) into structured, owner/due-date/
+    status-tracked ir_corrective_actions rows — one per bulleted action. The text
+    write still happens (back-compat); this is additive.
+
+    Deterministic-parse of the "• action (priority)" bullets the card builder
+    produced. Idempotent-ish: skips seeding if this incident already has any
+    corrective-action row, so re-accepting (or a manual add first) won't duplicate.
+    """
+    if not company_id or not field_value:
+        return 0
+    existing = await conn.fetchval(
+        "SELECT COUNT(*) FROM ir_corrective_actions WHERE incident_id = $1", incident_id
+    )
+    if existing:
+        return 0
+    seeded = 0
+    for body, priority in _parse_action_bullets(field_value):
+        await conn.execute(
+            """
+            INSERT INTO ir_corrective_actions
+                (incident_id, company_id, description, action_type, priority, created_by)
+            VALUES ($1, $2, $3, 'corrective', $4, $5)
+            """,
+            incident_id, str(company_id), body, priority,
+            str(user_id) if user_id else None,
+        )
+        seeded += 1
+    return seeded
+
+
 @router.post("/{incident_id}/copilot/accept")
 async def accept_copilot_card(
     incident_id: UUID,
@@ -1607,6 +1671,25 @@ async def accept_copilot_card(
                             "previous_value": prev,
                             "new_value": new_value,
                         }
+
+                        # Bridge: accepting the AI recommendations card also
+                        # materializes each action as a tracked CAPA row so it
+                        # gets an owner, due date, and the deadline worker's
+                        # follow-through — not just a note in the text column.
+                        if (
+                            db_field == "corrective_actions"
+                            and card.get("id") == "recommendations_corrective_actions"
+                        ):
+                            try:
+                                seeded = await _seed_structured_corrective_actions(
+                                    conn, incident_id, company_id, current_user.id, new_value,
+                                )
+                                if seeded:
+                                    event_extra["structured_actions_created"] = seeded
+                            except Exception as exc:  # never block the text write
+                                logger.warning(
+                                    "Failed to seed structured corrective actions: %s", exc
+                                )
 
                 elif action_type == "run_analysis":
                     analysis_type = _canonical_analysis_type(action.get("analysis_type"))
