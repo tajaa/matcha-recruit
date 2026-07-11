@@ -58,6 +58,19 @@ html[data-app-shell-bg="admin"] {
   background-color: #3f3f46;
 }
 
+/* Noir marketing landing (pages/Home) sets this while mounted — same idea as
+   data-app-shell-bg: overscroll bounce shows noir instead of a white flash,
+   and in-page anchor jumps (the hero scroll cue) glide instead of teleporting. */
+html[data-marketing-noir] {
+  background-color: #0E0E0C;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  html[data-marketing-noir] {
+    scroll-behavior: smooth;
+  }
+}
+
 @keyframes ticker {
   0%   { transform: translateX(0); }
   100% { transform: translateX(-50%); }

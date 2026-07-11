@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { PRODUCTS } from "./data";
 import { ASH, BONE, DISPLAY, LINE_D, NOIR } from "./theme";
+import { Reveal } from "./PageChrome";
 
 export function ProductIndex() {
   const [hovered, setHovered] = useState<number | null>(null);
@@ -9,27 +10,29 @@ export function ProductIndex() {
   return (
     <section id="index" className="scroll-mt-16 py-20 sm:py-28">
       <div className="max-w-[1600px] mx-auto w-full px-6 sm:px-10 lg:px-16 xl:px-24">
-        <div className="flex items-baseline justify-between mb-2">
-          <h2
-            className="text-[11px] tracking-[0.3em] font-mono uppercase"
-            style={{ color: ASH }}
-          >
-            Four ways in
-          </h2>
-          <span
-            className="text-[11px] tracking-[0.3em] font-mono uppercase"
-            style={{ color: ASH }}
-          >
-            Index
-          </span>
-        </div>
+        <Reveal>
+          <div className="flex items-baseline justify-between mb-2">
+            <h2
+              className="text-[11px] tracking-[0.3em] font-mono uppercase"
+              style={{ color: ASH }}
+            >
+              Four ways in
+            </h2>
+            <span
+              className="text-[11px] tracking-[0.3em] font-mono uppercase"
+              style={{ color: ASH }}
+            >
+              Index
+            </span>
+          </div>
+        </Reveal>
 
         <div className="border-t" style={{ borderColor: LINE_D }}>
           {PRODUCTS.map((p, i) => {
             const active = hovered === i;
             return (
+              <Reveal key={p.name} delayMs={Math.min(i * 70, 210)}>
               <Link
-                key={p.name}
                 to={p.to}
                 onMouseEnter={() => setHovered(i)}
                 onMouseLeave={() => setHovered(null)}
@@ -86,6 +89,7 @@ export function ProductIndex() {
                   </span>
                 </span>
               </Link>
+              </Reveal>
             );
           })}
         </div>

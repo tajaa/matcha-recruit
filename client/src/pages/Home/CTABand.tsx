@@ -1,9 +1,10 @@
 import { ASH, BONE, DISPLAY, MATCHA, NOIR } from "./theme";
+import { Reveal } from "./PageChrome";
 
 export function CTABand({ onDemoClick }: { onDemoClick: () => void }) {
   return (
     <section className="py-28 sm:py-40">
-      <div className="max-w-[1400px] mx-auto px-6 sm:px-10 lg:px-16 xl:px-24 text-center">
+      <Reveal className="max-w-[1400px] mx-auto px-6 sm:px-10 lg:px-16 xl:px-24 text-center">
         <h2
           className="tracking-[-0.02em]"
           style={{
@@ -28,7 +29,7 @@ export function CTABand({ onDemoClick }: { onDemoClick: () => void }) {
         <div className="mt-10 flex flex-wrap items-center justify-center gap-5">
           <button
             onClick={onDemoClick}
-            className="inline-flex items-center px-8 rounded-full text-base font-medium transition-transform hover:-translate-y-0.5 cursor-pointer"
+            className="inline-flex items-center px-8 rounded-full text-base font-medium cursor-pointer transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_18px_44px_-16px_rgba(245,242,237,0.35)] active:translate-y-0 active:shadow-none"
             style={{ backgroundColor: MATCHA, color: NOIR, height: 56 }}
           >
             Request a Demo
@@ -42,7 +43,7 @@ export function CTABand({ onDemoClick }: { onDemoClick: () => void }) {
             <span aria-hidden>↑</span>
           </a>
         </div>
-      </div>
+      </Reveal>
     </section>
   );
 }

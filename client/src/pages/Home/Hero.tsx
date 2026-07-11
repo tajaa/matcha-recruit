@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { ChevronDown } from "lucide-react";
-import { ASH, BONE, DISPLAY, LINE_D, MATCHA } from "./theme";
+import { AMBER, ASH, BONE, DISPLAY, LEAF, LINE_D, MATCHA } from "./theme";
 import { useReducedMotion } from "./instruments/shared";
 import { ProductCarousel } from "./ProductCarousel";
 import { StartCapture } from "./StartCapture";
@@ -9,7 +9,7 @@ import { StartCapture } from "./StartCapture";
 // styling (italic accents) that the old static markup had.
 const HEADLINE: { text: string; style?: React.CSSProperties }[] = [
   { text: "We run the whole " },
-  { text: "risk", style: { color: "#D97706", fontStyle: "italic" } },
+  { text: "risk", style: { color: AMBER, fontStyle: "italic" } },
   { text: " & " },
   { text: "people", style: { color: MATCHA, fontStyle: "italic" } },
   { text: " function." },
@@ -29,6 +29,38 @@ const CAROUSEL_DELAY_S = DECK_DELAY_S + 0.55;
 export function Hero() {
   return (
     <section className="relative w-full min-h-[100svh] flex flex-col">
+      {/* Atmosphere — two whisper-quiet radial glows (leaf upper-left, amber
+          lower-right, echoing the headline accents) lift the canvas off flat
+          noir. Kept behind the content by DOM order; blur is baked into the
+          gradients (no filter) so it costs nothing to composite. */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 overflow-hidden"
+      >
+        <div
+          className="absolute"
+          style={{
+            left: "-12%",
+            top: "-18%",
+            width: "62%",
+            height: "72%",
+            background:
+              "radial-gradient(50% 50% at 50% 50%, rgba(163,197,125,0.075) 0%, transparent 70%)",
+          }}
+        />
+        <div
+          className="absolute"
+          style={{
+            right: "-14%",
+            bottom: "-22%",
+            width: "58%",
+            height: "68%",
+            background:
+              "radial-gradient(50% 50% at 50% 50%, rgba(217,119,6,0.055) 0%, transparent 70%)",
+          }}
+        />
+      </div>
+
       {/* Masthead row */}
       <div className="max-w-[1600px] mx-auto w-full px-6 sm:px-10 lg:px-16 xl:px-24 pt-[76px] sm:pt-[84px]">
         <div
@@ -42,7 +74,7 @@ export function Hero() {
             >
               <span
                 className="w-1 h-1 rounded-full shrink-0"
-                style={{ backgroundColor: "#A3C57D" }}
+                style={{ backgroundColor: LEAF }}
               />
               Managing your risk
             </span>
@@ -203,7 +235,7 @@ function TypedHeadline() {
             width: "0.055em",
             height: "0.78em",
             marginLeft: "0.05em",
-            backgroundColor: "#D97706",
+            backgroundColor: AMBER,
           }}
         />
       </h1>

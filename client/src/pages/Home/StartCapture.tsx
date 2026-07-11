@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { ArrowRight } from "lucide-react";
-import { ASH, BONE, LINE_D } from "./theme";
+import { AMBER, ASH, BONE, LINE_D } from "./theme";
 import { QUALIFY_EMAIL_KEY, validateWorkEmail } from "./qualify";
 
 /**
@@ -39,7 +39,7 @@ export function StartCapture() {
 
       <div
         className="flex items-center gap-3 border-b pb-3 transition-colors focus-within:border-[#A3C57D]"
-        style={{ borderColor: error ? "#D97706" : LINE_D }}
+        style={{ borderColor: error ? AMBER : LINE_D }}
       >
         <input
           type="email"
@@ -55,7 +55,7 @@ export function StartCapture() {
         />
         <button
           type="submit"
-          className="group inline-flex items-center gap-3 shrink-0"
+          className="group inline-flex items-center gap-3 shrink-0 cursor-pointer"
         >
           <span
             className="text-[11px] font-mono uppercase tracking-[0.22em]"
@@ -85,7 +85,7 @@ export function StartCapture() {
       />
 
       {error ? (
-        <p role="alert" className="text-xs mt-3" style={{ color: "#D97706" }}>
+        <p role="alert" className="text-xs mt-3" style={{ color: AMBER }}>
           {error}
         </p>
       ) : (

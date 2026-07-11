@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import MarketingNav from "../landing/MarketingNav";
 import MarketingFooter from "../landing/MarketingFooter";
 import { PricingContactModal } from "../../components/PricingContactModal";
@@ -14,6 +14,13 @@ import { CTABand } from "./CTABand";
 export default function Home() {
   const [isPricingOpen, setIsPricingOpen] = useState(false);
 
+  // Noir page chrome while mounted (see index.css) — overscroll bounce stays
+  // noir instead of flashing white, and anchor scrolls glide.
+  useEffect(() => {
+    document.documentElement.setAttribute("data-marketing-noir", "");
+    return () => document.documentElement.removeAttribute("data-marketing-noir");
+  }, []);
+
   useSEO({
     title: "Matcha — Full-Service HR: Platform, Lite, Compliance & Consulting",
     description:
@@ -25,7 +32,7 @@ export default function Home() {
   return (
     <div
       style={{ backgroundColor: NOIR, color: BONE }}
-      className="min-h-screen overflow-x-hidden"
+      className="home-root min-h-screen overflow-x-hidden"
     >
       <PageStyle />
       <GrainOverlay />
@@ -34,7 +41,10 @@ export default function Home() {
         isOpen={isPricingOpen}
         onClose={() => setIsPricingOpen(false)}
       />
-      <MarketingNav onDemoClick={() => setIsPricingOpen(true)} />
+      <MarketingNav
+        onDemoClick={() => setIsPricingOpen(true)}
+        transparentAtTop
+      />
 
       <Hero />
       <ProductIndex />

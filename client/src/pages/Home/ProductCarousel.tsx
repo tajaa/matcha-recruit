@@ -181,7 +181,7 @@ export function ProductCarousel({
             type="button"
             aria-label={`Go to ${s.name}`}
             onClick={() => goTo(i, i > index ? 1 : -1)}
-            className="relative h-1.5 rounded-full overflow-hidden transition-all duration-300"
+            className="relative h-1.5 rounded-full overflow-hidden transition-all duration-300 cursor-pointer"
             style={{
               width: i === index ? 28 : 8,
               backgroundColor: i === index ? "rgba(245,242,237,0.18)" : LINE_D,

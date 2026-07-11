@@ -1,9 +1,13 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { Menu, X, ChevronDown } from "lucide-react";
 
 interface Props {
   onDemoClick?: () => void;
+  /** Start with no bar (transparent, borderless) at the top of the page and
+   * fade the blurred panel in on scroll. Only safe on pages whose top section
+   * is dark (the noir landing) — default off everywhere else. */
+  transparentAtTop?: boolean;
 }
 
 // The four offerings — primary nav, in sales order.
@@ -36,7 +40,10 @@ const EXPLORE_LINKS = [
 const TEXT_COLOR = "#F5F2ED";
 const PANEL_BG = "#161513";
 
-export default function MarketingNav({ onDemoClick }: Props) {
+export default function MarketingNav({
+  onDemoClick,
+  transparentAtTop = false,
+}: Props) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [exploreOpen, setExploreOpen] = useState(false);
   const { pathname } = useLocation();
@@ -46,19 +53,34 @@ export default function MarketingNav({ onDemoClick }: Props) {
     setExploreOpen(false);
   };
 
+  // With transparentAtTop the blurred panel lives on its own layer and fades
+  // in once the visitor scrolls — the hero opens with no chrome at all.
+  const [scrolled, setScrolled] = useState(!transparentAtTop);
+  useEffect(() => {
+    if (!transparentAtTop) return;
+    const onScroll = () => setScrolled(window.scrollY > 24);
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, [transparentAtTop]);
+
+  const panelVisible = scrolled || menuOpen;
+
   return (
     <>
-      <nav
-        className="fixed left-0 right-0 z-50 transition-colors duration-300"
-        style={{
-          top: 0,
-          backgroundColor: "rgba(15, 15, 15, 0.88)",
-          backdropFilter: "blur(14px)",
-          WebkitBackdropFilter: "blur(14px)",
-          borderBottom: "1px solid rgba(245, 242, 237, 0.08)",
-        }}
-      >
-        <div className="max-w-[1440px] mx-auto flex items-center justify-between px-6 sm:px-10 h-16">
+      <nav className="fixed left-0 right-0 top-0 z-50">
+        <div
+          aria-hidden
+          className="absolute inset-0 transition-opacity duration-500"
+          style={{
+            opacity: panelVisible ? 1 : 0,
+            backgroundColor: "rgba(15, 15, 15, 0.88)",
+            backdropFilter: "blur(14px)",
+            WebkitBackdropFilter: "blur(14px)",
+            borderBottom: "1px solid rgba(245, 242, 237, 0.08)",
+          }}
+        />
+        <div className="relative max-w-[1440px] mx-auto flex items-center justify-between px-6 sm:px-10 h-16">
           <Link
             to="/"
             onClick={closeAll}
