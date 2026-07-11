@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from .jurisdiction_chain import resolve_jurisdiction_chain
@@ -360,7 +361,9 @@ def affected_requirement_updates(
         ).append(link)
 
     def _dt_key(v):
-        return v if v is not None else 0
+        # None can't occur in practice (detected_at is NOT NULL DEFAULT NOW()),
+        # but keep the pure fn sound: a real datetime must never be compared to 0.
+        return v if v is not None else datetime.min
 
     updates: Dict[Any, Dict[str, Any]] = {}
     for d in drift_rows:
@@ -423,7 +426,13 @@ async def propagate_drift_to_requirements(conn) -> Dict[str, Any]:
             """
             SELECT i.authority_index_id, i.citation,
                    sc.jurisdiction_requirement_id AS requirement_id,
-                   jr.change_status AS prior_change_status
+                   -- Preserve the ORIGINAL pre-drift status across cascading drift:
+                   -- once a row is already needs_review from an earlier drift, its
+                   -- live change_status is 'needs_review' (only this path sets it),
+                   -- so snapshotting it would overwrite the true restore target. The
+                   -- first drift's breadcrumb already holds the real prior status.
+                   COALESCE(jr.metadata->'drift'->>'prior_change_status',
+                            jr.change_status) AS prior_change_status
             FROM authority_index_items i
             JOIN authority_item_classifications c ON c.item_id = i.id
             JOIN scope_codifications sc ON sc.classification_id = c.id
@@ -435,46 +444,53 @@ async def propagate_drift_to_requirements(conn) -> Dict[str, Any]:
     ]
 
     updates = affected_requirement_updates(drift_rows, links)
+
+    # Flag the affected requirements and stamp propagated_at as one atomic unit:
+    # if the flag succeeds but the stamp doesn't, the next ingest re-processes the
+    # same drift and re-snapshots the (now needs_review) status — the corruption
+    # the COALESCE above defends against. Keeping both writes in one transaction
+    # closes that window.
     flagged = 0
-    if updates:
-        req_ids = list(updates.keys())
-        breadcrumbs = [
-            json.dumps({"drift": {
-                "drift_id": str(updates[r]["drift_id"]),
-                "change_type": updates[r]["change_type"],
-                "citation": updates[r]["citation"],
-                "detected_at": (updates[r]["detected_at"].isoformat()
-                                if hasattr(updates[r]["detected_at"], "isoformat")
-                                else updates[r]["detected_at"]),
-                "prior_change_status": updates[r]["prior_change_status"],
-            }})
-            for r in req_ids
-        ]
-        flagged = await conn.fetchval(
+    async with conn.transaction():
+        if updates:
+            req_ids = list(updates.keys())
+            breadcrumbs = [
+                json.dumps({"drift": {
+                    "drift_id": str(updates[r]["drift_id"]),
+                    "change_type": updates[r]["change_type"],
+                    "citation": updates[r]["citation"],
+                    "detected_at": (updates[r]["detected_at"].isoformat()
+                                    if hasattr(updates[r]["detected_at"], "isoformat")
+                                    else updates[r]["detected_at"]),
+                    "prior_change_status": updates[r]["prior_change_status"],
+                }})
+                for r in req_ids
+            ]
+            flagged = await conn.fetchval(
+                """
+                WITH u AS (
+                    UPDATE jurisdiction_requirements AS jr
+                    SET change_status = 'needs_review',
+                        metadata = COALESCE(jr.metadata, '{}'::jsonb) || t.crumb::jsonb,
+                        updated_at = NOW()
+                    FROM unnest($1::uuid[], $2::jsonb[]) AS t(req_id, crumb)
+                    WHERE jr.id = t.req_id
+                    RETURNING 1
+                ) SELECT COUNT(*) FROM u
+                """,
+                req_ids, breadcrumbs,
+            )
+
+        # Stamp every unpropagated drift row (amended/removed we just processed,
+        # plus any 'new' rows) so the worklist drains.
+        processed = await conn.fetchval(
             """
             WITH u AS (
-                UPDATE jurisdiction_requirements AS jr
-                SET change_status = 'needs_review',
-                    metadata = COALESCE(jr.metadata, '{}'::jsonb) || t.crumb::jsonb,
-                    updated_at = NOW()
-                FROM unnest($1::uuid[], $2::jsonb[]) AS t(req_id, crumb)
-                WHERE jr.id = t.req_id
-                RETURNING 1
+                UPDATE authority_index_drift SET propagated_at = NOW()
+                WHERE propagated_at IS NULL RETURNING 1
             ) SELECT COUNT(*) FROM u
-            """,
-            req_ids, breadcrumbs,
+            """
         )
-
-    # Stamp every unpropagated drift row (amended/removed we just processed, plus
-    # any 'new' rows) so the worklist drains.
-    processed = await conn.fetchval(
-        """
-        WITH u AS (
-            UPDATE authority_index_drift SET propagated_at = NOW()
-            WHERE propagated_at IS NULL RETURNING 1
-        ) SELECT COUNT(*) FROM u
-        """
-    )
     return {"drift_processed": int(processed or 0), "requirements_flagged": int(flagged or 0)}
 
 
@@ -559,36 +575,14 @@ async def reconcile_codifications(
 
     links = match_codifications(classifications, requirement_rows, rkd_category_by_id)
 
-    inserted = updated = 0
     run_info_json = json.dumps(run_info) if run_info else None
-    if links:
-        # One set-based upsert (unnest) instead of N round trips.
-        result = await conn.fetch(
-            """
-            INSERT INTO scope_codifications
-                (classification_id, jurisdiction_requirement_id, regulation_key,
-                 jurisdiction_id, source, run_info)
-            SELECT * FROM unnest(
-                $1::uuid[], $2::uuid[], $3::text[], $4::uuid[]
-            ) AS t(classification_id, jurisdiction_requirement_id, regulation_key, jurisdiction_id),
-            LATERAL (SELECT $5::varchar AS source, $6::jsonb AS run_info) s
-            ON CONFLICT (classification_id, jurisdiction_requirement_id) DO UPDATE SET
-                codified_at = NOW(), source = EXCLUDED.source, run_info = EXCLUDED.run_info
-            RETURNING (xmax = 0) AS inserted
-            """,
-            [link["classification_id"] for link in links],
-            [link["jurisdiction_requirement_id"] for link in links],
-            [link["regulation_key"] for link in links],
-            [link["jurisdiction_id"] for link in links],
-            source, run_info_json,
-        )
-        inserted = sum(1 for r in result if r["inserted"])
-        updated = len(result) - inserted
 
-    # Stamp verified citations onto the requirement rows. The citation comes from
-    # the classification's authority_index_item — verified by construction, never
-    # from model free-recall. Registry wins over a hand-edited citation (the
-    # overwrite is counted, not silent).
+    # Build the verified-citation stamps in Python first (pure, no DB), so the
+    # three writes below can form one tight transaction.
+    #
+    # The citation comes from the classification's authority_index_item — verified
+    # by construction, never from model free-recall. Registry wins over a
+    # hand-edited citation (the overwrite is counted, not silent).
     class_meta = {c["id"]: c for c in classifications}
     req_meta = {
         r["id"]: {"level": r.get("jurisdiction_level"), "state": r.get("requirement_state")}
@@ -599,6 +593,7 @@ async def reconcile_codifications(
         r["id"] for r in requirement_rows
         if r.get("statute_citation") and r.get("citation_verified_at") is None
     }
+    prior_citation_by_id = {r["id"]: r.get("statute_citation") for r in requirement_rows}
     stamp_links = []
     for link in links:
         meta = class_meta.get(link["classification_id"], {})
@@ -613,60 +608,93 @@ async def reconcile_codifications(
             "authority_state": meta.get("authority_state"),
         }})
     stamps = build_citation_stamps(stamp_links, req_meta)
+    stamped_ids = list(stamps.keys())
 
+    inserted = updated = 0
     citations_stamped = 0
     overwrote_manual = 0
-    if stamps:
-        req_ids = list(stamps.keys())
-        citations = [stamps[r]["statute_citation"] for r in req_ids]
-        item_ids = [stamps[r]["citation_item_id"] for r in req_ids]
-        verified_json = [
-            json.dumps({"verified_citations": stamps[r]["verified_citations"]})
-            for r in req_ids
-        ]
-        await conn.execute(
-            """
-            UPDATE jurisdiction_requirements AS jr
-            SET statute_citation = t.citation,
-                citation_item_id = t.item_id,
-                citation_verified_at = NOW(),
-                metadata = COALESCE(jr.metadata, '{}'::jsonb) || t.verified::jsonb
-            FROM unnest($1::uuid[], $2::text[], $3::uuid[], $4::jsonb[])
-                AS t(req_id, citation, item_id, verified)
-            WHERE jr.id = t.req_id
-            """,
-            req_ids, citations, item_ids, verified_json,
-        )
-        citations_stamped = len(stamps)
-        overwrote_manual = sum(
-            1 for rid in stamps
-            if rid in manual_before
-            and stamps[rid]["statute_citation"] != next(
-                (r.get("statute_citation") for r in requirement_rows if r["id"] == rid), None
+    cleared = 0
+    # Insert the linkage, stamp verified citations, and self-correct stale stamps
+    # as one atomic unit — a partial run must never leave codifications inserted
+    # but citations unstamped, or new stamps written while stale ones aren't
+    # cleared (that inconsistency is exactly what a re-run would then act on).
+    async with conn.transaction():
+        if links:
+            # One set-based upsert (unnest) instead of N round trips.
+            result = await conn.fetch(
+                """
+                INSERT INTO scope_codifications
+                    (classification_id, jurisdiction_requirement_id, regulation_key,
+                     jurisdiction_id, source, run_info)
+                SELECT * FROM unnest(
+                    $1::uuid[], $2::uuid[], $3::text[], $4::uuid[]
+                ) AS t(classification_id, jurisdiction_requirement_id, regulation_key, jurisdiction_id),
+                LATERAL (SELECT $5::varchar AS source, $6::jsonb AS run_info) s
+                ON CONFLICT (classification_id, jurisdiction_requirement_id) DO UPDATE SET
+                    codified_at = NOW(), source = EXCLUDED.source, run_info = EXCLUDED.run_info
+                RETURNING (xmax = 0) AS inserted
+                """,
+                [link["classification_id"] for link in links],
+                [link["jurisdiction_requirement_id"] for link in links],
+                [link["regulation_key"] for link in links],
+                [link["jurisdiction_id"] for link in links],
+                source, run_info_json,
             )
-        )
+            inserted = sum(1 for r in result if r["inserted"])
+            updated = len(result) - inserted
 
-    # Self-correct: a row that was registry-verified but no longer has a supporting
-    # citation this run (classification removed, or the jurisdiction guard now
-    # rejects a cross-state link written by an older reconcile) loses its verified
-    # stamp. Only clears registry stamps (verified_at set) — hand-curated citations
-    # (verified_at NULL) are untouched.
-    stamped_ids = list(stamps.keys())
-    cleared = await conn.fetchval(
-        """
-        WITH c AS (
-            UPDATE jurisdiction_requirements AS jr
-            SET statute_citation = NULL, citation_item_id = NULL,
-                citation_verified_at = NULL,
-                metadata = COALESCE(jr.metadata, '{}'::jsonb) - 'verified_citations'
-            WHERE jr.id = ANY($1::uuid[])
-              AND jr.citation_verified_at IS NOT NULL
-              AND NOT (jr.id = ANY($2::uuid[]))
-            RETURNING 1
-        ) SELECT COUNT(*) FROM c
-        """,
-        [r["id"] for r in requirement_rows], stamped_ids,
-    )
+        if stamps:
+            req_ids = list(stamps.keys())
+            citations = [stamps[r]["statute_citation"] for r in req_ids]
+            item_ids = [stamps[r]["citation_item_id"] for r in req_ids]
+            verified_json = [
+                json.dumps({"verified_citations": stamps[r]["verified_citations"]})
+                for r in req_ids
+            ]
+            await conn.execute(
+                """
+                UPDATE jurisdiction_requirements AS jr
+                SET statute_citation = t.citation,
+                    citation_item_id = t.item_id,
+                    citation_verified_at = NOW(),
+                    metadata = COALESCE(jr.metadata, '{}'::jsonb) || t.verified::jsonb
+                FROM unnest($1::uuid[], $2::text[], $3::uuid[], $4::jsonb[])
+                    AS t(req_id, citation, item_id, verified)
+                WHERE jr.id = t.req_id
+                """,
+                req_ids, citations, item_ids, verified_json,
+            )
+            citations_stamped = len(stamps)
+            overwrote_manual = sum(
+                1 for rid in stamps
+                if rid in manual_before
+                and stamps[rid]["statute_citation"] != prior_citation_by_id.get(rid)
+            )
+
+        # Self-correct: a row that was registry-verified but no longer has a
+        # supporting citation this run (classification removed, or the jurisdiction
+        # guard now rejects a cross-state link written by an older reconcile) is
+        # downgraded verified→unverified. Only the verified markers + the
+        # verified_citations breadcrumb are cleared; the statute_citation TEXT is
+        # kept (mirrors the PATCH liveness reset) so the pointer back to the
+        # authority survives transient registry churn instead of being erased.
+        # Only touches registry stamps (verified_at set) — hand-curated citations
+        # (verified_at NULL) are untouched.
+        cleared = await conn.fetchval(
+            """
+            WITH c AS (
+                UPDATE jurisdiction_requirements AS jr
+                SET citation_item_id = NULL,
+                    citation_verified_at = NULL,
+                    metadata = COALESCE(jr.metadata, '{}'::jsonb) - 'verified_citations'
+                WHERE jr.id = ANY($1::uuid[])
+                  AND jr.citation_verified_at IS NOT NULL
+                  AND NOT (jr.id = ANY($2::uuid[]))
+                RETURNING 1
+            ) SELECT COUNT(*) FROM c
+            """,
+            [r["id"] for r in requirement_rows], stamped_ids,
+        )
 
     matched_classification_ids = {link["classification_id"] for link in links}
     unmatched_keys = sorted({

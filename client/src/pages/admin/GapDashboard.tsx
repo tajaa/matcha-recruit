@@ -27,6 +27,13 @@ import { useResearchGaps, type ResearchGapItem } from '../../hooks/useResearchGa
 import GapCard, { humanizeCategory, jurisdictionLabel } from '../../features/admin-onboarding/GapCard'
 import { complexityBandClass } from './GapOverview'
 
+// Provenance chip for the Coverage stat card — engine = scope-registry grounded,
+// bank = compliance-catalog fallback. Same chip idiom as ScopeStudio's badge maps.
+const COVERAGE_SOURCE_BADGE: Record<'engine' | 'bank', string> = {
+  engine: 'border-emerald-500/30 bg-emerald-500/15 text-emerald-300',
+  bank: 'border-zinc-500/30 bg-zinc-500/15 text-zinc-400',
+}
+
 type CoveredItem = {
   requirement_id?: string
   category_slug?: string
@@ -234,6 +241,9 @@ export default function GapDashboard() {
   const drift = data?.drift
   const jurisdictionCount = dossier?.scope.applicable_jurisdictions?.length ?? 0
   const coveragePct = counts?.coverage_pct ?? 0
+  const coverageSource = counts?.coverage_source
+  // engine_coverage_pct is only present when coverage_source === 'engine'
+  const displayCoveragePct = counts?.engine_coverage_pct ?? coveragePct
   const cx = data?.complexity
 
   const suggestionCount =
@@ -323,10 +333,29 @@ export default function GapDashboard() {
           <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
             <div className="rounded-lg border border-vsc-border bg-vsc-panel p-3 col-span-2 md:col-span-1">
               <div className="text-[10px] text-zinc-500 uppercase tracking-wider">Coverage</div>
-              <div className="text-2xl font-semibold text-zinc-100 mt-1">{coveragePct}%</div>
+              <div className="text-2xl font-semibold text-zinc-100 mt-1">{displayCoveragePct}%</div>
               <div className="mt-1.5 h-1.5 rounded-full bg-vsc-bg overflow-hidden">
-                <div className="h-full rounded-full bg-emerald-500" style={{ width: `${coveragePct}%` }} />
+                <div className="h-full rounded-full bg-emerald-500" style={{ width: `${displayCoveragePct}%` }} />
               </div>
+              {coverageSource && (
+                <div className="mt-1.5 text-[10px]">
+                  <span
+                    className={`rounded border px-1 py-0.5 ${COVERAGE_SOURCE_BADGE[coverageSource]}`}
+                    title={
+                      coverageSource === 'engine'
+                        ? 'Grounded in the scope-registry engine (registry classifies every coordinate)'
+                        : 'From the compliance catalog (registry not yet definitive for this company)'
+                    }
+                  >
+                    {coverageSource === 'engine' ? 'grounded (engine)' : 'catalog (bank)'}
+                  </span>
+                  {coverageSource === 'engine' && (
+                    <span className="ml-1 text-zinc-500">
+                      {counts?.engine_covered ?? 0} codified · {counts?.engine_gaps ?? 0} to codify
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
             {cx && (
               <button

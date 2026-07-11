@@ -80,11 +80,21 @@ type CategoryEntry = {
   jurisdiction_count: number
   requirement_count: number
   has_data: boolean
+  // Engine augmentation (present only with a location + a definitively-classified
+  // coordinate). 'engine' = the registry grounds this cell's codified/to-codify.
+  registry_source?: 'engine' | 'bank'
+  engine_codified?: number | null
+  engine_to_codify?: number | null
+  engine_expected?: number | null
 }
 
 type MatrixResponse = {
-  summary: { total: number; with_data: number; missing_data: number }
+  summary: {
+    total: number; with_data: number; missing_data: number
+    engine_cells?: number; engine_to_codify?: number
+  }
   scoped_to: { state: string; city: string | null; city_found: boolean | null } | null
+  registry_definitive?: boolean
   categories: CategoryEntry[]
 }
 
@@ -1178,6 +1188,11 @@ export default function ScopeStudio() {
                 {matrix.scoped_to?.city && matrix.scoped_to.city_found === false && (
                   <span className="text-xs text-amber-400">city not found — state ∪ federal</span>
                 )}
+                {(matrix.summary.engine_cells ?? 0) > 0 && (
+                  <span className={`rounded border px-2 py-0.5 text-xs ${SOURCE_BADGE.base}`}>
+                    {matrix.summary.engine_cells} engine-grounded · {matrix.summary.engine_to_codify ?? 0} to codify
+                  </span>
+                )}
               </div>
             )}
             {matrixLoading ? (
@@ -1221,6 +1236,16 @@ export default function ScopeStudio() {
                                 </span>
                               ) : (
                                 <span className="text-amber-400">No data</span>
+                              )}
+                              {c.registry_source === 'engine' && (
+                                <span className="ml-2 inline-flex items-center gap-1">
+                                  <span className={`rounded border px-1.5 py-0.5 text-[10px] ${SOURCE_BADGE.base}`}>
+                                    engine
+                                  </span>
+                                  <span className="text-zinc-400">
+                                    {c.engine_codified ?? 0} codified · {c.engine_to_codify ?? 0} to codify
+                                  </span>
+                                </span>
                               )}
                             </td>
                           </tr>

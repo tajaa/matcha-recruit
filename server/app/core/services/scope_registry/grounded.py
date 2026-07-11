@@ -87,6 +87,11 @@ def validate_requirement_citations(
     tagged ``grounded=True`` and gets ``grounded_citations`` (the resolved real
     citations). Reqs with no valid id keep ``grounded=False``. Returns
     ``(reqs, dropped_ids)`` — mutates each req in place (adds the two keys).
+
+    Caveat: this proves the model cited a *real* excerpt in the corpus, not that
+    the reported value actually appears in that excerpt's text (same shape as
+    ``legal_defense.validate_citations``). ``grounded``/``gemini_grounded`` is an
+    "anchored to a fetched source" signal, not a value-provenance guarantee.
     """
     citation_index = citation_index or {}
     dropped: List[str] = []

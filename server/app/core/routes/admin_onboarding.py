@@ -1702,6 +1702,39 @@ async def get_company_gap_dashboard(
         basics = _safe_jsonb(session["basics"], {}) or {}
         size = _safe_jsonb(session["size"], {}) or {}
         locations = _safe_jsonb(session["locations"], []) or []
+
+        # Engine overlay (additive, guarded). The scope-registry's grounded
+        # verdict for this company, used where it definitively classifies the
+        # coordinate. The bank arrays (coverage.covered/gaps) stay authoritative —
+        # the frontend's "Research a gap" actions consume their shape — so this
+        # only annotates counts + adds an `engine` block; it never overwrites them.
+        # use_cache=False keeps this GET read-only over the engine tables
+        # (use_cache=True would INSERT into scope_resolutions on every view).
+        engine_block = None
+        try:
+            from app.core.services.scope_registry.gap_surfaces import resolve_company_scope
+
+            def _sz(k: str) -> int:
+                # Same guarded read as compliance_complexity._sz — session size
+                # JSONB can hold non-numeric values (e.g. range strings).
+                try:
+                    return int(size.get(k, 0) or 0)
+                except (TypeError, ValueError):
+                    return 0
+
+            # FT+PT+contractor: the same headcount definition the complexity
+            # score uses, so engine strata and complexity never disagree on size.
+            headcount = _sz("full_time") + _sz("part_time") + _sz("contractor")
+            engine_block = await resolve_company_scope(
+                conn, company_id,
+                industry=basics.get("industry"),
+                specialty=basics.get("specialty"),
+                employee_count=headcount or None,
+                use_cache=False,
+            )
+        except Exception:
+            logger.exception("gap-dashboard: engine overlay failed for company %s", company_id)
+
         dossier = build_gap_analysis_dossier({
             "id": session["id"],
             "status": session["status"],
@@ -1710,7 +1743,7 @@ async def get_company_gap_dashboard(
             "locations": locations,
             "ai_scope": ai_scope,
             "resolved_scope": resolved,
-        })
+        }, engine=engine_block)
         counts = dossier["counts"]
         denom = counts["covered"] + counts["gaps"]
         counts["coverage_pct"] = round(100 * counts["covered"] / denom) if denom else 100
@@ -1751,6 +1784,7 @@ async def get_company_gap_dashboard(
             "dossier": dossier,
             "drift": drift,
             "complexity": complexity,
+            "engine": engine_block,
         }
 
 

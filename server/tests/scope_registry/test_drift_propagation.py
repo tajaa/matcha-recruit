@@ -63,3 +63,17 @@ def test_one_drift_fans_to_multiple_requirements():
     links = [_link(req="r_fed"), _link(req="r_ca")]
     updates = affected_requirement_updates([_drift("d1", "amended")], links)
     assert set(updates) == {"r_fed", "r_ca"}
+
+
+def test_null_detected_at_does_not_crash_comparison():
+    # Regression: _dt_key must not compare a datetime against 0. If two drift rows
+    # hit one requirement and exactly one has detected_at=None, the tie-break has to
+    # stay a datetime-vs-datetime comparison (None → datetime.min), never raise.
+    dated = _drift("d_dated", "amended", dt=datetime(2026, 6, 1))
+    undated = _drift("d_undated", "removed", dt=None)
+    # None-first then dated, and dated-first then None — both orders must resolve.
+    u1 = affected_requirement_updates([undated, dated], [_link(req="r1")])
+    u2 = affected_requirement_updates([dated, undated], [_link(req="r1")])
+    # The dated row (later than datetime.min) wins regardless of input order.
+    assert u1["r1"]["drift_id"] == "d_dated"
+    assert u2["r1"]["drift_id"] == "d_dated"
