@@ -36,6 +36,11 @@ export function useThemeEditor() {
     setTheme((t) => { const type = { ...themeObj(t.type) }; if (value === '' || value == null) delete type[key]; else type[key] = value; return { ...t, type } })
     setThemeDirty(true)
   }
+  // ── global style system (theme_config.style): spacing / type scale / layout ──
+  const setStyleKey = (key: string, value: unknown) => {
+    setTheme((t) => { const style = { ...themeObj(t.style) }; if (value === '' || value == null) delete style[key]; else style[key] = value; return { ...t, style } })
+    setThemeDirty(true)
+  }
   const setBrandGradient = (g: Record<string, unknown> | null) => {
     setTheme((t) => {
       const colors = { ...(t.colors && typeof t.colors === 'object' && !Array.isArray(t.colors) ? (t.colors as Record<string, unknown>) : {}) }
@@ -49,7 +54,8 @@ export function useThemeEditor() {
     theme, themeDirty, themeOpen, setThemeOpen,
     loadTheme: (t: Record<string, unknown>) => setTheme(t),
     markClean: () => setThemeDirty(false),
+    markDirty: () => setThemeDirty(true),
     applyPreset, setBrand, setPairing, setRadius, setMode, setPremium,
-    setHeadingFont, setBodyFont, setTypeKey, setBrandGradient,
+    setHeadingFont, setBodyFont, setTypeKey, setStyleKey, setBrandGradient,
   }
 }

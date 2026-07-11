@@ -100,6 +100,16 @@ def _clampi(v: Any, lo: int, hi: int, default: int = 0) -> int:
     return max(lo, min(hi, n))
 
 
+_ANCHOR_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$")
+
+
+def _anchor_id(v: Any) -> str:
+    """Strict slug for a section `id=` attribute. Only [a-z0-9-] with no leading/
+    trailing dash — no space/quote/`>` can appear, so no attribute breakout."""
+    s = str(v or "").strip().lower()
+    return s if _ANCHOR_RE.match(s) else ""
+
+
 _PAD_SCALE = {"none": "0rem", "sm": "2rem", "lg": "6rem", "xl": "9rem"}
 _MAXW = {"narrow": "44rem", "wide": "84rem", "full": "100%"}
 _MINH = {"tall": "70vh", "screen": "100vh"}
@@ -109,6 +119,53 @@ _HOVER_FX = {"lift", "tilt", "glow"}
 _LOOP_FX = {"float", "pulse"}
 _HEADING_FX = {"rise", "shimmer"}
 _OVERLAYS = {"light", "medium", "dark"}
+
+# ── global style system (theme_config.style → extra :root vars) ─────────────
+# Each value is an enum-dict constant or a `_clampi` int emitted with a unit —
+# no raw user string reaches the sink. Every enum default equals today's literal
+# in `_BASE_CSS`, and a token is only emitted when the editor sets the key, so an
+# unset `style` renders byte-identical.
+_CONTAINER = {"compact": "64rem", "default": "72rem", "wide": "80rem", "xwide": "88rem"}
+_GUTTER = {"tight": "1rem", "default": "1.5rem", "roomy": "2rem"}
+_LINEHEIGHT = {"tight": "1.45", "normal": "1.6", "relaxed": "1.75"}
+_SEC_PAD = {"compact": "clamp(2rem,5vw,3.5rem)", "cozy": "clamp(2.5rem,6vw,4.25rem)",
+            "default": "clamp(3rem,7vw,5rem)", "roomy": "clamp(4rem,8vw,6.5rem)"}
+_CARD_BORDER = {"none": "0", "hairline": "1px", "bold": "2px"}
+_GRID_GAP = {"tight": "0.75rem", "default": "1.25rem", "roomy": "2rem"}
+
+
+def _style_vars(style: Any) -> list[str]:
+    """Build the optional `--token:value` list from `theme_config.style`. Absent /
+    unrecognized keys are omitted so the `_BASE_CSS` `var(--token, <literal>)`
+    fallbacks apply (byte-identical to today)."""
+    if not isinstance(style, dict) or not style:
+        return []
+    out: list[str] = []
+
+    def _enum(key: str, table: dict, var: str) -> None:
+        v = table.get(str(style.get(key) or ""))
+        if v is not None:
+            out.append(f"{var}:{v}")
+
+    def _px(key: str, lo: int, hi: int, var: str) -> None:
+        n = _clampi(style.get(key), lo, hi, 0)
+        if n:
+            out.append(f"{var}:{n}px")
+
+    _px("baseFont", 14, 20, "--base-fs")
+    _enum("lineHeight", _LINEHEIGHT, "--base-lh")
+    _enum("container", _CONTAINER, "--container")
+    _enum("gutter", _GUTTER, "--gutter")
+    _enum("sectionPad", _SEC_PAD, "--sec-pad")
+    _enum("gap", _GRID_GAP, "--grid-gap")
+    _px("cardPad", 8, 48, "--card-pad")
+    _enum("cardBorder", _CARD_BORDER, "--card-bd")
+    _px("headerPad", 8, 28, "--hdr-pad")
+    _px("brandSize", 14, 32, "--brand-fs")
+    _px("footerPad", 16, 80, "--ftr-pad")
+    _px("buttonPadX", 4, 40, "--btn-px")
+    _px("buttonPadY", 4, 30, "--btn-py")
+    return out
 
 
 def _design_motion(d: dict) -> bool:
@@ -153,6 +210,9 @@ def _apply_design(html_str: str, design: Any, *, block_index: Any = None, editab
         bg = design.get("bg") if isinstance(design.get("bg"), dict) else {}
         layout = design.get("layout") if isinstance(design.get("layout"), dict) else {}
         colors = design.get("colors") if isinstance(design.get("colors"), dict) else {}
+        typ = design.get("type") if isinstance(design.get("type"), dict) else {}
+        border = design.get("border") if isinstance(design.get("border"), dict) else {}
+        anchor = design.get("anchor") if isinstance(design.get("anchor"), dict) else {}
         classes.append("cz-design")
 
         # ── motion ──────────────────────────────────────────────────────────
@@ -213,14 +273,26 @@ def _apply_design(html_str: str, design: Any, *, block_index: Any = None, editab
                 classes.append("cz-bg--blur")
 
         # ── layout ──────────────────────────────────────────────────────────
-        pt = _PAD_SCALE.get(layout.get("padTop"))
+        # Numeric px override wins over the enum step; -1 default distinguishes
+        # "unset" from a deliberate 0 so `padTopPx:0` can zero the padding.
+        pt_px = _clampi(layout.get("padTopPx"), 0, 400, -1)
+        pt = f"{pt_px}px" if pt_px >= 0 else _PAD_SCALE.get(layout.get("padTop"))
         if pt is not None:
             cssvars.append(f"--cz-pad-t:{pt}")
             classes.append("cz-has-pt")
-        pb = _PAD_SCALE.get(layout.get("padBottom"))
+        pb_px = _clampi(layout.get("padBottomPx"), 0, 400, -1)
+        pb = f"{pb_px}px" if pb_px >= 0 else _PAD_SCALE.get(layout.get("padBottom"))
         if pb is not None:
             cssvars.append(f"--cz-pad-b:{pb}")
             classes.append("cz-has-pb")
+        cols = _clampi(layout.get("columns"), 1, 6, 0)
+        if cols:
+            cssvars.append(f"--cz-cols:repeat({cols},minmax(0,1fr))")
+            classes.append("cz-has-cols")
+        gap_px = _clampi(layout.get("gap"), 0, 80, -1)
+        if gap_px >= 0:
+            cssvars.append(f"--cz-gap:{gap_px}px")
+            classes.append("cz-has-gap")
         mw = _MAXW.get(layout.get("maxWidth"))
         if mw:
             cssvars.append(f"--cz-maxw:{mw}")
@@ -242,6 +314,36 @@ def _apply_design(html_str: str, design: Any, *, block_index: Any = None, editab
         if cacc:
             cssvars += [f"--cz-brand:{cacc}", f"--cz-accent:{cacc}"]
             classes.append("cz-acc")
+
+        # ── per-section type sizes ──────────────────────────────────────────
+        hsize = _clampi(typ.get("headingSize"), 16, 96, 0)
+        if hsize:
+            cssvars.append(f"--cz-h-size:{hsize}px")
+            classes.append("cz-has-hsize")
+        psize = _clampi(typ.get("bodySize"), 12, 28, 0)
+        if psize:
+            cssvars.append(f"--cz-p-size:{psize}px")
+            classes.append("cz-has-psize")
+
+        # ── per-section border / divider ────────────────────────────────────
+        if border.get("top") or border.get("bottom"):
+            bw = _clampi(border.get("width"), 1, 8, 1)
+            bcol = _hexonly(border.get("color"))
+            cssvars.append(f"--cz-bd-w:{bw}px")
+            if bcol:
+                cssvars.append(f"--cz-bd-col:{bcol}")
+            if border.get("top"):
+                classes.append("cz-bd-t")
+            if border.get("bottom"):
+                classes.append("cz-bd-b")
+
+        # ── section anchor id (new attr sink; strict slug prevents breakout) ─
+        # Skip if the block renderer already put an id on the section (store→
+        # #shop, booking→#book): a second id= would be invalid HTML and the
+        # browser would keep the first, silently ignoring the user's anchor.
+        aid = _anchor_id(anchor.get("id"))
+        if aid and "id=" not in m.group(1):
+            attrs.append(f'id="{aid}"')
 
     if tag_block:
         attrs.append(f'data-cz-block="{int(block_index)}"')
@@ -332,21 +434,21 @@ _BASE_CSS = """
 *,*::before,*::after{box-sizing:border-box}
 html{-webkit-text-size-adjust:100%}
 body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font-b);
-  line-height:1.6;-webkit-font-smoothing:antialiased;font-size:17px}
+  line-height:var(--base-lh,1.6);-webkit-font-smoothing:antialiased;font-size:var(--base-fs,17px)}
 img{max-width:100%;display:block}
 a{color:inherit}
 h1,h2,h3{font-family:var(--font-h);font-weight:700;line-height:1.05;letter-spacing:-0.02em;margin:0}
 p{margin:0}
-.cz-wrap{max-width:72rem;margin:0 auto;padding:0 1.5rem}
+.cz-wrap{max-width:var(--container,72rem);margin:0 auto;padding:0 var(--gutter,1.5rem)}
 .cz-narrow{max-width:44rem;margin:0 auto;padding:0 1.5rem}
 
 /* header */
 .cz-header{position:sticky;top:0;z-index:30;background:color-mix(in srgb,var(--bg) 82%,transparent);
   backdrop-filter:saturate(1.4) blur(10px);border-bottom:1px solid var(--line)}
-.cz-header .cz-bar{display:flex;align-items:center;gap:1.5rem;padding:1.05rem 0}
+.cz-header .cz-bar{display:flex;align-items:center;gap:1.5rem;padding:var(--hdr-pad,1.05rem) 0}
 .cz-header.center .cz-bar{justify-content:center}
 .cz-header:not(.center) .cz-bar{justify-content:space-between}
-.cz-brand{font-family:var(--font-h);font-weight:700;font-size:1.2rem;text-decoration:none;color:var(--ink)}
+.cz-brand{font-family:var(--font-h);font-weight:700;font-size:var(--brand-fs,1.2rem);text-decoration:none;color:var(--ink)}
 .cz-brand img{height:30px;width:auto}
 .cz-nav{display:flex;gap:1.5rem;flex-wrap:wrap}
 .cz-nav a{color:var(--muted);text-decoration:none;font-size:.95rem;font-weight:500;transition:color .2s}
@@ -354,7 +456,7 @@ p{margin:0}
 
 /* buttons */
 .cz-btn{display:inline-flex;align-items:center;justify-content:center;gap:.5rem;
-  padding:.8rem 1.5rem;border-radius:var(--radius);font-weight:600;font-size:.95rem;
+  padding:var(--btn-py,.8rem) var(--btn-px,1.5rem);border-radius:var(--radius);font-weight:600;font-size:.95rem;
   text-decoration:none;cursor:pointer;border:1px solid transparent;transition:transform .15s,opacity .2s,background .2s;font-family:var(--font-b)}
 .cz-btn:active{transform:translateY(1px)}
 .cz-btn--solid{background:var(--brand);color:var(--brand-fg)}
@@ -406,9 +508,9 @@ section{position:relative}
 .cz-hero--left .cz-cta-row{justify-content:flex-start}
 
 /* features */
-.cz-features{padding:clamp(3rem,7vw,5rem) 0}
-.cz-cards{display:grid;gap:1.25rem;grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
-.cz-card{border:1px solid var(--line);background:var(--surface);border-radius:var(--radius);padding:1.6rem}
+.cz-features{padding:var(--sec-pad,clamp(3rem,7vw,5rem)) 0}
+.cz-cards{display:grid;gap:var(--cz-gap,var(--grid-gap,1.25rem));grid-template-columns:var(--cz-cols,repeat(auto-fit,minmax(220px,1fr)))}
+.cz-card{border:var(--card-bd,1px) solid var(--line);background:var(--surface);border-radius:var(--radius);padding:var(--card-pad,1.6rem)}
 .cz-feat__icon{width:44px;height:44px;display:flex;align-items:center;justify-content:center;
   border-radius:var(--radius);background:color-mix(in srgb,var(--brand) 14%,transparent);
   color:var(--brand);font-weight:700;font-size:1.15rem;margin-bottom:1rem}
@@ -416,8 +518,8 @@ section{position:relative}
 .cz-card p{color:var(--muted);font-size:.95rem}
 
 /* gallery */
-.cz-gallery{padding:clamp(3rem,7vw,5rem) 0}
-.cz-grid-img{display:grid;gap:.85rem;grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
+.cz-gallery{padding:var(--sec-pad,clamp(3rem,7vw,5rem)) 0}
+.cz-grid-img{display:grid;gap:var(--cz-gap,var(--grid-gap,.85rem));grid-template-columns:var(--cz-cols,repeat(auto-fit,minmax(220px,1fr)))}
 .cz-tile{position:relative;border-radius:var(--radius);overflow:hidden}
 .cz-tile img{aspect-ratio:1;width:100%;object-fit:cover;transition:transform .5s}
 .cz-tile:hover img{transform:scale(1.05)}
@@ -425,10 +527,10 @@ section{position:relative}
   background:linear-gradient(transparent,rgba(0,0,0,.6))}
 
 /* pricing */
-.cz-pricing{padding:clamp(3rem,7vw,5rem) 0}
-.cz-plans{display:grid;gap:1.25rem;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));max-width:60rem;margin:0 auto}
-.cz-plan{position:relative;border:1px solid var(--line);background:var(--surface);border-radius:var(--radius);
-  padding:2rem;display:flex;flex-direction:column}
+.cz-pricing{padding:var(--sec-pad,clamp(3rem,7vw,5rem)) 0}
+.cz-plans{display:grid;gap:var(--cz-gap,var(--grid-gap,1.25rem));grid-template-columns:var(--cz-cols,repeat(auto-fit,minmax(240px,1fr)));max-width:60rem;margin:0 auto}
+.cz-plan{position:relative;border:var(--card-bd,1px) solid var(--line);background:var(--surface);border-radius:var(--radius);
+  padding:var(--card-pad,2rem);display:flex;flex-direction:column}
 .cz-plan--hot{outline:2px solid var(--brand);outline-offset:-1px;box-shadow:0 20px 40px -24px rgba(0,0,0,.4)}
 .cz-plan__badge{position:absolute;top:-.7rem;left:50%;transform:translateX(-50%);background:var(--brand);
   color:var(--brand-fg);font-size:.7rem;font-weight:700;padding:.25rem .7rem;border-radius:999px}
@@ -439,24 +541,24 @@ section{position:relative}
 .cz-plan li::before{content:"✓";color:var(--brand);font-weight:700}
 
 /* testimonial */
-.cz-quotes{padding:clamp(3rem,7vw,5rem) 0}
-.cz-quote-grid{display:grid;gap:1.25rem;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));max-width:60rem;margin:0 auto}
-.cz-quote{border:1px solid var(--line);background:var(--surface);border-radius:var(--radius);padding:2rem}
+.cz-quotes{padding:var(--sec-pad,clamp(3rem,7vw,5rem)) 0}
+.cz-quote-grid{display:grid;gap:var(--cz-gap,var(--grid-gap,1.25rem));grid-template-columns:var(--cz-cols,repeat(auto-fit,minmax(280px,1fr)));max-width:60rem;margin:0 auto}
+.cz-quote{border:var(--card-bd,1px) solid var(--line);background:var(--surface);border-radius:var(--radius);padding:var(--card-pad,2rem)}
 .cz-quote blockquote{font-family:var(--font-h);font-size:1.15rem;line-height:1.5;margin:0}
 .cz-quote figcaption{margin-top:1.25rem;font-size:.9rem}
 .cz-quote figcaption b{color:var(--ink)}
 .cz-quote figcaption span{color:var(--muted)}
 
 /* cta band */
-.cz-band{background:var(--brand);color:var(--brand-fg);text-align:center;padding:clamp(3rem,7vw,5rem) 0}
+.cz-band{background:var(--brand);color:var(--brand-fg);text-align:center;padding:var(--sec-pad,clamp(3rem,7vw,5rem)) 0}
 .cz-band h2{font-size:clamp(1.8rem,4vw,2.6rem)}
 .cz-band p{margin:.75rem auto 0;max-width:34rem;opacity:.9}
 .cz-band .cz-btn{margin-top:1.75rem;background:rgba(255,255,255,.16);color:#fff}
 .cz-band .cz-btn:hover{background:rgba(255,255,255,.26)}
 
 /* menu */
-.cz-menu{padding:clamp(3rem,7vw,5rem) 0}
-.cz-menu-grid{display:grid;gap:2.5rem;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));max-width:54rem;margin:0 auto}
+.cz-menu{padding:var(--sec-pad,clamp(3rem,7vw,5rem)) 0}
+.cz-menu-grid{display:grid;gap:var(--cz-gap,var(--grid-gap,2.5rem));grid-template-columns:var(--cz-cols,repeat(auto-fit,minmax(280px,1fr)));max-width:54rem;margin:0 auto}
 .cz-menu h3{font-size:1.3rem;margin-bottom:.5rem}
 .cz-menu-row{display:flex;align-items:baseline;gap:.75rem;padding:.55rem 0;border-top:1px solid var(--line)}
 .cz-menu-row .name{font-weight:600}
@@ -480,7 +582,7 @@ section{position:relative}
 .cz-text p{font-size:1.12rem;color:var(--muted);line-height:1.75}
 
 /* forms / widgets */
-.cz-form-sec{padding:clamp(3rem,7vw,5rem) 0}
+.cz-form-sec{padding:var(--sec-pad,clamp(3rem,7vw,5rem)) 0}
 .cz-field{width:100%;padding:.7rem .9rem;border:1px solid var(--line);background:var(--bg);color:var(--ink);
   border-radius:var(--radius);font:inherit;font-size:.95rem;outline:none;transition:border-color .2s}
 .cz-field:focus{border-color:var(--brand)}
@@ -491,7 +593,7 @@ section{position:relative}
 .cz-inline{display:flex;gap:.6rem}.cz-inline .cz-field{flex:1}
 
 /* store */
-.cz-store{padding:clamp(3rem,7vw,5rem) 0}
+.cz-store{padding:var(--sec-pad,clamp(3rem,7vw,5rem)) 0}
 .cz-store-grid{display:grid;gap:1.1rem;grid-template-columns:repeat(2,1fr)}
 .cz-product{border:1px solid var(--line);background:var(--surface);border-radius:var(--radius);overflow:hidden;
   display:flex;flex-direction:column;text-align:left;cursor:pointer;font:inherit;color:inherit;width:100%;padding:0;
@@ -551,7 +653,7 @@ section{position:relative}
 
 /* footer */
 .cz-footer{border-top:1px solid var(--line);text-align:center;color:var(--muted);
-  font-size:.85rem;padding:2.5rem 0}
+  font-size:.85rem;padding:var(--ftr-pad,2.5rem) 0}
 .cz-footer .small{font-size:.75rem;opacity:.7;margin-top:.35rem}
 .cz-foot-social{display:flex;flex-wrap:wrap;justify-content:center;gap:1.1rem;margin-bottom:1rem}
 .cz-foot-social a{color:var(--ink);text-decoration:none;font-size:.82rem;font-weight:600;letter-spacing:.02em}
@@ -561,8 +663,8 @@ section{position:relative}
 .cz-foot-contact a:hover{color:var(--brand)}
 
 /* stats band */
-.cz-stats{padding:clamp(3rem,7vw,5rem) 0}
-.cz-stats-grid{display:grid;gap:1.5rem;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));max-width:62rem;margin:0 auto;text-align:center}
+.cz-stats{padding:var(--sec-pad,clamp(3rem,7vw,5rem)) 0}
+.cz-stats-grid{display:grid;gap:var(--cz-gap,var(--grid-gap,1.5rem));grid-template-columns:var(--cz-cols,repeat(auto-fit,minmax(150px,1fr)));max-width:62rem;margin:0 auto;text-align:center}
 .cz-stat{padding:1rem .5rem;position:relative}
 .cz-stat+.cz-stat::before{content:"";position:absolute;left:0;top:18%;bottom:18%;width:1px;background:var(--line)}
 .cz-stat__num{font-family:var(--font-h);font-weight:700;font-size:clamp(2.4rem,5vw,3.4rem);line-height:1;
@@ -578,7 +680,7 @@ section{position:relative}
 .cz-logos__name{font-family:var(--font-h);font-weight:700;font-size:1.15rem;color:var(--muted);opacity:.8}
 
 /* faq (native accordion) */
-.cz-faq{padding:clamp(3rem,7vw,5rem) 0}
+.cz-faq{padding:var(--sec-pad,clamp(3rem,7vw,5rem)) 0}
 .cz-faq__list{max-width:46rem;margin:0 auto;border-top:1px solid var(--line)}
 .cz-faq__item{border-bottom:1px solid var(--line)}
 .cz-faq__item summary{display:flex;justify-content:space-between;align-items:center;gap:1rem;cursor:pointer;
@@ -589,9 +691,9 @@ section{position:relative}
 .cz-faq__item p{color:var(--muted);font-size:1.02rem;line-height:1.75;margin:0;padding:0 .25rem 1.4rem;max-width:42rem}
 
 /* bento grid */
-.cz-bento{padding:clamp(3rem,7vw,5rem) 0}
+.cz-bento{padding:var(--sec-pad,clamp(3rem,7vw,5rem)) 0}
 .cz-bento-grid{display:grid;gap:1.1rem;grid-template-columns:repeat(2,1fr)}
-.cz-bento-cell{border:1px solid var(--line);background:var(--surface);border-radius:var(--radius);padding:1.7rem;
+.cz-bento-cell{border:var(--card-bd,1px) solid var(--line);background:var(--surface);border-radius:var(--radius);padding:var(--card-pad,1.7rem);
   display:flex;flex-direction:column;justify-content:flex-end;min-height:190px;position:relative;overflow:hidden;
   transition:transform .2s,border-color .2s}
 .cz-bento-cell:hover{transform:translateY(-3px);border-color:color-mix(in srgb,var(--brand) 40%,var(--line))}
@@ -604,7 +706,7 @@ section{position:relative}
 .cz-bento-cell--img p{color:rgba(255,255,255,.86)}
 
 /* split feature */
-.cz-split{padding:clamp(3rem,7vw,5rem) 0}
+.cz-split{padding:var(--sec-pad,clamp(3rem,7vw,5rem)) 0}
 .cz-split__grid{display:grid;gap:2.5rem;align-items:center}
 .cz-split__art{aspect-ratio:4/3;border-radius:var(--radius);overflow:hidden;background:linear-gradient(135deg,var(--brand),var(--accent))}
 .cz-split__art img{width:100%;height:100%;object-fit:cover}
@@ -617,9 +719,9 @@ section{position:relative}
 .cz-split .cz-btn{margin-top:1.6rem}
 
 /* credentials / qualifications */
-.cz-creds{padding:clamp(3rem,7vw,5rem) 0}
-.cz-creds-grid{display:grid;gap:1rem;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));max-width:62rem;margin:0 auto}
-.cz-cred{display:flex;gap:.95rem;align-items:flex-start;border:1px solid var(--line);background:var(--surface);
+.cz-creds{padding:var(--sec-pad,clamp(3rem,7vw,5rem)) 0}
+.cz-creds-grid{display:grid;gap:var(--cz-gap,var(--grid-gap,1rem));grid-template-columns:var(--cz-cols,repeat(auto-fit,minmax(260px,1fr)));max-width:62rem;margin:0 auto}
+.cz-cred{display:flex;gap:.95rem;align-items:flex-start;border:var(--card-bd,1px) solid var(--line);background:var(--surface);
   border-radius:var(--radius);padding:1.25rem 1.4rem}
 .cz-cred__badge{flex:0 0 auto;width:34px;height:34px;display:flex;align-items:center;justify-content:center;
   border-radius:999px;background:color-mix(in srgb,var(--brand) 16%,transparent);color:var(--brand);font-weight:700}
@@ -649,9 +751,9 @@ section{position:relative}
 .cz-staff--on{background:var(--brand);color:var(--brand-fg);border-color:var(--brand)}
 
 /* reviews */
-.cz-reviews{padding:clamp(3rem,7vw,5rem) 0}
-.cz-reviews-grid{display:grid;gap:1.25rem;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));max-width:60rem;margin:0 auto}
-.cz-review{border:1px solid var(--line);background:var(--surface);border-radius:var(--radius);padding:1.6rem}
+.cz-reviews{padding:var(--sec-pad,clamp(3rem,7vw,5rem)) 0}
+.cz-reviews-grid{display:grid;gap:var(--cz-gap,var(--grid-gap,1.25rem));grid-template-columns:var(--cz-cols,repeat(auto-fit,minmax(260px,1fr)));max-width:60rem;margin:0 auto}
+.cz-review{border:var(--card-bd,1px) solid var(--line);background:var(--surface);border-radius:var(--radius);padding:var(--card-pad,1.6rem)}
 .cz-review__stars{color:#f5b301;letter-spacing:2px;margin-bottom:.55rem}
 .cz-review blockquote{margin:0;font-size:1.02rem;line-height:1.6;color:var(--ink)}
 .cz-review figcaption{margin-top:.9rem;font-weight:600;color:var(--muted);font-size:.9rem}
@@ -660,7 +762,7 @@ section{position:relative}
 .cz-rv-form__t{font-weight:700;font-family:var(--font-h);text-align:center}
 
 /* map + hours */
-.cz-map{padding:clamp(3rem,7vw,5rem) 0}
+.cz-map{padding:var(--sec-pad,clamp(3rem,7vw,5rem)) 0}
 .cz-map__embed{border-radius:var(--radius);overflow:hidden;border:1px solid var(--line);aspect-ratio:16/9;margin-bottom:1.25rem}
 .cz-map__embed iframe{width:100%;height:100%;border:0;display:block}
 .cz-map__addr{font-size:1.05rem;margin-bottom:.9rem}
@@ -743,6 +845,12 @@ section{position:relative}
 .cz-design{color:var(--cz-text,inherit)}
 .cz-design h1,.cz-design h2,.cz-design h3{color:var(--cz-heading,inherit)}
 .cz-acc{--brand:var(--cz-brand);--accent:var(--cz-accent)}
+/* per-section type sizes + borders (scoped to the section; unset = today) */
+.cz-design.cz-has-hsize .cz-head h2,.cz-design.cz-has-hsize .cz-hero__title,
+.cz-design.cz-has-hsize .cz-split__body h2,.cz-design.cz-has-hsize .cz-band h2{font-size:var(--cz-h-size)}
+.cz-design.cz-has-psize p{font-size:var(--cz-p-size)}
+.cz-bd-t{border-top:var(--cz-bd-w,1px) solid var(--cz-bd-col,var(--line))}
+.cz-bd-b{border-bottom:var(--cz-bd-w,1px) solid var(--cz-bd-col,var(--line))}
 /* backgrounds: solid/gradient paint the section; image/video ride a media layer */
 .cz-bg--color{background:var(--cz-bg-color)}
 .cz-bg--gradient{background:var(--cz-grad)}
@@ -2141,6 +2249,7 @@ def render_site_html(site: dict, page: dict, nav_pages: list[dict], preview: boo
     _grad = _design_gradient(tc_colors.get("brandGradient"))
     if _grad:
         _extra.append(f"--brand-grad:{_grad}")
+    _extra += _style_vars(tc.get("style"))
     extra_vars = f":root{{{';'.join(_extra)}}}" if _extra else ""
     _hero_anim = typ.get("heroAnim")
     _anim_cls = f"cz-h-{_hero_anim}" if _hero_anim in ("rise", "shimmer") else ""

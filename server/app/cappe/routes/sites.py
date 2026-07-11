@@ -17,6 +17,7 @@ from ..models.cappe import (
     CappeSiteFromTemplate,
     CappeSiteUpdate,
 )
+from ..services.design_gate import gate_content, gate_theme
 from ..services.readiness import compute_readiness
 from ..services.render import render_site_html
 from .render import invalidate_render_cache, tenant_security_headers
@@ -172,16 +173,20 @@ async def preview_site_page(
             "SELECT title, slug FROM cappe_pages WHERE site_id = $1 ORDER BY sort_order, created_at",
             site_id,
         )
+    # Gate premium design in the preview too, so a non-premium plan sees exactly
+    # what will persist on Save (no premium-looking preview that vanishes on save).
+    theme_cfg = body.theme_config if body.theme_config is not None else loads(site["theme_config"])
     site_dict = {
         "name": site["name"],
         "slug": site["slug"],
         # Unsaved theme override (live theme switcher) wins over the saved theme.
-        "theme_config": body.theme_config if body.theme_config is not None else loads(site["theme_config"]),
+        "theme_config": gate_theme(theme_cfg, account.plan),
         # Unsaved meta override (live promos editing) wins over the saved meta.
         "meta_config": body.meta_config if body.meta_config is not None else loads(site["meta_config"]),
     }
     nav = [{"slug": r["slug"], "title": r["title"]} for r in nav_rows] or [{"slug": "home", "title": "Home"}]
-    page = {"title": body.title or "Page", "slug": body.slug or "home", "content": body.content or {}}
+    page = {"title": body.title or "Page", "slug": body.slug or "home",
+            "content": gate_content(body.content or {}, account.plan)}
     # Tenant CSP (inline widget scripts + fonts) — the app-wide middleware only
     # applies the strict default when no policy is set here.
     return HTMLResponse(
@@ -238,7 +243,7 @@ async def update_site(
         if body.custom_domain is not None:
             add("custom_domain", body.custom_domain or None)
         if body.theme_config is not None:
-            add("theme_config", json.dumps(body.theme_config))
+            add("theme_config", json.dumps(gate_theme(body.theme_config, account.plan)))
         if body.meta_config is not None:
             add("meta_config", json.dumps(body.meta_config))
         if body.timezone is not None:

@@ -1,4 +1,4 @@
-import { ArrowLeft, Loader2, MousePointerClick, Pencil, Save } from 'lucide-react'
+import { ArrowLeft, Loader2, MousePointerClick, Pencil, Redo2, Save, Undo2 } from 'lucide-react'
 import { PromosPanel } from './PromosPanel'
 import { ThemeMenu } from './ThemeMenu'
 import type { useThemeEditor } from './useThemeEditor'
@@ -9,6 +9,7 @@ export function EditorToolbar({
   designerUnlocked, themeEditor,
   canvasUnlocked, editMode, setEditMode,
   status, setStatus, saving, onSave, onBack,
+  onUndo, onRedo, canUndo, canRedo,
 }: {
   title: string
   setTitle: (v: string) => void
@@ -29,6 +30,10 @@ export function EditorToolbar({
   saving: boolean
   onSave: () => void
   onBack: () => void
+  onUndo: () => void
+  onRedo: () => void
+  canUndo: boolean
+  canRedo: boolean
 }) {
   return (
     <div className="flex items-center justify-between gap-4 border-b border-zinc-800 bg-zinc-900 px-6 py-3">
@@ -44,6 +49,12 @@ export function EditorToolbar({
       <div className="flex items-center gap-2">
         {notice && <span className="text-sm text-emerald-400">{notice}</span>}
         {error && <span className="text-sm text-red-400">{error}</span>}
+
+        {/* Undo / redo (⌘Z / ⌘⇧Z) */}
+        <div className="flex rounded-lg border border-zinc-700 p-0.5">
+          <button onClick={onUndo} disabled={!canUndo} title="Undo (⌘Z)" className="rounded-md px-1.5 py-1 text-zinc-400 hover:text-zinc-100 disabled:opacity-30"><Undo2 className="h-4 w-4" /></button>
+          <button onClick={onRedo} disabled={!canRedo} title="Redo (⌘⇧Z)" className="rounded-md px-1.5 py-1 text-zinc-400 hover:text-zinc-100 disabled:opacity-30"><Redo2 className="h-4 w-4" /></button>
+        </div>
 
         {/* Site-wide promos (announcement bar + pop-up) */}
         <PromosPanel meta={meta} premium={designerUnlocked} dirty={promosDirty} onChange={(m) => { setMeta(m); setPromosDirty(true) }} />

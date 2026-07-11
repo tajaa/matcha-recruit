@@ -2,14 +2,22 @@ import { useState } from 'react'
 import { ChevronDown, ChevronUp, Wand2 } from 'lucide-react'
 import { DCheck, DColor, DNum, DSelect, GradientPicker, PremiumLock, usePremium } from './DesignPrimitives'
 import { ImageInput, VideoInput } from './FieldInputs'
-import { dHead, dLabel } from './styles'
+import { StylePresetsPanel } from './StylePresets'
+import { dHead, dLabel, inputCls } from './styles'
 import { isOn, obj, str } from './valueHelpers'
 
-export function DesignInspector({ design, onChange }: { design: unknown; onChange: (d: Record<string, unknown>) => void }) {
+// Grid-based blocks whose column count is user-controllable. Bento (span layout)
+// and logos (flex row) are deliberately excluded — see render.py.
+const COLUMN_BLOCKS = new Set(['features', 'gallery', 'pricing', 'testimonial', 'stats', 'credentials', 'reviews', 'menu'])
+// slugify for the section anchor (server re-validates with a strict slug regex).
+const slugify = (v: string) => v.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 63)
+
+export function DesignInspector({ blockType, design, onChange }: { blockType?: string; design: unknown; onChange: (d: Record<string, unknown>) => void }) {
   const premium = usePremium()
   const [open, setOpen] = useState(false)
   const d = obj(design)
   const motion = obj(d.motion), bg = obj(d.bg), layout = obj(d.layout), colors = obj(d.colors)
+  const type = obj(d.type), border = obj(d.border), anchor = obj(d.anchor)
   const fx = str(motion.effect) || 'none'
   const hover = str(motion.hover) || 'none'
   const loop = str(motion.loop) || 'none'
@@ -18,6 +26,8 @@ export function DesignInspector({ design, onChange }: { design: unknown; onChang
   const patch = (group: string, key: string, value: unknown) =>
     onChange({ ...d, [group]: { ...obj(d[group]), [key]: value } })
   const padOpts: [string, string][] = [['default', 'Default'], ['none', 'None'], ['sm', 'Small'], ['lg', 'Large'], ['xl', 'XL']]
+  // Numeric per-section overrides: 0/absent → cleared (byte-identical to unset).
+  const numPatch = (group: string, key: string, v: number) => patch(group, key, v ? v : undefined)
 
   return (
     <div className="rounded-lg border border-zinc-800 bg-zinc-950/40">
@@ -77,6 +87,47 @@ export function DesignInspector({ design, onChange }: { design: unknown; onChang
                   <DSelect label="Min height" value={str(layout.minHeight) || 'default'} onChange={(v) => patch('layout', 'minHeight', v)} options={[['default', 'Default'], ['tall', 'Tall'], ['screen', 'Full screen']]} />
                 </div>
                 <DSelect label="Align" value={str(layout.align) || 'default'} onChange={(v) => patch('layout', 'align', v)} options={[['default', 'Default'], ['left', 'Left'], ['center', 'Center']]} />
+                <div className="grid grid-cols-2 gap-2">
+                  <DNum label="Padding top (px)" value={Number(layout.padTopPx) || 0} min={0} max={400} step={4} onChange={(v) => numPatch('layout', 'padTopPx', v)} />
+                  <DNum label="Padding bottom (px)" value={Number(layout.padBottomPx) || 0} min={0} max={400} step={4} onChange={(v) => numPatch('layout', 'padBottomPx', v)} />
+                  {COLUMN_BLOCKS.has(blockType || '') && (
+                    <DNum label="Columns" value={Number(layout.columns) || 0} min={0} max={6} onChange={(v) => numPatch('layout', 'columns', v)} />
+                  )}
+                  <DNum label="Item gap (px)" value={Number(layout.gap) || 0} min={0} max={80} step={2} onChange={(v) => numPatch('layout', 'gap', v)} />
+                </div>
+                <p className="text-[10px] text-zinc-600">px overrides win over the presets above; 0 = use default.</p>
+              </section>
+
+              <section className="space-y-2">
+                <p className={dHead}>Type (this section)</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <DNum label="Heading size (px)" value={Number(type.headingSize) || 0} min={0} max={96} step={2} onChange={(v) => numPatch('type', 'headingSize', v)} />
+                  <DNum label="Body size (px)" value={Number(type.bodySize) || 0} min={0} max={28} onChange={(v) => numPatch('type', 'bodySize', v)} />
+                </div>
+              </section>
+
+              <section className="space-y-1.5">
+                <p className={dHead}>Border (this section)</p>
+                <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+                  <DCheck label="Top rule" checked={isOn(border.top)} onChange={(v) => patch('border', 'top', v)} />
+                  <DCheck label="Bottom rule" checked={isOn(border.bottom)} onChange={(v) => patch('border', 'bottom', v)} />
+                </div>
+                {(isOn(border.top) || isOn(border.bottom)) && (
+                  <div className="grid grid-cols-2 gap-2">
+                    <DNum label="Width (px)" value={Number(border.width) || 1} min={1} max={8} onChange={(v) => patch('border', 'width', v)} />
+                    <DColor label="Color" value={str(border.color)} onChange={(v) => patch('border', 'color', v)} />
+                  </div>
+                )}
+              </section>
+
+              <section className="space-y-1">
+                <p className={dHead}>Anchor</p>
+                <label className="block">
+                  <span className={dLabel}>Link id (for in-page #links)</span>
+                  <input type="text" value={str(anchor.id)} placeholder="e.g. pricing"
+                    onChange={(e) => patch('anchor', 'id', slugify(e.target.value))}
+                    className={`${inputCls} py-1.5`} />
+                </label>
               </section>
 
               <section className="space-y-1.5">
@@ -84,6 +135,15 @@ export function DesignInspector({ design, onChange }: { design: unknown; onChang
                 <DColor label="Text" value={str(colors.text)} onChange={(v) => patch('colors', 'text', v)} />
                 <DColor label="Headings" value={str(colors.heading)} onChange={(v) => patch('colors', 'heading', v)} />
                 <DColor label="Accent" value={str(colors.accent)} onChange={(v) => patch('colors', 'accent', v)} />
+              </section>
+
+              <section className="border-t border-zinc-800 pt-3">
+                <StylePresetsPanel
+                  kind="section"
+                  label="Saved section styles"
+                  currentData={d}
+                  onApply={(data) => { const next = { ...(data as Record<string, unknown>) }; delete next.anchor; onChange(next) }}
+                />
               </section>
             </>
           )}

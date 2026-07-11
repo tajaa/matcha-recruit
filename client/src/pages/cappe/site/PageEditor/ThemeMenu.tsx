@@ -1,21 +1,35 @@
 import { Check, Palette, Sparkles, Wand2 } from 'lucide-react'
 import { CAPPE_THEMES, FONT_PAIRINGS, RADII } from '../../../../data/cappeThemes'
 import { CappeFontPicker } from './CappeFontPicker'
-import { DCheck, GradientPicker, PremiumLock } from './DesignPrimitives'
+import { DCheck, DNum, DSelect, GradientPicker, PremiumLock } from './DesignPrimitives'
 import { dHead, dLabel, inputCls } from './styles'
+import { StylePresetsPanel } from './StylePresets'
 import { fontPairId, themeColors, themeFonts, themeObj } from './themeHelpers'
 import type { useThemeEditor } from './useThemeEditor'
-import { obj } from './valueHelpers'
+import { obj, str } from './valueHelpers'
+
+// Global style-system option lists (mirror render.py enum maps; '' = "Default").
+const LINEHEIGHT_OPTS: [string, string][] = [['', 'Default'], ['tight', 'Tight'], ['normal', 'Normal'], ['relaxed', 'Relaxed']]
+const CONTAINER_OPTS: [string, string][] = [['', 'Default'], ['compact', 'Compact'], ['wide', 'Wide'], ['xwide', 'Extra wide']]
+const GUTTER_OPTS: [string, string][] = [['', 'Default'], ['tight', 'Tight'], ['roomy', 'Roomy']]
+const SECPAD_OPTS: [string, string][] = [['', 'Default'], ['compact', 'Compact'], ['cozy', 'Cozy'], ['roomy', 'Roomy']]
+const GAP_OPTS: [string, string][] = [['', 'Default'], ['tight', 'Tight'], ['roomy', 'Roomy']]
+const CARDBD_OPTS: [string, string][] = [['', 'Default'], ['none', 'None'], ['hairline', 'Hairline'], ['bold', 'Bold']]
 
 export function ThemeMenu({ themeEditor, designerUnlocked }: {
   themeEditor: ReturnType<typeof useThemeEditor>
   designerUnlocked: boolean
 }) {
   const {
-    theme, themeDirty, themeOpen, setThemeOpen,
+    theme, themeDirty, themeOpen, setThemeOpen, loadTheme, markDirty,
     applyPreset, setBrand, setPairing, setRadius, setMode, setPremium,
-    setHeadingFont, setBodyFont, setTypeKey, setBrandGradient,
+    setHeadingFont, setBodyFont, setTypeKey, setStyleKey, setBrandGradient,
   } = themeEditor
+  const style = themeObj(theme.style)
+  // Number fields show the real CSS default when unset; typing that same default
+  // back clears the key so the render stays byte-identical to "no override".
+  const numOr = (k: string, def: number) => Number(style[k]) || def
+  const setNum = (k: string, v: number, def: number) => setStyleKey(k, v === def ? '' : v)
 
   return (
     <div className="relative">
@@ -88,15 +102,6 @@ export function ThemeMenu({ themeEditor, designerUnlocked }: {
                   ))}
                 </div>
               </div>
-
-              <div className="flex items-center justify-between">
-                <span className="flex items-center gap-1 text-xs text-zinc-400"><Sparkles className="h-3 w-3 text-amber-400" /> Premium effects</span>
-                <div className="flex rounded-lg border border-zinc-700 p-0.5">
-                  {([['On', true], ['Off', false]] as const).map(([label, on]) => (
-                    <button key={label} onClick={() => setPremium(on)} className={`rounded-md px-2.5 py-0.5 text-xs font-medium ${!!theme.premium === on ? 'bg-emerald-500 text-zinc-950' : 'text-zinc-400 hover:text-zinc-200'}`}>{label}</button>
-                  ))}
-                </div>
-              </div>
             </div>
 
             {/* premium designer studio — custom fonts, type, brand gradient */}
@@ -134,6 +139,48 @@ export function ThemeMenu({ themeEditor, designerUnlocked }: {
                   {!!obj(obj(theme.colors).brandGradient).stops && (
                     <GradientPicker value={obj(obj(theme.colors).brandGradient)} onChange={(g) => setBrandGradient(g)} />
                   )}
+
+                  <div className="flex items-center justify-between pt-1">
+                    <span className="flex items-center gap-1 text-xs text-zinc-400"><Sparkles className="h-3 w-3 text-amber-400" /> Premium effects</span>
+                    <div className="flex rounded-lg border border-zinc-700 p-0.5">
+                      {([['On', true], ['Off', false]] as const).map(([label, on]) => (
+                        <button key={label} onClick={() => setPremium(on)} className={`rounded-md px-2.5 py-0.5 text-xs font-medium ${!!theme.premium === on ? 'bg-emerald-500 text-zinc-950' : 'text-zinc-400 hover:text-zinc-200'}`}>{label}</button>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* global style system — spacing / type scale / layout (premium) */}
+            <div className="mt-3 space-y-2.5 border-t border-zinc-800 pt-3">
+              <p className={`${dHead} flex items-center gap-1`}><Palette className="h-3 w-3 text-amber-400" /> Layout &amp; spacing</p>
+              {!designerUnlocked ? (
+                <PremiumLock>Upgrade to Pro to tune type scale, spacing rhythm, container width &amp; card styling.</PremiumLock>
+              ) : (
+                <>
+                  <div className="grid grid-cols-2 gap-2">
+                    <DNum label="Base font (px)" value={numOr('baseFont', 17)} min={14} max={20} onChange={(v) => setNum('baseFont', v, 17)} />
+                    <DSelect label="Line height" value={str(style.lineHeight)} options={LINEHEIGHT_OPTS} onChange={(v) => setStyleKey('lineHeight', v)} />
+                    <DSelect label="Container width" value={str(style.container)} options={CONTAINER_OPTS} onChange={(v) => setStyleKey('container', v)} />
+                    <DSelect label="Page gutter" value={str(style.gutter)} options={GUTTER_OPTS} onChange={(v) => setStyleKey('gutter', v)} />
+                    <DSelect label="Section spacing" value={str(style.sectionPad)} options={SECPAD_OPTS} onChange={(v) => setStyleKey('sectionPad', v)} />
+                    <DSelect label="Grid gap" value={str(style.gap)} options={GAP_OPTS} onChange={(v) => setStyleKey('gap', v)} />
+                    <DNum label="Card padding (px)" value={numOr('cardPad', 24)} min={8} max={48} step={2} onChange={(v) => setNum('cardPad', v, 24)} />
+                    <DSelect label="Card border" value={str(style.cardBorder)} options={CARDBD_OPTS} onChange={(v) => setStyleKey('cardBorder', v)} />
+                    <DNum label="Header padding (px)" value={numOr('headerPad', 17)} min={8} max={28} onChange={(v) => setNum('headerPad', v, 17)} />
+                    <DNum label="Brand size (px)" value={numOr('brandSize', 19)} min={14} max={32} onChange={(v) => setNum('brandSize', v, 19)} />
+                    <DNum label="Footer padding (px)" value={numOr('footerPad', 40)} min={16} max={80} step={2} onChange={(v) => setNum('footerPad', v, 40)} />
+                  </div>
+
+                  <div className="border-t border-zinc-800 pt-2.5">
+                    <StylePresetsPanel
+                      kind="theme"
+                      label="Saved themes"
+                      currentData={theme}
+                      onApply={(data) => { loadTheme({ ...theme, ...data }); markDirty() }}
+                    />
+                  </div>
                 </>
               )}
             </div>

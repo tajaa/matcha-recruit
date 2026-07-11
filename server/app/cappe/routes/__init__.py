@@ -19,6 +19,7 @@ from .messages import router as messages_router
 from .newsletter import router as newsletter_router
 from .pages import router as pages_router
 from .payments import router as payments_router
+from .presets import router as presets_router
 from .public import router as public_router
 from .reviews import router as reviews_router
 from .rider import router as rider_router
@@ -46,6 +47,7 @@ cappe_router.include_router(domains_router)
 # Authenticated, per-site (each route gates on require_cappe_account + get_owned_site).
 cappe_router.include_router(sites_router)
 cappe_router.include_router(pages_router)
+cappe_router.include_router(presets_router)
 cappe_router.include_router(shop_router)
 cappe_router.include_router(newsletter_router)
 cappe_router.include_router(forms_router)

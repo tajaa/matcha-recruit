@@ -661,3 +661,13 @@ export type CappePost = {
   created_at: string
   updated_at: string
 }
+
+// A saved reusable look: kind='theme' → a theme_config style subset;
+// kind='section' → a block _design bag.
+export type CappeStylePreset = {
+  id: string
+  name: string
+  kind: 'theme' | 'section'
+  data: Record<string, unknown>
+  created_at: string
+}

@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from ...database import get_connection
 from ..dependencies import require_cappe_account
 from ..models.cappe import CappeAccount, CappePage, CappePageCreate, CappePageUpdate
+from ..services.design_gate import gate_content
 from .render import invalidate_render_cache
 from ._shared import get_owned_site, page_row_to_dict, slugify, unique_slug
 
@@ -54,7 +55,7 @@ async def create_page(
             site_id,
             body.title,
             slug,
-            json.dumps(body.content),
+            json.dumps(gate_content(body.content, account.plan)),
             body.sort_order,
             body.status,
         )
@@ -90,7 +91,7 @@ async def update_page(
         if body.slug is not None:
             add("slug", slugify(body.slug))
         if body.content is not None:
-            add("content", json.dumps(body.content))
+            add("content", json.dumps(gate_content(body.content, account.plan)))
         if body.sort_order is not None:
             add("sort_order", body.sort_order)
         if body.status is not None:

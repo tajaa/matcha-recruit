@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Loader2, Plus, Sparkles } from 'lucide-react'
 import type { CappeBlock } from '../../../../types/cappe'
 import { BLOCK_ORDER, BLOCK_SCHEMAS } from './blockSchemas'
@@ -5,7 +6,8 @@ import { BlockCard } from './BlockCard'
 
 export function FormModeView({
   blocks, preview, adding, setAdding, canvasUnlocked,
-  updateBlock, removeBlock, moveBlock, addBlock,
+  updateBlock, removeBlock, moveBlock, reorderBlock, duplicateBlock, addBlock,
+  copyStyle, pasteStyle, canPasteStyle,
 }: {
   blocks: CappeBlock[]
   preview: string
@@ -15,22 +17,48 @@ export function FormModeView({
   updateBlock: (i: number, b: CappeBlock) => void
   removeBlock: (i: number) => void
   moveBlock: (i: number, dir: -1 | 1) => void
+  reorderBlock: (from: number, to: number) => void
+  duplicateBlock: (i: number) => void
   addBlock: (type: string) => void
+  copyStyle: (i: number) => void
+  pasteStyle: (i: number) => void
+  canPasteStyle: boolean
 }) {
+  const [dragFrom, setDragFrom] = useState<number | null>(null)
+  const [dragOver, setDragOver] = useState<number | null>(null)
+
+  const onDrop = (to: number) => {
+    if (dragFrom !== null) reorderBlock(dragFrom, to)
+    setDragFrom(null)
+    setDragOver(null)
+  }
+
   return (
     <div className="flex min-h-0 flex-1">
       <div className="w-full overflow-y-auto border-r border-zinc-800 bg-zinc-950 p-5 lg:w-[46%]">
         <div className="space-y-3">
           {blocks.map((b, i) => (
-            <BlockCard
-              key={i}
-              block={b}
-              index={i}
-              total={blocks.length}
-              onChange={(nb) => updateBlock(i, nb)}
-              onRemove={() => removeBlock(i)}
-              onMove={(dir) => moveBlock(i, dir)}
-            />
+            <div
+              key={(b._k as string) || i}
+              onDragOver={(e) => { if (dragFrom !== null) { e.preventDefault(); setDragOver(i) } }}
+              onDrop={() => onDrop(i)}
+              className={dragOver === i && dragFrom !== i ? 'rounded-xl ring-2 ring-emerald-500/60' : ''}
+            >
+              <BlockCard
+                block={b}
+                index={i}
+                total={blocks.length}
+                onChange={(nb) => updateBlock(i, nb)}
+                onRemove={() => removeBlock(i)}
+                onMove={(dir) => moveBlock(i, dir)}
+                onDuplicate={() => duplicateBlock(i)}
+                onCopyStyle={() => copyStyle(i)}
+                onPasteStyle={() => pasteStyle(i)}
+                canPasteStyle={canPasteStyle}
+                onDragStart={() => setDragFrom(i)}
+                onDragEnd={() => { setDragFrom(null); setDragOver(null) }}
+              />
+            </div>
           ))}
           {blocks.length === 0 && (
             <p className="rounded-xl border border-dashed border-zinc-700 p-6 text-center text-sm text-zinc-500">

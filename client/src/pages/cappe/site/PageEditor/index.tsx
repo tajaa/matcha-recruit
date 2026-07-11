@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, Loader2 } from 'lucide-react'
 import { cappeApi } from '../../../../api/cappeClient'
@@ -11,8 +11,19 @@ import { EditorToolbar } from './EditorToolbar'
 import { FormModeView } from './FormModeView'
 import { themeObj } from './themeHelpers'
 import { useCanvasBridge } from './useCanvasBridge'
+import { useEditorHistory } from './useEditorHistory'
 import { usePagePreview } from './usePagePreview'
 import { useThemeEditor } from './useThemeEditor'
+
+// Stable per-block key so form-mode drag-reorder reconciles correctly (index
+// keys would strand each card's local open/collapse state on reorder). Stripped
+// before persisting so it never lands in stored `content.blocks`.
+const STYLE_CLIP_KEY = 'cappe:styleClipboard'
+const genKey = () =>
+  (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `k${Math.random().toString(36).slice(2)}`)
+const withKey = (b: CappeBlock): CappeBlock => (b._k ? b : { ...b, _k: genKey() })
+const withKeys = (bs: CappeBlock[]) => bs.map(withKey)
+const stripKeys = (bs: CappeBlock[]) => bs.map((b) => { const r = { ...b }; delete r._k; return r })
 
 export default function PageEditor() {
   const { siteId, pageId } = useParams<{ siteId: string; pageId: string }>()
@@ -43,6 +54,12 @@ export default function PageEditor() {
   const [meta, setMeta] = useState<Record<string, unknown>>({})
   const [promosDirty, setPromosDirty] = useState(false)
 
+  // Copy/paste a section's design (`_design`). Persisted to localStorage so it
+  // survives page/tab switches. `anchor.id` is dropped on paste (ids stay unique).
+  const [styleClip, setStyleClip] = useState<Record<string, unknown> | null>(() => {
+    try { const raw = localStorage.getItem(STYLE_CLIP_KEY); return raw ? JSON.parse(raw) : null } catch { return null }
+  })
+
   useEffect(() => {
     if (!siteId || !pageId) return
     Promise.all([
@@ -56,7 +73,7 @@ export default function PageEditor() {
         setTitle(p.title)
         setStatus(p.status === 'published' ? 'published' : 'draft')
         const bs = (p.content?.blocks as CappeBlock[]) || []
-        setBlocks(Array.isArray(bs) ? bs : [])
+        setBlocks(withKeys(Array.isArray(bs) ? bs : []))
         themeEditor.loadTheme(themeObj(site?.theme_config))
         setMeta(themeObj(site?.meta_config))
       })
@@ -77,23 +94,72 @@ export default function PageEditor() {
       ;[next[i], next[j]] = [next[j], next[i]]
       return next
     })
+  // Drag-reorder (form mode): move block from → to.
+  const reorderBlock = (from: number, to: number) =>
+    setBlocks((bs) => {
+      if (from === to || from < 0 || to < 0 || from >= bs.length || to >= bs.length) return bs
+      const next = [...bs]
+      const [moved] = next.splice(from, 1)
+      next.splice(to, 0, moved)
+      return next
+    })
   const addBlock = (type: string) => {
-    setBlocks((bs) => [...bs, BLOCK_SCHEMAS[type].make()])
+    setBlocks((bs) => [...bs, withKey(BLOCK_SCHEMAS[type].make())])
     setAdding(false)
   }
   // Insert a new block right after index `i` (canvas "add below").
   const addBlockAt = (type: string, i: number) => {
-    setBlocks((bs) => { const next = [...bs]; next.splice(i + 1, 0, BLOCK_SCHEMAS[type].make()); return next })
+    setBlocks((bs) => { const next = [...bs]; next.splice(i + 1, 0, withKey(BLOCK_SCHEMAS[type].make())); return next })
     canvas.setSelBlock(i + 1)
   }
-  // Deep-copy a block (incl. _design + list items) and insert after it.
+  // Deep-copy a block (incl. _design + list items) and insert after it. Fresh key.
   const duplicateBlock = (i: number) => {
     setBlocks((bs) => {
       const clone = JSON.parse(JSON.stringify(bs[i])) as CappeBlock
+      clone._k = genKey()
       const next = [...bs]; next.splice(i + 1, 0, clone); return next
     })
     canvas.setSelBlock(i + 1)
   }
+  // Copy/paste a section's `_design` across blocks.
+  const copyStyle = (i: number) => {
+    const dz = (blocks[i]?._design as Record<string, unknown>) || {}
+    const clip = JSON.parse(JSON.stringify(dz)) as Record<string, unknown>
+    setStyleClip(clip)
+    try { localStorage.setItem(STYLE_CLIP_KEY, JSON.stringify(clip)) } catch { /* ignore quota */ }
+  }
+  const pasteStyle = (i: number) => {
+    if (!styleClip) return
+    const dz = JSON.parse(JSON.stringify(styleClip)) as Record<string, unknown>
+    delete dz.anchor // ids must stay unique per page
+    setBlocks((bs) => bs.map((x, j) => (j === i ? { ...x, _design: dz } : x)))
+  }
+
+  // ── Undo / redo (blocks + title + meta + theme) ────────────────────────────
+  const history = useEditorHistory(
+    { blocks, title, meta, theme: themeEditor.theme },
+    (s) => { setBlocks(s.blocks); setTitle(s.title); setMeta(s.meta); themeEditor.loadTheme(s.theme); themeEditor.markDirty() },
+  )
+  const historyRef = useRef(history)
+  historyRef.current = history
+  // Reset history baseline once the page has loaded so the first undo doesn't
+  // rewind into the empty pre-load state.
+  useEffect(() => {
+    if (page) historyRef.current.reset({ blocks, title, meta, theme: themeEditor.theme })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page?.id])
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 'z') return
+      // Don't hijack undo while typing into the on-page canvas contenteditable.
+      const el = document.activeElement
+      if (el && (el as HTMLElement).isContentEditable) return
+      e.preventDefault()
+      if (e.shiftKey) historyRef.current.redo(); else historyRef.current.undo()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   async function save() {
     if (!siteId || !pageId) return
@@ -104,7 +170,7 @@ export default function PageEditor() {
       const updated = await cappeApi.put<CappePage>(`/sites/${siteId}/pages/${pageId}`, {
         title,
         status,
-        content: { blocks },
+        content: { blocks: stripKeys(blocks) },
       })
       setPage(updated)
       // Persist the theme + promos (meta_config) to the site too, if changed here.
@@ -162,6 +228,10 @@ export default function PageEditor() {
           saving={saving}
           onSave={save}
           onBack={() => navigate(`/cappe/sites/${siteId}`)}
+          onUndo={history.undo}
+          onRedo={history.redo}
+          canUndo={history.canUndo}
+          canRedo={history.canRedo}
         />
 
         {editMode === 'canvas' ? (
@@ -188,7 +258,12 @@ export default function PageEditor() {
             updateBlock={updateBlock}
             removeBlock={removeBlock}
             moveBlock={moveBlock}
+            reorderBlock={reorderBlock}
+            duplicateBlock={duplicateBlock}
             addBlock={addBlock}
+            copyStyle={copyStyle}
+            pasteStyle={pasteStyle}
+            canPasteStyle={!!styleClip}
           />
         )}
       </div>
