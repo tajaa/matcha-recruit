@@ -58,6 +58,14 @@ async def upload_cert(
             raise HTTPException(status_code=400, detail="Invalid contract_id")
 
     async with get_connection() as conn:
+        # Only link a contract the caller actually owns (the FK checks existence,
+        # not tenancy — don't store another company's contract id).
+        if cid is not None:
+            owns = await conn.fetchval(
+                "SELECT 1 FROM company_contracts WHERE id = $1 AND company_id = $2", cid, company_id,
+            )
+            if not owns:
+                raise HTTPException(status_code=404, detail="Contract not found")
         await coi_service.create_certificate(
             conn, company_id, parsed,
             holder_name=holder_name, contract_id=cid,

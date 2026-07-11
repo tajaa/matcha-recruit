@@ -14,6 +14,7 @@ aggregate, not per-occurrence severities). Reuses the existing engine — no new
 simulation math.
 """
 
+import asyncio
 import math
 from uuid import UUID
 
@@ -149,7 +150,9 @@ async def build_tcor(conn, company_id: UUID) -> dict:
             dims = json.loads(dims)
         line_items = extract_cost_of_risk_items(dims) if isinstance(dims, dict) else []
         if line_items:
-            mc = run_monte_carlo(line_items, seed=42, include_samples=True)
+            # 10k-iteration sim — offload so it doesn't block the event loop
+            # (mirrors the other run_monte_carlo callsites in the risk routes).
+            mc = await asyncio.to_thread(run_monte_carlo, line_items, 10000, 42, True)
             modeled_loss = mc.aggregate.expected_annual_loss
             samples = mc.aggregate.samples or []
             candidates = _default_candidates(base_retention, mc.aggregate.max_simulated)

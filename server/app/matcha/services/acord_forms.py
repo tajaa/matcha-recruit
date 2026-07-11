@@ -42,15 +42,13 @@ def _money(v) -> str:
 async def build_acord_context(conn, company_id: UUID) -> dict:
     """Pull every source the four forms draw on. Each piece is best-effort."""
     company = await conn.fetchrow(
-        "SELECT name, industry, ein, website FROM companies WHERE id = $1", company_id
-    ) if await _has_col(conn, "companies", "ein") else await conn.fetchrow(
         "SELECT name, industry FROM companies WHERE id = $1", company_id
     )
     locations = await conn.fetch(
         "SELECT city, state, county FROM business_locations "
         "WHERE company_id = $1 AND COALESCE(is_active, true) = true",
         company_id,
-    ) if await _has_table(conn, "business_locations") else []
+    )
 
     buildings, sov_rollup = [], None
     try:
@@ -74,16 +72,6 @@ async def build_acord_context(conn, company_id: UUID) -> dict:
         "sov_rollup": sov_rollup,
         "wc_exposures": wc_exposures,
     }
-
-
-async def _has_table(conn, table: str) -> bool:
-    return bool(await conn.fetchval("SELECT to_regclass($1)", f"public.{table}"))
-
-
-async def _has_col(conn, table: str, col: str) -> bool:
-    return bool(await conn.fetchval(
-        "SELECT 1 FROM information_schema.columns WHERE table_name=$1 AND column_name=$2",
-        table, col))
 
 
 def _header_html(form: str, ctx: dict) -> str:
@@ -114,8 +102,8 @@ def _acord130_html(ctx: dict) -> str:
 def _acord140_html(ctx: dict) -> str:
     rollup = ctx.get("sov_rollup") or {}
     rows = "".join(
-        f"<tr><td>{_esc(b.get('description') or b.get('address'))}</td>"
-        f"<td>{_esc(b.get('construction'))}</td><td>{_money(b.get('building_value'))}</td>"
+        f"<tr><td>{_esc(b.get('name') or b.get('address'))}</td>"
+        f"<td>{_esc(b.get('construction_type'))}</td><td>{_money(b.get('building_value'))}</td>"
         f"<td>{_money(b.get('contents_value'))}</td><td>{_money(b.get('bi_value'))}</td></tr>"
         for b in ctx["buildings"]
     ) or "<tr><td colspan='5'>No buildings on the Statement of Values.</td></tr>"

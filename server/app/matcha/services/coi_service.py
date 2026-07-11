@@ -74,7 +74,10 @@ async def list_certificates(conn, company_id: UUID) -> dict:
                "with_gaps": 0}
     for c in certs:
         summary[c["status"]] = summary.get(c["status"], 0) + 1
-        if c.get("verification", {}).get("summary", {}).get("contract_shortfalls"):
+        # verification is None when the cert isn't linked to a contract — guard
+        # the chain (the key is present with value None, so .get() default won't help).
+        vsummary = (c.get("verification") or {}).get("summary") or {}
+        if vsummary.get("contract_shortfalls"):
             summary["with_gaps"] += 1
     return {"certificates": certs, "summary": summary}
 
