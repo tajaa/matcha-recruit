@@ -4056,6 +4056,19 @@ async def get_api_sources_overview():
         }
 
 
+def _row_metadata(value) -> dict:
+    """asyncpg returns jsonb columns as raw strings (no pool codec); coerce to dict."""
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str) and value:
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, dict) else {}
+        except (ValueError, TypeError):
+            return {}
+    return {}
+
+
 @router.get("/jurisdictions/quality-audit", dependencies=[Depends(require_admin)])
 async def get_quality_audit(
     state: Optional[str] = None,
@@ -4221,7 +4234,7 @@ async def get_quality_audit(
                     "city": r["city"],
                     "completeness_score": r["completeness_score"],
                     "staleness_days": r["staleness_days"],
-                    "research_source": (r["metadata"] or {}).get("research_source") if r["metadata"] else None,
+                    "research_source": _row_metadata(r["metadata"]).get("research_source"),
                 }
                 for r in rows
             ],
