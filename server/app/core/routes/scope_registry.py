@@ -354,12 +354,26 @@ async def fetch_queue_research(payload: FetchQueueResearchRequest):
     from app.core.services.scope_registry.codify import (
         chain_uncodified, group_research_units, reconcile_codifications,
     )
+    from app.core.services.scope_registry.body_fetch import fetch_bodies_for_index
+    from app.core.services.scope_registry.grounded import build_grounded_corpus
     from app.core.services.compliance_service import research_specialization_for_jurisdiction
 
     state, city = payload.state, payload.city
 
     def _sse(event: dict) -> str:
         return f"data: {_json.dumps(event)}\n\n"
+
+    async def _corpus_for_unit(conn, unit) -> tuple:
+        """Fetch the unit items' statute bodies and render the grounded corpus."""
+        item_ids = [it["item_id"] for it in unit["items"] if it.get("item_id")]
+        if not item_ids:
+            return "", {}
+        rows = await conn.fetch(
+            "SELECT id AS item_id, citation, heading, body_text "
+            "FROM authority_index_items WHERE id = ANY($1::uuid[])",
+            item_ids,
+        )
+        return build_grounded_corpus([dict(r) for r in rows])
 
     async def stream():
       try:
@@ -371,6 +385,28 @@ async def fetch_queue_research(payload: FetchQueueResearchRequest):
                 state_id=work["chain"]["state_id"],
                 city_id=work["chain"]["city_id"],
             )
+
+            # Grounding pre-flight: fetch official statute text for any worklist
+            # index whose items don't have bodies yet, so research can extract
+            # values from the source instead of model recall. Best-effort — a
+            # fetch failure just falls back to ungrounded research for that unit.
+            bodyless_slugs = sorted({
+                it["index_slug"] for u in units for it in u["items"]
+                if it.get("index_slug") and not it.get("has_body")
+            })
+            fetched = 0
+            for slug in bodyless_slugs:
+                try:
+                    res = await fetch_bodies_for_index(conn, slug)
+                    fetched += (res or {}).get("fetched", 0) if isinstance(res, dict) else 0
+                except Exception as exc:
+                    logger.warning("body prefetch failed for %s: %s", slug, exc)
+            if bodyless_slugs:
+                yield _sse({"type": "status",
+                            "message": f"Fetched statute text for {fetched} item(s) "
+                                       f"across {len(bodyless_slugs)} index(es)",
+                            "bodies_fetched": fetched})
+
             yield _sse({"type": "status",
                         "message": f"{len(units)} research unit(s) · "
                                    f"{len(work['keyed'])} keyed · {len(work['unkeyed'])} unkeyed",
@@ -393,14 +429,17 @@ async def fetch_queue_research(payload: FetchQueueResearchRequest):
                 yield _sse({"type": "researching", "jurisdiction": label,
                             "progress": idx, "total": len(units)})
                 try:
+                    corpus, citation_index = await _corpus_for_unit(conn, unit)
                     res = await research_specialization_for_jurisdiction(
                         conn, unit["jurisdiction_id"], unit["categories"],
                         industry_tag="", industry_context=unit["context"],
                         skip_existing=False,
+                        grounded_corpus=corpus, citation_index=citation_index,
                     )
                     total_new += res.get("new", 0)
                     yield _sse({"type": "jurisdiction_complete", "jurisdiction": label,
-                                "new": res.get("new", 0), "failed": res.get("failed", [])})
+                                "new": res.get("new", 0), "failed": res.get("failed", []),
+                                "grounded": bool(corpus)})
                 except Exception as exc:  # a unit failing must not kill the stream
                     logger.warning("fetch-queue research failed for %s: %s", label, exc)
                     yield _sse({"type": "jurisdiction_complete", "jurisdiction": label,

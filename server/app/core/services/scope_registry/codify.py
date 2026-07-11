@@ -202,7 +202,9 @@ async def chain_uncodified(
             SELECT c.id AS classification_id, c.disposition, c.applies_to_categories,
                    c.excludes_categories, c.entity_condition, c.regulation_key,
                    c.key_definition_id, rkd.category_slug,
-                   i.citation, i.heading, ai.level, ai.slug AS index_slug,
+                   i.id AS item_id, i.citation, i.heading,
+                   (i.body_text IS NOT NULL) AS has_body,
+                   ai.level, ai.slug AS index_slug,
                    ai.domain_categories
             FROM authority_item_classifications c
             JOIN authority_index_items i ON i.id = c.item_id
@@ -242,6 +244,9 @@ async def chain_uncodified(
             "level": r["level"],
             "citation": r["citation"],
             "heading": r["heading"],
+            "item_id": r["item_id"],
+            "index_slug": r["index_slug"],
+            "has_body": r["has_body"],
         }
         if not r["regulation_key"]:
             unkeyed.append(item)

@@ -1655,8 +1655,17 @@ async def _upsert_requirements_additive(
     for req in reqs:
         # Build per-requirement metadata (research_source + penalties if present)
         meta_dict: dict = {}
+        # Carry any caller-set metadata (e.g. grounding marker from grounded
+        # extraction) — but never let it override research_source below.
+        req_meta = req.get("metadata")
+        if isinstance(req_meta, dict):
+            meta_dict.update(req_meta)
         if research_source:
             meta_dict["research_source"] = research_source
+        if req.get("grounding"):
+            meta_dict["grounding"] = req["grounding"]
+        if req.get("grounded_citations"):
+            meta_dict["grounded_citations"] = req["grounded_citations"]
         penalties = req.get("penalties")
         if isinstance(penalties, dict) and any(penalties.values()):
             meta_dict["penalties"] = penalties
@@ -9047,6 +9056,8 @@ async def research_specialization_for_jurisdiction(
     progress_callback: Optional[Callable] = None,
     *,
     skip_existing: bool = True,
+    grounded_corpus: str = "",
+    citation_index: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Research specialization-specific categories for a jurisdiction.
 
@@ -9056,7 +9067,14 @@ async def research_specialization_for_jurisdiction(
     jurisdiction already has rows in it — the fetch-queue case, where the
     category exists but a specific key was missed (the missing key is targeted
     via ``industry_context``).
+
+    ``grounded_corpus`` (+ ``citation_index``): fetched official statute text the
+    model must extract values FROM and cite (see grounded.py). When present, each
+    returned req is gated by ``validate_requirement_citations`` — reqs that cite a
+    real corpus id upsert as ``research_source='gemini_grounded'``; ungrounded
+    ones stay ``'gemini'`` + ``metadata.grounding='ungrounded'``.
     """
+    from .scope_registry.grounded import validate_requirement_citations
     from .gemini_compliance import get_gemini_compliance_service
     from .jurisdiction_context import get_known_sources, build_context_prompt, get_global_authority_sources
 
@@ -9142,6 +9160,7 @@ async def research_specialization_for_jurisdiction(
                 preemption_rules=preemption_rules,
                 has_local_ordinance=has_local_ordinance,
                 industry_context=industry_context,
+                grounded_corpus=grounded_corpus,
             )
             reqs = reqs or []
 
@@ -9151,7 +9170,25 @@ async def research_specialization_for_jurisdiction(
                     req["applicable_industries"] = [industry_tag]
 
             if reqs:
-                await _upsert_requirements_additive(conn, jurisdiction_id, reqs, research_source="gemini")
+                if grounded_corpus:
+                    # Gate on the corpus the model was given. Grounded reqs
+                    # (cited a real statute excerpt) upsert as gemini_grounded;
+                    # the rest stay gemini + a metadata.grounding marker.
+                    validate_requirement_citations(reqs, citation_index)
+                    grounded = [r for r in reqs if r.get("grounded")]
+                    ungrounded = [r for r in reqs if not r.get("grounded")]
+                    for r in grounded:
+                        r["grounding"] = "grounded"
+                    for r in ungrounded:
+                        r["grounding"] = "ungrounded"
+                    if grounded:
+                        await _upsert_requirements_additive(
+                            conn, jurisdiction_id, grounded, research_source="gemini_grounded")
+                    if ungrounded:
+                        await _upsert_requirements_additive(
+                            conn, jurisdiction_id, ungrounded, research_source="gemini")
+                else:
+                    await _upsert_requirements_additive(conn, jurisdiction_id, reqs, research_source="gemini")
                 total_new += len(reqs)
                 added_requirements.extend(reqs)
         except Exception as e:

@@ -372,21 +372,41 @@ def _build_regulation_key_instruction(category: str) -> str:
     )
 
 
+def _build_grounded_section(grounded_corpus: str) -> str:
+    """The statute-text block: Gemini extracts values FROM this, never from recall."""
+    if not grounded_corpus:
+        return ""
+    return f"""
+OFFICIAL STATUTE TEXT (fetched from the authority — this is the source of truth):
+{grounded_corpus}
+
+GROUNDING RULES (override any prior knowledge):
+- Extract "current_value" ONLY from the statute text above where it states the value.
+- For each requirement, set "cited_sources" to the bracketed ids ([S1], [S2], …) of
+  the excerpt(s) the value came from. Cite ONLY ids that appear above — never invent one.
+- If the text above does not state the value, set "needs_body_review": true and
+  "cited_sources": [] rather than guessing.
+"""
+
+
 def _build_category_prompt(
     location_str: str,
     category: str,
     context_section: str = "",
     preemption_context: str = "",
     industry_context: str = "",
+    grounded_corpus: str = "",
 ) -> str:
     """Build a focused prompt for a single compliance category."""
 
     regulation_key_instruction = _build_regulation_key_instruction(category)
+    grounded_section = _build_grounded_section(grounded_corpus)
 
     return f"""You are a compliance research expert. Research current {category.replace('_', ' ')} laws for a business operating in {location_str}.
 {context_section}
 {preemption_context}
 {industry_context}
+{grounded_section}
 {RESEARCH_PROMPTS.get(category, "")}
 If there is no distinct rule beyond federal/state baseline, still return one state-level requirement that explicitly says no additional jurisdiction-specific rule applies.
 Do NOT return an empty requirements list.
@@ -417,6 +437,8 @@ Respond with JSON:
       "source_url": "https://...",
       "source_name": "Source Name",
       "requires_written_policy": true | false,
+      "cited_sources": <when statute text is provided above: array of bracketed ids like ["S1"] whose text states this value; else omit>,
+      "needs_body_review": <true if the provided statute text did not state the value; else omit>,
       "paid": <for leave only: true|false; else omit>,
       "max_weeks": <for leave only: integer; else omit>,
       "wage_replacement_pct": <for leave only: number or null; else omit>,
@@ -695,6 +717,7 @@ class GeminiComplianceService:
         has_local_ordinance: Optional[bool] = None,
         on_retry: Optional[Callable[[int, str], Any]] = None,
         industry_context: str = "",
+        grounded_corpus: str = "",
     ) -> List[Dict]:
         """Research compliance using parallel category-specific calls.
 
@@ -771,6 +794,7 @@ class GeminiComplianceService:
                 location_str, category, context_section,
                 preemption_context=_preemption_context_for(category),
                 industry_context=industry_context,
+                grounded_corpus=grounded_corpus,
             )
             try:
                 def _validate(data: dict) -> Optional[str]:
@@ -874,6 +898,7 @@ class GeminiComplianceService:
         has_local_ordinance: Optional[bool] = None,
         on_retry: Optional[Callable[[int, str], Any]] = None,
         industry_context: str = "",
+        grounded_corpus: str = "",
     ) -> List[Dict]:
         """Research compliance requirements for a location (uses parallel calls)."""
         if not self._has_api_key():
@@ -886,6 +911,7 @@ class GeminiComplianceService:
             has_local_ordinance=has_local_ordinance,
             on_retry=on_retry,
             industry_context=industry_context,
+            grounded_corpus=grounded_corpus,
         )
 
     async def research_triggered_requirements(
