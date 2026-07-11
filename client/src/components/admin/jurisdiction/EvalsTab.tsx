@@ -97,8 +97,25 @@ type GoldenFact = {
 
 type GoldenResponse = { facts: GoldenFact[]; total: number; active: number; unverified: number }
 
-const SUITES = ['completeness', 'tagging', 'golden', 'authority'] as const
+const SUITES = ['completeness', 'tagging', 'golden', 'authority', 'baseline'] as const
 type Suite = (typeof SUITES)[number]
+
+type BaselineItem = {
+  category: string
+  key: string
+  citation: string
+  authority_url: string
+  applies_note: string
+  present: boolean
+}
+type BaselineJurisdiction = {
+  label: string
+  jurisdiction_found: boolean
+  expected: number
+  present: number
+  score: number | null
+  items: BaselineItem[]
+}
 
 const INDUSTRIES = [
   'manufacturing',
@@ -210,6 +227,73 @@ function CoreChecklistPanel({ checklist }: { checklist: CoreChecklist }) {
           </div>
         ))}
       </div>
+    </div>
+  )
+}
+
+function BaselinePanel() {
+  const [data, setData] = useState<BaselineJurisdiction[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    api.get<{ jurisdictions: BaselineJurisdiction[] }>('/admin/jurisdictions/evals/baseline-checklist')
+      .then((r) => setData(r.jurisdictions))
+      .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load'))
+  }, [])
+
+  if (error) return <p className="text-xs text-red-400">{error}</p>
+  if (!data) return <p className="text-xs text-zinc-500">Loading…</p>
+
+  return (
+    <div className="space-y-4">
+      <p className="text-xs text-zinc-500">
+        The enumerated federal + CA-state labor obligations a general employer owes, scored against
+        each base jurisdiction's own catalog. Every miss is a critical gap carrying the citation to
+        research next — the checkable answer to "is federal/state actually done?".
+      </p>
+      {data.map((jur) => {
+        const byCategory = [...jur.items.reduce((m, i) => {
+          const b = m.get(i.category); if (b) b.push(i); else m.set(i.category, [i]); return m
+        }, new Map<string, BaselineItem[]>()).entries()]
+        return (
+          <div key={jur.label} className="border border-zinc-800 rounded-lg p-3">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-sm font-medium text-zinc-200">{jur.label}</p>
+              <p className={`text-sm font-bold ${scoreColor(jur.score)}`}>
+                {jur.present}/{jur.expected}
+              </p>
+            </div>
+            {!jur.jurisdiction_found && (
+              <p className="text-[11px] text-amber-400 mb-2">No jurisdiction record found.</p>
+            )}
+            <div className="grid gap-x-6 gap-y-2 sm:grid-cols-2">
+              {byCategory.map(([category, items]) => (
+                <div key={category}>
+                  <p className="text-[10px] uppercase tracking-wider text-zinc-500 mb-0.5">{category}</p>
+                  <ul>
+                    {items.map((item) => (
+                      <li key={item.key} className="flex items-baseline gap-1.5 text-xs">
+                        <span aria-hidden className={item.present ? 'text-emerald-400' : 'text-red-400'}>
+                          {item.present ? '✓' : '✗'}
+                        </span>
+                        <a
+                          href={item.authority_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className={`${item.present ? 'text-zinc-400' : 'text-red-300'} hover:underline`}
+                          title={`${item.citation}${item.applies_note ? ' — ' + item.applies_note : ''}`}
+                        >
+                          {item.key}
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -650,7 +734,7 @@ function GoldenPanel() {
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 
-type View = 'scorecard' | 'runs' | 'golden'
+type View = 'scorecard' | 'runs' | 'golden' | 'baseline'
 
 export default function EvalsTab() {
   const [view, setView] = useState<View>('scorecard')
@@ -736,7 +820,7 @@ export default function EvalsTab() {
       </div>
 
       <div className="flex gap-1">
-        {(['scorecard', 'runs', 'golden'] as View[]).map((v) => (
+        {(['scorecard', 'runs', 'golden', 'baseline'] as View[]).map((v) => (
           <Button key={v} variant={view === v ? 'secondary' : 'ghost'} size="sm" onClick={() => setView(v)}>
             {v[0].toUpperCase() + v.slice(1)}
           </Button>
@@ -746,6 +830,8 @@ export default function EvalsTab() {
       {view === 'scorecard' && <Scorecard cells={cells} />}
 
       {view === 'golden' && <GoldenPanel />}
+
+      {view === 'baseline' && <BaselinePanel />}
 
       {view === 'runs' && (
         <div className="space-y-4">

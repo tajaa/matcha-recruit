@@ -376,6 +376,37 @@ export default function GapDashboard() {
             <StatCard label="Jurisdictions" value={jurisdictionCount} />
           </div>
 
+          {/* Base-layer labor readiness — the federal + state foundation this
+              company inherits, scored against the enumerated master-list. */}
+          {data?.baseline && data.baseline.length > 0 && (
+            <div className="rounded-xl border border-vsc-border bg-vsc-panel p-4">
+              <div className="flex items-center justify-between mb-2">
+                <div>
+                  <h3 className="text-sm font-semibold text-zinc-200">Base-layer labor coverage</h3>
+                  <p className="text-[11px] text-zinc-500">
+                    Federal + state foundations this company inherits, vs the enumerated labor master-list.
+                  </p>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {data.baseline.map((b) => {
+                  const pct = b.score
+                  const tone = pct == null ? 'text-zinc-500'
+                    : pct >= 90 ? 'text-emerald-300' : pct >= 60 ? 'text-amber-300' : 'text-red-300'
+                  return (
+                    <div key={b.jurisdiction_id} className="rounded-lg border border-vsc-border px-3 py-1.5">
+                      <span className="text-xs text-zinc-400">{b.label}: </span>
+                      <span className={`text-xs font-semibold ${tone}`}>
+                        {b.present ?? '—'}/{b.expected ?? '—'}
+                        {pct != null && ` (${Math.round(pct)}%)`}
+                      </span>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
           {/* Complexity breakdown (expand from the card) */}
           {cx && showCx && (
             <div className="rounded-xl border border-vsc-border bg-vsc-panel p-4">

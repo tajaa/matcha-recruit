@@ -323,6 +323,19 @@ export type GapDashboardResponse = {
   drift: GapDrift | null
   complexity?: ComplexityScore | null
   engine?: GapEngineCoverage | null
+  baseline?: BaselineReadiness[] | null
+}
+
+// Base-layer labor readiness (federal + each state the company inherits), scored
+// against the enumerated master-list by the `baseline` eval suite.
+export type BaselineReadiness = {
+  jurisdiction_id: string
+  label: string
+  level: string
+  score: number | null
+  present?: number | null
+  expected?: number | null
+  missing?: number | null
 }
 
 // Deterministic compliance-complexity score (0–100) + explainable breakdown.
