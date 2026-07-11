@@ -39,6 +39,65 @@ def _parse_date(value: Optional[str]) -> Optional[date]:
         return None
 
 
+async def _sync_company_locations(conn, company_id, service, config, secrets) -> int:
+    """Upsert HRIS company work locations into business_locations. Returns #created.
+
+    Best-effort and additive-only: providers without a locations surface
+    (`fetch_locations` absent, older Gusto tokens, ADP mode) yield 0; existing
+    rows are NEVER mutated (manual entries win). Dedupe key is (city, state) —
+    deliberately the same key `_resolve_work_location_id` matches on, so this
+    can't create a second row that would make employee→location resolution
+    ambiguous. Runs before the employee loop so first-sync companies get their
+    establishments (OSHA 300A, wage-hour coverage, per-location compliance)
+    without hand-entering locations.
+    """
+    fetch = getattr(service, "fetch_locations", None)
+    if fetch is None:
+        return 0
+    try:
+        locations = await fetch(config, secrets)
+    except HRISProvisioningError as exc:
+        logger.warning("[HRIS] Location fetch failed for company %s: %s", company_id, exc)
+        return 0
+
+    created = 0
+    for loc in locations:
+        city = (loc.get("city") or "").strip()
+        state = (loc.get("state") or "").strip().upper()
+        zipcode = (loc.get("postal_code") or "").strip()[:10]
+        country = (loc.get("country") or "").strip().upper()
+        # business_locations requires city/state(2)/zipcode and models US
+        # jurisdictions — skip anything incomplete or non-US.
+        if not city or len(state) != 2 or not zipcode:
+            continue
+        if country not in ("", "US", "USA"):
+            continue
+
+        exists = await conn.fetchval(
+            """SELECT 1 FROM business_locations
+               WHERE company_id = $1 AND LOWER(city) = LOWER($2) AND UPPER(state) = $3
+               LIMIT 1""",
+            company_id, city, state,
+        )
+        if exists:
+            continue
+
+        address = ", ".join(p for p in (loc.get("line1"), loc.get("line2")) if p) or None
+        await conn.execute(
+            """INSERT INTO business_locations (company_id, name, address, city, state, zipcode, is_active)
+               VALUES ($1, $2, $3, $4, $5, $6, true)""",
+            company_id,
+            (loc.get("name") or f"{city}, {state}")[:255],
+            address[:500] if address else None,
+            city[:100], state, zipcode,
+        )
+        created += 1
+
+    if created:
+        logger.info("[HRIS] Created %d business locations from HRIS for company %s", created, company_id)
+    return created
+
+
 async def _resolve_work_location_id(conn, company_id, work_city, work_state):
     """Map an HRIS work city/state to a business_locations.id (the OSHA establishment FK).
 
@@ -302,12 +361,26 @@ async def start_hris_sync(
 
     # ── Phase 3: Import workers (new connection) ───────────────────
     async with get_connection() as conn:
+        # 3a. Company locations first, so a first-sync company has establishment
+        # rows for _resolve_work_location_id to match. Never fails the sync.
+        try:
+            await _sync_company_locations(conn, company_id, service, config, secrets_decrypted)
+        except Exception:
+            logger.exception("[HRIS] Location ingest failed for company %s — continuing sync", company_id)
+
         for raw_worker in raw_workers:
             try:
                 normalized = service.normalize_worker(raw_worker)
             except Exception as exc:
                 error_count += 1
-                oid = raw_worker.get("associateOID", "unknown")
+                # Provider-specific id keys: Finch merged records use `id`,
+                # Gusto `uuid`, ADP `associateOID`.
+                oid = (
+                    raw_worker.get("id")
+                    or raw_worker.get("uuid")
+                    or raw_worker.get("associateOID")
+                    or "unknown"
+                )
                 errors.append({"hris_id": oid, "error": f"Normalization failed: {exc}"})
                 logger.warning("[HRIS] Failed to normalize worker %s: %s", oid, exc)
                 continue

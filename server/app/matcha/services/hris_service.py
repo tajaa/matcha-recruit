@@ -338,6 +338,40 @@ class GustoHRISService:
         logger.info("[Gusto] Fetched %d employees for company %s", len(workers), gusto_company_id)
         return workers
 
+    async def fetch_locations(self, config: dict, secrets: dict) -> list[dict]:
+        """Company work locations, normalized to the shared HRIS location shape.
+
+        GET /v1/companies/{id}/locations (needs the `companies:read` scope —
+        granted on new OAuth connects; older tokens without it degrade to []).
+        Same output keys as ``FinchHRISService.fetch_locations``.
+        """
+        from .finch_service import normalize_hris_locations
+
+        if config.get("mode") == "mock":
+            return normalize_hris_locations(_GUSTO_MOCK_LOCATIONS)
+
+        gusto_company_id = config.get("gusto_company_id", "")
+        if not gusto_company_id:
+            return []
+
+        token = await self.authenticate(config, secrets)
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+                resp = await client.get(
+                    f"{GUSTO_BASE_URL}/v1/companies/{gusto_company_id}/locations",
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+        except Exception as e:
+            raise HRISProvisioningError("fetch_error", f"Gusto locations fetch error: {str(e)}")
+        if resp.status_code != 200:
+            # Older tokens lack companies:read — treat as "no location data",
+            # not a sync failure (locations ingest is additive/best-effort).
+            logger.info("[Gusto] Locations fetch returned %d — skipping location ingest", resp.status_code)
+            return []
+        body = resp.json()
+        rows = body if isinstance(body, list) else []
+        return normalize_hris_locations([r for r in rows if r.get("active") in (True, None)])
+
     @staticmethod
     def _current_comp(job: dict) -> dict:
         """Resolve the current compensation object for a job. Gusto exposes it in a few
@@ -422,6 +456,15 @@ class GustoHRISService:
 # ---------------------------------------------------------------------------
 # Small mock dataset for Gusto mode (dev / demo)
 # ---------------------------------------------------------------------------
+
+_GUSTO_MOCK_LOCATIONS: list[dict] = [
+    {"street_1": "1 Market St", "city": "San Francisco", "state": "CA",
+     "zip": "94105", "country": "US", "active": True},
+    {"street_1": "1221 Broadway", "city": "Oakland", "state": "CA",
+     "zip": "94612", "country": "US", "active": True},
+    {"street_1": "350 5th Ave", "city": "New York", "state": "NY",
+     "zip": "10118", "country": "US", "active": True},
+]
 
 _GUSTO_MOCK_EMPLOYEES: list[dict] = [
     {
