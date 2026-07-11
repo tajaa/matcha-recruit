@@ -400,19 +400,55 @@ def _build_category_prompt(
     preemption_context: str = "",
     industry_context: str = "",
     grounded_corpus: str = "",
+    is_federal: bool = False,
 ) -> str:
-    """Build a focused prompt for a single compliance category."""
+    """Build a focused prompt for a single compliance category.
+
+    ``is_federal``: the target IS the U.S. federal baseline, not a state/local layer
+    on top of it. The default prompt asks for rules "beyond the federal/state
+    baseline" and returns a null "no additional rule" row when there aren't any —
+    degenerate for the federal jurisdiction itself, which is the baseline. In
+    federal mode the intro asks for the federal statutory obligation directly and
+    the null-row escape hatch is dropped.
+    """
 
     regulation_key_instruction = _build_regulation_key_instruction(category)
     grounded_section = _build_grounded_section(grounded_corpus)
 
-    return f"""You are a compliance research expert. Research current {category.replace('_', ' ')} laws for a business operating in {location_str}.
+    if is_federal:
+        intro = (
+            f"You are a U.S. federal employment-law research expert. State the "
+            f"FEDERAL {category.replace('_', ' ')} obligations that apply to a "
+            f"private employer operating anywhere in the United States — the "
+            f"national statutory baseline itself (e.g. FLSA, FMLA, Title VII, ADA, "
+            f"ADEA, OSHA, WARN, IRCA/I-9, COBRA, ERISA, NLRA, USERRA, FCRA). For "
+            f"each distinct obligation return one requirement with its U.S. Code or "
+            f"CFR citation, the operative value/threshold (e.g. employee-count "
+            f"trigger, notice period, dollar amount), and jurisdiction_level "
+            f"\"national\"."
+        )
+        no_rule_line = (
+            "Return every applicable federal obligation for this category as its "
+            "own requirement. Do NOT collapse them into a 'no additional rule' row."
+        )
+    else:
+        intro = (
+            f"You are a compliance research expert. Research current "
+            f"{category.replace('_', ' ')} laws for a business operating in {location_str}."
+        )
+        no_rule_line = (
+            "If there is no distinct rule beyond federal/state baseline, still return "
+            "one state-level requirement that explicitly says no additional "
+            "jurisdiction-specific rule applies."
+        )
+
+    return f"""{intro}
 {context_section}
 {preemption_context}
 {industry_context}
 {grounded_section}
 {RESEARCH_PROMPTS.get(category, "")}
-If there is no distinct rule beyond federal/state baseline, still return one state-level requirement that explicitly says no additional jurisdiction-specific rule applies.
+{no_rule_line}
 Do NOT return an empty requirements list.
 
 For each requirement, determine whether the statute explicitly requires the employer to include this policy in a written employee handbook or written notice. Set "requires_written_policy" to true only if written disclosure is legally mandated. If the obligation is satisfied by a workplace poster, verbal notice, or operational compliance alone, set it to false.
@@ -723,6 +759,7 @@ class GeminiComplianceService:
         on_retry: Optional[Callable[[int, str], Any]] = None,
         industry_context: str = "",
         grounded_corpus: str = "",
+        is_federal: bool = False,
     ) -> List[Dict]:
         """Research compliance using parallel category-specific calls.
 
@@ -731,10 +768,12 @@ class GeminiComplianceService:
                 When provided, prompts are enhanced with preemption awareness.
             industry_context: Optional context string for industry-specific research
                 (e.g., healthcare-specific wage/overtime/scheduling rules).
+            is_federal: target the U.S. federal baseline itself (see
+                _build_category_prompt) rather than a state/local layer above it.
         """
 
-        location_str = f"{city}, {state}"
-        if county:
+        location_str = "the United States (federal law)" if is_federal else f"{city}, {state}"
+        if county and not is_federal:
             location_str += f" ({county})"
 
         # Build context
@@ -750,14 +789,19 @@ class GeminiComplianceService:
         if not selected_categories:
             selected_categories = list(DEFAULT_RESEARCH_CATEGORIES)
 
-        search_strategy = build_search_strategy_prompt(state, selected_categories)
-        if search_strategy:
-            context_section += f"\n\n{search_strategy}"
+        # Federal targets the national baseline itself — the state-search strategy
+        # and state/local preemption guidance don't apply (there is no layer above).
+        if not is_federal:
+            search_strategy = build_search_strategy_prompt(state, selected_categories)
+            if search_strategy:
+                context_section += f"\n\n{search_strategy}"
 
         # Build per-category preemption context strings
         preemption_map = preemption_rules or {}
 
         def _preemption_context_for(cat: str) -> str:
+            if is_federal:
+                return ""
             allows = preemption_map.get(cat)
             if allows is None:
                 if has_local_ordinance is False:
@@ -800,6 +844,7 @@ class GeminiComplianceService:
                 preemption_context=_preemption_context_for(category),
                 industry_context=industry_context,
                 grounded_corpus=grounded_corpus,
+                is_federal=is_federal,
             )
             try:
                 def _validate(data: dict) -> Optional[str]:
@@ -904,6 +949,7 @@ class GeminiComplianceService:
         on_retry: Optional[Callable[[int, str], Any]] = None,
         industry_context: str = "",
         grounded_corpus: str = "",
+        is_federal: bool = False,
     ) -> List[Dict]:
         """Research compliance requirements for a location (uses parallel calls)."""
         if not self._has_api_key():
@@ -917,6 +963,7 @@ class GeminiComplianceService:
             on_retry=on_retry,
             industry_context=industry_context,
             grounded_corpus=grounded_corpus,
+            is_federal=is_federal,
         )
 
     async def research_triggered_requirements(
