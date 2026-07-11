@@ -23,17 +23,31 @@ in the text. Verdicts:
   * ``value_unverifiable``  — the value is prose with no numeric claim tier 1 can
                               check (info; the tier-2 LLM verifier is the follow-up).
 
+Tier 2a (``cross_check_rows``, wired) is the golden cross-check: a grounded row
+whose value DISAGREES with a hand-verified golden fact for the same key is a
+critical ``grounded_but_wrong`` — the pipeline extracted the wrong number, harder
+than a not-in-cited-text miss. Pure ``compare`` over the fetched rows, no new I/O.
+
 Read-only over the catalog, like every eval suite. Pure core (``evaluate_row``,
-``value_tokens``) unit-tests without a DB. Tier-2 (an adversarial LLM verifier on
-the unresolved rows) and a golden cross-check are documented extension points at
-the bottom — deliberately not wired yet.
+``value_tokens``, ``cross_check_rows``) unit-tests without a DB. Tier-2b (an
+adversarial LLM verifier on the rows tier 1 can't settle) is a documented
+extension point at the bottom — deliberately not wired here (Part B).
 """
 from __future__ import annotations
 
 import logging
 import re
 from collections import defaultdict
-from typing import Any, Dict, List, Optional
+from datetime import date
+from typing import Any, Dict, List, Optional, Set, Tuple
+
+from .golden import (
+    GoldenFact,
+    _resolve_jurisdiction_id,
+    compare as golden_compare,
+    load_fixtures,
+)
+from .keys import normalize_key
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +91,11 @@ VALUE_IN_TEXT = "value_in_text"
 VALUE_NOT_IN_TEXT = "value_not_in_text"
 CORPUS_STUB = "corpus_stub"
 VALUE_UNVERIFIABLE = "value_unverifiable"
+# Tier-2a: a grounded value that CONTRADICTS a hand-verified golden fact. The
+# pipeline extracted the wrong number (right citation, wrong value) — a harder
+# failure than value_not_in_text (which only proves the value isn't in the *cited*
+# excerpt; golden proves it's the wrong value, period). CRITICAL.
+GROUNDED_BUT_WRONG = "grounded_but_wrong"
 
 
 def _fmt_numeric(numeric_value: Any) -> Optional[str]:
@@ -143,13 +162,79 @@ def evaluate_row(
     return {"verdict": verdict, "body_len": len(body), "found": found, "missing": missing}
 
 
+def _grounded_key(row: Dict) -> Optional[str]:
+    """The `category:normalized_key` a grounded row indexes under — the SAME scheme
+    golden._rows_for uses, so a golden fact (which names the normalized key) resolves
+    to its grounded row. None when the row carries no usable key."""
+    key = row.get("regulation_key")
+    rk = row.get("requirement_key")
+    if not key and rk and ":" in rk:
+        key = rk.rsplit(":", 1)[-1]
+    if not key:
+        return None
+    key = normalize_key(row["category"], key, row.get("level"), row.get("country_code"))
+    return f"{row['category']}:{key}"
+
+
+def cross_check_rows(
+    active_facts: List[GoldenFact],
+    grounded_by_key: Dict[str, Dict],
+    *,
+    comparator=golden_compare,
+) -> Tuple[List[Dict], Set]:
+    """Tier-2a: judge grounded ROWS against active golden facts (pure, no I/O).
+
+    ``grounded_by_key`` holds ONLY grounded rows (caller restricts) indexed by
+    ``category:normalized_key``. A fact with no matching grounded row is skipped —
+    that's the golden suite's job; here we only judge the grounding pipeline's own
+    output. A fact whose grounded row fails ``compare`` yields a critical
+    ``grounded_but_wrong`` finding + the row id (so scoring can move it out of
+    ``verified``). Returns ``(findings, contradicted_row_ids)``.
+    """
+    findings: List[Dict] = []
+    contradicted: Set = set()
+    for fact in active_facts:
+        row = grounded_by_key.get(f"{fact.category}:{fact.requirement_key}")
+        if row is None:
+            continue
+        verdict = comparator(fact, row)
+        if verdict.get("passed"):
+            continue
+        contradicted.add(row["id"])
+        findings.append({
+            "suite": "grounding", "finding_type": GROUNDED_BUT_WRONG,
+            "severity": "critical",
+            "jurisdiction_id": row["jurisdiction_id"], "requirement_id": row["id"],
+            "requirement_key": row["requirement_key"], "category": row["category"],
+            "expected": {
+                "comparator": fact.comparator,
+                "numeric": fact.expected_numeric,
+                "text": fact.expected_text,
+                "date": str(fact.expected_date) if fact.expected_date else None,
+                "authority_url": fact.authority_url,
+                "golden_curated_by": fact.curated_by,
+            },
+            "observed": {**(verdict.get("observed") or {}),
+                         "current_value": row.get("current_value"),
+                         "reason": verdict.get("reason")},
+        })
+    return findings, contradicted
+
+
 async def _grounded_rows(conn, jurisdiction_ids: Optional[List]) -> List[Dict]:
+    # title/description/effective_date + jurisdiction level/country_code are here for
+    # the tier-2a golden cross-check: golden.compare reads them (text_contains scans
+    # title/description; date_eq reads effective_date) and normalize_key needs the
+    # level/country_code to build the same key golden fixtures index on.
     sql = """
         SELECT jr.id, jr.jurisdiction_id, jr.requirement_key, jr.regulation_key,
                jr.category, jr.current_value, jr.numeric_value,
+               jr.title, jr.description, jr.effective_date,
+               j.level::text AS level, COALESCE(j.country_code, 'US') AS country_code,
                ARRAY(SELECT jsonb_array_elements_text(jr.metadata->'grounded_citations'))
                  AS cited
         FROM jurisdiction_requirements jr
+        JOIN jurisdictions j ON j.id = jr.jurisdiction_id
         WHERE jr.metadata->>'grounding' = 'grounded'
           AND COALESCE(jr.status, 'active') = 'active'
     """
@@ -193,7 +278,10 @@ async def run_grounding(conn, jurisdiction_ids: Optional[List] = None) -> Dict:
     findings: List[Dict] = []
     per_jur: Dict = defaultdict(lambda: defaultdict(int))
     totals = {"grounded_rows": len(rows), VALUE_IN_TEXT: 0, VALUE_NOT_IN_TEXT: 0,
-              CORPUS_STUB: 0, VALUE_UNVERIFIABLE: 0}
+              CORPUS_STUB: 0, VALUE_UNVERIFIABLE: 0, GROUNDED_BUT_WRONG: 0}
+    # row id → (jid, tier-1 verdict) so the golden override can move a contradicted
+    # row out of whatever bucket tier-1 put it in.
+    verdict_by_row: Dict[Any, Tuple[Any, str]] = {}
 
     for r in rows:
         # The corpus the value was grounded on = the union of its cited excerpts.
@@ -202,6 +290,7 @@ async def run_grounding(conn, jurisdiction_ids: Optional[List] = None) -> Dict:
         verdict = res["verdict"]
         totals[verdict] += 1
         per_jur[r["jurisdiction_id"]][verdict] += 1
+        verdict_by_row[r["id"]] = (r["jurisdiction_id"], verdict)
 
         if verdict == VALUE_NOT_IN_TEXT:
             findings.append({
@@ -233,11 +322,45 @@ async def run_grounding(conn, jurisdiction_ids: Optional[List] = None) -> Dict:
                              "reason": "prose value; tier-1 has no numeric claim to check"},
             })
 
+    # ── Tier-2a: golden cross-check ──────────────────────────────────────────
+    # Grounded rows vs hand-verified facts. A contradiction is the wrong VALUE
+    # (not just "not in the cited excerpt"), so it overrides the tier-1 verdict
+    # for scoring: move the row out of its tier-1 bucket into grounded_but_wrong.
+    # The tier-1 finding (if the row was also value_not_in_text) stands — distinct
+    # evidence — but the row is only counted once in the score.
+    grounded_index: Dict[Any, Dict[str, Dict]] = defaultdict(dict)
+    for r in rows:
+        gk = _grounded_key(r)
+        if gk is not None:
+            grounded_index[r["jurisdiction_id"]][gk] = r
+
+    if grounded_index:
+        today = date.today()
+        for fixture in load_fixtures():
+            jid = await _resolve_jurisdiction_id(conn, fixture.jurisdiction)
+            if jid is None or jid not in grounded_index:
+                continue
+            active = [f for f in fixture.facts if f.active_on(today)]
+            xfindings, contradicted = cross_check_rows(active, grounded_index[jid])
+            findings.extend(xfindings)
+            for rid in contradicted:
+                old_jid, old_verdict = verdict_by_row[rid]
+                per_jur[old_jid][old_verdict] -= 1
+                totals[old_verdict] -= 1
+                per_jur[old_jid][GROUNDED_BUT_WRONG] += 1
+                totals[GROUNDED_BUT_WRONG] += 1
+                verdict_by_row[rid] = (old_jid, GROUNDED_BUT_WRONG)
+
     from .scoring import grounding_score
 
     results = {
         jid: {
-            "score": grounding_score(counts[VALUE_IN_TEXT], counts[VALUE_NOT_IN_TEXT]),
+            # a golden contradiction counts against grounding just like a
+            # not-in-text miss does.
+            "score": grounding_score(
+                counts[VALUE_IN_TEXT],
+                counts[VALUE_NOT_IN_TEXT] + counts.get(GROUNDED_BUT_WRONG, 0),
+            ),
             "detail": {"verdict_counts": dict(counts)},
         }
         for jid, counts in per_jur.items()
@@ -247,14 +370,13 @@ async def run_grounding(conn, jurisdiction_ids: Optional[List] = None) -> Dict:
 
 # ── Extension points (documented, not wired) ────────────────────────────────────
 #
-# Tier 2 — adversarial LLM verifier. For every row tier 1 can't settle
+# Tier 2b — adversarial LLM verifier (Part B). For every row tier 1 can't settle
 # (value_unverifiable) or wants a second opinion on (value_not_in_text), make ONE
 # independent Gemini call framed to REFUTE: "excerpt + claimed value → does the text
 # state this value? Answer strictly." Verifier framing ≠ extractor framing, so it
 # catches recall the extractor smuggled in. Gate behind a settings flag + run only
 # on new/changed grounded rows (cheap). Store the verdict alongside tier 1.
 #
-# Golden cross-check. golden.py already holds hand-verified facts with effective
-# windows. A grounded row that DISAGREES with a golden fact for the same
-# (jurisdiction, key) is a critical `grounded_but_wrong` — reuse golden.compare,
-# no new infrastructure.
+# Spot-check sampling — periodically re-run the LLM verifier on a random sample of
+# value_in_text rows to catch right-number-wrong-meaning the golden set doesn't
+# cover (golden is curated, not exhaustive).

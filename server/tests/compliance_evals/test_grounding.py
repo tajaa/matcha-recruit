@@ -3,9 +3,12 @@
 No DB, no AI: the value-in-cited-text check is deterministic. These lock the
 verdict boundaries (real grounding vs recalled number vs stub vs prose).
 """
+from datetime import date
+
+from app.core.services.compliance_evals.golden import GoldenFact
 from app.core.services.compliance_evals.grounding import (
-    CORPUS_STUB, VALUE_IN_TEXT, VALUE_NOT_IN_TEXT, VALUE_UNVERIFIABLE,
-    evaluate_row, value_tokens,
+    CORPUS_STUB, GROUNDED_BUT_WRONG, VALUE_IN_TEXT, VALUE_NOT_IN_TEXT,
+    VALUE_UNVERIFIABLE, cross_check_rows, evaluate_row, value_tokens,
 )
 from app.core.services.compliance_evals.scoring import grounding_score
 
@@ -82,3 +85,54 @@ def test_score_none_when_nothing_judgeable():
 def test_score_excludes_stubs_from_denominator():
     # 3 verified, 1 contradicted → 75; stubs/prose never entered the call
     assert grounding_score(3, 1) == 75.0
+
+
+# ── cross_check_rows (tier-2a golden cross-check) ───────────────────────────
+
+def _fact(key, category="wage_hour", comparator="numeric_eq", numeric=None,
+          text=None, from_=date(2020, 1, 1), to=None):
+    return GoldenFact(
+        requirement_key=key, category=category, comparator=comparator,
+        expected_numeric=numeric, expected_text=text,
+        effective_from=from_, effective_to=to,
+        authority_url="https://example.com/law", curated_by="finch",
+        curated_at=date(2020, 1, 1),
+    )
+
+
+def _row(key_index, *, id="r1", jid="j1", numeric=None, current="", cat="wage_hour"):
+    # a grounded row as cross_check_rows sees it (already indexed elsewhere)
+    return {"id": id, "jurisdiction_id": jid, "requirement_key": key_index,
+            "category": cat, "numeric_value": numeric, "current_value": current}
+
+
+def test_cross_check_disagreement_is_critical():
+    fact = _fact("minimum_wage", numeric=15.0)
+    rows = {"wage_hour:minimum_wage": _row("x:minimum_wage", numeric=12.0)}
+    findings, contradicted = cross_check_rows([fact], rows)
+    assert contradicted == {"r1"}
+    assert len(findings) == 1
+    f = findings[0]
+    assert f["finding_type"] == GROUNDED_BUT_WRONG and f["severity"] == "critical"
+    assert f["expected"]["numeric"] == 15.0
+
+
+def test_cross_check_agreement_no_finding():
+    fact = _fact("minimum_wage", numeric=15.0)
+    rows = {"wage_hour:minimum_wage": _row("x:minimum_wage", numeric=15.0)}
+    findings, contradicted = cross_check_rows([fact], rows)
+    assert findings == [] and contradicted == set()
+
+
+def test_cross_check_no_matching_grounded_row_skipped():
+    # fact has no grounded row → not our concern (golden suite handles absence)
+    fact = _fact("minimum_wage", numeric=15.0)
+    findings, contradicted = cross_check_rows([fact], {})
+    assert findings == [] and contradicted == set()
+
+
+def test_cross_check_only_active_facts_are_passed_in():
+    # caller filters active_on(today); an expired fact simply isn't in the list
+    active = []  # expired fact filtered out upstream
+    findings, contradicted = cross_check_rows(active, {"wage_hour:minimum_wage": _row("x")})
+    assert findings == [] and contradicted == set()
