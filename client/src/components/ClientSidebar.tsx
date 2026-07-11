@@ -3,6 +3,7 @@ import {
   AlertTriangle, BookOpen, BarChart2, Sparkles, Building2, Accessibility,
   BadgeCheck, MessageSquareWarning, Mail, Bell, Gavel, MapPin, CalendarDays,
   GraduationCap, TrendingUp, ClipboardList, ShieldAlert, MessagesSquare, Handshake, ShieldCheck, Gauge, HeartPulse, FileCheck, Car, Link2, Activity,
+  Coins, FileSignature,
 } from 'lucide-react'
 import SidebarShell from './SidebarShell'
 import type { NavGroup, NavItem } from './SidebarShell'
@@ -41,6 +42,10 @@ const nav: (NavItem | NavGroup)[] = [
       { to: '/app/limit-adequacy', icon: Scale, label: 'Limit Adequacy', feature: 'limit_adequacy' },
       { to: '/app/driver-risk', icon: Car, label: 'Driver Risk', feature: 'driver_risk' },
       { to: '/app/property', icon: Building2, label: 'Commercial Property', feature: 'property' },
+      { to: '/app/tcor', icon: Coins, label: 'Total Cost of Risk', feature: 'tcor' },
+      { to: '/app/coi', icon: FileText, label: 'Certificate Tracking', feature: 'coi_tracking' },
+      { to: '/app/management-liability', icon: ShieldAlert, label: 'D&O Readiness', feature: 'do_readiness' },
+      { to: '/app/acord', icon: FileSignature, label: 'ACORD Forms', feature: 'acord_forms' },
     ],
   },
   {

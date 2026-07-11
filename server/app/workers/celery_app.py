@@ -31,6 +31,7 @@ celery_app = Celery(
         "app.workers.tasks.compliance_action_reminders",
         "app.workers.tasks.legal_deadline_reminders",
         "app.workers.tasks.handbook_freshness",
+        "app.workers.tasks.coi_expiry",
         "app.workers.tasks.risk_assessment",
         "app.workers.tasks.healthcare_research",
         "app.workers.tasks.research_browse",
@@ -205,6 +206,13 @@ def on_worker_ready(**kwargs):
         run_handbook_freshness_checks.delay()
     else:
         print("[Worker] Handbook freshness checks scheduler is disabled, skipping.")
+
+    from app.workers.tasks.coi_expiry import run_coi_expiry_sweep
+
+    if _is_scheduler_enabled("coi_expiry"):
+        run_coi_expiry_sweep.delay()
+    else:
+        print("[Worker] COI expiry scheduler is disabled, skipping.")
 
     from app.workers.tasks.risk_assessment import enqueue_scheduled_risk_assessments
 

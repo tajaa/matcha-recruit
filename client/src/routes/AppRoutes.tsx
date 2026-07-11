@@ -33,6 +33,10 @@ import ResidentCare from '../pages/app/ResidentCare'
 import ControlsEvidence from '../pages/app/ControlsEvidence'
 import LimitAdequacy from '../pages/app/LimitAdequacy'
 import DriverRisk from '../pages/app/DriverRisk'
+import Tcor from '../pages/app/Tcor'
+import Coi from '../pages/app/Coi'
+import ManagementLiability from '../pages/app/ManagementLiability'
+import Acord from '../pages/app/Acord'
 import Property from '../pages/app/Property'
 import LegalDefense from '../pages/app/LegalDefense'
 import HandbookPilot from '../pages/app/HandbookPilot'
@@ -117,6 +121,10 @@ export default function AppRoutes() {
         <Route path="controls-evidence" element={<FeatureGate feature="controls_evidence" label="Proof of Controls"><ControlsEvidence /></FeatureGate>} />
         <Route path="limit-adequacy" element={<FeatureGate feature="limit_adequacy" label="Limit Adequacy"><LimitAdequacy /></FeatureGate>} />
         <Route path="driver-risk" element={<FeatureGate feature="driver_risk" label="Driver Risk"><DriverRisk /></FeatureGate>} />
+        <Route path="tcor" element={<FeatureGate feature="tcor" label="Total Cost of Risk"><Tcor /></FeatureGate>} />
+        <Route path="coi" element={<FeatureGate feature="coi_tracking" label="Certificate Tracking"><Coi /></FeatureGate>} />
+        <Route path="management-liability" element={<FeatureGate feature="do_readiness" label="D&O Readiness"><ManagementLiability /></FeatureGate>} />
+        <Route path="acord" element={<FeatureGate feature="acord_forms" label="ACORD Forms"><Acord /></FeatureGate>} />
         <Route path="property" element={<FeatureGate feature="property" label="Commercial Property"><Property /></FeatureGate>} />
         <Route path="legal-pilot" element={<FeatureGate feature="legal_defense" label="Legal Pilot"><LegalDefense /></FeatureGate>} />
         <Route path="handbook-pilot" element={<FeatureGate feature="handbook_pilot" label="Handbook Pilot"><HandbookPilot /></FeatureGate>} />

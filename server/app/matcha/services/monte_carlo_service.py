@@ -108,6 +108,11 @@ class AggregateSimResult:
     histogram_bins: list[HistogramBin] | None = None
     exceedance_curve: list[ExceedanceCurvePoint] | None = None
     distribution_stats: DistributionStats | None = None
+    # Raw sorted per-iteration aggregate loss totals. Populated ONLY when
+    # run_monte_carlo(..., include_samples=True); intentionally excluded from
+    # to_dict() so it never bloats the persisted snapshot JSON. Consumers that
+    # need the distribution (e.g. retention optimization) read it transiently.
+    samples: list[float] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         d = {
@@ -350,6 +355,7 @@ def run_monte_carlo(
     cost_of_risk_items: list[dict[str, Any]],
     iterations: int = DEFAULT_ITERATIONS,
     seed: int | None = None,
+    include_samples: bool = False,
 ) -> MonteCarloResult:
     """Run Monte Carlo simulation over cost-of-risk line items.
 
@@ -358,6 +364,9 @@ def run_monte_carlo(
             Each must have: key, label, low, high, affected_count.
         iterations: Number of simulation iterations (default 10,000).
         seed: Optional random seed for reproducibility.
+        include_samples: When True, attach the raw sorted aggregate loss totals to
+            ``result.aggregate.samples`` (for retention optimization). Never
+            serialized (to_dict omits it), so snapshots stay small.
 
     Returns:
         MonteCarloResult with per-category and aggregate distributions.
@@ -446,6 +455,7 @@ def run_monte_carlo(
         histogram_bins=hist_bins,
         exceedance_curve=exc_curve,
         distribution_stats=dist_stats,
+        samples=list(aggregate_totals) if include_samples else None,
     )
 
     return MonteCarloResult(

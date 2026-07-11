@@ -26,6 +26,10 @@ from .analysis_pilot import router as analysis_pilot_router
 from .limit_adequacy import router as limit_adequacy_router
 from .property import router as property_router
 from .driver_risk import router as driver_risk_router
+from .tcor import router as tcor_router
+from .coi import router as coi_router
+from .management_liability import router as management_liability_router
+from .acord import router as acord_router
 from .ir_onboarding import router as ir_onboarding_router
 from .matcha_x_onboarding import router as matcha_x_onboarding_router
 from .ir_surveys import router as ir_surveys_router
@@ -138,6 +142,15 @@ matcha_router.include_router(property_router, prefix="/property", tags=["propert
                              dependencies=[Depends(require_feature("property"))])
 matcha_router.include_router(driver_risk_router, prefix="/driver-risk", tags=["driver-risk"],
                              dependencies=[Depends(require_feature("driver_risk"))])
+matcha_router.include_router(tcor_router, prefix="/tcor", tags=["tcor"],
+                             dependencies=[Depends(require_feature("tcor"))])
+matcha_router.include_router(coi_router, prefix="/coi", tags=["coi"],
+                             dependencies=[Depends(require_feature("coi_tracking"))])
+matcha_router.include_router(management_liability_router, prefix="/management-liability",
+                             tags=["management-liability"],
+                             dependencies=[Depends(require_feature("do_readiness"))])
+matcha_router.include_router(acord_router, prefix="/acord", tags=["acord"],
+                             dependencies=[Depends(require_feature("acord_forms"))])
 matcha_router.include_router(provisioning_router, prefix="/provisioning", tags=["provisioning"])
 matcha_router.include_router(
     matcha_work_router,

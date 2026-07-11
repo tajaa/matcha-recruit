@@ -126,6 +126,26 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     # Gates /property + /app/property + the broker property surfaces. Default off;
     # admin-toggle. Not bundled.
     "property": False,
+    # Total Cost of Risk + aggregate retention/SIR optimizer. Assembles premiums +
+    # retained losses + fees + mitigation spend into TCOR, and uses the Monte-Carlo
+    # aggregate loss distribution to price candidate aggregate retentions (expected
+    # retained loss + volatility + a labeled premium-credit heuristic). Gates /tcor +
+    # /app/tcor. Default off; admin-toggle. Not bundled.
+    "tcor": False,
+    # Certificate-of-insurance tracking. Inbound COI capture (Gemini extract of
+    # carrier/limits/expiry), auto-verify carried-vs-required limits via the
+    # limit-adequacy engine, and expiry alerting (Celery sweep). Gates /coi +
+    # /app/coi. Default off; admin-toggle. Not bundled.
+    "coi_tracking": False,
+    # D&O / Management-liability readiness. EPL-style weighted readiness score
+    # (board governance, financial health, ERISA/fiduciary, bankruptcy/M&A) from
+    # derived + attested factors, plus a submission section. Gates
+    # /management-liability + /app/management-liability. Default off; admin-toggle.
+    "do_readiness": False,
+    # ACORD form generation (branded equivalents of 125/126/130/140) from data
+    # already held (SOV, WC class exposures, loss runs, company profile). Gates
+    # /acord. Default off; admin-toggle. Not bundled.
+    "acord_forms": False,
     # Optional voice dictation on the IR create form (all IR products). The reporter
     # records a spoken account; one Gemini multimodal call transcribes + extracts the
     # form fields for the user to review before submitting (never auto-creates). Gates
