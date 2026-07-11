@@ -7,6 +7,7 @@ data (license status, violations, accidents, major violations) → clean / margi
 with resident_care. Business-facing, tenant-isolated.
 """
 
+import logging
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Response
@@ -16,7 +17,18 @@ from ..dependencies import require_admin_or_client, get_client_company_id
 from ..services import driver_risk as dr
 from ..models.driver_risk import DriverReviewCreate, DriverReviewUpdate
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
+
+
+def _degrade_503(exc: Exception) -> HTTPException:
+    """build_fleet now propagates real DB errors (only schema-not-ready degrades
+    to empty). Surface a retryable 503 at the route instead of a bare 500 —
+    important for the insurer-facing fleet.pdf, which must not emit a confident
+    'no drivers on file' PDF off a transient failure."""
+    logger.exception("driver-risk fleet load failed")
+    return HTTPException(status_code=503, detail="Fleet data temporarily unavailable, please retry")
 
 _COLS = ("id, driver_name, employee_id, review_type, review_date, status, next_due_date, notes, "
          "violation_count, accident_count, major_violation, license_status")
@@ -36,8 +48,11 @@ async def get_fleet(current_user=Depends(require_admin_or_client)):
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         return {"company_id": None, "company_name": "", "drivers": [], "summary": dr.summarize([])}
-    async with get_connection() as conn:
-        return await dr.build_fleet(conn, company_id)
+    try:
+        async with get_connection() as conn:
+            return await dr.build_fleet(conn, company_id)
+    except Exception as exc:
+        raise _degrade_503(exc)
 
 
 @router.post("/drivers")
@@ -98,8 +113,11 @@ async def delete_driver(review_id: UUID, current_user=Depends(require_admin_or_c
 @router.get("/fleet.pdf")
 async def fleet_pdf(current_user=Depends(require_admin_or_client)):
     company_id = await _require_company_id(current_user)
-    async with get_connection() as conn:
-        fleet = await dr.build_fleet(conn, company_id)
+    try:
+        async with get_connection() as conn:
+            fleet = await dr.build_fleet(conn, company_id)
+    except Exception as exc:
+        raise _degrade_503(exc)
     pdf = await dr.render_fleet_pdf(fleet["company_name"], fleet)
     safe = fleet["company_name"].replace("/", "-").replace('"', "")
     return Response(

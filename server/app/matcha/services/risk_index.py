@@ -14,6 +14,8 @@ from datetime import date
 from typing import Optional
 from uuid import UUID
 
+import asyncpg
+
 from . import epl_readiness, wc_depth
 
 logger = logging.getLogger(__name__)
@@ -96,7 +98,6 @@ async def _wc_reserve_confidence(conn, company_id: UUID) -> str:
     no loss-run triangle — no volatility signal to downgrade, same as the WC
     metrics' own current-state read. Best-effort: degrades to a conservative
     "low" on unexpected failure rather than inflating the composite to "high"."""
-    import asyncpg
     try:
         from . import loss_development
         snaps = await loss_development.list_company_snapshots(conn, company_id, line="wc")
@@ -270,7 +271,6 @@ async def _property_component(conn, company_id: UUID):
     lag on a server that has the code but not ``prop01``) so the composite index never
     500s. The loss-development lookup gets the same best-effort treatment — a bad
     triangle degrades the loss signal, not the whole component."""
-    import asyncpg
     from . import property_sov  # lazy: avoid import cycle
     try:
         # list_buildings (1 query) + pure rollup — skip build_sov's per-building peril

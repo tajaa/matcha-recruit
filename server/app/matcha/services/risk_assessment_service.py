@@ -1263,6 +1263,39 @@ async def load_risk_weights(conn) -> dict[str, float]:
     return dict(DEFAULT_WEIGHTS)
 
 
+async def write_risk_history(
+    conn,
+    company_id: UUID,
+    *,
+    overall_score,
+    overall_band,
+    dims_json: str,
+    weights_json: str,
+    computed_at,
+    source: str,
+) -> None:
+    """Append one row to risk_assessment_history — the trend/anomaly/correlation feed.
+
+    Single writer shared by the manual route, the scheduled Celery task, and the
+    wage-change background refresh, differing only by ``source``
+    ('manual'/'scheduled'/'auto') so the three can't drift on columns.
+    """
+    await conn.execute(
+        """
+        INSERT INTO risk_assessment_history
+            (company_id, overall_score, overall_band, dimensions, weights, computed_at, source)
+        VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6, $7)
+        """,
+        company_id,
+        overall_score,
+        overall_band,
+        dims_json,
+        weights_json,
+        computed_at,
+        source,
+    )
+
+
 async def compute_risk_assessment(
     company_id: UUID,
     weights: Optional[dict[str, float]] = None,

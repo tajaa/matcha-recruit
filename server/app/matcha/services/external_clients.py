@@ -13,15 +13,20 @@ Scores stay directly comparable to on-platform (pass-through) clients. Caller
 owns the asyncpg connection; all reads are broker-scoped by broker_id.
 """
 
+import logging
 import secrets
 from typing import Optional
 from uuid import UUID
+
+import asyncpg
 
 from . import wc_depth
 from . import epl_readiness
 from . import risk_index
 from . import loss_development
 from .wc_benchmarks import lookup_benchmark, estimate_premium_impact, severity_band
+
+logger = logging.getLogger(__name__)
 
 
 # --- identity --------------------------------------------------------------
@@ -232,7 +237,6 @@ async def _property_snap(conn, client_id: UUID):
     """Fetch the broker-keyed property snapshot. Best-effort: returns None if the
     table isn't present yet (code deployed before prop01) so the pre-existing
     external-client + risk-curve endpoints don't 500 on migration lag."""
-    import asyncpg
     try:
         return await conn.fetchrow(
             "SELECT * FROM broker_external_property WHERE external_client_id = $1", client_id)
@@ -280,13 +284,20 @@ def _compute_property(snap) -> dict:
 async def _wc_reserve_confidence(conn, broker_id: UUID, client_id: UUID) -> str:
     """Reserve confidence of this external client's WC loss-run triangle, folded
     into the composite so a volatile/thin triangle doesn't read high-confidence.
-    "high" when there are no WC loss runs (no volatility signal). Never raises."""
+    "high" when there are no WC loss runs (no volatility signal). Best-effort:
+    degrades to a conservative "low" on unexpected failure rather than inflating
+    the composite to "high" — mirrors risk_index._wc_reserve_confidence so tenant
+    and external clients behave identically on the underwriting-facing index."""
     try:
         tri = await loss_development.build_development(conn, broker_id, "external", client_id)
         wc_line = next((ln for ln in tri["lines"] if ln["line"] == "wc"), None)
         return wc_line["summary"]["reserve_confidence"] if wc_line else "high"
-    except Exception:
+    except (asyncpg.UndefinedTableError, asyncpg.UndefinedColumnError):
+        # Loss-run table not provisioned yet — genuinely no volatility signal.
         return "high"
+    except Exception:
+        logger.exception("external reserve_confidence failed for %s — defaulting low", client_id)
+        return "low"
 
 
 async def client_detail(conn, broker_id: UUID, client_id: UUID) -> Optional[dict]:
