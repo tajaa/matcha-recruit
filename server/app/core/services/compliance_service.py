@@ -9106,6 +9106,10 @@ async def research_specialization_for_jurisdiction(
     state = j["state"]
     county = j.get("county")
     location_name = f"{city}, {state}" if city else state
+    # Federal target = the U.S. national baseline itself (state 'US', no city). The
+    # research prompt otherwise treats the jurisdiction as a state/local layer ABOVE
+    # federal and returns a null "no additional rule" row — degenerate for federal.
+    is_federal = (state == "US" and not city)
 
     has_local_ordinance = await _lookup_has_local_ordinance(conn, city, state)
     known_sources = await get_known_sources(conn, jurisdiction_id)
@@ -9178,6 +9182,7 @@ async def research_specialization_for_jurisdiction(
                 preemption_rules=preemption_rules,
                 has_local_ordinance=has_local_ordinance,
                 industry_context=industry_context,
+                is_federal=is_federal,
                 grounded_corpus=grounded_corpus,
             )
             reqs = reqs or []
