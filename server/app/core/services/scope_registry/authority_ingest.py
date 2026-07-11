@@ -40,6 +40,12 @@ from .authority_sources import (
     federal_part_by_slug,
 )
 from .curated_ca import CURATED_ROWS
+from .curated_us import CURATED_US_ROWS
+
+# Curated rows live in two modules (CA + the US federal labor baseline). Merged here,
+# at the single consumption point, so curated_us can import CuratedRow from curated_ca
+# without an import cycle.
+_ALL_CURATED_ROWS = {**CURATED_ROWS, **CURATED_US_ROWS}
 from .models import IngestResult
 
 logger = logging.getLogger(__name__)
@@ -385,7 +391,7 @@ async def ingest_curated_index(conn, spec: CuratedIndexSpec) -> IngestResult:
     federal curated index (e.g. the FLSA statute, which isn't in eCFR) has NULL
     jurisdiction — same as the federal eCFR parts.
     """
-    rows = CURATED_ROWS.get(spec.slug, [])
+    rows = _ALL_CURATED_ROWS.get(spec.slug, [])
     jurisdiction_id = (
         None if spec.level == "federal"
         else await _resolve_jurisdiction_id(conn, spec.jurisdiction)

@@ -10,7 +10,12 @@ from app.core.services.scope_registry.authority_sources import (
     curated_index_by_slug,
     federal_part_by_slug,
 )
-from app.core.services.scope_registry.curated_ca import CURATED_ROWS
+from app.core.services.scope_registry.curated_ca import CURATED_ROWS as _CA_ROWS
+from app.core.services.scope_registry.curated_us import CURATED_US_ROWS
+
+# Curated rows live in two modules (CA + the US federal labor baseline); the ingest
+# reads the merge (authority_ingest._ALL_CURATED_ROWS).
+CURATED_ROWS = {**_CA_ROWS, **CURATED_US_ROWS}
 
 
 def test_slugs_unique_across_catalog():
@@ -39,7 +44,7 @@ def test_1910_excludes_other_osha_domains():
 
 def test_curated_index_set():
     assert {c.slug for c in CURATED_INDEXES} == {
-        "us-flsa", "ca-labor-code", "ca-title-8", "ca-title-16",
+        "us-flsa", "us-labor-baseline", "ca-labor-code", "ca-title-8", "ca-title-16",
     }
     for c in CURATED_INDEXES:
         assert c.domain_categories
@@ -47,7 +52,7 @@ def test_curated_index_set():
 
 def test_ca_curated_indexes_are_ca_state():
     for c in CURATED_INDEXES:
-        if c.slug == "us-flsa":
+        if c.level == "federal":  # us-flsa, us-labor-baseline — NULL jurisdiction
             continue
         assert c.jurisdiction["state"] == "CA"
         assert c.jurisdiction["level"] == "state"

@@ -3,10 +3,15 @@ import re
 
 import pytest
 
+from app.core.services.compliance_evals.baseline_masterlist import (
+    FEDERAL_LABOR_MASTERLIST,
+)
 from app.core.services.scope_registry.classify import validate_proposal
-from app.core.services.scope_registry.curated_ca import CURATED_ROWS
+from app.core.services.scope_registry.curated_ca import CURATED_ROWS as _CA_ROWS
+from app.core.services.scope_registry.curated_us import CURATED_US_ROWS
 from app.core.services.scope_registry.seed import SEED_CLASSIFICATIONS
 
+CURATED_ROWS = {**_CA_ROWS, **CURATED_US_ROWS}
 _CURATED_CITATIONS = {r["citation"] for rows in CURATED_ROWS.values() for r in rows}
 # Federal citations from authority_parse: "29 CFR 1910.147" / "29 CFR 825 Subpart A"
 _FEDERAL_RE = re.compile(r"^\d{2} CFR (?:\d+ Subpart [A-Z]+|\d+\.\d+)$")
@@ -29,6 +34,13 @@ _RKD = {
     # pay_frequency intentionally has no key for §204/§226 (uncodified by design).
     "pay_frequency": set(),
 }
+
+# The federal-baseline seeds are DERIVED from the master-list, so their (category,
+# key) pairs come with them — fold them in so validate_proposal keeps the keys.
+# Veracity is still not asserted here: test_seed_keys_match_the_real_registry
+# cross-checks every seeded pair against the canonical compliance_registry map.
+for _e in FEDERAL_LABOR_MASTERLIST:
+    _RKD.setdefault(_e.category, set()).add(_e.key)
 
 
 def test_every_citation_is_anchored():

@@ -29,14 +29,23 @@ def match_codifications(
     """Key-equality join between confirmed classifications and catalog rows (pure).
 
     One linkage per (classification × requirement) sharing a non-NULL
-    ``regulation_key``. When the classification carries a ``key_definition_id``,
-    the requirement's ``category`` must also equal that key's RKD ``category_slug``
-    — guards the same key living in two categories (e.g. ``exempt_salary_threshold``
-    under both minimum_wage and overtime).
+    ``regulation_key``, subject to two guards:
 
-    ``classifications``: rows with ``id``, ``regulation_key``, ``key_definition_id``.
-    ``requirement_rows``: rows with ``id``, ``regulation_key``, ``jurisdiction_id``,
-    ``category``.
+    * **category guard** — when the classification carries a ``key_definition_id``,
+      the requirement's ``category`` must equal that key's RKD ``category_slug``
+      (guards the same key living in two categories, e.g.
+      ``exempt_salary_threshold`` under both minimum_wage and overtime).
+    * **jurisdiction guard** — a *state-scoped* authority may only codify rows in
+      its own state. A federal/global index (``authority_state`` NULL) still binds
+      any jurisdiction, because federal law applies everywhere. Without this, a
+      registry-wide reconcile (``chain_ids=None``, where the SQL applies no
+      jurisdiction filter) matched on key alone and bound e.g. ``Cal. Lab. Code
+      § 510`` to the FEDERAL ``daily_weekly_overtime`` row — one obligation
+      claiming authority from a jurisdiction that doesn't govern it.
+
+    ``classifications``: rows with ``id``, ``regulation_key``, ``key_definition_id``,
+    ``authority_state``. ``requirement_rows``: rows with ``id``, ``regulation_key``,
+    ``jurisdiction_id``, ``category``, ``requirement_state``.
     """
     rkd_category_by_id = rkd_category_by_id or {}
 
@@ -52,8 +61,12 @@ def match_codifications(
         if not key:
             continue  # NULL-key classifications can never codify
         want_category = rkd_category_by_id.get(c.get("key_definition_id"))
+        authority_state = c.get("authority_state")
         for r in reqs_by_key.get(key, []):
             if want_category is not None and r.get("category") != want_category:
+                continue
+            # State-scoped authority binds only its own state's rows.
+            if authority_state and r.get("requirement_state") != authority_state:
                 continue
             links.append({
                 "classification_id": c["id"],
