@@ -209,6 +209,7 @@ async def compute_cohort_analysis(
         # no employee link (no FK, no party table), so they are not attributable
         # to any cohort (er_case_count is reported as 0, er_attributable=False).
         total_risk_events = total_incidents + total_discipline
+
         results: list[CohortResult] = []
 
         for label, emps in cohorts.items():
