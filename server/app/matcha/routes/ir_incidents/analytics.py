@@ -659,7 +659,7 @@ async def get_wc_metrics_by_location(
             """
             SELECT id, name, city, state
             FROM business_locations
-            WHERE company_id = $1
+            WHERE company_id = $1 AND is_active = true
             ORDER BY name ASC
             LIMIT 50
             """,

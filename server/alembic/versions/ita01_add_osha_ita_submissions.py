@@ -47,8 +47,13 @@ def upgrade():
             company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
             location_id UUID,
             year INTEGER NOT NULL,
-            status VARCHAR(20) NOT NULL DEFAULT 'pending'
-                CHECK (status IN ('pending', 'submitted', 'accepted', 'rejected', 'error')),
+            -- 'not_configured' is a real persisted outcome: the submit endpoint
+            -- records every attempt, including the one where no ITA token is on
+            -- file. Omitting it here turned that (most common) misconfiguration
+            -- into a CheckViolationError → 500.
+            status VARCHAR(30) NOT NULL DEFAULT 'pending'
+                CHECK (status IN ('pending', 'submitted', 'accepted', 'rejected',
+                                  'error', 'not_configured')),
             ita_submission_id TEXT,
             establishment_count INTEGER NOT NULL DEFAULT 0,
             response_payload JSONB,

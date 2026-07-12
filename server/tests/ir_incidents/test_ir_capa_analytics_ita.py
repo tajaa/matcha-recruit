@@ -7,11 +7,26 @@ size category, and the ITA-deadline date math used by the deadline worker.
 Run: cd server && ./venv/bin/python -m pytest tests/ir_incidents/test_ir_capa_analytics_ita.py -q
 """
 
+import os
 import sys
 from datetime import date
 from types import ModuleType
 
+# provisioning.py raises at import time when these are unset, and importing
+# copilot pulls in the whole routes package. Satisfy them with throwaway values
+# (import-time guard only — no network). Same pattern as
+# tests/matcha_work/test_journal_isolation.py.
+for _k, _v in (
+    ("GUSTO_OAUTH_CLIENT_ID", "test"),
+    ("GUSTO_OAUTH_CLIENT_SECRET", "test"),
+    ("GUSTO_OAUTH_REDIRECT_URI", "http://localhost/test"),
+):
+    os.environ.setdefault(_k, _v)
+
 # Stub google.genai before any app imports (mirrors test_ir_incidents.py).
+# Importing copilot pulls in the whole routes package, which reaches
+# services/ir_voice_parser — and that module evaluates types.HarmCategory /
+# HarmBlockThreshold at import time, so the stub has to carry them too.
 google_module = ModuleType("google")
 genai_module = ModuleType("google.genai")
 types_module = ModuleType("google.genai.types")
@@ -20,6 +35,17 @@ genai_module.types = types_module
 types_module.Tool = lambda **kw: None
 types_module.GoogleSearch = lambda **kw: None
 types_module.GenerateContentConfig = lambda **kw: None
+types_module.SafetySetting = lambda **kw: None
+types_module.Part = type("Part", (), {"from_bytes": staticmethod(lambda **kw: None)})
+types_module.HarmCategory = type(
+    "HarmCategory", (), {
+        "HARM_CATEGORY_HARASSMENT": "harassment",
+        "HARM_CATEGORY_HATE_SPEECH": "hate_speech",
+        "HARM_CATEGORY_SEXUALLY_EXPLICIT": "sexually_explicit",
+        "HARM_CATEGORY_DANGEROUS_CONTENT": "dangerous_content",
+    },
+)
+types_module.HarmBlockThreshold = type("HarmBlockThreshold", (), {"BLOCK_NONE": "block_none"})
 sys.modules.setdefault("google", google_module)
 sys.modules.setdefault("google.genai", genai_module)
 sys.modules.setdefault("google.genai.types", types_module)

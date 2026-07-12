@@ -53,6 +53,36 @@ _CA_FROM = """
 _OPEN_STATUSES = ("open", "in_progress")
 
 
+async def _assert_assignable(conn, assigned_to, company_id) -> None:
+    """Reject an assigned_to that isn't a user inside the caller's company.
+
+    Without this, any admin could assign an action to an arbitrary user UUID:
+    the read path's COALESCE(cl.name, u.email) would fall through to u.email for
+    a foreign user (the clients join is company-scoped, the users join is not),
+    turning the endpoint into an email-enumeration oracle, and the deadline
+    worker would email that stranger the incident's number, title, and action
+    text. An owner is either a business admin (clients) or an employee whose
+    roster row is linked to a user account (employees.user_id).
+    """
+    if assigned_to is None:
+        return
+    ok = await conn.fetchval(
+        """
+        SELECT EXISTS (
+            SELECT 1 FROM clients WHERE user_id = $1 AND company_id = $2
+            UNION ALL
+            SELECT 1 FROM employees WHERE user_id = $1 AND org_id = $2
+        )
+        """,
+        str(assigned_to), str(company_id),
+    )
+    if not ok:
+        raise HTTPException(
+            status_code=400,
+            detail="assigned_to must be a user in your company",
+        )
+
+
 def _is_overdue(due_date, status: str) -> bool:
     if not due_date or status not in _OPEN_STATUSES:
         return False
@@ -119,6 +149,7 @@ async def create_corrective_action(
         incident = await _get_incident_with_company_check(
             conn, incident_id, current_user, columns="id, company_id"
         )
+        await _assert_assignable(conn, payload.assigned_to, incident["company_id"])
         row = await conn.fetchrow(
             """
             INSERT INTO ir_corrective_actions
@@ -207,6 +238,7 @@ async def update_corrective_action(
         if "priority" in fields and payload.priority is not None:
             add("priority", payload.priority)
         if "assigned_to" in fields:
+            await _assert_assignable(conn, payload.assigned_to, company_id)
             add("assigned_to", str(payload.assigned_to) if payload.assigned_to else None)
         if "assignee_name" in fields:
             add("assignee_name", payload.assignee_name or None)

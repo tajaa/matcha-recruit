@@ -58,18 +58,35 @@ async def _admin_contacts(conn, company_id) -> list[dict]:
     return [{"email": r["email"], "name": r["name"] or r["email"]} for r in rows]
 
 
-async def _log_once(conn, incident_id, company_id, alert_kind, today) -> bool:
-    """Insert a dedupe ledger row; return True if this is the first send today."""
-    row = await conn.fetchrow(
+async def _already_sent(conn, incident_id, alert_kind, today) -> bool:
+    """Has this (incident, alert_kind) already gone out today?
+
+    Checked BEFORE sending. The ledger row is only written once an email
+    actually lands (`_record_sent`) — writing it up-front meant a company with
+    no reachable admins, or a transient SMTP failure, silently burned the day's
+    alert with nothing delivered.
+    """
+    return await conn.fetchval(
+        """
+        SELECT EXISTS (
+            SELECT 1 FROM ir_deadline_alert_log
+            WHERE incident_id = $1 AND alert_kind = $2 AND sent_on = $3
+        )
+        """,
+        incident_id, alert_kind, today,
+    )
+
+
+async def _record_sent(conn, incident_id, company_id, alert_kind, today) -> None:
+    """Stamp the dedupe ledger after a successful send."""
+    await conn.execute(
         """
         INSERT INTO ir_deadline_alert_log (incident_id, company_id, alert_kind, sent_on)
         VALUES ($1, $2, $3, $4)
         ON CONFLICT (incident_id, alert_kind, sent_on) DO NOTHING
-        RETURNING id
         """,
         incident_id, company_id, alert_kind, today,
     )
-    return row is not None
 
 
 async def _sweep_capa(conn, email_service, today, limit) -> dict:
@@ -166,7 +183,8 @@ async def _sweep_stale_incidents(conn, email_service, today, limit) -> dict:
                 CASE WHEN i.severity = 'critical'
                      THEN make_interval(days => $1)
                      ELSE make_interval(days => $2) END)
-        ORDER BY i.severity DESC, i.reported_at ASC
+        ORDER BY CASE i.severity WHEN 'critical' THEN 0 ELSE 1 END,
+                 i.reported_at ASC
         LIMIT $3
         """,
         STALE_CRITICAL_DAYS, STALE_HIGH_DAYS, limit,
@@ -174,7 +192,7 @@ async def _sweep_stale_incidents(conn, email_service, today, limit) -> dict:
 
     sent = 0
     for r in rows:
-        if not await _log_once(conn, r["incident_id"], r["company_id"], "stale_critical", today):
+        if await _already_sent(conn, r["incident_id"], "stale_critical", today):
             continue
         recipients = await _admin_contacts(conn, r["company_id"])
         if not recipients:
@@ -203,6 +221,7 @@ async def _sweep_stale_incidents(conn, email_service, today, limit) -> dict:
             except Exception as exc:  # noqa: BLE001
                 print(f"[IR Deadline Alerts] Stale email error to {rc['email']}: {exc}")
         if any_ok:
+            await _record_sent(conn, r["incident_id"], r["company_id"], "stale_critical", today)
             sent += 1
     return {"stale_sent": sent, "stale_checked": len(rows)}
 
@@ -238,7 +257,7 @@ async def _sweep_unclassified_recordable(conn, email_service, today, limit) -> d
 
     sent = 0
     for r in rows:
-        if not await _log_once(conn, r["incident_id"], r["company_id"], "unclassified_recordable", today):
+        if await _already_sent(conn, r["incident_id"], "unclassified_recordable", today):
             continue
         recipients = await _admin_contacts(conn, r["company_id"])
         if not recipients:
@@ -266,6 +285,7 @@ async def _sweep_unclassified_recordable(conn, email_service, today, limit) -> d
             except Exception as exc:  # noqa: BLE001
                 print(f"[IR Deadline Alerts] Recordable email error to {rc['email']}: {exc}")
         if any_ok:
+            await _record_sent(conn, r["incident_id"], r["company_id"], "unclassified_recordable", today)
             sent += 1
     return {"recordable_sent": sent, "recordable_checked": len(rows)}
 
@@ -288,7 +308,7 @@ async def _sweep_osha_emergency(conn, email_service, today, limit) -> dict:
 
     sent = 0
     for r in rows:
-        if not await _log_once(conn, r["incident_id"], r["company_id"], "osha_emergency", today):
+        if await _already_sent(conn, r["incident_id"], "osha_emergency", today):
             continue
         recipients = await _admin_contacts(conn, r["company_id"])
         if not recipients:
@@ -316,6 +336,7 @@ async def _sweep_osha_emergency(conn, email_service, today, limit) -> dict:
             except Exception as exc:  # noqa: BLE001
                 print(f"[IR Deadline Alerts] OSHA emergency email error to {rc['email']}: {exc}")
         if any_ok:
+            await _record_sent(conn, r["incident_id"], r["company_id"], "osha_emergency", today)
             sent += 1
     return {"osha_emergency_sent": sent, "osha_emergency_checked": len(rows)}
 

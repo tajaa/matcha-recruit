@@ -2152,6 +2152,43 @@ async def init_db():
         """)
 
         # ===========================================
+        # OSHA ITA direct electronic filing
+        # ===========================================
+        # osha_ita_credentials holds the company's ITA API token (encrypted at
+        # rest via app.core.services.secret_crypto); osha_ita_submissions is the
+        # auditable filing history. See alembic migration ita01.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS osha_ita_credentials (
+                company_id UUID PRIMARY KEY REFERENCES companies(id) ON DELETE CASCADE,
+                api_token TEXT NOT NULL,
+                created_by UUID,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS osha_ita_submissions (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+                location_id UUID,
+                year INTEGER NOT NULL,
+                status VARCHAR(30) NOT NULL DEFAULT 'pending'
+                    CHECK (status IN ('pending', 'submitted', 'accepted', 'rejected',
+                                      'error', 'not_configured')),
+                ita_submission_id TEXT,
+                establishment_count INTEGER NOT NULL DEFAULT 0,
+                response_payload JSONB,
+                error_detail TEXT,
+                submitted_by UUID,
+                submitted_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_osha_ita_submissions_company_year
+            ON osha_ita_submissions(company_id, year DESC)
+        """)
+
+        # ===========================================
         # IR People registry (matcha-lite per-person tracking, no roster)
         # ===========================================
         # Lightweight, auto-built identity for people named in incidents.
