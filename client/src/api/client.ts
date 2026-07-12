@@ -321,6 +321,12 @@ export const api = {
   delete: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
   upload: <T>(path: string, formData: FormData) =>
     request<T>(path, { method: 'POST', body: formData }),
+  // GET returning raw text (e.g. the admin traffic report HTML).
+  getText: async (path: string) => {
+    const res = await _fetchWithRefresh(`${BASE}${path}`)
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
+    return res.text()
+  },
   download: async (path: string, filename?: string) => {
     const res = await _fetchWithRefresh(`${BASE}${path}`)
     if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)

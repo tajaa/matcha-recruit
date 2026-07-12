@@ -100,8 +100,11 @@ docker run -d \
     --env-file .env.backend \
     -v "${UPLOADS_VOLUME}:/app/uploads" \
     -v "${CREDENTIALS_SRC}:/app/credentials:ro" \
+    -v /home/ec2-user/matcha/analytics:/app/analytics:ro \
     --restart unless-stopped \
     --memory=1g \
+    --log-opt max-size=50m \
+    --log-opt max-file=3 \
     "$IMAGE"
 
 echo "[deploy] waiting for $NEW_CONTAINER to answer on :$NEW_PORT/health..."

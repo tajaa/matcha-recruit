@@ -76,6 +76,8 @@ docker run -d \
     -e "WS_URL=${WS_URL:-ws://localhost:8002}" \
     --restart unless-stopped \
     --memory=64m \
+    --log-opt max-size=50m \
+    --log-opt max-file=3 \
     "$IMAGE"
 
 echo "[deploy] waiting for $NEW_CONTAINER to answer on :$NEW_PORT..."
