@@ -180,6 +180,8 @@
 		C945FD19578DFD18392EF297 /* DMThreadView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4E073C9506CA7C7E73D9062 /* DMThreadView.swift */; };
 		CA11AB01AB01AB01AB010001 /* CallModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA11AB01AB01AB01AB010002 /* CallModels.swift */; };
 		CA11AB01AB01AB01AB010003 /* CallService.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA11AB01AB01AB01AB010004 /* CallService.swift */; };
+		CA11AB01AB01AB01AB0100F2 /* UsageBeaconService.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA11AB01AB01AB01AB0100F1 /* UsageBeaconService.swift */; };
+		CA11AB01AB01AB01AB0100F3 /* UsageBeaconService.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA11AB01AB01AB01AB0100F1 /* UsageBeaconService.swift */; };
 		CA11AB01AB01AB01AB010005 /* CallPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA11AB01AB01AB01AB010006 /* CallPanelView.swift */; };
 		CA11AB01AB01AB01AB010007 /* InviteToCallSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA11AB01AB01AB01AB010008 /* InviteToCallSheet.swift */; };
 		CA11AB01AB01AB01AB010009 /* KanbanListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA11AB01AB01AB01AB01000A /* KanbanListView.swift */; };
@@ -410,6 +412,7 @@
 		C91B349426CC3B8BAC1F8C8F /* OnboardingPreview.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = OnboardingPreview.swift; sourceTree = "<group>"; };
 		CA11AB01AB01AB01AB010002 /* CallModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallModels.swift; sourceTree = "<group>"; };
 		CA11AB01AB01AB01AB010004 /* CallService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallService.swift; sourceTree = "<group>"; };
+		CA11AB01AB01AB01AB0100F1 /* UsageBeaconService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageBeaconService.swift; sourceTree = "<group>"; };
 		CA11AB01AB01AB01AB010006 /* CallPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallPanelView.swift; sourceTree = "<group>"; };
 		CA11AB01AB01AB01AB010008 /* InviteToCallSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InviteToCallSheet.swift; sourceTree = "<group>"; };
 		CA11AB01AB01AB01AB01000A /* KanbanListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KanbanListView.swift; sourceTree = "<group>"; };
@@ -627,6 +630,7 @@
 				DD00EE11FF22334455770099 /* ChannelNotificationManager.swift */,
 				BC01DD22EE33FF445566BB02 /* BroadcastService.swift */,
 				CA11AB01AB01AB01AB010004 /* CallService.swift */,
+				CA11AB01AB01AB01AB0100F1 /* UsageBeaconService.swift */,
 				C0C0C0C0C0C0C0C001010002 /* ProjectWebSocket.swift */,
 				FFFF1S1S1S1S1S1S01010002 /* ChannelStarStore.swift */,
 				FFFF1U1U1U1U1U1U01010002 /* TicketUpdatesStore.swift */,
@@ -1297,6 +1301,7 @@
 				BC01DD22EE33FF445566AA03 /* BroadcastPanelView.swift in Sources */,
 				CA11AB01AB01AB01AB010001 /* CallModels.swift in Sources */,
 				CA11AB01AB01AB01AB010003 /* CallService.swift in Sources */,
+				CA11AB01AB01AB01AB0100F2 /* UsageBeaconService.swift in Sources */,
 				CA11AB01AB01AB01AB010005 /* CallPanelView.swift in Sources */,
 				CA11AB01AB01AB01AB010007 /* InviteToCallSheet.swift in Sources */,
 				EE11FF2233445566AA000001 /* RecruitingPipelineView.swift in Sources */,
@@ -1400,6 +1405,7 @@
 				EDAA68473E78435104F25EEE /* InboxService.swift in Sources */,
 				4FC7FA5D56CCB6BFEBA1E867 /* ChannelsWebSocket.swift in Sources */,
 				C8583F026B8654268F37D4A1 /* CallService.swift in Sources */,
+				CA11AB01AB01AB01AB0100F3 /* UsageBeaconService.swift in Sources */,
 				3F3EE5D89655DDC22EABC2E7 /* BroadcastService.swift in Sources */,
 				8770E93129EFE6F4EAE72C5A /* WorkDetailVMStore.swift in Sources */,
 				FCC58C40DF134D20428715AB /* ServiceCache.swift in Sources */,

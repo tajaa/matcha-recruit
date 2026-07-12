@@ -375,6 +375,7 @@ class AppState {
     func didLogin(user: UserInfo) {
         currentUser = user
         isAuthenticated = true
+        UsageBeaconService.shared.start()
         CallService.shared.currentUserId = user.id
         MatchaWorkService.shared.updateCacheScope(user.id)
         ChannelStarStore.shared.bind(userId: user.id)
@@ -727,6 +728,7 @@ class AppState {
     func didLogout() {
         currentUser = nil
         isAuthenticated = false
+        UsageBeaconService.shared.stop()
         selectedThreadId = nil
         showSkills = false
         onlineUsers = []

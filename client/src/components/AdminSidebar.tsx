@@ -1,4 +1,4 @@
-import { Building2, ToggleRight, Settings, Globe, FileText, Briefcase, ShieldCheck, Mail, Image as ImageIcon, AlertOctagon, AlertTriangle, BarChart3, BookOpen, Users, Sparkles, Leaf, Calculator, HeartHandshake, LayoutTemplate, Rocket, Database, Layers } from 'lucide-react'
+import { Building2, ToggleRight, Settings, Globe, FileText, Briefcase, ShieldCheck, Mail, Image as ImageIcon, Activity, AlertOctagon, AlertTriangle, BarChart3, BookOpen, Users, Sparkles, Leaf, Calculator, HeartHandshake, LayoutTemplate, Rocket, Database, Layers } from 'lucide-react'
 import SidebarShell, { type NavGroup } from './SidebarShell'
 
 // Grouped master-admin nav. SidebarShell renders each group as a collapsible
@@ -59,6 +59,7 @@ const nav: NavGroup[] = [
     label: 'Monitoring',
     items: [
       { to: '/admin/traffic', icon: BarChart3, label: 'Traffic' },
+      { to: '/admin/usage', icon: Activity, label: 'Usage' },
       { to: '/admin/client-errors', icon: AlertOctagon, label: 'Client Errors' },
       { to: '/admin/server-errors', icon: AlertTriangle, label: 'Server Errors' },
     ],

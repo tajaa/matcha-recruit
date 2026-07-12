@@ -1,5 +1,6 @@
 import logging
 import os
+import time
 import traceback as tb_module
 from contextlib import asynccontextmanager
 
@@ -35,6 +36,12 @@ logger = logging.getLogger(__name__)
 
 from .config import get_settings, load_settings
 from .core.services.error_reporter import install_error_logging, report_server_error
+from .core.services.usage_tracker import (
+    record_event,
+    resolve_token,
+    start_usage_flusher,
+    stop_usage_flusher,
+)
 from .database import close_pool, get_connection, init_db, init_pool
 from .core.services.notification_manager import (
     close_notification_manager,
@@ -164,6 +171,10 @@ async def lifespan(app: FastAPI):
     from .core.services.inactivity_worker import start_inactivity_scheduler
     inactivity_task = await start_inactivity_scheduler()
 
+    # Batched usage-event writer (per worker; each owns its own buffer).
+    start_usage_flusher()
+    print("[Matcha] Usage-event flusher started")
+
     yield
 
     # Cancel background tasks
@@ -173,6 +184,8 @@ async def lifespan(app: FastAPI):
     await stop_fanout_subscriber()
     await stop_server_ping_loop()
     await stop_project_fanout_subscriber()
+    # Drains whatever is still buffered (best-effort — analytics is droppable).
+    await stop_usage_flusher()
 
     # Cleanup
     await close_redis_cache()
@@ -346,6 +359,72 @@ def _format_exc_chain(exc: BaseException) -> str:
     if inner is exc:
         return tb_module.format_exc()
     return "".join(tb_module.format_exception(type(inner), inner, inner.__traceback__))
+
+
+# Paths that would either drown the table in noise or feed themselves:
+# the beacon/error endpoints (self-reference), health checks (every few
+# seconds), docs, and WS upgrades.
+_USAGE_SKIP_PREFIXES = (
+    "/health",
+    "/api/usage",
+    "/api/client-errors",
+    "/api/admin/usage",
+    "/docs",
+    "/openapi",
+    "/uploads",
+    "/ws/",
+)
+
+
+@app.middleware("http")
+async def track_api_usage(request: Request, call_next):
+    """Record one usage_events row per API call (path template, status, duration).
+
+    Deliberately never touches the response body — it only reads `status_code`
+    after `call_next` — so SSE and StreamingResponse pass straight through
+    unbuffered. For a stream, `duration_ms` is therefore time-to-first-byte, not
+    total stream lifetime.
+    """
+    skip = request.method == "OPTIONS" or request.url.path.startswith(_USAGE_SKIP_PREFIXES)
+
+    user_id = role = None
+    if not skip:
+        try:
+            user_id, role = resolve_token(request.headers.get("authorization"))
+            # Must happen BEFORE call_next: capture_errors reads request.state
+            # in its exception path, i.e. while the route is still on the stack.
+            if user_id:
+                request.state.user_id = user_id
+                request.state.user_role = role
+        except Exception:
+            pass  # analytics must never break a request
+
+    start = time.perf_counter()
+    response = await call_next(request)
+    if skip:
+        return response
+
+    try:
+        # The matched route's template (`/api/ir/incidents/{incident_id}`) keeps
+        # cardinality bounded and ids out of the table. Unmatched requests are
+        # mostly bot scans — collapse them all to one sentinel rather than
+        # storing attacker-controlled paths.
+        route = request.scope.get("route")
+        path_template = getattr(route, "path_format", None) or "<unmatched>"
+
+        record_event(
+            surface="web",
+            event="api_call",
+            path=path_template,
+            method=request.method,
+            status=response.status_code,
+            duration_ms=int((time.perf_counter() - start) * 1000),
+            user_id=user_id,
+            role=role,
+        )
+    except Exception:
+        pass  # analytics must never break a response
+    return response
 
 
 @app.middleware("http")

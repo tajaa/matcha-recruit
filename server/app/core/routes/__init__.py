@@ -40,6 +40,7 @@ from .newsletter import public_router as newsletter_public_router, admin_router 
 from .client_errors import router as client_errors_router
 from .server_errors import router as server_errors_router
 from .traffic import router as traffic_router
+from .usage import router as usage_router
 from .landing_media import public_router as landing_media_public_router, admin_router as landing_media_admin_router
 from .resources import router as resources_router
 from .matcha_lite_pricing_admin import router as matcha_lite_pricing_admin_router
@@ -123,6 +124,7 @@ core_router.include_router(landing_media_admin_router, prefix="/admin", tags=["l
 core_router.include_router(client_errors_router, tags=["client-errors"])
 core_router.include_router(server_errors_router, tags=["server-errors"])
 core_router.include_router(traffic_router, tags=["traffic"])
+core_router.include_router(usage_router, tags=["usage"])
 
 # Export individual routers for backwards compatibility
 __all__ = [
