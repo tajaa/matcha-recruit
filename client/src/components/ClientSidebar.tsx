@@ -3,7 +3,7 @@ import {
   AlertTriangle, BookOpen, BarChart2, Sparkles, Building2, Accessibility,
   BadgeCheck, MessageSquareWarning, Mail, Bell, Gavel, MapPin, CalendarDays,
   GraduationCap, TrendingUp, ClipboardList, ShieldAlert, MessagesSquare, Handshake, ShieldCheck, Gauge, HeartPulse, FileCheck, Car, Link2, Activity,
-  Coins, FileSignature,
+  Coins, FileSignature, CalendarClock,
 } from 'lucide-react'
 import SidebarShell from './SidebarShell'
 import type { NavGroup, NavItem } from './SidebarShell'
@@ -17,6 +17,7 @@ const nav: (NavItem | NavGroup)[] = [
     label: 'HR Ops',
     items: [
       { to: '/app/employees', icon: Users, label: 'Employees' },
+      { to: '/app/employee-schedule', icon: CalendarClock, label: 'Schedule', feature: 'employee_schedule' },
       { to: '/app/onboarding', icon: ClipboardCheck, label: 'Onboarding' },
       { to: '/app/accommodations', icon: Accessibility, label: 'Accommodations' },
       { to: '/app/discipline', icon: Gavel, label: 'Performance Action', feature: 'discipline' },

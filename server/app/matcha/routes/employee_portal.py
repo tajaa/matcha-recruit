@@ -31,6 +31,7 @@ from ..models.employee import (
     PortalDashboard, PortalTasks, PendingTask,
     LeaveRequestCreate, LeaveRequestResponse, LeaveRequestListResponse,
 )
+from ..models.employee_schedule import ScheduleRequestCreate
 from ...core.dependencies import get_current_user
 from ..dependencies import require_employee, require_employee_record, require_feature
 
@@ -643,6 +644,148 @@ async def cancel_leave_request(
             leave_id,
         )
         return {"status": "cancelled", "leave_id": str(leave_id)}
+
+
+# ================================
+# Schedule (feature: employee_schedule)
+# ================================
+
+_schedule_dep = [Depends(require_feature("employee_schedule"))]
+
+
+@router.get("/me/schedule", dependencies=_schedule_dep)
+async def get_my_schedule(
+    start: datetime = Query(...),
+    end: datetime = Query(...),
+    employee: dict = Depends(require_employee_record),
+):
+    """The signed-in employee's PUBLISHED shifts overlapping [start, end)."""
+    from .employee_schedule._shared import fetch_shifts
+
+    if end <= start:
+        raise HTTPException(status_code=422, detail="end must be after start")
+    async with get_connection() as conn:
+        shifts = await fetch_shifts(
+            conn, employee["org_id"], start, end,
+            status="published", employee_id=employee["id"],
+        )
+    return {"shifts": shifts}
+
+
+@router.get("/me/schedule/requests", dependencies=_schedule_dep)
+async def list_my_schedule_requests(
+    employee: dict = Depends(require_employee_record),
+):
+    from .employee_schedule._shared import serialize_request
+
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT r.id, r.employee_id, r.request_type, r.shift_id, r.target_employee_id,
+                   r.unavailable_start, r.unavailable_end, r.reason, r.status,
+                   r.review_notes, r.reviewed_at, r.created_at,
+                   e.first_name, e.last_name,
+                   s.starts_at AS shift_starts_at, s.ends_at AS shift_ends_at
+            FROM schedule_requests r
+            JOIN employees e ON e.id = r.employee_id
+            LEFT JOIN schedule_shifts s ON s.id = r.shift_id
+            WHERE r.employee_id = $1
+            ORDER BY r.created_at DESC
+            """,
+            employee["id"],
+        )
+    return {"requests": [serialize_request(dict(r)) for r in rows]}
+
+
+@router.post("/me/schedule/requests", dependencies=_schedule_dep)
+async def create_my_schedule_request(
+    body: ScheduleRequestCreate,
+    employee: dict = Depends(require_employee_record),
+):
+    """File a swap / drop / unavailability request against my own schedule."""
+    from .employee_schedule._shared import serialize_request
+
+    company_id = employee["org_id"]
+    async with get_connection() as conn:
+        # swap/drop must reference a shift the employee is actually on.
+        if body.shift_id is not None:
+            assigned = await conn.fetchval(
+                """
+                SELECT 1 FROM schedule_shift_assignments
+                WHERE shift_id = $1 AND employee_id = $2
+                """,
+                body.shift_id, employee["id"],
+            )
+            if not assigned:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Shift not found on your schedule",
+                )
+        # A named swap target must belong to the same company.
+        if body.target_employee_id is not None:
+            valid = await conn.fetchval(
+                "SELECT 1 FROM employees WHERE id = $1 AND org_id = $2",
+                body.target_employee_id, company_id,
+            )
+            if not valid:
+                raise HTTPException(status_code=404, detail="Target employee not found")
+
+        request_id = await conn.fetchval(
+            """
+            INSERT INTO schedule_requests
+                (company_id, employee_id, request_type, shift_id, target_employee_id,
+                 unavailable_start, unavailable_end, reason)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+            RETURNING id
+            """,
+            company_id, employee["id"], body.request_type, body.shift_id,
+            body.target_employee_id, body.unavailable_start, body.unavailable_end,
+            body.reason,
+        )
+        await conn.execute(
+            """
+            INSERT INTO schedule_audit_log
+                (company_id, entity_type, entity_id, actor_user_id, action, details)
+            VALUES ($1,'request',$2,$3,'request.create','{}'::jsonb)
+            """,
+            company_id, request_id, employee.get("user_id"),
+        )
+        row = await conn.fetchrow(
+            """
+            SELECT r.id, r.employee_id, r.request_type, r.shift_id, r.target_employee_id,
+                   r.unavailable_start, r.unavailable_end, r.reason, r.status,
+                   r.review_notes, r.reviewed_at, r.created_at,
+                   e.first_name, e.last_name,
+                   s.starts_at AS shift_starts_at, s.ends_at AS shift_ends_at
+            FROM schedule_requests r
+            JOIN employees e ON e.id = r.employee_id
+            LEFT JOIN schedule_shifts s ON s.id = r.shift_id
+            WHERE r.id = $1
+            """,
+            request_id,
+        )
+    return serialize_request(dict(row))
+
+
+@router.delete("/me/schedule/requests/{request_id}", dependencies=_schedule_dep)
+async def cancel_my_schedule_request(
+    request_id: UUID,
+    employee: dict = Depends(require_employee_record),
+):
+    """Cancel a still-pending request I filed."""
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            UPDATE schedule_requests
+            SET status = 'cancelled', updated_at = NOW()
+            WHERE id = $1 AND employee_id = $2 AND status = 'pending'
+            RETURNING id
+            """,
+            request_id, employee["id"],
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Pending request not found")
+    return {"status": "cancelled", "request_id": str(request_id)}
 
 
 # ================================

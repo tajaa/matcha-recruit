@@ -26,6 +26,7 @@ from .analysis_pilot import router as analysis_pilot_router
 from .limit_adequacy import router as limit_adequacy_router
 from .property import router as property_router
 from .driver_risk import router as driver_risk_router
+from .employee_schedule import router as employee_schedule_router
 from .tcor import router as tcor_router
 from .coi import router as coi_router
 from .management_liability import router as management_liability_router
@@ -142,6 +143,10 @@ matcha_router.include_router(property_router, prefix="/property", tags=["propert
                              dependencies=[Depends(require_feature("property"))])
 matcha_router.include_router(driver_risk_router, prefix="/driver-risk", tags=["driver-risk"],
                              dependencies=[Depends(require_feature("driver_risk"))])
+# Employee scheduling — shift builder + templates over the roster (paid add-on).
+matcha_router.include_router(employee_schedule_router, prefix="/employee-schedule",
+                             tags=["employee-schedule"],
+                             dependencies=[Depends(require_feature("employee_schedule"))])
 matcha_router.include_router(tcor_router, prefix="/tcor", tags=["tcor"],
                              dependencies=[Depends(require_feature("tcor"))])
 matcha_router.include_router(coi_router, prefix="/coi", tags=["coi"],
