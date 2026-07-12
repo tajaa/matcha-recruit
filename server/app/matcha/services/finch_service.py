@@ -14,9 +14,13 @@ OAuth only).
 Field paths were verified against Finch's public API docs (2026-07): the work
 location lives at ``employment.location`` (``work_location`` kept as a defensive
 fallback), ``flsa_status`` values are ``exempt`` / ``non_exempt`` / ``unknown`` /
-null, and benefit types follow the documented enum (``s125_medical``, ``hsa_pre``,
-…). Still validate end-to-end against a live sandbox connection before enabling
-for real customer connections (provider-specific gaps are common).
+null, and benefit types follow the documented enum (``s125_medical``,
+``fsa_medical``, …). Still validate end-to-end against a live sandbox connection
+before enabling for real customer connections (provider-specific gaps are common).
+
+Set ``config['mode'] = 'finch_mock'`` to serve the mock dataset below through this
+class (plain ``mock`` routes to the base ``HRISService`` instead — see
+``hris_service.get_hris_service``).
 """
 
 import asyncio
@@ -27,7 +31,7 @@ from typing import Optional
 
 import httpx
 
-from .hris_service import HRISProvisioningError
+from .hris_service import HRISProvisioningError, is_mock_mode, normalize_hris_locations
 
 logger = logging.getLogger(__name__)
 
@@ -38,15 +42,17 @@ FINCH_API_VERSION = os.getenv("FINCH_API_VERSION", "2020-09-17")
 # Batch size for the POST /employer/{individual,employment} detail endpoints.
 _FINCH_BATCH = 50
 
-# Finch's documented benefit-type enum values that carry employer HEALTH
-# contributions (drives the termination premium-leak estimate). The enum has no
-# plain "health"/"medical" type — s125_dental / s125_vision / retirement types
-# are deliberately excluded.
-_HEALTH_BENEFIT_TYPES = frozenset({"s125_medical", "fsa_medical", "hsa_pre", "hsa_post"})
+# Finch's documented benefit-type enum values that carry an employer HEALTH
+# PREMIUM (drives the termination premium-leak estimate). The enum has no plain
+# "health"/"medical" type; s125_dental / s125_vision / retirement types are
+# deliberately excluded. So are hsa_pre / hsa_post: an employer HSA contribution
+# is a deposit into the employee's account, not a premium the employer keeps
+# paying after termination — counting it would inflate the leak.
+_HEALTH_BENEFIT_TYPES = frozenset({"s125_medical", "fsa_medical"})
 
 
 def _is_health_benefit(benefit_type: Optional[str]) -> bool:
-    """True when a Finch benefit type represents employer health coverage.
+    """True when a Finch benefit type represents an employer health premium.
 
     Exact-matches the documented enum, plus a substring fallback for
     provider-custom types (e.g. a custom "medical_plan"), excluding
@@ -57,7 +63,7 @@ def _is_health_benefit(benefit_type: Optional[str]) -> bool:
         return True
     if "dental" in btype or "vision" in btype:
         return False
-    return "medical" in btype or btype.startswith("hsa")
+    return "medical" in btype
 
 
 class FinchHRISService:
@@ -78,8 +84,7 @@ class FinchHRISService:
         }
 
     async def test_connection(self, config: dict, secrets: dict) -> tuple[bool, Optional[str]]:
-        mode = config.get("mode", "mock")
-        if mode == "mock":
+        if is_mock_mode(config):
             return True, None
         try:
             token = await self.authenticate(config, secrets)
@@ -99,8 +104,7 @@ class FinchHRISService:
     async def authenticate(self, config: dict, secrets: dict) -> str:
         """Return the Finch access token. Finch is OAuth-only — the token is
         obtained via Finch Connect and stored encrypted in secrets."""
-        mode = config.get("mode", "mock")
-        if mode == "mock":
+        if is_mock_mode(config):
             return "mock-finch-token"
 
         token = secrets.get("access_token")
@@ -153,7 +157,7 @@ class FinchHRISService:
     async def fetch_workers(self, config: dict, secrets: dict) -> list[dict]:
         """List the employer directory, then hydrate each individual with
         identity + employment detail. Returns a list of merged raw Finch records."""
-        if config.get("mode") == "mock":
+        if is_mock_mode(config):
             return _FINCH_MOCK_EMPLOYEES
 
         token = await self.authenticate(config, secrets)
@@ -239,7 +243,7 @@ class FinchHRISService:
 
     async def fetch_company(self, config: dict, secrets: dict) -> dict:
         """GET /employer/company — legal name, entity, EIN, and work locations."""
-        if config.get("mode") == "mock":
+        if is_mock_mode(config):
             return _FINCH_MOCK_COMPANY
         token = await self.authenticate(config, secrets)
         async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
@@ -405,7 +409,7 @@ class FinchHRISService:
         to "no facts" — the caller treats unknown enrollment as ``None`` rather
         than a false signal.
         """
-        if config.get("mode") == "mock":
+        if is_mock_mode(config):
             # Demo facts: first mock employee enrolled w/ employer premium, the
             # rest unenrolled — exercises both the leak and the gap path.
             facts: dict[str, dict] = {}
@@ -441,11 +445,20 @@ class FinchHRISService:
                 fact["has_benefits_enrollment"] = True
                 detail = contributions.get(iid) or {}
                 comp = detail.get("company_contribution") or {}
-                amount = comp.get("amount") if isinstance(comp, dict) else None
+                if not isinstance(comp, dict):
+                    continue
+                # `amount` is only a dollar figure when `type` is "fixed" — a
+                # "percent" contribution's amount is a rate, and dividing it by 100
+                # would report a fabricated premium (50% → "$50.00/mo"). A percent
+                # contribution needs the plan's total premium to resolve, which
+                # Finch doesn't expose here, so it degrades to "no premium fact".
+                if (comp.get("type") or "").lower() != "fixed":
+                    continue
+                amount = comp.get("amount")
                 if amount not in (None, ""):
                     try:
                         # Finch fixed amounts are in minor units (cents). ACCUMULATE
-                        # across health benefits (e.g. s125_medical + hsa_pre) —
+                        # across health benefits (e.g. s125_medical + fsa_medical) —
                         # assigning would let the last benefit overwrite the rest.
                         monthly = float(Decimal(str(amount)) / Decimal(100))
                         fact["employer_health_premium_monthly"] = round(
@@ -576,36 +589,6 @@ class FinchHRISService:
             # Finch (like Gusto) does not carry clinical credentials — stays CSV/manual.
             "credentials": None,
         }
-
-
-def normalize_hris_locations(raw_locations: list) -> list[dict]:
-    """Normalize provider location records to the shared HRIS location shape.
-
-    Accepts Finch's documented shape (line1/line2/city/state/postal_code/country)
-    and Gusto's (street_1/street_2/city/state/zip). Emits
-    ``{name, line1, line2, city, state, postal_code, country}`` with None for
-    missing fields — filtering (US-only, city+state+zip required) happens in the
-    orchestrator upsert, not here.
-    """
-    out: list[dict] = []
-    for loc in raw_locations or []:
-        if not isinstance(loc, dict):
-            continue
-        line1 = loc.get("line1") or loc.get("street_1")
-        line2 = loc.get("line2") or loc.get("street_2")
-        city = loc.get("city")
-        state = loc.get("state")
-        postal = loc.get("postal_code") or loc.get("zip")
-        out.append({
-            "name": loc.get("name") or line1 or (f"{city}, {state}" if city and state else None),
-            "line1": (line1 or "").strip() or None,
-            "line2": (line2 or "").strip() or None,
-            "city": (city or "").strip() or None,
-            "state": (state or "").strip().upper() or None,
-            "postal_code": (str(postal) if postal is not None else "").strip() or None,
-            "country": (loc.get("country") or "").strip().upper() or None,
-        })
-    return out
 
 
 # ---------------------------------------------------------------------------

@@ -4,9 +4,11 @@ Covers the doc-verified field paths (2026-07):
 - work location at employment.location (work_location / residence fallbacks)
 - flsa_status values exempt / non_exempt / unknown (underscore matters —
   the old substring check misclassified non_exempt as exempt)
-- benefit-type matching against Finch's documented enum (s125_medical, hsa_*,
-  fsa_medical; no plain "health"/"section_125_medical" types)
-- employer health premium ACCUMULATES across multiple health benefits
+- benefit-type matching against Finch's documented enum (s125_medical,
+  fsa_medical; no plain "health"/"section_125_medical" types, and hsa_* is a
+  deposit, not a premium)
+- employer health premium ACCUMULATES across health benefits, and only counts
+  "fixed" contributions (a "percent" amount is a rate, not cents)
 - provider-agnostic location normalization (Finch + Gusto shapes)
 
 Network-touching paths (fetch_workers/fetch_company against live Finch) are
@@ -19,6 +21,10 @@ from app.matcha.services.finch_service import (
     FinchHRISService,
     _FINCH_MOCK_EMPLOYEES,
     _is_health_benefit,
+)
+from app.matcha.services.hris_service import (
+    GustoHRISService,
+    get_hris_service,
     normalize_hris_locations,
 )
 
@@ -91,8 +97,15 @@ class TestNormalizeWorkerFlsa:
 
 class TestIsHealthBenefit:
     def test_documented_health_types(self):
-        for t in ("s125_medical", "fsa_medical", "hsa_pre", "hsa_post"):
+        for t in ("s125_medical", "fsa_medical"):
             assert _is_health_benefit(t), t
+
+    def test_hsa_is_not_a_premium(self):
+        # An employer HSA contribution is a deposit into the employee's account,
+        # not a premium the employer keeps paying post-termination — counting it
+        # would inflate the leak estimate.
+        for t in ("hsa_pre", "hsa_post"):
+            assert not _is_health_benefit(t), t
 
     def test_non_health_documented_types(self):
         for t in ("s125_dental", "s125_vision", "401k", "401k_roth", "403b",
@@ -125,22 +138,22 @@ class TestFetchBenefitFacts:
         svc.list_enrolled = fake_list_enrolled
         svc.get_benefit_individuals = fake_individuals
         return asyncio.run(
-            svc.fetch_benefit_facts({"mode": "api"}, {"access_token": "t"}, ["i-1", "i-2"])
+            svc.fetch_benefit_facts({"mode": "finch"}, {"access_token": "t"}, ["i-1", "i-2"])
         )
 
     def test_premium_accumulates_across_health_benefits(self):
-        # s125_medical $650.00 + hsa_pre $50.00 employer contribution → $700.00,
+        # s125_medical $650.00 + fsa_medical $50.00 employer contribution → $700.00,
         # not the last-write-wins $50.00 the old assignment produced.
         facts = self._run(
             benefits=[
                 {"id": "b-med", "type": "s125_medical"},
-                {"id": "b-hsa", "type": "hsa_pre"},
+                {"id": "b-fsa", "type": "fsa_medical"},
                 {"id": "b-401k", "type": "401k"},
             ],
-            enrolled={"b-med": ["i-1"], "b-hsa": ["i-1"], "b-401k": ["i-1", "i-2"]},
+            enrolled={"b-med": ["i-1"], "b-fsa": ["i-1"], "b-401k": ["i-1", "i-2"]},
             contributions={
                 "b-med": {"i-1": {"company_contribution": {"amount": 65000, "type": "fixed"}}},
-                "b-hsa": {"i-1": {"company_contribution": {"amount": 5000, "type": "fixed"}}},
+                "b-fsa": {"i-1": {"company_contribution": {"amount": 5000, "type": "fixed"}}},
                 "b-401k": {"i-1": {"company_contribution": {"amount": 99900, "type": "fixed"}}},
             },
         )
@@ -149,10 +162,38 @@ class TestFetchBenefitFacts:
         # 401k enrollment alone is not a health-benefit fact.
         assert "i-2" not in facts
 
+    def test_percent_contribution_is_not_a_dollar_premium(self):
+        # `amount` is only minor-units when type == "fixed". A 50% contribution
+        # (amount 5000) must NOT be reported as "$50.00/mo" — enrollment is still
+        # a fact, the premium isn't.
+        facts = self._run(
+            benefits=[{"id": "b-med", "type": "s125_medical"}],
+            enrolled={"b-med": ["i-1"]},
+            contributions={
+                "b-med": {"i-1": {"company_contribution": {"amount": 5000, "type": "percent"}}},
+            },
+        )
+        assert facts["i-1"]["has_benefits_enrollment"] is True
+        assert facts["i-1"]["employer_health_premium_monthly"] == 0.0
+
+    def test_percent_does_not_pollute_a_fixed_premium(self):
+        facts = self._run(
+            benefits=[
+                {"id": "b-med", "type": "s125_medical"},
+                {"id": "b-fsa", "type": "fsa_medical"},
+            ],
+            enrolled={"b-med": ["i-1"], "b-fsa": ["i-1"]},
+            contributions={
+                "b-med": {"i-1": {"company_contribution": {"amount": 65000, "type": "fixed"}}},
+                "b-fsa": {"i-1": {"company_contribution": {"amount": 5000, "type": "percent"}}},
+            },
+        )
+        assert facts["i-1"]["employer_health_premium_monthly"] == 650.0
+
     def test_mock_mode_alternates(self):
         svc = FinchHRISService()
         facts = asyncio.run(
-            svc.fetch_benefit_facts({"mode": "mock"}, {}, ["a", "b"])
+            svc.fetch_benefit_facts({"mode": "finch_mock"}, {}, ["a", "b"])
         )
         assert facts["a"]["has_benefits_enrollment"] is True
         assert facts["b"]["has_benefits_enrollment"] is False
@@ -207,8 +248,23 @@ class TestMockPipeline:
 
     def test_mock_company_locations_normalize(self):
         svc = FinchHRISService()
-        locs = asyncio.run(svc.fetch_locations({"mode": "mock"}, {}))
+        locs = asyncio.run(svc.fetch_locations({"mode": "finch_mock"}, {}))
         assert {(l["city"], l["state"]) for l in locs} == {
             ("San Francisco", "CA"), ("Los Angeles", "CA"),
         }
         assert all(l["postal_code"] for l in locs)
+
+    def test_provider_mock_modes_route_to_the_provider_class(self):
+        # get_hris_service dispatches on the connection's mode, so a plain "mock"
+        # lands on the base ADP HRISService — the provider mock datasets (and the
+        # provider-specific field paths they exercise) are only reachable through
+        # the *_mock modes.
+        assert isinstance(get_hris_service("finch_mock"), FinchHRISService)
+        assert isinstance(get_hris_service("gusto_mock"), GustoHRISService)
+        assert not isinstance(get_hris_service("mock"), (FinchHRISService, GustoHRISService))
+
+    def test_gusto_mock_locations_normalize(self):
+        locs = asyncio.run(GustoHRISService().fetch_locations({"mode": "gusto_mock"}, {}))
+        assert {(l["city"], l["state"]) for l in locs} == {
+            ("San Francisco", "CA"), ("Oakland", "CA"), ("New York", "NY"),
+        }

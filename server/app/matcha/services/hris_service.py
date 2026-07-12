@@ -23,6 +23,47 @@ class HRISProvisioningError(Exception):
         self.needs_action = needs_action
 
 
+def is_mock_mode(config: dict) -> bool:
+    """True for the base ``mock`` mode and the per-provider ``gusto_mock`` /
+    ``finch_mock`` modes, which `get_hris_service` routes to the real provider
+    class so its own mock dataset (and field paths) get exercised.
+    """
+    mode = config.get("mode") or "mock"
+    return mode == "mock" or mode.endswith("_mock")
+
+
+def normalize_hris_locations(raw_locations: list) -> list[dict]:
+    """Normalize provider location records to the shared HRIS location shape.
+
+    Provider-agnostic on purpose — every `fetch_locations` implementation emits
+    through this, so the orchestrator's business_locations ingest is identical
+    across providers. Accepts Finch's documented shape (line1/line2/city/state/
+    postal_code/country) and Gusto's (street_1/street_2/city/state/zip). Emits
+    ``{name, line1, line2, city, state, postal_code, country}`` with None for
+    missing fields — filtering (US-only, city+state+zip required) happens in the
+    orchestrator ingest, not here.
+    """
+    out: list[dict] = []
+    for loc in raw_locations or []:
+        if not isinstance(loc, dict):
+            continue
+        line1 = loc.get("line1") or loc.get("street_1")
+        line2 = loc.get("line2") or loc.get("street_2")
+        city = loc.get("city")
+        state = loc.get("state")
+        postal = loc.get("postal_code") or loc.get("zip")
+        out.append({
+            "name": loc.get("name") or line1 or (f"{city}, {state}" if city and state else None),
+            "line1": (line1 or "").strip() or None,
+            "line2": (line2 or "").strip() or None,
+            "city": (city or "").strip() or None,
+            "state": (state or "").strip().upper() or None,
+            "postal_code": (str(postal) if postal is not None else "").strip() or None,
+            "country": (loc.get("country") or "").strip().upper() or None,
+        })
+    return out
+
+
 class HRISService:
     """Client for ADP-style HRIS API. Fetches and normalizes employee data."""
 
@@ -31,8 +72,7 @@ class HRISService:
 
     async def test_connection(self, config: dict, secrets: dict) -> tuple[bool, Optional[str]]:
         """Test connectivity to the HRIS endpoint."""
-        mode = config.get("mode", "mock")
-        if mode == "mock":
+        if is_mock_mode(config):
             return True, None
 
         base_url = config.get("base_url", "").rstrip("/")
@@ -50,8 +90,7 @@ class HRISService:
 
     async def authenticate(self, config: dict, secrets: dict) -> str:
         """Authenticate with the HRIS and return a bearer token."""
-        mode = config.get("mode", "mock")
-        if mode == "mock":
+        if is_mock_mode(config):
             return "mock-token"
 
         base_url = config.get("base_url", "").rstrip("/")
@@ -219,8 +258,7 @@ class GustoHRISService:
         self.timeout_seconds = timeout_seconds
 
     async def test_connection(self, config: dict, secrets: dict) -> tuple[bool, Optional[str]]:
-        mode = config.get("mode", "mock")
-        if mode == "mock":
+        if is_mock_mode(config):
             return True, None
         try:
             token = await self.authenticate(config, secrets)
@@ -238,8 +276,7 @@ class GustoHRISService:
             return False, f"Connection failed: {str(e)}"
 
     async def authenticate(self, config: dict, secrets: dict) -> str:
-        mode = config.get("mode", "mock")
-        if mode == "mock":
+        if is_mock_mode(config):
             return "mock-gusto-token"
 
         # OAuth flow: use access_token from secrets if available
@@ -301,11 +338,11 @@ class GustoHRISService:
     async def fetch_workers(self, config: dict, secrets: dict) -> list[dict]:
         gusto_company_id = config.get("gusto_company_id", "")
 
-        if not gusto_company_id and config.get("mode") != "mock":
+        if not gusto_company_id and not is_mock_mode(config):
             raise HRISProvisioningError("config_missing", "gusto_company_id not configured", needs_action=True)
 
         # Mock mode: return a small representative set (no auth needed)
-        if config.get("mode") == "mock":
+        if is_mock_mode(config):
             return _GUSTO_MOCK_EMPLOYEES
 
         token = await self.authenticate(config, secrets)
@@ -345,9 +382,7 @@ class GustoHRISService:
         granted on new OAuth connects; older tokens without it degrade to []).
         Same output keys as ``FinchHRISService.fetch_locations``.
         """
-        from .finch_service import normalize_hris_locations
-
-        if config.get("mode") == "mock":
+        if is_mock_mode(config):
             return normalize_hris_locations(_GUSTO_MOCK_LOCATIONS)
 
         gusto_company_id = config.get("gusto_company_id", "")
@@ -510,10 +545,16 @@ _GUSTO_MOCK_EMPLOYEES: list[dict] = [
 
 
 def get_hris_service(provider: str):
-    """Return the appropriate HRIS service for the given provider/mode."""
-    if provider == "gusto":
+    """Return the appropriate HRIS service for the given connection mode.
+
+    ``*_mock`` modes route to the real provider class, which then serves its own
+    mock dataset (see ``is_mock_mode``). Without them, the plain ``mock`` mode
+    lands on the base ``HRISService`` and the Gusto/Finch mock branches — and the
+    provider-specific field paths they exist to exercise — are unreachable.
+    """
+    if provider in ("gusto", "gusto_mock"):
         return GustoHRISService()
-    if provider == "finch":
+    if provider in ("finch", "finch_mock"):
         # Lazy import: finch_service imports HRISProvisioningError from this module.
         from .finch_service import FinchHRISService
         return FinchHRISService()

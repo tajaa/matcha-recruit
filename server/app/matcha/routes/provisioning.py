@@ -1342,7 +1342,10 @@ async def list_provisioning_runs(
 # =======================================================================
 
 class HRISConnectionRequest(BaseModel):
-    mode: str = Field(default="mock", pattern="^(mock|adp|gusto|finch)$")
+    # `finch_mock` / `gusto_mock` route to the real provider class serving its own
+    # mock dataset (see hris_service.get_hris_service) — plain `mock` is the base
+    # ADP-shaped mock. `finch` is rejected below (OAuth-only).
+    mode: str = Field(default="mock", pattern="^(mock|adp|gusto|finch|gusto_mock|finch_mock)$")
     base_url: Optional[str] = Field(default=None, max_length=500)
     client_id: Optional[str] = Field(default=None, max_length=255)
     client_secret: Optional[str] = None
