@@ -27,6 +27,7 @@ from app.matcha.dependencies import require_admin_or_client, get_client_company_
 from app.matcha.models.ir_incident import (
     AnalyticsSummary,
     ConsistencyAnalytics,
+    LeadingIndicators,
     LocationAnalysis,
     LocationHotspot,
     RiskInsightsResponse,
@@ -36,6 +37,8 @@ from app.matcha.models.ir_incident import (
     RiskTheme,
     TrendDataPoint,
     TrendsAnalysis,
+    WcByLocationResponse,
+    WcLocationScorecard,
 )
 
 # Helpers still living in _legacy.py; will move to _shared.py in step 10.
@@ -278,9 +281,22 @@ def _build_risk_scope_key(location_id: Optional[UUID], period_days: int) -> str:
     return f"loc={loc_part}:days={period_days}"
 
 
-async def compute_wc_metrics(conn, company_id: UUID, period_days: int = 365) -> dict:
+async def compute_wc_metrics(
+    conn,
+    company_id: UUID,
+    period_days: int = 365,
+    location_id: Optional[UUID] = None,
+    headcount_override: Optional[int] = None,
+) -> dict:
     """Per-company Workers Comp metrics — extracted so the broker portfolio
-    endpoint can reuse the same calc per linked client."""
+    endpoint can reuse the same calc per linked client.
+
+    location_id (default None) scopes every incident query to one establishment
+    for the per-location safety scorecard; None preserves the company-wide
+    behavior the broker re-export depends on. headcount_override lets the caller
+    supply a location-scoped headcount (company profile headcount is wrong for a
+    single site); when None the company profile headcount is used as before.
+    """
     from app.matcha.services.wc_benchmarks import (
         lookup_benchmark, estimate_premium_impact, severity_band,
     )
@@ -299,12 +315,26 @@ async def compute_wc_metrics(conn, company_id: UUID, period_days: int = 365) -> 
         """,
         company_id,
     )
-    headcount = int(profile["headcount"]) if profile and profile["headcount"] else 0
     industry = profile["industry"] if profile else None
+    if headcount_override is not None:
+        headcount = int(headcount_override)
+    else:
+        headcount = int(profile["headcount"]) if profile and profile["headcount"] else 0
+
+    # Optional per-establishment scope. location_id becomes $4 (query 1) / $3
+    # (query 2) / $2 (query 3) — appended so the existing positional params keep
+    # their numbers.
+    loc = location_id is not None
+    loc1 = "AND location_id = $4" if loc else ""
+    loc2 = "AND location_id = $3" if loc else ""
+    loc3 = "AND location_id = $2" if loc else ""
 
     # Current + prior period totals.
+    p1 = [company_id, period_start, prior_start]
+    if loc:
+        p1.append(location_id)
     rows = await conn.fetch(
-        """
+        f"""
         SELECT
             CASE WHEN occurred_at >= $2 THEN 'current' ELSE 'prior' END AS bucket,
             COUNT(*) AS recordable_cases,
@@ -329,14 +359,18 @@ async def compute_wc_metrics(conn, company_id: UUID, period_days: int = 365) -> 
         WHERE company_id = $1
           AND osha_recordable = true
           AND occurred_at >= $3
+          {loc1}
         GROUP BY bucket
         """,
-        company_id, period_start, prior_start,
+        *p1,
     )
 
     # Quarterly bucketing — 8 quarters trailing.
+    p2 = [company_id, quarter_start]
+    if loc:
+        p2.append(location_id)
     quarter_rows = await conn.fetch(
-        """
+        f"""
         SELECT
             DATE_TRUNC('quarter', occurred_at) AS quarter_start,
             COUNT(*) AS recordable_cases,
@@ -348,18 +382,23 @@ async def compute_wc_metrics(conn, company_id: UUID, period_days: int = 365) -> 
         WHERE company_id = $1
           AND osha_recordable = true
           AND occurred_at >= $2
+          {loc2}
         GROUP BY quarter_start
         ORDER BY quarter_start
         """,
-        company_id, quarter_start,
+        *p2,
     )
 
+    p3 = [company_id]
+    if loc:
+        p3.append(location_id)
     last_recordable = await conn.fetchval(
-        """
+        f"""
         SELECT MAX(occurred_at) FROM ir_incidents
         WHERE company_id = $1 AND osha_recordable = true
+          {loc3}
         """,
-        company_id,
+        *p3,
     )
 
     cur = next((r for r in rows if r["bucket"] == "current"), None)
@@ -438,6 +477,7 @@ async def compute_wc_metrics(conn, company_id: UUID, period_days: int = 365) -> 
 
     return {
         "period_days": period_days,
+        "location_id": str(location_id) if location_id else None,
         "industry": industry,
         "headcount": headcount or None,
         "hours_worked_assumed": int(hours_worked) if hours_worked > 0 else None,
@@ -590,6 +630,162 @@ async def get_wc_metrics(
         raise HTTPException(status_code=400, detail="No company associated with user")
     async with get_connection() as conn:
         return await compute_wc_metrics(conn, company_id, period_days)
+
+
+@router.get("/analytics/wc-metrics/by-location", response_model=WcByLocationResponse)
+async def get_wc_metrics_by_location(
+    period_days: int = Query(365, ge=30, le=1095),
+    current_user=Depends(require_admin_or_client),
+):
+    """Per-establishment TRIR/DART scorecards + the company roll-up.
+
+    Fans compute_wc_metrics out over each active business_location (scoped
+    incidents + a location-specific headcount so the rates are meaningful),
+    alongside the company-wide block. Large multi-site buyers use this to see
+    which site drives the composite number. Capped at 50 locations.
+    """
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=400, detail="No company associated with user")
+
+    # Location-scoped headcount lives in osha.py (roster + fallbacks). Lazy
+    # import to avoid a load-order cycle between the analytics + osha submodules.
+    from .osha import _active_headcount
+
+    async with get_connection() as conn:
+        company_metrics = await compute_wc_metrics(conn, company_id, period_days)
+
+        loc_rows = await conn.fetch(
+            """
+            SELECT id, name, city, state
+            FROM business_locations
+            WHERE company_id = $1 AND is_active = true
+            ORDER BY name ASC
+            LIMIT 50
+            """,
+            company_id,
+        )
+
+        sole = len(loc_rows) == 1
+        scorecards: list[WcLocationScorecard] = []
+        for lr in loc_rows:
+            try:
+                hc = await _active_headcount(
+                    conn, company_id, lr["id"],
+                    city=lr["city"], state=lr["state"], sole_location=sole,
+                )
+            except Exception:  # headcount is best-effort — rates just go null
+                hc = 0
+            metrics = await compute_wc_metrics(
+                conn, company_id, period_days,
+                location_id=lr["id"], headcount_override=hc or None,
+            )
+            scorecards.append(
+                WcLocationScorecard(
+                    location_id=lr["id"],
+                    location_name=lr["name"] or "Unnamed location",
+                    city=lr["city"],
+                    state=lr["state"],
+                    metrics=metrics,
+                )
+            )
+
+    return WcByLocationResponse(
+        period_days=period_days,
+        company=company_metrics,
+        locations=scorecards,
+        generated_at=_utc_now_naive().isoformat(),
+    )
+
+
+@router.get("/analytics/leading-indicators", response_model=LeadingIndicators)
+async def get_leading_indicators(
+    period_days: int = Query(365, ge=30, le=1095),
+    current_user=Depends(require_admin_or_client),
+):
+    """Leading (predictive) safety signals: near-miss volume + CAPA follow-through.
+
+    Lagging metrics (TRIR/DART) tell you what already happened; near-miss volume,
+    the near-miss-to-recordable ratio, and corrective-action close-rate are the
+    forward-looking counterparts. Pure SQL over ir_incidents + ir_corrective_actions.
+    """
+    company_id = await get_client_company_id(current_user)
+    generated_at = _utc_now_naive().isoformat()
+    if company_id is None:
+        return LeadingIndicators(
+            period_days=period_days, near_miss_count=0, recordable_count=0,
+            generated_at=generated_at,
+        )
+
+    period_start = _utc_now_naive() - timedelta(days=period_days)
+    prior_start = period_start - timedelta(days=period_days)
+
+    async with get_connection() as conn:
+        inc = await conn.fetchrow(
+            """
+            SELECT
+                COALESCE(SUM(CASE WHEN incident_type = 'near_miss'
+                                   AND occurred_at >= $2 THEN 1 ELSE 0 END), 0) AS near_miss,
+                COALESCE(SUM(CASE WHEN incident_type = 'near_miss'
+                                   AND occurred_at >= $3 AND occurred_at < $2 THEN 1 ELSE 0 END), 0) AS near_miss_prior,
+                COALESCE(SUM(CASE WHEN osha_recordable = true
+                                   AND occurred_at >= $2 THEN 1 ELSE 0 END), 0) AS recordable,
+                COALESCE(SUM(CASE WHEN occurred_at >= $2 THEN 1 ELSE 0 END), 0) AS total
+            FROM ir_incidents
+            WHERE company_id = $1
+            """,
+            company_id, period_start, prior_start,
+        )
+
+        capa = await conn.fetchrow(
+            """
+            SELECT
+                COALESCE(SUM(CASE WHEN status IN ('open', 'in_progress') THEN 1 ELSE 0 END), 0) AS open,
+                COALESCE(SUM(CASE WHEN status IN ('open', 'in_progress')
+                                   AND due_date IS NOT NULL AND due_date < CURRENT_DATE
+                                  THEN 1 ELSE 0 END), 0) AS overdue,
+                COALESCE(SUM(CASE WHEN status IN ('completed', 'verified') THEN 1 ELSE 0 END), 0) AS completed,
+                COUNT(*) AS total,
+                AVG(CASE WHEN status IN ('completed', 'verified') AND completed_at IS NOT NULL
+                         THEN EXTRACT(EPOCH FROM (completed_at - created_at)) / 86400.0 END) AS avg_days_to_close
+            FROM ir_corrective_actions
+            WHERE company_id = $1
+            """,
+            company_id,
+        )
+
+    near_miss = int(inc["near_miss"])
+    near_miss_prior = int(inc["near_miss_prior"])
+    recordable = int(inc["recordable"])
+    total = int(inc["total"])
+    ratio = round(near_miss / recordable, 2) if recordable > 0 else None
+    delta = (
+        round(((near_miss - near_miss_prior) / near_miss_prior) * 100, 1)
+        if near_miss_prior > 0 else None
+    )
+
+    ca_open = int(capa["open"])
+    ca_overdue = int(capa["overdue"])
+    ca_completed = int(capa["completed"])
+    ca_total = int(capa["total"])
+    close_rate = round(ca_completed / ca_total, 2) if ca_total > 0 else None
+    avg_close = round(float(capa["avg_days_to_close"]), 1) if capa["avg_days_to_close"] is not None else None
+
+    return LeadingIndicators(
+        period_days=period_days,
+        near_miss_count=near_miss,
+        recordable_count=recordable,
+        near_miss_to_recordable_ratio=ratio,
+        near_miss_prior_count=near_miss_prior,
+        near_miss_delta_pct=delta,
+        total_incident_count=total,
+        corrective_actions_open=ca_open,
+        corrective_actions_overdue=ca_overdue,
+        corrective_actions_completed=ca_completed,
+        capa_close_rate=close_rate,
+        avg_days_to_close=avg_close,
+        generated_at=generated_at,
+    )
 
 
 @router.get("/analytics/risk-matrix", response_model=RiskMatrixResponse)

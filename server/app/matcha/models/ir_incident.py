@@ -252,6 +252,97 @@ class IRPersonHistory(BaseModel):
 
 
 # ===========================================
+# Corrective Action (CAPA) Models
+# ===========================================
+
+CorrectiveActionType = Literal["corrective", "preventive"]
+CorrectiveActionPriority = Literal["immediate", "short_term", "long_term"]
+CorrectiveActionStatus = Literal["open", "in_progress", "completed", "verified", "cancelled"]
+CorrectiveActionEffectiveness = Literal["effective", "ineffective", "pending"]
+
+
+class CorrectiveAction(BaseModel):
+    """One structured corrective/preventive action on an incident (ir_corrective_actions).
+
+    The accountable layer on top of the free-text ir_incidents.corrective_actions
+    notes column: each row carries its own owner, due date, status lifecycle, and
+    post-completion effectiveness check.
+    """
+    id: UUID
+    incident_id: UUID
+    description: str
+    action_type: CorrectiveActionType = "corrective"
+    priority: CorrectiveActionPriority = "short_term"
+    assigned_to: Optional[UUID] = None
+    # No-roster fallback owner name (mirrors ir_people), used when assigned_to is
+    # unset (matcha-lite tenants may not have a managed roster).
+    assignee_name: Optional[str] = None
+    # Hydrated owner display name for assigned_to (populated on read).
+    assigned_to_name: Optional[str] = None
+    due_date: Optional[date] = None
+    status: CorrectiveActionStatus = "open"
+    completed_at: Optional[datetime] = None
+    verified_by: Optional[UUID] = None
+    verified_at: Optional[datetime] = None
+    effectiveness: Optional[CorrectiveActionEffectiveness] = None
+    created_by: Optional[UUID] = None
+    created_at: datetime
+    updated_at: datetime
+    # Derived: due_date in the past and not yet completed/verified/cancelled.
+    overdue: bool = False
+
+
+class CorrectiveActionCreate(BaseModel):
+    """Request model for creating a corrective action."""
+    description: str = Field(..., min_length=1)
+    action_type: CorrectiveActionType = "corrective"
+    priority: CorrectiveActionPriority = "short_term"
+    assigned_to: Optional[UUID] = None
+    assignee_name: Optional[str] = None
+    due_date: Optional[date] = None
+
+
+class CorrectiveActionUpdate(BaseModel):
+    """Request model for updating a corrective action (PATCH-style).
+
+    Only the fields present in model_fields_set are written, so a status flip
+    doesn't clobber the owner and vice-versa. completed_at / verified_* are
+    stamped server-side on the corresponding status transition.
+    """
+    description: Optional[str] = Field(None, min_length=1)
+    action_type: Optional[CorrectiveActionType] = None
+    priority: Optional[CorrectiveActionPriority] = None
+    assigned_to: Optional[UUID] = None
+    assignee_name: Optional[str] = None
+    due_date: Optional[date] = None
+    status: Optional[CorrectiveActionStatus] = None
+    effectiveness: Optional[CorrectiveActionEffectiveness] = None
+
+
+class CorrectiveActionListResponse(BaseModel):
+    """Response model for listing corrective actions."""
+    actions: list[CorrectiveAction]
+    total: int
+
+
+class OpenCorrectiveAction(CorrectiveAction):
+    """A corrective action in the company-wide open/overdue list.
+
+    Adds incident context so the dashboard tile can link straight to the
+    originating incident without a second fetch.
+    """
+    incident_number: str
+    incident_title: str
+
+
+class OpenCorrectiveActionsResponse(BaseModel):
+    """Company-wide open/overdue corrective actions (dashboard + deadline worker)."""
+    actions: list[OpenCorrectiveAction]
+    total: int
+    overdue_count: int
+
+
+# ===========================================
 # Document Models
 # ===========================================
 
@@ -535,6 +626,50 @@ class RiskInsightsResponse(BaseModel):
     from_cache: bool = False
 
 
+class WcLocationScorecard(BaseModel):
+    """One establishment's Workers-Comp metric block for the per-site scorecard."""
+    location_id: Optional[UUID] = None
+    location_name: str
+    city: Optional[str] = None
+    state: Optional[str] = None
+    metrics: dict[str, Any]
+
+
+class WcByLocationResponse(BaseModel):
+    """Side-by-side per-location TRIR/DART scorecards + the company roll-up.
+
+    compute_wc_metrics is company-wide only by default; this fans it out per
+    business_location (scoped incidents + location headcount) so a multi-site
+    buyer sees which site drives the number.
+    """
+    period_days: int
+    company: dict[str, Any]
+    locations: list[WcLocationScorecard]
+    generated_at: str
+
+
+class LeadingIndicators(BaseModel):
+    """Leading (predictive) safety signals — the counterpart to lagging TRIR/DART.
+
+    Near-miss volume and the near-miss-to-recordable ratio are recognized
+    leading indicators (a healthy program surfaces many near-misses per
+    recordable); CAPA close-rate + time-to-close measure follow-through.
+    """
+    period_days: int
+    near_miss_count: int
+    recordable_count: int
+    near_miss_to_recordable_ratio: Optional[float] = None
+    near_miss_prior_count: int = 0
+    near_miss_delta_pct: Optional[float] = None
+    total_incident_count: int = 0
+    corrective_actions_open: int = 0
+    corrective_actions_overdue: int = 0
+    corrective_actions_completed: int = 0
+    capa_close_rate: Optional[float] = None
+    avg_days_to_close: Optional[float] = None
+    generated_at: str
+
+
 # ===========================================
 # Audit Log Models
 # ===========================================
@@ -682,6 +817,49 @@ class Osha300ASummary(BaseModel):
     # every 300A/ITA filing). Surfaced so a silently-wrong federal form can't
     # print without a warning.
     data_quality_warnings: list[str] = []
+
+
+class ItaCredentialUpdate(BaseModel):
+    """Store/replace the company's OSHA ITA API token (encrypted at rest)."""
+    api_token: str = Field(..., min_length=1, max_length=4000)
+
+
+class ItaCredentialStatus(BaseModel):
+    """Whether an ITA API token is on file — never returns the token itself."""
+    configured: bool
+    updated_at: Optional[datetime] = None
+
+
+class ItaSubmitRequest(BaseModel):
+    """Trigger a direct ITA electronic submission for a calendar year."""
+    year: int = Field(..., ge=2015, le=2100)
+    attested: bool = False
+
+
+class ItaSubmitResponse(BaseModel):
+    """Outcome of a submit attempt (no secrets)."""
+    status: str  # submitted | rejected | error | not_configured
+    submission_id: Optional[str] = None
+    establishment_count: int = 0
+    error: Optional[str] = None
+
+
+class ItaSubmission(BaseModel):
+    """One row of the ITA filing history."""
+    id: UUID
+    location_id: Optional[UUID] = None
+    year: int
+    status: str
+    ita_submission_id: Optional[str] = None
+    establishment_count: int = 0
+    error_detail: Optional[str] = None
+    submitted_by: Optional[UUID] = None
+    submitted_at: datetime
+
+
+class ItaSubmissionListResponse(BaseModel):
+    submissions: list[ItaSubmission]
+    total: int
 
 
 class Osha300ASaveRequest(BaseModel):

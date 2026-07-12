@@ -5,7 +5,7 @@ import { fetchLocations } from '../../api/compliance'
 import type { BusinessLocation } from '../../types/compliance'
 import { Badge, Button, Modal } from '../ui'
 import { useMe } from '../../hooks/useMe'
-import { Download, Loader2, FileSpreadsheet, FileText, Save, AlertTriangle, Lock, Eye, EyeOff } from 'lucide-react'
+import { Download, Loader2, FileSpreadsheet, FileText, Save, AlertTriangle, Lock, Eye, EyeOff, Send } from 'lucide-react'
 
 type LogEntry = {
   case_number: string
@@ -79,6 +79,25 @@ type ItaProblem = {
   missing: string[]
 }
 
+type ItaSubmissionRow = {
+  id: string
+  year: number
+  status: string
+  ita_submission_id: string | null
+  establishment_count: number
+  error_detail: string | null
+  submitted_at: string
+}
+
+type ItaCredentialStatus = { configured: boolean; updated_at: string | null }
+
+type ItaSubmitResponse = {
+  status: string
+  submission_id: string | null
+  establishment_count: number
+  error: string | null
+}
+
 const classificationLabel: Record<string, string> = {
   death: 'Death',
   days_away: 'Days Away',
@@ -144,6 +163,14 @@ export function OshaLogsPanel() {
   const [itaProblems, setItaProblems] = useState<ItaProblem[] | null>(null)
   const [itaBusy, setItaBusy] = useState(false)
 
+  // ITA direct-submission state (electronic filing via the OSHA API).
+  const [itaCredConfigured, setItaCredConfigured] = useState<boolean | null>(null)
+  const [itaTokenInput, setItaTokenInput] = useState('')
+  const [savingToken, setSavingToken] = useState(false)
+  const [showTokenInput, setShowTokenInput] = useState(false)
+  const [itaSubmitMsg, setItaSubmitMsg] = useState<{ status: string; text: string } | null>(null)
+  const [itaSubmissions, setItaSubmissions] = useState<ItaSubmissionRow[]>([])
+
   // Pre-export reviewer attestation. No file leaves the system until the user
   // confirms they reviewed the (AI-assisted) data; the backend re-checks via
   // ?attested=true and writes the audit record.
@@ -180,6 +207,8 @@ export function OshaLogsPanel() {
         if (active.length > 0) setLocationId((prev) => prev || active[0].id)
       })
       .catch(() => {})
+    loadItaState()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Load the 300 log + 300A summary whenever year or establishment changes.
@@ -372,6 +401,70 @@ export function OshaLogsPanel() {
     }
   }
 
+  // ── ITA direct electronic submission ──────────────────────────────────────
+  async function loadItaState() {
+    try {
+      const status = await api.get<ItaCredentialStatus>('/ir/incidents/osha/ita/credentials')
+      setItaCredConfigured(status.configured)
+    } catch {
+      setItaCredConfigured(null)
+    }
+    try {
+      const res = await api.get<{ submissions: ItaSubmissionRow[] }>('/ir/incidents/osha/ita/submissions')
+      setItaSubmissions(res.submissions)
+    } catch {
+      setItaSubmissions([])
+    }
+  }
+
+  async function saveItaToken() {
+    if (!itaTokenInput.trim()) return
+    setSavingToken(true)
+    try {
+      await api.put('/ir/incidents/osha/ita/credentials', { api_token: itaTokenInput.trim() })
+      setItaTokenInput('')
+      setShowTokenInput(false)
+      setItaCredConfigured(true)
+    } catch (e) {
+      setItaSubmitMsg({ status: 'error', text: e instanceof Error ? e.message : 'Could not save token' })
+    } finally {
+      setSavingToken(false)
+    }
+  }
+
+  async function submitIta() {
+    setItaBusy(true)
+    setItaProblems(null)
+    setItaSubmitMsg(null)
+    try {
+      const problems = await api.get<ItaProblem[]>(`/ir/incidents/osha/ita/validate?year=${year}`)
+      if (problems.length > 0) {
+        setItaProblems(problems)
+        const blocking = problems.filter((p) => !p.missing.includes('unassigned_location'))
+        if (blocking.length > 0) return
+      }
+      promptExport('Submit to OSHA ITA (electronic filing)', renderItaPreview(), async () => {
+        const res = await api.post<ItaSubmitResponse>('/ir/incidents/osha/ita/submit', {
+          year,
+          attested: true,
+        })
+        if (res.status === 'submitted') {
+          setItaSubmitMsg({ status: 'ok', text: `Filed ${res.establishment_count} establishment(s) with OSHA${res.submission_id ? ` — confirmation ${res.submission_id}` : ''}.` })
+        } else if (res.status === 'not_configured') {
+          setItaSubmitMsg({ status: 'warn', text: 'Add your OSHA ITA API token below before filing.' })
+          setShowTokenInput(true)
+        } else {
+          setItaSubmitMsg({ status: 'error', text: res.error || 'OSHA ITA rejected the filing.' })
+        }
+        await loadItaState()
+      })
+    } catch {
+      setItaProblems([])
+    } finally {
+      setItaBusy(false)
+    }
+  }
+
   async function revealConfidentialNames() {
     setRevealing(true)
     try {
@@ -458,7 +551,82 @@ export function OshaLogsPanel() {
             )}
             ITA Export
           </Button>
+          <Button size="sm" onClick={submitIta} disabled={itaBusy}>
+            {itaBusy ? (
+              <Loader2 size={12} className="mr-1.5 animate-spin" />
+            ) : (
+              <Send size={12} className="mr-1.5" />
+            )}
+            Submit to ITA
+          </Button>
         </div>
+      </div>
+
+      {/* ITA electronic filing status + credentials + history */}
+      <div className="bg-zinc-900 border border-white/10 rounded-2xl p-4 space-y-3">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 text-[10px] text-zinc-500 uppercase tracking-widest font-bold">
+            <Send size={13} /> OSHA ITA Electronic Filing
+          </div>
+          <div className="flex items-center gap-2">
+            <span className={`text-[11px] ${itaCredConfigured ? 'text-emerald-400' : 'text-zinc-500'}`}>
+              {itaCredConfigured === null ? '' : itaCredConfigured ? 'API token on file' : 'No API token'}
+            </span>
+            <Button size="sm" variant="ghost" onClick={() => setShowTokenInput((v) => !v)}>
+              {itaCredConfigured ? 'Update token' : 'Add token'}
+            </Button>
+          </div>
+        </div>
+
+        {showTokenInput && (
+          <div className="flex flex-col sm:flex-row gap-2">
+            <input
+              type="password"
+              value={itaTokenInput}
+              onChange={(e) => setItaTokenInput(e.target.value)}
+              placeholder="OSHA ITA API token (from your ITA account)"
+              className="flex-1 bg-zinc-950 border border-white/10 rounded-lg text-zinc-200 text-xs px-3 py-2 focus:outline-none focus:border-zinc-600"
+            />
+            <Button size="sm" onClick={saveItaToken} disabled={savingToken || !itaTokenInput.trim()}>
+              {savingToken ? 'Saving…' : 'Save token'}
+            </Button>
+          </div>
+        )}
+
+        {itaSubmitMsg && (
+          <div
+            className={`text-[12px] rounded-lg px-3 py-2 border ${
+              itaSubmitMsg.status === 'ok'
+                ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+                : itaSubmitMsg.status === 'warn'
+                  ? 'border-amber-500/30 bg-amber-500/10 text-amber-300'
+                  : 'border-red-500/30 bg-red-500/10 text-red-300'
+            }`}
+          >
+            {itaSubmitMsg.text}
+          </div>
+        )}
+
+        {itaSubmissions.length > 0 && (
+          <div className="text-[11px] text-zinc-400">
+            <div className="text-zinc-600 uppercase tracking-wider mb-1">Recent filings</div>
+            <div className="space-y-1">
+              {itaSubmissions.slice(0, 5).map((s) => (
+                <div key={s.id} className="flex items-center justify-between gap-2 font-mono">
+                  <span>{s.year} · {s.establishment_count} est.</span>
+                  <span className={
+                    s.status === 'submitted' || s.status === 'accepted' ? 'text-emerald-400'
+                      : s.status === 'rejected' || s.status === 'error' ? 'text-red-400'
+                      : 'text-zinc-500'
+                  }>
+                    {s.status}{s.ita_submission_id ? ` · ${s.ita_submission_id}` : ''}
+                  </span>
+                  <span className="text-zinc-600">{new Date(s.submitted_at).toLocaleDateString()}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ITA validation errors */}

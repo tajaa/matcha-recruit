@@ -2090,6 +2090,105 @@ async def init_db():
         """)
 
         # ===========================================
+        # IR Corrective Actions (CAPA) — structured follow-through
+        # ===========================================
+        # The accountable layer over the free-text ir_incidents.corrective_actions
+        # notes column: one row per corrective/preventive action, each with its
+        # own owner, due date, status lifecycle, and effectiveness verification.
+        # See alembic migration ircapa01.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS ir_corrective_actions (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                incident_id UUID NOT NULL REFERENCES ir_incidents(id) ON DELETE CASCADE,
+                company_id UUID NOT NULL,
+                description TEXT NOT NULL,
+                action_type VARCHAR(20) NOT NULL DEFAULT 'corrective'
+                    CHECK (action_type IN ('corrective', 'preventive')),
+                priority VARCHAR(20) NOT NULL DEFAULT 'short_term'
+                    CHECK (priority IN ('immediate', 'short_term', 'long_term')),
+                assigned_to UUID,
+                assignee_name TEXT,
+                due_date DATE,
+                status VARCHAR(20) NOT NULL DEFAULT 'open'
+                    CHECK (status IN ('open', 'in_progress', 'completed', 'verified', 'cancelled')),
+                completed_at TIMESTAMPTZ,
+                verified_by UUID,
+                verified_at TIMESTAMPTZ,
+                effectiveness VARCHAR(20)
+                    CHECK (effectiveness IN ('effective', 'ineffective', 'pending')),
+                reminder_sent_at DATE,
+                created_by UUID,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_ir_corrective_actions_incident
+            ON ir_corrective_actions(incident_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_ir_corrective_actions_company_status_due
+            ON ir_corrective_actions(company_id, status, due_date)
+        """)
+
+        # ir_deadline_alert_log — idempotency ledger for the IR deadline worker's
+        # incident-scoped sweeps (stale critical, unclassified recordable, OSHA
+        # emergency countdown). CAPA nudges dedupe on reminder_sent_at instead.
+        # See alembic migration irdl01.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS ir_deadline_alert_log (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                incident_id UUID NOT NULL REFERENCES ir_incidents(id) ON DELETE CASCADE,
+                company_id UUID NOT NULL,
+                alert_kind VARCHAR(40) NOT NULL,
+                sent_on DATE NOT NULL DEFAULT CURRENT_DATE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                UNIQUE (incident_id, alert_kind, sent_on)
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_ir_deadline_alert_log_company
+            ON ir_deadline_alert_log(company_id, sent_on)
+        """)
+
+        # ===========================================
+        # OSHA ITA direct electronic filing
+        # ===========================================
+        # osha_ita_credentials holds the company's ITA API token (encrypted at
+        # rest via app.core.services.secret_crypto); osha_ita_submissions is the
+        # auditable filing history. See alembic migration ita01.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS osha_ita_credentials (
+                company_id UUID PRIMARY KEY REFERENCES companies(id) ON DELETE CASCADE,
+                api_token TEXT NOT NULL,
+                created_by UUID,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS osha_ita_submissions (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+                location_id UUID,
+                year INTEGER NOT NULL,
+                status VARCHAR(30) NOT NULL DEFAULT 'pending'
+                    CHECK (status IN ('pending', 'submitted', 'accepted', 'rejected',
+                                      'error', 'not_configured')),
+                ita_submission_id TEXT,
+                establishment_count INTEGER NOT NULL DEFAULT 0,
+                response_payload JSONB,
+                error_detail TEXT,
+                submitted_by UUID,
+                submitted_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_osha_ita_submissions_company_year
+            ON osha_ita_submissions(company_id, year DESC)
+        """)
+
+        # ===========================================
         # IR People registry (matcha-lite per-person tracking, no roster)
         # ===========================================
         # Lightweight, auto-built identity for people named in incidents.
@@ -3555,7 +3654,8 @@ async def init_db():
                 ('deadline_escalation', 'Deadline Escalation', 'Re-evaluate deadline severities for upcoming legislation based on proximity to effective dates.', false, 0),
                 ('legislation_watch', 'Legislation Watch (RSS)', 'Monitor RSS feeds from state DOL/legislature sites for upcoming legislation.', false, 0),
                 ('pattern_recognition', 'Pattern Recognition', 'Detect coordinated legislative changes across jurisdictions.', false, 0),
-                ('discipline_expiry', 'Discipline Expiry Sweep', 'Flips active discipline records past expires_at to expired and writes audit rows.', false, 10000)
+                ('discipline_expiry', 'Discipline Expiry Sweep', 'Flips active discipline records past expires_at to expired and writes audit rows.', false, 10000),
+                ('ir_deadline_alerts', 'IR Deadline & SLA Alerts', 'Nudges owners on overdue corrective actions, stale critical incidents, unclassified OSHA recordables, and the OSHA 8/24hr emergency window.', false, 200)
             ON CONFLICT (task_key) DO NOTHING
         """)
 

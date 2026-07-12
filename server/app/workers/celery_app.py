@@ -49,6 +49,7 @@ celery_app = Celery(
         "app.workers.tasks.cappe_campaign_send",
         "app.workers.tasks.cba_clause_extraction",
         "app.workers.tasks.grievance_deadline_alerts",
+        "app.workers.tasks.ir_deadline_alerts",
         "app.workers.tasks.scope_registry",
     ],
 )
@@ -234,6 +235,13 @@ def on_worker_ready(**kwargs):
         run_grievance_deadline_alerts.delay()
     else:
         print("[Worker] Grievance deadline alerts scheduler is disabled, skipping.")
+
+    from app.workers.tasks.ir_deadline_alerts import run_ir_deadline_alerts
+
+    if _is_scheduler_enabled("ir_deadline_alerts"):
+        run_ir_deadline_alerts.delay()
+    else:
+        print("[Worker] IR deadline alerts scheduler is disabled, skipping.")
 
     from app.workers.tasks.compliance_evals import run_scheduled_compliance_evals
 

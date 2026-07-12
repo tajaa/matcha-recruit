@@ -7,6 +7,65 @@ export type IRIncidentType = 'safety' | 'behavioral' | 'property' | 'near_miss' 
 export type IRSeverity = 'low' | 'medium' | 'high' | 'critical'
 export type IRStatus = 'reported' | 'investigating' | 'action_required' | 'resolved' | 'closed'
 
+// ── Corrective Actions (CAPA) — mirrors ir_corrective_actions ──
+
+export type CorrectiveActionType = 'corrective' | 'preventive'
+export type CorrectiveActionPriority = 'immediate' | 'short_term' | 'long_term'
+export type CorrectiveActionStatus = 'open' | 'in_progress' | 'completed' | 'verified' | 'cancelled'
+export type CorrectiveActionEffectiveness = 'effective' | 'ineffective' | 'pending'
+
+export type CorrectiveAction = {
+  id: string
+  incident_id: string
+  description: string
+  action_type: CorrectiveActionType
+  priority: CorrectiveActionPriority
+  assigned_to: string | null
+  assignee_name: string | null
+  assigned_to_name: string | null
+  due_date: string | null
+  status: CorrectiveActionStatus
+  completed_at: string | null
+  verified_by: string | null
+  verified_at: string | null
+  effectiveness: CorrectiveActionEffectiveness | null
+  created_by: string | null
+  created_at: string
+  updated_at: string
+  overdue: boolean
+}
+
+export type CorrectiveActionCreate = {
+  description: string
+  action_type?: CorrectiveActionType
+  priority?: CorrectiveActionPriority
+  assignee_name?: string | null
+  due_date?: string | null
+}
+
+export type CorrectiveActionListResponse = {
+  actions: CorrectiveAction[]
+  total: number
+}
+
+// ── Leading indicators — mirrors analytics.py LeadingIndicators ──
+
+export type IRLeadingIndicators = {
+  period_days: number
+  near_miss_count: number
+  recordable_count: number
+  near_miss_to_recordable_ratio: number | null
+  near_miss_prior_count: number
+  near_miss_delta_pct: number | null
+  total_incident_count: number
+  corrective_actions_open: number
+  corrective_actions_overdue: number
+  corrective_actions_completed: number
+  capa_close_rate: number | null
+  avg_days_to_close: number | null
+  generated_at: string
+}
+
 // Voice-dictation parse result (optional "talk it in" prefill for the create form).
 export type VoicePrefill = {
   transcript: string | null

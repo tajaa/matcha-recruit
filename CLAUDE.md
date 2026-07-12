@@ -294,6 +294,7 @@ Scheduling model: no celery-beat. The worker container runs continuously (`resta
 - `leave_deadline_checks`, `leave_agent_orchestration` — leave-of-absence tracking
 - `onboarding_reminders` — new-hire task chases
 - `discipline_expiry` — auto-close stale discipline records
+- `ir_deadline_alerts` — IR deadline/SLA nudges (overdue corrective actions, stale critical incidents, unclassified OSHA recordables before the 300A/ITA deadline, OSHA 8/24hr emergency window). Scheduler row seeded disabled; dedup via `ir_corrective_actions.reminder_sent_at` + `ir_deadline_alert_log`.
 - `handbook_freshness` — re-evaluate handbooks against current law
 - `pattern_recognition` — cross-incident analysis
 - `auto_archive` — close-out abandoned projects

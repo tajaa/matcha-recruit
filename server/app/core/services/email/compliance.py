@@ -300,6 +300,99 @@ Sent by Matcha on behalf of {company_name}"""
             text_content=text_content,
         )
 
+    async def send_ir_deadline_reminder(
+        self,
+        to_email: str,
+        to_name: str,
+        company_name: str,
+        subject: str,
+        headline: str,
+        detail_lines: list[tuple[str, str]],
+        incident_id: Optional[str] = None,
+        cta_label: str = "Open Incident Reporting",
+        urgent: bool = False,
+    ) -> bool:
+        """Generic IR deadline/SLA reminder email.
+
+        One template serves every sweep in the ir_deadline_alerts worker
+        (overdue corrective action, stale critical incident, unclassified
+        recordable, OSHA emergency window). `detail_lines` is an ordered list
+        of (label, value) rows rendered into the card; `urgent` reddens the
+        accent for time-critical alerts (OSHA window / overdue).
+        """
+        if not self.is_configured():
+            logger.warning("Email not configured, skipping IR deadline reminder")
+            return False
+
+        app_base_url = self.settings.app_base_url
+        if incident_id:
+            link = f"{app_base_url}/app/ir/incidents/{incident_id}"
+        else:
+            link = f"{app_base_url}/app/ir"
+        accent = "#ef4444" if urgent else "#f59e0b"
+
+        rows_html = "".join(
+            f'<p style="margin: 8px 0 0 0;"><strong>{html.escape(str(label))}:</strong> '
+            f'{html.escape(str(value))}</p>'
+            for label, value in detail_lines
+        )
+        rows_text = "\n".join(f"{label}: {value}" for label, value in detail_lines)
+
+        html_content = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; }}
+        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+        .header {{ text-align: center; padding: 20px 0; border-bottom: 2px solid #22c55e; }}
+        .logo {{ color: #22c55e; font-size: 24px; font-weight: bold; letter-spacing: 2px; }}
+        .content {{ padding: 30px 0; }}
+        .card {{ background: #f9fafb; border-radius: 10px; padding: 20px; margin: 20px 0; border-left: 4px solid {accent}; }}
+        .btn {{ display: inline-block; background: #22c55e; color: white; padding: 12px 22px; text-decoration: none; border-radius: 6px; font-weight: 600; }}
+        .footer {{ text-align: center; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 12px; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">MATCHA</div>
+        </div>
+        <div class="content">
+            <p>Hi {html.escape(to_name)},</p>
+            <p style="color: {accent}; font-weight: 600;">{html.escape(headline)}</p>
+            <div class="card">
+                {rows_html}
+            </div>
+            <p>
+                <a href="{link}" class="btn">{html.escape(cta_label)}</a>
+            </p>
+        </div>
+        <div class="footer">
+            <p>Sent by Matcha on behalf of {html.escape(company_name)}</p>
+        </div>
+    </div>
+</body>
+</html>"""
+
+        text_content = f"""Hi {to_name},
+
+{headline}
+
+{rows_text}
+
+Open: {link}
+
+Sent by Matcha on behalf of {company_name}"""
+
+        return await self.send_email(
+            to_email=to_email,
+            to_name=to_name,
+            subject=subject,
+            html_content=html_content,
+            text_content=text_content,
+        )
+
     async def send_ir_incident_notification_email(
         self,
         to_email: str,

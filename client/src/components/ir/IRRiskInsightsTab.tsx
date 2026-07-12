@@ -21,6 +21,7 @@ import { IRQuarterlyRecordableChart } from './risk/IRQuarterlyRecordableChart'
 import { IRSeverityDonut } from './risk/IRSeverityDonut'
 import { IRPeopleCard } from './risk/IRPeopleCard'
 import { IREssentialsLockedCard } from './risk/IREssentialsLockedCard'
+import { IRLocationScorecards } from './risk/IRLocationScorecards'
 
 type LocationRow = {
   id: string
@@ -258,6 +259,9 @@ export function IRRiskInsightsTab({ onNavigateIncident }: Props) {
               {wcMetrics && wcMetrics.quarterly.length > 0 && (
                 <IRQuarterlyRecordableChart quarterly={wcMetrics.quarterly} />
               )}
+
+              {/* Per-site TRIR/DART scorecard (multi-location tenants only). */}
+              <IRLocationScorecards />
             </>
           )}
 

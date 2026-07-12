@@ -12,6 +12,7 @@ import { IRSimilarIncidentsPanel } from '../../components/ir/IRSimilarIncidentsP
 import { IRPolicyMappingPanel } from '../../components/ir/IRPolicyMappingPanel'
 import { IRConsistencyGuidancePanel } from '../../components/ir/IRConsistencyGuidancePanel'
 import { IRDocumentPanel } from '../../components/ir/IRDocumentPanel'
+import { IRCorrectiveActionsPanel } from '../../components/ir/IRCorrectiveActionsPanel'
 import { IRInterviewScheduler } from '../../components/ir/IRInterviewScheduler'
 import { IREscalationForm } from '../../components/ir/IREscalationForm'
 import { IRCategoryDataDisplay } from '../../components/ir/IRCategoryDataDisplay'
@@ -295,16 +296,24 @@ export default function IRDetail() {
                     </Button>
                   )}
                 </div>
-                <div>
-                  <h3 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-1.5">Corrective Actions</h3>
-                  <textarea className="w-full bg-zinc-900 border border-zinc-800 rounded-lg text-sm text-zinc-200 px-3 py-2 min-h-[80px] focus:outline-none focus:border-zinc-600"
-                    value={correctiveActions} onChange={(e) => setCorrectiveActions(e.target.value)} placeholder="Document corrective actions taken..." />
-                  {correctiveActions !== (incident.corrective_actions || '') && (
-                    <Button size="sm" className="mt-1" disabled={savingFields} onClick={() => updateField('corrective_actions', correctiveActions)}>
-                      {savingFields ? 'Saving...' : 'Save'}
-                    </Button>
-                  )}
-                </div>
+                {/* Structured, accountable corrective actions (CAPA). The
+                    free-text notes below stay as an optional catch-all. */}
+                <IRCorrectiveActionsPanel incidentId={incidentId!} />
+
+                <details className="group">
+                  <summary className="text-xs font-medium text-zinc-500 uppercase tracking-wide cursor-pointer select-none hover:text-zinc-400">
+                    Corrective action notes (free text)
+                  </summary>
+                  <div className="mt-1.5">
+                    <textarea className="w-full bg-zinc-900 border border-zinc-800 rounded-lg text-sm text-zinc-200 px-3 py-2 min-h-[80px] focus:outline-none focus:border-zinc-600"
+                      value={correctiveActions} onChange={(e) => setCorrectiveActions(e.target.value)} placeholder="Optional free-text notes (the tracked actions above are the record of accountability)..." />
+                    {correctiveActions !== (incident.corrective_actions || '') && (
+                      <Button size="sm" className="mt-1" disabled={savingFields} onClick={() => updateField('corrective_actions', correctiveActions)}>
+                        {savingFields ? 'Saving...' : 'Save'}
+                      </Button>
+                    )}
+                  </div>
+                </details>
 
                 {/* WC Classification — only for OSHA-recordable injuries; feeds broker WC analytics. */}
                 {incident.osha_recordable && (
