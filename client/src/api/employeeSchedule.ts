@@ -10,8 +10,8 @@ export function fetchWeek(weekStart: string) {
   return api.get<WeekResponse>(`/employee-schedule/week?start=${weekStart}`)
 }
 
-export function createShift(payload: ShiftPayload) {
-  return api.post<Shift>('/employee-schedule/shifts', payload)
+export function createShift(payload: ShiftPayload, force = false) {
+  return api.post<Shift>(`/employee-schedule/shifts${force ? '?force=true' : ''}`, payload)
 }
 
 export function updateShift(id: string, payload: ShiftPayload) {
@@ -34,8 +34,11 @@ export function publishRange(start: string, end: string) {
 
 // ---- Admin: assignments ----
 
-export function assignEmployee(shiftId: string, employeeId: string) {
-  return api.post<Shift>(`/employee-schedule/shifts/${shiftId}/assignments`, { employee_id: employeeId })
+export function assignEmployee(shiftId: string, employeeId: string, force = false) {
+  return api.post<Shift>(
+    `/employee-schedule/shifts/${shiftId}/assignments${force ? '?force=true' : ''}`,
+    { employee_id: employeeId },
+  )
 }
 
 export function unassignEmployee(shiftId: string, employeeId: string) {
@@ -73,9 +76,9 @@ export function fetchRequests(status?: string) {
   return api.get<{ requests: ScheduleRequest[] }>(`/employee-schedule/requests${q}`)
 }
 
-export function reviewRequest(id: string, decision: 'approved' | 'denied', reviewNotes?: string) {
+export function reviewRequest(id: string, decision: 'approved' | 'denied', reviewNotes?: string, force = false) {
   return api.post<ScheduleRequest>(`/employee-schedule/requests/${id}/review`, {
-    decision, review_notes: reviewNotes ?? null,
+    decision, review_notes: reviewNotes ?? null, force,
   })
 }
 

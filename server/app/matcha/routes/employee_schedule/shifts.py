@@ -17,6 +17,7 @@ from ...models.employee_schedule import (
 from ._shared import (
     require_company_id, log_audit, fetch_shifts, fetch_roster, fetch_shift_by_id,
     assert_employee_in_company, assert_location_in_company,
+    find_conflicts, raise_conflict,
 )
 
 router = APIRouter()
@@ -86,12 +87,20 @@ async def get_week(
 
 
 @router.post("/shifts")
-async def create_shift(body: ShiftCreate, current_user=Depends(require_admin_or_client)):
+async def create_shift(body: ShiftCreate,
+                       force: bool = Query(False, description="Assign despite overlapping shifts"),
+                       current_user=Depends(require_admin_or_client)):
     company_id = await require_company_id(current_user)
     async with get_connection() as conn:
         await assert_location_in_company(conn, company_id, body.location_id)
         for emp_id in body.employee_ids:
             await assert_employee_in_company(conn, company_id, emp_id)
+            if not force:
+                conflicts = await find_conflicts(
+                    conn, company_id, emp_id, body.starts_at, body.ends_at,
+                )
+                if conflicts:
+                    raise_conflict(emp_id, conflicts)
         async with conn.transaction():
             shift_id = await conn.fetchval(
                 """

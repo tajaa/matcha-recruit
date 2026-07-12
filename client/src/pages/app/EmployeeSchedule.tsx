@@ -4,6 +4,7 @@ import {
   Send, Users, LayoutTemplate, Inbox, Sparkles,
 } from 'lucide-react'
 import { Card } from '../../components/ui'
+import { ApiError } from '../../api/client'
 import {
   fetchWeek, createShift, deleteShift, publishShift, publishRange,
   assignEmployee, unassignEmployee, fetchTemplates, createTemplate, deleteTemplate,
@@ -42,6 +43,22 @@ function fmtDayLabel(iso: string): string {
 }
 
 const inputCls = 'bg-zinc-900 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500 w-full'
+
+interface ConflictDetail {
+  code?: string
+  conflicts?: { starts_at: string; ends_at: string; role: string | null }[]
+}
+
+/** 409 schedule_conflict → a confirm() prompt; anything else → null. */
+function conflictPrompt(err: unknown): string | null {
+  if (!(err instanceof ApiError) || err.status !== 409) return null
+  const detail = (err.body as { detail?: ConflictDetail } | null)?.detail
+  if (detail?.code !== 'schedule_conflict') return null
+  const lines = (detail.conflicts ?? []).map(
+    (c) => `• ${fmtDayLabel(c.starts_at.slice(0, 10))} ${fmtTime(c.starts_at)}–${fmtTime(c.ends_at)}${c.role ? ` (${c.role})` : ''}`,
+  )
+  return `Already scheduled during this time:\n${lines.join('\n')}\n\nAssign anyway?`
+}
 
 type Tab = 'schedule' | 'templates' | 'requests'
 
@@ -203,6 +220,18 @@ function ShiftCard({ shift, roster, onPatch, onChanged }: {
     setBusy(true)
     try { onPatch(await fn()) } finally { setBusy(false) }
   }
+  async function assign(employeeId: string) {
+    setBusy(true)
+    try {
+      onPatch(await assignEmployee(shift.id, employeeId))
+    } catch (err) {
+      const prompt = conflictPrompt(err)
+      if (prompt && window.confirm(prompt)) {
+        onPatch(await assignEmployee(shift.id, employeeId, true))
+      }
+      // non-conflict errors: leave the shift as-is (no toast system on this page)
+    } finally { setBusy(false) }
+  }
   async function remove() {
     setBusy(true)
     try { await deleteShift(shift.id); onChanged() } finally { setBusy(false) }
@@ -233,7 +262,7 @@ function ShiftCard({ shift, roster, onPatch, onChanged }: {
         <select
           className={`${inputCls} mt-2 text-xs`}
           value=""
-          onChange={(e) => { if (e.target.value) { act(() => assignEmployee(shift.id, e.target.value)); setPickerOpen(false) } }}
+          onChange={(e) => { if (e.target.value) { assign(e.target.value); setPickerOpen(false) } }}
         >
           <option value="">Select employee…</option>
           {available.map((e) => <option key={e.id} value={e.id}>{e.name}{e.job_title ? ` — ${e.job_title}` : ''}</option>)}
@@ -421,7 +450,13 @@ function RequestsTab({ onReviewed }: { onReviewed: () => void }) {
   useEffect(() => { load().finally(() => setLoading(false)) }, [load])
 
   async function review(id: string, decision: 'approved' | 'denied') {
-    await reviewRequest(id, decision)
+    try {
+      await reviewRequest(id, decision)
+    } catch (err) {
+      const prompt = conflictPrompt(err)
+      if (!prompt || !window.confirm(prompt)) return
+      await reviewRequest(id, decision, undefined, true)
+    }
     await load()
     onReviewed()
   }

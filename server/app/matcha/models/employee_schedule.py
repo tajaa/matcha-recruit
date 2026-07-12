@@ -143,3 +143,5 @@ class ScheduleRequestCreate(BaseModel):
 class RequestReview(BaseModel):
     decision: RequestDecision
     review_notes: Optional[str] = Field(None, max_length=2000)
+    # Approve a swap even if the target employee has an overlapping shift.
+    force: bool = False

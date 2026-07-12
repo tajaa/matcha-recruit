@@ -148,6 +148,58 @@ async def fetch_shifts(
     return shifts
 
 
+async def find_conflicts(
+    conn,
+    company_id: UUID,
+    employee_id: UUID,
+    starts_at: datetime,
+    ends_at: datetime,
+    *,
+    exclude_shift_id: Optional[UUID] = None,
+) -> list[dict]:
+    """Non-cancelled shifts this employee is already on that overlap the window.
+
+    Used to block accidental double-booking on the assignment paths; callers
+    expose a `force` override for deliberate back-to-back/overlap scheduling.
+    """
+    rows = await conn.fetch(
+        """
+        SELECT s.id, s.starts_at, s.ends_at, s.role, s.status
+        FROM schedule_shifts s
+        JOIN schedule_shift_assignments a ON a.shift_id = s.id
+        WHERE s.company_id = $1 AND a.employee_id = $2
+          AND s.status <> 'cancelled'
+          AND s.starts_at < $4 AND s.ends_at > $3
+          AND ($5::uuid IS NULL OR s.id <> $5)
+        ORDER BY s.starts_at
+        """,
+        company_id, employee_id, starts_at, ends_at, exclude_shift_id,
+    )
+    return [
+        {
+            "shift_id": str(r["id"]),
+            "starts_at": _iso(r["starts_at"]),
+            "ends_at": _iso(r["ends_at"]),
+            "role": r["role"],
+            "status": r["status"],
+        }
+        for r in rows
+    ]
+
+
+def raise_conflict(employee_id: UUID, conflicts: list[dict]) -> None:
+    """409 with structured detail the frontend can render / offer to force."""
+    raise HTTPException(
+        status_code=409,
+        detail={
+            "code": "schedule_conflict",
+            "message": "Employee is already scheduled during this time",
+            "employee_id": str(employee_id),
+            "conflicts": conflicts,
+        },
+    )
+
+
 async def fetch_shift_by_id(conn, company_id: UUID, shift_id: UUID) -> Optional[dict]:
     """A single serialized shift (with assignments), tenant-scoped, or None."""
     row = await conn.fetchrow(

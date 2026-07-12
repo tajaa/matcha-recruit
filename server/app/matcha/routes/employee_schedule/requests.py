@@ -14,7 +14,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from ...database import get_connection
 from ...dependencies import require_admin_or_client
 from ...models.employee_schedule import RequestReview
-from ._shared import require_company_id, log_audit, serialize_request
+from ._shared import (
+    require_company_id, log_audit, serialize_request,
+    find_conflicts, raise_conflict,
+)
 
 router = APIRouter()
 
@@ -67,6 +70,28 @@ async def review_request(request_id: UUID, body: RequestReview,
             raise HTTPException(status_code=404, detail="Request not found")
         if req["status"] != "pending":
             raise HTTPException(status_code=409, detail="Request already reviewed")
+
+        # Approving a swap onto a target who's already scheduled then would
+        # silently double-book them — surface it (admin can re-approve with force).
+        if (
+            new_status == "approved"
+            and not body.force
+            and req["request_type"] == "swap"
+            and req["shift_id"] is not None
+            and req["target_employee_id"] is not None
+        ):
+            window = await conn.fetchrow(
+                "SELECT starts_at, ends_at FROM schedule_shifts WHERE id = $1",
+                req["shift_id"],
+            )
+            if window:
+                conflicts = await find_conflicts(
+                    conn, company_id, req["target_employee_id"],
+                    window["starts_at"], window["ends_at"],
+                    exclude_shift_id=req["shift_id"],
+                )
+                if conflicts:
+                    raise_conflict(req["target_employee_id"], conflicts)
 
         async with conn.transaction():
             await conn.execute(
