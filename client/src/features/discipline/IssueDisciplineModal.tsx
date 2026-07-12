@@ -1,17 +1,20 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Button, Input, Modal, Select, Textarea } from '../../components/ui'
-import { api } from '../../api/client'
+import { api, ApiError } from '../../api/client'
 import {
   useDisciplinePolicies,
   useDisciplineRecommendation,
 } from '../../hooks/discipline/useDiscipline'
+import { disciplineApi } from '../../api/discipline'
 import type {
+  ComplianceVerdict,
   DisciplineLevel,
   DisciplineSeverity,
   DisciplineRecord,
 } from '../../api/discipline'
-import { Loader2, Sparkles } from 'lucide-react'
+import CompliancePanel from './CompliancePanel'
+import { Loader2, Plus, Sparkles, X } from 'lucide-react'
 
 type EmployeeOption = {
   id: string
@@ -46,6 +49,14 @@ const LEVEL_LABEL: Record<DisciplineLevel, string> = {
   suspension: 'Suspension',
 }
 
+/** Pull the verdict out of a 422/409 the server raised from the compliance gate. */
+function verdictFromError(e: unknown): ComplianceVerdict | null {
+  if (!(e instanceof ApiError)) return null
+  if (e.status !== 422 && e.status !== 409) return null
+  const detail = (e.body as { detail?: { verdict?: ComplianceVerdict } } | undefined)?.detail
+  return detail?.verdict ?? null
+}
+
 export default function IssueDisciplineModal({
   open,
   onClose,
@@ -62,7 +73,9 @@ export default function IssueDisciplineModal({
   const [infractionType, setInfractionType] = useState('')
   const [severity, setSeverity] = useState<DisciplineSeverity>('moderate')
   const [issuedDate, setIssuedDate] = useState(() => new Date().toISOString().slice(0, 10))
+  const [occurrenceDates, setOccurrenceDates] = useState<string[]>([])
   const [reviewDate, setReviewDate] = useState('')
+  const [situation, setSituation] = useState('')
   const [description, setDescription] = useState('')
   const [expectedImprovement, setExpectedImprovement] = useState('')
   const [overrideEnabled, setOverrideEnabled] = useState(false)
@@ -70,6 +83,12 @@ export default function IssueDisciplineModal({
   const [overrideReason, setOverrideReason] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [formError, setFormError] = useState('')
+
+  const [drafting, setDrafting] = useState(false)
+  const [draftConcerns, setDraftConcerns] = useState<string[]>([])
+  const [verdict, setVerdict] = useState<ComplianceVerdict | null>(null)
+  const [verdictLoading, setVerdictLoading] = useState(false)
+  const [ackReason, setAckReason] = useState('')
 
   useEffect(() => {
     if (!open) return
@@ -84,16 +103,41 @@ export default function IssueDisciplineModal({
       setInfractionType('')
       setSeverity('moderate')
       setIssuedDate(new Date().toISOString().slice(0, 10))
+      setOccurrenceDates([])
       setReviewDate('')
+      setSituation('')
       setDescription('')
       setExpectedImprovement('')
       setOverrideEnabled(false)
       setOverrideLevel('')
       setOverrideReason('')
       setFormError('')
+      setDraftConcerns([])
+      setVerdict(null)
+      setAckReason('')
       reset()
     }
   }, [open, prefilledEmployeeId, reset])
+
+  // Live preview of the compliance verdict as the form fills in, so a hard block
+  // surfaces before HR has written a letter they can't issue. This is only a
+  // preview — POST /records re-runs the same check and is what actually decides.
+  useEffect(() => {
+    if (!open || !employeeId || !infractionType || occurrenceDates.length === 0) {
+      setVerdict(null)
+      return
+    }
+    let cancelled = false
+    setVerdictLoading(true)
+    const t = setTimeout(() => {
+      disciplineApi
+        .complianceCheck(employeeId, infractionType, occurrenceDates)
+        .then((v) => { if (!cancelled) setVerdict(v) })
+        .catch(() => { if (!cancelled) setVerdict(null) })
+        .finally(() => { if (!cancelled) setVerdictLoading(false) })
+    }, 350)
+    return () => { cancelled = true; clearTimeout(t) }
+  }, [open, employeeId, infractionType, occurrenceDates])
 
   const policyOptions = useMemo(
     () => policies.map((p) => ({ value: p.infraction_type, label: p.label })),
@@ -111,8 +155,43 @@ export default function IssueDisciplineModal({
     [employees],
   )
 
-  const canPreview =
-    employeeId && infractionType && severity && !recLoading
+  const addOccurrenceDate = useCallback((value: string) => {
+    if (!value) return
+    setOccurrenceDates((prev) => (prev.includes(value) ? prev : [...prev, value].sort()))
+  }, [])
+
+  const blocked = (verdict?.blocks.length ?? 0) > 0
+  const needsAck = !blocked && (verdict?.advisories.length ?? 0) > 0
+
+  const canPreview = employeeId && infractionType && severity && !recLoading
+  const canDraft = employeeId && situation.trim().length >= 20 && !drafting
+
+  async function handleDraft() {
+    if (!canDraft) return
+    setDrafting(true)
+    setFormError('')
+    try {
+      const draft = await disciplineApi.draft({
+        employee_id: employeeId,
+        situation,
+        infraction_type: infractionType || undefined,
+        severity,
+      })
+      setDescription(draft.description)
+      setExpectedImprovement(draft.expected_improvement)
+      setDraftConcerns(draft.concerns)
+      // Only adopt the AI's classification if HR hasn't chosen one — never
+      // overwrite a human's explicit call.
+      if (!infractionType && draft.suggested_infraction_type) {
+        setInfractionType(draft.suggested_infraction_type)
+      }
+      reset()
+    } catch (e) {
+      setFormError(e instanceof Error ? e.message : 'Could not draft the letter')
+    } finally {
+      setDrafting(false)
+    }
+  }
 
   async function handlePreview() {
     setFormError('')
@@ -140,17 +219,32 @@ export default function IssueDisciplineModal({
         discipline_type:
           (overrideEnabled && overrideLevel ? overrideLevel : recommendation.recommended_level),
         issued_date: issuedDate,
+        occurrence_dates: occurrenceDates,
+        situation: situation || undefined,
         review_date: reviewDate || undefined,
         description: description || undefined,
         expected_improvement: expectedImprovement || undefined,
         override_level: overrideEnabled,
         override_reason: overrideEnabled ? overrideReason : undefined,
+        advisory_ack_reason: ackReason.trim() || undefined,
       })
       onIssued?.(record)
       onClose()
       navigate(`/app/discipline/${record.id}`)
     } catch (e) {
-      setFormError(e instanceof Error ? e.message : 'Failed to issue performance action record')
+      // The server's verdict supersedes whatever the live preview showed — it
+      // ran the AI text review the preview doesn't, and it is the only authority.
+      const serverVerdict = verdictFromError(e)
+      if (serverVerdict) {
+        setVerdict(serverVerdict)
+        setFormError(
+          serverVerdict.blocks.length > 0
+            ? 'This action is barred by state law — see below.'
+            : 'Review the flagged risks below and record why you are proceeding.',
+        )
+      } else {
+        setFormError(e instanceof Error ? e.message : 'Failed to issue performance action record')
+      }
     } finally {
       setSubmitting(false)
     }
@@ -188,6 +282,68 @@ export default function IssueDisciplineModal({
           />
         </div>
 
+        <div>
+          <div className="mb-1 flex items-center gap-2">
+            <label className="text-sm font-medium text-zinc-300">Date(s) of conduct</label>
+            <span className="text-xs text-zinc-500">
+              when it happened — checked against protected leave
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Input
+              type="date"
+              value=""
+              onChange={(e) => addOccurrenceDate(e.target.value)}
+            />
+            <Plus className="h-4 w-4 shrink-0 text-zinc-600" />
+          </div>
+          {occurrenceDates.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {occurrenceDates.map((d) => (
+                <span
+                  key={d}
+                  className="inline-flex items-center gap-1 rounded-md bg-zinc-800 px-2 py-1 text-xs text-zinc-200"
+                >
+                  {d}
+                  <button
+                    type="button"
+                    onClick={() => setOccurrenceDates((prev) => prev.filter((x) => x !== d))}
+                    className="text-zinc-500 hover:text-zinc-200"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-3">
+          <Textarea
+            label="What happened?"
+            placeholder="Describe the situation in your own words — the AI will draft the letter from this."
+            value={situation}
+            onChange={(e) => setSituation(e.target.value)}
+            rows={3}
+          />
+          <div className="mt-2 flex items-center justify-between">
+            <span className="text-xs text-zinc-500">
+              You review and edit every word before anything is issued.
+            </span>
+            <Button variant="secondary" onClick={handleDraft} disabled={!canDraft}>
+              {drafting
+                ? <Loader2 className="h-4 w-4 animate-spin" />
+                : <Sparkles className="h-4 w-4" />}
+              <span className="ml-2">Draft letter</span>
+            </Button>
+          </div>
+          {draftConcerns.length > 0 && (
+            <ul className="mt-2 list-inside list-disc space-y-1 text-xs text-amber-300/90">
+              {draftConcerns.map((c, i) => <li key={i}>{c}</li>)}
+            </ul>
+          )}
+        </div>
+
         <Textarea
           label="Description of conduct"
           placeholder="Concise summary of what happened, when, and witnesses (if any)"
@@ -207,6 +363,13 @@ export default function IssueDisciplineModal({
           type="date"
           value={reviewDate}
           onChange={(e) => setReviewDate(e.target.value)}
+        />
+
+        <CompliancePanel
+          verdict={verdict}
+          loading={verdictLoading}
+          ackReason={ackReason}
+          onAckReasonChange={setAckReason}
         />
 
         <div className="flex items-center justify-between border-t border-zinc-800 pt-4">
@@ -283,8 +446,18 @@ export default function IssueDisciplineModal({
 
         <div className="flex justify-end gap-2 pt-2 border-t border-zinc-800">
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button onClick={handleIssue} disabled={!recommendation || submitting}>
-            {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Issue record'}
+          <Button
+            onClick={handleIssue}
+            disabled={
+              !recommendation ||
+              submitting ||
+              blocked ||
+              (needsAck && ackReason.trim().length === 0)
+            }
+          >
+            {submitting
+              ? <Loader2 className="w-4 h-4 animate-spin" />
+              : blocked ? 'Barred by state law' : 'Issue record'}
           </Button>
         </div>
       </div>

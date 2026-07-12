@@ -48,8 +48,60 @@ export type DisciplineRecord = {
   signature_envelope_id: string | null
   signed_pdf_storage_path: string | null
   meeting_held_at: string | null
+  occurrence_dates: string[]
+  compliance_check: ComplianceVerdict | null
+  advisory_ack_reason: string | null
+  situation_narrative: string | null
   created_at: string
   updated_at: string
+}
+
+/** A statutory prohibition on this discipline. Not overridable — the server
+ *  refuses the write (422) regardless of what the client sends. */
+export type ComplianceBlock = {
+  code: 'protected_leave_overlap'
+  statute: string
+  state: string
+  detail: string
+  source: string
+  record_id: string
+  dates: string[]
+}
+
+/** A risk HR should weigh, not a prohibition. Proceeding requires a logged reason. */
+export type ComplianceAdvisory = {
+  code:
+    | 'leave_overlap_unmapped_state'
+    | 'leave_overlap_non_attendance'
+    | 'retaliation_timing'
+    | 'unmapped_state'
+    | 'ai_review'
+    | 'ai_review_unavailable'
+  detail: string
+  source?: string
+  record_id?: string | null
+  dates?: string[]
+  cited_ids?: string[]
+}
+
+export type ComplianceVerdict = {
+  version: number
+  checked_at: string
+  work_state: string | null
+  state_row: { state: string; statute: string; protection: string; note: string } | null
+  blocks: ComplianceBlock[]
+  advisories: ComplianceAdvisory[]
+}
+
+export type DisciplineDraft = {
+  description: string
+  expected_improvement: string
+  suggested_infraction_type: string | null
+  suggested_severity: DisciplineSeverity | null
+  evidence_map: { point: string; cited_ids: string[] }[]
+  dropped_citations: string[]
+  concerns: string[]
+  available: boolean
 }
 
 export type DisciplineRecommendation = {
@@ -109,6 +161,18 @@ export type DisciplineIssueInput = DisciplineRecommendInput & {
   documents?: unknown[]
   override_level?: boolean
   override_reason?: string
+  /** When the conduct happened — not when the letter was written. The
+   *  compliance gate tests these against protected leave. */
+  occurrence_dates?: string[]
+  situation?: string
+  advisory_ack_reason?: string
+}
+
+export type DisciplineDraftInput = {
+  employee_id: string
+  situation: string
+  infraction_type?: string
+  severity?: DisciplineSeverity
 }
 
 export type DisciplinePolicyUpsertInput = {
@@ -125,6 +189,22 @@ export const disciplineApi = {
   recommend: (input: DisciplineRecommendInput) =>
     api.post<DisciplineRecommendation>('/discipline/recommend', input),
 
+  /** Preview only. `issue` re-runs the same check server-side and is what
+   *  actually decides — a stale preview can never let a block through. */
+  complianceCheck: (employeeId: string, infractionType: string, occurrenceDates: string[]) => {
+    const qs = new URLSearchParams({
+      employee_id: employeeId,
+      infraction_type: infractionType,
+      occurrence_dates: occurrenceDates.join(','),
+    })
+    return api.get<ComplianceVerdict>(`/discipline/compliance-check?${qs}`)
+  },
+
+  draft: (input: DisciplineDraftInput) =>
+    api.post<DisciplineDraft>('/discipline/ai/draft', input),
+
+  /** Throws ApiError 422 (`compliance_block`) or 409 (`compliance_advisories`)
+   *  with the verdict in `err.body.detail.verdict`. */
   issue: (input: DisciplineIssueInput) =>
     api.post<DisciplineRecord>('/discipline/records', input),
 

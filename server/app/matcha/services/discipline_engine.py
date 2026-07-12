@@ -85,6 +85,22 @@ LEVEL_RANK = {
     "suspension": 3,
 }
 
+# Every read of a discipline record returns the same shape. Kept as one constant
+# because it is interpolated into eight statements — when a column was added,
+# updating seven of them and missing the eighth is a silent None in one code path.
+RECORD_COLUMNS = """
+    id, employee_id, company_id, discipline_type, issued_date,
+    issued_by, description, expected_improvement, review_date,
+    status, outcome_notes, documents, infraction_type, severity,
+    lookback_months, expires_at, escalated_from_id,
+    override_level, override_reason, signature_status,
+    signature_requested_at, signature_completed_at,
+    signature_envelope_id, signed_pdf_storage_path,
+    meeting_held_at, occurrence_dates, compliance_check,
+    advisory_ack_reason, situation_narrative,
+    created_at, updated_at
+"""
+
 
 # ── Policy mapping ──────────────────────────────────────────────────────
 
@@ -354,8 +370,17 @@ async def issue_discipline_with_supersede(
     documents: Optional[list[Any]] = None,
     override_level: bool = False,
     override_reason: Optional[str] = None,
+    occurrence_dates: Optional[list[Any]] = None,
+    situation_narrative: Optional[str] = None,
+    compliance_check: Optional[dict[str, Any]] = None,
+    advisory_ack_reason: Optional[str] = None,
 ) -> dict[str, Any]:
-    """Insert new record, flip prior actives to escalated, write audit log."""
+    """Insert new record, flip prior actives to escalated, write audit log.
+
+    `compliance_check` is the verdict from `discipline_compliance` at issue time.
+    The caller is responsible for refusing to call this at all when the verdict
+    contains blocks — the engine records the verdict, it does not enforce it.
+    """
     if discipline_type not in VALID_LEVELS:
         raise ValueError(f"Invalid discipline_type: {discipline_type}")
     if severity not in VALID_SEVERITIES:
@@ -378,34 +403,33 @@ async def issue_discipline_with_supersede(
             escalated_from = supersede_ids[0] if supersede_ids else None
 
             row = await conn.fetchrow(
-                """
+                f"""
                 INSERT INTO progressive_discipline (
                     employee_id, company_id, discipline_type, issued_date, issued_by,
                     description, expected_improvement, review_date,
                     status, documents, infraction_type, severity, lookback_months,
                     expires_at, escalated_from_id, override_level, override_reason,
-                    signature_status
+                    signature_status, occurrence_dates, situation_narrative,
+                    compliance_check, advisory_ack_reason
                 )
                 VALUES (
                     $1, $2, $3, $4, $5, $6, $7, $8,
                     'draft', $9::jsonb, $10, $11, $12::int,
                     ($4::date)::timestamptz + make_interval(months => $12::int),
-                    $13, $14, $15, 'pending'
+                    $13, $14, $15, 'pending',
+                    $16::date[], $17, $18::jsonb, $19
                 )
-                RETURNING id, employee_id, company_id, discipline_type, issued_date,
-                          issued_by, description, expected_improvement, review_date,
-                          status, outcome_notes, documents, infraction_type, severity,
-                          lookback_months, expires_at, escalated_from_id,
-                          override_level, override_reason, signature_status,
-                          signature_requested_at, signature_completed_at,
-                          signature_envelope_id, signed_pdf_storage_path,
-                          meeting_held_at, created_at, updated_at
+                RETURNING {RECORD_COLUMNS}
                 """,
                 employee_id, company_id, discipline_type, issued_date, actor_user_id,
                 description, expected_improvement, review_date,
                 json.dumps(documents or []),
                 infraction_type, severity, lookback,
                 escalated_from, override_level, override_reason,
+                list(occurrence_dates or []),
+                situation_narrative,
+                json.dumps(compliance_check) if compliance_check is not None else None,
+                advisory_ack_reason,
             )
 
             new_id = row["id"]
@@ -445,6 +469,26 @@ async def issue_discipline_with_supersede(
                     details={"override_reason": override_reason},
                 )
 
+            # The compliance verdict is audited in the same transaction as the
+            # insert. If the record exists, the check that let it exist is on
+            # file — the two can't drift apart under a partial failure.
+            if compliance_check is not None:
+                await write_audit(
+                    conn, new_id, actor_user_id, "compliance_check",
+                    details=compliance_check,
+                )
+            if advisory_ack_reason:
+                await write_audit(
+                    conn, new_id, actor_user_id, "advisories_acknowledged",
+                    details={
+                        "advisory_ack_reason": advisory_ack_reason,
+                        "advisory_codes": [
+                            a.get("code")
+                            for a in (compliance_check or {}).get("advisories") or []
+                        ],
+                    },
+                )
+
             return _row_to_dict(row)
 
 
@@ -471,14 +515,7 @@ async def transition_status(
         UPDATE progressive_discipline
         SET status = $2, updated_at = NOW(){extra_sql}
         WHERE id = $1 AND status = ANY($3::text[])
-        RETURNING id, employee_id, company_id, discipline_type, issued_date,
-                  issued_by, description, expected_improvement, review_date,
-                  status, outcome_notes, documents, infraction_type, severity,
-                  lookback_months, expires_at, escalated_from_id,
-                  override_level, override_reason, signature_status,
-                  signature_requested_at, signature_completed_at,
-                  signature_envelope_id, signed_pdf_storage_path,
-                  meeting_held_at, created_at, updated_at
+        RETURNING {RECORD_COLUMNS}
         """,
         discipline_id, to, expected_from, *extra_values,
     )
@@ -505,14 +542,7 @@ async def update_signature_status(
         UPDATE progressive_discipline
         SET signature_status = $2, updated_at = NOW(){sets_sql}
         WHERE id = $1
-        RETURNING id, employee_id, company_id, discipline_type, issued_date,
-                  issued_by, description, expected_improvement, review_date,
-                  status, outcome_notes, documents, infraction_type, severity,
-                  lookback_months, expires_at, escalated_from_id,
-                  override_level, override_reason, signature_status,
-                  signature_requested_at, signature_completed_at,
-                  signature_envelope_id, signed_pdf_storage_path,
-                  meeting_held_at, created_at, updated_at
+        RETURNING {RECORD_COLUMNS}
         """,
         discipline_id, signature_status, *extra_values,
     )
@@ -582,15 +612,8 @@ async def expire_stale_records() -> int:
 
 async def fetch_record(conn, discipline_id: UUID) -> Optional[dict[str, Any]]:
     row = await conn.fetchrow(
-        """
-        SELECT id, employee_id, company_id, discipline_type, issued_date,
-               issued_by, description, expected_improvement, review_date,
-               status, outcome_notes, documents, infraction_type, severity,
-               lookback_months, expires_at, escalated_from_id,
-               override_level, override_reason, signature_status,
-               signature_requested_at, signature_completed_at,
-               signature_envelope_id, signed_pdf_storage_path,
-               meeting_held_at, created_at, updated_at
+        f"""
+        SELECT {RECORD_COLUMNS}
         FROM progressive_discipline
         WHERE id = $1
         """,
@@ -601,15 +624,8 @@ async def fetch_record(conn, discipline_id: UUID) -> Optional[dict[str, Any]]:
 
 async def fetch_record_by_envelope(conn, envelope_id: str) -> Optional[dict[str, Any]]:
     row = await conn.fetchrow(
-        """
-        SELECT id, employee_id, company_id, discipline_type, issued_date,
-               issued_by, description, expected_improvement, review_date,
-               status, outcome_notes, documents, infraction_type, severity,
-               lookback_months, expires_at, escalated_from_id,
-               override_level, override_reason, signature_status,
-               signature_requested_at, signature_completed_at,
-               signature_envelope_id, signed_pdf_storage_path,
-               meeting_held_at, created_at, updated_at
+        f"""
+        SELECT {RECORD_COLUMNS}
         FROM progressive_discipline
         WHERE signature_envelope_id = $1
         """,
@@ -620,15 +636,8 @@ async def fetch_record_by_envelope(conn, envelope_id: str) -> Optional[dict[str,
 
 async def list_records_for_employee(conn, employee_id: UUID) -> list[dict[str, Any]]:
     rows = await conn.fetch(
-        """
-        SELECT id, employee_id, company_id, discipline_type, issued_date,
-               issued_by, description, expected_improvement, review_date,
-               status, outcome_notes, documents, infraction_type, severity,
-               lookback_months, expires_at, escalated_from_id,
-               override_level, override_reason, signature_status,
-               signature_requested_at, signature_completed_at,
-               signature_envelope_id, signed_pdf_storage_path,
-               meeting_held_at, created_at, updated_at
+        f"""
+        SELECT {RECORD_COLUMNS}
         FROM progressive_discipline
         WHERE employee_id = $1
         ORDER BY issued_date DESC, created_at DESC
@@ -643,15 +652,8 @@ async def list_records_for_company(
 ) -> list[dict[str, Any]]:
     if status_filter:
         rows = await conn.fetch(
-            """
-            SELECT id, employee_id, company_id, discipline_type, issued_date,
-                   issued_by, description, expected_improvement, review_date,
-                   status, outcome_notes, documents, infraction_type, severity,
-                   lookback_months, expires_at, escalated_from_id,
-                   override_level, override_reason, signature_status,
-                   signature_requested_at, signature_completed_at,
-                   signature_envelope_id, signed_pdf_storage_path,
-                   meeting_held_at, created_at, updated_at
+            f"""
+            SELECT {RECORD_COLUMNS}
             FROM progressive_discipline
             WHERE company_id = $1 AND status = $2
             ORDER BY issued_date DESC, created_at DESC
@@ -661,15 +663,8 @@ async def list_records_for_company(
         )
     else:
         rows = await conn.fetch(
-            """
-            SELECT id, employee_id, company_id, discipline_type, issued_date,
-                   issued_by, description, expected_improvement, review_date,
-                   status, outcome_notes, documents, infraction_type, severity,
-                   lookback_months, expires_at, escalated_from_id,
-                   override_level, override_reason, signature_status,
-                   signature_requested_at, signature_completed_at,
-                   signature_envelope_id, signed_pdf_storage_path,
-                   meeting_held_at, created_at, updated_at
+            f"""
+            SELECT {RECORD_COLUMNS}
             FROM progressive_discipline
             WHERE company_id = $1
             ORDER BY issued_date DESC, created_at DESC
@@ -692,4 +687,12 @@ def _row_to_dict(row) -> Optional[dict[str, Any]]:
             d["documents"] = json.loads(docs)
         except (json.JSONDecodeError, ValueError):
             d["documents"] = []
+    check = d.get("compliance_check")
+    if isinstance(check, str):
+        try:
+            d["compliance_check"] = json.loads(check)
+        except (json.JSONDecodeError, ValueError):
+            d["compliance_check"] = None
+    if d.get("occurrence_dates") is None:
+        d["occurrence_dates"] = []
     return d

@@ -81,6 +81,9 @@ def _render_html(
     issued_date = _fmt_date(record.get("issued_date"))
     review_date = _fmt_date(record.get("review_date"))
     expires_at = _fmt_date(record.get("expires_at"))
+    occurrence_dates = _html.escape(
+        ", ".join(_fmt_date(d) for d in (record.get("occurrence_dates") or []))
+    )
 
     issuer_name = _html.escape(str((issuer or {}).get("name") or ""))
     issuer_title = _html.escape(str((issuer or {}).get("title") or "Human Resources"))
@@ -204,6 +207,7 @@ def _render_html(
     <div><div class="label">Active Through</div><div class="value">{expires_at or '—'}</div></div>
     <div><div class="label">Email</div><div class="value">{employee_email or '—'}</div></div>
     <div><div class="label">Review Date</div><div class="value">{review_date or '—'}</div></div>
+    <div><div class="label">Date(s) of Conduct</div><div class="value">{occurrence_dates or '—'}</div></div>
   </div>
 
   <h2>Description of Conduct</h2>

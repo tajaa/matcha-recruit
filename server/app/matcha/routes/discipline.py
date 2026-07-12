@@ -21,6 +21,8 @@ from ...core.dependencies import get_current_user
 from ...core.models.auth import CurrentUser
 from ...core.services.storage import get_storage
 from ..dependencies import require_admin_or_client, get_client_company_id
+from ..services import discipline_ai
+from ..services import discipline_compliance
 from ..services import discipline_engine
 from ..services import discipline_notifications
 from ..services.discipline_pdf import render_discipline_letter
@@ -55,6 +57,19 @@ class IssueRequest(BaseModel):
     documents: Optional[list[Any]] = None
     override_level: bool = False
     override_reason: Optional[str] = None
+    # When the conduct happened — distinct from `issued_date` (when HR wrote the
+    # letter). The compliance gate tests these against protected leave, so an
+    # empty list means the leave overlap check has nothing to test.
+    occurrence_dates: list[date] = Field(default_factory=list)
+    situation: Optional[str] = None
+    advisory_ack_reason: Optional[str] = None
+
+
+class DraftRequest(BaseModel):
+    employee_id: UUID
+    situation: str = Field(..., min_length=20)
+    infraction_type: Optional[str] = None
+    severity: Optional[str] = None
 
 
 class RefuseRequest(BaseModel):
@@ -73,21 +88,30 @@ class PolicyUpsertRequest(BaseModel):
 
 # ── Helpers ─────────────────────────────────────────────────────────────
 
+def _json_safe(v: Any) -> Any:
+    if isinstance(v, UUID):
+        return str(v)
+    if isinstance(v, datetime):
+        return v.isoformat()
+    if isinstance(v, date):
+        return v.isoformat()
+    if isinstance(v, list):
+        return [_json_safe(i) for i in v]
+    if isinstance(v, dict):
+        return {k: _json_safe(i) for k, i in v.items()}
+    return v
+
+
 def _serialize_record(record: dict[str, Any]) -> dict[str, Any]:
-    """Convert UUIDs/dates/datetimes to JSON-friendly forms."""
+    """Convert UUIDs/dates/datetimes to JSON-friendly forms, recursively.
+
+    Recursion matters now that records carry `occurrence_dates` (a list of
+    dates) and `compliance_check` (a nested dict) — a shallow pass leaves raw
+    date objects inside them and the response fails to encode.
+    """
     if record is None:
         return None  # type: ignore
-    out: dict[str, Any] = {}
-    for k, v in record.items():
-        if isinstance(v, UUID):
-            out[k] = str(v)
-        elif isinstance(v, datetime):
-            out[k] = v.isoformat()
-        elif isinstance(v, date):
-            out[k] = v.isoformat()
-        else:
-            out[k] = v
-    return out
+    return {k: _json_safe(v) for k, v in record.items()}
 
 
 async def _ensure_record_in_company(
@@ -157,6 +181,82 @@ async def recommend(
     return result
 
 
+@router.get("/compliance-check")
+async def compliance_check(
+    employee_id: UUID,
+    infraction_type: str,
+    occurrence_dates: str = "",
+    current_user: CurrentUser = Depends(require_admin_or_client),
+    company_id: UUID = Depends(get_client_company_id),
+):
+    """Preview the compliance verdict before issuing. Deterministic half only.
+
+    The frontend calls this live as HR fills the form so a block surfaces before
+    they've written a letter they can't issue. It is a preview, not the gate —
+    `POST /records` re-runs the same check server-side and is the only thing that
+    decides. A stale or spoofed preview therefore can't let anything through.
+    """
+    if not company_id:
+        raise HTTPException(status_code=403, detail="No company associated with this account")
+
+    dates: list[date] = []
+    for chunk in (occurrence_dates or "").split(","):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        try:
+            dates.append(date.fromisoformat(chunk))
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid occurrence date '{chunk}' — expected YYYY-MM-DD",
+            )
+
+    async with get_connection() as conn:
+        await _load_employee(conn, employee_id, company_id)
+        verdict = await discipline_compliance.check_discipline_compliance(
+            conn,
+            company_id=company_id,
+            employee_id=employee_id,
+            infraction_type=infraction_type,
+            occurrence_dates=dates,
+        )
+    return verdict
+
+
+@router.post("/ai/draft")
+async def draft_letter(
+    body: DraftRequest,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+    company_id: UUID = Depends(get_client_company_id),
+):
+    """Draft the corrective-action letter from HR's account of what happened.
+
+    Grounded in the company's own records; hallucinated citations are dropped by
+    the shared gate. The draft is a starting point for HR to edit — nothing is
+    written to the record until they issue.
+    """
+    if not company_id:
+        raise HTTPException(status_code=403, detail="No company associated with this account")
+
+    async with get_connection() as conn:
+        await _load_employee(conn, body.employee_id, company_id)
+        draft = await discipline_ai.draft_discipline_letter(
+            conn,
+            company_id=company_id,
+            employee_id=body.employee_id,
+            situation=body.situation,
+            infraction_type=body.infraction_type,
+            severity=body.severity,
+        )
+    if not draft.get("available"):
+        raise HTTPException(
+            status_code=503,
+            detail="The AI drafting service is unavailable right now. Write the letter manually — discipline can still be issued.",
+        )
+    return draft
+
+
 @router.post("/records")
 async def issue_record(
     body: IssueRequest,
@@ -168,6 +268,45 @@ async def issue_record(
 
     async with get_connection() as conn:
         await _load_employee(conn, body.employee_id, company_id)
+
+        # The gate runs here, server-side, on every issue — never trusting what
+        # the client previewed. A block is a statutory prohibition, so there is
+        # no acknowledge-and-proceed path for it: the write is refused.
+        verdict = await discipline_compliance.check_discipline_compliance(
+            conn,
+            company_id=company_id,
+            employee_id=body.employee_id,
+            infraction_type=body.infraction_type,
+            occurrence_dates=body.occurrence_dates,
+        )
+
+        if not verdict["blocks"]:
+            # Only worth spending a Gemini call once the action is otherwise viable.
+            ai_advisories = await discipline_ai.review_final_text(
+                conn,
+                company_id=company_id,
+                employee_id=body.employee_id,
+                situation=body.situation,
+                description=body.description,
+                expected_improvement=body.expected_improvement,
+                infraction_type=body.infraction_type,
+                severity=body.severity,
+                discipline_type=body.discipline_type,
+                deterministic_verdict=verdict,
+            )
+            verdict["advisories"].extend(ai_advisories)
+
+    if verdict["blocks"]:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "compliance_block", "verdict": verdict},
+        )
+
+    if verdict["advisories"] and not (body.advisory_ack_reason or "").strip():
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "compliance_advisories", "verdict": verdict},
+        )
 
     try:
         record = await discipline_engine.issue_discipline_with_supersede(
@@ -184,6 +323,10 @@ async def issue_record(
             documents=body.documents,
             override_level=body.override_level,
             override_reason=body.override_reason,
+            occurrence_dates=body.occurrence_dates,
+            situation_narrative=body.situation,
+            compliance_check=verdict,
+            advisory_ack_reason=body.advisory_ack_reason,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
