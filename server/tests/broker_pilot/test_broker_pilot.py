@@ -328,3 +328,84 @@ def test_memo_html_renders_without_error():
     assert "Travelers WC loss run" in html        # doc appendix from stored extraction
     assert "Appendix — Platform data: Wc" in html # cited platform section appendix
     assert "ATTORNEY WORK PRODUCT" not in html    # legal-pilot watermark not inherited
+
+
+# --- structured answer: coercion, citation gate, memo layout ------------------
+
+def test_coerce_turn_clamps_every_bucket():
+    out = bp._coerce_turn({
+        "assistant_text": "  Limits trail the contract requirements.  ",
+        "key_questions": ["q" * 500, "", None, "Which carrier wrote 2025?"] + ["extra"] * 20,
+        "considerations": [{"point": "p" * 900, "cited_ids": ["platform:wc", 7]},
+                           {"point": "", "cited_ids": []},   # pointless → dropped
+                           "junk"],
+        "gaps": [{"point": "GL sits below the MSA requirement",
+                  "severity": "HIGH", "cited_ids": ["clause:1"]},
+                 {"point": "No waiver of subrogation", "severity": "catastrophic",
+                  "cited_ids": ["platform:limits.gl"]}],
+    })
+    assert out["assistant_text"] == "Limits trail the contract requirements."
+    assert len(out["key_questions"]) <= bp._MAX_QUESTIONS
+    assert all(q and len(q) <= bp._QUESTION_CAP for q in out["key_questions"])
+    # one consideration survives; point capped; non-str cited id dropped
+    assert len(out["considerations"]) == 1
+    assert len(out["considerations"][0]["point"]) == bp._FINDING_POINT_CAP
+    assert out["gaps"][0]["severity"] == "high"     # normalized
+    assert out["gaps"][1]["severity"] is None       # off-whitelist → unranked, not guessed
+
+
+def test_coerce_turn_falls_back_to_legacy_open_questions():
+    out = bp._coerce_turn({"assistant_text": "x", "open_questions": ["Obtain the loss run."]})
+    assert out["key_questions"] == ["Obtain the loss run."]
+    assert out["considerations"] == [] and out["gaps"] == []
+
+
+def test_coerce_turn_never_raises_on_junk():
+    for junk in (None, [], "string", 42, {"gaps": "nope", "key_questions": 3}):
+        out = bp._coerce_turn(junk)  # type: ignore[arg-type]
+        assert out["gaps"] == [] and out["considerations"] == [] and out["key_questions"] == []
+
+
+def test_gate_preserves_severity_and_drops_invented_ids():
+    index = bp.build_corpus("Hillcrest", _CTX, _docs())["index"]
+    real = next(iter(index))
+    clean, dropped = bp._gate(
+        [{"point": "gap", "severity": "high", "cited_ids": [real, "platform:invented"]}], index)
+    assert clean[0]["severity"] == "high"          # key the shared gate doesn't know about
+    assert clean[0]["cited_ids"] == [real]
+    assert dropped == ["platform:invented"]
+
+
+def test_cited_ids_spans_gaps_and_considerations():
+    memo = {
+        "evidence_map": [{"point": "a", "cited_ids": ["platform:wc"]}],
+        "gaps": [{"point": "b", "cited_ids": ["clause:9", "platform:wc"]}],  # dupe collapses
+        "considerations": [{"point": "c", "cited_ids": ["platform:epl"]}],
+    }
+    # a record cited ONLY by a gap must still reach the footnote/appendix set
+    assert bp._cited_ids(memo) == ["platform:wc", "clause:9", "platform:epl"]
+
+
+def test_memo_html_renders_structured_sections_in_order():
+    corpus = bp.build_corpus("Hillcrest", _CTX, _docs())
+    memo = {
+        "assistant_text": "Carried GL trails what the MSA requires.",
+        "key_questions": ["Which carrier wrote the 2025 policy?"],
+        "considerations": [{"point": "The account markets better with the MSA cured",
+                            "cited_ids": ["platform:wc"]}],
+        "gaps": [{"point": "Low-ranked gap", "severity": "low", "cited_ids": ["platform:wc"]},
+                 {"point": "Unranked gap", "severity": None, "cited_ids": ["platform:wc"]},
+                 {"point": "Critical gap", "severity": "high", "cited_ids": ["platform:epl"]}],
+        "evidence_map": [{"point": "EMR is 1.18", "cited_ids": ["platform:wc"]}],
+    }
+    html = bp._memo_html({"title": "Contract review", "subject_kind": "company"},
+                         "Hillcrest Senior Living", corpus, memo, _docs())
+    for heading in ("Key questions", "Strategic considerations",
+                    "Gaps identified in the record", "Observations grounded in the material"):
+        assert f"<h2>{heading}</h2>" in html
+    # ticket order: questions → considerations → gaps
+    assert (html.index("Key questions") < html.index("Strategic considerations")
+            < html.index("Gaps identified in the record"))
+    # severity ranks the gaps; the unranked one sorts last rather than vanishing
+    assert html.index("Critical gap") < html.index("Low-ranked gap") < html.index("Unranked gap")
+    assert "sev-high" in html and "sev-low" in html

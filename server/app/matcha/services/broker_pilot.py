@@ -49,6 +49,17 @@ _MAX_DOCS_PER_SESSION = 12
 _MAX_KEY_FIGURES = 20
 _MAX_NOTABLE = 10
 
+# Structured answer buckets. A turn is a short lead answer plus three reviewable
+# lists — the questions to put to the client, the strategic considerations, and
+# the concrete gaps. The lists are DATA, not headings inside the prose: the
+# console renders them as sections and the memo lays them out with footnote
+# citations, neither of which can be done to a markdown blob.
+_MAX_QUESTIONS = 6
+_MAX_FINDINGS = 8             # per bucket (considerations, gaps)
+_FINDING_POINT_CAP = 400
+_QUESTION_CAP = 300
+_GAP_SEVERITIES = ("high", "medium", "low")
+
 DOC_TYPES = (
     "loss_run", "dec_page", "quote", "carrier_letter",
     "bordereau", "policy_form", "financials", "other",
@@ -756,10 +767,34 @@ HARD RULES:
 - A `clause:` record marked PROVISIONAL comes from an unconfirmed AI extraction — say that whenever you rely on it.
 - Raw document text (DOCUMENT TEXT blocks) belongs to its `doc:` ID — cite that ID when using it.
 
+ANSWER SHAPE — a short lead answer, then three reviewable lists. The broker reads
+the lists, not a wall of prose:
+- assistant_text: the direct answer to what was asked, at most 120 words, plain
+  prose. Lead with the conclusion. Do NOT write section headings, do NOT restate
+  the lists below, and do NOT pad with caveats that belong in key_questions.
+- key_questions: what the broker should put to the client, the underwriter, or
+  counsel before acting — including anything the corpus does not establish and
+  the data that would settle it. This is the broker's next-action list.
+- considerations: the strategic reading — what the material means for how the
+  account is positioned, marketed, or negotiated. Judgment, grounded in cited
+  records wherever it rests on a fact. Never a recommendation to buy or decline
+  coverage.
+- gaps: the concrete, specific gaps the record supports — a limit below what a
+  contract requires, a missing endorsement, an uninsurable indemnity form, an
+  exclusion or sublimit, a coverage line carried nowhere, or a hole in the data
+  needed to place the account. Every gap MUST cite the records that establish it
+  and carry a severity of "high", "medium", or "low". An unsupported gap is a
+  key_question, not a gap — do not manufacture gaps to fill the list.
+
+Emit a list ONLY where the corpus supports entries; an empty list is correct and
+expected. Every `point` is one sentence.
+
 Return STRICT JSON ONLY (no markdown, no prose outside the JSON), shape:
-{"assistant_text": "<your precise, conversational reply to the broker>",
- "evidence_map": [{"point": "<a factual observation grounded in the corpus>", "cited_ids": ["<id>", ...]}],
- "open_questions": ["<what the corpus does NOT establish / what the broker should obtain or verify>"]}"""
+{"assistant_text": "<direct answer, <=120 words, no headings>",
+ "key_questions": ["<question the broker should ask / what to obtain to settle it>"],
+ "considerations": [{"point": "<what this means for the account>", "cited_ids": ["<id>", ...]}],
+ "gaps": [{"point": "<the specific gap>", "severity": "high|medium|low", "cited_ids": ["<id>", ...]}],
+ "evidence_map": [{"point": "<a factual observation grounded in the corpus>", "cited_ids": ["<id>", ...]}]}"""
 
 
 def _corpus_text(corpus: dict, docs: list[dict]) -> str:
@@ -811,6 +846,71 @@ LATEST BROKER MESSAGE:
 """
 
 
+def _coerce_findings(raw, *, with_severity: bool) -> list[dict]:
+    """Clamp a model-emitted findings list into the stored shape. Pure.
+
+    Shape is `{point, cited_ids}` (+ `severity` for gaps) — the same shape the
+    citation gate consumes, so a coerced list can go straight to it."""
+    if not isinstance(raw, list):
+        return []
+    out: list[dict] = []
+    for item in raw[:_MAX_FINDINGS]:
+        if not isinstance(item, dict):
+            continue
+        point = str(item.get("point") or "").strip()[:_FINDING_POINT_CAP]
+        if not point:
+            continue
+        cited = item.get("cited_ids")
+        ids = [str(c) for c in cited if c] if isinstance(cited, list) else []
+        finding = {"point": point, "cited_ids": ids}
+        if with_severity:
+            sev = str(item.get("severity") or "").strip().lower()
+            # Unknown/absent severity is not an error — the gap still stands, it
+            # just isn't ranked. Never guess a severity the model didn't give.
+            finding["severity"] = sev if sev in _GAP_SEVERITIES else None
+        out.append(finding)
+    return out
+
+
+def _coerce_turn(data) -> dict:
+    """Clamp one model turn into the stored answer schema. Pure.
+
+    `key_questions` falls back to the legacy `open_questions` key so a model
+    (or a stored message) still speaking the old shape keeps working."""
+    if not isinstance(data, dict):
+        data = {}
+    questions = data.get("key_questions")
+    if not isinstance(questions, list) or not questions:
+        questions = data.get("open_questions")
+    if not isinstance(questions, list):
+        questions = []
+    return {
+        "assistant_text": str(data.get("assistant_text") or "").strip(),
+        "key_questions": [
+            str(q).strip()[:_QUESTION_CAP] for q in questions[:_MAX_QUESTIONS]
+            if q and str(q).strip()
+        ],
+        "considerations": _coerce_findings(data.get("considerations"), with_severity=False),
+        "gaps": _coerce_findings(data.get("gaps"), with_severity=True),
+        "evidence_map": data.get("evidence_map") or [],
+    }
+
+
+def _gate(items: list[dict], index: dict) -> tuple[list[dict], list[str]]:
+    """Run the shared anti-hallucination gate over a findings list, preserving
+    per-item keys it doesn't know about (`severity`).
+
+    `validate_citations` returns only `{point, cited_ids}`, so gate item-by-item
+    and re-attach the rest — a positional zip would misalign the moment the gate
+    skips a non-dict item."""
+    clean, dropped = [], []
+    for item in items:
+        [checked], drops = validate_citations([item], index)
+        clean.append({**item, **checked})
+        dropped.extend(drops)
+    return clean, dropped
+
+
 async def _generate(session: dict, subject_name: str, history: list[dict],
                     corpus: dict, docs: list[dict], latest: str) -> dict:
     prompt = _build_prompt(session, subject_name, history, corpus, docs, latest)
@@ -818,12 +918,7 @@ async def _generate(session: dict, subject_name: str, history: list[dict],
         _genai().aio.models.generate_content(model=MODEL, contents=prompt),
         timeout=_GEMINI_TIMEOUT,
     )
-    data = _parse_json(getattr(resp, "text", "") or "")
-    return {
-        "assistant_text": str(data.get("assistant_text") or "").strip(),
-        "evidence_map": data.get("evidence_map") or [],
-        "open_questions": [str(q) for q in (data.get("open_questions") or []) if q],
-    }
+    return _coerce_turn(_parse_json(getattr(resp, "text", "") or ""))
 
 
 async def run_chat_turn(session: dict, subject_name: str, history: list[dict],
@@ -842,8 +937,29 @@ async def run_chat_turn(session: dict, subject_name: str, history: list[dict],
         yield {"type": "error", "message": "Analysis failed — please try again."}
         return
 
-    clean_map, dropped = validate_citations(result.get("evidence_map"), corpus.get("index", {}))
+    index = corpus.get("index", {})
+    dropped: list[str] = []
+
+    clean_map, drops = validate_citations(result.get("evidence_map"), index)
     result["evidence_map"] = clean_map
+    dropped.extend(drops)
+
+    considerations, drops = _gate(result.get("considerations") or [], index)
+    result["considerations"] = considerations
+    dropped.extend(drops)
+
+    gaps, drops = _gate(result.get("gaps") or [], index)
+    dropped.extend(drops)
+    # A gap is a claim ABOUT the record — if the gate stripped every record it
+    # rested on, nothing grounds it, so it doesn't survive as a gap. The prompt
+    # says an unsupported gap is a question; demote it rather than drop it, so
+    # the broker still sees the thread to pull.
+    result["gaps"] = [g for g in gaps if g["cited_ids"]]
+    demoted = [g["point"] for g in gaps if not g["cited_ids"]]
+    if demoted:
+        result["key_questions"] = (result.get("key_questions") or []) + demoted
+        logger.info("broker_pilot: demoted %d ungrounded gap(s) to key questions", len(demoted))
+
     if dropped:
         result["dropped_citations"] = dropped
         logger.info("broker_pilot: dropped %d hallucinated citation(s)", len(dropped))
@@ -862,12 +978,18 @@ async def run_chat_turn(session: dict, subject_name: str, history: list[dict],
 # --------------------------------------------------------------------------- #
 
 def _cited_ids(memo: dict) -> list[str]:
+    """Every record cited anywhere in the turn, in footnote order.
+
+    Spans ALL cited buckets — a record cited only by a gap still has to reach the
+    evidence index and the appendix, or the memo would footnote it as [?] and
+    omit the record it rests on."""
     seen, out = set(), []
-    for item in memo.get("evidence_map") or []:
-        for c in item.get("cited_ids") or []:
-            if c not in seen:
-                seen.add(c)
-                out.append(c)
+    for bucket in ("evidence_map", "gaps", "considerations"):
+        for item in memo.get(bucket) or []:
+            for c in item.get("cited_ids") or []:
+                if c not in seen:
+                    seen.add(c)
+                    out.append(c)
     return out
 
 
@@ -906,6 +1028,11 @@ _MEMO_CSS_EXTRA = """
     display:flex; align-items:center; justify-content:center; }
   .obs-point { font-weight:600; margin-bottom:2px; }
   .obs ul { margin:2px 0 0; }
+  .sev { margin-left:6px; padding:1px 5px; border-radius:8px; font-size:7.5px;
+    font-weight:700; text-transform:uppercase; letter-spacing:.6px; vertical-align:middle; }
+  .sev-high { background:#fee2e2; color:#991b1b; }
+  .sev-medium { background:#fef3c7; color:#92400e; }
+  .sev-low { background:#e5e7eb; color:#4b5563; }
 """
 
 _GONE = "(no longer in scope at generation time)"
@@ -999,21 +1126,36 @@ def _memo_html(session: dict, subject_name: str, corpus: dict, memo: dict,
 
     narrative = _narrative_html(memo.get("assistant_text") or "")
 
-    points = ""
-    for n, item in enumerate(memo.get("evidence_map") or [], start=1):
-        cites = "".join(
-            f"<li><sup class='cite'>[{fn.get(c, '?')}]</sup> "
-            f"{_esc(index[c].get('summary', '')) if c in index else _GONE} "
-            f"<span style='color:#888'>({_esc(index.get(c, {}).get('when', ''))})</span></li>"
-            for c in (item.get("cited_ids") or [])
-        )
-        points += (f"<div class='obs'><div class='obs-n'>{n}</div>"
-                   f"<div class='obs-body'><div class='obs-point'>{_esc(item.get('point'))}</div>"
-                   f"<ul>{cites or '<li>—</li>'}</ul></div></div>")
-    points = points or "<p>No grounded observations were recorded.</p>"
+    def _findings_html(bucket: str, empty: str, *, severity: bool = False) -> str:
+        out = ""
+        for n, item in enumerate(memo.get(bucket) or [], start=1):
+            cites = "".join(
+                f"<li><sup class='cite'>[{fn.get(c, '?')}]</sup> "
+                f"{_esc(index[c].get('summary', '')) if c in index else _GONE} "
+                f"<span style='color:#888'>({_esc(index.get(c, {}).get('when', ''))})</span></li>"
+                for c in (item.get("cited_ids") or [])
+            )
+            sev = str(item.get("severity") or "") if severity else ""
+            chip = (f"<span class='sev sev-{_esc(sev)}'>{_esc(sev)}</span>"
+                    if sev in _GAP_SEVERITIES else "")
+            out += (f"<div class='obs'><div class='obs-n'>{n}</div>"
+                    f"<div class='obs-body'><div class='obs-point'>{_esc(item.get('point'))}{chip}</div>"
+                    f"<ul>{cites or '<li>—</li>'}</ul></div></div>")
+        return out or f"<p>{empty}</p>"
 
-    oq = "".join(f"<li>{_esc(q)}</li>" for q in (memo.get("open_questions") or []))
-    oq_block = f"<ul>{oq}</ul>" if oq else "<p>None recorded.</p>"
+    # Gaps lead — they are what the broker acts on. Severity orders them; an
+    # unranked gap sorts last rather than being dropped from the memo.
+    gaps = sorted(memo.get("gaps") or [],
+                  key=lambda g: _GAP_SEVERITIES.index(g["severity"])
+                  if g.get("severity") in _GAP_SEVERITIES else len(_GAP_SEVERITIES))
+    memo = {**memo, "gaps": gaps}
+
+    gaps_block = _findings_html("gaps", "No gaps were established by the record.", severity=True)
+    cons_block = _findings_html("considerations", "None recorded.")
+    points = _findings_html("evidence_map", "No grounded observations were recorded.")
+
+    kq = "".join(f"<li>{_esc(q)}</li>" for q in (memo.get("key_questions") or []))
+    kq_block = f"<ul>{kq}</ul>" if kq else "<p>None recorded.</p>"
 
     idx_rows = "".join(
         f"<tr><td>[{fn[c]}]</td><td>{_esc(index[c].get('source_label', ''))}</td>"
@@ -1102,11 +1244,17 @@ def _memo_html(session: dict, subject_name: str, corpus: dict, memo: dict,
       <h2>Analysis narrative</h2>
       <div class="narr">{narrative}</div>
 
+      <h2>Key questions</h2>
+      {kq_block}
+
+      <h2>Strategic considerations</h2>
+      {cons_block}
+
+      <h2>Gaps identified in the record</h2>
+      {gaps_block}
+
       <h2>Observations grounded in the material</h2>
       {points}
-
-      <h2>Open questions / items to obtain</h2>
-      {oq_block}
 
       <h2>Evidence index (cited records)</h2>
       <table><thead><tr><th>#</th><th>Source</th><th>Ref</th><th>Record</th><th>When</th></tr></thead>

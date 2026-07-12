@@ -51,8 +51,17 @@ export type PilotTemplate = {
 }
 
 export type EvidenceMapItem = { point: string; cited_ids: string[] }
+export type GapSeverity = 'high' | 'medium' | 'low'
+// A gap always cites the records that establish it (the server demotes an
+// ungrounded one to a key question); severity is null when the model didn't rank it.
+export type GapItem = EvidenceMapItem & { severity?: GapSeverity | null }
+
 export type MessageMeta = {
   evidence_map?: EvidenceMapItem[]
+  key_questions?: string[]
+  considerations?: EvidenceMapItem[]
+  gaps?: GapItem[]
+  /** Pre-structured-answer transcripts only — read as key_questions. */
   open_questions?: string[]
   dropped_citations?: string[]
 } | null
@@ -143,7 +152,9 @@ export const downloadPilotPacket = (sessionId: string, packet: PilotPacket) =>
 export type ChatResult = {
   assistant_text: string
   evidence_map: EvidenceMapItem[]
-  open_questions: string[]
+  key_questions: string[]
+  considerations: EvidenceMapItem[]
+  gaps: GapItem[]
   dropped_citations?: string[]
 }
 export type ChatHandlers = {

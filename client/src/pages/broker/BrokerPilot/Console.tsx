@@ -4,7 +4,7 @@ import remarkGfm from 'remark-gfm'
 import { Loader2, Send, ShieldAlert, Sparkles } from 'lucide-react'
 import {
   streamPilotChat,
-  type ContextPreview, type CorpusRecord, type EvidenceMapItem,
+  type ContextPreview, type CorpusRecord, type EvidenceMapItem, type GapSeverity,
   type PilotMessage, type PilotSession,
 } from '../../../api/brokerPilot'
 import { DISCLAIMER, LABEL, startersFor } from './shared'
@@ -71,7 +71,9 @@ export function Console({ session, context, onTurnComplete }: ConsoleProps) {
             content: data.assistant_text,
             metadata: {
               evidence_map: data.evidence_map,
-              open_questions: data.open_questions,
+              key_questions: data.key_questions,
+              considerations: data.considerations,
+              gaps: data.gaps,
               dropped_citations: data.dropped_citations,
             },
           }])
@@ -223,13 +225,22 @@ function Entry({ role, content }: { role: 'user' | 'assistant' | 'system'; conte
   )
 }
 
+const SEVERITY_CHIP: Record<GapSeverity, string> = {
+  high: 'bg-red-500/15 text-red-300',
+  medium: 'bg-amber-500/15 text-amber-300',
+  low: 'bg-zinc-700/60 text-zinc-400',
+}
+
 function AssistantEntry({ message, cidIndex }: {
   message: LiveMessage
   cidIndex: Map<string, CorpusRecord>
 }) {
   const meta = message.metadata
   const evidence = meta?.evidence_map ?? []
-  const openQuestions = meta?.open_questions ?? []
+  // `open_questions` is the pre-structured-answer key — old transcripts still render.
+  const keyQuestions = meta?.key_questions ?? meta?.open_questions ?? []
+  const considerations = meta?.considerations ?? []
+  const gaps = meta?.gaps ?? []
   const dropped = meta?.dropped_citations ?? []
 
   return (
@@ -239,19 +250,35 @@ function AssistantEntry({ message, cidIndex }: {
         <Markdown remarkPlugins={[remarkGfm]}>{message.content}</Markdown>
       </div>
 
+      {keyQuestions.length > 0 && (
+        <div className="mt-3 max-w-[65ch] border-l-2 border-sky-500/30 pl-3">
+          <div className="text-[10px] font-medium uppercase tracking-[0.15em] text-sky-400/80">Key questions</div>
+          <ul className="mt-1 list-disc pl-4 text-[13px] leading-relaxed text-zinc-400">
+            {keyQuestions.map((q, i) => <li key={i}>{q}</li>)}
+          </ul>
+        </div>
+      )}
+
+      {considerations.length > 0 && (
+        <div className="mt-3 max-w-[65ch] space-y-2 border-l-2 border-violet-500/30 pl-3">
+          <div className="text-[10px] font-medium uppercase tracking-[0.15em] text-violet-400/80">Strategic considerations</div>
+          {considerations.map((it, i) => <EvidenceLine key={i} item={it} cidIndex={cidIndex} />)}
+        </div>
+      )}
+
+      {gaps.length > 0 && (
+        <div className="mt-3 max-w-[65ch] space-y-2 border-l-2 border-amber-500/40 pl-3">
+          <div className="text-[10px] font-medium uppercase tracking-[0.15em] text-amber-400/80">Gaps identified</div>
+          {gaps.map((g, i) => (
+            <EvidenceLine key={i} item={g} cidIndex={cidIndex} severity={g.severity ?? null} />
+          ))}
+        </div>
+      )}
+
       {evidence.length > 0 && (
         <div className="mt-3 max-w-[65ch] space-y-2 border-l-2 border-emerald-500/30 pl-3">
           <div className={LABEL}>Grounded observations</div>
           {evidence.map((it, i) => <EvidenceLine key={i} item={it} cidIndex={cidIndex} />)}
-        </div>
-      )}
-
-      {openQuestions.length > 0 && (
-        <div className="mt-3 max-w-[65ch] border-l-2 border-amber-500/30 pl-3">
-          <div className="text-[10px] font-medium uppercase tracking-[0.15em] text-amber-400/80">Open questions / to obtain</div>
-          <ul className="mt-1 list-disc pl-4 text-[13px] leading-relaxed text-zinc-400">
-            {openQuestions.map((q, i) => <li key={i}>{q}</li>)}
-          </ul>
         </div>
       )}
 
@@ -264,9 +291,18 @@ function AssistantEntry({ message, cidIndex }: {
   )
 }
 
-function EvidenceLine({ item, cidIndex }: { item: EvidenceMapItem; cidIndex: Map<string, CorpusRecord> }) {
+function EvidenceLine({ item, cidIndex, severity = null }: {
+  item: EvidenceMapItem
+  cidIndex: Map<string, CorpusRecord>
+  severity?: GapSeverity | null
+}) {
   return (
     <div className="text-[13px] leading-relaxed">
+      {severity && (
+        <span className={`mr-1.5 rounded-sm px-1.5 py-px align-middle font-mono text-[9px] uppercase tracking-wider ${SEVERITY_CHIP[severity]}`}>
+          {severity}
+        </span>
+      )}
       <span className="text-zinc-300">{item.point}</span>
       {item.cited_ids.length > 0 && (
         <span className="ml-1.5 inline-flex flex-wrap gap-1 align-middle">

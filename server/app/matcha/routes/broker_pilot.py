@@ -167,7 +167,11 @@ async def _latest_memo(conn, session_id: str) -> Optional[dict]:
     return {
         "assistant_text": row["content"] or "",
         "evidence_map": meta.get("evidence_map") or [],
-        "open_questions": meta.get("open_questions") or [],
+        # `open_questions` is the pre-structured-answer key — a memo generated
+        # over an older transcript still renders its questions.
+        "key_questions": meta.get("key_questions") or meta.get("open_questions") or [],
+        "considerations": meta.get("considerations") or [],
+        "gaps": meta.get("gaps") or [],
     }
 
 
@@ -515,7 +519,9 @@ async def chat(session_id: str, body: ChatIn, request: Request,
         except Exception:
             logger.exception("broker_pilot: chat stream error")
             yield f"data: {json.dumps({'type': 'error', 'message': 'Analysis failed.'})}\n\n"
-        # Persist the assistant turn (+ validated evidence map) after streaming.
+        # Persist the assistant turn (+ the validated, structured buckets) after
+        # streaming. Everything stored here has already been through the citation
+        # gate in run_chat_turn.
         if result_payload:
             try:
                 async with get_connection() as c2:
@@ -525,7 +531,9 @@ async def chat(session_id: str, body: ChatIn, request: Request,
                         session_id, result_payload.get("assistant_text", ""),
                         json.dumps({
                             "evidence_map": result_payload.get("evidence_map"),
-                            "open_questions": result_payload.get("open_questions"),
+                            "key_questions": result_payload.get("key_questions"),
+                            "considerations": result_payload.get("considerations"),
+                            "gaps": result_payload.get("gaps"),
                             "dropped_citations": result_payload.get("dropped_citations"),
                         }),
                     )
