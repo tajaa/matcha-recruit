@@ -37,6 +37,7 @@ from app.matcha.routes.matcha_work._shared import THREAD_FILE_TEXT_CAP, _row_to_
 from app.matcha.services import matcha_work_document as doc_svc
 from app.matcha.services import token_budget_service
 from app.matcha.services.escalation_service import should_escalate, create_escalation
+from app.core.feature_flags import get_company_features
 from app.matcha.services.matcha_work_modes import THREAD_MODES
 from app.matcha.services.matcha_work_node import build_compliance_context, build_payer_staff_context, ComplianceContextResult
 from app.matcha.services.matcha_work_ai import (
@@ -664,11 +665,21 @@ async def send_message_stream(
             # Registry-driven modes (node, benefits, legal, risk, training, …).
             # Compliance and payer are custom_dispatch — their bespoke blocks
             # follow below (reasoning-chain statuses + RAG; prompt-swap path).
-            for _mode in THREAD_MODES:
-                if _mode.custom_dispatch or _mode.build_context is None:
-                    continue
-                if not thread.get(_mode.column):
-                    continue
+            #
+            # The toggle route gates on required_feature, but the column stays
+            # true if the flag is later revoked — so re-check here too, or a
+            # downgraded company keeps getting the paid subsystem injected.
+            _active_modes = [
+                m for m in THREAD_MODES
+                if not m.custom_dispatch and m.build_context is not None and thread.get(m.column)
+            ]
+            if any(m.required_feature for m in _active_modes):
+                _features = await get_company_features(company_id)
+                _active_modes = [
+                    m for m in _active_modes
+                    if not m.required_feature or _features.get(m.required_feature, False)
+                ]
+            for _mode in _active_modes:
                 yield _sse_data({"type": "status", "message": _mode.status_loading})
                 try:
                     _mode_ctx = await _mode.build_context(company_id)
@@ -800,11 +811,9 @@ async def send_message_stream(
                 node_mode=bool(thread.get("node_mode")),
                 # Any registry mode with grounded context active → the model
                 # should reason over injected records (bumps thinking level).
-                grounded_mode=any(
-                    bool(thread.get(m.column))
-                    for m in THREAD_MODES
-                    if not m.custom_dispatch
-                ),
+                # Uses the post-gate list: a mode whose feature was revoked
+                # injected nothing, so it must not buy a thinking-level bump.
+                grounded_mode=bool(_active_modes),
                 blog_mode_state=stream_blog_mode_state,
                 thread_id=str(thread_id),
             ))

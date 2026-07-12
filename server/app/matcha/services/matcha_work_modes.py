@@ -9,13 +9,15 @@ Adding a mode now means:
      (+ the conditional ALTER in database.py:init_db for fresh bootstraps)
   2. A context builder (services/matcha_work_mode_contexts.py or
      services/matcha_work_node.py)
-  3. A ThreadMode entry below
-  4. A frontend MODES entry (client/src/pages/work/MatchaWorkThread.tsx)
-     + the `<key>_mode` field on the thread types (types/matcha-work.ts)
+  3. A ThreadMode entry below — including `required_feature` if the mode reads
+     a paid subsystem, which both 403s the toggle route and hides the button
+  4. A THREAD_MODE_TOGGLES row (client/src/components/matcha-work/constants.ts,
+     with the matching `feature`) + the `<key>_mode` field on the thread types
+     (types/matcha-work.ts)
 
 Everything else — the toggle endpoint, the document-service setter, the
 thread-select column lists, the response models, and the messaging dispatch
-loop — is driven by this registry.
+loop (including its feature re-check) — is driven by this registry.
 
 Compliance and payer keep bespoke dispatch blocks in messaging.py
 (reasoning-chain status events + conditional RAG for compliance; the
@@ -43,6 +45,11 @@ class ThreadMode:
     # True → messaging.py dispatches this mode in a hand-written block
     # (compliance, payer); the generic loop skips it.
     custom_dispatch: bool = False
+    # Paid feature flag the mode's data lives behind. The mode injects records
+    # from a subsystem the company may not have bought, so the toggle route
+    # gates on this (403) and the frontend hides the button. None → ungated
+    # (node/compliance/payer predate the registry and stay open).
+    required_feature: Optional[str] = None
 
 
 async def _node_context(company_id: UUID) -> str:
@@ -102,6 +109,7 @@ THREAD_MODES: tuple[ThreadMode, ...] = (
         status_loading="Loading benefits roster & eligibility data...",
         status_unavailable="Benefits data unavailable — continuing without it...",
         build_context=_benefits_context,
+        required_feature="benefits_admin",
     ),
     ThreadMode(
         key="legal",
@@ -110,6 +118,7 @@ THREAD_MODES: tuple[ThreadMode, ...] = (
         status_loading="Loading legal matters & evidence summary...",
         status_unavailable="Legal data unavailable — continuing without it...",
         build_context=_legal_context,
+        required_feature="legal_defense",
     ),
     ThreadMode(
         key="risk",
@@ -118,6 +127,9 @@ THREAD_MODES: tuple[ThreadMode, ...] = (
         status_loading="Loading risk index & coverage data...",
         status_unavailable="Risk data unavailable — continuing without it...",
         build_context=_risk_context,
+        # The builder reads risk_index (risk_profile) + limit_adequacy; the
+        # portal flag is the one that owns the composite index it leads with.
+        required_feature="risk_profile",
     ),
     ThreadMode(
         key="training",
@@ -126,6 +138,7 @@ THREAD_MODES: tuple[ThreadMode, ...] = (
         status_loading="Loading training & credential data...",
         status_unavailable="Training data unavailable — continuing without it...",
         build_context=_training_context,
+        required_feature="training",
     ),
 )
 

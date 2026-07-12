@@ -641,7 +641,7 @@ export default function MatchaWorkThread() {
             </div>
           )}
 
-          {!isIndividual && THREAD_MODE_TOGGLES.map((m) => {
+          {!isIndividual && THREAD_MODE_TOGGLES.filter((m) => !m.feature || hasFeature(m.feature)).map((m) => {
             const active = modeValue(m.key)
             const Icon = m.icon
             return (

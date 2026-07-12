@@ -37,6 +37,15 @@ def _fmt_money(value) -> str:
         return "n/a"
 
 
+def _fmt_pct(value, *, signed: bool = False) -> str:
+    """Nullable numeric → percentage text. The renewal-risk columns are
+    nullable, and a bare f-string format spec (":+") raises TypeError on None."""
+    try:
+        return f"{float(value):+.0f}%" if signed else f"{float(value):.0f}%"
+    except (TypeError, ValueError):
+        return "n/a"
+
+
 # ---------------------------------------------------------------------------
 # Benefits mode — roster snapshot, open eligibility exceptions, renewal risk.
 # Reads the last-computed state written by services/benefits_eligibility.py
@@ -139,8 +148,8 @@ async def _build_benefits_context_uncached(company_id: UUID) -> str:
                 except Exception:
                     pass
             lines.append(
-                f"- {dim}: {str(r['risk_band']).upper()} — turnover {r['turnover_pct']}% "
-                f"(delta {r['turnover_delta_pct']:+}% vs baseline), {r['lost_workdays']} lost workdays, "
+                f"- {dim}: {str(r['risk_band']).upper()} — turnover {_fmt_pct(r['turnover_pct'])} "
+                f"(delta {_fmt_pct(r['turnover_delta_pct'], signed=True)} vs baseline), {r['lost_workdays']} lost workdays, "
                 f"{r['near_misses']} near-misses, {r['behavioral_incidents']} behavioral incidents, "
                 f"headcount {r['headcount']}.{trig} (computed {_fmt_date(r['computed_at'].date() if r['computed_at'] else None)})"
             )
@@ -188,7 +197,9 @@ async def _build_legal_context_uncached(company_id: UUID) -> str:
         counts: dict[str, int] = {}
         for label, sql in (
             ("IR incidents", "SELECT COUNT(*) FROM ir_incidents WHERE company_id=$1"),
-            ("ER cases", "SELECT COUNT(*) FROM er_cases WHERE company_id=$1"),
+            # er_cases.company_id is nullable — legacy rows are NULL and the ER
+            # routes read them as the tenant's (er_copilot/_shared.py).
+            ("ER cases", "SELECT COUNT(*) FROM er_cases WHERE company_id=$1 OR company_id IS NULL"),
             ("discipline records", "SELECT COUNT(*) FROM progressive_discipline WHERE company_id=$1"),
             ("training records", "SELECT COUNT(*) FROM training_records WHERE company_id=$1"),
         ):
@@ -445,12 +456,20 @@ async def _build_training_context_uncached(company_id: UUID) -> str:
                 f"- {p['title']} ({p['training_type']}{juris}{freq}, applies to {p['applies_to']}): "
                 f"{p['completed']}/{p['total_assigned']} completed, {p['overdue']} OVERDUE"
             )
+        if len(programs) > _MAX_LIST_ROWS:
+            lines.append(f"...and {len(programs) - _MAX_LIST_ROWS} more active programs.")
         for r in overdue_rows:
             lines.append(f"  · OVERDUE: {r['first_name']} {r['last_name']} — {r['title']} (due {_fmt_date(r['due_date'])})")
+        # The detail rows are LIMIT-capped; say so, or the model reads a
+        # truncated list as the complete one.
+        if total_overdue > len(overdue_rows):
+            lines.append(f"  · ...and {total_overdue - len(overdue_rows)} more overdue assignments not listed individually.")
         if expiring:
             lines.append("Completions expiring within 60 days:")
             for r in expiring:
                 lines.append(f"  · {r['first_name']} {r['last_name']} — {r['title']} expires {_fmt_date(r['expiration_date'])}")
+            if len(expiring) == _MAX_LIST_ROWS:
+                lines.append(f"  · (list capped at {_MAX_LIST_ROWS} — more completions may be expiring.)")
 
     if has_creds:
         lines.append(
@@ -464,6 +483,8 @@ async def _build_training_context_uncached(company_id: UUID) -> str:
                 f"- {r['first_name']} {r['last_name']}: {r['license_type'] or 'license'}{state} "
                 f"{status} {_fmt_date(r['license_expiration'])}"
             )
+        if len(cred_expiring) == _MAX_LIST_ROWS:
+            lines.append(f"...(list capped at {_MAX_LIST_ROWS} — the counts above are the authoritative totals.)")
 
     if mvr and (mvr["total"] or 0) > 0:
         lines.append(

@@ -31,6 +31,7 @@ from app.matcha.routes.matcha_work._shared import (
     _row_to_message,
     _sse_data,
 )
+from app.core.feature_flags import get_company_features
 from app.core.services.storage import get_storage
 from app.database import get_connection
 from app.matcha.dependencies import require_admin_or_client, get_client_company_id
@@ -62,6 +63,7 @@ from app.matcha.models.matcha_work import (
     GeneratePresentationResponse,
 )
 from app.matcha.services import matcha_work_document as doc_svc
+from app.matcha.services.matcha_work_modes import MODE_COLUMNS_SQL, MODES_BY_KEY, THREAD_MODES
 from app.matcha.services.er_document_parser import ERDocumentParser
 from app.matcha.services.matcha_work_handbook_upload import (
     AuditedLocation,
@@ -315,8 +317,8 @@ async def create_thread(
         version=thread["version"],
         task_type=_infer_skill_from_state(thread["current_state"]),
         is_pinned=thread.get("is_pinned", False),
-        node_mode=thread.get("node_mode", False),
-        compliance_mode=thread.get("compliance_mode", False),
+        # Registry-driven so a new mode can't be silently dropped here.
+        **{m.column: thread.get(m.column, False) for m in THREAD_MODES},
         created_at=thread["created_at"],
         assistant_reply=assistant_reply,
         pdf_url=pdf_url,
@@ -1697,11 +1699,11 @@ async def update_thread_title(
 
     async with get_connection() as conn:
         row = await conn.fetchrow(
-            """
+            f"""
             UPDATE mw_threads
             SET title=$1, updated_at=NOW()
             WHERE id=$2 AND company_id=$3
-            RETURNING id, title, status, version, is_pinned, node_mode, compliance_mode, created_at, updated_at, current_state
+            RETURNING id, title, status, version, is_pinned, {MODE_COLUMNS_SQL}, created_at, updated_at, current_state
             """,
             body.title,
             thread_id,
@@ -1751,13 +1753,24 @@ async def set_thread_mode(
     mode_key is validated against matcha_work_modes.THREAD_MODES. The
     per-mode endpoints below (/node-mode, /compliance-mode, /payer-mode)
     are legacy aliases kept for older clients (Werk desktop)."""
-    from app.matcha.services.matcha_work_modes import MODES_BY_KEY
-
-    if mode_key not in MODES_BY_KEY:
+    mode = MODES_BY_KEY.get(mode_key)
+    if mode is None:
         raise HTTPException(status_code=404, detail="Unknown thread mode")
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         raise HTTPException(status_code=404, detail="Thread not found")
+
+    # A mode injects records from its subsystem into every AI turn, so the
+    # company must actually own that subsystem's feature. Enforced here rather
+    # than via require_feature(), which is a static per-route dependency and
+    # can't read the flag name off a path param. Admins bypass, as they do there.
+    if mode.required_feature and current_user.role != "admin":
+        features = await get_company_features(company_id)
+        if not features.get(mode.required_feature, False):
+            raise HTTPException(
+                status_code=403,
+                detail=f"The '{mode.required_feature}' feature is not enabled for your company",
+            )
 
     row = await doc_svc.set_thread_mode(thread_id, company_id, mode_key, body.enabled)
     if row is None:

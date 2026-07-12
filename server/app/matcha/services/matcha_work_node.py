@@ -51,8 +51,9 @@ _MAX_LEGACY_ROWS = 200
 def _get_build_lock(key: str) -> asyncio.Lock:
     lock = _build_locks.get(key)
     if lock is None:
-        # Bound the registry — without eviction it grows 3 locks per company
-        # forever in a long-lived process. Evicting an unlocked entry another
+        # Bound the registry — without eviction it grows one lock per company
+        # per grounding mode (see matcha_work_modes.THREAD_MODES) forever in a
+        # long-lived process. Evicting an unlocked entry another
         # coroutine still references at worst causes one duplicate build
         # (benign); this runs synchronously on the event loop, so no race.
         if len(_build_locks) >= _MAX_BUILD_LOCKS:
