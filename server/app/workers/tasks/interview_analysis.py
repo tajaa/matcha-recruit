@@ -311,8 +311,9 @@ async def _link_to_er_case_and_upload_transcript(
         )
         filename = f"investigation_transcript_{interviewee_name or 'unknown'}_{interview_id[:8]}.txt"
 
-        # Upload to S3
-        file_path = await storage.upload_file(
+        # Private upload (s3:// URI, no CDN URL) — investigation transcripts
+        # must never be world-fetchable; readers use storage.download_file.
+        file_path = await storage.upload_private_file(
             transcript_bytes, filename,
             prefix=f"er-cases/{er_case_id}/documents",
             content_type="text/plain",

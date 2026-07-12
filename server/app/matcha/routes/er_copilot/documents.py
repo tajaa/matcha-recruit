@@ -85,7 +85,9 @@ async def upload_document(
 
     # Upload to storage
     storage = get_storage()
-    file_path = await storage.upload_file(
+    # Private upload (s3:// URI, no CDN URL) — ER evidence must never be
+    # world-fetchable by URL; all readers go through storage.download_file.
+    file_path = await storage.upload_private_file(
         file_bytes,
         filename,
         prefix=f"er-documents/{case_id}",
