@@ -44,7 +44,7 @@ export default function PortalSchedule() {
     setRequests(reqs.requests)
   }, [])
 
-  useEffect(() => { load().finally(() => setLoading(false)) }, [load])
+  useEffect(() => { load().catch(() => {}).finally(() => setLoading(false)) }, [load])
 
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="h-6 w-6 text-zinc-500 animate-spin" /></div>
 

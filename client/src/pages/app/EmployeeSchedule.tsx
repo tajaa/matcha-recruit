@@ -5,7 +5,7 @@ import {
 } from 'lucide-react'
 import { Card } from '../../components/ui'
 import {
-  fetchWeek, createShift, updateShift, deleteShift, publishShift, publishRange,
+  fetchWeek, createShift, deleteShift, publishShift, publishRange,
   assignEmployee, unassignEmployee, fetchTemplates, createTemplate, deleteTemplate,
   generateFromTemplate, fetchRequests, reviewRequest,
 } from '../../api/employeeSchedule'
