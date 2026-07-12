@@ -1,11 +1,11 @@
-import { useState } from 'react'
+import { useState, type RefObject } from 'react'
 import { Loader2, Plus, Sparkles } from 'lucide-react'
 import type { CappeBlock } from '../../../../types/cappe'
 import { BLOCK_ORDER, BLOCK_SCHEMAS } from './blockSchemas'
 import { BlockCard } from './BlockCard'
 
 export function FormModeView({
-  blocks, preview, adding, setAdding, canvasUnlocked,
+  blocks, preview, adding, setAdding, canvasUnlocked, iframeRef,
   updateBlock, removeBlock, moveBlock, reorderBlock, duplicateBlock, addBlock,
   copyStyle, pasteStyle, canPasteStyle,
 }: {
@@ -14,6 +14,7 @@ export function FormModeView({
   adding: boolean
   setAdding: (fn: (a: boolean) => boolean) => void
   canvasUnlocked: boolean
+  iframeRef: RefObject<HTMLIFrameElement>
   updateBlock: (i: number, b: CappeBlock) => void
   removeBlock: (i: number) => void
   moveBlock: (i: number, dir: -1 | 1) => void
@@ -90,7 +91,7 @@ export function FormModeView({
       {/* preview */}
       <div className="hidden flex-1 bg-zinc-900 lg:block">
         {preview ? (
-          <iframe title="Live preview" srcDoc={preview} sandbox="allow-scripts" className="h-full w-full border-0" />
+          <iframe ref={iframeRef} title="Live preview" srcDoc={preview} sandbox="allow-scripts" className="h-full w-full border-0" />
         ) : (
           <div className="flex h-full items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-zinc-600" /></div>
         )}

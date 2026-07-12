@@ -63,8 +63,9 @@ export function EditorToolbar({
         {/* Site-wide promos (announcement bar + pop-up) */}
         <PromosPanel meta={meta} premium={designerUnlocked} dirty={promosDirty} onChange={(m) => { setMeta(m); setPromosDirty(true) }} />
 
-        {/* Live theme switcher + tweaks */}
-        <ThemeMenu themeEditor={themeEditor} designerUnlocked={designerUnlocked} />
+        {/* Live theme switcher toggle — the drawer itself renders in index.tsx
+            as a flex sibling of the preview, not here. */}
+        <ThemeMenu themeEditor={themeEditor} />
 
         {canvasUnlocked && (
           <div className="flex rounded-lg border border-zinc-700 p-0.5">

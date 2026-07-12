@@ -1298,10 +1298,55 @@ _CANVAS_JS = """<style>
 .cz-cv-grabbing *{user-select:none !important}
 .cz-editable .cz-canvas .cz-cv-wrap{min-height:96px}
 .cz-editable a.cz-el,.cz-editable .cz-el img{-webkit-user-drag:none;user-drag:none}
+.cz-theme-hl{outline:2px solid #10b981 !important;outline-offset:2px !important;transition:outline-color .15s}
 </style>
 <script>(function(){
 var editing=null,origText='',cancelEdit=false,dragging=false,dragFrom=-1,downY=0,downIdx=-1,moved=false,dropLine=null;
 var elDrag=null,elResize=null,rdir='',selEl=null,curBp='d',gx=0,gy=0,sx=0,sy=0,sw=0,sh=0,gg=null,pid=0;
+var themeMode=false;
+// Region -> selector map for theme highlight-sync. Kept in lockstep with the
+// ThemeRegion union in useThemeBridge.ts.
+var THEME_REGION_SEL={
+  brand:'.cz-btn--solid,.cz-brand',
+  accent:'.cz-btn--solid,.cz-brand,.cz-stat__num',
+  headingFont:'h1,h2,h3',
+  bodyFont:'body',
+  radius:'.cz-btn,.cz-card,.cz-plan,.cz-quote,.cz-bento-cell',
+  mode:'body',
+  container:'.cz-wrap',
+  gutter:'.cz-wrap',
+  sectionPad:'main>section:first-of-type,main>[data-cz-block]:first-of-type',
+  gap:'.cz-cards,.cz-plans,.cz-grid-img,.cz-quote-grid',
+  cardPad:'.cz-card,.cz-plan,.cz-quote,.cz-bento-cell',
+  cardBorder:'.cz-card,.cz-plan,.cz-quote,.cz-bento-cell',
+  headerPad:'.cz-header',
+  brandSize:'.cz-header',
+  footerPad:'.cz-footer'
+};
+var THEME_HL_MAX=6;
+function clearThemeHl(){var hs=document.querySelectorAll('.cz-theme-hl');for(var i=0;i<hs.length;i++)hs[i].classList.remove('cz-theme-hl');}
+function highlightTheme(region){
+  clearThemeHl();
+  var sel=THEME_REGION_SEL[region];if(!sel)return;
+  var els=[].slice.call(document.querySelectorAll(sel)).slice(0,THEME_HL_MAX);
+  for(var i=0;i<els.length;i++)els[i].classList.add('cz-theme-hl');
+  // Scroll the first match into view — but never for whole-page targets (body),
+  // where "scrolling into view" would just yank the preview to the top.
+  if(els[0]&&els[0]!==document.body&&els[0].scrollIntoView)els[0].scrollIntoView({block:'center',behavior:'smooth'});
+}
+// Reverse direction: clicking a page element while the theme drawer is open
+// probes which region governs it, so the parent can jump the drawer there.
+// Checked most-specific first — broad containers (body) would match everything.
+var THEME_PROBE_ORDER=['brand','headingFont','cardPad','headerPad','footerPad','gap'];
+function probeThemeRegion(el){
+  for(var k=0;k<THEME_PROBE_ORDER.length;k++){
+    var region=THEME_PROBE_ORDER[k];
+    var matches=document.querySelectorAll(THEME_REGION_SEL[region]);
+    for(var i=0;i<matches.length;i++){if(matches[i]===el||matches[i].contains(el)){post({type:'cz-theme-probe',region:region});return;}}
+  }
+  var inSection=el.closest&&el.closest('[data-cz-block]');
+  post({type:'cz-theme-probe',region:inSection?'sectionPad':'bodyFont'});
+}
 function post(m){try{window.parent.postMessage(m,'*');}catch(e){}}
 function blocks(){return [].slice.call(document.querySelectorAll('main>[data-cz-block]'));}
 function blockEl(i){return document.querySelector('[data-cz-block="'+i+'"]');}
@@ -1316,12 +1361,13 @@ function clamp(v,lo,hi){return Math.max(lo,Math.min(hi,v));}
 function gridInfo(el){var w=el.closest&&el.closest('.cz-cv-wrap');if(!w)return null;var cs=getComputedStyle(w);var cols=parseInt(cs.getPropertyValue('--cv-cols'),10)||12;var rh=parseFloat(cs.getPropertyValue('--cv-rowh'))||24;return {cols:cols,rowH:rh,cellW:(w.clientWidth/cols)||1};}
 function pos(el){var p=(curBp==='m')?'m':'d';return {x:parseInt(el.getAttribute('data-'+p+'x'),10)||0,y:parseInt(el.getAttribute('data-'+p+'y'),10)||0,w:parseInt(el.getAttribute('data-'+p+'w'),10)||1,h:parseInt(el.getAttribute('data-'+p+'h'),10)||1};}
 function setPos(el,x,y,w,h){el.style.gridColumn=(x+1)+'/span '+w;el.style.gridRow=(y+1)+'/span '+h;var p=(curBp==='m')?'m':'d';el.setAttribute('data-'+p+'x',x);el.setAttribute('data-'+p+'y',y);el.setAttribute('data-'+p+'w',w);el.setAttribute('data-'+p+'h',h);}
-document.addEventListener('mouseover',function(e){if(editing||dragging||elDrag||elResize)return;var b=e.target.closest&&e.target.closest('[data-cz-block]');if(b)b.classList.add('cz-hover');});
+document.addEventListener('mouseover',function(e){if(themeMode||editing||dragging||elDrag||elResize)return;var b=e.target.closest&&e.target.closest('[data-cz-block]');if(b)b.classList.add('cz-hover');});
 document.addEventListener('mouseout',function(e){var b=e.target.closest&&e.target.closest('[data-cz-block]');if(b)b.classList.remove('cz-hover');});
 document.addEventListener('click',function(e){
   var a=e.target.closest&&e.target.closest('a');if(a)e.preventDefault();
   if(editing&&editing.contains(e.target))return;
   if(moved){moved=false;return;}
+  if(themeMode){probeThemeRegion(e.target);return;}
   var ce=e.target.closest&&e.target.closest('.cz-el');
   var b=e.target.closest&&e.target.closest('[data-cz-block]');if(!b)return;
   var i=parseInt(b.getAttribute('data-cz-block'),10);
@@ -1332,6 +1378,7 @@ document.addEventListener('click',function(e){
   post({type:'cz-select',block:i,field:f?f.getAttribute('data-cz-field'):undefined,rect:{top:r.top,left:r.left,width:r.width,height:r.height}});
 },true);
 document.addEventListener('dblclick',function(e){
+  if(themeMode)return;
   var f=e.target.closest&&e.target.closest('[data-cz-field]');if(!f)return;
   e.preventDefault();
   if(editing&&editing!==f)editing.blur();
@@ -1356,7 +1403,7 @@ document.addEventListener('blur',function(e){
   post({type:'cz-editing-end'});
 },true);
 document.addEventListener('pointerdown',function(e){
-  if(editing)return;
+  if(editing||themeMode)return;
   var h=e.target.closest&&e.target.closest('.cz-cv-h');
   if(h&&selEl){e.preventDefault();gg=gridInfo(selEl);if(!gg)return;elResize=selEl;rdir=h.getAttribute('data-dir');var p=pos(selEl);sx=p.x;sy=p.y;sw=p.w;sh=p.h;gx=e.clientX;gy=e.clientY;moved=false;downIdx=-1;dragging=false;pid=e.pointerId;try{selEl.setPointerCapture(pid);}catch(_){}return;}
   var ce=e.target.closest&&e.target.closest('.cz-el');
@@ -1409,6 +1456,10 @@ window.addEventListener('message',function(e){
   else if(d.type==='cz-clear')clearSel();
   else if(d.type==='cz-bp')curBp=(d.bp==='m')?'m':'d';
   else if(d.type==='cz-elem-highlight'){var el=document.querySelector('.cz-el[data-cz-id="'+d.id+'"]');if(el)selectEl(el);}
+  else if(d.type==='cz-theme-highlight')highlightTheme(d.region);
+  else if(d.type==='cz-theme-clear')clearThemeHl();
+  else if(d.type==='cz-theme-open')themeMode=true;
+  else if(d.type==='cz-theme-close'){themeMode=false;clearThemeHl();}
 });
 post({type:'cz-ready'});
 })();</script>"""

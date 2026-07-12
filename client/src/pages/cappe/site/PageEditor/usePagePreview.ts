@@ -16,9 +16,14 @@ export function usePagePreview(
   editMode: 'form' | 'canvas',
   refreshTick: number,
   suspendPreview: MutableRefObject<boolean>,
+  themeOpen: boolean,
 ) {
   const [preview, setPreview] = useState('')
   const previewSeq = useRef(0)
+  // The theme drawer's highlight-sync bridge needs the `_CANVAS_JS` runtime in
+  // the iframe even in Form mode — otherwise there's no listener for
+  // `cz-theme-highlight` when the drawer is open over a plain form preview.
+  const editable = editMode === 'canvas' || themeOpen
 
   useEffect(() => {
     if (!siteId || !page) return
@@ -27,13 +32,16 @@ export function usePagePreview(
       if (suspendPreview.current) return
       cappeApi
         .postHtml(`/sites/${siteId}/preview`, {
-          title, slug: page.slug, content: { blocks }, theme_config: theme, meta_config: meta, editable: editMode === 'canvas',
+          title, slug: page.slug, content: { blocks }, theme_config: theme, meta_config: meta, editable,
         })
         .then((html) => { if (seq === previewSeq.current) setPreview(html) })
         .catch(() => { /* keep last good preview */ })
     }, 400)
     return () => clearTimeout(t)
-  }, [siteId, page, title, blocks, theme, meta, editMode, refreshTick])
+    // Depend on the computed `editable`, not `themeOpen`: in canvas mode the
+    // runtime is always injected, so toggling the drawer must NOT force a full
+    // iframe reload (flash + scroll reset) for byte-identical HTML.
+  }, [siteId, page, title, blocks, theme, meta, editMode, refreshTick, editable])
 
   return preview
 }

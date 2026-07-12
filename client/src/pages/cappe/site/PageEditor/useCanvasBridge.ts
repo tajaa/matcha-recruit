@@ -1,11 +1,19 @@
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from 'react'
 import type { CappeBlock, CappeCanvasElement } from '../../../../types/cappe'
 import { CV_MAX_ELEMENTS, cvEls, cvNextY, cvNewElement, isCanvasBlock } from './canvasHelpers'
 
 /** Canvas mode (Pro & Business): click-on-page editing via the preview iframe.
  *  Owns selection/breakpoint/floating-panel state, the freeform canvas-element
- *  mutators, and the postMessage bridge to the framed runtime. */
-export function useCanvasBridge(blocks: CappeBlock[], setBlocks: (fn: (bs: CappeBlock[]) => CappeBlock[]) => void) {
+ *  mutators, and the postMessage bridge to the framed runtime. `iframeRef` is
+ *  shared with the theme bridge (both modes reuse the one preview iframe). */
+export function useCanvasBridge(
+  blocks: CappeBlock[],
+  setBlocks: (fn: (bs: CappeBlock[]) => CappeBlock[]) => void,
+  iframeRef: RefObject<HTMLIFrameElement>,
+  /** Right-edge space already claimed by a docked panel (the theme drawer), so
+   *  the floating inspector — which is viewport-`fixed` — never slides under it. */
+  reservedRight = 0,
+) {
   const [selBlock, setSelBlock] = useState<number | null>(null)
   const [selElement, setSelElement] = useState<string | null>(null)  // freeform canvas: selected element id
   const [canvasBp, setCanvasBp] = useState<'d' | 'm'>('d')            // freeform canvas: editing desktop vs mobile
@@ -13,6 +21,9 @@ export function useCanvasBridge(blocks: CappeBlock[], setBlocks: (fn: (bs: Cappe
   // Once the user drags the floating inspector, keep it where they put it (don't
   // re-anchor to the next clicked element); reset when the panel closes.
   const panelDragged = useRef(false)
+  const reservedRightRef = useRef(0)
+  reservedRightRef.current = reservedRight
+  const maxLeft = () => window.innerWidth - 372 - reservedRightRef.current
   function startPanelDrag(e: ReactPointerEvent) {
     e.preventDefault()
     const sx = e.clientX, sy = e.clientY
@@ -20,7 +31,7 @@ export function useCanvasBridge(blocks: CappeBlock[], setBlocks: (fn: (bs: Cappe
     const onMove = (ev: PointerEvent) => {
       panelDragged.current = true
       setPopPos({
-        left: Math.min(Math.max(orig.left + (ev.clientX - sx), 8), window.innerWidth - 372),
+        left: Math.min(Math.max(orig.left + (ev.clientX - sx), 8), maxLeft()),
         top: Math.min(Math.max(orig.top + (ev.clientY - sy), 8), window.innerHeight - 80),
       })
     }
@@ -31,7 +42,6 @@ export function useCanvasBridge(blocks: CappeBlock[], setBlocks: (fn: (bs: Cappe
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
   }
-  const iframeRef = useRef<HTMLIFrameElement>(null)
   const suspendPreview = useRef(false)
   const [refreshTick, setRefreshTick] = useState(0)
   // Refs mirror state for the (mount-once) postMessage handler — avoid stale closures.
@@ -87,7 +97,7 @@ export function useCanvasBridge(blocks: CappeBlock[], setBlocks: (fn: (bs: Cappe
           // has dragged the panel somewhere, in which case leave it.
           const fr = iframeRef.current?.getBoundingClientRect()
           if (!panelDragged.current && fr && d.rect) {
-            const left = Math.min(Math.max(fr.left + d.rect.left + 8, 8), window.innerWidth - 372)
+            const left = Math.min(Math.max(fr.left + d.rect.left + 8, 8), maxLeft())
             const top = Math.min(Math.max(fr.top + d.rect.top + 8, 64), window.innerHeight - 160)
             setPopPos({ top, left })
           }
