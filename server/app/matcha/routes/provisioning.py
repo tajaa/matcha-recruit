@@ -1342,7 +1342,10 @@ async def list_provisioning_runs(
 # =======================================================================
 
 class HRISConnectionRequest(BaseModel):
-    mode: str = Field(default="mock", pattern="^(mock|adp|gusto|finch)$")
+    # `finch_mock` / `gusto_mock` route to the real provider class serving its own
+    # mock dataset (see hris_service.get_hris_service) — plain `mock` is the base
+    # ADP-shaped mock. `finch` is rejected below (OAuth-only).
+    mode: str = Field(default="mock", pattern="^(mock|adp|gusto|finch|gusto_mock|finch_mock)$")
     base_url: Optional[str] = Field(default=None, max_length=500)
     client_id: Optional[str] = Field(default=None, max_length=255)
     client_secret: Optional[str] = None
@@ -1446,6 +1449,19 @@ async def connect_hris(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     company_id = await get_client_company_id(current_user)
+
+    # Finch is OAuth-only (access_token minted by Finch Connect) — this endpoint
+    # only stores client credentials, so a mode='finch' connection saved here
+    # would fail auth on every sync. Point at the real flows instead.
+    if request.mode == "finch":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Finch connections are established via Finch Connect — use "
+                "GET /provisioning/hris/finch/authorize (or POST "
+                "/provisioning/hris/finch/sandbox for sandbox testing)."
+            ),
+        )
 
     config = {
         "mode": request.mode,
@@ -1682,7 +1698,9 @@ async def authorize_gusto_oauth(
         "client_id": GUSTO_OAUTH_CLIENT_ID,
         "redirect_uri": GUSTO_OAUTH_REDIRECT_URI,
         "response_type": "code",
-        "scope": "employees:read jobs:read compensations:read employee_addresses:read",
+        # companies:read covers /v1/companies/{id}/locations for the business-
+        # locations ingest; older tokens without it degrade to no location data.
+        "scope": "companies:read employees:read jobs:read compensations:read employee_addresses:read",
         "state": state,
     }
     oauth_url = f"{GUSTO_AUTHORIZE_URL}?{urlencode(params)}"
@@ -2045,7 +2063,9 @@ async def authorize_finch_oauth(
         raise HTTPException(status_code=400, detail=f"Finch Connect session error: {str(e)}")
 
     # Persist state only after the session is created, then append it to the connect
-    # URL for CSRF validation on the callback (Finch echoes ?state= back).
+    # URL for CSRF validation on the callback. Verified against Finch docs (2026-07):
+    # Connect's authorize flow passes `state` through and echoes it back to the
+    # redirect_uri alongside `code` (the Connect SDK's onSuccess receives {code, state}).
     async with get_connection() as conn:
         await conn.execute(
             "INSERT INTO oauth_states (state, company_id, created_at) VALUES ($1, $2, NOW())",

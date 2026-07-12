@@ -11,9 +11,16 @@ encrypted in ``integration_connections.secrets['access_token']`` — same slot t
 Gusto OAuth flow uses. There is no client_credentials fallback (Finch is per-employer
 OAuth only).
 
-⚠️ Field paths below follow Finch's documented schema but are UNVERIFIED against a live
-sandbox (no credentials at scaffold time). Validate ``fetch_workers`` / ``normalize_worker``
-against a Finch sandbox company before enabling for real connections.
+Field paths were verified against Finch's public API docs (2026-07): the work
+location lives at ``employment.location`` (``work_location`` kept as a defensive
+fallback), ``flsa_status`` values are ``exempt`` / ``non_exempt`` / ``unknown`` /
+null, and benefit types follow the documented enum (``s125_medical``,
+``fsa_medical``, …). Still validate end-to-end against a live sandbox connection
+before enabling for real customer connections (provider-specific gaps are common).
+
+Set ``config['mode'] = 'finch_mock'`` to serve the mock dataset below through this
+class (plain ``mock`` routes to the base ``HRISService`` instead — see
+``hris_service.get_hris_service``).
 """
 
 import asyncio
@@ -24,7 +31,7 @@ from typing import Optional
 
 import httpx
 
-from .hris_service import HRISProvisioningError
+from .hris_service import HRISProvisioningError, is_mock_mode, normalize_hris_locations
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +41,29 @@ FINCH_API_VERSION = os.getenv("FINCH_API_VERSION", "2020-09-17")
 
 # Batch size for the POST /employer/{individual,employment} detail endpoints.
 _FINCH_BATCH = 50
+
+# Finch's documented benefit-type enum values that carry an employer HEALTH
+# PREMIUM (drives the termination premium-leak estimate). The enum has no plain
+# "health"/"medical" type; s125_dental / s125_vision / retirement types are
+# deliberately excluded. So are hsa_pre / hsa_post: an employer HSA contribution
+# is a deposit into the employee's account, not a premium the employer keeps
+# paying after termination — counting it would inflate the leak.
+_HEALTH_BENEFIT_TYPES = frozenset({"s125_medical", "fsa_medical"})
+
+
+def _is_health_benefit(benefit_type: Optional[str]) -> bool:
+    """True when a Finch benefit type represents an employer health premium.
+
+    Exact-matches the documented enum, plus a substring fallback for
+    provider-custom types (e.g. a custom "medical_plan"), excluding
+    dental/vision.
+    """
+    btype = (benefit_type or "").lower()
+    if btype in _HEALTH_BENEFIT_TYPES:
+        return True
+    if "dental" in btype or "vision" in btype:
+        return False
+    return "medical" in btype
 
 
 class FinchHRISService:
@@ -54,8 +84,7 @@ class FinchHRISService:
         }
 
     async def test_connection(self, config: dict, secrets: dict) -> tuple[bool, Optional[str]]:
-        mode = config.get("mode", "mock")
-        if mode == "mock":
+        if is_mock_mode(config):
             return True, None
         try:
             token = await self.authenticate(config, secrets)
@@ -75,8 +104,7 @@ class FinchHRISService:
     async def authenticate(self, config: dict, secrets: dict) -> str:
         """Return the Finch access token. Finch is OAuth-only — the token is
         obtained via Finch Connect and stored encrypted in secrets."""
-        mode = config.get("mode", "mock")
-        if mode == "mock":
+        if is_mock_mode(config):
             return "mock-finch-token"
 
         token = secrets.get("access_token")
@@ -129,7 +157,7 @@ class FinchHRISService:
     async def fetch_workers(self, config: dict, secrets: dict) -> list[dict]:
         """List the employer directory, then hydrate each individual with
         identity + employment detail. Returns a list of merged raw Finch records."""
-        if config.get("mode") == "mock":
+        if is_mock_mode(config):
             return _FINCH_MOCK_EMPLOYEES
 
         token = await self.authenticate(config, secrets)
@@ -212,6 +240,32 @@ class FinchHRISService:
                 if iid:
                     out[iid] = body
         return out
+
+    async def fetch_company(self, config: dict, secrets: dict) -> dict:
+        """GET /employer/company — legal name, entity, EIN, and work locations."""
+        if is_mock_mode(config):
+            return _FINCH_MOCK_COMPANY
+        token = await self.authenticate(config, secrets)
+        async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+            resp = await self._request_with_retry(
+                client, "GET", f"{FINCH_BASE_URL}/employer/company",
+                headers=self._headers(token),
+            )
+        if resp.status_code != 200:
+            raise HRISProvisioningError(
+                "fetch_failed", f"Finch company fetch failed: {resp.status_code}"
+            )
+        return resp.json()
+
+    async def fetch_locations(self, config: dict, secrets: dict) -> list[dict]:
+        """Company work locations, normalized to the shared HRIS location shape.
+
+        Returns ``[{name, line1, line2, city, state, postal_code, country}]`` —
+        the same keys ``GustoHRISService.fetch_locations`` emits, so the sync
+        orchestrator's ``business_locations`` upsert is provider-agnostic.
+        """
+        company = await self.fetch_company(config, secrets)
+        return normalize_hris_locations(company.get("locations") or [])
 
     # ------------------------------------------------------------------
     # Benefits / deductions WRITE (Finch Deductions product)
@@ -349,12 +403,13 @@ class FinchHRISService:
         benefits drive the employer-premium estimate that powers the
         termination "premium leak" detection.
 
-        ⚠️ UNVERIFIED against a live Finch sandbox (no credentials at scaffold
-        time). Real connections without the Benefits product, or providers that
-        don't expose ``/benefits/{id}/individuals``, degrade to "no facts" — the
-        caller treats unknown enrollment as ``None`` rather than a false signal.
+        Benefit-type matching follows Finch's documented enum (see
+        ``_is_health_benefit``). Real connections without the Benefits product,
+        or providers that don't expose ``/benefits/{id}/individuals``, degrade
+        to "no facts" — the caller treats unknown enrollment as ``None`` rather
+        than a false signal.
         """
-        if config.get("mode") == "mock":
+        if is_mock_mode(config):
             # Demo facts: first mock employee enrolled w/ employer premium, the
             # rest unenrolled — exercises both the leak and the gap path.
             facts: dict[str, dict] = {}
@@ -372,10 +427,8 @@ class FinchHRISService:
         except HRISProvisioningError:
             return facts  # Benefits product not available — caller handles unknown.
 
-        health_types = ("medical", "health", "section_125_medical", "hsa", "fsa_medical")
         for benefit in benefits:
-            btype = (benefit.get("type") or "").lower()
-            if not any(h in btype for h in health_types):
+            if not _is_health_benefit(benefit.get("type")):
                 continue
             bid = benefit.get("id") or benefit.get("benefit_id")
             if not bid:
@@ -392,12 +445,25 @@ class FinchHRISService:
                 fact["has_benefits_enrollment"] = True
                 detail = contributions.get(iid) or {}
                 comp = detail.get("company_contribution") or {}
-                amount = comp.get("amount") if isinstance(comp, dict) else None
+                if not isinstance(comp, dict):
+                    continue
+                # `amount` is only a dollar figure when `type` is "fixed" — a
+                # "percent" contribution's amount is a rate, and dividing it by 100
+                # would report a fabricated premium (50% → "$50.00/mo"). A percent
+                # contribution needs the plan's total premium to resolve, which
+                # Finch doesn't expose here, so it degrades to "no premium fact".
+                if (comp.get("type") or "").lower() != "fixed":
+                    continue
+                amount = comp.get("amount")
                 if amount not in (None, ""):
                     try:
-                        # Finch fixed amounts are in minor units (cents).
+                        # Finch fixed amounts are in minor units (cents). ACCUMULATE
+                        # across health benefits (e.g. s125_medical + fsa_medical) —
+                        # assigning would let the last benefit overwrite the rest.
                         monthly = float(Decimal(str(amount)) / Decimal(100))
-                        fact["employer_health_premium_monthly"] = round(monthly, 2)
+                        fact["employer_health_premium_monthly"] = round(
+                            fact["employer_health_premium_monthly"] + monthly, 2
+                        )
                     except (InvalidOperation, ValueError):
                         pass
         return facts
@@ -423,8 +489,10 @@ class FinchHRISService:
         phones = individual.get("phone_numbers") or []
         phone = next((p.get("data") for p in phones if p.get("data")), None)
 
-        # Work location → state/city. Finch puts the work location on employment under
-        # `location` (older docs say `work_location`); fall back to individual residence.
+        # Work location → state/city. Finch's documented schema puts the work
+        # location on employment under `location` (line1/line2/city/state/
+        # postal_code/country); `work_location` kept as a defensive fallback for
+        # provider drift, then individual residence.
         work_loc = (
             employment.get("location")
             or employment.get("work_location")
@@ -456,14 +524,17 @@ class FinchHRISService:
                 pay_rate = None
 
         # Pay classification → Matcha enum (hourly|exempt). Prefer the explicit FLSA
-        # status when present (Finch sandbox + many providers expose employment.flsa_status
-        # = "exempt"/"nonexempt"); else infer from income.unit. "fixed" = fixed salary →
+        # status when present — Finch's documented values are "exempt" / "non_exempt"
+        # / "unknown" / null; else infer from income.unit. "fixed" = fixed salary →
         # exempt. NOTE: "salaried non-exempt" can't be distinguished from unit alone.
+        # Compact out _/-/spaces before matching: the naive `"nonexempt" in flsa`
+        # never matched Finch's "non_exempt" and misclassified it as exempt.
         flsa = (employment.get("flsa_status") or "").lower()
+        flsa_compact = flsa.replace("_", "").replace("-", "").replace(" ", "")
         unit = (income.get("unit") or "").lower()
-        if "nonexempt" in flsa or unit == "hourly":
+        if "nonexempt" in flsa_compact or unit == "hourly":
             pay_classification = "hourly"
-        elif "exempt" in flsa:
+        elif "exempt" in flsa_compact:
             pay_classification = "exempt"
         elif unit in ("yearly", "quarterly", "monthly", "weekly", "biweekly", "semimonthly", "daily", "fixed"):
             pay_classification = "exempt"
@@ -525,6 +596,19 @@ class FinchHRISService:
 # fetch_workers produces (id + individual + employment).
 # ---------------------------------------------------------------------------
 
+_FINCH_MOCK_COMPANY: dict = {
+    "id": "finch-mock-company",
+    "legal_name": "Finch Mock Co",
+    "entity": {"type": "llc", "subtype": None},
+    "ein": None,
+    "locations": [
+        {"line1": "1 Market St", "line2": None, "city": "San Francisco",
+         "state": "CA", "postal_code": "94105", "country": "US"},
+        {"line1": "500 W Temple St", "line2": None, "city": "Los Angeles",
+         "state": "CA", "postal_code": "90012", "country": "US"},
+    ],
+}
+
 _FINCH_MOCK_EMPLOYEES: list[dict] = [
     {
         "id": "finch-mock-001",
@@ -540,7 +624,11 @@ _FINCH_MOCK_EMPLOYEES: list[dict] = [
             "department": {"name": "Engineering"},
             "employment": {"type": "employee", "subtype": "full_time"},
             "income": {"amount": 12000000, "unit": "yearly", "currency": "usd"},
-            "work_location": {"state": "CA", "city": "San Francisco"},
+            "flsa_status": "exempt",
+            # Documented schema key is `location` (was `work_location` — kept
+            # wrong here would mean mock never exercises the real path).
+            "location": {"line1": "1 Market St", "state": "CA", "city": "San Francisco",
+                         "postal_code": "94105", "country": "US"},
             "start_date": "2023-03-01",
             "is_active": True,
         },
@@ -559,7 +647,9 @@ _FINCH_MOCK_EMPLOYEES: list[dict] = [
             "department": {"name": "Field Operations"},
             "employment": {"type": "employee", "subtype": "part_time"},
             "income": {"amount": 2800, "unit": "hourly", "currency": "usd"},
-            "work_location": {"state": "CA", "city": "Los Angeles"},
+            "flsa_status": "non_exempt",
+            "location": {"line1": "500 W Temple St", "state": "CA", "city": "Los Angeles",
+                         "postal_code": "90012", "country": "US"},
             "start_date": "2022-06-15",
             "is_active": True,
         },

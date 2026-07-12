@@ -10,6 +10,7 @@ from uuid import UUID
 
 from ...core.services.secret_crypto import decrypt_secret
 from ...core.services.roster_jurisdictions import run_jurisdiction_drift_check
+from ...core.us_states import US_STATE_CODES
 from ...database import get_connection
 from .hris_service import PROVIDER_HRIS, HRISProvisioningError, get_hris_service
 
@@ -37,6 +38,117 @@ def _parse_date(value: Optional[str]) -> Optional[date]:
         return datetime.strptime(value, "%Y-%m-%d").date()
     except (ValueError, TypeError):
         return None
+
+
+def _normalize_us_state(value: Optional[str]) -> Optional[str]:
+    """USPS 2-letter code, or None for anything that isn't a US jurisdiction.
+
+    Every path that grounds a compliance jurisdiction from HRIS input gates on
+    this: an unvalidated region (a Canadian province "ON", a full state name)
+    would flow into `employees.work_state` and from there into the roster-derived
+    jurisdiction build, minting an ungrounded jurisdiction. See app/core/us_states.py.
+    """
+    code = (value or "").strip().upper()
+    return code if code in US_STATE_CODES else None
+
+
+async def _fetch_company_locations(service, config, secrets, company_id) -> list[dict]:
+    """HRIS company work locations, or [] — best-effort, holds NO DB connection.
+
+    Providers without a locations surface (`fetch_locations` absent — ADP), older
+    Gusto tokens lacking `companies:read`, and a provider outage all degrade to []
+    rather than failing the sync. Called before the import connection is opened so
+    a slow provider never pins a pooled connection (same rule as Phase 2's worker
+    fetch).
+    """
+    fetch = getattr(service, "fetch_locations", None)
+    if fetch is None:
+        return []
+    try:
+        return await fetch(config, secrets) or []
+    except HRISProvisioningError as exc:
+        logger.warning("[HRIS] Location fetch failed for company %s: %s", company_id, exc)
+        return []
+    except Exception:
+        logger.exception("[HRIS] Location fetch errored for company %s", company_id)
+        return []
+
+
+async def _sync_company_locations(conn, company_id, locations) -> int:
+    """Ingest HRIS company work locations into business_locations. Returns #created.
+
+    Goes through `ensure_location_for_employee` — the same helper the employee
+    create/update and roster-build paths use — rather than a raw INSERT, because
+    it is what *grounds* a location: it resolves the county, stamps
+    source/coverage_status, and creates + links the `jurisdiction_id`. A row
+    inserted without that linkage is invisible to the compliance engine
+    (`detect_jurisdiction_drift` only counts `jurisdiction_id IS NOT NULL`
+    locations as covered) yet still counts as "tracked" for
+    `collect_roster_jurisdictions`, so it would suppress the roster build that
+    would otherwise have grounded it — permanently ungrounded, and alerting drift
+    for the very states this ingest just handled.
+
+    Additive: an existing row's name/address/zip are never overwritten. An
+    *inactive* match is reactivated (the helper's step 3) — the HRIS reports it as
+    a live company work location, and leaving it inactive would also leave
+    `_resolve_work_location_id` (which filters `is_active = true`) unable to
+    resolve employees to it.
+
+    Runs before the employee loop so first-sync companies get their establishments
+    (OSHA 300A, wage-hour coverage, per-location compliance) without hand-entering
+    locations.
+    """
+    # Lazy import: compliance_service is a large module that imports widely;
+    # importing it at module load would risk a cycle (same reason
+    # roster_jurisdictions.py defers it).
+    from ...core.services.compliance_service import ensure_location_for_employee
+
+    created = 0
+    for loc in locations:
+        city = (loc.get("city") or "").strip()
+        state = _normalize_us_state(loc.get("state"))
+        zipcode = (loc.get("postal_code") or "").strip()[:10]
+        country = (loc.get("country") or "").strip().upper()
+        # business_locations requires city/state/zipcode and models US
+        # jurisdictions — skip anything incomplete or non-US. Gating on the
+        # canonical USPS set (not len == 2) rejects a foreign region like "ON"
+        # even when the provider omits country.
+        if not city or not zipcode or not state:
+            continue
+        if country not in ("", "US", "USA"):
+            continue
+
+        existing = await conn.fetchval(
+            """SELECT 1 FROM business_locations
+               WHERE company_id = $1 AND LOWER(city) = LOWER($2) AND UPPER(state) = $3
+               LIMIT 1""",
+            company_id, city, state,
+        )
+
+        location_id = await ensure_location_for_employee(
+            conn, company_id, city[:100], state, work_zip=zipcode,
+        )
+        if location_id is None or existing:
+            continue
+
+        # Freshly created: the helper names it "City, ST" with an empty address.
+        # Carry the HRIS label/street through, without touching anything else.
+        address = ", ".join(p for p in (loc.get("line1"), loc.get("line2")) if p)
+        await conn.execute(
+            """UPDATE business_locations
+               SET name = COALESCE(NULLIF($2, ''), name),
+                   address = COALESCE(NULLIF($3, ''), address),
+                   updated_at = NOW()
+               WHERE id = $1""",
+            location_id,
+            (loc.get("name") or "")[:255],
+            address[:500],
+        )
+        created += 1
+
+    if created:
+        logger.info("[HRIS] Created %d business locations from HRIS for company %s", created, company_id)
+    return created
 
 
 async def _resolve_work_location_id(conn, company_id, work_city, work_state):
@@ -290,6 +402,12 @@ async def start_hris_sync(
             "errors": [{"code": exc.code, "message": str(exc)}],
         }
 
+    # Company work locations — fetched here, alongside the workers, so the
+    # provider HTTP call doesn't happen while the Phase 3 connection is held.
+    raw_locations = await _fetch_company_locations(
+        service, config, secrets_decrypted, company_id
+    )
+
     total_records = len(raw_workers)
     created_count = 0
     updated_count = 0
@@ -302,12 +420,26 @@ async def start_hris_sync(
 
     # ── Phase 3: Import workers (new connection) ───────────────────
     async with get_connection() as conn:
+        # 3a. Company locations first, so a first-sync company has establishment
+        # rows for _resolve_work_location_id to match. Never fails the sync.
+        try:
+            await _sync_company_locations(conn, company_id, raw_locations)
+        except Exception:
+            logger.exception("[HRIS] Location ingest failed for company %s — continuing sync", company_id)
+
         for raw_worker in raw_workers:
             try:
                 normalized = service.normalize_worker(raw_worker)
             except Exception as exc:
                 error_count += 1
-                oid = raw_worker.get("associateOID", "unknown")
+                # Provider-specific id keys: Finch merged records use `id`,
+                # Gusto `uuid`, ADP `associateOID`.
+                oid = (
+                    raw_worker.get("id")
+                    or raw_worker.get("uuid")
+                    or raw_worker.get("associateOID")
+                    or "unknown"
+                )
                 errors.append({"hris_id": oid, "error": f"Normalization failed: {exc}"})
                 logger.warning("[HRIS] Failed to normalize worker %s: %s", oid, exc)
                 continue
@@ -482,9 +614,17 @@ async def _sync_single_employee(
             email,
         )
 
+    # Gate the feed's work_state on the canonical USPS set, exactly like the CSV /
+    # manual-create path (routes/employees/_shared.py). An ungated region — a
+    # Canadian province "ON", a full state name — reaches the roster-derived
+    # jurisdiction build (collect_roster_jurisdictions → ensure_location_for_employee)
+    # and mints an ungrounded compliance jurisdiction. Unrecognized → None, which
+    # the COALESCE below treats as "no new fact" rather than clobbering a good value.
+    work_state = _normalize_us_state(normalized.get("work_state"))
+
     # Map the HRIS work city/state to an establishment FK (None unless unambiguous).
     resolved_location_id = await _resolve_work_location_id(
-        conn, company_id, normalized.get("work_city"), normalized.get("work_state"),
+        conn, company_id, normalized.get("work_city"), work_state,
     )
 
     if existing:
@@ -523,7 +663,7 @@ async def _sync_single_employee(
             normalized.get("job_title"),
             normalized.get("department"),
             normalized.get("employment_type"),
-            normalized.get("work_state"),
+            work_state,
             normalized.get("phone"),
             normalized.get("hris_id"),
             normalized.get("employment_status"),
@@ -553,7 +693,7 @@ async def _sync_single_employee(
             normalized.get("personal_email"),
             normalized.get("first_name"),
             normalized.get("last_name"),
-            normalized.get("work_state"),
+            work_state,
             normalized.get("employment_type"),
             start_date,
             normalized.get("phone"),
@@ -578,8 +718,7 @@ async def _sync_single_employee(
 
     # Assign credential requirements based on role + jurisdiction (skip if already assigned)
     job_title = normalized.get("job_title")
-    work_state = normalized.get("work_state")
-    work_city = normalized.get("work_city")
+    work_city = normalized.get("work_city")  # work_state: the USPS-gated value from above
     if job_title:
         has_reqs = await conn.fetchval(
             "SELECT COUNT(*) FROM employee_credential_requirements WHERE employee_id = $1",
