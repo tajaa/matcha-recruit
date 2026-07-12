@@ -128,24 +128,16 @@ export function NewSessionModal({ prefill, onClose, onCreated }: NewSessionModal
           </p>
         )}
 
-        {/* Starter mode picker */}
+        {/* Starter mode picker — "Open analysis" is a synthetic blank entry so
+            both it and the catalog modes render from one card block. */}
         <label className="block text-xs text-zinc-400 mb-1">Start from a mode</label>
         <div className="mb-3 space-y-1">
-          <button
-            type="button"
-            onClick={() => setTemplateKey('')}
-            className={`block w-full rounded-md border px-3 py-2 text-left transition-colors ${
-              templateKey === ''
-                ? 'border-emerald-600/60 bg-emerald-600/10'
-                : 'border-zinc-700 hover:border-zinc-600'
-            }`}
-          >
-            <div className="text-sm text-zinc-100">Open analysis</div>
-            <div className="text-[11px] text-zinc-500">Blank session — ask anything about the client's records.</div>
-          </button>
-          {templates.map((t) => (
+          {[
+            { key: '', label: 'Open analysis', description: "Blank session — ask anything about the client's records." },
+            ...templates,
+          ].map((t) => (
             <button
-              key={t.key}
+              key={t.key || 'open'}
               type="button"
               onClick={() => setTemplateKey(t.key)}
               className={`block w-full rounded-md border px-3 py-2 text-left transition-colors ${

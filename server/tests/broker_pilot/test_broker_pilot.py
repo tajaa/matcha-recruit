@@ -267,9 +267,16 @@ def test_get_template_and_validity():
     assert "focus" not in tmpl                       # public shape only
     assert bp.get_template("nope") is None
     assert bp.get_template(None) is None
-    assert bp.is_valid_template(known) is True
-    assert bp.is_valid_template("nope") is False
-    assert bp.is_valid_template(None) is False
+    assert bp.get_template("") is None               # blank → open analysis
+
+
+def test_get_template_starters_are_copies():
+    # the public projection must not alias the module catalog's list
+    known = bp.PILOT_TEMPLATES[0]["key"]
+    a = bp.get_template(known)
+    a["starters"].append("mutation")
+    b = bp.get_template(known)
+    assert "mutation" not in b["starters"]
 
 
 def test_mode_focus_lookup():

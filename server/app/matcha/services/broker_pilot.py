@@ -86,7 +86,7 @@ PILOT_TEMPLATES: tuple[dict, ...] = (
                        "requirements against the coverage they carry.",
         "title": "Contract review",
         "focus": (
-            "SESSION MODE — Client contract review. Center the analysis on the "
+            "Center the analysis on the "
             "client's contractual risk transfer: the extracted indemnity clauses "
             "(`clause:` records) and the coverage lines the client carries "
             "(`platform:limits.*`). Assess whether carried limits meet each "
@@ -110,7 +110,7 @@ PILOT_TEMPLATES: tuple[dict, ...] = (
                        "since the policy bound.",
         "title": "Mid-year check-in",
         "focus": (
-            "SESSION MODE — Mid-year check-in. This is a mid-term account review. "
+            "This is a mid-term account review. "
             "Center on what has CHANGED since the policy bound: recent loss "
             "development (`platform:lossdev.*`), open vs. closed claims, new "
             "safety or employee-relations activity (`incident:` / `er_case:` "
@@ -131,7 +131,7 @@ PILOT_TEMPLATES: tuple[dict, ...] = (
                        "completeness, and likely underwriter questions.",
         "title": "90-day renewal check-in",
         "focus": (
-            "SESSION MODE — 90 days before renewal. Renewal is roughly 90 days "
+            "Renewal is roughly 90 days "
             "out. Center on renewal readiness: reserve and loss development with "
             "projected ultimates (`platform:lossdev.*`), submission-data "
             "completeness (`platform:readiness`), the controls story "
@@ -153,7 +153,7 @@ PILOT_TEMPLATES: tuple[dict, ...] = (
                        "documents and data on file.",
         "title": "New business appetite read",
         "focus": (
-            "SESSION MODE — New business appetite read. This is a new-business / "
+            "This is a new-business / "
             "prospect evaluation. Center on how a carrier would view the account: "
             "the risk profile from available data (industry, headcount, venue, "
             "property), what the uploaded documents (loss runs, current dec "
@@ -174,7 +174,7 @@ PILOT_TEMPLATES: tuple[dict, ...] = (
                        "severity, development, and large claims.",
         "title": "Loss-run deep dive",
         "focus": (
-            "SESSION MODE — Loss-run deep dive. Center the analysis on the "
+            "Center the analysis on the "
             "uploaded loss-run documents (`doc:` / `docfig:`) alongside the "
             "platform loss development on file (`platform:lossdev.*`). Break down "
             "frequency, severity, paid vs. reserved, open claims, and any large "
@@ -195,7 +195,7 @@ PILOT_TEMPLATES: tuple[dict, ...] = (
                        "the loss history.",
         "title": "Quote comparison",
         "focus": (
-            "SESSION MODE — Quote comparison. The broker is comparing carrier "
+            "The broker is comparing carrier "
             "quotes. Center on the uploaded quote documents (`doc:` / `docfig:`): "
             "premium, limits, retentions, and — critically — the coverage "
             "differences, sublimits, and exclusions between them. Test whether "
@@ -213,29 +213,48 @@ PILOT_TEMPLATES: tuple[dict, ...] = (
 )
 
 _TEMPLATE_BY_KEY: dict[str, dict] = {t["key"]: t for t in PILOT_TEMPLATES}
-_TEMPLATE_PUBLIC_FIELDS = ("key", "label", "description", "title", "starters")
+
+
+def _lookup_template(key: str | None) -> dict | None:
+    """Single resolution point for a stored template_key. None for a blank key
+    (open analysis / legacy rows); a truthy key that no longer resolves is a
+    stranded session (catalog edit while sessions persist) — warn so it's
+    observable rather than silently un-moded."""
+    if not key:
+        return None
+    t = _TEMPLATE_BY_KEY.get(key)
+    if t is None:
+        logger.warning("broker_pilot: session references unknown template_key %r", key)
+    return t
+
+
+def _public_template(t: dict) -> dict:
+    """Public projection (drops the internal `focus`). Copies `starters` so a
+    caller mutating the returned list can't corrupt the module catalog."""
+    return {
+        "key": t["key"], "label": t["label"], "description": t["description"],
+        "title": t["title"], "starters": list(t["starters"]),
+    }
 
 
 def template_catalog() -> list[dict]:
     """Public catalog for the frontend picker (omits the internal `focus`
     directive). Order is the catalog's declared order."""
-    return [{k: t[k] for k in _TEMPLATE_PUBLIC_FIELDS} for t in PILOT_TEMPLATES]
+    return [_public_template(t) for t in PILOT_TEMPLATES]
 
 
 def get_template(key: str | None) -> dict | None:
     """Public template shape (no `focus`) for a stored key, or None."""
-    t = _TEMPLATE_BY_KEY.get(key) if key else None
-    return {k: t[k] for k in _TEMPLATE_PUBLIC_FIELDS} if t else None
-
-
-def is_valid_template(key: str | None) -> bool:
-    return bool(key) and key in _TEMPLATE_BY_KEY
+    t = _lookup_template(key)
+    return _public_template(t) if t else None
 
 
 def _mode_focus(key: str | None) -> str:
-    """The per-mode system-prompt fragment for a stored key, or "" (no mode)."""
-    t = _TEMPLATE_BY_KEY.get(key) if key else None
-    return t["focus"] if t else ""
+    """The per-mode system-prompt directive for a stored key, or "" (no mode).
+    The `SESSION MODE — <label>.` header is composed here so it can never drift
+    from the template's own `label`."""
+    t = _lookup_template(key)
+    return f"SESSION MODE — {t['label']}. {t['focus']}" if t else ""
 
 
 _client = None
@@ -1049,7 +1068,7 @@ def _memo_html(session: dict, subject_name: str, corpus: dict, memo: dict,
 
     kind_label = "On-platform Matcha client" if session.get("subject_kind") == "company" \
         else "Off-platform client (broker-recorded data)"
-    mode = _TEMPLATE_BY_KEY.get(session.get("template_key"))
+    mode = _lookup_template(session.get("template_key"))
     mode_cell = (f"<div><div class='l'>Mode</div><div class='v'>{_esc(mode['label'])}</div></div>"
                  if mode else "")
     generated = datetime.now(timezone.utc).strftime("%B %d, %Y · %H:%M UTC")

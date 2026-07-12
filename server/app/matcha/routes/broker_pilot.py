@@ -220,9 +220,12 @@ async def list_templates(current_user=Depends(require_broker_pro)):
 @router.post("/pilot/sessions")
 async def create_session(body: SessionCreate, request: Request,
                          current_user=Depends(require_broker_pro)):
-    if body.template_key is not None and not bp.is_valid_template(body.template_key):
+    # An unselected picker naturally serializes template_key as "" — normalize
+    # blank to None (open analysis); only a genuinely unknown key is a 400.
+    template_key = (body.template_key or "").strip() or None
+    tmpl = bp.get_template(template_key)
+    if template_key is not None and tmpl is None:
         raise HTTPException(status_code=400, detail="Unknown template")
-    tmpl = bp.get_template(body.template_key)
     async with get_connection() as conn:
         broker_id = await _broker_id(conn, current_user.id)
         subject_name = await _assert_subject(conn, current_user.id, broker_id,
@@ -237,12 +240,12 @@ async def create_session(body: SessionCreate, request: Request,
             """INSERT INTO broker_pilot_sessions
                    (broker_id, subject_kind, subject_id, title, template_key, created_by)
                VALUES ($1, $2, $3, $4, $5, $6) RETURNING *""",
-            broker_id, body.subject_kind, body.subject_id, title, body.template_key,
+            broker_id, body.subject_kind, body.subject_id, title, template_key,
             getattr(current_user, "id", None),
         )
         await _audit(conn, row["id"], current_user, request, "create",
                      {"title": title, "subject_kind": body.subject_kind,
-                      "template_key": body.template_key})
+                      "template_key": template_key})
     return {**dict(row), "subject_name": subject_name, "template": tmpl}
 
 
@@ -318,7 +321,9 @@ async def update_session(session_id: str, body: SessionUpdate, request: Request,
             raise HTTPException(status_code=404, detail="Session not found")
         await _audit(conn, session_id, current_user, request, "update",
                      {"fields": list(fields.keys())})
-    return dict(row)
+    # Carry the resolved mode so a caller that adopts this PATCH response as the
+    # session state can't silently drop the mode (get_session attaches it too).
+    return {**dict(row), "template": bp.get_template(row.get("template_key"))}
 
 
 # --------------------------------------------------------------------------- #
