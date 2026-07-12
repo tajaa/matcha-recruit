@@ -15,7 +15,7 @@ reminder_sent_at is stamped by the ir_deadline_alerts worker (migration irdl01)
 so a due-date nudge fires at most once per day per action.
 
 Revision ID: ircapa01
-Revises: oshacase0001
+Revises: do01
 Create Date: 2026-07-11
 """
 
@@ -23,7 +23,11 @@ from alembic import op
 
 
 revision = "ircapa01"
-down_revision = "oshacase0001"
+# Chains off do01, the head this branch merged into. It was authored against
+# oshacase0001 (a head at the time the branch was cut); leaving it there left
+# the merged tree with two heads (do01 + ita01), which breaks
+# `alembic upgrade head` in migrate-dev.sh / migrate-prod.sh.
+down_revision = "do01"
 branch_labels = None
 depends_on = None
 
