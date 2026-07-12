@@ -40,6 +40,16 @@ export type PilotDocument = {
   created_at: string
 }
 
+// A starter "mode" — public catalog shape (the server keeps the prompt `focus`
+// to itself). `template` on a session is this shape or null (open analysis).
+export type PilotTemplate = {
+  key: string
+  label: string
+  description: string
+  title: string
+  starters: string[]
+}
+
 export type EvidenceMapItem = { point: string; cited_ids: string[] }
 export type MessageMeta = {
   evidence_map?: EvidenceMapItem[]
@@ -69,6 +79,8 @@ export type PilotSession = {
   subject_id: string
   subject_name?: string | null
   title: string
+  template_key?: string | null
+  template?: PilotTemplate | null
   status: SessionStatus
   created_at: string
   updated_at: string
@@ -93,8 +105,13 @@ export const listPilotSessions = (filter?: { subject_kind: SubjectKind; subject_
   const qs = filter ? `?subject_kind=${filter.subject_kind}&subject_id=${filter.subject_id}` : ''
   return api.get<PilotSession[]>(`/broker/pilot/sessions${qs}`)
 }
-export const createPilotSession = (body: { subject_kind: SubjectKind; subject_id: string; title: string }) =>
-  api.post<PilotSession>('/broker/pilot/sessions', body)
+export const listPilotTemplates = () => api.get<PilotTemplate[]>('/broker/pilot/templates')
+export const createPilotSession = (body: {
+  subject_kind: SubjectKind
+  subject_id: string
+  title?: string
+  template_key?: string
+}) => api.post<PilotSession>('/broker/pilot/sessions', body)
 export const getPilotSession = (id: string) => api.get<PilotSession>(`/broker/pilot/sessions/${id}`)
 export const updatePilotSession = (id: string, body: { title?: string; status?: SessionStatus }) =>
   api.patch<PilotSession>(`/broker/pilot/sessions/${id}`, body)

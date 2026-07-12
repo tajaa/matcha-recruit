@@ -50,7 +50,11 @@ _ALLOWED_EXTENSIONS = (".pdf", ".docx", ".txt", ".csv")
 class SessionCreate(BaseModel):
     subject_kind: Literal["company", "external"]
     subject_id: UUID
-    title: str = Field(..., min_length=1, max_length=300)
+    # Optional: a starter template ("mode") that seeds the title + steers every
+    # turn. When title is blank, it's derived from the template (or the client
+    # name). Validated against bp.PILOT_TEMPLATES in create_session.
+    template_key: Optional[str] = Field(None, max_length=40)
+    title: Optional[str] = Field(None, min_length=1, max_length=300)
 
 
 class SessionUpdate(BaseModel):
@@ -203,26 +207,46 @@ async def _read_upload(file: UploadFile) -> tuple[bytes, str, bool]:
 
 
 # --------------------------------------------------------------------------- #
-# Sessions
+# Starter templates ("modes") + Sessions
 # --------------------------------------------------------------------------- #
+
+@router.get("/pilot/templates")
+async def list_templates(current_user=Depends(require_broker_pro)):
+    """Static catalog of starter modes for the new-session picker. Public
+    fields only (the per-mode system-prompt `focus` stays server-side)."""
+    return bp.template_catalog()
+
 
 @router.post("/pilot/sessions")
 async def create_session(body: SessionCreate, request: Request,
                          current_user=Depends(require_broker_pro)):
+    # An unselected picker naturally serializes template_key as "" — normalize
+    # blank to None (open analysis); only a genuinely unknown key is a 400.
+    template_key = (body.template_key or "").strip() or None
+    tmpl = bp.get_template(template_key)
+    if template_key is not None and tmpl is None:
+        raise HTTPException(status_code=400, detail="Unknown template")
     async with get_connection() as conn:
         broker_id = await _broker_id(conn, current_user.id)
         subject_name = await _assert_subject(conn, current_user.id, broker_id,
                                              body.subject_kind, body.subject_id)
+        # Derive the title when blank: the mode's title scoped to the client,
+        # else the generic "<client> — analysis".
+        title = (body.title or "").strip()
+        if not title:
+            title = (f"{tmpl['title']} — {subject_name}" if tmpl
+                     else f"{subject_name} — analysis")[:300]
         row = await conn.fetchrow(
             """INSERT INTO broker_pilot_sessions
-                   (broker_id, subject_kind, subject_id, title, created_by)
-               VALUES ($1, $2, $3, $4, $5) RETURNING *""",
-            broker_id, body.subject_kind, body.subject_id, body.title,
+                   (broker_id, subject_kind, subject_id, title, template_key, created_by)
+               VALUES ($1, $2, $3, $4, $5, $6) RETURNING *""",
+            broker_id, body.subject_kind, body.subject_id, title, template_key,
             getattr(current_user, "id", None),
         )
         await _audit(conn, row["id"], current_user, request, "create",
-                     {"title": body.title, "subject_kind": body.subject_kind})
-    return {**dict(row), "subject_name": subject_name}
+                     {"title": title, "subject_kind": body.subject_kind,
+                      "template_key": template_key})
+    return {**dict(row), "subject_name": subject_name, "template": tmpl}
 
 
 @router.get("/pilot/sessions")
@@ -258,6 +282,9 @@ async def get_session(session_id: str, current_user=Depends(require_broker_pro))
         subject_name = await _assert_subject(conn, current_user.id, broker_id,
                                              session["subject_kind"], session["subject_id"])
         session["subject_name"] = subject_name
+        # Mode metadata so the console renders the session's tailored starters
+        # without a second fetch (None for legacy / open-analysis sessions).
+        session["template"] = bp.get_template(session.get("template_key"))
         session["messages"] = await _load_messages(conn, session_id)
         session["documents"] = [_doc_out(d) for d in await _load_docs(conn, session_id)]
         packets = await conn.fetch(
@@ -294,7 +321,9 @@ async def update_session(session_id: str, body: SessionUpdate, request: Request,
             raise HTTPException(status_code=404, detail="Session not found")
         await _audit(conn, session_id, current_user, request, "update",
                      {"fields": list(fields.keys())})
-    return dict(row)
+    # Carry the resolved mode so a caller that adopts this PATCH response as the
+    # session state can't silently drop the mode (get_session attaches it too).
+    return {**dict(row), "template": bp.get_template(row.get("template_key"))}
 
 
 # --------------------------------------------------------------------------- #

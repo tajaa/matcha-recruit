@@ -4,7 +4,7 @@ import {
   FileSignature, FileText, Gauge, Gavel, GraduationCap, Handshake, HardHat, Hash, MapPin,
   Scale, ShieldCheck, Siren, TrendingUp, Users, Warehouse,
 } from 'lucide-react'
-import type { ContextPreview, CorpusRecord, DocStatus, DocType } from '../../../api/brokerPilot'
+import type { ContextPreview, CorpusRecord, DocStatus, DocType, PilotSession } from '../../../api/brokerPilot'
 
 /** Label voice — docket micro-caption, shared with the platform primitives. */
 export { LABEL } from '../../../components/ui'
@@ -132,6 +132,8 @@ export function fmtWhen(iso: string | null | undefined): string {
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString()
 }
 
+/** Default starters for an open-ended session (no mode) + the fallback when a
+ *  moded session's template metadata hasn't loaded yet. */
 export const STARTERS = [
   'Give me an underwriting read on the WC reserve development and biggest EPL and catastrophe exposures.',
   'Summarize what the uploaded documents show and how it squares with the platform data on file.',
@@ -139,6 +141,13 @@ export const STARTERS = [
   'Which contract indemnity clauses put this client at risk, and do their limits meet what the contracts require?',
   'Where is the data thin or low-confidence, and what will an underwriter ask for next?',
 ]
+
+/** Mode-tailored starters for a session, falling back to the defaults. Mirrors
+ *  Legal Pilot's `startersFor(matter_type)`. */
+export function startersFor(session: PilotSession | null): string[] {
+  const s = session?.template?.starters
+  return s && s.length ? s : STARTERS
+}
 
 export const DISCLAIMER =
   'Analysis is grounded only in the uploaded documents and platform records on file. Verify all figures against actual policy forms before relying on them.'

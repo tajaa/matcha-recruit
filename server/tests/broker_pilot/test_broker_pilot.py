@@ -245,6 +245,70 @@ def test_corpus_text_empty():
 
 # --- memo helpers -------------------------------------------------------------
 
+# --- starter templates ("modes") ---------------------------------------------
+
+def test_template_catalog_shape_and_unique_keys():
+    cat = bp.template_catalog()
+    assert cat, "catalog must not be empty"
+    keys = [t["key"] for t in cat]
+    assert len(keys) == len(set(keys)), "template keys must be unique"
+    for t in cat:
+        for field in ("key", "label", "description", "title"):
+            assert isinstance(t[field], str) and t[field].strip(), f"{t.get('key')}.{field} empty"
+        assert t["starters"] and all(isinstance(s, str) and s.strip() for s in t["starters"])
+        # the public catalog never leaks the internal system-prompt directive
+        assert "focus" not in t
+
+
+def test_get_template_and_validity():
+    known = bp.PILOT_TEMPLATES[0]["key"]
+    tmpl = bp.get_template(known)
+    assert tmpl is not None and tmpl["key"] == known
+    assert "focus" not in tmpl                       # public shape only
+    assert bp.get_template("nope") is None
+    assert bp.get_template(None) is None
+    assert bp.get_template("") is None               # blank → open analysis
+
+
+def test_get_template_starters_are_copies():
+    # the public projection must not alias the module catalog's list
+    known = bp.PILOT_TEMPLATES[0]["key"]
+    a = bp.get_template(known)
+    a["starters"].append("mutation")
+    b = bp.get_template(known)
+    assert "mutation" not in b["starters"]
+
+
+def test_mode_focus_lookup():
+    known = bp.PILOT_TEMPLATES[0]["key"]
+    focus = bp._mode_focus(known)
+    assert "SESSION MODE" in focus
+    assert bp._mode_focus("nope") == ""
+    assert bp._mode_focus(None) == ""
+
+
+def test_build_prompt_injects_mode_focus_only_when_set():
+    corpus = bp.build_corpus("X", {}, [])
+    known = bp.PILOT_TEMPLATES[0]
+    moded = {"title": "T", "subject_kind": "company", "template_key": known["key"]}
+    open_ = {"title": "T", "subject_kind": "company"}
+    p_moded = bp._build_prompt(moded, "Acme", [], corpus, [], "hi")
+    p_open = bp._build_prompt(open_, "Acme", [], corpus, [], "hi")
+    assert known["focus"] in p_moded
+    assert "SESSION MODE" in p_moded
+    assert "SESSION MODE" not in p_open
+
+
+def test_memo_html_shows_mode_label():
+    corpus = bp.build_corpus("Hillcrest", _CTX, _docs())
+    memo = {"assistant_text": "x", "evidence_map": [], "open_questions": []}
+    known = bp.PILOT_TEMPLATES[0]
+    session = {"title": "Contract review — Hillcrest", "subject_kind": "company",
+               "template_key": known["key"]}
+    html = bp._memo_html(session, "Hillcrest Senior Living", corpus, memo, _docs())
+    assert known["label"] in html
+
+
 def test_memo_html_renders_without_error():
     corpus = bp.build_corpus("Hillcrest", _CTX, _docs())
     memo = {
