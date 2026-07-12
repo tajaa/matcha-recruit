@@ -136,6 +136,55 @@ SEED_CLASSIFICATIONS: Dict[str, Dict[str, Any]] = {
 }
 
 
+# ── Federal labor baseline (us-labor-baseline index) ──────────────────────────
+# Derived from the master-list so the authority item, the classification key, and
+# the obligation the baseline eval scores cannot drift apart — one citation, one
+# key, one row (the anti-polymorphy contract). Keys already exist in RKD via the
+# baseline01 migration, so validate_proposal keeps them.
+#
+# A federal obligation applies to every employer UNLESS the statute sets a
+# headcount floor; those become `conditional` on employee_count, exactly like FMLA.
+_BASELINE_HEADCOUNT: Dict[str, int] = {
+    "protected_classes": 15,             # Title VII
+    "reasonable_accommodation": 15,      # ADA Title I
+    "pregnancy_accommodation": 15,       # PWFA
+    "genetic_information_gina": 15,      # GINA
+    "harassment_prevention_training": 15,
+    "age_discrimination_adea": 20,       # ADEA
+    "cobra_continuation": 20,            # COBRA
+    "federal_warn_notice": 100,          # WARN
+    "eeo1_report": 100,                  # EEO-1
+}
+
+
+def _headcount_condition(n: int) -> Dict[str, Any]:
+    return {"type": "attribute", "key": "employee_count", "operator": "gte", "value": n}
+
+
+def _add_baseline_seeds() -> None:
+    from app.core.services.compliance_evals.baseline_masterlist import (
+        FEDERAL_LABOR_MASTERLIST,
+    )
+
+    from .curated_us import ALREADY_INGESTED
+
+    for e in FEDERAL_LABOR_MASTERLIST:
+        # An existing hand-written seed wins (e.g. 29 U.S.C. § 206/207/213), and the
+        # already-ingested parts are classified through their own index's items.
+        if e.citation in SEED_CLASSIFICATIONS or e.citation in ALREADY_INGESTED:
+            continue
+        n = _BASELINE_HEADCOUNT.get(e.key)
+        SEED_CLASSIFICATIONS[e.citation] = (
+            _conditional(_headcount_condition(n), regulation_key=e.key,
+                         category_slug=e.category)
+            if n else
+            _universal(category_slug=e.category, regulation_key=e.key)
+        )
+
+
+_add_baseline_seeds()
+
+
 async def apply_seed(conn) -> Dict[str, Any]:
     """Apply the seed to whatever ingested items exist. Idempotent.
 

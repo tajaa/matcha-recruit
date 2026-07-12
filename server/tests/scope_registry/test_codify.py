@@ -92,12 +92,14 @@ def test_build_research_context_targets_the_keys():
     assert "meal_break" in ctx and "Lab 512" in ctx and "not yet codified" in ctx
 
 
-def _cls(id, key, kd=None):
-    return {"id": id, "regulation_key": key, "key_definition_id": kd}
+def _cls(id, key, kd=None, authority_state=None):
+    return {"id": id, "regulation_key": key, "key_definition_id": kd,
+            "authority_state": authority_state}
 
 
-def _req(id, key, jur="J", category="minimum_wage"):
-    return {"id": id, "regulation_key": key, "jurisdiction_id": jur, "category": category}
+def _req(id, key, jur="J", category="minimum_wage", requirement_state=None):
+    return {"id": id, "regulation_key": key, "jurisdiction_id": jur, "category": category,
+            "requirement_state": requirement_state}
 
 
 def test_match_by_key_equality():
@@ -138,6 +140,35 @@ def test_category_guard_via_rkd():
         rkd_category_by_id={"kd_mw": "minimum_wage"},
     )
     assert {l["jurisdiction_requirement_id"] for l in links} == {"r_mw"}
+
+
+def test_state_authority_never_codifies_another_jurisdiction():
+    # A registry-wide reconcile applies no SQL jurisdiction filter, so the matcher
+    # itself must refuse to bind CA authority (Cal. Lab. Code § 510) to the FEDERAL
+    # daily_weekly_overtime row — an obligation must not claim authority from a
+    # jurisdiction that doesn't govern it. This bound 322 bogus pairs before the guard.
+    links = match_codifications(
+        [_cls("c_ca", "daily_weekly_overtime", authority_state="CA")],
+        [
+            _req("r_fed", "daily_weekly_overtime", requirement_state="US"),
+            _req("r_ny", "daily_weekly_overtime", requirement_state="NY"),
+            _req("r_ca", "daily_weekly_overtime", requirement_state="CA"),
+        ],
+    )
+    assert {l["jurisdiction_requirement_id"] for l in links} == {"r_ca"}
+
+
+def test_federal_authority_still_binds_every_jurisdiction():
+    # A federal/global index has NULL authority_state — federal law applies
+    # everywhere, so it keeps binding each jurisdiction's row for that key.
+    links = match_codifications(
+        [_cls("c_fed", "daily_weekly_overtime", authority_state=None)],
+        [
+            _req("r_fed", "daily_weekly_overtime", requirement_state="US"),
+            _req("r_ca", "daily_weekly_overtime", requirement_state="CA"),
+        ],
+    )
+    assert {l["jurisdiction_requirement_id"] for l in links} == {"r_fed", "r_ca"}
 
 
 def test_no_key_definition_id_matches_all_categories():

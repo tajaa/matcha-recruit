@@ -96,6 +96,16 @@ CURATED_INDEXES: List[CuratedIndexSpec] = [
         level="federal",
         domain_categories=["all_industry"],
     ),
+    # The federal labor baseline's statutes — Title VII, ADA, ADEA, WARN, I-9,
+    # COBRA, ERISA, NLRA, USERRA, FCRA, EEO-1, garnishment. None are in eCFR's
+    # structure API, so they're curated (derived from baseline_masterlist).
+    CuratedIndexSpec(
+        slug="us-labor-baseline",
+        name="US Federal Labor Baseline — general-employer statutes (curated)",
+        jurisdiction={},
+        level="federal",
+        domain_categories=["all_industry"],
+    ),
     CuratedIndexSpec(
         slug="ca-labor-code",
         name="California Labor Code — core wage-hour spine + AB 701 (selected)",
