@@ -4,6 +4,7 @@ import type {
   MWThread,
   MWThreadDetail,
   MWCreateResponse,
+  MWModeKey,
   MWSendResponse,
   MWStreamEvent,
   ResearchTask,
@@ -36,16 +37,9 @@ export function pinThread(id: string, is_pinned = true) {
   return api.post<MWThread>(`/matcha-work/threads/${id}/pin`, { is_pinned })
 }
 
-export function setNodeMode(id: string, node_mode: boolean) {
-  return api.post<MWThread>(`/matcha-work/threads/${id}/node-mode`, { node_mode })
-}
-
-export function setComplianceMode(id: string, compliance_mode: boolean) {
-  return api.post<MWThread>(`/matcha-work/threads/${id}/compliance-mode`, { compliance_mode })
-}
-
-export function setPayerMode(id: string, payer_mode: boolean) {
-  return api.post<MWThread>(`/matcha-work/threads/${id}/payer-mode`, { payer_mode })
+// Registry-driven mode toggle — key must be a backend THREAD_MODES key.
+export function setThreadMode(id: string, mode: MWModeKey, enabled: boolean) {
+  return api.post<MWThread>(`/matcha-work/threads/${id}/modes/${mode}`, { enabled })
 }
 
 export function archiveThread(id: string) {

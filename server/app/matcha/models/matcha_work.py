@@ -303,6 +303,10 @@ class CreateThreadResponse(BaseModel):
     node_mode: bool = False
     compliance_mode: bool = False
     payer_mode: bool = False
+    benefits_mode: bool = False
+    legal_mode: bool = False
+    risk_mode: bool = False
+    training_mode: bool = False
     created_at: datetime
     assistant_reply: Optional[str] = None
     pdf_url: Optional[str] = None
@@ -395,6 +399,10 @@ class ThreadListItem(BaseModel):
     node_mode: bool = False
     compliance_mode: bool = False
     payer_mode: bool = False
+    benefits_mode: bool = False
+    legal_mode: bool = False
+    risk_mode: bool = False
+    training_mode: bool = False
     collaborator_count: int = 0
     created_at: datetime
     updated_at: datetime
@@ -423,6 +431,10 @@ class ThreadDetailResponse(BaseModel):
     node_mode: bool = False
     compliance_mode: bool = False
     payer_mode: bool = False
+    benefits_mode: bool = False
+    legal_mode: bool = False
+    risk_mode: bool = False
+    training_mode: bool = False
     linked_offer_letter_id: Optional[UUID] = None
     created_at: datetime
     updated_at: datetime
@@ -464,6 +476,11 @@ class UpdateTitleRequest(BaseModel):
 
 class PinThreadRequest(BaseModel):
     is_pinned: bool = True
+
+
+class ThreadModeRequest(BaseModel):
+    """Body for the registry-driven POST /threads/{id}/modes/{mode_key}."""
+    enabled: bool = True
 
 
 class NodeModeRequest(BaseModel):

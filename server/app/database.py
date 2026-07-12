@@ -5045,6 +5045,13 @@ async def init_db():
                 END IF;
             END $$;
         """)
+        # Registry thread modes (matcha_work_modes.THREAD_MODES) — migration mwmodes01
+        await conn.execute("""
+            ALTER TABLE mw_threads ADD COLUMN IF NOT EXISTS benefits_mode BOOLEAN NOT NULL DEFAULT false;
+            ALTER TABLE mw_threads ADD COLUMN IF NOT EXISTS legal_mode BOOLEAN NOT NULL DEFAULT false;
+            ALTER TABLE mw_threads ADD COLUMN IF NOT EXISTS risk_mode BOOLEAN NOT NULL DEFAULT false;
+            ALTER TABLE mw_threads ADD COLUMN IF NOT EXISTS training_mode BOOLEAN NOT NULL DEFAULT false;
+        """)
         await conn.execute("""
             DO $$
             DECLARE

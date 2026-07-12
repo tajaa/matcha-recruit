@@ -21,9 +21,9 @@ Backend routes for Matcha Work (collaborative AI workspace — projects, threads
 | `collaboration.py` | Discussion channel, project collaborators, invites, admin-user search, thread collaborators | 13 |
 | `recruiting.py` | Recruiting-client CRUD, project chats, job posting, candidate shortlist/dismiss/reject, resume upload/analyze, interviews | 19 |
 | `tutor.py` | Language tutor voice sessions (Gemini Live) + EN/ES/FR utterance-check prompts | 3 |
-| `messaging.py` | The core AI-turn surface: `send_message_stream` (the biggest handler; its non-streaming twin was deleted 2026-07-09 — quota-bypass/wrong-tenant/crash-after-billing drift, zero callers) + RAG-context/compliance-gap-detection/thread-file-attachment-meta helpers | 1 |
-| `threads.py` | Remainder: create/logo/handbook-upload, list/get, versions/revert/finalize/save-draft, PDF/proxy, archive/unarchive, review-requests + signatures + presentation, title/pin/node-mode/compliance-mode/payer-mode (**owns `public_router`** for public review routes) | 24 + 2 public |
-| **Total** | | **203 routes** |
+| `messaging.py` | The core AI-turn surface: `send_message_stream` (the biggest handler; its non-streaming twin was deleted 2026-07-09 — quota-bypass/wrong-tenant/crash-after-billing drift, zero callers) + RAG-context/compliance-gap-detection/thread-file-attachment-meta helpers. Mode dispatch is registry-driven: a generic loop over `services/matcha_work_modes.THREAD_MODES` injects each active mode's context (node, benefits, legal, risk, training); compliance + payer are `custom_dispatch=True` and keep bespoke blocks (reasoning-chain statuses + conditional RAG; payer prompt-swap path) | 1 |
+| `threads.py` | Remainder: create/logo/handbook-upload, list/get, versions/revert/finalize/save-draft, PDF/proxy, archive/unarchive, review-requests + signatures + presentation, title/pin, mode toggles — the registry-driven `POST /threads/{id}/modes/{mode_key}` + 3 legacy aliases (`/node-mode`, `/compliance-mode`, `/payer-mode`) (**owns `public_router`** for public review routes) | 25 + 2 public |
+| **Total** | | **204 routes** |
 
 ## Three routers
 

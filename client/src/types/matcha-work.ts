@@ -320,6 +320,17 @@ export interface PresentationState {
   generated_at: string | null
 }
 
+// Grounding-mode keys — mirrors the backend registry
+// (server/app/matcha/services/matcha_work_modes.py THREAD_MODES).
+export type MWModeKey =
+  | 'node'
+  | 'compliance'
+  | 'payer'
+  | 'benefits'
+  | 'legal'
+  | 'risk'
+  | 'training'
+
 export interface MWThread {
   id: string
   title: string
@@ -329,6 +340,10 @@ export interface MWThread {
   node_mode: boolean
   compliance_mode: boolean
   payer_mode: boolean
+  benefits_mode: boolean
+  legal_mode: boolean
+  risk_mode: boolean
+  training_mode: boolean
   collaborator_count: number
   version: number
   created_at: string
@@ -475,6 +490,10 @@ export interface MWCreateResponse {
   node_mode: boolean
   compliance_mode: boolean
   payer_mode: boolean
+  benefits_mode: boolean
+  legal_mode: boolean
+  risk_mode: boolean
+  training_mode: boolean
   created_at: string
   assistant_reply: string | null
   pdf_url: string | null

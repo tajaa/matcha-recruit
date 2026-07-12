@@ -104,6 +104,8 @@ async def _build_thread_detail_response(thread_id: UUID, company_id: Optional[UU
             for r in collab_rows
         ]
 
+    from app.matcha.services.matcha_work_modes import THREAD_MODES
+
     return ThreadDetailResponse(
         id=thread["id"],
         title=thread["title"],
@@ -112,8 +114,9 @@ async def _build_thread_detail_response(thread_id: UUID, company_id: Optional[UU
         version=thread["version"],
         task_type=_infer_skill_from_state(thread["current_state"]),
         is_pinned=thread.get("is_pinned", False),
-        node_mode=thread.get("node_mode", False),
-        compliance_mode=thread.get("compliance_mode", False),
+        # Registry-driven so a new mode can't be silently dropped here (the
+        # pre-registry version of this serializer lost payer_mode).
+        **{m.column: thread.get(m.column, False) for m in THREAD_MODES},
         linked_offer_letter_id=thread.get("linked_offer_letter_id"),
         created_at=thread["created_at"],
         updated_at=thread["updated_at"],

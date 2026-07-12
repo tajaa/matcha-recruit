@@ -10,6 +10,7 @@ from typing import Optional
 from uuid import UUID
 
 from ...database import get_connection
+from .matcha_work_modes import MODE_COLUMNS
 
 logger = logging.getLogger(__name__)
 
@@ -1069,11 +1070,11 @@ async def create_project_chat(project_id: UUID, company_id: UUID, user_id: UUID,
             })
 
         row = await conn.fetchrow(
-            """
+            f"""
             INSERT INTO mw_threads (company_id, created_by, title, project_id, current_state)
             VALUES ($1, $2, $3, $4, $5::jsonb)
             RETURNING id, title, status, version, created_at, updated_at, is_pinned,
-                      node_mode, compliance_mode, payer_mode, project_id
+                      {', '.join(MODE_COLUMNS)}, project_id
             """,
             company_id, user_id, title, project_id, initial_state,
         )
@@ -1095,9 +1096,9 @@ async def list_project_chats(project_id: UUID, company_id: UUID, user_id: UUID) 
     """
     async with get_connection() as conn:
         rows = await conn.fetch(
-            """
+            f"""
             SELECT t.id, t.title, t.task_type, t.status, t.version, t.is_pinned,
-                   t.node_mode, t.compliance_mode, t.payer_mode,
+                   {', '.join(f't.{c}' for c in MODE_COLUMNS)},
                    t.created_by, t.created_at, t.updated_at,
                    (SELECT COUNT(*) FROM mw_thread_collaborators c WHERE c.thread_id = t.id)
                        AS collaborator_count
