@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react'
 import { Building2, Globe, Loader2, X } from 'lucide-react'
-import { createPilotSession, type PilotSession, type SubjectKind } from '../../../api/brokerPilot'
+import {
+  createPilotSession, listPilotTemplates,
+  type PilotSession, type PilotTemplate, type SubjectKind,
+} from '../../../api/brokerPilot'
 import { fetchBrokerPortfolio, fetchExternalClients } from '../../../api/broker'
 
 type SubjectOption = { kind: SubjectKind; id: string; name: string }
@@ -17,8 +20,19 @@ export function NewSessionModal({ prefill, onClose, onCreated }: NewSessionModal
   const [loading, setLoading] = useState(true)
   const [subjectId, setSubjectId] = useState(prefill?.id ?? '')
   const [title, setTitle] = useState('')
+  const [templates, setTemplates] = useState<PilotTemplate[]>([])
+  const [templateKey, setTemplateKey] = useState('')
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // Starter modes for the picker (best-effort — the modal still works blank).
+  useEffect(() => {
+    let cancelled = false
+    listPilotTemplates()
+      .then((t) => { if (!cancelled) setTemplates(t) })
+      .catch(() => { /* picker just shows "Open analysis" */ })
+    return () => { cancelled = true }
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -36,6 +50,12 @@ export function NewSessionModal({ prefill, onClose, onCreated }: NewSessionModal
   }, [tab])
 
   const selected = options.find((o) => o.id === subjectId)
+  const selectedTemplate = templates.find((t) => t.key === templateKey)
+  // What the title will be if left blank — mirrors the backend's derivation, so
+  // the placeholder previews the real result.
+  const derivedTitle = selectedTemplate
+    ? `${selectedTemplate.title} — ${selected?.name ?? 'Client'}`
+    : `${selected?.name ?? 'Client'} — analysis`
 
   const create = async () => {
     if (!subjectId) return
@@ -45,7 +65,8 @@ export function NewSessionModal({ prefill, onClose, onCreated }: NewSessionModal
       const session = await createPilotSession({
         subject_kind: tab,
         subject_id: subjectId,
-        title: title.trim() || `${selected?.name ?? 'Client'} — analysis`,
+        title: title.trim() || undefined,
+        template_key: templateKey || undefined,
       })
       onCreated(session)
     } catch (e) {
@@ -107,11 +128,43 @@ export function NewSessionModal({ prefill, onClose, onCreated }: NewSessionModal
           </p>
         )}
 
-        <label className="block text-xs text-zinc-400 mb-1">Session title</label>
+        {/* Starter mode picker */}
+        <label className="block text-xs text-zinc-400 mb-1">Start from a mode</label>
+        <div className="mb-3 space-y-1">
+          <button
+            type="button"
+            onClick={() => setTemplateKey('')}
+            className={`block w-full rounded-md border px-3 py-2 text-left transition-colors ${
+              templateKey === ''
+                ? 'border-emerald-600/60 bg-emerald-600/10'
+                : 'border-zinc-700 hover:border-zinc-600'
+            }`}
+          >
+            <div className="text-sm text-zinc-100">Open analysis</div>
+            <div className="text-[11px] text-zinc-500">Blank session — ask anything about the client's records.</div>
+          </button>
+          {templates.map((t) => (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => setTemplateKey(t.key)}
+              className={`block w-full rounded-md border px-3 py-2 text-left transition-colors ${
+                templateKey === t.key
+                  ? 'border-emerald-600/60 bg-emerald-600/10'
+                  : 'border-zinc-700 hover:border-zinc-600'
+              }`}
+            >
+              <div className="text-sm text-zinc-100">{t.label}</div>
+              <div className="text-[11px] text-zinc-500">{t.description}</div>
+            </button>
+          ))}
+        </div>
+
+        <label className="block text-xs text-zinc-400 mb-1">Session title <span className="text-zinc-600">(optional)</span></label>
         <input
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          placeholder={selected ? `${selected.name} — analysis` : 'e.g. Renewal review 2026'}
+          placeholder={subjectId ? derivedTitle : 'e.g. Renewal review 2026'}
           className="w-full bg-zinc-800 border border-zinc-700 rounded-md px-2.5 py-2 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500 mb-4"
         />
 

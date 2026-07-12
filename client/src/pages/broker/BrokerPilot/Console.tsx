@@ -7,7 +7,7 @@ import {
   type ContextPreview, type CorpusRecord, type EvidenceMapItem,
   type PilotMessage, type PilotSession,
 } from '../../../api/brokerPilot'
-import { DISCLAIMER, LABEL, STARTERS } from './shared'
+import { DISCLAIMER, LABEL, startersFor } from './shared'
 
 interface ConsoleProps {
   session: PilotSession
@@ -27,6 +27,7 @@ export function Console({ session, context, onTurnComplete }: ConsoleProps) {
   const [view, setView] = useState<'chat' | 'examples'>('chat')
   const endRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const starters = startersFor(session)
 
   // cid → corpus record, for citation chips (built from the flat sources).
   const cidIndex = useMemo(() => {
@@ -99,12 +100,12 @@ export function Console({ session, context, onTurnComplete }: ConsoleProps) {
       </div>
       {view === 'examples' ? (
         <div className="flex-1 overflow-y-auto px-5 py-8">
-          <div className={LABEL}>Example prompts</div>
+          <div className={LABEL}>{session.template ? `${session.template.label} · example prompts` : 'Example prompts'}</div>
           <p className="mt-2 max-w-[60ch] text-sm leading-relaxed text-zinc-400">
             Click one to drop it into the composer, then edit or send it as-is.
           </p>
           <div className="mt-4 max-w-[60ch]">
-            {STARTERS.map((s) => (
+            {starters.map((s) => (
               <button key={s}
                 onClick={() => { setInput(s); setView('chat'); inputRef.current?.focus() }}
                 className="group flex w-full items-start gap-2.5 border-t border-white/[0.06] py-2.5 text-left text-[13px] text-zinc-500 transition-colors last:border-b last:border-white/[0.06] hover:text-zinc-200"
@@ -120,8 +121,11 @@ export function Console({ session, context, onTurnComplete }: ConsoleProps) {
         <div className="flex min-h-full flex-col justify-end">
           {messages.length === 0 && !status && (
             <div className="px-5 py-8">
-              <div className={LABEL}>Analyst console</div>
+              <div className={LABEL}>{session.template ? session.template.label : 'Analyst console'}</div>
               <p className="mt-2 max-w-[60ch] text-sm leading-relaxed text-zinc-400">
+                {session.template
+                  ? <>{session.template.description}{' '}</>
+                  : null}
                 {context && context.total > 0
                   ? <>The record is assembled — <span className="font-mono tabular-nums text-zinc-200">{context.total}</span> records across <span className="font-mono tabular-nums text-zinc-200">{sourceCount}</span> systems are in scope.</>
                   : 'The record is being assembled.'}{' '}
@@ -129,7 +133,7 @@ export function Console({ session, context, onTurnComplete }: ConsoleProps) {
                 history, and uploaded documents in one picture; every answer cites the records behind it.
               </p>
               <div className="mt-4 max-w-[60ch]">
-                {STARTERS.map((s) => (
+                {starters.map((s) => (
                   <button key={s}
                     onClick={() => { setInput(s); inputRef.current?.focus() }}
                     disabled={busy}
