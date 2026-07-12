@@ -75,14 +75,9 @@ ITA_CSV_COLUMNS = [
 ]
 
 
-def _ita_size_category(avg_employees) -> int:
-    """OSHA ITA establishment size code: 1 (<20), 2 (20–249), 3 (>=250)."""
-    n = avg_employees or 0
-    if n >= 250:
-        return 3
-    if n >= 20:
-        return 2
-    return 1
+# Single definition of the OSHA size bands, shared with the direct-filing path —
+# the CSV export and the API submission must never disagree on the size code.
+from app.matcha.services.ir_ita_submission import ita_size_category as _ita_size_category  # noqa: E402
 
 
 # Mandatory ITA fields that can realistically be missing (city/state/zipcode are
@@ -1292,6 +1287,11 @@ async def submit_ita(
     single API call whose numbers are byte-identical to the validated CSV. Every
     attempt is recorded in osha_ita_submissions for an auditable filing history.
     A missing/invalid token yields a clean `not_configured` result, not a 500.
+
+    Filing a year twice is refused with 409 unless `resubmit` is set (an amended
+    filing). The check and the API call run under a per-(company, year) advisory
+    lock held for the whole transaction, so a double-click can't slip two
+    filings through the gap between the check and the insert.
     """
     from app.matcha.services.ir_ita_submission import submit_establishments
 
@@ -1300,7 +1300,42 @@ async def submit_ita(
         raise HTTPException(status_code=400, detail="No company associated with user")
 
     year = payload.year
-    async with get_connection() as conn:
+    async with get_connection() as conn, conn.transaction():
+        # Serialize concurrent submits for this (company, year). Held until the
+        # transaction commits — i.e. across the OSHA API call and the history
+        # insert — so the duplicate check below can't race a second request.
+        await conn.execute(
+            "SELECT pg_advisory_xact_lock(hashtext($1), $2::int)",
+            f"ita_submit:{company_id}", year,
+        )
+
+        if not payload.resubmit:
+            prior = await conn.fetchrow(
+                """
+                SELECT ita_submission_id, submitted_at
+                FROM osha_ita_submissions
+                WHERE company_id = $1 AND year = $2
+                  AND status IN ('submitted', 'accepted')
+                ORDER BY submitted_at DESC
+                LIMIT 1
+                """,
+                company_id, year,
+            )
+            if prior:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "already_filed",
+                        "message": (
+                            f"{year} has already been filed with OSHA. "
+                            "Set resubmit=true to file an amended submission."
+                        ),
+                        "year": year,
+                        "submission_id": prior["ita_submission_id"],
+                        "submitted_at": prior["submitted_at"].isoformat(),
+                    },
+                )
+
         # Reviewer attestation (403 + disclaimer when not attested) — same gate
         # as every OSHA export, since this IS the filing.
         await _attest_export(conn, current_user, form="ita_submit", year=year, attested=payload.attested)

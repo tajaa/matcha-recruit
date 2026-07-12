@@ -36,10 +36,11 @@ logger = logging.getLogger(__name__)
 DEFAULT_ITA_API_URL = "https://www.osha.gov/injuryreporting/ita/api/v1"
 
 
-def _ita_size_category(avg_employees) -> int:
+def ita_size_category(avg_employees) -> int:
     """OSHA ITA establishment size code: 1 (<20), 2 (20–249), 3 (>=250).
 
-    Duplicated from osha.py (kept pure here so the service has no route import).
+    Canonical definition — osha.py imports this rather than keeping its own copy,
+    so the CSV export and the direct API filing can't drift apart on the bands.
     """
     n = avg_employees or 0
     if n >= 250:
@@ -69,7 +70,7 @@ def build_ita_establishment_payload(est: dict, year: int) -> dict[str, Any]:
             "zip_code": est.get("zip_code") or "",
             "naics_code": est.get("naics") or "",
             "industry_description": naics_industry_description(est.get("naics")) or "",
-            "size": _ita_size_category(est.get("annual_average_employees")),
+            "size": ita_size_category(est.get("annual_average_employees")),
             "establishment_type": 1,  # 1 = private (non-government)
             "year_filing_for": year,
             "annual_average_employees": est.get("annual_average_employees") or 0,

@@ -135,7 +135,7 @@ def _fixture_establishment() -> dict:
 
 
 def test_ita_size_category_bands():
-    from app.matcha.services.ir_ita_submission import _ita_size_category
+    from app.matcha.services.ir_ita_submission import ita_size_category as _ita_size_category
 
     assert _ita_size_category(0) == 1
     assert _ita_size_category(19) == 1

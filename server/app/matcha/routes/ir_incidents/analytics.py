@@ -281,62 +281,9 @@ def _build_risk_scope_key(location_id: Optional[UUID], period_days: int) -> str:
     return f"loc={loc_part}:days={period_days}"
 
 
-async def compute_wc_metrics(
-    conn,
-    company_id: UUID,
-    period_days: int = 365,
-    location_id: Optional[UUID] = None,
-    headcount_override: Optional[int] = None,
-) -> dict:
-    """Per-company Workers Comp metrics — extracted so the broker portfolio
-    endpoint can reuse the same calc per linked client.
-
-    location_id (default None) scopes every incident query to one establishment
-    for the per-location safety scorecard; None preserves the company-wide
-    behavior the broker re-export depends on. headcount_override lets the caller
-    supply a location-scoped headcount (company profile headcount is wrong for a
-    single site); when None the company profile headcount is used as before.
-    """
-    from app.matcha.services.wc_benchmarks import (
-        lookup_benchmark, estimate_premium_impact, severity_band,
-    )
-
-    period_start = _utc_now_naive() - timedelta(days=period_days)
-    prior_start = period_start - timedelta(days=period_days)
-    quarter_start = _utc_now_naive() - timedelta(days=730)  # 8 quarters back
-    annualization = 365.0 / period_days
-
-    profile = await conn.fetchrow(
-        """
-        SELECT comp.industry, hp.headcount
-        FROM companies comp
-        LEFT JOIN company_handbook_profiles hp ON hp.company_id = comp.id
-        WHERE comp.id = $1
-        """,
-        company_id,
-    )
-    industry = profile["industry"] if profile else None
-    if headcount_override is not None:
-        headcount = int(headcount_override)
-    else:
-        headcount = int(profile["headcount"]) if profile and profile["headcount"] else 0
-
-    # Optional per-establishment scope. location_id becomes $4 (query 1) / $3
-    # (query 2) / $2 (query 3) — appended so the existing positional params keep
-    # their numbers.
-    loc = location_id is not None
-    loc1 = "AND location_id = $4" if loc else ""
-    loc2 = "AND location_id = $3" if loc else ""
-    loc3 = "AND location_id = $2" if loc else ""
-
-    # Current + prior period totals.
-    p1 = [company_id, period_start, prior_start]
-    if loc:
-        p1.append(location_id)
-    rows = await conn.fetch(
-        f"""
-        SELECT
-            CASE WHEN occurred_at >= $2 THEN 'current' ELSE 'prior' END AS bucket,
+# The aggregate expressions are identical for the company-wide roll-up and the
+# per-location fan-out — only the GROUP BY differs — so they live here once.
+_WC_AGG_COLUMNS = """
             COUNT(*) AS recordable_cases,
             COALESCE(SUM(CASE WHEN COALESCE(days_away_from_work, 0) > 0
                                OR COALESCE(days_restricted_duty, 0) > 0
@@ -355,54 +302,116 @@ async def compute_wc_metrics(
                                AND return_to_work_date IS NOT NULL THEN 1 ELSE 0 END), 0) AS lost_time_resolved,
             AVG(CASE WHEN return_to_work_date IS NOT NULL AND COALESCE(days_away_from_work, 0) > 0
                      THEN (return_to_work_date - occurred_at::date) END) AS avg_days_to_rtw
-        FROM ir_incidents
-        WHERE company_id = $1
-          AND osha_recordable = true
-          AND occurred_at >= $3
-          {loc1}
-        GROUP BY bucket
-        """,
-        *p1,
-    )
+"""
 
-    # Quarterly bucketing — 8 quarters trailing.
-    p2 = [company_id, quarter_start]
-    if loc:
-        p2.append(location_id)
-    quarter_rows = await conn.fetch(
-        f"""
-        SELECT
-            DATE_TRUNC('quarter', occurred_at) AS quarter_start,
+_WC_QUARTER_COLUMNS = """
             COUNT(*) AS recordable_cases,
             COALESCE(SUM(CASE WHEN COALESCE(days_away_from_work, 0) > 0
                                OR COALESCE(days_restricted_duty, 0) > 0
                               THEN 1 ELSE 0 END), 0) AS dart_cases,
             COALESCE(SUM(COALESCE(days_away_from_work, 0)), 0) AS lost_days
+"""
+
+
+async def compute_wc_metrics(conn, company_id: UUID, period_days: int = 365) -> dict:
+    """Per-company Workers Comp metrics — extracted so the broker portfolio
+    endpoint can reuse the same calc per linked client.
+
+    Company-wide only. The per-location scorecard does NOT call this in a loop —
+    see `_compute_wc_metrics_by_location`, which pulls the same aggregates for
+    every establishment in one grouped pass and shares `_assemble_wc_metrics`.
+    """
+    period_start = _utc_now_naive() - timedelta(days=period_days)
+    prior_start = period_start - timedelta(days=period_days)
+    quarter_start = _utc_now_naive() - timedelta(days=730)  # 8 quarters back
+
+    profile = await conn.fetchrow(
+        """
+        SELECT comp.industry, hp.headcount
+        FROM companies comp
+        LEFT JOIN company_handbook_profiles hp ON hp.company_id = comp.id
+        WHERE comp.id = $1
+        """,
+        company_id,
+    )
+    industry = profile["industry"] if profile else None
+    headcount = int(profile["headcount"]) if profile and profile["headcount"] else 0
+
+    # Current + prior period totals.
+    rows = await conn.fetch(
+        f"""
+        SELECT
+            CASE WHEN occurred_at >= $2 THEN 'current' ELSE 'prior' END AS bucket,
+            {_WC_AGG_COLUMNS}
+        FROM ir_incidents
+        WHERE company_id = $1
+          AND osha_recordable = true
+          AND occurred_at >= $3
+        GROUP BY bucket
+        """,
+        company_id, period_start, prior_start,
+    )
+
+    # Quarterly bucketing — 8 quarters trailing.
+    quarter_rows = await conn.fetch(
+        f"""
+        SELECT
+            DATE_TRUNC('quarter', occurred_at) AS quarter_start,
+            {_WC_QUARTER_COLUMNS}
         FROM ir_incidents
         WHERE company_id = $1
           AND osha_recordable = true
           AND occurred_at >= $2
-          {loc2}
         GROUP BY quarter_start
         ORDER BY quarter_start
         """,
-        *p2,
+        company_id, quarter_start,
     )
 
-    p3 = [company_id]
-    if loc:
-        p3.append(location_id)
     last_recordable = await conn.fetchval(
-        f"""
+        """
         SELECT MAX(occurred_at) FROM ir_incidents
         WHERE company_id = $1 AND osha_recordable = true
-          {loc3}
         """,
-        *p3,
+        company_id,
     )
 
     cur = next((r for r in rows if r["bucket"] == "current"), None)
     prv = next((r for r in rows if r["bucket"] == "prior"), None)
+
+    return _assemble_wc_metrics(
+        period_days=period_days,
+        location_id=None,
+        industry=industry,
+        headcount=headcount,
+        cur=cur,
+        prv=prv,
+        quarter_rows=quarter_rows,
+        last_recordable=last_recordable,
+    )
+
+
+def _assemble_wc_metrics(
+    *,
+    period_days: int,
+    location_id: Optional[UUID],
+    industry: Optional[str],
+    headcount: int,
+    cur,
+    prv,
+    quarter_rows,
+    last_recordable,
+) -> dict:
+    """Turn already-fetched aggregate rows into the WC metrics block.
+
+    Pure (no DB) so the company-wide path and the per-location fan-out produce
+    byte-identical shapes from differently-grouped queries.
+    """
+    from app.matcha.services.wc_benchmarks import (
+        lookup_benchmark, estimate_premium_impact, severity_band,
+    )
+
+    annualization = 365.0 / period_days
 
     def _g(row, key):
         return int(row[key]) if row else 0
@@ -632,6 +641,129 @@ async def get_wc_metrics(
         return await compute_wc_metrics(conn, company_id, period_days)
 
 
+async def _batch_active_headcounts(conn, company_id, loc_rows) -> dict:
+    """Active-employee count per establishment, in ONE query.
+
+    Mirrors osha.py:_active_headcount exactly — sole-location short-circuit, then
+    FK match OR the work_city/work_state heuristic (HRIS sync populates the city
+    but never the location FK) — but resolves every location at once instead of
+    one query per site.
+    """
+    if len(loc_rows) == 1:
+        total = await conn.fetchval(
+            "SELECT COUNT(*) FROM employees WHERE org_id = $1 AND termination_date IS NULL",
+            company_id,
+        ) or 0
+        return {loc_rows[0]["id"]: int(total)}
+
+    rows = await conn.fetch(
+        """
+        SELECT bl.id AS location_id, COUNT(e.id) AS headcount
+        FROM business_locations bl
+        LEFT JOIN employees e
+          ON e.org_id = bl.company_id
+         AND e.termination_date IS NULL
+         AND (
+              e.work_location_id = bl.id
+              OR (
+                   e.work_location_id IS NULL
+                   AND bl.city IS NOT NULL
+                   AND LOWER(e.work_city) = LOWER(bl.city)
+                   AND UPPER(e.work_state) = UPPER(bl.state)
+                 )
+             )
+        WHERE bl.id = ANY($1::uuid[])
+        GROUP BY bl.id
+        """,
+        [lr["id"] for lr in loc_rows],
+    )
+    return {r["location_id"]: int(r["headcount"] or 0) for r in rows}
+
+
+async def _compute_wc_metrics_by_location(
+    conn, company_id: UUID, period_days: int, loc_rows, *, industry
+) -> dict:
+    """WC metrics for every establishment, in a fixed number of queries.
+
+    The three aggregates compute_wc_metrics runs company-wide are re-run ONCE
+    each, grouped by location_id, and sliced per site — so a 50-location tenant
+    costs 4 queries instead of the ~200 a per-location compute_wc_metrics loop
+    would issue. Assembly is shared with the company-wide path.
+    """
+    period_start = _utc_now_naive() - timedelta(days=period_days)
+    prior_start = period_start - timedelta(days=period_days)
+    quarter_start = _utc_now_naive() - timedelta(days=730)
+    loc_ids = [lr["id"] for lr in loc_rows]
+
+    headcounts = await _batch_active_headcounts(conn, company_id, loc_rows)
+
+    bucket_rows = await conn.fetch(
+        f"""
+        SELECT
+            location_id,
+            CASE WHEN occurred_at >= $2 THEN 'current' ELSE 'prior' END AS bucket,
+            {_WC_AGG_COLUMNS}
+        FROM ir_incidents
+        WHERE company_id = $1
+          AND osha_recordable = true
+          AND occurred_at >= $3
+          AND location_id = ANY($4::uuid[])
+        GROUP BY location_id, bucket
+        """,
+        company_id, period_start, prior_start, loc_ids,
+    )
+
+    quarter_rows = await conn.fetch(
+        f"""
+        SELECT
+            location_id,
+            DATE_TRUNC('quarter', occurred_at) AS quarter_start,
+            {_WC_QUARTER_COLUMNS}
+        FROM ir_incidents
+        WHERE company_id = $1
+          AND osha_recordable = true
+          AND occurred_at >= $2
+          AND location_id = ANY($3::uuid[])
+        GROUP BY location_id, quarter_start
+        ORDER BY quarter_start
+        """,
+        company_id, quarter_start, loc_ids,
+    )
+
+    last_rows = await conn.fetch(
+        """
+        SELECT location_id, MAX(occurred_at) AS last_recordable
+        FROM ir_incidents
+        WHERE company_id = $1
+          AND osha_recordable = true
+          AND location_id = ANY($2::uuid[])
+        GROUP BY location_id
+        """,
+        company_id, loc_ids,
+    )
+    last_by_loc = {r["location_id"]: r["last_recordable"] for r in last_rows}
+
+    out = {}
+    for lid in loc_ids:
+        cur = next(
+            (r for r in bucket_rows if r["location_id"] == lid and r["bucket"] == "current"), None
+        )
+        prv = next(
+            (r for r in bucket_rows if r["location_id"] == lid and r["bucket"] == "prior"), None
+        )
+        out[lid] = _assemble_wc_metrics(
+            period_days=period_days,
+            location_id=lid,
+            industry=industry,
+            headcount=headcounts.get(lid, 0),
+            cur=cur,
+            prv=prv,
+            quarter_rows=[r for r in quarter_rows if r["location_id"] == lid],
+            last_recordable=last_by_loc.get(lid),
+        )
+    return out
+
+
 @router.get("/analytics/wc-metrics/by-location", response_model=WcByLocationResponse)
 async def get_wc_metrics_by_location(
     period_days: int = Query(365, ge=30, le=1095),
@@ -648,10 +780,6 @@ async def get_wc_metrics_by_location(
     if company_id is None:
         raise HTTPException(status_code=400, detail="No company associated with user")
 
-    # Location-scoped headcount lives in osha.py (roster + fallbacks). Lazy
-    # import to avoid a load-order cycle between the analytics + osha submodules.
-    from .osha import _active_headcount
-
     async with get_connection() as conn:
         company_metrics = await compute_wc_metrics(conn, company_id, period_days)
 
@@ -665,30 +793,29 @@ async def get_wc_metrics_by_location(
             """,
             company_id,
         )
+        if not loc_rows:
+            return WcByLocationResponse(
+                period_days=period_days,
+                company=company_metrics,
+                locations=[],
+                generated_at=_utc_now_naive().isoformat(),
+            )
 
-        sole = len(loc_rows) == 1
-        scorecards: list[WcLocationScorecard] = []
-        for lr in loc_rows:
-            try:
-                hc = await _active_headcount(
-                    conn, company_id, lr["id"],
-                    city=lr["city"], state=lr["state"], sole_location=sole,
-                )
-            except Exception:  # headcount is best-effort — rates just go null
-                hc = 0
-            metrics = await compute_wc_metrics(
-                conn, company_id, period_days,
-                location_id=lr["id"], headcount_override=hc or None,
-            )
-            scorecards.append(
-                WcLocationScorecard(
-                    location_id=lr["id"],
-                    location_name=lr["name"] or "Unnamed location",
-                    city=lr["city"],
-                    state=lr["state"],
-                    metrics=metrics,
-                )
-            )
+        per_location = await _compute_wc_metrics_by_location(
+            conn, company_id, period_days, loc_rows,
+            industry=company_metrics.get("industry"),
+        )
+
+    scorecards = [
+        WcLocationScorecard(
+            location_id=lr["id"],
+            location_name=lr["name"] or "Unnamed location",
+            city=lr["city"],
+            state=lr["state"],
+            metrics=per_location[lr["id"]],
+        )
+        for lr in loc_rows
+    ]
 
     return WcByLocationResponse(
         period_days=period_days,

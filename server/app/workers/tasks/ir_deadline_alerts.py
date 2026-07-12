@@ -25,6 +25,12 @@ from ..utils import get_db_connection
 
 # CAPA: how many days ahead of due_date to start nudging.
 CAPA_LOOKAHEAD_DAYS = 2
+# ...and how often to re-nudge while the action stays open. Without a backoff a
+# permanently-overdue action emails its owner every single morning forever,
+# which is how the highest-volume sweep trains people to filter the alerts.
+# 'immediate'-priority actions get the tighter cadence.
+CAPA_REMINDER_INTERVAL_DAYS = 7
+CAPA_REMINDER_INTERVAL_DAYS_IMMEDIATE = 3
 # Stale-incident thresholds (days since reported AND since last update).
 STALE_CRITICAL_DAYS = 3
 STALE_HIGH_DAYS = 7
@@ -92,6 +98,10 @@ async def _record_sent(conn, incident_id, company_id, alert_kind, today) -> None
 async def _sweep_capa(conn, email_service, today, limit) -> dict:
     """Nudge owners on corrective actions that are due soon or overdue."""
     lookahead = today + timedelta(days=CAPA_LOOKAHEAD_DAYS)
+    # Re-nudge cutoffs: an action is eligible again only once its last reminder
+    # is older than its priority's interval (never nudged → always eligible).
+    standard_cutoff = today - timedelta(days=CAPA_REMINDER_INTERVAL_DAYS)
+    immediate_cutoff = today - timedelta(days=CAPA_REMINDER_INTERVAL_DAYS_IMMEDIATE)
     rows = await conn.fetch(
         """
         SELECT ca.id AS action_id, ca.company_id, ca.description, ca.due_date,
@@ -108,11 +118,15 @@ async def _sweep_capa(conn, email_service, today, limit) -> dict:
         WHERE ca.status IN ('open', 'in_progress')
           AND ca.due_date IS NOT NULL
           AND ca.due_date <= $1
-          AND (ca.reminder_sent_at IS NULL OR ca.reminder_sent_at < $2)
+          AND (
+                ca.reminder_sent_at IS NULL
+                OR ca.reminder_sent_at <= (CASE WHEN ca.priority = 'immediate'
+                                                THEN $3::date ELSE $2::date END)
+              )
         ORDER BY ca.due_date ASC
-        LIMIT $3
+        LIMIT $4
         """,
-        lookahead, today, limit,
+        lookahead, standard_cutoff, immediate_cutoff, limit,
     )
 
     sent = 0

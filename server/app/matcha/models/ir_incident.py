@@ -834,6 +834,10 @@ class ItaSubmitRequest(BaseModel):
     """Trigger a direct ITA electronic submission for a calendar year."""
     year: int = Field(..., ge=2015, le=2100)
     attested: bool = False
+    # A year that already filed successfully is refused with 409 unless the
+    # caller explicitly asks to file again (an amended filing). Guards the
+    # double-click / retried-POST case — this submits to OSHA for real.
+    resubmit: bool = False
 
 
 class ItaSubmitResponse(BaseModel):
