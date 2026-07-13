@@ -406,10 +406,30 @@ async def view_newsletter(newsletter_id: UUID):
 
     async with get_connection() as conn:
         row = await conn.fetchrow(
-            """SELECT title, subject, content_html, sent_at FROM newsletters
+            """SELECT title, subject, preheader, content_html, design_json, sent_at FROM newsletters
                WHERE id = $1 AND status = 'sent' AND is_deleted = FALSE""",
             newsletter_id,
         )
+
+    # Block-designed newsletters render through the SAME themed email pipeline
+    # as the send/preview — a full, self-contained document. The legacy dark
+    # "prose" chrome below is only correct for freeform TipTap content_html;
+    # feeding it a light-themed block snapshot would paint dark text on a dark
+    # background.
+    if row and row.get("design_json"):
+        design = svc._coerce_design(row["design_json"])
+        if design and design.get("blocks"):
+            preset = (design.get("theme") or {}).get("preset")
+            html = svc.render_preview(
+                title=row["title"] or "",
+                subject=row["subject"] or "",
+                preheader=row["preheader"] or "",
+                content_html=row["content_html"] or "",
+                theme=preset if preset in ("dark", "light") else "light",
+                design_json=design,
+            )
+            return HTMLResponse(html)
+
     CDN = "https://cdn.jsdelivr.net/npm/@tailwindcss/cdn@4"
     if not row or not row["content_html"]:
         return HTMLResponse(
@@ -556,6 +576,7 @@ class UpdateNewsletterRequest(BaseModel):
     title: Optional[str] = None
     subject: Optional[str] = None
     content_html: Optional[str] = None
+    design_json: Optional[dict] = None
     curated_article_ids: Optional[list[str]] = None
     preheader: Optional[str] = Field(default=None, max_length=255)
     scheduled_at: Optional[datetime] = None
@@ -598,7 +619,9 @@ async def update_newsletter(
     body: UpdateNewsletterRequest,
     current_user: CurrentUser = Depends(require_admin),
 ):
-    updates = {k: v for k, v in body.model_dump().items() if v is not None}
+    # exclude_unset so design_json can be sent as null to clear it (switch back
+    # to freeform HTML) — a plain model_dump()+drop-None can't express that.
+    updates = body.model_dump(exclude_unset=True)
     if not updates:
         raise HTTPException(status_code=400, detail="No updates provided")
     try:
@@ -732,6 +755,7 @@ class PreviewRequest(BaseModel):
     subject: str = ""
     preheader: str = ""
     content_html: str = ""
+    design_json: Optional[dict] = None
     theme: str = "dark"  # "dark" | "light"
 
 
@@ -741,8 +765,9 @@ async def render_newsletter_preview(
     current_user: CurrentUser = Depends(require_admin),
 ):
     """Render a draft body through the same pipeline as send time so the
-    compose iframe shows what recipients actually see (video poster fallback,
-    branded chrome, theme-correct palette). No tracking pixel injected."""
+    compose iframe shows what recipients actually see (block layout, branded
+    chrome, theme-correct palette, poster fallback). No tracking pixel injected.
+    When design_json is supplied it drives the render; else content_html does."""
     theme = body.theme if body.theme in ("dark", "light") else "dark"
     html = svc.render_preview(
         title=body.title,
@@ -750,6 +775,7 @@ async def render_newsletter_preview(
         preheader=body.preheader,
         content_html=body.content_html,
         theme=theme,
+        design_json=body.design_json,
     )
     return {"html": html}
 
@@ -885,6 +911,7 @@ class TemplateCreateRequest(BaseModel):
     name: str
     description: Optional[str] = None
     content_html: Optional[str] = None
+    design_json: Optional[dict] = None
     preheader: Optional[str] = Field(default=None, max_length=255)
 
 
@@ -892,6 +919,7 @@ class TemplateUpdateRequest(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     content_html: Optional[str] = None
+    design_json: Optional[dict] = None
     preheader: Optional[str] = Field(default=None, max_length=255)
 
 
@@ -907,7 +935,7 @@ async def create_template(
 ):
     return await svc.create_template(
         body.name, body.description, body.content_html, body.preheader,
-        created_by=current_user.id,
+        created_by=current_user.id, design_json=body.design_json,
     )
 
 
@@ -928,7 +956,7 @@ async def update_template(
     body: TemplateUpdateRequest,
     current_user: CurrentUser = Depends(require_admin),
 ):
-    updates = {k: v for k, v in body.model_dump().items() if v is not None}
+    updates = body.model_dump(exclude_unset=True)
     if not updates:
         raise HTTPException(status_code=400, detail="No updates provided")
     row = await svc.update_template(template_id, updates)
@@ -945,6 +973,92 @@ async def delete_template(
     if not await svc.delete_template(template_id):
         raise HTTPException(status_code=404, detail="Template not found")
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Idea scratchpad + template generator
+# ---------------------------------------------------------------------------
+
+
+class IdeaCreateRequest(BaseModel):
+    title: str = Field(..., min_length=1, max_length=255)
+    notes: Optional[str] = None
+    media_url: Optional[str] = None
+
+
+class IdeaUpdateRequest(BaseModel):
+    title: Optional[str] = Field(default=None, max_length=255)
+    notes: Optional[str] = None
+    media_url: Optional[str] = None
+
+
+class CreateFromIdeaRequest(BaseModel):
+    # Optional here so an idea that already carries captured media can be
+    # converted without re-supplying it; the service enforces that at least
+    # one of the two is present (mandatory-media requirement).
+    media_url: Optional[str] = None
+    media_alt: Optional[str] = None
+
+
+@admin_router.get("/ideas")
+async def list_ideas(current_user: CurrentUser = Depends(require_admin)):
+    return {"ideas": await svc.list_ideas()}
+
+
+@admin_router.post("/ideas")
+async def create_idea(
+    body: IdeaCreateRequest,
+    current_user: CurrentUser = Depends(require_admin),
+):
+    return await svc.create_idea(
+        body.title, body.notes, body.media_url, created_by=current_user.id,
+    )
+
+
+@admin_router.put("/ideas/{idea_id}")
+async def update_idea(
+    idea_id: UUID,
+    body: IdeaUpdateRequest,
+    current_user: CurrentUser = Depends(require_admin),
+):
+    updates = {k: v for k, v in body.model_dump(exclude_unset=True).items()}
+    if not updates:
+        raise HTTPException(status_code=400, detail="No updates provided")
+    row = await svc.update_idea(idea_id, updates)
+    if not row:
+        raise HTTPException(status_code=404, detail="Idea not found")
+    return row
+
+
+@admin_router.delete("/ideas/{idea_id}")
+async def delete_idea(
+    idea_id: UUID,
+    current_user: CurrentUser = Depends(require_admin),
+):
+    if not await svc.delete_idea(idea_id):
+        raise HTTPException(status_code=404, detail="Idea not found")
+    return {"ok": True}
+
+
+@admin_router.post("/ideas/{idea_id}/create-newsletter")
+async def create_newsletter_from_idea(
+    idea_id: UUID,
+    body: CreateFromIdeaRequest,
+    current_user: CurrentUser = Depends(require_admin),
+):
+    """Export an idea into a structured newsletter draft.
+
+    The generated template mandates a visual — the request must supply a
+    `media_url` (or the idea must already carry one), else this 422s.
+    """
+    try:
+        return await svc.create_newsletter_from_idea(
+            idea_id, body.media_url, created_by=current_user.id, media_alt=body.media_alt,
+        )
+    except svc.IdeaMediaRequiredError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
 
 # ---------------------------------------------------------------------------

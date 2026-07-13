@@ -2,13 +2,15 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { Loader2, Plus } from 'lucide-react'
 import { api } from '../../../api/client'
-import type { Subscriber, Newsletter, SubStats, Tag, Template, GrowthPoint, Analytics, Progress, Tab } from './types'
+import type { Subscriber, Newsletter, SubStats, Tag, Template, Idea, GrowthPoint, Analytics, Progress, Tab } from './types'
 import { Sparkline } from './Sparkline'
 import { SubscribersTab } from './SubscribersTab'
 import { NewslettersTab } from './NewslettersTab'
-import { ComposeTab } from './ComposeTab'
+import { ComposeTab, type ComposeMode } from './ComposeTab'
 import { TagsTab } from './TagsTab'
 import { TemplatesTab } from './TemplatesTab'
+import { IdeasTab } from './IdeasTab'
+import { emptyDesign, type NewsletterDesign } from './blocks/schema'
 import { SendModal } from './SendModal'
 import { AnalyticsDrawer } from './AnalyticsDrawer'
 import { CsvImportModal } from './CsvImportModal'
@@ -23,6 +25,7 @@ export default function NewsletterAdmin() {
   const [newsletters, setNewsletters] = useState<Newsletter[]>([])
   const [tags, setTags] = useState<Tag[]>([])
   const [templates, setTemplates] = useState<Template[]>([])
+  const [ideas, setIdeas] = useState<Idea[]>([])
   const [growth, setGrowth] = useState<GrowthPoint[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -32,6 +35,8 @@ export default function NewsletterAdmin() {
   const [composeSubject, setComposeSubject] = useState('')
   const [composePreheader, setComposePreheader] = useState('')
   const [composeHtml, setComposeHtml] = useState('')
+  const [composeMode, setComposeMode] = useState<ComposeMode>('design')
+  const [composeDesign, setComposeDesign] = useState<NewsletterDesign | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [isDirty, setIsDirty] = useState(false)
@@ -70,6 +75,7 @@ export default function NewsletterAdmin() {
       setTab('compose')
       setEditingId(null)
       setComposeTitle(''); setComposeSubject(''); setComposePreheader(''); setComposeHtml('')
+      setComposeDesign(emptyDesign('light')); setComposeMode('design')
       setIsDirty(false); setSaveStatus('saved')
     }
   }, [location.pathname])
@@ -77,11 +83,12 @@ export default function NewsletterAdmin() {
   async function loadData() {
     setLoading(true)
     try {
-      const [subRes, nlRes, tagsRes, tplRes, growthRes] = await Promise.allSettled([
+      const [subRes, nlRes, tagsRes, tplRes, ideasRes, growthRes] = await Promise.allSettled([
         api.get<{ subscribers: Subscriber[]; total: number; stats: SubStats }>('/admin/newsletter/subscribers?limit=100'),
         api.get<Newsletter[]>('/admin/newsletter/newsletters'),
         api.get<{ tags: Tag[] }>('/admin/newsletter/tags'),
         api.get<{ templates: Template[] }>('/admin/newsletter/templates'),
+        api.get<{ ideas: Idea[] }>('/admin/newsletter/ideas'),
         api.get<{ days: number; series: GrowthPoint[] }>('/admin/newsletter/subscribers/growth?days=90'),
       ])
       if (subRes.status === 'fulfilled') {
@@ -91,6 +98,7 @@ export default function NewsletterAdmin() {
       if (nlRes.status === 'fulfilled') setNewsletters(nlRes.value)
       if (tagsRes.status === 'fulfilled') setTags(tagsRes.value.tags)
       if (tplRes.status === 'fulfilled') setTemplates(tplRes.value.templates)
+      if (ideasRes.status === 'fulfilled') setIdeas(ideasRes.value.ideas)
       if (growthRes.status === 'fulfilled') setGrowth(growthRes.value.series)
     } catch {}
     setLoading(false)
@@ -123,6 +131,21 @@ export default function NewsletterAdmin() {
     return () => { progressStopRef.current = true }
   }, [progress?.newsletter_status])
 
+  // Body of the save payload, shaped by the active editor mode. Design mode
+  // sends design_json (server renders the content_html snapshot); HTML mode
+  // sends content_html and nulls design_json so the two can't fight.
+  function savePayload() {
+    const base = {
+      title: composeTitle.trim() || undefined,
+      subject: composeSubject.trim() || undefined,
+      preheader: composePreheader || undefined,
+    }
+    if (composeMode === 'design') {
+      return { ...base, design_json: composeDesign ?? emptyDesign('light') }
+    }
+    return { ...base, content_html: composeHtml || undefined, design_json: null }
+  }
+
   // Auto-save: 2s after last keystroke, create or update draft
   useEffect(() => {
     if (!isDirty) return
@@ -131,29 +154,17 @@ export default function NewsletterAdmin() {
     setSaveStatus('saving')
     const timer = window.setTimeout(async () => {
       try {
-        if (!editingId) {
+        let id = editingId
+        if (!id) {
           const created = await api.post<Newsletter>('/admin/newsletter/newsletters', {
             title: composeTitle.trim(), subject: composeSubject.trim(),
           })
+          id = created.id
           setEditingId(created.id)
-          let saved = created
-          if (composeHtml || composePreheader) {
-            saved = await api.put<Newsletter>(`/admin/newsletter/newsletters/${created.id}`, {
-              title: composeTitle.trim(), subject: composeSubject.trim(),
-              preheader: composePreheader || undefined,
-              content_html: composeHtml || undefined,
-            })
-          }
-          upsertNewsletter(saved)
-        } else {
-          const saved = await api.put<Newsletter>(`/admin/newsletter/newsletters/${editingId}`, {
-            title: composeTitle.trim() || undefined,
-            subject: composeSubject.trim() || undefined,
-            preheader: composePreheader || undefined,
-            content_html: composeHtml || undefined,
-          })
-          upsertNewsletter(saved)
+          upsertNewsletter(created)
         }
+        const saved = await api.put<Newsletter>(`/admin/newsletter/newsletters/${id}`, savePayload())
+        upsertNewsletter(saved)
         setIsDirty(false)
         setSaveStatus('saved')
       } catch {
@@ -161,7 +172,7 @@ export default function NewsletterAdmin() {
       }
     }, 2000)
     return () => window.clearTimeout(timer)
-  }, [composeTitle, composeSubject, composePreheader, composeHtml, isDirty])
+  }, [composeTitle, composeSubject, composePreheader, composeHtml, composeMode, composeDesign, isDirty])
 
   useEffect(() => {
     function handler(e: BeforeUnloadEvent) {
@@ -201,12 +212,7 @@ export default function NewsletterAdmin() {
     if (!editingId) return
     setSaving(true)
     try {
-      const saved = await api.put<Newsletter>(`/admin/newsletter/newsletters/${editingId}`, {
-        title: composeTitle.trim() || undefined,
-        subject: composeSubject.trim() || undefined,
-        preheader: composePreheader || undefined,
-        content_html: composeHtml || undefined,
-      })
+      const saved = await api.put<Newsletter>(`/admin/newsletter/newsletters/${editingId}`, savePayload())
       upsertNewsletter(saved)
       setIsDirty(false); setSaveStatus('saved')
     } catch {}
@@ -252,6 +258,7 @@ export default function NewsletterAdmin() {
       setSendModal(null)
       setEditingId(null)
       setComposeTitle(''); setComposeSubject(''); setComposePreheader(''); setComposeHtml('')
+      setComposeDesign(emptyDesign('light')); setComposeMode('design')
       setIsDirty(false); setSaveStatus('saved')
       setTab('newsletters')
       loadData()
@@ -319,8 +326,27 @@ export default function NewsletterAdmin() {
     setComposeSubject(nl.subject)
     setComposePreheader(nl.preheader ?? '')
     setComposeHtml(nl.content_html || '')
+    if (nl.design_json) {
+      setComposeDesign(nl.design_json)
+      setComposeMode('design')
+    } else {
+      setComposeDesign(emptyDesign('light'))
+      setComposeMode(nl.content_html ? 'html' : 'design')
+    }
     setIsDirty(false)
     setSaveStatus('saved')
+    setTab('compose')
+  }
+
+  function startFromDesign(design: NewsletterDesign, name: string) {
+    setComposeTitle(name)
+    setComposeSubject(name)
+    setComposePreheader('')
+    setComposeHtml('')
+    setComposeDesign(design)
+    setComposeMode('design')
+    setEditingId(null)
+    setIsDirty(true); setSaveStatus('unsaved')
     setTab('compose')
   }
 
@@ -329,6 +355,13 @@ export default function NewsletterAdmin() {
     setComposeSubject(t.name)
     setComposePreheader(t.preheader ?? '')
     setComposeHtml(t.content_html ?? '')
+    if (t.design_json) {
+      setComposeDesign(t.design_json)
+      setComposeMode('design')
+    } else {
+      setComposeDesign(emptyDesign('light'))
+      setComposeMode(t.content_html ? 'html' : 'design')
+    }
     setEditingId(null)
     setIsDirty(true); setSaveStatus('unsaved')
     setTab('compose')
@@ -442,7 +475,7 @@ export default function NewsletterAdmin() {
 
       {/* Tabs */}
       <div className="flex gap-1 mb-6 border-b border-zinc-800/60 pb-px">
-        {(['subscribers', 'newsletters', 'compose', 'tags', 'templates'] as Tab[]).map((t) => {
+        {(['ideas', 'subscribers', 'newsletters', 'compose', 'tags', 'templates'] as Tab[]).map((t) => {
           const draftCount = t === 'newsletters' ? newsletters.filter(n => n.status === 'draft').length : 0
           return (
             <button key={t} onClick={() => handleTabChange(t)} className={`px-4 py-2 text-xs font-medium transition-colors relative flex items-center gap-1.5 ${tab === t ? 'text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'}`}>
@@ -455,6 +488,15 @@ export default function NewsletterAdmin() {
           )
         })}
       </div>
+
+      {/* Ideas scratchpad tab */}
+      {tab === 'ideas' && (
+        <IdeasTab
+          ideas={ideas}
+          onChange={loadData}
+          onCreatedNewsletter={(nl) => { upsertNewsletter(nl); startEdit(nl) }}
+        />
+      )}
 
       {/* Subscribers tab */}
       {tab === 'subscribers' && (
@@ -492,6 +534,8 @@ export default function NewsletterAdmin() {
           composeSubject={composeSubject} setComposeSubject={setComposeSubject}
           composePreheader={composePreheader} setComposePreheader={setComposePreheader}
           composeHtml={composeHtml} setComposeHtml={setComposeHtml}
+          composeMode={composeMode} setComposeMode={setComposeMode}
+          composeDesign={composeDesign} setComposeDesign={setComposeDesign}
           setIsDirty={setIsDirty} setSaveStatus={setSaveStatus}
           previewViewport={previewViewport} setPreviewViewport={setPreviewViewport}
           saving={saving}
@@ -506,7 +550,7 @@ export default function NewsletterAdmin() {
       {tab === 'tags' && <TagsTab tags={tags} onChange={async () => { const t = await api.get<{ tags: Tag[] }>('/admin/newsletter/tags'); setTags(t.tags) }} subscribers={subscribers} />}
 
       {/* Templates tab */}
-      {tab === 'templates' && <TemplatesTab templates={templates} onChange={loadData} onPickTemplate={fromTemplate} />}
+      {tab === 'templates' && <TemplatesTab templates={templates} onChange={loadData} onPickTemplate={fromTemplate} onStartFrom={startFromDesign} currentDesign={composeDesign} />}
 
       {/* Send modal */}
       {sendModal && (

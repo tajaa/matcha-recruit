@@ -6245,6 +6245,13 @@ async def init_db():
                 ) THEN
                     ALTER TABLE newsletters ADD COLUMN scheduled_send_started_at TIMESTAMPTZ;
                 END IF;
+                -- Block-builder design (migration nldesign01)
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'newsletters' AND column_name = 'design_json'
+                ) THEN
+                    ALTER TABLE newsletters ADD COLUMN design_json JSONB;
+                END IF;
             END $$;
         """)
         await conn.execute("""
@@ -6309,6 +6316,25 @@ async def init_db():
                 description TEXT,
                 content_html TEXT,
                 preheader VARCHAR(255),
+                design_json JSONB,
+                created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        await conn.execute(
+            "ALTER TABLE newsletter_templates ADD COLUMN IF NOT EXISTS design_json JSONB"
+        )
+
+        # Newsletter idea scratchpad (migration nlideas01)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS newsletter_ideas (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                title VARCHAR(255) NOT NULL,
+                notes TEXT,
+                media_url TEXT,
+                status VARCHAR(20) NOT NULL DEFAULT 'idea',
+                newsletter_id UUID REFERENCES newsletters(id) ON DELETE SET NULL,
                 created_by UUID REFERENCES users(id) ON DELETE SET NULL,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
