@@ -7798,6 +7798,16 @@ async def run_specialization_research(req: SpecializationResearchRequest):
                     def progress_cb(cat_idx, cat_total, message):
                         pass  # inner progress handled by category events
 
+                    # Ground this run in fetched statute text where the registry
+                    # covers the chain (COMPLIANCE_SYSTEM_GAP_REVIEW.md §3: this
+                    # path used to be unconditionally ungrounded). Degrades to
+                    # ("", {}) — i.e. the old behaviour — where it doesn't.
+                    from app.core.services.scope_registry.research_loop import (
+                        corpus_for_jurisdiction,
+                    )
+                    corpus, citation_index = await corpus_for_jurisdiction(
+                        conn, j["id"], req.categories,
+                    )
                     result = await research_specialization_for_jurisdiction(
                         conn,
                         j["id"],
@@ -7805,6 +7815,8 @@ async def run_specialization_research(req: SpecializationResearchRequest):
                         req.industry_tag,
                         industry_context=req.industry_context,
                         progress_callback=progress_cb,
+                        grounded_corpus=corpus,
+                        citation_index=citation_index,
                     )
 
                     grand_total += result.get("new", 0)

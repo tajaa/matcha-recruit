@@ -1,13 +1,19 @@
-"""Celery task for scope-registry authority ingest.
+"""Celery tasks for the scope-registry pipeline: authority ingest + the
+headless research→reconcile growth loop.
 
 Routed to Celery (not BackgroundTasks) because the federal parts each hit the
-live eCFR API — a slow regulator host must not pin a uvicorn worker.
+live eCFR API — a slow regulator host must not pin a uvicorn worker. Research
+is routed here for the same reason (Gemini calls) plus because it's the only
+thing that actually mints jurisdiction_requirements rows (codify.py itself
+never does — see COMPLIANCE_SYSTEM_GAP_REVIEW.md §3).
 
 Scheduling: no celery-beat here. The hourly worker restart re-fires
 `@worker_ready`, which dispatches `sync_all_authority_indexes` iff the
 `scope_registry_authority` scheduler_settings row is enabled (seeded disabled by
-`scoperg01`). A scheduled sweep declines on its own if one completed recently,
-so enabling the row doesn't re-crawl .gov every hour.
+`scoperg01`), and `run_scheduled_research_cycle` iff `scope_registry_research`
+is enabled (seeded disabled by `scoperg02`). A scheduled ingest declines on
+its own if one completed recently, so enabling the row doesn't re-crawl .gov
+every hour; the research cycle is capped per-run by MAX_UNITS_PER_CYCLE.
 """
 import asyncio
 from typing import Optional
@@ -17,6 +23,13 @@ from ..notifications import publish_task_complete, publish_task_error
 
 MIN_SCHEDULED_INTERVAL_DAYS = 6
 CHANNEL = "admin:scope_registry"
+
+# Federal+CA first (COMPLIANCE_SYSTEM_GAP_REVIEW.md §3 fill-next #2) — the
+# only chain with a corpus dense enough for grounded research to have
+# something to cite against. Widen this list as more states get authority
+# indexes (§1) rather than sweeping registry-wide with an empty corpus.
+SCHEDULED_RESEARCH_CHAINS = [{"state": "CA", "city": None}]
+MAX_UNITS_PER_CYCLE = 5
 
 
 async def _scheduled_run_is_due() -> bool:
@@ -77,12 +90,26 @@ def ingest_authority_index(index_slug: Optional[str] = None, trigger_source: str
         finally:
             await conn.close()
 
+    def _dispatch_reclassify(result: dict) -> None:
+        """A 'new' citation has no classification, so drift propagation can't
+        route it anywhere — without this it drains off the worklist unclassified
+        and never reaches the engine (COMPLIANCE_SYSTEM_GAP_REVIEW.md §3).
+        Proposals land 'provisional' and still await human confirm, so this
+        auto-dispatch only queues the work, it never self-approves it.
+        """
+        for slug in (result.get("propagation") or {}).get("reclassify_slugs") or []:
+            try:
+                classify_authority_index.delay(index_slug=slug)
+            except Exception as exc:
+                print(f"[scope_registry] reclassify dispatch failed for {slug}: {exc}")
+
     try:
         result = asyncio.run(_run())
     except Exception as exc:
         publish_task_error(CHANNEL, "scope_registry", index_slug or "all", str(exc))
         raise
 
+    _dispatch_reclassify(result)
     publish_task_complete(CHANNEL, "scope_registry", index_slug or "all", result)
     return result
 
@@ -145,4 +172,42 @@ def classify_authority_index(index_slug: str, triggered_by: Optional[str] = None
         raise
 
     publish_task_complete(CHANNEL, "scope_registry_classify", index_slug, result)
+    return result
+
+
+@celery_app.task(name="scope_registry.research_cycle", max_retries=0, time_limit=1800)
+def run_scheduled_research_cycle():
+    """Headless growth loop: for each configured chain, drive its keyed
+    fetch-queue into grounded research then reconcile — the automated
+    counterpart to the admin's manual "Research these · codify" button
+    (POST /fetch-queue/research). Runs every configured chain in one task
+    invocation; a chain failing doesn't abort the rest.
+    """
+    from app.workers.utils import get_db_connection
+    from app.core.services.scope_registry.research_loop import run_research_cycle
+
+    async def _run():
+        conn = await get_db_connection()
+        try:
+            summaries = []
+            for chain in SCHEDULED_RESEARCH_CHAINS:
+                try:
+                    summary = await run_research_cycle(
+                        conn, state=chain["state"], city=chain.get("city"),
+                        max_units=MAX_UNITS_PER_CYCLE,
+                    )
+                    summaries.append({**chain, **summary})
+                except Exception as exc:
+                    summaries.append({**chain, "error": str(exc)})
+            return {"chains": summaries}
+        finally:
+            await conn.close()
+
+    try:
+        result = asyncio.run(_run())
+    except Exception as exc:
+        publish_task_error(CHANNEL, "scope_registry_research", "scheduled", str(exc))
+        raise
+
+    publish_task_complete(CHANNEL, "scope_registry_research", "scheduled", result)
     return result

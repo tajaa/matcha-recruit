@@ -1414,6 +1414,33 @@ async def finalize_session(
         licenses = ai_scope.get("required_licenses") or []
 
         company_id = row["company_id"]
+        industry = _safe_jsonb(row["basics"], {}).get("industry")
+
+        # Shadow→cutover (SCOPE_REGISTRY_PLAN.md commit 5): additive only —
+        # union engine-definitive codified keys into the bank projection for
+        # allowlisted (state, industry) coordinates. expand_scope/map_to_bank
+        # stays authoritative for everything else; a coordinate the engine
+        # doesn't cover still gets whatever the category-grab found.
+        # expand_only_existing (pre-union) is what feeds the shadow diff below —
+        # merging engine items into `existing` before that comparison would
+        # inflate the observed agreement rate exactly for the coordinates
+        # being cut over, corrupting the signal that's supposed to justify
+        # widening the allowlist.
+        expand_only_existing = existing
+        from app.core.services.scope_registry.cutover import engine_sourced_scope_items
+        engine_items = await engine_sourced_scope_items(conn, company_id, industry=industry)
+        if engine_items:
+            already = {item.get("requirement_id") for item in existing}
+            new_engine_items = [
+                it for it in engine_items if it["requirement_id"] not in already
+            ]
+            if new_engine_items:
+                logger.info(
+                    "cutover: unioning %d engine-sourced item(s) into session %s "
+                    "(company %s)", len(new_engine_items), session_id, company_id,
+                )
+                existing = existing + new_engine_items
+
         scope_rows_written = await _write_compliance_scope_rows(
             conn,
             company_id=company_id,
@@ -1518,14 +1545,16 @@ async def finalize_session(
 
     # Shadow the scope registry against this authoritative resolution — read-only
     # diff into scope_shadow_log, after the response, fully guarded. expand_scope
-    # stays authoritative (SCOPE_REGISTRY_PLAN.md commit 5).
+    # stays authoritative EXCEPT the cutover.py allowlist (SCOPE_REGISTRY_PLAN.md
+    # commit 5). Diffs against expand_only_existing (pre-cutover-union) so a
+    # cut-over coordinate's agreement doesn't inflate its own signal.
     from app.core.services.scope_registry.shadow import record_shadow
     background.add_task(
         record_shadow,
         session_id=session_id,
         company_id=company_id,
-        industry=_safe_jsonb(row["basics"], {}).get("industry"),
-        existing_items=existing,
+        industry=industry,
+        existing_items=expand_only_existing,
     )
 
     return FinalizeResponse(

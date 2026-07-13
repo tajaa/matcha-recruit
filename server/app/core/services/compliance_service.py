@@ -1319,9 +1319,17 @@ async def _is_jurisdiction_fresh(
 
 
 async def _load_jurisdiction_requirements(conn, jurisdiction_id: UUID) -> List[Dict]:
-    """Read requirements from the jurisdiction repository."""
+    """Read requirements from the jurisdiction repository.
+
+    Excludes 'under_review' (grounding-quarantined) rows — the single choke
+    point every tenant-sync and gap-detection caller goes through. A
+    quarantined row reads as a gap (triggers re-research) rather than as
+    served/covered — never silently surfaced to a tenant, never silently
+    treated as permanently missing either.
+    """
     rows = await conn.fetch(
-        "SELECT * FROM jurisdiction_requirements WHERE jurisdiction_id = $1",
+        "SELECT * FROM jurisdiction_requirements "
+        "WHERE jurisdiction_id = $1 AND status != 'under_review'",
         jurisdiction_id,
     )
     # Carry the catalog row id under an explicit key so the per-location sync can
@@ -1703,6 +1711,15 @@ async def _upsert_requirements_additive(
         aet = json.dumps(aet_raw) if aet_raw else None
         steps_raw = req.get("implementation_steps")
         steps_json = json.dumps(steps_raw) if isinstance(steps_raw, list) and steps_raw else None
+        # Quarantine: req["grounded"] is an explicit True/False ONLY when this
+        # req was actually checked against a fetched corpus
+        # (validate_requirement_citations) — never set at all on the legacy
+        # ungrounded-by-design research paths (healthcare/oncology/medical
+        # research, general compliance checks), which stay 'active' exactly
+        # as before. Only a req that WAS given real statute text and still
+        # failed to cite it gets quarantined — narrower than "any ungrounded
+        # row", matching requirement_status_enum's 'under_review' value.
+        req_status = "under_review" if req.get("grounded") is False else "active"
         await conn.execute(
             """
             INSERT INTO jurisdiction_requirements
@@ -1711,7 +1728,7 @@ async def _upsert_requirements_additive(
                  effective_date, expiration_date, last_verified_at, requires_written_policy,
                  applicable_industries, trigger_conditions, applicable_entity_types,
                  implementation_steps, category_id, metadata, source_tier,
-                 regulation_key, key_definition_id, source_url_status, source_checked_at)
+                 regulation_key, key_definition_id, source_url_status, source_checked_at, status)
             VALUES ($1, $2, $3::text, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), $15, $16, $17, $18,
                     $22::jsonb,
                     $19,
@@ -1721,7 +1738,8 @@ async def _upsert_requirements_additive(
                     (SELECT id FROM regulation_key_definitions
                      WHERE key = $23::text AND category_slug = $24::text LIMIT 1),
                     COALESCE($25::text, 'unchecked'),
-                    CASE WHEN $25::text IS NOT NULL THEN NOW() ELSE NULL END)
+                    CASE WHEN $25::text IS NOT NULL THEN NOW() ELSE NULL END,
+                    $26::requirement_status_enum)
             ON CONFLICT (jurisdiction_id, requirement_key) DO UPDATE SET
                 category = EXCLUDED.category,
                 rate_type = EXCLUDED.rate_type,
@@ -1791,6 +1809,13 @@ async def _upsert_requirements_additive(
                 source_checked_at = CASE
                     WHEN $25::text IS NOT NULL THEN NOW()
                     ELSE jurisdiction_requirements.source_checked_at END,
+                -- Escalate-only: a write that failed grounding quarantines the
+                -- row, but a write with no grounding verdict (the ordinary
+                -- case — see req_status above) never silently reactivates a
+                -- row an admin or a prior grounding failure parked here.
+                status = CASE
+                    WHEN $26::requirement_status_enum = 'under_review' THEN 'under_review'::requirement_status_enum
+                    ELSE jurisdiction_requirements.status END,
                 updated_at = NOW()
             """,
             jurisdiction_id,
@@ -1818,6 +1843,7 @@ async def _upsert_requirements_additive(
             regulation_key,        # $23: bare regulation_key (store↔scope join key)
             normalized_category,   # $24: normalized category for the RKD FK lookup
             req.get("source_url_status"),  # $25: liveness flag from _validate_source_urls
+            req_status,             # $26: 'under_review' quarantine iff grounding was checked and failed
         )
 
 

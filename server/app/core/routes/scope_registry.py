@@ -20,6 +20,7 @@ from ..models.scope_registry import (
     DispatchResponse,
     FetchQueueResearchRequest,
     ReconcileRequest,
+    ReviewQuarantinedRequest,
 )
 from ...database import get_connection
 
@@ -334,6 +335,62 @@ async def fetch_queue_endpoint(
     return {"items": items, "count": len(items)}
 
 
+@router.get("/under-review", dependencies=[Depends(require_admin)])
+async def list_under_review(
+    state: Optional[str] = None,
+    limit: int = 100,
+):
+    """Grounding-quarantined rows (status='under_review') — reqs that were
+    checked against a fetched statute and failed to cite it, so a hallucinated
+    value doesn't get silently served. See _upsert_requirements_additive's
+    req_status computation (compliance_service.py)."""
+    limit = max(1, min(limit, 500))
+    where = ["jr.status = 'under_review'"]
+    params: list = []
+    if state:
+        params.append(state.upper())
+        where.append(f"j.state = ${len(params)}")
+    params.append(limit)
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            f"""
+            SELECT jr.id, jr.jurisdiction_id, jr.category, jr.title, jr.current_value,
+                   jr.source_url, jr.metadata->>'research_source' AS research_source,
+                   jr.updated_at, j.display_name AS jurisdiction_label, j.state
+            FROM jurisdiction_requirements jr
+            JOIN jurisdictions j ON j.id = jr.jurisdiction_id
+            WHERE {' AND '.join(where)}
+            ORDER BY jr.updated_at DESC
+            LIMIT ${len(params)}
+            """,
+            *params,
+        )
+    return {"items": [_row_out(r) for r in rows], "count": len(rows)}
+
+
+@router.post("/under-review/decide", dependencies=[Depends(require_admin)])
+async def decide_under_review(
+    payload: ReviewQuarantinedRequest,
+    current_user=Depends(require_admin),
+):
+    new_status = "active" if payload.action == "promote" else "repealed"
+    async with get_connection() as conn:
+        decided = await conn.fetchval(
+            """
+            WITH updated AS (
+                UPDATE jurisdiction_requirements
+                SET status = $1::requirement_status_enum, updated_at = NOW()
+                WHERE id = ANY($2::uuid[]) AND status = 'under_review'
+                RETURNING 1
+            )
+            SELECT COUNT(*) FROM updated
+            """,
+            new_status, payload.ids,
+        )
+    return {"decided": int(decided or 0), "action": payload.action,
+            "skipped": len(payload.ids) - int(decided or 0)}
+
+
 @router.post("/reconcile", dependencies=[Depends(require_admin)])
 async def reconcile_endpoint(payload: Optional[ReconcileRequest] = None):
     """Persist the scope↔store codify linkage (scope_codifications) by matching
@@ -352,33 +409,26 @@ async def reconcile_endpoint(payload: Optional[ReconcileRequest] = None):
 async def fetch_queue_research(payload: FetchQueueResearchRequest):
     """Drive the chain's fetch queue into research, then reconcile — the wire that
     closes scope→fetch→store. SSE, emitting the same event types Scope Studio's
-    research loop parses (status/researching/jurisdiction_complete/completed/error)."""
+    research loop parses (status/researching/jurisdiction_complete/completed/error).
+
+    The corpus-building + body-prefetch subroutines live in
+    ``scope_registry/research_loop.py``, shared with the headless
+    ``scope_registry_research`` Celery task — everything else here (the SSE
+    per-unit loop + event shapes) is this route's own, since a generator
+    can't cleanly delegate its yield points to a shared awaited callback."""
     import json as _json
     from fastapi.responses import StreamingResponse
 
     from app.core.services.scope_registry.codify import (
         chain_uncodified, group_research_units, reconcile_codifications,
     )
-    from app.core.services.scope_registry.body_fetch import fetch_bodies_for_index
-    from app.core.services.scope_registry.grounded import build_grounded_corpus
+    from app.core.services.scope_registry.research_loop import bodies_for_unit, prefetch_bodies
     from app.core.services.compliance_service import research_specialization_for_jurisdiction
 
     state, city = payload.state, payload.city
 
     def _sse(event: dict) -> str:
         return f"data: {_json.dumps(event)}\n\n"
-
-    async def _corpus_for_unit(conn, unit) -> tuple:
-        """Fetch the unit items' statute bodies and render the grounded corpus."""
-        item_ids = [it["item_id"] for it in unit["items"] if it.get("item_id")]
-        if not item_ids:
-            return "", {}
-        rows = await conn.fetch(
-            "SELECT id AS item_id, citation, heading, body_text "
-            "FROM authority_index_items WHERE id = ANY($1::uuid[])",
-            item_ids,
-        )
-        return build_grounded_corpus([dict(r) for r in rows])
 
     async def stream():
       try:
@@ -395,22 +445,12 @@ async def fetch_queue_research(payload: FetchQueueResearchRequest):
             # index whose items don't have bodies yet, so research can extract
             # values from the source instead of model recall. Best-effort — a
             # fetch failure just falls back to ungrounded research for that unit.
-            bodyless_slugs = sorted({
-                it["index_slug"] for u in units for it in u["items"]
-                if it.get("index_slug") and not it.get("has_body")
-            })
-            fetched = 0
-            for slug in bodyless_slugs:
-                try:
-                    res = await fetch_bodies_for_index(conn, slug)
-                    fetched += (res or {}).get("fetched", 0) if isinstance(res, dict) else 0
-                except Exception as exc:
-                    logger.warning("body prefetch failed for %s: %s", slug, exc)
-            if bodyless_slugs:
+            prefetch = await prefetch_bodies(conn, units)
+            if prefetch["slugs"]:
                 yield _sse({"type": "status",
-                            "message": f"Fetched statute text for {fetched} item(s) "
-                                       f"across {len(bodyless_slugs)} index(es)",
-                            "bodies_fetched": fetched})
+                            "message": f"Fetched statute text for {prefetch['fetched']} item(s) "
+                                       f"across {len(prefetch['slugs'])} index(es)",
+                            "bodies_fetched": prefetch["fetched"]})
 
             yield _sse({"type": "status",
                         "message": f"{len(units)} research unit(s) · "
@@ -434,7 +474,7 @@ async def fetch_queue_research(payload: FetchQueueResearchRequest):
                 yield _sse({"type": "researching", "jurisdiction": label,
                             "progress": idx, "total": len(units)})
                 try:
-                    corpus, citation_index = await _corpus_for_unit(conn, unit)
+                    corpus, citation_index = await bodies_for_unit(conn, unit)
                     res = await research_specialization_for_jurisdiction(
                         conn, unit["jurisdiction_id"], unit["categories"],
                         industry_tag="", industry_context=unit["context"],

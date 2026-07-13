@@ -165,6 +165,12 @@ def on_worker_ready(**kwargs):
     else:
         print("[Worker] Scope registry authority sync scheduler is disabled, skipping.")
 
+    if _is_scheduler_enabled("scope_registry_research"):
+        from app.workers.tasks.scope_registry import run_scheduled_research_cycle
+        run_scheduled_research_cycle.delay()
+    else:
+        print("[Worker] Scope registry research cycle scheduler is disabled, skipping.")
+
     if _is_scheduler_enabled("pattern_recognition"):
         run_pattern_recognition.delay()
     else:

@@ -436,8 +436,28 @@ async def propagate_drift_to_requirements(conn) -> Dict[str, Any]:
     ``propagated_at`` on every processed drift row (idempotent — reruns are no-ops).
 
     Runs after ingest completes (a changed authority makes its codified values
-    suspect immediately, before anyone acknowledges the drift). Returns counts.
+    suspect immediately, before anyone acknowledges the drift).
+
+    Returns counts plus ``reclassify_slugs``: the indexes that gained a ``'new'``
+    citation this pass. A 'new' citation has no classification yet, so it can't
+    join to any requirement — the stamp below drains it off the worklist, and
+    without this signal it would never reach CLASSIFY at all (the "new citations
+    → no reclassify loop" gap, COMPLIANCE_SYSTEM_GAP_REVIEW.md §3). The caller
+    (workers/tasks/scope_registry.py) dispatches classify for these.
     """
+    # Captured BEFORE the stamp below drains them — 'new' rows are stamped
+    # processed without ever being classified, so this is the only chance.
+    reclassify_slugs = [
+        r["slug"] for r in await conn.fetch(
+            """
+            SELECT DISTINCT ai.slug
+            FROM authority_index_drift d
+            JOIN authority_indexes ai ON ai.id = d.authority_index_id
+            WHERE d.propagated_at IS NULL AND d.change_type = 'new'
+            """
+        )
+    ]
+
     drift_rows = [
         dict(r) for r in await conn.fetch(
             """
@@ -457,7 +477,8 @@ async def propagate_drift_to_requirements(conn) -> Dict[str, Any]:
             ) SELECT COUNT(*) FROM u
             """
         )
-        return {"drift_processed": int(marked or 0), "requirements_flagged": 0}
+        return {"drift_processed": int(marked or 0), "requirements_flagged": 0,
+                "reclassify_slugs": reclassify_slugs}
 
     # Resolve the join: drifted citation → item → classification → codification →
     # requirement (the stored linkage, not a raw key match which would over-flag).
@@ -533,7 +554,8 @@ async def propagate_drift_to_requirements(conn) -> Dict[str, Any]:
             ) SELECT COUNT(*) FROM u
             """
         )
-    return {"drift_processed": int(processed or 0), "requirements_flagged": int(flagged or 0)}
+    return {"drift_processed": int(processed or 0), "requirements_flagged": int(flagged or 0),
+            "reclassify_slugs": reclassify_slugs}
 
 
 async def reconcile_codifications(

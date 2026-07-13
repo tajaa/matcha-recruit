@@ -54,3 +54,16 @@ class FetchQueueResearchRequest(BaseModel):
 
     state: Optional[str] = None
     city: Optional[str] = None
+
+
+class ReviewQuarantinedRequest(BaseModel):
+    """Bulk-decide grounding-quarantined rows (POST /under-review/decide).
+
+    ``action='promote'`` sets status='active' (the admin re-read the source
+    and confirmed the value); ``action='reject'`` sets status='repealed' —
+    never silently deleted, it stays as an audit trail of a value that
+    failed grounding and was confirmed wrong.
+    """
+
+    ids: List[UUID] = Field(min_length=1)
+    action: Literal["promote", "reject"]

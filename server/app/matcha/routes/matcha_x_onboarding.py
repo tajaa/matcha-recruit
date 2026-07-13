@@ -601,6 +601,36 @@ async def build_compliance_baseline_stream(
                         ),
                     }
 
+        # Shadow the scope registry against this self-serve build (fire-and-forget,
+        # fully guarded — mirrors the admin onboarding wizard's finalize hook,
+        # COMPLIANCE_SYSTEM_GAP_REVIEW.md §2's "self-serve unshadowed" gap).
+        # Self-serve has no onboarding_sessions row and never calls map_to_bank,
+        # so existing_items is built from what this run actually projected
+        # (compliance_requirements.jurisdiction_requirement_id) rather than a
+        # bank-resolution result — record_shadow only reads requirement_id off
+        # each item, so that's all this needs to supply.
+        async with get_connection() as shadow_conn:
+            shadow_rows = await shadow_conn.fetch(
+                """
+                SELECT DISTINCT jurisdiction_requirement_id
+                FROM compliance_requirements cr
+                JOIN business_locations bl ON bl.id = cr.location_id
+                WHERE bl.company_id = $1 AND cr.jurisdiction_requirement_id IS NOT NULL
+                """,
+                company_id,
+            )
+        if shadow_rows:
+            from app.core.services.scope_registry.shadow import record_shadow
+            shadow_existing = [{"requirement_id": r["jurisdiction_requirement_id"]} for r in shadow_rows]
+            # Awaited, not create_task'd: a task spawned from inside an SSE
+            # generator gets cancelled when the response closes. record_shadow
+            # is fully guarded (never raises) and this stream is already long,
+            # so paying its cost inline before the terminal event is fine.
+            await record_shadow(
+                session_id=None, company_id=company_id, industry=industry,
+                existing_items=shadow_existing,
+            )
+
         coverage_pct = round(100 * hb_covered / hb_total) if hb_total else None
         yield {
             "type": "complete",
