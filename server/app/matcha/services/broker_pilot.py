@@ -62,7 +62,7 @@ _GAP_SEVERITIES = ("high", "medium", "low")
 
 DOC_TYPES = (
     "loss_run", "dec_page", "quote", "carrier_letter",
-    "bordereau", "policy_form", "financials", "other",
+    "bordereau", "policy_form", "financials", "contract", "other",
 )
 _LINES = ("wc", "gl", "auto", "property", "package", "umbrella", "epl", "cyber", "other")
 
@@ -113,6 +113,26 @@ PILOT_TEMPLATES: tuple[dict, ...] = (
             "Which indemnity clauses create uninsurable or likely-void exposure, and why?",
             "Which contracts require endorsements (additional insured / waiver of subrogation / primary & non-contributory) the client may not carry?",
         ],
+        "required_docs": (
+            {
+                "doc_type": "contract",
+                "label": "Client contract",
+                "hint": "The agreement whose insurance and indemnity requirements you want checked — "
+                        "a customer contract, lease, MSA, or subcontract. On-platform clients: adding "
+                        "it under the client's Contracts page gives full clause extraction and "
+                        "insurability verdicts instead of a basic read.",
+                "required": True,
+                "platform_source": "clauses",
+            },
+            {
+                "doc_type": "dec_page",
+                "label": "Current dec page",
+                "hint": "The limits the client actually carries today — what the contract's "
+                        "requirements get measured against.",
+                "required": False,
+                "platform_source": "limits",
+            },
+        ),
     },
     {
         "key": "mid_year",
@@ -134,6 +154,16 @@ PILOT_TEMPLATES: tuple[dict, ...] = (
             "How is loss development trending mid-term — is anything developing adversely?",
             "Any new exposures — locations, headcount, contracts — that affect the current program?",
         ],
+        "required_docs": (
+            {
+                "doc_type": "loss_run",
+                "label": "Current loss run",
+                "hint": "Mid-term loss activity. Satisfied automatically when the client already has "
+                        "loss-development history on the platform.",
+                "required": True,
+                "platform_source": "lossdev",
+            },
+        ),
     },
     {
         "key": "renewal_90",
@@ -156,6 +186,23 @@ PILOT_TEMPLATES: tuple[dict, ...] = (
             "What's missing from the submission data, and what will the underwriter ask for first?",
             "Summarize the controls and readiness story I can lead the renewal narrative with.",
         ],
+        "required_docs": (
+            {
+                "doc_type": "loss_run",
+                "label": "Valued loss run",
+                "hint": "The loss run the market will price off. Satisfied automatically when the "
+                        "client already has loss-development history on the platform.",
+                "required": True,
+                "platform_source": "lossdev",
+            },
+            {
+                "doc_type": "dec_page",
+                "label": "Expiring dec page",
+                "hint": "The expiring terms the renewal gets compared against.",
+                "required": False,
+                "platform_source": "limits",
+            },
+        ),
     },
     {
         "key": "new_business",
@@ -177,6 +224,24 @@ PILOT_TEMPLATES: tuple[dict, ...] = (
             "What are the strengths I can lead with, and the red flags I need to get ahead of?",
             "What information is missing to market this account, and what should I request first?",
         ],
+        # Nothing hard-required: an appetite read is exactly the conversation a
+        # broker has BEFORE the prospect hands over paper.
+        "required_docs": (
+            {
+                "doc_type": "loss_run",
+                "label": "Prior-carrier loss runs",
+                "hint": "The single biggest driver of how a market views the account.",
+                "required": False,
+                "platform_source": "lossdev",
+            },
+            {
+                "doc_type": "dec_page",
+                "label": "Current dec page",
+                "hint": "What the prospect carries today — the program you'd be competing against.",
+                "required": False,
+                "platform_source": "limits",
+            },
+        ),
     },
     {
         "key": "loss_run",
@@ -198,6 +263,20 @@ PILOT_TEMPLATES: tuple[dict, ...] = (
             "How do the uploaded loss runs reconcile with the platform loss development on file?",
             "Which claims are developing adversely, and what does that imply for the reserves?",
         ],
+        # No `platform_source`, deliberately: this mode's whole point is the
+        # claim-level carrier document. Platform loss triangles are aggregates —
+        # they can't answer "which claims are developing adversely", so they must
+        # NOT quietly satisfy the requirement the way they do for mid_year/renewal.
+        "required_docs": (
+            {
+                "doc_type": "loss_run",
+                "label": "Carrier loss run",
+                "hint": "The claim-level document itself. Platform loss triangles don't substitute — "
+                        "this mode reconciles the two against each other.",
+                "required": True,
+                "platform_source": None,
+            },
+        ),
     },
     {
         "key": "quote_comparison",
@@ -220,6 +299,26 @@ PILOT_TEMPLATES: tuple[dict, ...] = (
             "Is the quoted pricing supported by the loss history, or is a cheaper quote buying less coverage?",
             "What coverage differences or sublimits between these quotes should I flag to the client?",
         ],
+        # One quote clears the gate — comparing a single quote against the expiring
+        # program is a real comparison. `single_quote_note` tells the analyst it is
+        # working from one, so it can't silently narrate a head-to-head that isn't there.
+        "required_docs": (
+            {
+                "doc_type": "quote",
+                "label": "Carrier quote",
+                "hint": "Upload every quote you want compared. One quote works — it gets compared "
+                        "against the expiring program — but the mode is at its best with two or more.",
+                "required": True,
+                "platform_source": None,
+            },
+            {
+                "doc_type": "dec_page",
+                "label": "Expiring dec page",
+                "hint": "The incumbent's terms, so a cheaper quote's coverage cuts show up.",
+                "required": False,
+                "platform_source": "limits",
+            },
+        ),
     },
 )
 
@@ -240,11 +339,17 @@ def _lookup_template(key: str | None) -> dict | None:
 
 
 def _public_template(t: dict) -> dict:
-    """Public projection (drops the internal `focus`). Copies `starters` so a
-    caller mutating the returned list can't corrupt the module catalog."""
+    """Public projection (drops the internal `focus`). Copies `starters` and
+    `required_docs` (per-row too) so a caller mutating the returned structures
+    can't corrupt the module catalog.
+
+    `required_docs` IS public: the frontend renders it as the mode's document
+    chips, and `broker_pilot_requirements` computes satisfaction from it — so the
+    same dict the picker shows is the one the gate keys on."""
     return {
         "key": t["key"], "label": t["label"], "description": t["description"],
         "title": t["title"], "starters": list(t["starters"]),
+        "required_docs": [dict(r) for r in t.get("required_docs") or ()],
     }
 
 
@@ -292,7 +397,7 @@ def _hum(s) -> str:
 _EXTRACT_PROMPT = """You are a commercial P&C insurance analyst. Classify the attached document and extract its citable substance.
 
 Return ONLY valid JSON, exactly this shape:
-{"doc_type": "<one of: loss_run | dec_page | quote | carrier_letter | bordereau | policy_form | financials | other>",
+{"doc_type": "<one of: loss_run | dec_page | quote | carrier_letter | bordereau | policy_form | financials | contract | other>",
  "title": "<short document title, e.g. 'Travelers WC loss run valued 2026-03-31'>",
  "carrier": "<carrier/issuer name or null>",
  "line": "<one of: wc | gl | auto | property | package | umbrella | epl | cyber | other, or null>",
@@ -306,6 +411,7 @@ Rules:
 - Extract ONLY what the document actually shows. Never invent, estimate, or infer figures.
 - key_figures: at most 20 — premiums, limits, retentions/deductibles, claim counts, paid/reserved totals, mods, rates. The numbers a broker would cite.
 - notable: at most 10 short items.
+- doc_type "contract": a client/vendor/lease/MSA/subcontract agreement carrying insurance requirements or an indemnification clause — NOT an insurance policy form (that is policy_form).
 - If the document is unreadable or not an insurance-related document, use doc_type "other" and say so in the summary."""
 
 
@@ -824,6 +930,21 @@ def _history_text(history: list[dict]) -> str:
     return "\n".join(f"[{m['role']}] {m.get('content', '')}" for m in msgs) or "(no prior messages)"
 
 
+def _scope_text(corpus: dict) -> str:
+    """Corpus notes as a prompt block. An absent record is indistinguishable from
+    a record that doesn't exist, so without this the model answers confidently
+    from whatever else is in scope and never says "you haven't given me the loss
+    run". The notes are the only channel that tells it what is MISSING."""
+    notes = corpus.get("notes") or []
+    if not notes:
+        return ""
+    listed = "\n".join(f"- {n}" for n in notes)
+    return (
+        "\nSCOPE NOTES (limits of what you were given — honor them; never invent "
+        f"material to fill a gap they name):\n{listed}\n"
+    )
+
+
 def _build_prompt(session: dict, subject_name: str, history: list[dict],
                   corpus: dict, docs: list[dict], latest: str) -> str:
     kind = "on-platform Matcha client" if session.get("subject_kind") == "company" \
@@ -837,7 +958,7 @@ SESSION: {session.get('title') or 'Analysis session'}
 
 EVIDENCE CORPUS (the ONLY records you may cite):
 {_corpus_text(corpus, docs)}
-
+{_scope_text(corpus)}
 CONVERSATION (oldest first):
 {_history_text(history)}
 
