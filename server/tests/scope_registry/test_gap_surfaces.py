@@ -9,11 +9,12 @@ def _item(key, citation="29 CFR 1910.1"):
     return {"regulation_key": key, "citation": citation}
 
 
-def _coord(state="CA", city=None, *, resolved=True, definitive=True,
+def _coord(state="CA", city=None, *, resolved=True, definitive=True, partial=False,
            codified=(), uncodified=(), provisional=0, unmodeled=()):
     return {
         "state": state, "city": city, "resolved": resolved,
         "engine_definitive": definitive,
+        "engine_partial": partial,
         "codified": list(codified),
         "uncodified": list(uncodified),
         "counts": {"provisional": provisional},
@@ -40,7 +41,7 @@ def test_all_definitive_no_degrade_is_engine():
     # key union dedupes; item counts sum per coordinate (per-chain facts)
     assert agg["codified_keys"] == ["minimum_wage", "overtime"]
     assert agg["counts"]["codified"] == 3
-    assert agg["gate"] == {"total": 2, "engine": 2, "fallback": 0}
+    assert agg["gate"] == {"total": 2, "engine": 2, "partial": 0, "fallback": 0}
 
 
 def test_one_non_definitive_falls_back_to_bank():
@@ -49,7 +50,46 @@ def test_one_non_definitive_falls_back_to_bank():
         _coord("TX", definitive=False),
     ])
     assert agg["coverage_source"] == "bank"
-    assert agg["gate"] == {"total": 2, "engine": 1, "fallback": 1}
+    assert agg["gate"] == {"total": 2, "engine": 1, "partial": 0, "fallback": 1}
+
+
+def test_partial_coordinate_renders_engine_partial_not_bank():
+    """A confirmed-but-incompletely-classified chain yields a FLOOR, not nothing:
+    the keys it reports really are in scope, unclassified items may add more.
+    Falling all the way back to the bank here is what made the overlay dead
+    weight while the federal index sat far from fully classified."""
+    agg = aggregate_company_coordinates([
+        _coord("CA", definitive=False, partial=True, codified=[_item("minimum_wage")]),
+    ])
+    assert agg["coverage_source"] == "engine_partial"
+    assert agg["gate"] == {"total": 1, "engine": 0, "partial": 1, "fallback": 0}
+    assert agg["coordinates"][0]["coverage_source"] == "engine_partial"
+
+
+def test_partial_plus_definitive_is_partial_overall():
+    agg = aggregate_company_coordinates([
+        _coord("CA", definitive=True, codified=[_item("minimum_wage")]),
+        _coord("NY", definitive=False, partial=True, codified=[_item("overtime", "b")]),
+    ])
+    assert agg["coverage_source"] == "engine_partial"
+
+
+def test_partial_plus_unknown_still_falls_back_to_bank():
+    """A coordinate with NO engine verdict at all is unknown footprint — a
+    partial verdict elsewhere can't speak for it."""
+    agg = aggregate_company_coordinates([
+        _coord("CA", definitive=False, partial=True, codified=[_item("minimum_wage")]),
+        _coord("TX", definitive=False, partial=False),
+    ])
+    assert agg["coverage_source"] == "bank"
+
+
+def test_partial_with_degraded_coordinate_falls_back_to_bank():
+    agg = aggregate_company_coordinates([
+        _coord("CA", definitive=False, partial=True, codified=[_item("minimum_wage")],
+               unmodeled=[{"kind": "city", "value": "Nowhere"}]),
+    ])
+    assert agg["coverage_source"] == "bank"
 
 
 def test_degraded_coordinate_forces_bank():
@@ -74,7 +114,7 @@ def test_failed_resolve_forces_bank_and_is_counted():
     assert agg["degraded"] is True
     assert agg["counts"]["locations"] == 1
     assert agg["counts"]["locations_failed"] == 1
-    assert agg["gate"] == {"total": 2, "engine": 1, "fallback": 1}
+    assert agg["gate"] == {"total": 2, "engine": 1, "partial": 0, "fallback": 1}
 
 
 def test_cross_chain_gap_is_retained():

@@ -44,6 +44,7 @@ class Subscores:
     authority: Optional[float] = None
     freshness: Optional[float] = None
     tagging: Optional[float] = None
+    scope: Optional[float] = None
 
     def as_dict(self) -> Dict[str, Optional[float]]:
         return {
@@ -52,6 +53,7 @@ class Subscores:
             "authority": self.authority,
             "freshness": self.freshness,
             "tagging": self.tagging,
+            "scope": self.scope,
         }
 
 
@@ -185,6 +187,23 @@ def baseline_score(present: int, missing: int) -> Optional[float]:
     if total == 0:
         return None
     return _pct(present, total)
+
+
+def scope_score(
+    item_count: int, unclassified: int, without_value: int,
+) -> Optional[float]:
+    """Fraction of an authority index's items that are fully resolved: confirmed-
+    classified AND either excluded or backed by a codified catalog value.
+
+    ``unclassified`` already means "no CONFIRMED classification" (classify.py's
+    _refresh_unclassified_count), so provisional work counts against this — the
+    registry is only authoritative for what a human confirmed. None when the
+    index is empty: unmeasured is not 100, same rule as every other subscore.
+    """
+    if item_count <= 0:
+        return None
+    resolved = max(0, item_count - unclassified - without_value)
+    return _pct(resolved, item_count)
 
 
 def composite_score(s: Subscores) -> Optional[float]:

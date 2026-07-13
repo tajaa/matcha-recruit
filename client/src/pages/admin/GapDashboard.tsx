@@ -28,10 +28,26 @@ import GapCard, { humanizeCategory, jurisdictionLabel } from '../../features/adm
 import { complexityBandClass } from './GapOverview'
 
 // Provenance chip for the Coverage stat card — engine = scope-registry grounded,
-// bank = compliance-catalog fallback. Same chip idiom as ScopeStudio's badge maps.
-const COVERAGE_SOURCE_BADGE: Record<'engine' | 'bank', string> = {
+// engine_partial = grounded but on a partially-classified index (a floor, not the
+// whole scope), bank = compliance-catalog fallback. Same chip idiom as
+// ScopeStudio's badge maps.
+const COVERAGE_SOURCE_BADGE: Record<'engine' | 'engine_partial' | 'bank', string> = {
   engine: 'border-emerald-500/30 bg-emerald-500/15 text-emerald-300',
+  engine_partial: 'border-amber-500/30 bg-amber-500/15 text-amber-300',
   bank: 'border-zinc-500/30 bg-zinc-500/15 text-zinc-400',
+}
+
+const COVERAGE_SOURCE_LABEL: Record<'engine' | 'engine_partial' | 'bank', string> = {
+  engine: 'grounded (engine)',
+  engine_partial: 'grounded (partial)',
+  bank: 'catalog (bank)',
+}
+
+const COVERAGE_SOURCE_TITLE: Record<'engine' | 'engine_partial' | 'bank', string> = {
+  engine: 'Grounded in the scope-registry engine (registry classifies every coordinate)',
+  engine_partial:
+    'Grounded in the scope-registry engine, but at least one covering authority index is not fully classified — these obligations really are in scope, but unclassified items may add more.',
+  bank: 'From the compliance catalog (registry not yet definitive for this company)',
 }
 
 type CoveredItem = {
@@ -341,15 +357,11 @@ export default function GapDashboard() {
                 <div className="mt-1.5 text-[10px]">
                   <span
                     className={`rounded border px-1 py-0.5 ${COVERAGE_SOURCE_BADGE[coverageSource]}`}
-                    title={
-                      coverageSource === 'engine'
-                        ? 'Grounded in the scope-registry engine (registry classifies every coordinate)'
-                        : 'From the compliance catalog (registry not yet definitive for this company)'
-                    }
+                    title={COVERAGE_SOURCE_TITLE[coverageSource]}
                   >
-                    {coverageSource === 'engine' ? 'grounded (engine)' : 'catalog (bank)'}
+                    {COVERAGE_SOURCE_LABEL[coverageSource]}
                   </span>
-                  {coverageSource === 'engine' && (
+                  {coverageSource !== 'bank' && (
                     <span className="ml-1 text-zinc-500">
                       {counts?.engine_covered ?? 0} codified · {counts?.engine_gaps ?? 0} to codify
                     </span>

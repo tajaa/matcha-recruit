@@ -82,8 +82,16 @@ def run_compliance_evals(
 
 @celery_app.task(name="compliance_evals.run_scheduled", max_retries=0, time_limit=3300)
 def run_scheduled_compliance_evals():
-    """Weekly sweep entrypoint — all deterministic suites over every jurisdiction."""
+    """Weekly sweep entrypoint — all deterministic suites over every jurisdiction.
+
+    `scope` and `grounding` are included: both are deterministic and non-network
+    by default (grounding's tier-2b adversarial LLM verifier stays off behind
+    `grounding_llm_verifier_enabled`). Leaving them out meant the registry's own
+    coverage and the grounded-value check were only ever measured when an admin
+    clicked Run — see COMPLIANCE_SYSTEM_GAP_REVIEW.md §5.
+    """
     return run_compliance_evals(
-        suites=["completeness", "tagging", "golden", "authority", "baseline"],
+        suites=["completeness", "tagging", "golden", "authority", "baseline",
+                "scope", "grounding"],
         trigger_source="scheduled",
     )

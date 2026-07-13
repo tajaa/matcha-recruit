@@ -101,6 +101,13 @@ def aggregate_company_coordinates(coords: List[Dict[str, Any]]) -> Dict[str, Any
     resolved, EVERY coordinate resolved (a failed resolve = unknown footprint),
     every resolved coordinate is engine-definitive, and none degraded (an
     unmodeled state/city makes coverage uncertain — fall back conservatively).
+
+    ``"engine_partial"`` when every coordinate has an engine verdict and none
+    degraded, but at least one rests on a partially-classified index: the
+    engine's keys are a **floor** (confirmed obligations really are in scope;
+    unclassified items may add more). Rendering that floor with a caveat beats
+    rendering nothing, which is what the strict gate did to the whole overlay
+    while the federal index sat far from fully classified.
     """
     resolved = [c for c in coords if c.get("resolved")]
     failed = len(coords) - len(resolved)
@@ -126,12 +133,21 @@ def aggregate_company_coordinates(coords: List[Dict[str, Any]]) -> Dict[str, Any
     uncodified_n = len(uncodified)
     degraded = bool(unmodeled) or failed > 0
     engine_n = sum(1 for c in resolved if c.get("engine_definitive"))
+    partial_n = sum(1 for c in resolved if c.get("engine_partial"))
     n = len(resolved)
     engine = n > 0 and engine_n == n and not degraded
+    # Every coordinate has SOME engine verdict (definitive or floor) and none
+    # degraded: render the engine's numbers with a "partial" caveat rather than
+    # falling back to the bank entirely. Strictly better than dark, strictly
+    # more honest than claiming definitiveness.
+    partial = (
+        not engine and n > 0 and (engine_n + partial_n) == n and not degraded
+        and partial_n > 0
+    )
     denom = codified_n + uncodified_n
 
     return {
-        "coverage_source": "engine" if engine else "bank",
+        "coverage_source": "engine" if engine else ("engine_partial" if partial else "bank"),
         "codified_keys": sorted(codified_keys),
         "uncodified": uncodified,
         "counts": {
@@ -145,7 +161,8 @@ def aggregate_company_coordinates(coords: List[Dict[str, Any]]) -> Dict[str, Any
         "gate": {
             "total": len(coords),
             "engine": engine_n,
-            "fallback": len(coords) - engine_n,
+            "partial": partial_n,
+            "fallback": len(coords) - engine_n - partial_n,
         },
         "unmodeled_coordinates": unmodeled,
         "degraded": degraded,
@@ -153,7 +170,11 @@ def aggregate_company_coordinates(coords: List[Dict[str, Any]]) -> Dict[str, Any
             {
                 "state": c.get("state"),
                 "city": c.get("city"),
-                "coverage_source": "engine" if c.get("engine_definitive") else "bank",
+                "coverage_source": (
+                    "engine" if c.get("engine_definitive")
+                    else "engine_partial" if c.get("engine_partial")
+                    else "bank"
+                ),
                 "counts": c.get("counts") or {},
                 "unmodeled": c.get("unmodeled") or [],
             }
@@ -270,30 +291,38 @@ async def resolve_company_scope(
             continue
 
         definitive = False
+        partial = False
         if gate:
             chain_key = tuple(res["coordinate"]["jurisdiction_ids"])
             if chain_key in gate_by_chain:
-                definitive = gate_by_chain[chain_key]
+                definitive, partial = gate_by_chain[chain_key]
             else:
                 try:
                     from app.core.services.compliance_evals.completeness import (
-                        registry_expected_keys,
+                        registry_expected_keys_partial,
                     )
-                    expected = await registry_expected_keys(
+                    verdict = await registry_expected_keys_partial(
                         conn, list(chain_key), category,
                     )
-                    definitive = expected is not None
+                    definitive = bool(verdict["expected"]) and verdict["definitive"]
+                    # Confirmed keys exist, but unclassified items may add more:
+                    # a floor, not the whole scope. Worth rendering with a caveat
+                    # rather than falling all the way back to the bank — the
+                    # all-or-nothing gate is what made the engine overlay dead
+                    # weight (COMPLIANCE_SYSTEM_GAP_REVIEW.md §4).
+                    partial = bool(verdict["expected"]) and not verdict["definitive"]
                 except Exception:
                     logger.exception(
                         "gap_surfaces: gate check failed for company %s", company_id,
                     )
-                gate_by_chain[chain_key] = definitive
+                gate_by_chain[chain_key] = (definitive, partial)
 
         coords.append({
             "state": loc["state"],
             "city": loc["city"],
             "resolved": True,
             "engine_definitive": definitive,
+            "engine_partial": partial,
             "codified": res["codified"],
             "uncodified": res["uncodified"],
             "counts": res["counts"],

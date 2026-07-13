@@ -785,6 +785,24 @@ REGULATIONS: List[RegulationDef] = [
         authority_sources=({"domain": "cms.gov/medicare/provider-enrollment-and-certification", "name": "cms.gov/medicare/provider-enrollment-and-certification"},),
     ),
     RegulationDef(
+        # The Medicaid-side analog of the key above (42 CFR Part 455 Subpart E,
+        # administered per-state: Medi-Cal in CA, eMedNY in NY, …). A separate
+        # obligation with its own screening levels, its own revalidation clock and
+        # its own state agency — not the Medicare rule wearing a state name, which
+        # is how it ended up colliding on `provider_enrollment_revalidation`.
+        key="medicaid_provider_enrollment",
+        category="billing_integrity",
+        name="Medicaid Provider Enrollment & Screening (42 CFR Part 455 Subpart E)",
+        description=(
+            "State Medicaid enrollment, screening (categorical risk levels), site visits, "
+            "fingerprinting and revalidation — administered by the state Medicaid agency"
+        ),
+        enforcing_agency="State Medicaid agency (e.g. DHCS/Medi-Cal) / CMS",
+        state_variance="High",
+        update_frequency="Revalidation at least every 5 yrs; state rules change independently",
+        authority_sources=({"domain": "medicaid.gov/medicaid/program-integrity", "name": "medicaid.gov Program Integrity"},),
+    ),
+    RegulationDef(
         key="cms_conditions_of_participation",
         category="clinical_safety",
         name="CMS Conditions of Participation (42 CFR Parts 482–491)",
@@ -3897,6 +3915,27 @@ REGULATIONS: List[RegulationDef] = [
         update_frequency="Federal updates every 3-5 yrs; state thresholds change independently",
         authority_sources=(
             {"domain": "dol.gov/agencies/whd/overtime", "name": "WHD Overtime Exemptions"},
+        ),
+    ),
+    RegulationDef(
+        # NY (and a few other states) set a HIGHER exempt threshold for a named
+        # region than for the rest of the state — NYC + Nassau/Suffolk/Westchester
+        # vs "remainder of state". Two different dollar figures, both live, both
+        # binding on their own geography: two obligations, so two keys. Without
+        # this they both land on `exempt_salary_threshold` and collide, which is
+        # exactly the polymorphy the one-code-one-obligation rule forbids.
+        key="exempt_salary_threshold_regional",
+        category="minimum_wage",
+        name="Exempt Employee Salary Threshold — Regional Tier",
+        description=(
+            "Higher exempt-salary threshold applying to a named sub-state region "
+            "(e.g. NY downstate: NYC, Nassau, Suffolk, Westchester)"
+        ),
+        enforcing_agency="State labor agencies",
+        state_variance="High",
+        update_frequency="Changes on the state's own schedule, independently of the statewide tier",
+        authority_sources=(
+            {"domain": "dol.ny.gov", "name": "NY DOL"},
         ),
     ),
     RegulationDef(

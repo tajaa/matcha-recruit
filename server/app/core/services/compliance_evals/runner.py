@@ -205,6 +205,7 @@ async def run_evals(
             golden_counts: Dict = {}
             grounding_results: Dict = {}
             baseline_results: Dict = {}
+            scope_results: Dict = {}
 
             if "completeness" in suites:
                 _progress(run_id, "Building jurisdiction graph", 5)
@@ -240,10 +241,16 @@ async def run_evals(
 
             if "scope" in suites:
                 _progress(run_id, "Auditing scope-registry coverage", 80)
-                # Findings-only: authority indexes are registry-global and the
-                # result table is per-jurisdiction, so scope contributes
-                # findings + totals, not a composite subscore.
                 out = await scope_suite.run_scope(conn, jur_ids)
+                # Indexes attributed to a jurisdiction now carry a subscore
+                # (confirmed-classified + codified fraction). Federal indexes
+                # attribute to NULL and can't ride the per-jurisdiction
+                # scorecard — their criticals gate readiness instead, via the
+                # federal_criticals bucket below.
+                scope_results = {
+                    jid: cell for jid, cell in (out.get("results") or {}).items()
+                    if jid is not None
+                }
                 all_findings.extend(out["findings"])
                 totals.update(out["totals"])
 
@@ -272,6 +279,7 @@ async def run_evals(
             # Per-jurisdiction critical counts, so the readiness gate can block on them.
             critical_by_jur: Dict = {}
             critical_by_pair: Dict = {}
+            federal_criticals = 0
             for f in all_findings:
                 if f.get("severity") != "critical":
                     continue
@@ -285,6 +293,13 @@ async def run_evals(
                     continue
                 jid = f.get("jurisdiction_id")
                 if jid is None:
+                    # Federal-attributed criticals (scope emits jurisdiction_id
+                    # NULL for the federal index). These were dropped entirely,
+                    # so a jurisdiction could read READY sitting on top of a
+                    # broken federal baseline that applies to every US employer
+                    # (COMPLIANCE_SYSTEM_GAP_REVIEW.md §5). Federal law applies
+                    # everywhere: block every jurisdiction on them.
+                    federal_criticals += 1
                     continue
                 if f.get("industry"):
                     critical_by_pair[(jid, f["industry"])] = (
@@ -301,6 +316,7 @@ async def run_evals(
                     ("golden", golden_results),
                     ("freshness", freshness_results),
                     ("grounding", grounding_results),
+                    ("scope", scope_results),
                 ):
                     cell = res.get(jid)
                     if cell:
@@ -323,6 +339,7 @@ async def run_evals(
                         authority=(authority_results.get(jid) or {}).get("score"),
                         freshness=(freshness_results.get(jid) or {}).get("score"),
                         tagging=(tagging_results.get(jid) or {}).get("score"),
+                        scope=(scope_results.get(jid) or {}).get("score"),
                     )
                     readiness = evaluate_readiness(
                         subs,
@@ -332,6 +349,7 @@ async def run_evals(
                         open_critical_findings=(
                             critical_by_jur.get(jid, 0)
                             + critical_by_pair.get((jid, industry), 0)
+                            + federal_criticals
                         ),
                         golden_fact_count=golden_counts.get(jid, 0),
                     )
@@ -353,6 +371,18 @@ async def run_evals(
                     conn, run_id, jid, None, "baseline",
                     cell["score"], cell["detail"],
                 )
+
+            # Same problem for golden: _resolve_jurisdiction_ids excludes federal,
+            # so the 13 US-federal golden facts were asserted (and emitted findings)
+            # every run but their score was never stored — the federal baseline had
+            # no accuracy cell at all (COMPLIANCE_SYSTEM_GAP_REVIEW.md §5).
+            jur_id_set = set(jur_ids)
+            for jid, cell in golden_results.items():
+                if jid not in jur_id_set:
+                    await _insert_result(
+                        conn, run_id, jid, None, "golden",
+                        cell["score"], cell["detail"],
+                    )
 
             totals["findings"] = len(all_findings)
             await conn.execute(

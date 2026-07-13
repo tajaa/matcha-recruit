@@ -10,7 +10,7 @@ live, so the union already reflects the correct expectation.
 from __future__ import annotations
 
 import logging
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from . import industry_keysets as iks
 from .keys import normalize_key
@@ -148,6 +148,16 @@ async def registry_expected_keys(
     # classification the resolved set is a subset of the true scope, so using
     # it as `expected` would shrink the denominator and inflate completeness.
     # Any unclassified item in a covering index ⇒ fall back to category-groups.
+    #
+    # This stays all-or-nothing ON PURPOSE, and it is not the gap the review
+    # thought it was: an *unclassified* item has, by definition, no category
+    # yet, so there is no sound way to say which categories it would or
+    # wouldn't have added keys to. Any per-category relaxation here would be
+    # guessing, and guessing low inflates completeness — the exact failure the
+    # gate exists to prevent. What WAS wrong is that a partial registry made
+    # the *overlay* go dark too; that's fixed in
+    # registry_expected_keys_partial below, which is honest about its
+    # confidence instead of silent.
     covering = await conn.fetch(
         "SELECT unclassified_count FROM authority_indexes "
         "WHERE jurisdiction_id IS NULL OR jurisdiction_id = ANY($1::uuid[])",
@@ -173,6 +183,11 @@ async def registry_expected_keys(
         """,
         list(chain_ids),
     )
+    return _select_expected(rows, chain) or None
+
+
+def _select_expected(rows, chain: List[str]) -> Dict[str, Set[str]]:
+    """Confirmed classifications → {category: {regulation_key}} for this chain."""
     chain_set = set(chain)
     expected: Dict[str, Set[str]] = {}
     for r in rows:
@@ -184,8 +199,67 @@ async def registry_expected_keys(
             continue
         cat = r["category_slug"] or "uncategorized"
         expected.setdefault(cat, set()).add(r["regulation_key"])
+    return expected
 
-    return expected or None
+
+async def registry_expected_keys_partial(
+    conn, chain_ids: List, industry: Optional[str],
+) -> Dict[str, Any]:
+    """Registry expected-keys WITHOUT the definitiveness gate, plus the
+    confidence to render it honestly.
+
+    Returns ``{"expected": {...}|None, "definitive": bool, "unclassified": int}``.
+
+    ``definitive=True`` means every covering index is fully confirmed-classified
+    — the expected set is the complete scope, and it's the same set
+    :func:`registry_expected_keys` returns. ``definitive=False`` means it's a
+    **floor**: these keys really are in scope (they're confirmed), but
+    unclassified items may add more. A floor is still worth showing — "at least
+    these N obligations, N unclassified items still to review" beats rendering
+    nothing, which is what the all-or-nothing gate did to the whole engine
+    overlay (COMPLIANCE_SYSTEM_GAP_REVIEW.md §4). It must never be used as a
+    completeness *denominator*; see the note in registry_expected_keys.
+    """
+    try:
+        from app.core.services.scope_registry.categories import ancestry, resolve_category
+    except Exception:
+        return {"expected": None, "definitive": False, "unclassified": 0}
+
+    slug = resolve_category(industry) if industry else None
+    chain = ancestry(slug) if slug else []
+    if not chain:
+        return {"expected": None, "definitive": False, "unclassified": 0}
+
+    covering = await conn.fetch(
+        "SELECT unclassified_count FROM authority_indexes "
+        "WHERE jurisdiction_id IS NULL OR jurisdiction_id = ANY($1::uuid[])",
+        list(chain_ids),
+    )
+    if not covering:
+        return {"expected": None, "definitive": False, "unclassified": 0}
+    unclassified = sum(c["unclassified_count"] or 0 for c in covering)
+
+    rows = await conn.fetch(
+        """
+        SELECT c.regulation_key, c.disposition, c.applies_to_categories,
+               c.excludes_categories, kd.category_slug
+        FROM authority_item_classifications c
+        JOIN authority_index_items i ON i.id = c.item_id
+        JOIN authority_indexes ai ON ai.id = i.authority_index_id
+        LEFT JOIN regulation_key_definitions kd ON kd.id = c.key_definition_id
+        WHERE c.status = 'confirmed'
+          AND c.disposition <> 'excluded'
+          AND c.regulation_key IS NOT NULL
+          AND (ai.jurisdiction_id IS NULL OR ai.jurisdiction_id = ANY($1::uuid[]))
+        """,
+        list(chain_ids),
+    )
+    expected = _select_expected(rows, chain)
+    return {
+        "expected": expected or None,
+        "definitive": unclassified == 0,
+        "unclassified": unclassified,
+    }
 
 
 async def registry_has_confirmed_classifications(conn) -> bool:

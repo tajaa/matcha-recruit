@@ -280,8 +280,11 @@ export type GapAnalysisDossier = {
     suggestions: number
     coverage_pct?: number
     // Engine overlay (additive). 'engine' when the scope-registry definitively
-    // classifies every one of the company's coordinates; else 'bank'.
-    coverage_source?: 'engine' | 'bank'
+    // classifies every one of the company's coordinates; 'engine_partial' when
+    // every coordinate has an engine verdict but at least one rests on a
+    // partially-classified index (the keys are a floor, not the whole scope);
+    // else 'bank'.
+    coverage_source?: 'engine' | 'engine_partial' | 'bank'
     engine_coverage_pct?: number
     engine_covered?: number
     engine_gaps?: number
@@ -292,7 +295,7 @@ export type GapAnalysisDossier = {
 // the engine overlay; null on failure). Additive — the dossier's bank arrays
 // remain the actionable worklist.
 export type GapEngineCoverage = {
-  coverage_source: 'engine' | 'bank'
+  coverage_source: 'engine' | 'engine_partial' | 'bank'
   coverage_pct: number
   counts: {
     locations: number

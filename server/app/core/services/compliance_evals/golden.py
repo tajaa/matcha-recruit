@@ -297,13 +297,68 @@ async def run_golden(conn, today: Optional[date] = None) -> Dict:
                 "observed": {**(verdict["observed"] or {}), "reason": verdict["reason"]},
             })
 
+    # Chain inheritance: a CA fact IS an assertion about Los Angeles — state and
+    # federal law apply in the city. Scoring each jurisdiction only against facts
+    # whose fixture happens to name it left LA(6)/SF(4)/NYC(4) permanently under
+    # MIN_GOLDEN_FACTS_READY and therefore permanently DEGRADED, no matter how
+    # correct their data was (COMPLIANCE_SYSTEM_GAP_REVIEW.md §5). Each fact is
+    # still ASSERTED against its own jurisdiction's rows (a CA fact checks CA's
+    # row, not LA's); only the roll-up inherits.
+    effective = await _inherit_along_chains(conn, per_jur)
+
     results = {
         jid: {
             "score": accuracy_score(s["passed"], s["failed"], s["critical_failures"]),
             "detail": s,
         }
-        for jid, s in per_jur.items()
+        for jid, s in effective.items()
     }
     return {"results": results, "findings": findings, "fact_counts": {
-        jid: s["passed"] + s["failed"] for jid, s in per_jur.items()
+        jid: s["passed"] + s["failed"] for jid, s in effective.items()
     }}
+
+
+async def _inherit_along_chains(conn, per_jur: Dict) -> Dict:
+    """Roll each jurisdiction's own fact stats up with its ancestors' (city →
+    state → federal). Pure aggregation over ``per_jur``; no new assertions.
+    """
+    if not per_jur:
+        return per_jur
+
+    rows = await conn.fetch(
+        "SELECT id, level::text AS level, state, COALESCE(country_code,'US') AS country_code "
+        "FROM jurisdictions WHERE id = ANY($1::uuid[])",
+        list(per_jur.keys()),
+    )
+    # Ancestors of a sub-state jurisdiction: its state's row + the federal row.
+    # Looked up among the fixture jurisdictions only — a fixture-less ancestor
+    # contributes no facts, so it can't contribute stats either.
+    by_level_state = {}
+    federal_ids = []
+    for r in rows:
+        if r["level"] in ("federal", "national"):
+            federal_ids.append(r["id"])
+        elif r["level"] == "state":
+            by_level_state[(r["state"], r["country_code"])] = r["id"]
+
+    effective: Dict = {}
+    for r in rows:
+        jid = r["id"]
+        own = per_jur[jid]
+        ancestors = []
+        if r["level"] not in ("federal", "national"):
+            ancestors.extend(federal_ids)
+        if r["level"] not in ("federal", "national", "state"):
+            state_id = by_level_state.get((r["state"], r["country_code"]))
+            if state_id:
+                ancestors.append(state_id)
+
+        merged = dict(own)
+        for aid in ancestors:
+            anc = per_jur.get(aid)
+            if not anc:
+                continue
+            for k in ("passed", "failed", "critical_failures"):
+                merged[k] += anc[k]
+        effective[jid] = merged
+    return effective

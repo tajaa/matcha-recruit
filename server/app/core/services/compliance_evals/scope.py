@@ -57,13 +57,22 @@ def _condition_attr_keys(condition: Any) -> List[str]:
 
 
 async def run_scope(conn, jurisdiction_ids: Optional[List] = None) -> Dict:
-    """Emit scope-coverage findings. Findings-only (no scorecard subscore).
+    """Emit scope-coverage findings + a per-jurisdiction scope subscore.
 
     Authority indexes are registry-global; an index attributes its findings to
     its own ``jurisdiction_id`` (NULL for federal). ``jurisdiction_ids`` filters
     curated indexes to the eval's targets; federal (NULL) is always included.
+
+    ``results`` is keyed by jurisdiction_id and aggregates every index covering
+    it (a jurisdiction with several curated indexes scores across all of them).
+    The federal (NULL) key is dropped by the caller — a scorecard row needs a
+    jurisdiction FK — but federal's *criticals* still gate readiness everywhere
+    via runner.py's federal_criticals bucket.
     """
+    from .scoring import scope_score
+
     findings: List[Dict] = []
+    per_jur: Dict = {}
     totals = {
         "scope_indexes": 0,
         "scope_unclassified": 0,
@@ -86,7 +95,7 @@ async def run_scope(conn, jurisdiction_ids: Optional[List] = None) -> Dict:
         )
     except Exception:
         totals["scope_registry_available"] = False
-        return {"findings": findings, "totals": totals}
+        return {"findings": findings, "totals": totals, "results": {}}
 
     jur_filter = set(jurisdiction_ids or [])
 
@@ -95,14 +104,25 @@ async def run_scope(conn, jurisdiction_ids: Optional[List] = None) -> Dict:
         if jur_filter and jid is not None and jid not in jur_filter:
             continue
         totals["scope_indexes"] += 1
+        agg = per_jur.setdefault(
+            jid, {"item_count": 0, "unclassified": 0, "without_value": 0, "indexes": 0}
+        )
+        agg["indexes"] += 1
+        agg["item_count"] += idx["item_count"] or 0
+        agg["unclassified"] += idx["unclassified_count"] or 0
 
         # 1. Unclassified items — the definitive remaining-work counter.
         if idx["unclassified_count"]:
             totals["scope_unclassified"] += idx["unclassified_count"]
+            # Must mirror _refresh_unclassified_count's predicate (classify.py):
+            # "unclassified" means "has no CONFIRMED classification", not "has no
+            # classification row at all" — otherwise a fully-Gemini-classified,
+            # zero-confirmed index reports a nonzero count with an empty sample.
             sample = await conn.fetch(
                 """
                 SELECT i.citation FROM authority_index_items i
-                LEFT JOIN authority_item_classifications c ON c.item_id = i.id
+                LEFT JOIN authority_item_classifications c
+                    ON c.item_id = i.id AND c.status = 'confirmed'
                 WHERE i.authority_index_id = $1 AND c.id IS NULL
                 ORDER BY i.citation LIMIT 10
                 """,
@@ -165,6 +185,7 @@ async def run_scope(conn, jurisdiction_ids: Optional[List] = None) -> Dict:
         )
         if without_value:
             totals["scope_without_value"] += len(without_value)
+            agg["without_value"] += len(without_value)
             findings.append({
                 "suite": "scope",
                 "finding_type": "scope_without_value",
@@ -218,4 +239,11 @@ async def run_scope(conn, jurisdiction_ids: Optional[List] = None) -> Dict:
                     },
                 })
 
-    return {"findings": findings, "totals": totals}
+    results = {
+        jid: {
+            "score": scope_score(a["item_count"], a["unclassified"], a["without_value"]),
+            "detail": a,
+        }
+        for jid, a in per_jur.items()
+    }
+    return {"findings": findings, "totals": totals, "results": results}
