@@ -62,6 +62,7 @@ const FEATURE_GROUPS: { label: string; features: Record<string, string> }[] = [
       legal_defense: 'Legal Pilot (AI litigation-evidence packets)',
       handbook_pilot: 'Handbook Pilot (AI handbook/policy generation)',
       analysis_pilot: 'Analysis Pilot (general data-analysis chat — CSV/XLSX/PDF, deterministic metrics)',
+      hr_pilot: 'HR Pilot (matcha-work thread mode — handbook-grounded supervisor guidance + hard-stop HR escalation gate)',
     },
   },
 ]
