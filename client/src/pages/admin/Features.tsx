@@ -42,6 +42,7 @@ const FEATURE_GROUPS: { label: string; features: Record<string, string> }[] = [
       inventory: 'Inventory',
       werk_lite: 'Werk Lite (work-chat surface — needs Matcha Work too)',
       werk_lite_calls_all_members: 'Werk Lite — any member can start calls',
+      hr_pilot: 'HR Pilot (thread mode — handbook-grounded supervisor guidance + hard-stop HR escalation gate)',
     },
   },
   {
@@ -62,7 +63,6 @@ const FEATURE_GROUPS: { label: string; features: Record<string, string> }[] = [
       legal_defense: 'Legal Pilot (AI litigation-evidence packets)',
       handbook_pilot: 'Handbook Pilot (AI handbook/policy generation)',
       analysis_pilot: 'Analysis Pilot (general data-analysis chat — CSV/XLSX/PDF, deterministic metrics)',
-      hr_pilot: 'HR Pilot (matcha-work thread mode — handbook-grounded supervisor guidance + hard-stop HR escalation gate)',
     },
   },
 ]
