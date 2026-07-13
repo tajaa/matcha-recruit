@@ -1303,7 +1303,9 @@ _CANVAS_JS = """<style>
 <script>(function(){
 var editing=null,origText='',cancelEdit=false,dragging=false,dragFrom=-1,downY=0,downIdx=-1,moved=false,dropLine=null;
 var elDrag=null,elResize=null,rdir='',selEl=null,curBp='d',gx=0,gy=0,sx=0,sy=0,sw=0,sh=0,gg=null,pid=0;
-var themeMode=false;
+var themeMode=false; // theme drawer open (Form mode only) — clicks probe a region instead of selecting
+var restrictMode=false; // Form mode: keep hover+click-select for the form<->preview sync, but
+                         // suppress canvas-only affordances (inline edit, drag-reorder, element drag/resize)
 // Region -> selector map for theme highlight-sync. Kept in lockstep with the
 // ThemeRegion union in useThemeBridge.ts.
 var THEME_REGION_SEL={
@@ -1378,7 +1380,7 @@ document.addEventListener('click',function(e){
   post({type:'cz-select',block:i,field:f?f.getAttribute('data-cz-field'):undefined,rect:{top:r.top,left:r.left,width:r.width,height:r.height}});
 },true);
 document.addEventListener('dblclick',function(e){
-  if(themeMode)return;
+  if(themeMode||restrictMode)return;
   var f=e.target.closest&&e.target.closest('[data-cz-field]');if(!f)return;
   e.preventDefault();
   if(editing&&editing!==f)editing.blur();
@@ -1403,7 +1405,7 @@ document.addEventListener('blur',function(e){
   post({type:'cz-editing-end'});
 },true);
 document.addEventListener('pointerdown',function(e){
-  if(editing||themeMode)return;
+  if(editing||themeMode||restrictMode)return;
   var h=e.target.closest&&e.target.closest('.cz-cv-h');
   if(h&&selEl){e.preventDefault();gg=gridInfo(selEl);if(!gg)return;elResize=selEl;rdir=h.getAttribute('data-dir');var p=pos(selEl);sx=p.x;sy=p.y;sw=p.w;sh=p.h;gx=e.clientX;gy=e.clientY;moved=false;downIdx=-1;dragging=false;pid=e.pointerId;try{selEl.setPointerCapture(pid);}catch(_){}return;}
   var ce=e.target.closest&&e.target.closest('.cz-el');
@@ -1460,6 +1462,7 @@ window.addEventListener('message',function(e){
   else if(d.type==='cz-theme-clear')clearThemeHl();
   else if(d.type==='cz-theme-open')themeMode=true;
   else if(d.type==='cz-theme-close'){themeMode=false;clearThemeHl();}
+  else if(d.type==='cz-mode')restrictMode=(d.mode==='form');
 });
 post({type:'cz-ready'});
 })();</script>"""

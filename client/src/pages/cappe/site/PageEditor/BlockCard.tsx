@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { ChevronDown, ChevronUp, ClipboardPaste, Copy, CopyPlus, GripVertical, Trash2, Wand2 } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { ChevronDown, ChevronUp, ClipboardPaste, Copy, CopyPlus, GripVertical, MoreVertical, Trash2, Wand2 } from 'lucide-react'
 import type { CappeBlock } from '../../../../types/cappe'
 import { BLOCK_SCHEMAS } from './blockSchemas'
 import { CanvasFormEditor } from './CanvasEditors'
@@ -8,26 +8,97 @@ import { usePremium } from './DesignPrimitives'
 import { DesignInspector } from './DesignInspector'
 import { FieldInput } from './FieldInputs'
 
+/** Overflow menu for the less-frequent actions (copy/paste style, duplicate,
+ *  reorder) — keeps the always-visible header row down to grip/label/kebab/
+ *  delete/chevron instead of up to 7 icon buttons. */
+function BlockMenu({ index, total, onMove, onDuplicate, onCopyStyle, onPasteStyle, canPasteStyle, premium }: {
+  index: number; total: number
+  onMove: (dir: -1 | 1) => void
+  onDuplicate?: () => void
+  onCopyStyle?: () => void
+  onPasteStyle?: () => void
+  canPasteStyle?: boolean
+  premium: boolean
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const onDoc = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false) }
+    document.addEventListener('mousedown', onDoc)
+    return () => document.removeEventListener('mousedown', onDoc)
+  }, [open])
+  const item = (label: string, onClick: (() => void) | undefined, disabled?: boolean, Icon?: typeof Copy) => (
+    <button
+      type="button"
+      disabled={disabled || !onClick}
+      onClick={() => { onClick?.(); setOpen(false) }}
+      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100 disabled:opacity-30 disabled:hover:bg-transparent"
+    >
+      {Icon && <Icon className="h-3.5 w-3.5" />} {label}
+    </button>
+  )
+  return (
+    <div ref={ref} className="relative">
+      <button type="button" onClick={() => setOpen((o) => !o)} className="hover:text-zinc-200"><MoreVertical className="h-4 w-4" /></button>
+      {open && (
+        <div className="absolute right-0 top-full z-10 mt-1 w-44 overflow-hidden rounded-lg border border-zinc-700 bg-zinc-900 py-1 shadow-xl shadow-black/40">
+          {premium && onCopyStyle && item('Copy design', onCopyStyle, false, Copy)}
+          {premium && onPasteStyle && item('Paste design', onPasteStyle, !canPasteStyle, ClipboardPaste)}
+          {onDuplicate && item('Duplicate section', onDuplicate, false, CopyPlus)}
+          {item('Move up', () => onMove(-1), index === 0, ChevronUp)}
+          {item('Move down', () => onMove(1), index === total - 1, ChevronDown)}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function BlockCard({
-  block, index, total, onChange, onRemove, onMove,
+  block, index, total, onChange, onRemove, onMove, defaultOpen,
   onDuplicate, onCopyStyle, onPasteStyle, canPasteStyle, onDragStart, onDragEnd,
+  onHoverStart, onHoverEnd, forceOpenTick,
 }: {
   block: CappeBlock; index: number; total: number
   onChange: (b: CappeBlock) => void
   onRemove: () => void
   onMove: (dir: -1 | 1) => void
+  /** Auto-expand once (the block just added), instead of the new collapsed default. */
+  defaultOpen?: boolean
   onDuplicate?: () => void
   onCopyStyle?: () => void
   onPasteStyle?: () => void
   canPasteStyle?: boolean
   onDragStart?: () => void
   onDragEnd?: () => void
+  /** Hover sync — highlights this block in the live preview. */
+  onHoverStart?: () => void
+  onHoverEnd?: () => void
+  /** Bumped when this block is clicked in the preview — expands + scrolls to it. */
+  forceOpenTick?: number
 }) {
-  const [open, setOpen] = useState(true)
+  const [open, setOpen] = useState(!!defaultOpen)
   const schema = BLOCK_SCHEMAS[block.type]
   const premium = usePremium()
+  const rootRef = useRef<HTMLDivElement>(null)
+
+  // A page click (form-mode preview → card sync) forces this card open and
+  // scrolls it into view, even if the user had collapsed it.
+  const lastTick = useRef(forceOpenTick)
+  useEffect(() => {
+    if (forceOpenTick === undefined || forceOpenTick === lastTick.current) return
+    lastTick.current = forceOpenTick
+    setOpen(true)
+    rootRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  }, [forceOpenTick])
+
   return (
-    <div className="rounded-xl border border-zinc-800 bg-zinc-900">
+    <div
+      ref={rootRef}
+      className="rounded-xl border border-zinc-800 bg-zinc-900"
+      onMouseEnter={onHoverStart}
+      onMouseLeave={onHoverEnd}
+    >
       <div className="flex items-center justify-between gap-2 border-b border-zinc-800 px-4 py-2.5">
         <div className="flex min-w-0 items-center gap-2">
           <span
@@ -43,7 +114,7 @@ export function BlockCard({
             {schema?.label || block.type}
           </button>
         </div>
-        <div className="flex items-center gap-1 text-zinc-500">
+        <div className="flex items-center gap-1.5 text-zinc-500">
           {premium && CONVERTIBLE_TO_CANVAS.has(block.type) && (
             <button type="button" title="Customize freely — turn this section into a freeform layout you can drag & restyle (one-way)"
               onClick={() => onChange(convertSectionToCanvas(block))}
@@ -51,17 +122,12 @@ export function BlockCard({
               <Wand2 className="h-3.5 w-3.5 text-amber-400" /> Customize freely
             </button>
           )}
-          {premium && block.type !== 'canvas' && onCopyStyle && (
-            <button type="button" onClick={onCopyStyle} title="Copy this section's design" className="hover:text-zinc-200"><Copy className="h-4 w-4" /></button>
-          )}
-          {premium && block.type !== 'canvas' && onPasteStyle && (
-            <button type="button" onClick={onPasteStyle} disabled={!canPasteStyle} title="Paste design onto this section" className="hover:text-zinc-200 disabled:opacity-30"><ClipboardPaste className="h-4 w-4" /></button>
-          )}
-          {onDuplicate && (
-            <button type="button" onClick={onDuplicate} title="Duplicate section" className="hover:text-zinc-200"><CopyPlus className="h-4 w-4" /></button>
-          )}
-          <button type="button" onClick={() => onMove(-1)} disabled={index === 0} className="hover:text-zinc-200 disabled:opacity-30"><ChevronUp className="h-4 w-4" /></button>
-          <button type="button" onClick={() => onMove(1)} disabled={index === total - 1} className="hover:text-zinc-200 disabled:opacity-30"><ChevronDown className="h-4 w-4" /></button>
+          <BlockMenu
+            index={index} total={total} onMove={onMove} onDuplicate={onDuplicate}
+            onCopyStyle={block.type !== 'canvas' ? onCopyStyle : undefined}
+            onPasteStyle={block.type !== 'canvas' ? onPasteStyle : undefined}
+            canPasteStyle={canPasteStyle} premium={premium}
+          />
           <button type="button" onClick={onRemove} className="hover:text-red-400"><Trash2 className="h-4 w-4" /></button>
           <button type="button" onClick={() => setOpen((o) => !o)} className="hover:text-zinc-200">{open ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</button>
         </div>

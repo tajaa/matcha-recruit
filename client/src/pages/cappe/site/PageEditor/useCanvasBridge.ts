@@ -13,6 +13,10 @@ export function useCanvasBridge(
   /** Right-edge space already claimed by a docked panel (the theme drawer), so
    *  the floating inspector — which is viewport-`fixed` — never slides under it. */
   reservedRight = 0,
+  /** Form mode keeps the runtime's hover+click-select (for the form<->preview
+   *  sync) but must suppress canvas-only affordances (inline edit, drag-reorder,
+   *  element drag/resize) — told to the iframe via `cz-mode`. */
+  editMode: 'form' | 'canvas' = 'canvas',
 ) {
   const [selBlock, setSelBlock] = useState<number | null>(null)
   const [selElement, setSelElement] = useState<string | null>(null)  // freeform canvas: selected element id
@@ -54,6 +58,12 @@ export function useCanvasBridge(
   selElementRef.current = selElement
   canvasBpRef.current = canvasBp
   const postToCanvas = (msg: unknown) => iframeRef.current?.contentWindow?.postMessage(msg, '*')
+  const editModeRef = useRef(editMode)
+  editModeRef.current = editMode
+  // Re-assert the interaction mode whenever it changes, and once more when a
+  // fresh runtime signals ready (the iframe fully reloads on most edits, which
+  // would otherwise silently reset restrictMode to its 'canvas' default).
+  useEffect(() => { postToCanvas({ type: 'cz-mode', mode: editMode }) }, [editMode])
   // Flip desktop/mobile editing: tell the canvas runtime (so drags write the right
   // coords) and narrow the preview iframe so the mobile @media layout activates.
   const setCanvasBreakpoint = (bp: 'd' | 'm') => { setCanvasBp(bp); postToCanvas({ type: 'cz-bp', bp }) }
@@ -80,6 +90,7 @@ export function useCanvasBridge(
       const d = e.data || {}
       switch (d.type) {
         case 'cz-ready': {
+          postToCanvas({ type: 'cz-mode', mode: editModeRef.current })
           const sb = selBlockRef.current
           if (sb != null) {
             if (isCanvasBlock(blocksRef.current[sb]) && selElementRef.current) postToCanvas({ type: 'cz-elem-highlight', id: selElementRef.current })

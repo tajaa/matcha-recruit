@@ -5,7 +5,7 @@ import { BLOCK_ORDER, BLOCK_SCHEMAS } from './blockSchemas'
 import { BlockCard } from './BlockCard'
 
 export function FormModeView({
-  blocks, preview, adding, setAdding, canvasUnlocked, iframeRef,
+  blocks, preview, adding, setAdding, canvasUnlocked, iframeRef, postToCanvas, selectedBlock, selectTick, justAddedKey,
   updateBlock, removeBlock, moveBlock, reorderBlock, duplicateBlock, addBlock,
   copyStyle, pasteStyle, canPasteStyle,
 }: {
@@ -15,6 +15,16 @@ export function FormModeView({
   setAdding: (fn: (a: boolean) => boolean) => void
   canvasUnlocked: boolean
   iframeRef: RefObject<HTMLIFrameElement>
+  /** Hover sync: highlight/clear the corresponding block in the live preview. */
+  postToCanvas: (msg: unknown) => void
+  /** Last block selected via a page click in the preview (form mode). */
+  selectedBlock: number | null
+  /** Bumped whenever `selectedBlock` changes, so a re-click on the same index
+   *  still re-triggers the force-open+scroll. */
+  selectTick: number
+  /** Stable `_k` of the block just added — opens expanded once instead of
+   *  starting collapsed. */
+  justAddedKey: string | null
   updateBlock: (i: number, b: CappeBlock) => void
   removeBlock: (i: number) => void
   moveBlock: (i: number, dir: -1 | 1) => void
@@ -36,7 +46,7 @@ export function FormModeView({
 
   return (
     <div className="flex min-h-0 flex-1">
-      <div className="w-full overflow-y-auto border-r border-zinc-800 bg-zinc-950 p-5 lg:w-[46%]">
+      <div className="w-full overflow-y-auto border-r border-zinc-800 bg-zinc-950 p-5 lg:w-[38%]">
         <div className="space-y-3">
           {blocks.map((b, i) => (
             <div
@@ -49,6 +59,7 @@ export function FormModeView({
                 block={b}
                 index={i}
                 total={blocks.length}
+                defaultOpen={!!b._k && b._k === justAddedKey}
                 onChange={(nb) => updateBlock(i, nb)}
                 onRemove={() => removeBlock(i)}
                 onMove={(dir) => moveBlock(i, dir)}
@@ -58,6 +69,9 @@ export function FormModeView({
                 canPasteStyle={canPasteStyle}
                 onDragStart={() => setDragFrom(i)}
                 onDragEnd={() => { setDragFrom(null); setDragOver(null) }}
+                onHoverStart={() => postToCanvas({ type: 'cz-highlight', block: i })}
+                onHoverEnd={() => postToCanvas({ type: 'cz-clear' })}
+                forceOpenTick={selectedBlock === i ? selectTick : undefined}
               />
             </div>
           ))}

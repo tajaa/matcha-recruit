@@ -55,7 +55,7 @@ export default function PageEditor() {
   useEffect(() => { if (canvasUnlocked) setEditMode('canvas') }, [canvasUnlocked])
   // The theme drawer is a real 18rem flex sibling, but the canvas inspector is
   // viewport-`fixed` — tell the bridge to clamp it clear of the drawer.
-  const canvas = useCanvasBridge(blocks, setBlocks, previewIframeRef, themeEditor.themeOpen ? 288 : 0)
+  const canvas = useCanvasBridge(blocks, setBlocks, previewIframeRef, themeEditor.themeOpen ? 288 : 0, editMode)
 
   // Reverse sync: clicking a page element while the drawer is open probes which
   // theme region governs it; the drawer scrolls to + flashes that control. Only
@@ -100,7 +100,16 @@ export default function PageEditor() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [siteId, pageId])
 
-  const preview = usePagePreview(siteId, page, title, blocks, themeEditor.theme, meta, editMode, canvas.refreshTick, canvas.suspendPreview, themeEditor.themeOpen)
+  const preview = usePagePreview(siteId, page, title, blocks, themeEditor.theme, meta, editMode, canvas.refreshTick, canvas.suspendPreview)
+
+  // Form<->preview block sync: bumped whenever the preview reports a new
+  // selection (page click), so FormModeView can force-open + scroll the
+  // matching card even if the user had collapsed it.
+  const [selectTick, setSelectTick] = useState(0)
+  useEffect(() => { if (editMode === 'form' && canvas.selBlock != null) setSelectTick((t) => t + 1) }, [editMode, canvas.selBlock])
+  // The block just added should open expanded once, instead of the new
+  // collapsed-by-default state.
+  const [justAddedKey, setJustAddedKey] = useState<string | null>(null)
 
   const updateBlock = (i: number, b: CappeBlock) => setBlocks((bs) => bs.map((x, j) => (j === i ? b : x)))
   const removeBlock = (i: number) => { setBlocks((bs) => bs.filter((_, j) => j !== i)); canvas.setSelBlock(null) }
@@ -122,12 +131,16 @@ export default function PageEditor() {
       return next
     })
   const addBlock = (type: string) => {
-    setBlocks((bs) => [...bs, withKey(BLOCK_SCHEMAS[type].make())])
+    const nb = withKey(BLOCK_SCHEMAS[type].make())
+    setBlocks((bs) => [...bs, nb])
+    setJustAddedKey(nb._k as string)
     setAdding(false)
   }
   // Insert a new block right after index `i` (canvas "add below").
   const addBlockAt = (type: string, i: number) => {
-    setBlocks((bs) => { const next = [...bs]; next.splice(i + 1, 0, withKey(BLOCK_SCHEMAS[type].make())); return next })
+    const nb = withKey(BLOCK_SCHEMAS[type].make())
+    setBlocks((bs) => { const next = [...bs]; next.splice(i + 1, 0, nb); return next })
+    setJustAddedKey(nb._k as string)
     canvas.setSelBlock(i + 1)
   }
   // Deep-copy a block (incl. _design + list items) and insert after it. Fresh key.
@@ -278,6 +291,10 @@ export default function PageEditor() {
             setAdding={setAdding}
             canvasUnlocked={canvasUnlocked}
             iframeRef={previewIframeRef}
+            postToCanvas={canvas.postToCanvas}
+            selectedBlock={canvas.selBlock}
+            selectTick={selectTick}
+            justAddedKey={justAddedKey}
             updateBlock={updateBlock}
             removeBlock={removeBlock}
             moveBlock={moveBlock}
