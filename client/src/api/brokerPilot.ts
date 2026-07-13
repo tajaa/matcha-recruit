@@ -11,7 +11,7 @@ export type SessionStatus = 'active' | 'closed'
 export type DocStatus = 'processing' | 'ready' | 'text_only' | 'failed'
 export type DocType =
   | 'loss_run' | 'dec_page' | 'quote' | 'carrier_letter'
-  | 'bordereau' | 'policy_form' | 'financials' | 'other'
+  | 'bordereau' | 'policy_form' | 'financials' | 'contract' | 'other'
 
 export type KeyFigure = { label: string; value: string; context?: string }
 export type DocExtraction = {
@@ -40,6 +40,27 @@ export type PilotDocument = {
   created_at: string
 }
 
+// The documents a mode analyzes. Declared on the template (so the picker can
+// show them before a session exists) and satisfied per-session — see
+// DocRequirement, which is this spec plus the answer to "does this client
+// already have it?".
+export type RequiredDocSpec = {
+  doc_type: DocType
+  label: string
+  hint: string
+  required: boolean
+  /** Platform data that satisfies this without an upload (null = the document itself is required). */
+  platform_source: string | null
+}
+
+/** How a requirement got satisfied — 'platform' means the client's own data already covers it. */
+export type SatisfiedBy = 'upload' | 'unclassified' | 'platform' | null
+export type DocRequirement = RequiredDocSpec & {
+  satisfied: boolean
+  satisfied_by: SatisfiedBy
+  doc_ids: string[]
+}
+
 // A starter "mode" — public catalog shape (the server keeps the prompt `focus`
 // to itself). `template` on a session is this shape or null (open analysis).
 export type PilotTemplate = {
@@ -48,6 +69,7 @@ export type PilotTemplate = {
   description: string
   title: string
   starters: string[]
+  required_docs: RequiredDocSpec[]
 }
 
 export type EvidenceMapItem = { point: string; cited_ids: string[] }
@@ -108,6 +130,8 @@ export type ContextPreview = {
   sources: Record<string, CorpusSource>
   notes: string[]
   total: number
+  /** The mode's live document checklist (empty for an open-analysis session). */
+  doc_requirements: DocRequirement[]
 }
 
 export const listPilotSessions = (filter?: { subject_kind: SubjectKind; subject_id: string }) => {
@@ -157,23 +181,44 @@ export type ChatResult = {
   gaps: GapItem[]
   dropped_citations?: string[]
 }
+/** The documents the mode needs but doesn't have — the 409 the chat gate raises. */
+export type MissingDoc = { doc_type: DocType; label: string; hint: string }
+
 export type ChatHandlers = {
   onStatus?: (message: string) => void
   onResult?: (data: ChatResult) => void
   onError?: (message: string) => void
+  /** The mode's required documents aren't in yet. Re-send with {force:true} to answer anyway. */
+  onBlocked?: (missing: MissingDoc[]) => void
 }
 
 // Grounded chat turn over SSE — raw fetch + ReadableStream (api/client.ts can't
 // stream). Mirrors the legalDefense.ts / IRCopilotPanel consumption pattern.
-export async function streamPilotChat(sessionId: string, message: string, h: ChatHandlers): Promise<void> {
+export async function streamPilotChat(
+  sessionId: string,
+  message: string,
+  h: ChatHandlers,
+  opts: { force?: boolean } = {},
+): Promise<void> {
   // authStreamHeaders proactively refreshes a near-expiry token — a stream
   // can't be replayed after a mid-flight 401.
-  const res = await fetch(`${BASE}/broker/pilot/sessions/${sessionId}/chat`, {
+  const qs = opts.force ? '?force=true' : ''
+  const res = await fetch(`${BASE}/broker/pilot/sessions/${sessionId}/chat${qs}`, {
     method: 'POST',
     headers: await authStreamHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ message }),
   })
   if (!res.ok || !res.body) {
+    // The document gate answers before the stream opens, so its 409 arrives as a
+    // plain JSON body. This is the one error whose payload we need — everything
+    // else stays a status-code message.
+    if (res.status === 409) {
+      const detail = await res.json().then((b) => b?.detail).catch(() => null)
+      if (detail?.code === 'missing_required_documents') {
+        h.onBlocked?.((detail.missing ?? []) as MissingDoc[])
+        return
+      }
+    }
     h.onError?.(`Chat failed (${res.status})`)
     return
   }
