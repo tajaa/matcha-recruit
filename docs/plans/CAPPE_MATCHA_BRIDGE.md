@@ -25,9 +25,7 @@ FKs `companies(id)` and sits under RLS; `created_by`/audit actors FK
 tables, each cappe account that enables a matcha feature gets a **backing
 tenant**, created lazily on first enable:
 
-- 1 `companies` row — `signup_source='cappe'`, **`owner_id` NULL** (this is
-  what keeps it out of the admin rosters — both `_BUSINESS_REGISTRATION_SELECT`
-  queries and the companies overview filter `owner_id IS NOT NULL`)
+- 1 `companies` row — `signup_source='cappe'`, **`owner_id` NULL**
 - 1 `users` row — role `client`, bridge email
   `cappe+<account_id>@bridge.matcha.invalid` (RFC 2606 reserved → the email
   guard hard-blocks any accidental send), random discarded password —
@@ -39,8 +37,14 @@ These rows are plumbing, not identity. The bridged `CurrentUser` is only ever
 minted server-side by `require_matcha_feature` after the cappe token +
 entitlement checks pass.
 
-**Invariant: backing companies keep `owner_id` NULL.** Setting it would leak
-them into the admin business-registration lists.
+**Invariant: backing companies stay out of admin/matcha company surfaces.**
+Two guards enforce this: `owner_id IS NULL` (the business-registration lists +
+`/admin/overview` filter `owner_id IS NOT NULL`) and an explicit
+`signup_source IS DISTINCT FROM 'cappe'` filter on the company scans that don't
+key off `owner_id` (`/admin/company-features`, `/admin/companies`, the
+`/admin/notifications` registrations feed). Any **new** query that scans
+`companies` must add the `signup_source` guard, or a cappe backing company —
+and its directly-mutable `enabled_features` — leaks into that surface.
 
 ## Pieces
 
@@ -77,10 +81,22 @@ same wrapper pattern.
 ## Known interactions / watch-list
 
 - **Workers**: backing companies mirror their granted flags onto
-  `companies.enabled_features`, so matcha-side workers treat them
-  consistently. `ir_deadline_alerts` chasing a cappe tenant's overdue CAPA is
-  desirable. Anything new that scans companies should be checked against
+  `companies.enabled_features` (with `osha_logs`/`employees` force-asserted off
+  — the essentials shape), so matcha-side workers treat them consistently.
+  Anything new that scans companies should be checked against
   `signup_source='cappe'`.
+- **Notifications go nowhere yet (phase-1 limitation).** All IR notification
+  paths (`send_ir_notifications_task`, the `ir_deadline_alerts` worker) resolve
+  recipients from the backing company's `clients`/`users` rows — which for a
+  cappe tenant is only the unloginable bridge user on `@bridge.matcha.invalid`,
+  hard-blocked by the reserved-domain email guard. So the real cappe owner is
+  **not** emailed about new incidents or overdue CAPA. This fails silent (a log
+  line, no bounce), not loud. Deferred, not "working": routing to
+  `cappe_accounts.email` needs a bridge-aware recipient resolver
+  (`_get_company_admin_contacts`), because putting the real email on the bridge
+  `users` row would risk colliding with a real matcha `users.email` (the
+  `ON CONFLICT (email)` path would then hijack an existing matcha identity —
+  the `.invalid` address exists precisely to prevent that).
 - **Cross-product import rule**: `cappe/routes/ir.py` imports from
   `app/matcha/*` — a documented exception to "cappe imports only from core"
   (the bridge is the point). Keep such imports confined to adapter routers +

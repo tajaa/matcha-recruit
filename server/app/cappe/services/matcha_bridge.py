@@ -37,7 +37,7 @@ from fastapi import Depends, HTTPException, status
 
 from ...core.models.auth import CurrentUser
 from ...core.services.auth import hash_password
-from ...database import get_connection
+from ...database import get_connection, set_tenant_id
 from ..dependencies import require_cappe_account
 from ..models.cappe import CappeAccount
 
@@ -50,6 +50,13 @@ logger = logging.getLogger(__name__)
 MATCHA_BRIDGEABLE_FEATURES = frozenset({"incidents"})
 
 CAPPE_COMPANY_SIGNUP_SOURCE = "cappe"
+
+# Flags force-asserted OFF on the backing company's enabled_features, mirroring
+# the matcha_lite_essentials (no-roster) shape the cappe bridge is modeled on.
+# osha_logs + employees both DEFAULT True/absent-but-tier-relevant and would
+# otherwise merge on via merge_company_features (signup_source='cappe' is in no
+# tier overlay). Cappe tenants have no employee roster, so these must stay off.
+CAPPE_FORCED_OFF_FEATURES = {"osha_logs": False, "employees": False}
 
 
 def bridge_email(account_id: UUID | str) -> str:
@@ -68,18 +75,23 @@ async def ensure_backing_tenant(conn, account_id: UUID, account_name: str | None
     Returns (company_id, user_id). Safe to call repeatedly; reuses rows already
     stamped on the cappe account.
     """
-    row = await conn.fetchrow(
-        "SELECT matcha_company_id, matcha_user_id FROM cappe_accounts WHERE id = $1",
-        account_id,
-    )
-    if row is None:
-        raise HTTPException(status_code=404, detail="Account not found")
-    if row["matcha_company_id"] and row["matcha_user_id"]:
-        return row["matcha_company_id"], row["matcha_user_id"]
-
     display_name = (account_name or "").strip() or f"Cappe account {str(account_id)[:8]}"
 
     async with conn.transaction():
+        # Lock the account row so concurrent first-enables (admin double-click,
+        # or several gate self-heal requests racing) can't each mint a duplicate
+        # backing company — the second caller blocks here, then sees the ids the
+        # first one stamped and returns them below.
+        row = await conn.fetchrow(
+            "SELECT matcha_company_id, matcha_user_id FROM cappe_accounts "
+            "WHERE id = $1 FOR UPDATE",
+            account_id,
+        )
+        if row is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+        if row["matcha_company_id"] and row["matcha_user_id"]:
+            return row["matcha_company_id"], row["matcha_user_id"]
+
         company_id = row["matcha_company_id"]
         if company_id is None:
             company_id = await conn.fetchval(
@@ -108,16 +120,24 @@ async def ensure_backing_tenant(conn, account_id: UUID, account_name: str | None
                 bridge_email(account_id),
                 hash_password(throwaway),
             )
-            await conn.execute(
-                """
-                INSERT INTO clients (user_id, company_id, name)
-                VALUES ($1, $2, $3)
-                ON CONFLICT (user_id) DO NOTHING
-                """,
-                user_id,
-                company_id,
-                display_name,
-            )
+
+        # Always (re)assert the clients membership, not only when the users row
+        # is freshly created. If the backing company was ever deleted
+        # (matcha_company_id → NULL via ON DELETE SET NULL, clients row CASCADE-
+        # gone) while matcha_user_id survived, a later heal creates a new company
+        # but must relink it — otherwise resolve_accessible_company_scope finds no
+        # membership and the feature is permanently dead. Idempotent via the
+        # unique(user_id) conflict target.
+        await conn.execute(
+            """
+            INSERT INTO clients (user_id, company_id, name)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (user_id) DO UPDATE SET company_id = EXCLUDED.company_id
+            """,
+            user_id,
+            company_id,
+            display_name,
+        )
 
         await conn.execute(
             "UPDATE cappe_accounts SET matcha_company_id = $2, matcha_user_id = $3 WHERE id = $1",
@@ -164,10 +184,14 @@ async def set_matcha_features(conn, account_id: UUID, features: dict[str, bool])
         json.dumps(granted),
     )
     if company_id is not None:
+        # Mirror onto the backing company, forcing the essentials-shape flags
+        # off so merge_company_features can't re-enable OSHA/roster for a
+        # rosterless cappe tenant (signup_source='cappe' is in no tier overlay).
+        mirror = {**granted, **CAPPE_FORCED_OFF_FEATURES}
         await conn.execute(
             "UPDATE companies SET enabled_features = $2::jsonb WHERE id = $1",
             company_id,
-            json.dumps(granted),
+            json.dumps(mirror),
         )
     return granted
 
@@ -219,6 +243,17 @@ def require_matcha_feature(flag: str):
                 company_id, user_id = await ensure_backing_tenant(conn, account.id, account.name)
         else:
             company_id, user_id = row["matcha_company_id"], row["matcha_user_id"]
+
+        # Prime the RLS tenant for the backing company. The wrapped matcha
+        # incident handlers re-establish this themselves (via
+        # get_client_company_id → resolve_accessible_company_scope), but the
+        # cappe-owned routes in routes/ir.py (e.g. /ir/locations) query
+        # RLS-guarded tables like business_locations directly and would
+        # otherwise run with an unset tenant — invisible today under the
+        # superuser DB role, but a hard break the moment the app switches to the
+        # NOBYPASSRLS matcha_app role (the documented cutover). Setting it here
+        # makes every route under the gate carry the right tenant.
+        set_tenant_id(str(company_id))
 
         matcha_user = CurrentUser(id=user_id, email=account.email, role="client")
         return CappeBridgeContext(account=account, matcha_user=matcha_user, company_id=company_id)

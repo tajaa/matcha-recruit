@@ -1000,6 +1000,7 @@ async def list_company_features():
             """
             SELECT id, name as company_name, industry, size, status, enabled_features
             FROM companies
+            WHERE signup_source IS DISTINCT FROM 'cappe'
             ORDER BY name
             """
         )
@@ -9179,7 +9180,8 @@ _NOTIFICATION_SUBQUERIES: list[str] = [
     """SELECT id::text, 'registration' AS type,
             name AS title, status AS subtitle,
             NULL AS severity, status, NULL AS company_id, created_at
-       FROM companies WHERE created_at > NOW() - INTERVAL '30 days'""",
+       FROM companies WHERE created_at > NOW() - INTERVAL '30 days'
+         AND signup_source IS DISTINCT FROM 'cappe'""",
 ]
 
 
@@ -9572,6 +9574,7 @@ async def list_companies_admin():
                 (SELECT COUNT(*) FROM business_locations bl WHERE bl.company_id = c.id) AS location_count
             FROM companies c
             WHERE c.deleted_at IS NULL
+              AND c.signup_source IS DISTINCT FROM 'cappe'
             ORDER BY c.name
         """)
         return [
