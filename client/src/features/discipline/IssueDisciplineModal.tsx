@@ -252,7 +252,7 @@ export default function IssueDisciplineModal({
 
   return (
     <Modal open={open} onClose={onClose} title="Issue Performance Action" width="lg">
-      <div className="space-y-4">
+      <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
         <div className="grid grid-cols-2 gap-3">
           <Select
             label="Employee"

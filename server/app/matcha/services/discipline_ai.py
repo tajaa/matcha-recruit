@@ -236,12 +236,11 @@ async def draft_discipline_letter(
     infraction_type: Optional[str] = None, severity: Optional[str] = None,
 ) -> dict[str, Any]:
     """Draft letter text from an HR account. Citation-gated. Never raises."""
-    corpus, index = await build_draft_corpus(
-        conn, company_id=company_id, employee_id=employee_id,
-        infraction_type=infraction_type or "policy_violation",
-    )
-
     try:
+        corpus, index = await build_draft_corpus(
+            conn, company_id=company_id, employee_id=employee_id,
+            infraction_type=infraction_type or "policy_violation",
+        )
         resp = await asyncio.wait_for(
             _genai().aio.models.generate_content(
                 model=MODEL,
@@ -312,9 +311,20 @@ async def review_final_text(
     if not (description or "").strip() and not (expected_improvement or "").strip():
         return []
 
-    corpus, index = await build_draft_corpus(
-        conn, company_id=company_id, employee_id=employee_id, infraction_type=infraction_type,
-    )
+    try:
+        corpus, index = await build_draft_corpus(
+            conn, company_id=company_id, employee_id=employee_id, infraction_type=infraction_type,
+        )
+    except Exception:
+        logger.exception("[discipline_ai] final review corpus build failed")
+        return [{
+            "code": "ai_review_unavailable",
+            "detail": (
+                "The AI writing review could not run. The statutory compliance check "
+                "DID run and its result stands — this only means the letter text was "
+                "not reviewed for tone and documentation gaps."
+            ),
+        }]
 
     prompt = f"""You are an employment-law risk reviewer reading a corrective-action letter
 that HR is about to issue.
