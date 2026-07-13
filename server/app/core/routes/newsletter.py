@@ -556,6 +556,7 @@ class UpdateNewsletterRequest(BaseModel):
     title: Optional[str] = None
     subject: Optional[str] = None
     content_html: Optional[str] = None
+    design_json: Optional[dict] = None
     curated_article_ids: Optional[list[str]] = None
     preheader: Optional[str] = Field(default=None, max_length=255)
     scheduled_at: Optional[datetime] = None
@@ -598,7 +599,9 @@ async def update_newsletter(
     body: UpdateNewsletterRequest,
     current_user: CurrentUser = Depends(require_admin),
 ):
-    updates = {k: v for k, v in body.model_dump().items() if v is not None}
+    # exclude_unset so design_json can be sent as null to clear it (switch back
+    # to freeform HTML) — a plain model_dump()+drop-None can't express that.
+    updates = body.model_dump(exclude_unset=True)
     if not updates:
         raise HTTPException(status_code=400, detail="No updates provided")
     try:
@@ -732,6 +735,7 @@ class PreviewRequest(BaseModel):
     subject: str = ""
     preheader: str = ""
     content_html: str = ""
+    design_json: Optional[dict] = None
     theme: str = "dark"  # "dark" | "light"
 
 
@@ -741,8 +745,9 @@ async def render_newsletter_preview(
     current_user: CurrentUser = Depends(require_admin),
 ):
     """Render a draft body through the same pipeline as send time so the
-    compose iframe shows what recipients actually see (video poster fallback,
-    branded chrome, theme-correct palette). No tracking pixel injected."""
+    compose iframe shows what recipients actually see (block layout, branded
+    chrome, theme-correct palette, poster fallback). No tracking pixel injected.
+    When design_json is supplied it drives the render; else content_html does."""
     theme = body.theme if body.theme in ("dark", "light") else "dark"
     html = svc.render_preview(
         title=body.title,
@@ -750,6 +755,7 @@ async def render_newsletter_preview(
         preheader=body.preheader,
         content_html=body.content_html,
         theme=theme,
+        design_json=body.design_json,
     )
     return {"html": html}
 
@@ -885,6 +891,7 @@ class TemplateCreateRequest(BaseModel):
     name: str
     description: Optional[str] = None
     content_html: Optional[str] = None
+    design_json: Optional[dict] = None
     preheader: Optional[str] = Field(default=None, max_length=255)
 
 
@@ -892,6 +899,7 @@ class TemplateUpdateRequest(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     content_html: Optional[str] = None
+    design_json: Optional[dict] = None
     preheader: Optional[str] = Field(default=None, max_length=255)
 
 
@@ -907,7 +915,7 @@ async def create_template(
 ):
     return await svc.create_template(
         body.name, body.description, body.content_html, body.preheader,
-        created_by=current_user.id,
+        created_by=current_user.id, design_json=body.design_json,
     )
 
 
@@ -928,7 +936,7 @@ async def update_template(
     body: TemplateUpdateRequest,
     current_user: CurrentUser = Depends(require_admin),
 ):
-    updates = {k: v for k, v in body.model_dump().items() if v is not None}
+    updates = body.model_dump(exclude_unset=True)
     if not updates:
         raise HTTPException(status_code=400, detail="No updates provided")
     row = await svc.update_template(template_id, updates)

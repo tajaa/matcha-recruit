@@ -1,31 +1,39 @@
 import { useState, useEffect } from 'react'
 import { Loader2 } from 'lucide-react'
 import { api } from '../../../api/client'
+import type { NewsletterDesign } from './blocks/schema'
 
 export type ViewportKey = 'mobile' | 'desktop' | 'wide'
 type ThemeKey = 'dark' | 'light'
 
 const VIEWPORT_WIDTHS: Record<ViewportKey, number> = { mobile: 360, desktop: 640, wide: 800 }
 
-export function MobilePreview({ title, subject, preheader, html, viewport, onViewportChange }: {
+export function MobilePreview({ title, subject, preheader, html, designJson, defaultTheme, viewport, onViewportChange }: {
   title: string; subject: string; preheader: string; html: string
+  designJson?: NewsletterDesign | null
+  defaultTheme?: ThemeKey
   viewport: ViewportKey; onViewportChange: (v: ViewportKey) => void
 }) {
   // Iframe runs the SAME render pipeline as outbound mail — POSTs the draft
   // to /admin/newsletter/preview and inlines whatever the backend produces.
-  // That's the only way the preview can stay honest about video poster
-  // fallback, branded chrome, theme palette, and CAN-SPAM footer changes.
-  const [theme, setTheme] = useState<ThemeKey>('dark')
+  // That's the only way the preview can stay honest about block layout,
+  // branded chrome, theme palette, poster fallback, and CAN-SPAM footer.
+  const [theme, setTheme] = useState<ThemeKey>(defaultTheme ?? 'dark')
   const [previewHtml, setPreviewHtml] = useState<string>('')
   const [previewLoading, setPreviewLoading] = useState(false)
 
+  // When switching a draft into design mode (or opening a design draft), snap
+  // the preview theme to the design's own preset so it matches send output.
+  useEffect(() => { if (defaultTheme) setTheme(defaultTheme) }, [defaultTheme])
+
+  const designKey = designJson ? JSON.stringify(designJson) : ''
   useEffect(() => {
     let cancelled = false
     setPreviewLoading(true)
     const t = window.setTimeout(async () => {
       try {
         const res = await api.post<{ html: string }>('/admin/newsletter/preview', {
-          title, subject, preheader, content_html: html, theme,
+          title, subject, preheader, content_html: html, design_json: designJson ?? null, theme,
         })
         if (!cancelled) setPreviewHtml(res.html || '')
       } catch {
@@ -35,18 +43,13 @@ export function MobilePreview({ title, subject, preheader, html, viewport, onVie
       }
     }, 500)
     return () => { cancelled = true; window.clearTimeout(t) }
-  }, [title, subject, preheader, html, theme])
+  }, [title, subject, preheader, html, designKey, theme])
 
-  // Wrap server-rendered fragment in a minimal HTML document. The server
-  // returns the email body div; we add a doctype + the recipient-side
-  // background that simulates what the email client paints around the email.
+  // The server returns a COMPLETE email document (its own <body> carries the
+  // recipient-side background), so it's used verbatim as the iframe srcDoc.
   const clientBg = theme === 'dark' ? '#0a0a0a' : '#f3f4f6'
-  const previewDoc = `<!doctype html><html><head><meta charset="utf-8"><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"><style>
-    html,body{margin:0;padding:0;background:${clientBg};}
-    body{padding:16px 0;font-family:'Inter',-apple-system,system-ui,sans-serif;}
-    img{max-width:100%;height:auto}
-    video{max-width:100%;height:auto}
-  </style></head><body>${previewHtml || '<p style="padding:16px;color:#777;text-align:center;">Loading preview…</p>'}</body></html>`
+  const loadingDoc = `<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;background:${clientBg};font-family:-apple-system,system-ui,sans-serif;}</style></head><body><p style="padding:24px;color:#777;text-align:center;">Loading preview…</p></body></html>`
+  const previewDoc = previewHtml || loadingDoc
 
   const viewportPx = VIEWPORT_WIDTHS[viewport]
 

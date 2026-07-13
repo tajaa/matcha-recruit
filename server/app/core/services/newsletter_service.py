@@ -33,6 +33,8 @@ import bleach
 
 from ...config import get_settings
 from ...database import get_connection
+from . import email_blocks
+from .email_blocks import PALETTES as EMAIL_THEMES, resolve_palette, render_blocks
 
 logger = logging.getLogger(__name__)
 
@@ -574,24 +576,45 @@ async def create_newsletter(title: str, subject: str, created_by: UUID) -> dict:
                RETURNING *""",
             title, subject, created_by,
         )
-    return dict(row)
+    return _normalize_row(row)
 
 
 async def update_newsletter(newsletter_id: UUID, updates: dict) -> dict:
-    allowed = {"title", "subject", "content_html", "curated_article_ids", "scheduled_at", "preheader"}
-    sets = []
-    params: list = []
-    idx = 1
+    allowed = {"title", "subject", "content_html", "curated_article_ids", "scheduled_at", "preheader", "design_json"}
+
+    # Resolve column → value first so design_json can (a) store canonical JSON
+    # and (b) re-render the content_html snapshot in one coherent pass.
+    design_provided = "design_json" in updates
+    design = _coerce_design(updates.get("design_json")) if design_provided else None
+
+    cols: dict = {}
     for key, val in updates.items():
-        if key not in allowed:
+        if key not in allowed or key == "design_json":
             continue
         if key == "content_html" and val:
             val = sanitize_html(val)
-        sets.append(f"{key} = ${idx}")
-        params.append(val)
-        idx += 1
-    if not sets:
+        cols[key] = val
+    if design_provided:
+        cols["__design_json__"] = design
+        if design and design.get("blocks"):
+            # Snapshot for /view-in-browser + non-design consumers. Send/preview
+            # re-render from design_json, so this can't drift for recipients.
+            cols["content_html"] = _render_design_snapshot(design)
+
+    if not cols:
         raise ValueError("No valid fields to update")
+
+    sets: list[str] = []
+    params: list = []
+    idx = 1
+    for key, val in cols.items():
+        if key == "__design_json__":
+            sets.append(f"design_json = ${idx}::jsonb")
+            params.append(json.dumps(val) if val else None)
+        else:
+            sets.append(f"{key} = ${idx}")
+            params.append(val)
+        idx += 1
     sets.append("updated_at = NOW()")
     params.append(newsletter_id)
     async with get_connection() as conn:
@@ -603,7 +626,7 @@ async def update_newsletter(newsletter_id: UUID, updates: dict) -> dict:
         )
     if not row:
         raise ValueError("Newsletter not found or not in draft status")
-    return dict(row)
+    return _normalize_row(row)
 
 
 async def get_newsletter(newsletter_id: UUID) -> Optional[dict]:
@@ -614,7 +637,7 @@ async def get_newsletter(newsletter_id: UUID) -> Optional[dict]:
         )
         if not row:
             return None
-        result = dict(row)
+        result = _normalize_row(row)
         stats = await conn.fetchrow(
             """SELECT
                  COUNT(*) AS total,
@@ -641,7 +664,7 @@ async def list_newsletters(limit: int = 20, offset: int = 0) -> list[dict]:
                LIMIT $1 OFFSET $2""",
             limit, offset,
         )
-    return [dict(r) for r in rows]
+    return [_normalize_row(r) for r in rows]
 
 
 async def soft_delete_newsletter(newsletter_id: UUID, actor_id: UUID) -> bool:
@@ -729,12 +752,15 @@ def render_preview(
     content_html: str,
     *,
     theme: Literal["dark", "light"] = "dark",
+    design_json: Optional[dict] = None,
 ) -> str:
     """Render a draft body through the same pipeline used at send time.
 
-    Used by the admin compose preview pane so the iframe shows what
-    recipients will actually see — including video poster fallback and
-    branded chrome. No tracking pixel is injected (send_id=None).
+    Used by the admin compose preview pane so the iframe shows what recipients
+    actually see — branded chrome, block layout, theme palette, poster
+    fallback, footer. No tracking pixel is injected (send_id=None). When
+    `design_json` is provided it drives the render (block builder); otherwise
+    the freeform `content_html` is used.
     """
     settings = get_settings()
     base_url = (settings.app_base_url or "https://hey-matcha.com").rstrip("/")
@@ -748,6 +774,7 @@ def render_preview(
             "subject": subject or "",
             "preheader": preheader or "",
             "content_html": sanitized,
+            "design_json": design_json,
         },
         {"name": "there"},
         fake_unsub,
@@ -880,30 +907,9 @@ async def _send_emails(newsletter_id: UUID, nl: dict, subscribers: list[dict]) -
 _HREF_RE = re.compile(r'href=(["\'])(https?://[^"\']+)\1', re.IGNORECASE)
 
 
-# Email-safe theme palettes. Gmail and Outlook strip <video> and many CSS
-# rules, so the wrapper colors must be set inline. Light is what most clients
-# render; dark matches admins' compose-time preference but Gmail's auto-dark
-# is stricter and unpredictable, so we keep contrast loud.
-EMAIL_THEMES = {
-    "dark": {
-        "wrapper_bg": "#1e1e1e",
-        "wrapper_fg": "#d4d4d4",
-        "heading_fg": "#e4e4e7",
-        "accent": "#ce9178",
-        "link": "#569cd6",
-        "muted": "#6a737d",
-        "rule": "#333",
-    },
-    "light": {
-        "wrapper_bg": "#ffffff",
-        "wrapper_fg": "#1f1f1f",
-        "heading_fg": "#0a0a0a",
-        "accent": "#a04a23",
-        "link": "#1d4ed8",
-        "muted": "#6b7280",
-        "rule": "#e5e7eb",
-    },
-}
+# Email-safe theme palettes live in email_blocks.PALETTES (aliased above as
+# EMAIL_THEMES for the legacy freeform + video-poster-fallback callers). Gmail
+# and Outlook strip <video> and many CSS rules, so wrapper colors are inlined.
 
 
 # Match an opening <video> tag (with optional attrs and trailing content
@@ -1004,6 +1010,52 @@ def _rewrite_links_for_tracking(
     return _HREF_RE.sub(_replace, html)
 
 
+def _coerce_design(value) -> Optional[dict]:
+    """Normalize a design_json value read from the DB (asyncpg returns JSONB as
+    a str) or supplied by a request (already a dict) into a dict or None."""
+    if not value:
+        return None
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except (json.JSONDecodeError, ValueError):
+            return None
+        return parsed if isinstance(parsed, dict) else None
+    return None
+
+
+def _normalize_row(row) -> dict:
+    """dict() a DB row and parse its design_json (asyncpg returns JSONB as a
+    str) so the API hands the frontend a real object, not a JSON string."""
+    d = dict(row)
+    if isinstance(d.get("design_json"), str):
+        d["design_json"] = _coerce_design(d["design_json"])
+    return d
+
+
+def _resolve_email_content(newsletter: dict, palette: dict, *, base_url: str) -> tuple[str, bool]:
+    """Return ``(content_html, is_design)`` — rendered blocks when a design is
+    present, else the freeform content_html (both already sanitized)."""
+    design = _coerce_design(newsletter.get("design_json"))
+    if design and design.get("blocks"):
+        return render_blocks(design, palette, base_url=base_url, sanitize=sanitize_html), True
+    return (newsletter.get("content_html") or ""), False
+
+
+def _render_design_snapshot(design: Optional[dict]) -> str:
+    """Render a design's blocks to a standalone content-HTML snapshot (no
+    chrome), stored in content_html so /view-in-browser and any non-design
+    consumer have something to show. Uses the design's own theme preset."""
+    theme_cfg = (design or {}).get("theme") or {}
+    theme_key = theme_cfg.get("preset") if theme_cfg.get("preset") in EMAIL_THEMES else "light"
+    palette = resolve_palette(theme_key, theme_cfg)
+    settings = get_settings()
+    base_url = (settings.app_base_url or "https://hey-matcha.com").rstrip("/")
+    return render_blocks(design, palette, base_url=base_url, sanitize=sanitize_html)
+
+
 def _render_email(
     newsletter: dict,
     subscriber: dict,
@@ -1011,90 +1063,139 @@ def _render_email(
     *,
     base_url: str = "",
     send_id: Optional[UUID] = None,
-    theme: Literal["dark", "light"] = "dark",
+    theme: Optional[Literal["dark", "light"]] = None,
 ) -> str:
-    """Render newsletter HTML with branded template, tracking, and CAN-SPAM
-    footer. content_html is already sanitized at write time.
+    """Render a full, email-client-safe HTML document with branded chrome,
+    block/freeform content, click + open tracking, and a CAN-SPAM footer.
 
-    `send_id` is the newsletter_sends row id — used to build the open-pixel
-    URL and click-tracking redirect targets. When omitted (test send) tracking
-    is skipped so we don't pollute the analytics with previews.
+    The output is a complete ``<!DOCTYPE html>`` document (the email service
+    attaches ``html_content`` verbatim). Layout is table-based with inline
+    styles; an MSO ``OfficeDocumentSettings`` block + conditional resets keep
+    Outlook honest.
 
-    `theme` controls the wrapper palette. Defaults to dark to match the
-    legacy look. The compose-preview endpoint can request "light" to simulate
-    how recipients in light-mode clients will see the email.
+    `theme` is the base palette key; a design's ``theme`` object may override
+    brand colour / background / branding. `send_id` (a newsletter_sends id)
+    turns on the open pixel + click-rewrite; omit it for previews/tests.
     """
     settings = get_settings()
     if not base_url:
         base_url = (settings.app_base_url or "https://hey-matcha.com").rstrip("/")
 
-    palette = EMAIL_THEMES.get(theme, EMAIL_THEMES["dark"])
+    design = _coerce_design(newsletter.get("design_json"))
+    theme_cfg = (design or {}).get("theme") or {}
+    # Explicit theme (preview toggle) wins; otherwise honor the design's own
+    # preset; freeform newsletters fall back to the legacy dark look.
+    if theme in EMAIL_THEMES:
+        theme_key = theme
+    elif theme_cfg.get("preset") in EMAIL_THEMES:
+        theme_key = theme_cfg["preset"]
+    else:
+        theme_key = "dark"
+    palette = resolve_palette(theme_key, theme_cfg)
 
-    content = newsletter.get("content_html") or ""
-    preheader = (newsletter.get("preheader") or "").strip()
+    content, is_design = _resolve_email_content(newsletter, palette, base_url=base_url)
 
     # Video fallback BEFORE tracking rewrite so the new <a href> can be
-    # click-tracked alongside any other external links.
+    # click-tracked alongside any other external links. (Block designs already
+    # render video as a poster card; this only bites freeform content_html.)
     content = _video_to_poster_fallback(content, palette)
 
-    # Click-tracking — wrap external links once, before any tracking pixels
-    # are spliced in (the pixel src must NOT be wrapped).
     if send_id:
         content = _rewrite_links_for_tracking(
-            content,
-            base_url=base_url,
-            send_id=send_id,
-            skip_urls={unsubscribe_url},
+            content, base_url=base_url, send_id=send_id, skip_urls={unsubscribe_url},
         )
 
-    # CAN-SPAM postal address. Newlines in the env-configured value become
-    # <br> so admins can format multi-line addresses.
     mailing_address = (settings.newsletter_mailing_address or "").strip()
     address_html = mailing_address.replace("\n", "<br>") if mailing_address else ""
 
-    # Preheader — hidden text right after <body> open. Email clients show
-    # this as the inbox preview snippet alongside the subject. Hidden via
-    # a stack of CSS tricks to defeat both Gmail and Outlook preview scrapers.
+    preheader = (newsletter.get("preheader") or "").strip()
     preheader_html = ""
     if preheader:
+        # Hidden inbox-preview snippet + whitespace hack that stops the client
+        # from pulling body text into the preview line after the preheader.
         preheader_html = (
-            f'<div style="display:none;max-height:0;overflow:hidden;'
-            f'mso-hide:all;visibility:hidden;opacity:0;color:transparent;'
-            f'height:0;width:0;">{preheader}</div>'
+            f'<div style="display:none;max-height:0px;overflow:hidden;mso-hide:all;'
+            f'visibility:hidden;opacity:0;color:transparent;height:0;width:0;">'
+            f'{html_lib.escape(preheader)}'
+            f'{"&#8203;&nbsp;" * 60}</div>'
         )
 
-    # Open-tracking pixel — placed at the end of content so most clients
-    # have already rendered the rest before fetching it.
     pixel_html = ""
     if send_id:
         pixel_url = f"{base_url}/api/newsletter/track/open/{send_id}.gif"
-        pixel_html = (
-            f'<img src="{pixel_url}" width="1" height="1" alt="" '
-            f'style="display:none;border:0;" />'
+        pixel_html = f'<img src="{pixel_url}" width="1" height="1" alt="" style="display:none;border:0;height:1px;width:1px;" />'
+
+    # Branding — logo image if provided, else a brand-colour wordmark.
+    brand_name = html_lib.escape(str(theme_cfg.get("brandName") or "Matcha"))
+    logo_url = email_blocks._safe_image(theme_cfg.get("logoUrl"))
+    if logo_url:
+        brand_html = f'<img src="{html_lib.escape(logo_url)}" alt="{brand_name}" height="30" style="display:inline-block;height:30px;width:auto;border:0;" />'
+    else:
+        brand_html = (
+            f'<span style="font-size:20px;font-weight:800;letter-spacing:-0.3px;'
+            f'color:{palette["brand"]};">{brand_name}</span>'
         )
 
-    return f"""
-    <style>@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');</style>
-    {preheader_html}
-    <div style="max-width:600px;margin:0 auto;font-family:'Inter',-apple-system,system-ui,sans-serif;background:{palette['wrapper_bg']};color:{palette['wrapper_fg']};padding:32px 24px;">
-        <div style="text-align:center;margin-bottom:24px;">
-            <span style="font-size:20px;font-weight:700;color:{palette['accent']};">Matcha</span>
+    # For freeform content, keep the title as an <h1> above the body. Block
+    # designs carry their own headings (hero etc.), so the title is omitted.
+    title_html = ""
+    if not is_design and newsletter.get("title"):
+        title_html = (
+            f'<h1 style="margin:0 0 18px 0;font-size:24px;line-height:1.3;font-weight:800;'
+            f'color:{palette["heading"]};letter-spacing:-0.3px;">{html_lib.escape(str(newsletter["title"]))}</h1>'
+        )
+
+    return f"""<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta http-equiv="X-UA-Compatible" content="IE=edge" />
+<meta name="x-apple-disable-message-reformatting" />
+<meta name="color-scheme" content="light dark" />
+<meta name="supported-color-schemes" content="light dark" />
+<title>{html_lib.escape(str(newsletter.get('subject') or newsletter.get('title') or 'Newsletter'))}</title>
+<!--[if mso]><noscript><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml></noscript><![endif]-->
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+  html,body{{margin:0!important;padding:0!important;width:100%!important;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;}}
+  body,table,td{{-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;}}
+  table,td{{mso-table-lspace:0pt;mso-table-rspace:0pt;border-collapse:collapse;}}
+  img{{-ms-interpolation-mode:bicubic;border:0;height:auto;line-height:100%;outline:none;text-decoration:none;}}
+  a{{color:{palette['link']};}}
+  a[x-apple-data-detectors]{{color:inherit!important;text-decoration:none!important;}}
+  @media only screen and (max-width:620px){{
+    .nl-container{{width:100%!important;border-radius:0!important;}}
+    .nl-pad{{padding-left:20px!important;padding-right:20px!important;}}
+  }}
+</style>
+</head>
+<body style="margin:0;padding:0;background-color:{palette['page_bg']};color:{palette['text']};font-family:{email_blocks.FONT_STACK};">
+{preheader_html}
+<table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color:{palette['page_bg']};">
+  <tr><td align="center" style="padding:24px 12px;">
+    <!--[if mso]><table role="presentation" border="0" cellpadding="0" cellspacing="0" width="600"><tr><td><![endif]-->
+    <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="600" class="nl-container" style="width:600px;max-width:600px;background-color:{palette['card_bg']};border:1px solid {palette['border']};border-radius:14px;overflow:hidden;">
+      <tr><td class="nl-pad" style="padding:26px 32px 8px 32px;text-align:center;">{brand_html}</td></tr>
+      <tr><td class="nl-pad" style="padding:14px 32px 8px 32px;font-family:{email_blocks.FONT_STACK};">
+        {title_html}
+        {content}
+      </td></tr>
+      <tr><td class="nl-pad" style="padding:8px 32px 28px 32px;">
+        <div style="height:1px;line-height:1px;font-size:1px;background:{palette['border']};margin:16px 0 18px 0;">&nbsp;</div>
+        <div style="text-align:center;font-size:12px;line-height:1.7;color:{palette['muted']};">
+          <p style="margin:0 0 6px 0;">You received this because you subscribed to {brand_name} updates.</p>
+          <p style="margin:0 0 10px 0;"><a href="{unsubscribe_url}" style="color:{palette['link']};text-decoration:underline;">Unsubscribe</a></p>
+          {f'<p style="margin:0;color:{palette["muted"]};">{address_html}</p>' if address_html else ''}
         </div>
-        <h1 style="font-size:22px;color:{palette['heading_fg']};margin-bottom:16px;">{newsletter['title']}</h1>
-        <div style="font-size:15px;line-height:1.7;color:{palette['wrapper_fg']};">
-            {content}
-        </div>
-        <hr style="border:none;border-top:1px solid {palette['rule']};margin:32px 0;" />
-        <div style="text-align:center;font-size:12px;color:{palette['muted']};line-height:1.6;">
-            <p style="margin:0 0 8px 0;">You received this because you subscribed to Matcha updates.</p>
-            <p style="margin:0 0 12px 0;">
-                <a href="{unsubscribe_url}" style="color:{palette['link']};text-decoration:underline;">Unsubscribe</a>
-            </p>
-            {f'<p style="margin:0;color:{palette["muted"]};">{address_html}</p>' if address_html else ''}
-        </div>
-        {pixel_html}
-    </div>
-    """
+      </td></tr>
+    </table>
+    <!--[if mso]></td></tr></table><![endif]-->
+  </td></tr>
+</table>
+{pixel_html}
+</body>
+</html>"""
 
 
 # ---------------------------------------------------------------------------
@@ -1315,9 +1416,10 @@ async def send_newsletter_to_segment(
 async def list_templates() -> list[dict]:
     async with get_connection() as conn:
         rows = await conn.fetch(
-            "SELECT id, name, description, preheader, created_at, updated_at FROM newsletter_templates ORDER BY name"
+            "SELECT id, name, description, preheader, design_json, created_at, updated_at "
+            "FROM newsletter_templates ORDER BY name"
         )
-    return [dict(r) for r in rows]
+    return [_normalize_row(r) for r in rows]
 
 
 async def create_template(
@@ -1326,33 +1428,56 @@ async def create_template(
     content_html: Optional[str],
     preheader: Optional[str],
     created_by: Optional[UUID],
+    design_json: Optional[dict] = None,
 ) -> dict:
-    sanitized = sanitize_html(content_html or "")
+    design = _coerce_design(design_json)
+    # A block design renders its own content_html snapshot; otherwise the
+    # provided freeform HTML is sanitized as before.
+    if design and design.get("blocks"):
+        content = _render_design_snapshot(design)
+    else:
+        content = sanitize_html(content_html or "")
     async with get_connection() as conn:
         row = await conn.fetchrow(
-            """INSERT INTO newsletter_templates (name, description, content_html, preheader, created_by)
-               VALUES ($1, $2, $3, $4, $5)
+            """INSERT INTO newsletter_templates (name, description, content_html, preheader, design_json, created_by)
+               VALUES ($1, $2, $3, $4, $5::jsonb, $6)
                RETURNING *""",
-            name.strip(), description, sanitized, preheader, created_by,
+            name.strip(), description, content, preheader,
+            json.dumps(design) if design else None, created_by,
         )
-    return dict(row)
+    return _normalize_row(row)
 
 
 async def update_template(template_id: UUID, updates: dict) -> Optional[dict]:
-    allowed = {"name", "description", "content_html", "preheader"}
-    sets = []
-    params: list = []
-    idx = 1
+    allowed = {"name", "description", "content_html", "preheader", "design_json"}
+    design_provided = "design_json" in updates
+    design = _coerce_design(updates.get("design_json")) if design_provided else None
+
+    cols: dict = {}
     for k, v in updates.items():
-        if k not in allowed:
+        if k not in allowed or k == "design_json":
             continue
         if k == "content_html" and v:
             v = sanitize_html(v)
-        sets.append(f"{k} = ${idx}")
-        params.append(v)
-        idx += 1
-    if not sets:
+        cols[k] = v
+    if design_provided:
+        cols["__design_json__"] = design
+        if design and design.get("blocks"):
+            cols["content_html"] = _render_design_snapshot(design)
+    if not cols:
         return None
+
+    sets: list[str] = []
+    params: list = []
+    idx = 1
+    for k, v in cols.items():
+        if k == "__design_json__":
+            sets.append(f"design_json = ${idx}::jsonb")
+            params.append(json.dumps(v) if v else None)
+        else:
+            sets.append(f"{k} = ${idx}")
+            params.append(v)
+        idx += 1
     sets.append("updated_at = NOW()")
     params.append(template_id)
     async with get_connection() as conn:
@@ -1360,7 +1485,7 @@ async def update_template(template_id: UUID, updates: dict) -> Optional[dict]:
             f"UPDATE newsletter_templates SET {', '.join(sets)} WHERE id = ${idx} RETURNING *",
             *params,
         )
-    return dict(row) if row else None
+    return _normalize_row(row) if row else None
 
 
 async def get_template(template_id: UUID) -> Optional[dict]:
@@ -1369,7 +1494,7 @@ async def get_template(template_id: UUID) -> Optional[dict]:
             "SELECT * FROM newsletter_templates WHERE id = $1",
             template_id,
         )
-    return dict(row) if row else None
+    return _normalize_row(row) if row else None
 
 
 async def delete_template(template_id: UUID) -> bool:
@@ -1502,6 +1627,48 @@ def build_idea_newsletter_html(
     return sanitize_html(raw)
 
 
+def build_idea_design(
+    title: str,
+    notes: Optional[str],
+    media_url: str,
+    media_alt: Optional[str] = None,
+) -> dict:
+    """Assemble a structured block design from a scratchpad idea.
+
+    Produces a professional starter layout whose first block is the MANDATORY
+    visual — a hero (image) or a video card — followed by the notes as body
+    text and a divider/footer. Guaranteed to satisfy ``design_has_media``.
+    """
+    title = (title or "Untitled newsletter").strip()
+    is_video = media_url.lower().rsplit("?", 1)[0].endswith((".mp4", ".mov", ".webm"))
+    blocks: list[dict] = []
+    if is_video:
+        blocks.append({"type": "heading", "heading": title, "align": "center"})
+        blocks.append({"type": "video", "url": media_url, "caption": media_alt or ""})
+    else:
+        blocks.append({
+            "type": "hero",
+            "image": media_url,
+            "layout": "overlay",
+            "overlay": "dark",
+            "align": "center",
+            "heading": title,
+            "eyebrow": "Newsletter",
+        })
+    body = (notes or "").strip()
+    if body:
+        blocks.append({"type": "text", "body": body})
+    else:
+        blocks.append({
+            "type": "text",
+            "body": "Start writing your newsletter here. This draft was generated "
+                    "from a captured idea — edit the blocks freely.",
+        })
+    blocks.append({"type": "divider"})
+    blocks.append({"type": "footer", "brandName": "Matcha", "tagline": "HR, handled."})
+    return {"version": 1, "theme": {"preset": "light"}, "blocks": blocks}
+
+
 class IdeaMediaRequiredError(ValueError):
     """Raised when an idea is converted without the mandatory visual."""
 
@@ -1533,19 +1700,20 @@ async def create_newsletter_from_idea(
                 "A media/image is required to create a newsletter from an idea."
             )
 
-        content_html = build_idea_newsletter_html(
+        design = build_idea_design(
             title=idea["title"],
             notes=idea["notes"],
             media_url=effective_media,
             media_alt=media_alt,
         )
+        content_html = _render_design_snapshot(design)
 
         async with conn.transaction():
             newsletter = await conn.fetchrow(
-                """INSERT INTO newsletters (title, subject, content_html, created_by)
-                   VALUES ($1, $2, $3, $4)
+                """INSERT INTO newsletters (title, subject, content_html, design_json, created_by)
+                   VALUES ($1, $2, $3, $4::jsonb, $5)
                    RETURNING *""",
-                idea["title"], idea["title"], content_html, created_by,
+                idea["title"], idea["title"], content_html, json.dumps(design), created_by,
             )
             await conn.execute(
                 """UPDATE newsletter_ideas
@@ -1554,7 +1722,7 @@ async def create_newsletter_from_idea(
                    WHERE id = $1""",
                 idea_id, newsletter["id"], effective_media,
             )
-    return dict(newsletter)
+    return _normalize_row(newsletter)
 
 
 # ---------------------------------------------------------------------------

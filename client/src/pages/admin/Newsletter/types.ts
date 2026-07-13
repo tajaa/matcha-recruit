@@ -3,9 +3,12 @@ export type Subscriber = {
   status: string; subscribed_at: string; unsubscribed_at: string | null
 }
 
+import type { NewsletterDesign } from './blocks/schema'
+
 export type Newsletter = {
   id: string; title: string; subject: string; status: string
   content_html: string | null; preheader: string | null
+  design_json: NewsletterDesign | null
   scheduled_at: string | null; sent_at: string | null; created_at: string
   total_sends?: number; total_opened?: number
 }
@@ -17,6 +20,7 @@ export type Tag = { id: string; slug: string; label: string; description: string
 export type Template = {
   id: string; name: string; description: string | null
   content_html: string | null; preheader: string | null
+  design_json: NewsletterDesign | null
   created_at: string; updated_at: string
 }
 
