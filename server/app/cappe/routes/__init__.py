@@ -14,6 +14,7 @@ from .clients import router as clients_router
 from .discounts import router as discounts_router
 from .domains import router as domains_router
 from .forms import router as forms_router
+from .ir import router as ir_router
 from .locations import router as locations_router
 from .messages import router as messages_router
 from .newsletter import router as newsletter_router
@@ -61,5 +62,10 @@ cappe_router.include_router(messages_router)
 cappe_router.include_router(clients_router)
 cappe_router.include_router(blog_router)
 cappe_router.include_router(uploads_router)
+
+# Bridged matcha features (parallel entitlement — see services/matcha_bridge.py).
+# Each route gates on require_matcha_feature('<flag>') per-route; the matcha
+# require_feature chain is never involved.
+cappe_router.include_router(ir_router)
 
 __all__ = ["cappe_router"]
