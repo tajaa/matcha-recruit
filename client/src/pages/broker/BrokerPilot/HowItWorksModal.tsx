@@ -9,8 +9,10 @@ const STEPS = [
     icon: Building2,
     title: 'Start a session on a client',
     body: 'Pick any client from your book — an on-platform Matcha client or an external one you track '
-      + 'in the External Book. Each session is a private analysis workspace for that client.',
-    detail: 'On-platform clients bring the richest picture: their operational history is generated for you.',
+      + 'in the External Book — then pick a mode. Each mode names the documents it analyzes up front, '
+      + 'and asks you for the ones this client doesn’t already have on file.',
+    detail: 'A mode never asks twice: a contract already read on the client’s Limits tab, or loss history '
+      + 'already on the platform, counts as provided.',
   },
   {
     icon: Sparkles,
@@ -33,9 +35,11 @@ const STEPS = [
   {
     icon: FileUp,
     title: 'Add carrier documents',
-    body: 'Upload loss runs, dec pages, competing quotes, or carrier letters (PDF/DOCX/TXT/CSV). Each is '
-      + 'analyzed once — key figures are extracted — and grounds every answer from then on.',
-    detail: 'When a document disagrees with the platform data, the analyst says so and cites both sides.',
+    body: 'Upload loss runs, dec pages, competing quotes, carrier letters, or contracts (PDF/DOCX/TXT/CSV). '
+      + 'Each is analyzed once — key figures are extracted — and grounds every answer from then on. The '
+      + 'Documents panel tracks which of the mode’s documents are still outstanding.',
+    detail: 'When a document disagrees with the platform data, the analyst says so and cites both sides. Ask '
+      + 'before a document lands and it tells you plainly what it is working without.',
   },
   {
     icon: MessageSquareQuote,

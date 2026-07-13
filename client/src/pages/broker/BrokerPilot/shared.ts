@@ -4,7 +4,9 @@ import {
   FileSignature, FileText, Gauge, Gavel, GraduationCap, Handshake, HardHat, Hash, MapPin,
   Scale, ShieldCheck, Siren, TrendingUp, Users, Warehouse,
 } from 'lucide-react'
-import type { ContextPreview, CorpusRecord, DocStatus, DocType, PilotSession } from '../../../api/brokerPilot'
+import type {
+  ContextPreview, CorpusRecord, DocRequirement, DocStatus, DocType, PilotSession,
+} from '../../../api/brokerPilot'
 
 /** Label voice — docket micro-caption, shared with the platform primitives. */
 export { LABEL } from '../../../components/ui'
@@ -17,6 +19,7 @@ export const DOC_TYPE_LABEL: Record<DocType, string> = {
   bordereau: 'Bordereau',
   policy_form: 'Policy form',
   financials: 'Financials',
+  contract: 'Contract',
   other: 'Document',
 }
 
@@ -117,6 +120,32 @@ export function deriveSystems(context: ContextPreview | null): Record<string, Co
     }
   }
   return out
+}
+
+/** How a requirement row reads once satisfied — the distinction matters:
+ *  "Platform data" means the client's own records already cover it and no upload
+ *  is being asked for, which is why a moded session on a well-populated client
+ *  never gets prompted at all. */
+export function requirementStatus(req: DocRequirement): string {
+  if (!req.satisfied) return req.required ? 'Needed' : 'Optional'
+  switch (req.satisfied_by) {
+    case 'platform': return 'Platform data'
+    case 'unclassified': return 'Uploaded (unclassified)'
+    default: return 'Uploaded'
+  }
+}
+
+export function requirementClass(req: DocRequirement): string {
+  if (req.satisfied) return 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+  if (req.required) return 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+  return 'bg-white/[0.04] text-zinc-400 border-white/[0.08]'
+}
+
+/** The rows that block the chat gate — the frontend mirror of the server's
+ *  `missing_required`. The server re-runs it on every turn; this is only for
+ *  rendering (what to nag about, whether to auto-prompt). */
+export function missingRequired(reqs: DocRequirement[] | undefined | null): DocRequirement[] {
+  return (reqs ?? []).filter((r) => r.required && !r.satisfied)
 }
 
 export function fmtSize(bytes: number | null | undefined): string | null {

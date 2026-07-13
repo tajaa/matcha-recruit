@@ -6,7 +6,7 @@ import {
   type PilotSession, type ContextPreview, type SubjectKind,
 } from '../../../api/brokerPilot'
 import { ApiError } from '../../../api/client'
-import { LABEL } from './shared'
+import { LABEL, missingRequired } from './shared'
 import { Masthead } from './Masthead'
 import { Console } from './Console'
 import { DocsPanel } from './DocsPanel'
@@ -14,6 +14,7 @@ import { EvidencePanel } from './EvidencePanel'
 import { PacketsPanel } from './PacketsPanel'
 import { NewSessionModal } from './NewSessionModal'
 import { HowItWorksModal } from './HowItWorksModal'
+import { RequiredDocsModal } from './RequiredDocsModal'
 
 export default function BrokerPilot() {
   const [searchParams, setSearchParams] = useSearchParams()
@@ -24,6 +25,7 @@ export default function BrokerPilot() {
   const [notPro, setNotPro] = useState(false)
   const [showNew, setShowNew] = useState(false)
   const [showHelp, setShowHelp] = useState(false)
+  const [showDocs, setShowDocs] = useState(false)
   const [prefill, setPrefill] = useState<{ kind: SubjectKind; id: string } | null>(null)
   // Guards a slow getPilotSession response from clobbering a switched session.
   const activeIdRef = useRef<string | null>(null)
@@ -45,6 +47,7 @@ export default function BrokerPilot() {
       if (activeIdRef.current !== id) return
       setActive(full)
       setContext(ctx)
+      return ctx
     } catch {
       if (activeIdRef.current === id) setActive(null)
     }
@@ -91,12 +94,19 @@ export default function BrokerPilot() {
     setShowNew(false)
     setPrefill(null)
     await refreshList()
-    void openSession(session.id)
+    // The mode's document prompt — the "clear next step" a fresh session used to
+    // lack. Raised only for what this client actually still needs: requirements
+    // the platform data already covers come back satisfied, so a well-populated
+    // on-platform client is never asked to upload anything.
+    const ctx = await openSession(session.id)
+    if (missingRequired(ctx?.doc_requirements).length) setShowDocs(true)
   }, [refreshList, openSession])
 
   // Full refresh (session + grounding context) — docs changed, session created.
+  // Context is refetched too: satisfaction is server-computed, so the checklist
+  // and the chat gate can't drift from each other after an upload or a delete.
   const onSessionChanged = useCallback(async () => {
-    if (activeIdRef.current) void openSession(activeIdRef.current)
+    if (activeIdRef.current) await openSession(activeIdRef.current)
     void refreshList()
   }, [openSession, refreshList])
 
@@ -220,11 +230,21 @@ export default function BrokerPilot() {
             <Masthead session={active} context={context} onChanged={onSessionChanged} />
             <div className="flex min-h-0 flex-1">
               <div className="flex min-w-0 flex-1 flex-col">
-                <Console session={active} context={context} onTurnComplete={onTurnComplete} />
+                <Console
+                  session={active}
+                  context={context}
+                  onTurnComplete={onTurnComplete}
+                  onUploadDocs={() => setShowDocs(true)}
+                />
               </div>
               <div className="flex w-80 shrink-0 flex-col overflow-y-auto border-l border-white/[0.06]">
                 <EvidencePanel context={context} />
-                <DocsPanel session={active} onChanged={onSessionChanged} />
+                <DocsPanel
+                  session={active}
+                  requirements={context?.doc_requirements ?? []}
+                  onChanged={onSessionChanged}
+                  onUploadDocs={() => setShowDocs(true)}
+                />
                 <PacketsPanel session={active} />
               </div>
             </div>
@@ -240,6 +260,14 @@ export default function BrokerPilot() {
         />
       )}
       {showHelp && <HowItWorksModal onClose={() => setShowHelp(false)} />}
+      {showDocs && active && (context?.doc_requirements?.length ?? 0) > 0 && (
+        <RequiredDocsModal
+          session={active}
+          requirements={context!.doc_requirements}
+          onChanged={onSessionChanged}
+          onClose={() => setShowDocs(false)}
+        />
+      )}
     </div>
   )
 }

@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Loader2, Send, ShieldAlert, Sparkles } from 'lucide-react'
+import { FileUp, Loader2, Send, ShieldAlert, Sparkles } from 'lucide-react'
 import {
   streamPilotChat,
   type ContextPreview, type CorpusRecord, type EvidenceMapItem, type GapSeverity,
-  type PilotMessage, type PilotSession,
+  type MissingDoc, type PilotMessage, type PilotSession,
 } from '../../../api/brokerPilot'
 import { DISCLAIMER, LABEL, startersFor } from './shared'
 
@@ -13,18 +13,24 @@ interface ConsoleProps {
   session: PilotSession
   context: ContextPreview | null
   onTurnComplete: () => void
+  onUploadDocs: () => void
 }
 
 type LiveMessage = Pick<PilotMessage, 'role' | 'content' | 'metadata'>
 
 /** Analyst console: full-width transcript rows (no chat bubbles), bottom-
  *  anchored, with grounded observations rendered as cited evidence blocks. */
-export function Console({ session, context, onTurnComplete }: ConsoleProps) {
+export function Console({ session, context, onTurnComplete, onUploadDocs }: ConsoleProps) {
   const [live, setLive] = useState<LiveMessage[]>([])
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState<string | null>(null)
   const [view, setView] = useState<'chat' | 'examples'>('chat')
+  const [blocked, setBlocked] = useState<MissingDoc[] | null>(null)
+  // "Ask anyway", remembered for the rest of this session in this tab: the gate
+  // is server-side and stateless, so without this every subsequent turn would
+  // re-raise the same 409 and re-nag someone who already answered it.
+  const forceRef = useRef(false)
   const endRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const starters = startersFor(session)
@@ -41,7 +47,11 @@ export function Console({ session, context, onTurnComplete }: ConsoleProps) {
   // Persisted transcript + optimistic in-flight turns; reconcile by content so a
   // refetch can't wipe a different in-flight turn.
   const persisted = session.messages ?? []
-  useEffect(() => { setLive([]) }, [session.id])
+  useEffect(() => {
+    setLive([])
+    setBlocked(null)
+    forceRef.current = false  // a different session has a different mode + documents
+  }, [session.id])
   const persistedKeys = new Set(persisted.map((m) => `${m.role} ${m.content}`))
   const pending = live.filter((m) => !persistedKeys.has(`${m.role} ${m.content}`))
   const messages: LiveMessage[] = [...persisted, ...pending]
@@ -59,9 +69,11 @@ export function Console({ session, context, onTurnComplete }: ConsoleProps) {
     const message = (text ?? input).trim()
     if (!message || busy) return
     setInput('')
+    setBlocked(null)
     if (inputRef.current) inputRef.current.style.height = 'auto'
     setBusy(true)
-    setLive((prev) => [...prev, { role: 'user', content: message, metadata: null }])
+    const optimistic: LiveMessage = { role: 'user', content: message, metadata: null }
+    setLive((prev) => [...prev, optimistic])
     try {
       await streamPilotChat(session.id, message, {
         onStatus: (m) => setStatus(m),
@@ -78,13 +90,27 @@ export function Console({ session, context, onTurnComplete }: ConsoleProps) {
             },
           }])
         },
+        // The mode's documents aren't in. The server refused BEFORE persisting the
+        // turn, so the optimistic row has to come back out and the text goes back
+        // in the composer — the question survives the interruption either way.
+        onBlocked: (missing) => {
+          setLive((prev) => prev.filter((m) => m !== optimistic))
+          setInput(message)
+          setBlocked(missing)
+        },
         onError: (m) => setLive((prev) => [...prev, { role: 'assistant', content: m, metadata: null }]),
-      })
+      }, { force: forceRef.current })
     } finally {
       setBusy(false)
       setStatus(null)
       onTurnComplete()
     }
+  }
+
+  const askAnyway = () => {
+    forceRef.current = true
+    setBlocked(null)
+    void send()
   }
 
   const sourceCount = context ? Object.values(deriveNonEmpty(context)).length : 0
@@ -166,6 +192,44 @@ export function Console({ session, context, onTurnComplete }: ConsoleProps) {
           <div ref={endRef} />
         </div>
       </div>
+      )}
+
+      {/* The mode's document gate. Soft by construction: the analyst can answer
+          without the paper, it just has to say what it's working without — so the
+          escape hatch sits right next to the fix. */}
+      {blocked && blocked.length > 0 && (
+        <div className="shrink-0 border-t border-amber-500/20 bg-amber-500/[0.06] px-5 py-3">
+          <div className="flex items-start gap-2">
+            <FileUp className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-medium text-amber-200">
+                {session.template?.label ?? 'This mode'} analyzes{' '}
+                {blocked.map((m) => m.label).join(' and ')} — not provided yet.
+              </p>
+              <ul className="mt-1 space-y-0.5">
+                {blocked.map((m) => (
+                  <li key={m.doc_type} className="text-[11px] leading-snug text-amber-200/70">
+                    {m.hint}
+                  </li>
+                ))}
+              </ul>
+              <div className="mt-2 flex items-center gap-2">
+                <button
+                  onClick={onUploadDocs}
+                  className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-[11px] text-amber-200 transition-colors hover:bg-amber-500/20"
+                >
+                  Upload documents
+                </button>
+                <button
+                  onClick={askAnyway}
+                  className="text-[11px] text-zinc-400 underline-offset-2 transition-colors hover:text-zinc-200 hover:underline"
+                >
+                  Ask anyway
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Composer */}

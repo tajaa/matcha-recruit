@@ -5,6 +5,7 @@ import {
   type PilotSession, type PilotTemplate, type SubjectKind,
 } from '../../../api/brokerPilot'
 import { fetchBrokerPortfolio, fetchExternalClients } from '../../../api/broker'
+import { DOC_TYPE_LABEL } from './shared'
 
 type SubjectOption = { kind: SubjectKind; id: string; name: string }
 
@@ -133,7 +134,7 @@ export function NewSessionModal({ prefill, onClose, onCreated }: NewSessionModal
         <label className="block text-xs text-zinc-400 mb-1">Start from a mode</label>
         <div className="mb-3 space-y-1">
           {[
-            { key: '', label: 'Open analysis', description: "Blank session — ask anything about the client's records." },
+            { key: '', label: 'Open analysis', description: "Blank session — ask anything about the client's records.", required_docs: [] },
             ...templates,
           ].map((t) => (
             <button
@@ -148,6 +149,27 @@ export function NewSessionModal({ prefill, onClose, onCreated }: NewSessionModal
             >
               <div className="text-sm text-zinc-100">{t.label}</div>
               <div className="text-[11px] text-zinc-500">{t.description}</div>
+              {/* What the mode analyzes, said before it's chosen rather than
+                  discovered later. "Needs" is not a hard block — anything the
+                  client already has on the platform comes back covered, and the
+                  session prompts only for the rest. */}
+              {(t.required_docs ?? []).length > 0 && (
+                <div className="mt-1.5 flex flex-wrap gap-1">
+                  {(t.required_docs ?? []).map((d) => (
+                    <span
+                      key={d.doc_type}
+                      title={d.hint}
+                      className={`rounded border px-1.5 py-px text-[10px] ${
+                        d.required
+                          ? 'border-amber-500/25 bg-amber-500/10 text-amber-300/90'
+                          : 'border-white/[0.08] bg-white/[0.03] text-zinc-400'
+                      }`}
+                    >
+                      {d.required ? 'Needs' : 'Helpful'}: {DOC_TYPE_LABEL[d.doc_type]}
+                    </span>
+                  ))}
+                </div>
+              )}
             </button>
           ))}
         </div>

@@ -1,20 +1,26 @@
 import { useRef, useState } from 'react'
-import { ExternalLink, FileUp, Loader2, Trash2 } from 'lucide-react'
+import { CheckCircle2, Circle, ExternalLink, FileUp, Loader2, Trash2 } from 'lucide-react'
 import {
   uploadPilotDocument, deletePilotDocument, getPilotDocumentUrl,
-  type PilotSession,
+  type DocRequirement, type PilotSession,
 } from '../../../api/brokerPilot'
 import { HelpHint } from '../../../components/broker/HelpHint'
-import { DOC_STATUS_CLASS, DOC_STATUS_LABEL, DOC_TYPE_LABEL, LABEL, fmtSize } from './shared'
+import {
+  DOC_STATUS_CLASS, DOC_STATUS_LABEL, DOC_TYPE_LABEL, LABEL, fmtSize,
+  requirementClass, requirementStatus,
+} from './shared'
 
 const ACCEPT = '.pdf,.docx,.txt,.csv'
 
 interface DocsPanelProps {
   session: PilotSession
+  /** The mode's live checklist (empty for an open-analysis session). */
+  requirements: DocRequirement[]
   onChanged: () => void
+  onUploadDocs: () => void
 }
 
-export function DocsPanel({ session, onChanged }: DocsPanelProps) {
+export function DocsPanel({ session, requirements, onChanged, onUploadDocs }: DocsPanelProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -63,6 +69,37 @@ export function DocsPanel({ session, onChanged }: DocsPanelProps) {
       </div>
 
       {error && <p className="px-4 pb-2 text-[11px] text-red-400">{error}</p>}
+
+      {/* The mode's checklist. Stays visible after the prompt modal is dismissed —
+          it's the standing answer to "what does this analysis still need?", and a
+          row can read satisfied without any upload when the client's platform
+          data already covers it. */}
+      {requirements.length > 0 && (
+        <div className="border-t border-white/[0.04] px-4 py-2.5">
+          <div className="mb-1.5 flex items-center justify-between">
+            <span className={LABEL}>{session.template?.label ?? 'Mode'} needs</span>
+            <button
+              onClick={onUploadDocs}
+              className="text-[10px] uppercase tracking-wide text-emerald-400/90 transition-colors hover:text-emerald-300"
+            >
+              Add
+            </button>
+          </div>
+          {requirements.map((req) => (
+            <div key={req.doc_type} className="flex items-start gap-1.5 py-1">
+              {req.satisfied
+                ? <CheckCircle2 className="mt-0.5 h-3 w-3 shrink-0 text-emerald-400" />
+                : <Circle className={`mt-0.5 h-3 w-3 shrink-0 ${req.required ? 'text-amber-400/70' : 'text-zinc-700'}`} />}
+              <span className="min-w-0 flex-1 truncate text-[11px] text-zinc-300" title={req.hint}>
+                {req.label}
+              </span>
+              <span className={`shrink-0 rounded border px-1 py-px text-[9px] ${requirementClass(req)}`}>
+                {requirementStatus(req)}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
 
       {docs.length === 0 ? (
         <p className="px-4 pb-3 text-[11px] leading-relaxed text-zinc-600">
