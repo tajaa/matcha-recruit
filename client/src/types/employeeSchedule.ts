@@ -128,3 +128,54 @@ export const REQUEST_TONE: Record<RequestStatus, string> = {
   denied: 'text-red-400 bg-red-500/10 border-red-500/20',
   cancelled: 'text-zinc-400 bg-zinc-500/10 border-zinc-500/20',
 }
+
+// ---- shared formatting (admin grid + employee portal render the same shifts) ----
+//
+// UTC wall-clock by convention: shifts are stored as the time an admin typed,
+// so both surfaces read them back in UTC rather than the viewer's local zone.
+// Keep these in one place — a fix applied to only one page silently gives the
+// admin and the employee different times for the same shift.
+
+export function fmtTime(iso: string): string {
+  const d = new Date(iso)
+  let h = d.getUTCHours()
+  const m = d.getUTCMinutes()
+  const ap = h >= 12 ? 'p' : 'a'
+  h = h % 12 || 12
+  return m ? `${h}:${String(m).padStart(2, '0')}${ap}` : `${h}${ap}`
+}
+
+export function toISODate(d: Date): string {
+  return d.toISOString().slice(0, 10)
+}
+
+export function addDays(iso: string, n: number): string {
+  const d = new Date(`${iso}T00:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + n)
+  return toISODate(d)
+}
+
+export function startOfWeekSunday(d: Date): Date {
+  const c = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()))
+  c.setUTCDate(c.getUTCDate() - c.getUTCDay())
+  return c
+}
+
+/** "Mon 7/13" — takes a YYYY-MM-DD day key or a full ISO timestamp. */
+export function fmtDayLabel(iso: string): string {
+  const d = new Date(`${iso.slice(0, 10)}T00:00:00Z`)
+  return `${WEEKDAY_LABELS[d.getUTCDay()]} ${d.getUTCMonth() + 1}/${d.getUTCDate()}`
+}
+
+/** Human-readable text for any thrown API error (ApiError detail, or a fallback). */
+export function errorMessage(err: unknown): string {
+  const body = (err as { body?: { detail?: unknown } } | null)?.body
+  const detail = body?.detail
+  if (typeof detail === 'string') return detail
+  if (detail && typeof detail === 'object' && 'message' in detail) {
+    const message = (detail as { message?: unknown }).message
+    if (typeof message === 'string') return message
+  }
+  if (err instanceof Error && err.message) return err.message
+  return 'Something went wrong. Please try again.'
+}

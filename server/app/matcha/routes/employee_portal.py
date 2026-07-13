@@ -676,22 +676,11 @@ async def get_my_schedule(
 async def list_my_schedule_requests(
     employee: dict = Depends(require_employee_record),
 ):
-    from .employee_schedule._shared import serialize_request
+    from .employee_schedule._shared import REQUEST_SELECT, serialize_request
 
     async with get_connection() as conn:
         rows = await conn.fetch(
-            """
-            SELECT r.id, r.employee_id, r.request_type, r.shift_id, r.target_employee_id,
-                   r.unavailable_start, r.unavailable_end, r.reason, r.status,
-                   r.review_notes, r.reviewed_at, r.created_at,
-                   e.first_name, e.last_name,
-                   s.starts_at AS shift_starts_at, s.ends_at AS shift_ends_at
-            FROM schedule_requests r
-            JOIN employees e ON e.id = r.employee_id
-            LEFT JOIN schedule_shifts s ON s.id = r.shift_id
-            WHERE r.employee_id = $1
-            ORDER BY r.created_at DESC
-            """,
+            f"{REQUEST_SELECT} WHERE r.employee_id = $1 ORDER BY r.created_at DESC LIMIT 200",
             employee["id"],
         )
     return {"requests": [serialize_request(dict(r)) for r in rows]}
@@ -703,66 +692,68 @@ async def create_my_schedule_request(
     employee: dict = Depends(require_employee_record),
 ):
     """File a swap / drop / unavailability request against my own schedule."""
-    from .employee_schedule._shared import serialize_request
+    from .employee_schedule._shared import (
+        INACTIVE_EMPLOYMENT_STATUSES, REQUEST_SELECT, log_audit, serialize_request,
+    )
 
     company_id = employee["org_id"]
     async with get_connection() as conn:
-        # swap/drop must reference a shift the employee is actually on.
+        # swap/drop must reference a PUBLISHED shift the employee is actually on.
+        # GET /me/schedule only serves published shifts, so anything else is a
+        # shift this employee was never shown — and the response would echo its
+        # window back, leaking an unpublished draft.
         if body.shift_id is not None:
-            assigned = await conn.fetchval(
+            shift = await conn.fetchrow(
                 """
-                SELECT 1 FROM schedule_shift_assignments
-                WHERE shift_id = $1 AND employee_id = $2
+                SELECT s.status
+                FROM schedule_shifts s
+                JOIN schedule_shift_assignments a
+                  ON a.shift_id = s.id AND a.employee_id = $2
+                WHERE s.id = $1
                 """,
                 body.shift_id, employee["id"],
             )
-            if not assigned:
+            if not shift or shift["status"] != "published":
                 raise HTTPException(
                     status_code=404,
                     detail="Shift not found on your schedule",
                 )
-        # A named swap target must belong to the same company.
+        # A named swap target must belong to the same company and still be employable.
         if body.target_employee_id is not None:
-            valid = await conn.fetchval(
-                "SELECT 1 FROM employees WHERE id = $1 AND org_id = $2",
+            target = await conn.fetchrow(
+                """
+                SELECT COALESCE(employment_status, 'active') AS employment_status
+                FROM employees WHERE id = $1 AND org_id = $2
+                """,
                 body.target_employee_id, company_id,
             )
-            if not valid:
+            if not target:
                 raise HTTPException(status_code=404, detail="Target employee not found")
+            if target["employment_status"] in INACTIVE_EMPLOYMENT_STATUSES:
+                raise HTTPException(
+                    status_code=409,
+                    detail="That coworker is no longer active and can't take the shift",
+                )
 
-        request_id = await conn.fetchval(
-            """
-            INSERT INTO schedule_requests
-                (company_id, employee_id, request_type, shift_id, target_employee_id,
-                 unavailable_start, unavailable_end, reason)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-            RETURNING id
-            """,
-            company_id, employee["id"], body.request_type, body.shift_id,
-            body.target_employee_id, body.unavailable_start, body.unavailable_end,
-            body.reason,
-        )
-        await conn.execute(
-            """
-            INSERT INTO schedule_audit_log
-                (company_id, entity_type, entity_id, actor_user_id, action, details)
-            VALUES ($1,'request',$2,$3,'request.create','{}'::jsonb)
-            """,
-            company_id, request_id, employee.get("user_id"),
-        )
+        async with conn.transaction():
+            request_id = await conn.fetchval(
+                """
+                INSERT INTO schedule_requests
+                    (company_id, employee_id, request_type, shift_id, target_employee_id,
+                     unavailable_start, unavailable_end, reason)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+                RETURNING id
+                """,
+                company_id, employee["id"], body.request_type, body.shift_id,
+                body.target_employee_id, body.unavailable_start, body.unavailable_end,
+                body.reason,
+            )
+            await log_audit(
+                conn, company_id, "request", request_id, employee.get("user_id"),
+                "request.create", {"request_type": body.request_type},
+            )
         row = await conn.fetchrow(
-            """
-            SELECT r.id, r.employee_id, r.request_type, r.shift_id, r.target_employee_id,
-                   r.unavailable_start, r.unavailable_end, r.reason, r.status,
-                   r.review_notes, r.reviewed_at, r.created_at,
-                   e.first_name, e.last_name,
-                   s.starts_at AS shift_starts_at, s.ends_at AS shift_ends_at
-            FROM schedule_requests r
-            JOIN employees e ON e.id = r.employee_id
-            LEFT JOIN schedule_shifts s ON s.id = r.shift_id
-            WHERE r.id = $1
-            """,
-            request_id,
+            f"{REQUEST_SELECT} WHERE r.id = $1", request_id,
         )
     return serialize_request(dict(row))
 

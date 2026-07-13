@@ -3,7 +3,7 @@ import {
   CalendarDays, Loader2, Plus, Trash2, ChevronLeft, ChevronRight, Check, X,
   Send, Users, LayoutTemplate, Inbox, Sparkles,
 } from 'lucide-react'
-import { Card } from '../../components/ui'
+import { Card, useToast } from '../../components/ui'
 import { ApiError } from '../../api/client'
 import {
   fetchWeek, createShift, deleteShift, publishShift, publishRange,
@@ -13,51 +13,34 @@ import {
 import type {
   Shift, RosterEmployee, ScheduleSummary, ShiftTemplate, ScheduleRequest, ShiftPayload,
 } from '../../types/employeeSchedule'
-import { WEEKDAY_LABELS, STATUS_TONE, REQUEST_TONE } from '../../types/employeeSchedule'
-
-// ---- date helpers (UTC wall-clock: what you type is what shows) ----
-function toISODate(d: Date): string {
-  return d.toISOString().slice(0, 10)
-}
-function startOfWeekSunday(d: Date): Date {
-  const c = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()))
-  c.setUTCDate(c.getUTCDate() - c.getUTCDay())
-  return c
-}
-function addDays(iso: string, n: number): string {
-  const d = new Date(`${iso}T00:00:00Z`)
-  d.setUTCDate(d.getUTCDate() + n)
-  return toISODate(d)
-}
-function fmtTime(iso: string): string {
-  const d = new Date(iso)
-  let h = d.getUTCHours()
-  const m = d.getUTCMinutes()
-  const ap = h >= 12 ? 'p' : 'a'
-  h = h % 12 || 12
-  return m ? `${h}:${String(m).padStart(2, '0')}${ap}` : `${h}${ap}`
-}
-function fmtDayLabel(iso: string): string {
-  const d = new Date(`${iso}T00:00:00Z`)
-  return `${WEEKDAY_LABELS[d.getUTCDay()]} ${d.getUTCMonth() + 1}/${d.getUTCDate()}`
-}
+import {
+  STATUS_TONE, REQUEST_TONE, errorMessage,
+  fmtTime, fmtDayLabel, toISODate, addDays, startOfWeekSunday,
+} from '../../types/employeeSchedule'
 
 const inputCls = 'bg-zinc-900 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500 w-full'
 
-interface ConflictDetail {
+interface ForceableDetail {
   code?: string
+  message?: string
   conflicts?: { starts_at: string; ends_at: string; role: string | null }[]
 }
 
-/** 409 schedule_conflict → a confirm() prompt; anything else → null. */
+/** A 409 the admin can override → confirm() text. Anything else → null (it gets
+ *  surfaced as an error instead of silently swallowed). */
 function conflictPrompt(err: unknown): string | null {
   if (!(err instanceof ApiError) || err.status !== 409) return null
-  const detail = (err.body as { detail?: ConflictDetail } | null)?.detail
-  if (detail?.code !== 'schedule_conflict') return null
-  const lines = (detail.conflicts ?? []).map(
-    (c) => `• ${fmtDayLabel(c.starts_at.slice(0, 10))} ${fmtTime(c.starts_at)}–${fmtTime(c.ends_at)}${c.role ? ` (${c.role})` : ''}`,
-  )
-  return `Already scheduled during this time:\n${lines.join('\n')}\n\nAssign anyway?`
+  const detail = (err.body as { detail?: ForceableDetail } | null)?.detail
+  if (detail?.code === 'schedule_conflict') {
+    const lines = (detail.conflicts ?? []).map(
+      (c) => `• ${fmtDayLabel(c.starts_at)} ${fmtTime(c.starts_at)}–${fmtTime(c.ends_at)}${c.role ? ` (${c.role})` : ''}`,
+    )
+    return `Already scheduled during this time:\n${lines.join('\n')}\n\nAssign anyway?`
+  }
+  if (detail?.code === 'shift_full') {
+    return `${detail.message ?? 'This shift is already fully staffed.'}\n\nAssign anyway?`
+  }
+  return null
 }
 
 type Tab = 'schedule' | 'templates' | 'requests'
@@ -210,6 +193,7 @@ function DayColumn({ day, shifts, roster, onPatch, onChanged }: {
 function ShiftCard({ shift, roster, onPatch, onChanged }: {
   shift: Shift; roster: RosterEmployee[]; onPatch: (s: Shift) => void; onChanged: () => void
 }) {
+  const { toast } = useToast()
   const [busy, setBusy] = useState(false)
   const [pickerOpen, setPickerOpen] = useState(false)
   const assignedIds = new Set(shift.assignments.map((a) => a.employee_id))
@@ -218,7 +202,7 @@ function ShiftCard({ shift, roster, onPatch, onChanged }: {
 
   async function act(fn: () => Promise<Shift>) {
     setBusy(true)
-    try { onPatch(await fn()) } finally { setBusy(false) }
+    try { onPatch(await fn()) } catch (err) { toast(errorMessage(err), 'error') } finally { setBusy(false) }
   }
   async function assign(employeeId: string) {
     setBusy(true)
@@ -226,15 +210,22 @@ function ShiftCard({ shift, roster, onPatch, onChanged }: {
       onPatch(await assignEmployee(shift.id, employeeId))
     } catch (err) {
       const prompt = conflictPrompt(err)
-      if (prompt && window.confirm(prompt)) {
-        onPatch(await assignEmployee(shift.id, employeeId, true))
+      if (!prompt) {
+        // 403 (feature gate), 404 (stale roster), 409 (cancelled shift), 500 —
+        // all used to vanish, leaving the admin staring at an unassigned shift.
+        toast(errorMessage(err), 'error')
+      } else if (window.confirm(prompt)) {
+        try {
+          onPatch(await assignEmployee(shift.id, employeeId, true))
+        } catch (forcedErr) {
+          toast(errorMessage(forcedErr), 'error')
+        }
       }
-      // non-conflict errors: leave the shift as-is (no toast system on this page)
     } finally { setBusy(false) }
   }
   async function remove() {
     setBusy(true)
-    try { await deleteShift(shift.id); onChanged() } finally { setBusy(false) }
+    try { await deleteShift(shift.id); onChanged() } catch (err) { toast(errorMessage(err), 'error') } finally { setBusy(false) }
   }
 
   return (
@@ -444,6 +435,7 @@ function TemplateForm({ onDone, onCancel }: { onDone: () => void; onCancel: () =
 // ---------- Requests tab ----------
 
 function RequestsTab({ onReviewed }: { onReviewed: () => void }) {
+  const { toast } = useToast()
   const [requests, setRequests] = useState<ScheduleRequest[]>([])
   const [loading, setLoading] = useState(true)
   const load = useCallback(() => fetchRequests().then((r) => setRequests(r.requests)), [])
@@ -454,8 +446,25 @@ function RequestsTab({ onReviewed }: { onReviewed: () => void }) {
       await reviewRequest(id, decision)
     } catch (err) {
       const prompt = conflictPrompt(err)
-      if (!prompt || !window.confirm(prompt)) return
-      await reviewRequest(id, decision, undefined, true)
+      if (!prompt) {
+        // Includes the 409 another admin causes by reviewing this first, and the
+        // 409 for a swap target who has since left. Both must reload: the row on
+        // screen is stale, and leaving it there gives the admin live Approve/Deny
+        // buttons that appear to do nothing.
+        toast(errorMessage(err), 'error')
+        await load()
+        onReviewed()
+        return
+      }
+      if (!window.confirm(prompt)) return
+      try {
+        await reviewRequest(id, decision, undefined, true)
+      } catch (forcedErr) {
+        toast(errorMessage(forcedErr), 'error')
+        await load()
+        onReviewed()
+        return
+      }
     }
     await load()
     onReviewed()

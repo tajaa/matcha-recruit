@@ -14,8 +14,11 @@ export function createShift(payload: ShiftPayload, force = false) {
   return api.post<Shift>(`/employee-schedule/shifts${force ? '?force=true' : ''}`, payload)
 }
 
-export function updateShift(id: string, payload: ShiftPayload) {
-  return api.put<Shift>(`/employee-schedule/shifts/${id}`, payload)
+/** True PATCH: send only the fields you're changing. An explicit null clears a
+ *  nullable column (role, department, location_id, color, notes). `force`
+ *  retimes past a double-booking conflict, same as createShift. */
+export function updateShift(id: string, payload: Partial<ShiftPayload>, force = false) {
+  return api.put<Shift>(`/employee-schedule/shifts/${id}${force ? '?force=true' : ''}`, payload)
 }
 
 export function deleteShift(id: string) {
@@ -55,7 +58,8 @@ export function createTemplate(payload: TemplatePayload) {
   return api.post<ShiftTemplate>('/employee-schedule/templates', payload)
 }
 
-export function updateTemplate(id: string, payload: TemplatePayload) {
+/** True PATCH, like updateShift. */
+export function updateTemplate(id: string, payload: Partial<TemplatePayload>) {
   return api.put<ShiftTemplate>(`/employee-schedule/templates/${id}`, payload)
 }
 

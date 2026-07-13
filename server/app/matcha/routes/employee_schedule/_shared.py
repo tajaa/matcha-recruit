@@ -15,12 +15,29 @@ from uuid import UUID
 from fastapi import HTTPException
 
 from ...dependencies import get_client_company_id
+from ...services.schedule_rules import (  # re-exported for the route modules
+    INACTIVE_EMPLOYMENT_STATUSES, build_patch, conflict_detail, shift_full_detail,
+)
 
 _SHIFT_COLS = (
     "id, company_id, location_id, template_id, series_id, role, department, "
     "starts_at, ends_at, break_minutes, required_staff, color, notes, status, "
     "published_at, created_at, updated_at"
 )
+
+# The one request-with-context projection, shared by the admin review router and
+# the employee portal. serialize_request() indexes these keys directly, so the
+# three surfaces that feed it must select the same columns.
+REQUEST_SELECT = """
+    SELECT r.id, r.employee_id, r.request_type, r.shift_id, r.target_employee_id,
+           r.unavailable_start, r.unavailable_end, r.reason, r.status,
+           r.review_notes, r.reviewed_at, r.created_at,
+           e.first_name, e.last_name,
+           s.starts_at AS shift_starts_at, s.ends_at AS shift_ends_at
+    FROM schedule_requests r
+    JOIN employees e ON e.id = r.employee_id
+    LEFT JOIN schedule_shifts s ON s.id = r.shift_id
+"""
 
 
 async def require_company_id(current_user) -> UUID:
@@ -52,13 +69,25 @@ async def log_audit(
 
 
 async def assert_employee_in_company(conn, company_id: UUID, employee_id: UUID) -> None:
-    """Employees are tenant-scoped on org_id (not company_id)."""
+    """Employees are tenant-scoped on org_id (not company_id).
+
+    Also rejects employees who have left: scheduling a terminated/offboarded
+    person makes a shift read as covered when nobody will work it.
+    """
     row = await conn.fetchrow(
-        "SELECT 1 FROM employees WHERE id = $1 AND org_id = $2",
+        """
+        SELECT COALESCE(employment_status, 'active') AS employment_status
+        FROM employees WHERE id = $1 AND org_id = $2
+        """,
         employee_id, company_id,
     )
     if not row:
         raise HTTPException(status_code=404, detail="Employee not found")
+    if row["employment_status"] in INACTIVE_EMPLOYMENT_STATUSES:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Employee is {row['employment_status']} and cannot be scheduled",
+        )
 
 
 async def assert_location_in_company(
@@ -90,14 +119,27 @@ async def fetch_shifts(
     *,
     status: Optional[str] = None,
     employee_id: Optional[UUID] = None,
+    starts_within: bool = False,
 ) -> list[dict]:
     """Shifts overlapping [start, end) for a company, each with its assignments.
 
     When employee_id is given, only shifts that employee is assigned to are
     returned (the portal "my schedule" view). status filters the shift status.
+
+    starts_within=True matches on the shift's START instead of overlap. The week
+    grid needs this: it buckets shifts into day columns by start date, and
+    publish_range only publishes shifts starting in the window — so an
+    overlap-matched shift that began before the window would be counted in the
+    summary and publish button but rendered in no column and published by
+    nothing. The portal's "my schedule" keeps overlap semantics (a shift already
+    in progress is still yours).
     """
     params: list[Any] = [company_id, start, end]
-    where = ["s.company_id = $1", "s.starts_at < $3", "s.ends_at > $2"]
+    where = (
+        ["s.company_id = $1", "s.starts_at >= $2", "s.starts_at < $3"]
+        if starts_within
+        else ["s.company_id = $1", "s.starts_at < $3", "s.ends_at > $2"]
+    )
     if status is not None:
         params.append(status)
         where.append(f"s.status = ${len(params)}")
@@ -189,15 +231,46 @@ async def find_conflicts(
 
 def raise_conflict(employee_id: UUID, conflicts: list[dict]) -> None:
     """409 with structured detail the frontend can render / offer to force."""
+    raise HTTPException(status_code=409, detail=conflict_detail(employee_id, conflicts))
+
+
+def raise_shift_full(assigned: int, required_staff: int) -> None:
+    """409 the frontend can force through, same shape as raise_conflict."""
     raise HTTPException(
-        status_code=409,
-        detail={
-            "code": "schedule_conflict",
-            "message": "Employee is already scheduled during this time",
-            "employee_id": str(employee_id),
-            "conflicts": conflicts,
-        },
+        status_code=409, detail=shift_full_detail(assigned, required_staff)
     )
+
+
+async def fetch_shift_for_write(conn, company_id: UUID, shift_id: UUID):
+    """The single read every assignment path takes before mutating a shift.
+
+    Carries the window (conflict check), the status (a cancelled shift takes no
+    assignments) and the staffing counts (headcount cap). 404s if the shift
+    isn't this company's.
+    """
+    row = await conn.fetchrow(
+        """
+        SELECT s.starts_at, s.ends_at, s.status, s.required_staff,
+               (SELECT COUNT(*) FROM schedule_shift_assignments a
+                WHERE a.shift_id = s.id) AS assigned_count
+        FROM schedule_shifts s
+        WHERE s.id = $1 AND s.company_id = $2
+        """,
+        shift_id, company_id,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Shift not found")
+    return row
+
+
+def assert_shift_open_for_assignment(shift) -> None:
+    """A cancelled shift is terminal — assigning to it would staff a dead shift."""
+    if shift["status"] == "cancelled":
+        raise HTTPException(
+            status_code=409, detail="Cannot assign employees to a cancelled shift"
+        )
+
+
 
 
 async def fetch_shift_by_id(conn, company_id: UUID, shift_id: UUID) -> Optional[dict]:
@@ -306,10 +379,10 @@ async def fetch_roster(conn, company_id: UUID) -> list[dict]:
         SELECT id, first_name, last_name, job_title, department
         FROM employees
         WHERE org_id = $1
-          AND COALESCE(employment_status, 'active') NOT IN ('terminated', 'inactive')
+          AND COALESCE(employment_status, 'active') <> ALL($2::text[])
         ORDER BY first_name, last_name
         """,
-        company_id,
+        company_id, list(INACTIVE_EMPLOYMENT_STATUSES),
     )
     return [
         {

@@ -5,11 +5,28 @@ requests. Response shapes are assembled as plain dicts in the route layer
 (see routes/employee_schedule/_shared.py:serialize_shift).
 """
 
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timezone
 from typing import Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+
+def _as_utc(value: Optional[datetime]) -> Optional[datetime]:
+    """Normalize an incoming datetime to UTC.
+
+    The columns are timestamptz and the whole surface is a UTC wall-clock (what
+    an admin types is what an employee sees). A client that omits the offset
+    would otherwise produce a naive datetime, and comparing it against the
+    tz-aware value read back from the DB raises TypeError → 500 instead of a
+    clean 422.
+    """
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
 
 ShiftStatus = Literal["draft", "published", "cancelled"]
 AssignmentStatus = Literal["assigned", "confirmed", "declined"]
@@ -33,6 +50,8 @@ class ShiftCreate(BaseModel):
     # Employees to assign up front (optional).
     employee_ids: list[UUID] = Field(default_factory=list)
 
+    _utc = field_validator("starts_at", "ends_at")(_as_utc)
+
     @model_validator(mode="after")
     def _check_window(self) -> "ShiftCreate":
         if self.ends_at <= self.starts_at:
@@ -52,6 +71,17 @@ class ShiftUpdate(BaseModel):
     notes: Optional[str] = Field(None, max_length=2000)
     status: Optional[ShiftStatus] = None
 
+    _utc = field_validator("starts_at", "ends_at")(_as_utc)
+
+    @model_validator(mode="after")
+    def _check_window(self) -> "ShiftUpdate":
+        # Only when the caller sent both — a one-sided retime is checked against
+        # the stored value in the route (see shifts.py:update_shift).
+        if self.starts_at is not None and self.ends_at is not None:
+            if self.ends_at <= self.starts_at:
+                raise ValueError("ends_at must be after starts_at")
+        return self
+
 
 class AssignmentCreate(BaseModel):
     employee_id: UUID
@@ -62,6 +92,8 @@ class PublishRange(BaseModel):
 
     start: datetime
     end: datetime
+
+    _utc = field_validator("start", "end")(_as_utc)
 
     @model_validator(mode="after")
     def _check_window(self) -> "PublishRange":

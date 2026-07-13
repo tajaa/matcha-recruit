@@ -1,38 +1,26 @@
 import { useEffect, useState, useCallback } from 'react'
-import { CalendarClock, Loader2, X, Check, Repeat, LogOut, CalendarOff } from 'lucide-react'
+import { CalendarClock, Loader2, X, Check, Repeat, LogOut, CalendarOff, AlertTriangle } from 'lucide-react'
+import { useToast } from '../../components/ui'
 import {
   fetchMySchedule, fetchMyRequests, createMyRequest, cancelMyRequest,
 } from '../../api/employeeSchedule'
 import type { Shift, ScheduleRequest } from '../../types/employeeSchedule'
-import { WEEKDAY_LABELS, REQUEST_TONE } from '../../types/employeeSchedule'
+import {
+  REQUEST_TONE, errorMessage, fmtTime, fmtDayLabel as fmtDay, addDays, toISODate,
+} from '../../types/employeeSchedule'
 
-function fmtTime(iso: string): string {
-  const d = new Date(iso)
-  let h = d.getUTCHours()
-  const m = d.getUTCMinutes()
-  const ap = h >= 12 ? 'p' : 'a'
-  h = h % 12 || 12
-  return m ? `${h}:${String(m).padStart(2, '0')}${ap}` : `${h}${ap}`
-}
-function fmtDay(iso: string): string {
-  const d = new Date(`${iso.slice(0, 10)}T00:00:00Z`)
-  return `${WEEKDAY_LABELS[d.getUTCDay()]}, ${d.getUTCMonth() + 1}/${d.getUTCDate()}`
-}
 function todayISO(): string {
-  return new Date().toISOString().slice(0, 10)
-}
-function addDays(iso: string, n: number): string {
-  const d = new Date(`${iso}T00:00:00Z`)
-  d.setUTCDate(d.getUTCDate() + n)
-  return d.toISOString().slice(0, 10)
+  return toISODate(new Date())
 }
 
 const inputCls = 'bg-zinc-900 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500 w-full'
 
 export default function PortalSchedule() {
+  const { toast } = useToast()
   const [shifts, setShifts] = useState<Shift[]>([])
   const [requests, setRequests] = useState<ScheduleRequest[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     const start = todayISO()
@@ -42,11 +30,39 @@ export default function PortalSchedule() {
     ])
     setShifts(sch.shifts)
     setRequests(reqs.requests)
+    setLoadError(null)
   }, [])
 
-  useEffect(() => { load().catch(() => {}).finally(() => setLoading(false)) }, [load])
+  // Swallowing this would render "no published shifts" — a fake-legitimate empty
+  // state — on top of a 403 or a 500.
+  useEffect(() => {
+    load().catch((err) => setLoadError(errorMessage(err))).finally(() => setLoading(false))
+  }, [load])
+
+  const cancelRequest = useCallback(async (id: string) => {
+    try {
+      await cancelMyRequest(id)
+      await load()
+    } catch (err) {
+      toast(errorMessage(err), 'error')
+    }
+  }, [load, toast])
 
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="h-6 w-6 text-zinc-500 animate-spin" /></div>
+
+  if (loadError) {
+    return (
+      <div className="max-w-3xl">
+        <div className="flex items-start gap-3 rounded-xl border border-red-500/30 bg-red-500/5 p-4">
+          <AlertTriangle className="h-5 w-5 text-red-400 shrink-0 mt-0.5" />
+          <div>
+            <div className="text-sm font-medium text-zinc-100">Couldn’t load your schedule</div>
+            <div className="text-sm text-zinc-400 mt-0.5">{loadError}</div>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   // group shifts by calendar day
   const byDay = new Map<string, Shift[]>()
@@ -99,7 +115,7 @@ export default function PortalSchedule() {
                   </div>
                 </div>
                 {r.status === 'pending' && (
-                  <button onClick={async () => { await cancelMyRequest(r.id); load() }} className="text-zinc-500 hover:text-red-400 p-1"><X className="h-4 w-4" /></button>
+                  <button onClick={() => { cancelRequest(r.id) }} className="text-zinc-500 hover:text-red-400 p-1"><X className="h-4 w-4" /></button>
                 )}
               </div>
             ))}
@@ -111,6 +127,7 @@ export default function PortalSchedule() {
 }
 
 function ShiftCard({ shift, onChanged }: { shift: Shift; onChanged: () => void }) {
+  const { toast } = useToast()
   const [mode, setMode] = useState<'swap' | 'drop' | null>(null)
   const [reason, setReason] = useState('')
   const [busy, setBusy] = useState(false)
@@ -122,7 +139,10 @@ function ShiftCard({ shift, onChanged }: { shift: Shift; onChanged: () => void }
       await createMyRequest({ request_type: mode, shift_id: shift.id, reason: reason.trim() || null })
       setMode(null)
       setReason('')
+      toast(`${mode === 'swap' ? 'Swap' : 'Drop'} request sent`, 'success')
       onChanged()
+    } catch (err) {
+      toast(errorMessage(err), 'error')
     } finally { setBusy(false) }
   }
 
@@ -147,6 +167,7 @@ function ShiftCard({ shift, onChanged }: { shift: Shift; onChanged: () => void }
 }
 
 function UnavailableForm({ onDone }: { onDone: () => void }) {
+  const { toast } = useToast()
   const [open, setOpen] = useState(false)
   const [from, setFrom] = useState(todayISO())
   const [to, setTo] = useState(todayISO())
@@ -164,7 +185,10 @@ function UnavailableForm({ onDone }: { onDone: () => void }) {
       })
       setOpen(false)
       setReason('')
+      toast('Request sent', 'success')
       onDone()
+    } catch (err) {
+      toast(errorMessage(err), 'error')
     } finally { setBusy(false) }
   }
 
