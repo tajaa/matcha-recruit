@@ -196,9 +196,20 @@ async def get_item_body(item_id: UUID):
 async def list_authority_items(
     slug: str,
     classified: Optional[bool] = None,
+    confirmed: Optional[bool] = None,
     disposition: Optional[str] = None,
 ):
-    """The item list — ``classified=false`` is the definitive remaining-work view."""
+    """The item list.
+
+    ``classified=false`` — no classification row at all.
+    ``confirmed=false`` — no CONFIRMED classification row: the confirm queue,
+    and the predicate ``unclassified_count`` counts (classify.py). This is the
+    one the cockpit's review queue wants: an item Gemini already proposed a
+    classification for is still unconfirmed work, and every engine read filters
+    ``status='confirmed'``, so it counts for nothing until a human confirms it.
+    Provisional rows are invisible to ``classified=false``, which is why that
+    filter alone could never drive the queue.
+    """
     async with get_connection() as conn:
         index_id = await conn.fetchval(
             "SELECT id FROM authority_indexes WHERE slug = $1", slug
@@ -212,6 +223,10 @@ async def list_authority_items(
             where.append("c.id IS NOT NULL")
         elif classified is False:
             where.append("c.id IS NULL")
+        if confirmed is True:
+            where.append("c.status = 'confirmed'")
+        elif confirmed is False:
+            where.append("(c.id IS NULL OR c.status <> 'confirmed')")
         if disposition:
             params.append(disposition)
             where.append(f"c.disposition = ${len(params)}")

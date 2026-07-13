@@ -92,14 +92,16 @@ def test_build_research_context_targets_the_keys():
     assert "meal_break" in ctx and "Lab 512" in ctx and "not yet codified" in ctx
 
 
-def _cls(id, key, kd=None, authority_state=None):
+def _cls(id, key, kd=None, authority_state=None, authority_country="US"):
     return {"id": id, "regulation_key": key, "key_definition_id": kd,
-            "authority_state": authority_state}
+            "authority_state": authority_state, "authority_country": authority_country}
 
 
-def _req(id, key, jur="J", category="minimum_wage", requirement_state=None):
+def _req(id, key, jur="J", category="minimum_wage", requirement_state=None,
+         requirement_country="US"):
     return {"id": id, "regulation_key": key, "jurisdiction_id": jur, "category": category,
-            "requirement_state": requirement_state}
+            "requirement_state": requirement_state,
+            "requirement_country": requirement_country}
 
 
 def test_match_by_key_equality():
@@ -169,6 +171,38 @@ def test_federal_authority_still_binds_every_jurisdiction():
         ],
     )
     assert {l["jurisdiction_requirement_id"] for l in links} == {"r_fed", "r_ca"}
+
+
+def test_us_federal_authority_never_codifies_a_foreign_row():
+    """"Federal law applies everywhere" means everywhere IN THE US.
+
+    Registry keys are a global vocabulary — `national_minimum_wage` is as true of
+    the UK as of the US — so key equality alone stamped `29 U.S.C. § 206` (FLSA)
+    onto UK and Mexican minimum-wage rows: citing a statute with no force in those
+    countries. The state guard could never catch it, because those rows have no
+    state. Found by driving a real reconcile against dev data.
+    """
+    links = match_codifications(
+        [_cls("c_flsa", "national_minimum_wage", authority_state=None, authority_country="US")],
+        [
+            _req("r_us", "national_minimum_wage", requirement_country="US"),
+            _req("r_uk", "national_minimum_wage", requirement_country="GB"),
+            _req("r_mx", "national_minimum_wage", requirement_country="MX"),
+        ],
+    )
+    assert {l["jurisdiction_requirement_id"] for l in links} == {"r_us"}
+
+
+def test_country_defaults_to_us_on_both_sides():
+    # Legacy rows carry no country_code; the catalog's default is US, so an
+    # absent country must not silently drop a legitimate domestic match.
+    links = match_codifications(
+        [{"id": "c1", "regulation_key": "national_minimum_wage", "key_definition_id": None,
+          "authority_state": None}],
+        [{"id": "r1", "regulation_key": "national_minimum_wage", "jurisdiction_id": "J",
+          "category": "minimum_wage", "requirement_state": None}],
+    )
+    assert {l["jurisdiction_requirement_id"] for l in links} == {"r1"}
 
 
 def test_no_key_definition_id_matches_all_categories():

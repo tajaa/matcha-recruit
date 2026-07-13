@@ -21,6 +21,7 @@ import { api, ensureFreshToken } from '../../api/client'
 import { Button, Input, LABEL, Select } from '../../components/ui'
 import { Drawer } from '../../components/ui/Drawer'
 import { HelpHint } from '../../components/ui/HelpHint'
+import AuthorityCockpit from '../../components/admin/scope/AuthorityCockpit'
 
 const BASE = import.meta.env.VITE_API_URL ?? '/api'
 
@@ -975,7 +976,9 @@ export default function ScopeStudio() {
         ) : laborScope.exhaustiveness.federal.basis === 'none'
             && laborScope.exhaustiveness.state.basis === 'none' ? (
           <div className="text-xs text-amber-400">
-            Scope registry is empty — run <span className="font-mono">server/scripts/populate_scope_registry.py</span> to populate it.
+            Scope registry is empty — use the <span className="text-zinc-300">Codification cockpit</span> below
+            to ingest an authority index, classify it, and confirm the classifications. Until then every
+            surface here falls back to the compliance catalog.
           </div>
         ) : (
           <>
@@ -1472,6 +1475,11 @@ export default function ScopeStudio() {
           </div>
         )}
       </div>
+
+      {/* The authoring pipeline: ingest → classify → confirm/key → reconcile.
+          Every surface above READS the registry; this is the only one that
+          fills it. */}
+      <AuthorityCockpit onMutate={() => setMatrixNonce((n) => n + 1)} />
 
       {proposal && (
         <SpecialtyReviewModal

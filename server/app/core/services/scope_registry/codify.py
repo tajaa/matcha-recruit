@@ -37,15 +37,24 @@ def match_codifications(
       ``exempt_salary_threshold`` under both minimum_wage and overtime).
     * **jurisdiction guard** — a *state-scoped* authority may only codify rows in
       its own state. A federal/global index (``authority_state`` NULL) still binds
-      any jurisdiction, because federal law applies everywhere. Without this, a
-      registry-wide reconcile (``chain_ids=None``, where the SQL applies no
-      jurisdiction filter) matched on key alone and bound e.g. ``Cal. Lab. Code
-      § 510`` to the FEDERAL ``daily_weekly_overtime`` row — one obligation
-      claiming authority from a jurisdiction that doesn't govern it.
+      any jurisdiction *in its own country*, because federal law applies
+      everywhere within it. Without this, a registry-wide reconcile
+      (``chain_ids=None``, where the SQL applies no jurisdiction filter) matched
+      on key alone and bound e.g. ``Cal. Lab. Code § 510`` to the FEDERAL
+      ``daily_weekly_overtime`` row — one obligation claiming authority from a
+      jurisdiction that doesn't govern it.
+    * **country guard** — "federal law applies everywhere" means everywhere in the
+      UNITED STATES. Registry keys are a global vocabulary (``national_minimum_wage``
+      is as true of the UK as of the US), so without this a US federal authority
+      stamped ``29 U.S.C. § 206`` onto *UK National Living Wage* and Mexico's
+      *ZLFN Border Zone Minimum Wage* — citing a statute that has no force in
+      those countries. Caught by driving a real reconcile against dev data; the
+      state guard alone never saw it, because those rows have no state.
 
     ``classifications``: rows with ``id``, ``regulation_key``, ``key_definition_id``,
-    ``authority_state``. ``requirement_rows``: rows with ``id``, ``regulation_key``,
-    ``jurisdiction_id``, ``category``, ``requirement_state``.
+    ``authority_state``, ``authority_country``. ``requirement_rows``: rows with
+    ``id``, ``regulation_key``, ``jurisdiction_id``, ``category``,
+    ``requirement_state``, ``requirement_country``.
     """
     rkd_category_by_id = rkd_category_by_id or {}
 
@@ -62,8 +71,13 @@ def match_codifications(
             continue  # NULL-key classifications can never codify
         want_category = rkd_category_by_id.get(c.get("key_definition_id"))
         authority_state = c.get("authority_state")
+        authority_country = c.get("authority_country") or "US"
         for r in reqs_by_key.get(key, []):
             if want_category is not None and r.get("category") != want_category:
+                continue
+            # An authority binds only rows in its own COUNTRY. Registry keys are a
+            # global vocabulary, so key equality alone would cite US law at UK rows.
+            if (r.get("requirement_country") or "US") != authority_country:
                 continue
             # State-scoped authority binds only its own state's rows.
             if authority_state and r.get("requirement_state") != authority_state:
@@ -596,7 +610,11 @@ async def reconcile_codifications(
                    i.id AS item_id, i.citation, i.hierarchy,
                    ai.slug AS index_slug, ai.source_type, ai.level AS jurisdiction_level,
                    ai.jurisdiction_id AS authority_jurisdiction_id,
-                   aij.state AS authority_state
+                   aij.state AS authority_state,
+                   -- A federal index has jurisdiction_id NULL and so no country row
+                   -- to read: every index in authority_sources.py is US, so US is
+                   -- the correct default. Revisit when a non-US authority is added.
+                   COALESCE(aij.country_code, 'US') AS authority_country
             FROM authority_item_classifications c
             JOIN authority_index_items i ON i.id = c.item_id
             JOIN authority_indexes ai ON ai.id = i.authority_index_id
@@ -618,7 +636,8 @@ async def reconcile_codifications(
             f"""
             SELECT jr.id, jr.regulation_key, jr.jurisdiction_id, jr.category,
                    jr.jurisdiction_level, jr.statute_citation, jr.citation_verified_at,
-                   j.state AS requirement_state
+                   j.state AS requirement_state,
+                   COALESCE(j.country_code, 'US') AS requirement_country
             FROM jurisdiction_requirements jr
             JOIN jurisdictions j ON j.id = jr.jurisdiction_id
             WHERE {' AND '.join(req_where)}
