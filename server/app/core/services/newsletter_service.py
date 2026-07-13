@@ -1379,6 +1379,185 @@ async def delete_template(template_id: UUID) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Idea scratchpad + template generator
+#
+# The scratchpad is a quick-capture surface for newsletter concepts. An idea
+# holds a title, free-form notes, and (optionally) a captured image. The
+# "Create Newsletter" action converts an idea into a structured newsletter
+# draft; the generated template ENFORCES at least one visual — a conversion
+# with no media is refused so every produced newsletter includes an image.
+# ---------------------------------------------------------------------------
+
+
+async def list_ideas() -> list[dict]:
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """SELECT id, title, notes, media_url, status, newsletter_id,
+                      created_at, updated_at
+               FROM newsletter_ideas
+               ORDER BY created_at DESC"""
+        )
+    return [dict(r) for r in rows]
+
+
+async def create_idea(
+    title: str,
+    notes: Optional[str],
+    media_url: Optional[str],
+    created_by: Optional[UUID],
+) -> dict:
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """INSERT INTO newsletter_ideas (title, notes, media_url, created_by)
+               VALUES ($1, $2, $3, $4)
+               RETURNING id, title, notes, media_url, status, newsletter_id,
+                         created_at, updated_at""",
+            title.strip(), notes, media_url, created_by,
+        )
+    return dict(row)
+
+
+async def update_idea(idea_id: UUID, updates: dict) -> Optional[dict]:
+    allowed = {"title", "notes", "media_url"}
+    sets = []
+    params: list = []
+    idx = 1
+    for k, v in updates.items():
+        if k not in allowed:
+            continue
+        if k == "title" and isinstance(v, str):
+            v = v.strip()
+        sets.append(f"{k} = ${idx}")
+        params.append(v)
+        idx += 1
+    if not sets:
+        return None
+    sets.append("updated_at = NOW()")
+    params.append(idea_id)
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            f"""UPDATE newsletter_ideas SET {', '.join(sets)}
+                WHERE id = ${idx}
+                RETURNING id, title, notes, media_url, status, newsletter_id,
+                          created_at, updated_at""",
+            *params,
+        )
+    return dict(row) if row else None
+
+
+async def delete_idea(idea_id: UUID) -> bool:
+    async with get_connection() as conn:
+        result = await conn.execute("DELETE FROM newsletter_ideas WHERE id = $1", idea_id)
+    return "DELETE 1" in result
+
+
+def _is_video_media(media_url: str) -> bool:
+    return media_url.lower().rsplit("?", 1)[0].endswith((".mp4", ".mov", ".webm"))
+
+
+def build_idea_newsletter_html(
+    title: str,
+    notes: Optional[str],
+    media_url: str,
+    media_alt: Optional[str] = None,
+) -> str:
+    """Assemble a structured newsletter body from a scratchpad idea.
+
+    The template has a fixed skeleton — a **mandatory** hero visual, the idea
+    title as an <h1>, and the notes rendered as paragraphs. The media block is
+    non-optional: this builder is only reached once a media_url is supplied, so
+    the produced HTML always contains at least one <img>/<video>. The result is
+    passed through the same `sanitize_html` allowlist as any other body.
+    """
+    safe_alt = html_lib.escape(media_alt or title or "Newsletter image")
+    if _is_video_media(media_url):
+        media_block = (
+            f'<figure><video controls src="{html_lib.escape(media_url)}" '
+            f'width="100%"></video>'
+            f'<figcaption>{safe_alt}</figcaption></figure>'
+        )
+    else:
+        media_block = (
+            f'<figure><img src="{html_lib.escape(media_url)}" alt="{safe_alt}" '
+            f'width="100%" /></figure>'
+        )
+
+    heading = f"<h1>{html_lib.escape(title.strip() or 'Untitled newsletter')}</h1>"
+
+    body_parts: list[str] = []
+    for para in (notes or "").split("\n\n"):
+        para = para.strip()
+        if not para:
+            continue
+        # Preserve single line breaks inside a paragraph.
+        para_html = "<br />".join(html_lib.escape(line) for line in para.split("\n"))
+        body_parts.append(f"<p>{para_html}</p>")
+    if not body_parts:
+        body_parts.append(
+            "<p>Start writing your newsletter here. This draft was generated "
+            "from a captured idea — edit freely.</p>"
+        )
+
+    raw = media_block + heading + "".join(body_parts)
+    return sanitize_html(raw)
+
+
+class IdeaMediaRequiredError(ValueError):
+    """Raised when an idea is converted without the mandatory visual."""
+
+
+async def create_newsletter_from_idea(
+    idea_id: UUID,
+    media_url: Optional[str],
+    created_by: UUID,
+    media_alt: Optional[str] = None,
+) -> dict:
+    """Export a scratchpad idea into a structured newsletter draft.
+
+    Enforces the mandatory-media requirement: `media_url` (falling back to any
+    media captured on the idea itself) must be present, or the conversion is
+    refused. On success a draft newsletter is created with the generated
+    structured body and the idea is stamped `converted` + linked to the draft.
+    """
+    async with get_connection() as conn:
+        idea = await conn.fetchrow(
+            "SELECT id, title, notes, media_url, status, newsletter_id FROM newsletter_ideas WHERE id = $1",
+            idea_id,
+        )
+        if not idea:
+            raise ValueError("Idea not found")
+
+        effective_media = (media_url or idea["media_url"] or "").strip()
+        if not effective_media:
+            raise IdeaMediaRequiredError(
+                "A media/image is required to create a newsletter from an idea."
+            )
+
+        content_html = build_idea_newsletter_html(
+            title=idea["title"],
+            notes=idea["notes"],
+            media_url=effective_media,
+            media_alt=media_alt,
+        )
+
+        async with conn.transaction():
+            newsletter = await conn.fetchrow(
+                """INSERT INTO newsletters (title, subject, content_html, created_by)
+                   VALUES ($1, $2, $3, $4)
+                   RETURNING *""",
+                idea["title"], idea["title"], content_html, created_by,
+            )
+            await conn.execute(
+                """UPDATE newsletter_ideas
+                   SET status = 'converted', newsletter_id = $2,
+                       media_url = COALESCE(media_url, $3), updated_at = NOW()
+                   WHERE id = $1""",
+                idea_id, newsletter["id"], effective_media,
+            )
+    return dict(newsletter)
+
+
+# ---------------------------------------------------------------------------
 # Analytics + growth (P2)
 # ---------------------------------------------------------------------------
 

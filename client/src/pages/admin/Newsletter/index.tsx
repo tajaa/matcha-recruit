@@ -2,13 +2,14 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { Loader2, Plus } from 'lucide-react'
 import { api } from '../../../api/client'
-import type { Subscriber, Newsletter, SubStats, Tag, Template, GrowthPoint, Analytics, Progress, Tab } from './types'
+import type { Subscriber, Newsletter, SubStats, Tag, Template, Idea, GrowthPoint, Analytics, Progress, Tab } from './types'
 import { Sparkline } from './Sparkline'
 import { SubscribersTab } from './SubscribersTab'
 import { NewslettersTab } from './NewslettersTab'
 import { ComposeTab } from './ComposeTab'
 import { TagsTab } from './TagsTab'
 import { TemplatesTab } from './TemplatesTab'
+import { IdeasTab } from './IdeasTab'
 import { SendModal } from './SendModal'
 import { AnalyticsDrawer } from './AnalyticsDrawer'
 import { CsvImportModal } from './CsvImportModal'
@@ -23,6 +24,7 @@ export default function NewsletterAdmin() {
   const [newsletters, setNewsletters] = useState<Newsletter[]>([])
   const [tags, setTags] = useState<Tag[]>([])
   const [templates, setTemplates] = useState<Template[]>([])
+  const [ideas, setIdeas] = useState<Idea[]>([])
   const [growth, setGrowth] = useState<GrowthPoint[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -77,11 +79,12 @@ export default function NewsletterAdmin() {
   async function loadData() {
     setLoading(true)
     try {
-      const [subRes, nlRes, tagsRes, tplRes, growthRes] = await Promise.allSettled([
+      const [subRes, nlRes, tagsRes, tplRes, ideasRes, growthRes] = await Promise.allSettled([
         api.get<{ subscribers: Subscriber[]; total: number; stats: SubStats }>('/admin/newsletter/subscribers?limit=100'),
         api.get<Newsletter[]>('/admin/newsletter/newsletters'),
         api.get<{ tags: Tag[] }>('/admin/newsletter/tags'),
         api.get<{ templates: Template[] }>('/admin/newsletter/templates'),
+        api.get<{ ideas: Idea[] }>('/admin/newsletter/ideas'),
         api.get<{ days: number; series: GrowthPoint[] }>('/admin/newsletter/subscribers/growth?days=90'),
       ])
       if (subRes.status === 'fulfilled') {
@@ -91,6 +94,7 @@ export default function NewsletterAdmin() {
       if (nlRes.status === 'fulfilled') setNewsletters(nlRes.value)
       if (tagsRes.status === 'fulfilled') setTags(tagsRes.value.tags)
       if (tplRes.status === 'fulfilled') setTemplates(tplRes.value.templates)
+      if (ideasRes.status === 'fulfilled') setIdeas(ideasRes.value.ideas)
       if (growthRes.status === 'fulfilled') setGrowth(growthRes.value.series)
     } catch {}
     setLoading(false)
@@ -442,7 +446,7 @@ export default function NewsletterAdmin() {
 
       {/* Tabs */}
       <div className="flex gap-1 mb-6 border-b border-zinc-800/60 pb-px">
-        {(['subscribers', 'newsletters', 'compose', 'tags', 'templates'] as Tab[]).map((t) => {
+        {(['ideas', 'subscribers', 'newsletters', 'compose', 'tags', 'templates'] as Tab[]).map((t) => {
           const draftCount = t === 'newsletters' ? newsletters.filter(n => n.status === 'draft').length : 0
           return (
             <button key={t} onClick={() => handleTabChange(t)} className={`px-4 py-2 text-xs font-medium transition-colors relative flex items-center gap-1.5 ${tab === t ? 'text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'}`}>
@@ -455,6 +459,15 @@ export default function NewsletterAdmin() {
           )
         })}
       </div>
+
+      {/* Ideas scratchpad tab */}
+      {tab === 'ideas' && (
+        <IdeasTab
+          ideas={ideas}
+          onChange={loadData}
+          onCreatedNewsletter={(nl) => { upsertNewsletter(nl); startEdit(nl) }}
+        />
+      )}
 
       {/* Subscribers tab */}
       {tab === 'subscribers' && (

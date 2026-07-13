@@ -948,6 +948,92 @@ async def delete_template(
 
 
 # ---------------------------------------------------------------------------
+# Idea scratchpad + template generator
+# ---------------------------------------------------------------------------
+
+
+class IdeaCreateRequest(BaseModel):
+    title: str = Field(..., min_length=1, max_length=255)
+    notes: Optional[str] = None
+    media_url: Optional[str] = None
+
+
+class IdeaUpdateRequest(BaseModel):
+    title: Optional[str] = Field(default=None, max_length=255)
+    notes: Optional[str] = None
+    media_url: Optional[str] = None
+
+
+class CreateFromIdeaRequest(BaseModel):
+    # Optional here so an idea that already carries captured media can be
+    # converted without re-supplying it; the service enforces that at least
+    # one of the two is present (mandatory-media requirement).
+    media_url: Optional[str] = None
+    media_alt: Optional[str] = None
+
+
+@admin_router.get("/ideas")
+async def list_ideas(current_user: CurrentUser = Depends(require_admin)):
+    return {"ideas": await svc.list_ideas()}
+
+
+@admin_router.post("/ideas")
+async def create_idea(
+    body: IdeaCreateRequest,
+    current_user: CurrentUser = Depends(require_admin),
+):
+    return await svc.create_idea(
+        body.title, body.notes, body.media_url, created_by=current_user.id,
+    )
+
+
+@admin_router.put("/ideas/{idea_id}")
+async def update_idea(
+    idea_id: UUID,
+    body: IdeaUpdateRequest,
+    current_user: CurrentUser = Depends(require_admin),
+):
+    updates = {k: v for k, v in body.model_dump(exclude_unset=True).items()}
+    if not updates:
+        raise HTTPException(status_code=400, detail="No updates provided")
+    row = await svc.update_idea(idea_id, updates)
+    if not row:
+        raise HTTPException(status_code=404, detail="Idea not found")
+    return row
+
+
+@admin_router.delete("/ideas/{idea_id}")
+async def delete_idea(
+    idea_id: UUID,
+    current_user: CurrentUser = Depends(require_admin),
+):
+    if not await svc.delete_idea(idea_id):
+        raise HTTPException(status_code=404, detail="Idea not found")
+    return {"ok": True}
+
+
+@admin_router.post("/ideas/{idea_id}/create-newsletter")
+async def create_newsletter_from_idea(
+    idea_id: UUID,
+    body: CreateFromIdeaRequest,
+    current_user: CurrentUser = Depends(require_admin),
+):
+    """Export an idea into a structured newsletter draft.
+
+    The generated template mandates a visual — the request must supply a
+    `media_url` (or the idea must already carry one), else this 422s.
+    """
+    try:
+        return await svc.create_newsletter_from_idea(
+            idea_id, body.media_url, created_by=current_user.id, media_alt=body.media_alt,
+        )
+    except svc.IdeaMediaRequiredError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
 # Analytics + send progress (P2)
 # ---------------------------------------------------------------------------
 

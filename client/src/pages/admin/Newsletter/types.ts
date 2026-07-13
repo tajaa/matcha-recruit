@@ -20,6 +20,12 @@ export type Template = {
   created_at: string; updated_at: string
 }
 
+export type Idea = {
+  id: string; title: string; notes: string | null; media_url: string | null
+  status: 'idea' | 'converted'; newsletter_id: string | null
+  created_at: string; updated_at: string
+}
+
 export type GrowthPoint = { day: string; subscribed: number; confirmed: number }
 
 export type Analytics = {
@@ -35,4 +41,4 @@ export type Progress = {
   opened: number; clicked: number; bounced: number
 }
 
-export type Tab = 'subscribers' | 'newsletters' | 'compose' | 'tags' | 'templates'
+export type Tab = 'ideas' | 'subscribers' | 'newsletters' | 'compose' | 'tags' | 'templates'
