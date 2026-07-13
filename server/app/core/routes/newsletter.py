@@ -406,10 +406,30 @@ async def view_newsletter(newsletter_id: UUID):
 
     async with get_connection() as conn:
         row = await conn.fetchrow(
-            """SELECT title, subject, content_html, sent_at FROM newsletters
+            """SELECT title, subject, preheader, content_html, design_json, sent_at FROM newsletters
                WHERE id = $1 AND status = 'sent' AND is_deleted = FALSE""",
             newsletter_id,
         )
+
+    # Block-designed newsletters render through the SAME themed email pipeline
+    # as the send/preview — a full, self-contained document. The legacy dark
+    # "prose" chrome below is only correct for freeform TipTap content_html;
+    # feeding it a light-themed block snapshot would paint dark text on a dark
+    # background.
+    if row and row.get("design_json"):
+        design = svc._coerce_design(row["design_json"])
+        if design and design.get("blocks"):
+            preset = (design.get("theme") or {}).get("preset")
+            html = svc.render_preview(
+                title=row["title"] or "",
+                subject=row["subject"] or "",
+                preheader=row["preheader"] or "",
+                content_html=row["content_html"] or "",
+                theme=preset if preset in ("dark", "light") else "light",
+                design_json=design,
+            )
+            return HTMLResponse(html)
+
     CDN = "https://cdn.jsdelivr.net/npm/@tailwindcss/cdn@4"
     if not row or not row["content_html"]:
         return HTMLResponse(

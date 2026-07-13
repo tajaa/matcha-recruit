@@ -133,14 +133,29 @@ def _esc(v: Any) -> str:
 
 
 def _safe_href(href: Any) -> str:
+    """Scheme-check a URL AND HTML-escape it for safe interpolation into a
+    double-quoted ``href="..."`` attribute.
+
+    Escaping matters because the block snapshot is stored as content_html and
+    served raw by the public /view endpoint (it cannot be bleached without
+    destroying the MSO/VML Outlook fallbacks), so the renderer must be safe by
+    construction. Escaping ``"`` neutralizes attribute breakout; the tracking
+    rewrite `html_lib.unescape`s the value before redirecting, so `&`-bearing
+    URLs still work.
+    """
     if not href:
         return "#"
     s = str(href).strip()
-    if s.startswith(("/", "#")):
-        return s
-    if s.lower().startswith(("http://", "https://", "mailto:", "tel:")):
-        return s
+    if s.startswith(("/", "#")) or s.lower().startswith(("http://", "https://", "mailto:", "tel:")):
+        return _esc(s)
     return "#"
+
+
+def _safe_align(v: Any, default: str = "left") -> str:
+    """Whitelist a text-align value — these land raw inside ``style="..."`` and
+    must never be free strings (attribute/style breakout otherwise)."""
+    s = str(v or "").strip().lower()
+    return s if s in ("left", "center", "right") else default
 
 
 def _safe_image(url: Any) -> Optional[str]:
@@ -178,6 +193,7 @@ def _str(block: dict, key: str, default: str = "") -> str:
 def _paragraphs(text: str, palette: dict, *, align: str = "left", size: int = 16) -> str:
     """Render a plain-text body into escaped <p> paragraphs (blank line splits,
     single newline → <br>)."""
+    align = _safe_align(align)
     out = []
     for para in (text or "").split("\n\n"):
         para = para.strip()
@@ -356,7 +372,7 @@ def _render_hero(b: dict, palette: dict, ctx: dict) -> str:
         vml = (
             f'<!--[if gte mso 9]>'
             f'<v:rect xmlns:v="urn:schemas-microsoft-com:vml" fill="true" stroke="false" '
-            f'style="width:{CARD_WIDTH}px;height:340px;">'
+            f'style="width:{CONTENT_WIDTH}px;height:340px;">'
             f'<v:fill type="frame" src="{_esc(image)}" color="#111111" />'
             f'<v:textbox inset="0,0,0,0"><![endif]-->'
         )
@@ -387,7 +403,7 @@ def _render_hero(b: dict, palette: dict, ctx: dict) -> str:
 def _render_heading(b: dict, palette: dict, ctx: dict) -> str:
     heading = _str(b, "heading")
     subheading = _str(b, "subheading")
-    align = _str(b, "align", "left")
+    align = _safe_align(b.get("align"))
     parts = []
     if heading:
         parts.append(
@@ -403,7 +419,7 @@ def _render_heading(b: dict, palette: dict, ctx: dict) -> str:
 
 
 def _render_text(b: dict, palette: dict, ctx: dict) -> str:
-    align = _str(b, "align", "left")
+    align = _safe_align(b.get("align"))
     raw_html = b.get("html")
     if raw_html:
         # Already-sanitized rich HTML from the inline editor. Wrap so base
@@ -471,7 +487,10 @@ def _render_image_text(b: dict, palette: dict, ctx: dict) -> str:
             f'{_esc(cta_label)} &rarr;</a>'
         )
     text_html = "".join(text_col)
-    img_html = _img(image, palette, alt=heading) if image else ""
+    # Size the image to its half-column: Outlook honors the width attribute and
+    # ignores max-width, so a full-width img would blow out the ghost-table cell.
+    cell_w = (CONTENT_WIDTH - 12) // 2
+    img_html = _img(image, palette, alt=heading, width=cell_w) if image else ""
     if not img_html:
         return text_html
     cells = [img_html, text_html] if side == "left" else [text_html, img_html]

@@ -1416,7 +1416,7 @@ async def send_newsletter_to_segment(
 async def list_templates() -> list[dict]:
     async with get_connection() as conn:
         rows = await conn.fetch(
-            "SELECT id, name, description, preheader, design_json, created_at, updated_at "
+            "SELECT id, name, description, preheader, content_html, design_json, created_at, updated_at "
             "FROM newsletter_templates ORDER BY name"
         )
     return [_normalize_row(r) for r in rows]
@@ -1706,6 +1706,14 @@ async def create_newsletter_from_idea(
             media_url=effective_media,
             media_alt=media_alt,
         )
+        # Enforce the mandatory-visual invariant against what will actually
+        # RENDER: a non-empty media_url that _safe_image rejects (data: URI,
+        # bare filename, parens/quotes) would be silently dropped, producing a
+        # medialess newsletter. Re-check the built design, not just emptiness.
+        if not email_blocks.design_has_media(design):
+            raise IdeaMediaRequiredError(
+                "A valid image or video URL (http/https) is required to create a newsletter from an idea."
+            )
         content_html = _render_design_snapshot(design)
 
         async with conn.transaction():
