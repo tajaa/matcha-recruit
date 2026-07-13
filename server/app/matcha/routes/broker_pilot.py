@@ -17,7 +17,8 @@ import logging
 from typing import Literal, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile
+from fastapi import (APIRouter, Depends, File, HTTPException, Query, Request, Response,
+                     UploadFile)
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -26,6 +27,7 @@ from ..dependencies import require_broker_pro
 from app.core.services.redis_cache import check_rate_limit, client_ip
 from app.core.services.storage import get_storage
 from ..services import broker_pilot as bp
+from ..services import broker_pilot_requirements as bpr
 from ..services import external_clients as ext
 from ..services.er_document_parser import ERDocumentParser
 from .broker_portfolio import _assert_broker_owns_company
@@ -124,6 +126,25 @@ async def _native_for(conn, session: dict) -> dict | None:
     if session["subject_kind"] != "company":
         return None
     return await bp.gather_native_sources(conn, session["subject_id"])
+
+
+def _corpus_and_requirements(session: dict, subject_name: str, ctx: dict,
+                             docs: list[dict], native: dict | None) -> tuple[dict, list[dict]]:
+    """Build the corpus, then the mode's document checklist against it, then fold
+    the resulting scope notes back into the corpus.
+
+    The order is forced: requirement satisfaction reads `platform_flags(corpus)`
+    (platform data can satisfy a requirement), so the corpus must exist first —
+    which is why the notes are appended here rather than passed into
+    `build_corpus`. Every caller (context preview, chat, memo) goes through this
+    one function, so the checklist the broker sees, the gate the chat enforces,
+    and the scope notes the analyst reads can never disagree.
+    """
+    corpus = bp.build_corpus(subject_name, ctx, docs, native)
+    template = bp.get_template(session.get("template_key"))
+    reqs = bpr.doc_requirements(template, docs, bpr.platform_flags(corpus))
+    corpus["notes"].extend(bpr.scope_notes(template, docs, reqs))
+    return corpus, reqs
 
 
 async def _load_messages(conn, session_id: str) -> list[dict]:
@@ -477,17 +498,24 @@ async def get_context(session_id: str, current_user=Depends(require_broker_pro))
         ctx = await _build_ctx(conn, current_user.id, session)
         docs = await _load_docs(conn, session_id)
         native = await _native_for(conn, session)
-    corpus = bp.build_corpus(subject_name, ctx, docs, native)
-    # Source summaries + counts only — the flat index is internal.
+    corpus, reqs = _corpus_and_requirements(session, subject_name, ctx, docs, native)
+    # Source summaries + counts only — the flat index is internal. The document
+    # checklist rides here (not on GET /sessions/{id}) because satisfaction needs
+    # the corpus this endpoint already pays to build; the frontend loads session
+    # and context in parallel, so it has both at first paint.
     return {
         "sources": corpus["sources"],
         "notes": corpus["notes"],
         "total": sum(len(s["records"]) for s in corpus["sources"].values()),
+        "doc_requirements": reqs,
     }
 
 
 @router.post("/pilot/sessions/{session_id}/chat")
 async def chat(session_id: str, body: ChatIn, request: Request,
+               force: bool = Query(False,
+                                   description="Answer even though the mode's required documents "
+                                               "are missing ('Ask anyway')"),
                current_user=Depends(require_broker_pro)):
     # Pre-work in one connection; release it before the long Gemini call.
     async with get_connection() as conn:
@@ -500,13 +528,25 @@ async def chat(session_id: str, body: ChatIn, request: Request,
         ctx = await _build_ctx(conn, current_user.id, session)
         docs = await _load_docs(conn, session_id, with_text=True)
         native = await _native_for(conn, session)
+
+        corpus, reqs = _corpus_and_requirements(session, subject_name, ctx, docs, native)
+
+        # The mode's document gate — soft, and it runs BEFORE the message is
+        # persisted so a refused turn leaves no orphan in the transcript. Forceable
+        # because a broker legitimately asks exploratory questions before the paper
+        # lands, and because doc_type is AI-assigned (a misclassified upload must
+        # never trap someone).
+        missing = bpr.missing_required(reqs)
+        if missing and not force:
+            raise HTTPException(status_code=409, detail=bpr.missing_docs_detail(missing))
+
         await conn.execute(
             "INSERT INTO broker_pilot_messages (session_id, role, content) VALUES ($1, 'user', $2)",
             session_id, body.message,
         )
-        await _audit(conn, session_id, current_user, request, "message", {"role": "user"})
-
-    corpus = bp.build_corpus(subject_name, ctx, docs, native)
+        await _audit(conn, session_id, current_user, request, "message",
+                     {"role": "user",
+                      **({"forced_missing": [m["doc_type"] for m in missing]} if missing else {})})
 
     async def event_stream():
         result_payload = None
@@ -571,7 +611,10 @@ async def generate_memo(session_id: str, request: Request,
         native = await _native_for(conn, session)
         broker_name = await conn.fetchval("SELECT name FROM brokers WHERE id = $1", broker_id)
 
-        corpus = bp.build_corpus(subject_name, ctx, docs, native)
+        # Memo generation is NOT gated on the mode's documents — a memo of a
+        # forced analysis is legitimate. It carries the scope note instead, so
+        # the reader sees what the analysis did not have.
+        corpus, _reqs = _corpus_and_requirements(session, subject_name, ctx, docs, native)
         packet = await bp.build_memo_pdf(session, subject_name, corpus, memo, docs,
                                          broker_name=broker_name)
 

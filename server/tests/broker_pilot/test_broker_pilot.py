@@ -299,6 +299,25 @@ def test_build_prompt_injects_mode_focus_only_when_set():
     assert "SESSION MODE" not in p_open
 
 
+def test_build_prompt_renders_scope_notes():
+    """Corpus notes are the ONLY channel that tells the analyst what it was not
+    given — an absent record is otherwise indistinguishable from one that doesn't
+    exist. They used to reach the memo but never the model."""
+    corpus = bp.build_corpus("X", {}, [])
+    corpus["notes"].append("The loss run has NOT been provided.")
+    prompt = bp._build_prompt({"title": "T", "subject_kind": "company"},
+                              "Acme", [], corpus, [], "hi")
+    assert "SCOPE NOTES" in prompt
+    assert "The loss run has NOT been provided." in prompt
+
+
+def test_build_prompt_omits_scope_block_when_no_notes():
+    corpus = {"sources": {}, "index": {}, "notes": []}
+    prompt = bp._build_prompt({"title": "T", "subject_kind": "company"},
+                              "Acme", [], corpus, [], "hi")
+    assert "SCOPE NOTES" not in prompt
+
+
 def test_memo_html_shows_mode_label():
     corpus = bp.build_corpus("Hillcrest", _CTX, _docs())
     memo = {"assistant_text": "x", "evidence_map": [], "open_questions": []}
