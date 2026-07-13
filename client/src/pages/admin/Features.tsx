@@ -24,6 +24,7 @@ const FEATURE_GROUPS: { label: string; features: Record<string, string> }[] = [
       separation_agreements: 'Separation Agreements',
       credential_templates: 'Credential Templates',
       discipline: 'Performance Action',
+      employee_schedule: 'Employee Schedule (shift scheduling — assignments, templates, swap/drop requests)',
     },
   },
   {
