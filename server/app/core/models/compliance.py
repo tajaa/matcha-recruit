@@ -244,6 +244,11 @@ class RequirementResponse(BaseModel):
     # Liveness of source_url on the catalog row: 'unchecked' | 'ok' | 'dead'
     # (None for rows with no catalog link). Dead links are retained + badged.
     source_url_status: Optional[str] = None
+    # Statute/reg citation the scope-registry codification engine stamped onto
+    # the catalog row (None until codify.py has reconciled a match — most rows
+    # today). Joined live off jurisdiction_requirements, same as source_url_status.
+    statute_citation: Optional[str] = None
+    citation_verified_at: Optional[str] = None
     source_name: Optional[str] = None
     effective_date: Optional[str] = None
     previous_value: Optional[str] = None

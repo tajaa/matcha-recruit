@@ -162,6 +162,13 @@ export function ComplianceRequirementsTab({ requirements, loading, onPin, checkM
                     {req.effective_date && (
                       <span className="text-[11px] text-zinc-600">Eff. {new Date(req.effective_date).toLocaleDateString()}</span>
                     )}
+                    {req.statute_citation && (
+                      <span
+                        className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-900/20 text-emerald-400 border border-emerald-800/40"
+                        title={req.citation_verified_at ? `Verified ${new Date(req.citation_verified_at).toLocaleDateString()}` : undefined}>
+                        {req.statute_citation}
+                      </span>
+                    )}
                     {!readOnly && (
                       <button type="button" onClick={() => onPin(req.id, !req.is_pinned)}
                         className={`text-[11px] transition-colors ${req.is_pinned ? 'text-amber-400' : 'text-zinc-600 hover:text-amber-400'}`}>

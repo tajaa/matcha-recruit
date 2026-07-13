@@ -1652,7 +1652,20 @@ async def _upsert_requirements_additive(
             req["category"] = cat
     await _validate_source_urls(reqs)
 
+    category_ids = {r["slug"]: r["id"] for r in await conn.fetch(
+        "SELECT id, slug FROM compliance_categories"
+    )}
+
     for req in reqs:
+        category_id = category_ids.get(req.get("category"))
+        if category_id is None:
+            logger.warning(
+                "compliance_service: dropping requirement %r for jurisdiction %s — "
+                "category %r has no compliance_categories row (registry/seed drift)",
+                req.get("title"), jurisdiction_id, req.get("category"),
+            )
+            continue
+
         # Build per-requirement metadata (research_source + penalties if present)
         meta_dict: dict = {}
         # Carry any caller-set metadata (e.g. grounding marker from grounded
@@ -1662,8 +1675,12 @@ async def _upsert_requirements_additive(
             meta_dict.update(req_meta)
         if research_source:
             meta_dict["research_source"] = research_source
-        if req.get("grounding"):
-            meta_dict["grounding"] = req["grounding"]
+        # Sink-side guard for EVERY research path, mirroring the penalty guard
+        # below: a caller that never validated against a grounded corpus (e.g.
+        # the legacy specialty-research path) previously left this key absent
+        # entirely, indistinguishable from pre-grounding-era rows. Default to
+        # "ungrounded" so provenance is always queryable.
+        meta_dict["grounding"] = req.get("grounding") or "ungrounded"
         if req.get("grounded_citations"):
             meta_dict["grounded_citations"] = req["grounded_citations"]
         # Sink-side penalty guard for EVERY research path (grounded or not): drop
@@ -1697,10 +1714,7 @@ async def _upsert_requirements_additive(
                  regulation_key, key_definition_id, source_url_status, source_checked_at)
             VALUES ($1, $2, $3::text, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), $15, $16, $17, $18,
                     $22::jsonb,
-                    COALESCE(
-                        (SELECT id FROM compliance_categories WHERE slug = $19 LIMIT 1),
-                        (SELECT id FROM compliance_categories LIMIT 1)
-                    ),
+                    $19,
                     CASE WHEN $20::text IS NOT NULL THEN $20::jsonb ELSE '{}'::jsonb END,
                     $21::source_tier_enum,
                     $23,
@@ -1797,7 +1811,7 @@ async def _upsert_requirements_additive(
             req.get("applicable_industries"),
             tc_json,
             aet,
-            req.get("category"),  # $19: duplicate for category_id subquery
+            category_id,           # $19: resolved above — never an arbitrary fallback row
             meta_fragment,         # $20: research_source metadata
             source_tier,           # $21: source_tier enum value
             steps_json,            # $22: implementation_steps JSONB
@@ -2605,10 +2619,28 @@ async def _upsert_jurisdiction_requirements(
             req["category"] = cat
     await _validate_source_urls(reqs)
 
+    category_ids = {r["slug"]: r["id"] for r in await conn.fetch(
+        "SELECT id, slug FROM compliance_categories"
+    )}
+
     new_keys = set()
     for req in reqs:
+        # Computed + retained in new_keys even on a category-resolution miss
+        # below, so an unresolvable category doesn't ALSO purge whatever
+        # this jurisdiction already has stored under the same key via the
+        # stale-row cleanup at the bottom of this function.
         requirement_key = _compute_requirement_key(req)
         new_keys.add(requirement_key)
+
+        category_id = category_ids.get(req.get("category"))
+        if category_id is None:
+            logger.warning(
+                "compliance_service: dropping requirement %r for jurisdiction %s — "
+                "category %r has no compliance_categories row (registry/seed drift)",
+                req.get("title"), jurisdiction_id, req.get("category"),
+            )
+            continue
+
         tc = req.get("trigger_conditions")
         tc_json = json.dumps(tc) if tc else None
         aet_raw = req.get("applicable_entity_types")
@@ -2622,10 +2654,7 @@ async def _upsert_jurisdiction_requirements(
                  applicable_industries, trigger_conditions, applicable_entity_types,
                  category_id, source_url_status, source_checked_at)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), $15, $16, $17, $18,
-                    COALESCE(
-                        (SELECT id FROM compliance_categories WHERE slug = $19 LIMIT 1),
-                        (SELECT id FROM compliance_categories LIMIT 1)
-                    ),
+                    $19,
                     COALESCE($20::text, 'unchecked'),
                     CASE WHEN $20::text IS NOT NULL THEN NOW() ELSE NULL END)
             ON CONFLICT (jurisdiction_id, requirement_key) DO UPDATE SET
@@ -2681,7 +2710,7 @@ async def _upsert_jurisdiction_requirements(
             req.get("applicable_industries"),
             tc_json,
             aet,
-            req.get("category"),  # $19: duplicate for category_id subquery
+            category_id,           # $19: resolved above — never an arbitrary fallback row
             req.get("source_url_status"),  # $20: liveness flag from _validate_source_urls
         )
 
@@ -6115,11 +6144,12 @@ async def get_location_requirements(
         state = loc["state"]
         has_local_ordinance = loc["has_local_ordinance"]
 
-        # source_url_status lives on the catalog row (jurisdiction_requirements)
-        # and is joined through the SSOT FK at read time — never mirrored, so it
-        # can't go stale. Null-FK (Gemini-fresh) rows read as NULL = unchecked.
+        # source_url_status/statute_citation live on the catalog row
+        # (jurisdiction_requirements) and are joined through the SSOT FK at
+        # read time — never mirrored, so they can't go stale. Null-FK
+        # (Gemini-fresh) rows read as NULL = unchecked / uncited.
         query = """
-            SELECT r.*, cat.source_url_status
+            SELECT r.*, cat.source_url_status, cat.statute_citation, cat.citation_verified_at
             FROM compliance_requirements r
             JOIN business_locations l ON r.location_id = l.id
             LEFT JOIN jurisdiction_requirements cat
@@ -6178,6 +6208,10 @@ async def get_location_requirements(
                 else None,
                 source_url=row["source_url"],
                 source_url_status=row.get("source_url_status"),
+                statute_citation=row.get("statute_citation"),
+                citation_verified_at=row["citation_verified_at"].isoformat()
+                if row.get("citation_verified_at")
+                else None,
                 source_name=row["source_name"],
                 effective_date=row["effective_date"].isoformat()
                 if row["effective_date"]

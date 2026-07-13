@@ -304,10 +304,17 @@ async def _upsert_classification(
 
 
 async def _refresh_unclassified_count(conn, index_id) -> int:
+    # Must match registry_expected_keys' own denominator (confirmed-only,
+    # completeness.py) — counting "has any classification row" instead of
+    # "has a CONFIRMED classification row" lets a classified-but-unconfirmed
+    # index read unclassified_count=0, opening the completeness gate while
+    # the expected-keys query then silently serves a shrunken confirmed-only
+    # set as if it were the full registry (completeness reads inflated).
     unclassified = await conn.fetchval(
         """
         SELECT COUNT(*) FROM authority_index_items i
-        LEFT JOIN authority_item_classifications c ON c.item_id = i.id
+        LEFT JOIN authority_item_classifications c
+            ON c.item_id = i.id AND c.status = 'confirmed'
         WHERE i.authority_index_id = $1 AND c.id IS NULL
         """,
         index_id,

@@ -91,6 +91,9 @@ export interface ComplianceRequirement {
   source_url: string | null
   /** Liveness of source_url: 'unchecked' | 'ok' | 'dead' (null = no catalog link). */
   source_url_status?: 'unchecked' | 'ok' | 'dead' | null
+  /** Statute/reg citation the scope-registry codification engine stamped onto the catalog row (null = not yet codified). */
+  statute_citation?: string | null
+  citation_verified_at?: string | null
   source_name: string | null
   effective_date: string | null
   previous_value: string | null

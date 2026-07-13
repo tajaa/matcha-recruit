@@ -176,7 +176,7 @@ async def resolve_scope(
           "uncodified": [ {citation, heading, disposition, applies_to} ],   # fetch queue
           "counts":     {applicable, codified, uncodified, provisional, conditional_skipped},
           "unmodeled_coordinates": [ ... ],
-          "cache": "hit"|"miss",
+          "cache": "not_implemented",  # always recomputed live — see note below
         }
 
     ``provisional`` is deliberately chain-wide, not coordinate-filtered: it is
@@ -217,23 +217,14 @@ async def resolve_scope(
 
     coord_hash = coordinate_hash(chain_slugs, jur["ids"], facility_attributes)
 
-    cache_state = "miss"
-    if use_cache:
-        cached = await conn.fetchrow(
-            """
-            SELECT r.computed_at, r.key_count, r.uncodified_count, r.provisional_count
-            FROM scope_resolutions r
-            WHERE r.coordinate_hash = $1
-              AND r.computed_at >= COALESCE(
-                    (SELECT MAX(refreshed_at) FROM scope_strata), 'epoch'::timestamp)
-            """,
-            coord_hash,
-        )
-        cache_state = "hit" if cached else "miss"
-        # Cached counts prove reuse ("second warehouse = zero work"), but the
-        # full item detail is cheap SQL — recompute the payload either way.
-        # stratum_ids tracking (serving wholly from cache) lands with the
-        # commit-5/6 read path.
+    # No read-side cache: this path always recomputes below, regardless of
+    # use_cache. A prior revision read scope_resolutions here and reported
+    # "hit"/"miss" without ever short-circuiting on a hit — a real cache
+    # needs an early return plus stratum_ids-based invalidation (this
+    # function doesn't consult scope_strata at all yet), which lands with
+    # the commit-5/6 read path. Until then, be honest instead of decorative:
+    # the write below is telemetry only (rows the future cache will read).
+    cache_state = "not_implemented"
 
     # One pass over confirmed classifications in the chain. Disposition and
     # exclude logic runs in Python (classification_matches) so the conditional
@@ -353,6 +344,9 @@ async def resolve_scope(
     }
 
     if use_cache:
+        # Telemetry write only (see the "no read-side cache" note above).
+        # stratum_ids stays '{}' honestly — this resolution never consulted
+        # scope_strata, so there is nothing real to record there yet.
         await conn.execute(
             """
             INSERT INTO scope_resolutions

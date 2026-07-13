@@ -577,7 +577,12 @@ async def map_to_bank(
     Returns ``{existing, missing, ambiguous}``:
 
     * ``existing``: rows with a confident bank match. Each row is a dict
-      ready to be persisted as a ``company_compliance_scope`` insert.
+      ready to be projected into ``compliance_requirements`` via
+      ``_write_compliance_scope_rows`` — the single source of truth every
+      compliance surface reads (see ``admin_onboarding.py``). Not
+      ``company_compliance_scope``: that table is a dead pointer nothing
+      reads (see migration ``cmpreqfk01``); this docstring pointed at it
+      by mistake.
     * ``missing``: AI scope items with no bank row — admin chooses which
       to research via the dispatch endpoint.
     * ``ambiguous``: AI jurisdiction tuples that matched >1 bank row
