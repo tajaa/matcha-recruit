@@ -12,7 +12,7 @@ from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from ...database import get_connection
+from app.database import get_connection
 from ...dependencies import require_admin_or_client
 from ...models.employee_schedule import (
     TemplateCreate, TemplateUpdate, GenerateFromTemplate,

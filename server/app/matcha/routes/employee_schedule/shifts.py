@@ -9,7 +9,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from ...database import get_connection
+from app.database import get_connection
 from ...dependencies import require_admin_or_client
 from ...models.employee_schedule import (
     ShiftCreate, ShiftUpdate, PublishRange,
