@@ -67,7 +67,7 @@ export const CAROUSEL_PRODUCTS: Product[] = [
   },
   {
     n: "02",
-    name: "Matcha Lite: 1 Click OSHA Logs Export",
+    name: "Matcha Lite: 1 Click OSHA Logs Reporting",
     nameSize: "clamp(1.35rem, 1.85vw, 2.1rem)",
     blurb:
       "Recordable incidents flow straight into your OSHA 300 log, 300A summary, and ITA export.",
