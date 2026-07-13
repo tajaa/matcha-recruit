@@ -22,6 +22,8 @@ import Blog from '../pages/cappe/site/Blog'
 import Messages from '../pages/cappe/site/Messages'
 import Clients from '../pages/cappe/site/Clients'
 import Reviews from '../pages/cappe/site/Reviews'
+import Incidents from '../pages/cappe/incidents/Incidents'
+import IncidentDetail from '../pages/cappe/incidents/IncidentDetail'
 
 // Cappe — website-builder product, served at /cappe. Self-contained route tree
 // with its own auth (cappe_* tokens, useCappeMe). Public signup/login live
@@ -44,6 +46,10 @@ export default function CappeRoutes() {
         <Route path="onboarding" element={<CappeOnboardingWizard />} />
         <Route path="sites" element={<CappeSites />} />
         <Route path="templates" element={<CappeTemplates />} />
+        {/* Account-level (not per-site) incident reporting — cappe↔matcha bridge,
+            gated on the account's matcha_features.incidents. */}
+        <Route path="incidents" element={<Incidents />} />
+        <Route path="incidents/:incidentId" element={<IncidentDetail />} />
         <Route path="sites/:siteId" element={<CappeSiteEditor />} />
         <Route path="sites/:siteId/pages/:pageId" element={<PageEditor />} />
         <Route path="sites/:siteId/shop" element={<Shop />} />

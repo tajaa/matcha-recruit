@@ -3,6 +3,7 @@ import { NavLink, useNavigate, useLocation } from 'react-router-dom'
 import {
   LayoutGrid, LayoutTemplate, LogOut, Globe, ArrowLeft, FileText, ShoppingBag,
   Receipt, Calendar, MessageSquare, Users, Mail, Inbox, Newspaper, UserCircle, Star, MapPin,
+  ShieldAlert,
 } from 'lucide-react'
 import { cappeApi, clearCappeTokens } from '../api/cappeClient'
 import { invalidateCappeMeCache } from '../hooks/useCappeMe'
@@ -100,6 +101,10 @@ export default function CappeSidebar({ account }: { account: CappeAccount | null
           <>
             <Item to="/cappe/sites" icon={LayoutGrid} label="My Sites" end />
             <Item to="/cappe/templates" icon={LayoutTemplate} label="Templates" />
+            {/* Bridged matcha IR feature — account-level, only when granted. */}
+            {account?.matcha_features?.incidents === true && (
+              <Item to="/cappe/incidents" icon={ShieldAlert} label="Incidents" />
+            )}
           </>
         )}
       </nav>
