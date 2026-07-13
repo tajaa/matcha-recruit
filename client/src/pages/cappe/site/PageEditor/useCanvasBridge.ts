@@ -9,7 +9,7 @@ import { CV_MAX_ELEMENTS, cvEls, cvNextY, cvNewElement, isCanvasBlock } from './
 export function useCanvasBridge(
   blocks: CappeBlock[],
   setBlocks: (fn: (bs: CappeBlock[]) => CappeBlock[]) => void,
-  iframeRef: RefObject<HTMLIFrameElement>,
+  iframeRef: RefObject<HTMLIFrameElement | null>,
   /** Right-edge space already claimed by a docked panel (the theme drawer), so
    *  the floating inspector — which is viewport-`fixed` — never slides under it. */
   reservedRight = 0,

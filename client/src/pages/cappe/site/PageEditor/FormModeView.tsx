@@ -14,7 +14,7 @@ export function FormModeView({
   adding: boolean
   setAdding: (fn: (a: boolean) => boolean) => void
   canvasUnlocked: boolean
-  iframeRef: RefObject<HTMLIFrameElement>
+  iframeRef: RefObject<HTMLIFrameElement | null>
   /** Hover sync: highlight/clear the corresponding block in the live preview. */
   postToCanvas: (msg: unknown) => void
   /** Last block selected via a page click in the preview (form mode). */

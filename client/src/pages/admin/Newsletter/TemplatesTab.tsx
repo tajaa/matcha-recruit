@@ -3,7 +3,6 @@ import { Layout, Trash2, Sparkles, Wand2 } from 'lucide-react'
 import { api } from '../../../api/client'
 import type { Template } from './types'
 import type { NewsletterDesign } from './blocks/schema'
-import { designHasMedia } from './blocks/schema'
 import { STARTERS, instantiateStarter } from './blocks/starterTemplates'
 
 export function TemplatesTab({

@@ -128,7 +128,7 @@ export function ThemeDrawer({ themeEditor, designerUnlocked, bridge, probe }: {
 
       {/* Reset to the currently-applied preset's stock values — a quick escape
           hatch while experimenting (⌘Z still walks the full undo history). */}
-      {theme.preset && (
+      {Boolean(theme.preset) && (
         <button onClick={() => applyPreset(theme.preset as string)} className="mt-2 self-start text-[11px] text-zinc-500 underline decoration-dotted hover:text-zinc-300">
           Reset to preset defaults
         </button>

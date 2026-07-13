@@ -12,7 +12,7 @@ export type ThemeRegion =
  *  preview iframe so theme controls can highlight what they affect, and listens
  *  for the reverse `cz-theme-probe` (click a page element while the drawer is
  *  open) so the caller can jump the drawer to the governing control. */
-export function useThemeBridge(iframeRef: RefObject<HTMLIFrameElement>, probeEnabled: boolean, onProbe?: (region: ThemeRegion) => void) {
+export function useThemeBridge(iframeRef: RefObject<HTMLIFrameElement | null>, probeEnabled: boolean, onProbe?: (region: ThemeRegion) => void) {
   const postToTheme = (msg: unknown) => iframeRef.current?.contentWindow?.postMessage(msg, '*')
   const highlightRegion = (region: ThemeRegion) => postToTheme({ type: 'cz-theme-highlight', region })
   const clearHighlight = () => postToTheme({ type: 'cz-theme-clear' })
