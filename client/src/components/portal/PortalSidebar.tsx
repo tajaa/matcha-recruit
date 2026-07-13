@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router-dom'
-import { LayoutDashboard } from 'lucide-react'
+import { LayoutDashboard, CalendarClock } from 'lucide-react'
 import { useMe } from '../../hooks/useMe'
 import { resetAuthCaches } from '../../api/authReset'
 import { useState } from 'react'
@@ -8,16 +8,20 @@ interface NavItem {
   to: string
   icon: typeof LayoutDashboard
   label: string
+  feature?: string
 }
 
 const NAV: NavItem[] = [
   { to: '/portal', icon: LayoutDashboard, label: 'Dashboard' },
+  { to: '/portal/schedule', icon: CalendarClock, label: 'My Schedule', feature: 'employee_schedule' },
 ]
 
 export default function PortalSidebar() {
   const { pathname } = useLocation()
-  const { me } = useMe()
+  const { me, hasFeature } = useMe()
   const [logoutHover, setLogoutHover] = useState(false)
+
+  const navItems = NAV.filter((item) => !item.feature || hasFeature(item.feature))
 
   function handleLogout() {
     localStorage.removeItem('matcha_access_token')
@@ -34,7 +38,7 @@ export default function PortalSidebar() {
       </div>
 
       <nav className="flex-1 py-3 px-2 space-y-1 overflow-auto">
-        {NAV.map((item) => {
+        {navItems.map((item) => {
           const active =
             item.to === '/portal' ? pathname === '/portal' : pathname.startsWith(item.to)
           const Icon = item.icon

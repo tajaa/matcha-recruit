@@ -199,6 +199,15 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     # /analysis-pilot router + the /app/analysis-pilot page. Default off;
     # admin-toggle; NOT bundled (paid analysis asset, like legal_defense).
     "analysis_pilot": False,
+    # Employee scheduling — shift builder + templates/recurrence over the
+    # existing roster (employees keyed on org_id) and work sites
+    # (business_locations). Admins create/publish shifts, assign employees, and
+    # generate weeks from reusable templates; employees view their published
+    # shifts and file swap/drop/unavailability requests via the portal (both
+    # gated on this flag). Gates the /employee-schedule router, the portal
+    # /v1/portal/me/schedule endpoints, and the /app/employee-schedule page.
+    # Default off; admin-toggle (paid add-on). NOT in any tier overlay.
+    "employee_schedule": False,
     # OSHA 300/301/300A logs within IR. Default True (existing behavior for
     # every `incidents` company, unchanged) — forced False for the no-roster
     # matcha_lite_essentials config, where there's no employee roster to log

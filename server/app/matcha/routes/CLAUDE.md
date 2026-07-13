@@ -8,7 +8,8 @@
 |---|---|---|
 | `companies.py` | `/companies` | Company CRUD + admin tooling |
 | `employees/` | `/employees` (+ `/employees/pto`, `/employees/leave`) | Employee CRUD, bulk upload, invitations, onboarding, offboarding, credentials, OIG, leave, incidents, pto/leave admin — **package** (split 2026-05-16; see `employees/CLAUDE.md`) |
-| `employee_portal.py` | `/v1/portal` | Employee-facing self-service portal |
+| `employee_portal.py` | `/v1/portal` | Employee-facing self-service portal (incl. `/me/schedule*` — view published shifts + file swap/drop/unavailability requests, gated `employee_schedule`) |
+| `employee_schedule/` | `/employee-schedule` | Employee shift scheduling — shift CRUD + publish + weekly view (`shifts.py`), assignment (`assignments.py`), templates + recurrence generation (`templates.py`), admin request review (`requests.py`). **Package**; `require_feature("employee_schedule")` |
 | `onboarding.py` | `/onboarding` | New-hire onboarding tasks + notification settings |
 | `invitations.py` | `/invitations` | Token-based invite acceptance |
 | `offer_letters.py` | `/offer-letters` | Offer letter creation, signing, candidate portal (1,288 lines) |
