@@ -91,3 +91,45 @@ async def create_escalation(
         row["id"], severity, ai_resp.mode, ai_resp.confidence, company_id,
     )
     return dict(row)
+
+
+async def create_hr_pilot_escalation(
+    company_id: UUID,
+    thread_id: UUID,
+    user_message_id: UUID | None,
+    assistant_message_id: UUID,
+    category: str | None,
+    user_query: str,
+    notice: str,
+    matched_terms: tuple[str, ...],
+) -> dict:
+    """Insert an HR Pilot hard-stop trip into the same human-review queue as
+    low-confidence AI escalations (mw_escalated_queries) — no separate table
+    or admin UI needed. Every hard-stop is severity=high by construction: the
+    gate's own posture is that a category match is a live legal-exposure
+    event, not something to grade."""
+    title = f"HR Pilot escalation: {category or 'policy'}"
+    missing = json.dumps(list(matched_terms)) if matched_terms else None
+
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """INSERT INTO mw_escalated_queries
+                   (company_id, thread_id, message_id, user_message_id,
+                    severity, title, user_query, ai_reply, ai_mode, missing_fields)
+               VALUES ($1, $2, $3, $4, 'high', $5, $6, $7, 'hr_pilot_hard_stop', $8::jsonb)
+               RETURNING *""",
+            company_id,
+            thread_id,
+            assistant_message_id,
+            user_message_id,
+            title,
+            user_query,
+            notice,
+            missing,
+        )
+
+    logger.info(
+        "HR Pilot escalation %s (category=%s) for company %s",
+        row["id"], category, company_id,
+    )
+    return dict(row)

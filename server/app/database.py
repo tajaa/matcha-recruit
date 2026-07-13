@@ -5052,6 +5052,10 @@ async def init_db():
             ALTER TABLE mw_threads ADD COLUMN IF NOT EXISTS risk_mode BOOLEAN NOT NULL DEFAULT false;
             ALTER TABLE mw_threads ADD COLUMN IF NOT EXISTS training_mode BOOLEAN NOT NULL DEFAULT false;
         """)
+        # HR Pilot thread mode — migration hrpilot01
+        await conn.execute("""
+            ALTER TABLE mw_threads ADD COLUMN IF NOT EXISTS hr_pilot_mode BOOLEAN NOT NULL DEFAULT false;
+        """)
         await conn.execute("""
             DO $$
             DECLARE

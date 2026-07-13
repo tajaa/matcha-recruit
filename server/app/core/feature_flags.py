@@ -182,6 +182,19 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     # page. Default off; in the matcha_x TIER_REQUIRED overlay + stored True
     # at Pro/bespoke signup (like handbook_audit / credential_templates).
     "handbook_pilot": False,
+    # HR Pilot — matcha-work thread grounding mode for on-site supervisors.
+    # Grounds AI drafting in the company's own handbook sections + policies
+    # (reuses handbook_service.derive_handbook_scopes_from_employees /
+    # _fetch_state_requirements — same corpus handbook_pilot reads) plus a
+    # per-state jurisdiction summary and the static discipline-ladder steps.
+    # A deterministic hard-stop gate (services/hr_pilot_escalation.
+    # classify_message) runs on every message BEFORE any AI call:
+    # harassment/discrimination, workplace-safety, leave/medical, and
+    # termination/legal topics are refused and routed to corporate HR
+    # (logged to mw_escalated_queries) instead of drafted. No dedicated
+    # router/page — gates the hr_pilot thread-mode toggle only (column
+    # mw_threads.hr_pilot_mode). Default off; admin-toggle; NOT bundled.
+    "hr_pilot": False,
     # Analysis Pilot (full Matcha / Pro). A company-facing, GENERAL-PURPOSE
     # bring-your-own-data analysis engine in a chat UI: the business uploads any
     # dataset (CSV / XLSX / financial-document PDF — 10-Ks, P&Ls, balance sheets,

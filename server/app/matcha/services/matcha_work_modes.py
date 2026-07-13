@@ -77,6 +77,11 @@ async def _training_context(company_id: UUID) -> str:
     return await build_training_context(company_id)
 
 
+async def _hr_pilot_context(company_id: UUID) -> str:
+    from app.matcha.services.matcha_work_mode_contexts import build_hr_pilot_context
+    return await build_hr_pilot_context(company_id)
+
+
 THREAD_MODES: tuple[ThreadMode, ...] = (
     ThreadMode(
         key="node",
@@ -139,6 +144,18 @@ THREAD_MODES: tuple[ThreadMode, ...] = (
         status_unavailable="Training data unavailable — continuing without it...",
         build_context=_training_context,
         required_feature="training",
+    ),
+    ThreadMode(
+        key="hr_pilot",
+        column="hr_pilot_mode",
+        label="HR Pilot",
+        status_loading="Loading company handbook & policies...",
+        status_unavailable="Handbook/policy data unavailable — continuing without it...",
+        build_context=_hr_pilot_context,
+        # A hard-stop escalation gate (services/hr_pilot_escalation) also runs
+        # for this mode, but earlier in messaging.py — before context building
+        # or any model call — not as part of build_context. See messaging.py.
+        required_feature="hr_pilot",
     ),
 )
 

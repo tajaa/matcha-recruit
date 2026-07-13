@@ -1,4 +1,4 @@
-import { Database, Shield, Stethoscope, HeartPulse, Scale, Gauge, GraduationCap } from 'lucide-react'
+import { Database, Shield, Stethoscope, HeartPulse, Scale, Gauge, GraduationCap, LifeBuoy } from 'lucide-react'
 import type { MWModeKey } from '../../types/matcha-work'
 
 // Grounding-mode registry — mirrors the backend
@@ -25,6 +25,7 @@ export const THREAD_MODE_TOGGLES: {
   { key: 'legal', label: 'Legal', icon: Scale, onClass: 'bg-amber-600 text-white hover:bg-amber-500', badgeClass: 'bg-amber-700 text-amber-200', tipOn: 'Legal ON — legal matters register injected', tipOff: 'Legal OFF', feature: 'legal_defense' },
   { key: 'risk', label: 'Risk', icon: Gauge, onClass: 'bg-indigo-600 text-white hover:bg-indigo-500', badgeClass: 'bg-indigo-700 text-indigo-200', tipOn: 'Risk ON — risk index, coverage & contract verdicts', tipOff: 'Risk OFF', feature: 'risk_profile' },
   { key: 'training', label: 'Training', icon: GraduationCap, onClass: 'bg-teal-600 text-white hover:bg-teal-500', badgeClass: 'bg-teal-700 text-teal-200', tipOn: 'Training ON — programs, credentials & OSHA currency', tipOff: 'Training OFF', feature: 'training' },
+  { key: 'hr_pilot', label: 'HR Pilot', icon: LifeBuoy, onClass: 'bg-fuchsia-600 text-white hover:bg-fuchsia-500', badgeClass: 'bg-fuchsia-700 text-fuchsia-200', tipOn: 'HR Pilot ON — grounded in your handbook & policies; sensitive topics route to corporate HR', tipOff: 'HR Pilot OFF', feature: 'hr_pilot' },
 ]
 
 export const MODEL_OPTIONS = [

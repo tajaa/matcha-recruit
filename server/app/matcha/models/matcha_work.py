@@ -307,6 +307,7 @@ class CreateThreadResponse(BaseModel):
     legal_mode: bool = False
     risk_mode: bool = False
     training_mode: bool = False
+    hr_pilot_mode: bool = False
     created_at: datetime
     assistant_reply: Optional[str] = None
     pdf_url: Optional[str] = None
@@ -403,6 +404,7 @@ class ThreadListItem(BaseModel):
     legal_mode: bool = False
     risk_mode: bool = False
     training_mode: bool = False
+    hr_pilot_mode: bool = False
     collaborator_count: int = 0
     created_at: datetime
     updated_at: datetime
@@ -435,6 +437,7 @@ class ThreadDetailResponse(BaseModel):
     legal_mode: bool = False
     risk_mode: bool = False
     training_mode: bool = False
+    hr_pilot_mode: bool = False
     linked_offer_letter_id: Optional[UUID] = None
     created_at: datetime
     updated_at: datetime

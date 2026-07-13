@@ -330,6 +330,7 @@ export type MWModeKey =
   | 'legal'
   | 'risk'
   | 'training'
+  | 'hr_pilot'
 
 export interface MWThread {
   id: string
@@ -344,6 +345,7 @@ export interface MWThread {
   legal_mode: boolean
   risk_mode: boolean
   training_mode: boolean
+  hr_pilot_mode: boolean
   collaborator_count: number
   version: number
   created_at: string
@@ -494,6 +496,7 @@ export interface MWCreateResponse {
   legal_mode: boolean
   risk_mode: boolean
   training_mode: boolean
+  hr_pilot_mode: boolean
   created_at: string
   assistant_reply: string | null
   pdf_url: string | null

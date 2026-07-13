@@ -38,7 +38,7 @@ from app.matcha.services import matcha_work_document as doc_svc
 from app.matcha.services import token_budget_service
 from app.matcha.services.escalation_service import should_escalate, create_escalation
 from app.core.feature_flags import get_company_features
-from app.matcha.services.matcha_work_modes import THREAD_MODES
+from app.matcha.services.matcha_work_modes import THREAD_MODES, MODES_BY_KEY
 from app.matcha.services.matcha_work_node import build_compliance_context, build_payer_staff_context, ComplianceContextResult
 from app.matcha.services.matcha_work_ai import (
     _build_company_context,
@@ -655,6 +655,78 @@ async def send_message_stream(
                 )
                 yield _sse_data({"type": "complete", "data": guard_response.model_dump(mode="json")})
                 return
+            # HR Pilot hard-stop gate — runs BEFORE any context building or
+            # model call. Deterministic (hr_pilot_escalation.classify_message),
+            # not a model judgment: a supervisor describing a harassment
+            # complaint, an injury, a leave/medical situation, or a
+            # termination must never get AI-drafted conversational guidance,
+            # only "stop, call corporate HR". Re-checks the feature flag the
+            # same way the generic mode loop does below — a downgraded
+            # company must not keep gating either.
+            if thread.get("hr_pilot_mode") and (body.content or "").strip():
+                hr_pilot_active = True
+                if MODES_BY_KEY["hr_pilot"].required_feature:
+                    hr_pilot_features = await get_company_features(company_id)
+                    hr_pilot_active = hr_pilot_features.get("hr_pilot", False)
+                if hr_pilot_active:
+                    from app.matcha.services.hr_pilot_escalation import (
+                        classify_message,
+                        CORPORATE_HR_ESCALATION_NOTICE,
+                    )
+                    verdict = classify_message(body.content)
+                    if verdict.hard_stop:
+                        notice = verdict.notice or CORPORATE_HR_ESCALATION_NOTICE
+                        assistant_msg = await doc_svc.add_message(
+                            thread_id,
+                            "assistant",
+                            notice,
+                            metadata={
+                                "hr_pilot_escalation": {
+                                    "category": verdict.category,
+                                    "matched_terms": list(verdict.matched_terms),
+                                }
+                            },
+                        )
+                        try:
+                            from app.matcha.services.escalation_service import create_hr_pilot_escalation
+                            await create_hr_pilot_escalation(
+                                company_id=company_id,
+                                thread_id=thread_id,
+                                user_message_id=user_msg["id"],
+                                assistant_message_id=assistant_msg["id"],
+                                category=verdict.category,
+                                user_query=body.content,
+                                notice=notice,
+                                matched_terms=verdict.matched_terms,
+                            )
+                        except Exception:
+                            logger.warning(
+                                "hr_pilot escalation log failed for thread %s", thread_id, exc_info=True
+                            )
+                        try:
+                            from app.matcha.routes.thread_ws import thread_manager
+                            _track_background_task(asyncio.create_task(
+                                thread_manager.broadcast_new_message(
+                                    str(thread_id),
+                                    [_row_to_message(user_msg).model_dump(mode="json"),
+                                     _row_to_message(assistant_msg).model_dump(mode="json")],
+                                    exclude_user=current_user.id,
+                                )
+                            ))
+                        except Exception:
+                            logger.warning("Thread WS broadcast failed (hr_pilot escalation) for thread %s", thread_id)
+                        yield _sse_data({"type": "status", "message": "Routed to corporate HR."})
+                        guard_response = SendMessageResponse(
+                            user_message=_row_to_message(user_msg),
+                            assistant_message=_row_to_message(assistant_msg),
+                            current_state=thread["current_state"],
+                            version=thread["version"],
+                            task_type=_infer_skill_from_state(thread["current_state"]),
+                            pdf_url=None,
+                            token_usage=None,
+                        )
+                        yield _sse_data({"type": "complete", "data": guard_response.model_dump(mode="json")})
+                        return
             # Build mode-specific context with status updates. Each block is
             # guarded: a context-builder failure (bad trigger data, DB hiccup)
             # degrades to a status notice instead of killing the SSE stream.

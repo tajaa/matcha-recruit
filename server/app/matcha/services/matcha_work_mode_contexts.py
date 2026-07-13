@@ -503,3 +503,136 @@ async def _build_training_context_uncached(company_id: UUID) -> str:
         "as authoritative. Do not invent employees, programs, or credentials not listed."
     )
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# HR Pilot mode — grounds AI guidance for on-site supervisors in the
+# company's own written material: active handbook sections, active policies,
+# a per-state jurisdiction summary (same corpus handbook_pilot reads — see
+# handbook_pilot.gather_grounding for the sibling query), and the static
+# progressive-discipline ladder. Deliberately reads only the PUBLISHED/ACTIVE
+# handbook + active policies (not drafts) — a supervisor needs what's
+# actually in force, not a work-in-progress. The hard-stop escalation gate
+# (services/hr_pilot_escalation.classify_message) is a separate, earlier
+# check in messaging.py — this builder only runs once a message has already
+# cleared that gate.
+# ---------------------------------------------------------------------------
+
+_MAX_HR_PILOT_SECTIONS = 60
+_MAX_HR_PILOT_POLICIES = 60
+_HR_PILOT_CHAR_CAP = 2000
+
+_DISCIPLINE_LADDER_SUMMARY = (
+    "Standard progressive-discipline steps: verbal warning -> written warning "
+    "-> final warning -> termination review. A final warning already on file "
+    "means the next step is a termination review — that is a hard-stop topic "
+    "(see above): do not draft it here, route the supervisor to corporate HR."
+)
+
+
+def _truncate(text: str | None) -> str:
+    text = text or ""
+    if len(text) <= _HR_PILOT_CHAR_CAP:
+        return text
+    return text[:_HR_PILOT_CHAR_CAP] + " …[truncated]"
+
+
+async def build_hr_pilot_context(company_id: UUID) -> str:
+    return await cached_context(
+        f"mw:hr_pilot_ctx:{company_id}",
+        lambda: _build_hr_pilot_context_uncached(company_id),
+    )
+
+
+async def _build_hr_pilot_context_uncached(company_id: UUID) -> str:
+    from app.core.services import handbook_service as hb
+
+    sections: list = []
+    policies: list = []
+    requirements: dict = {}
+
+    async with get_connection() as conn:
+        try:
+            sections = await conn.fetch(
+                """
+                SELECT hs.title, hs.section_type, hs.content, h.title AS handbook_title
+                FROM handbook_sections hs
+                JOIN handbook_versions hv ON hv.id = hs.handbook_version_id
+                JOIN handbooks h ON h.id = hv.handbook_id
+                WHERE h.company_id = $1 AND h.status = 'active'
+                  AND hv.version_number = h.active_version
+                ORDER BY hs.section_order
+                LIMIT $2
+                """,
+                company_id, _MAX_HR_PILOT_SECTIONS,
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning("hr_pilot: handbook-section fetch failed for %s", company_id)
+
+        try:
+            policies = await conn.fetch(
+                """
+                SELECT title, category, content, description
+                FROM policies
+                WHERE company_id = $1 AND status = 'active'
+                ORDER BY updated_at DESC
+                LIMIT $2
+                """,
+                company_id, _MAX_HR_PILOT_POLICIES,
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning("hr_pilot: policy fetch failed for %s", company_id)
+
+        try:
+            scopes = await hb.derive_handbook_scopes_from_employees(conn, str(company_id))
+            if scopes:
+                requirements = await hb._fetch_state_requirements(conn, scopes)
+        except Exception:  # noqa: BLE001
+            logger.warning("hr_pilot: jurisdiction requirement fetch failed for %s", company_id)
+
+    if not sections and not policies and not requirements:
+        return ""
+
+    lines = [
+        "=== HR PILOT MODE: COMPANY HANDBOOK, POLICIES & SUPERVISOR REFERENCE "
+        "(source material — ground every answer in this) ==="
+    ]
+
+    if sections:
+        lines.append(f"\n--- ACTIVE HANDBOOK SECTIONS ({len(sections)}) ---")
+        for s in sections:
+            lines.append(f"\n[{s['handbook_title']} — {s['title']}]\n{_truncate(s['content'])}")
+
+    if policies:
+        lines.append(f"\n--- ACTIVE POLICIES ({len(policies)}) ---")
+        for p in policies:
+            label = f"{p['title']} ({p['category']})" if p["category"] else p["title"]
+            body = p["content"] or p["description"] or ""
+            lines.append(f"\n[{label}]\n{_truncate(body)}")
+
+    if requirements:
+        # Brief per-state backdrop only, not the full requirement text — HR
+        # Pilot answers from written policy first; this keeps the model from
+        # contradicting a state minimum the handbook is silent on.
+        lines.append("\n--- APPLICABLE STATE REQUIREMENTS (backdrop — cite the handbook/policy language above first) ---")
+        for state in sorted(requirements.keys()):
+            reqs = requirements[state] or []
+            if not reqs:
+                continue
+            lines.append(f"\n[{state}]")
+            for r in reqs[:_MAX_LIST_ROWS]:
+                title = r.get("title") or r.get("category") or "requirement"
+                value = r.get("current_value")
+                value_bit = f": {value}" if value else ""
+                lines.append(f"  - {title}{value_bit}")
+            if len(reqs) > _MAX_LIST_ROWS:
+                lines.append(f"  - ...and {len(reqs) - _MAX_LIST_ROWS} more {state} requirements not listed individually.")
+
+    lines.append(f"\n--- DISCIPLINE LADDER (company policy) ---\n{_DISCIPLINE_LADDER_SUMMARY}")
+
+    lines.append(
+        "\nAnswer supervisor questions using the language and procedures above. "
+        "If the handbook/policies don't cover the topic, say so plainly instead "
+        "of inventing a policy — tell the supervisor to check with corporate HR."
+    )
+    return "\n".join(lines)
