@@ -11,6 +11,9 @@ export type CappeAccount = {
   plan: 'free' | 'hosting' | 'pro' | 'business' | string
   status: 'active' | 'suspended' | 'deleted' | string
   account_type: CappeAccountType | string
+  // Bridged matcha feature flags (e.g. {"incidents": true}) — parallel
+  // entitlement via the cappe↔matcha bridge. Empty for most accounts.
+  matcha_features?: Record<string, boolean>
 }
 
 export type CappeTokenResponse = {

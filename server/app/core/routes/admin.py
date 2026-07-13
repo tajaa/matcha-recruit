@@ -1000,6 +1000,7 @@ async def list_company_features():
             """
             SELECT id, name as company_name, industry, size, status, enabled_features
             FROM companies
+            WHERE signup_source IS DISTINCT FROM 'cappe'
             ORDER BY name
             """
         )
@@ -9179,7 +9180,8 @@ _NOTIFICATION_SUBQUERIES: list[str] = [
     """SELECT id::text, 'registration' AS type,
             name AS title, status AS subtitle,
             NULL AS severity, status, NULL AS company_id, created_at
-       FROM companies WHERE created_at > NOW() - INTERVAL '30 days'""",
+       FROM companies WHERE created_at > NOW() - INTERVAL '30 days'
+         AND signup_source IS DISTINCT FROM 'cappe'""",
 ]
 
 
@@ -9572,6 +9574,7 @@ async def list_companies_admin():
                 (SELECT COUNT(*) FROM business_locations bl WHERE bl.company_id = c.id) AS location_count
             FROM companies c
             WHERE c.deleted_at IS NULL
+              AND c.signup_source IS DISTINCT FROM 'cappe'
             ORDER BY c.name
         """)
         return [
@@ -11397,7 +11400,8 @@ async def admin_list_cappe_accounts():
     async with get_connection() as conn:
         accounts = await conn.fetch(
             """
-            SELECT id, email, name, plan, status, account_type, created_at
+            SELECT id, email, name, plan, status, account_type, created_at,
+                   matcha_features
             FROM cappe_accounts
             ORDER BY created_at DESC
             """
@@ -11431,6 +11435,9 @@ async def admin_list_cappe_accounts():
     total_revenue = 0
     for a in accounts:
         acct_id = str(a["id"])
+        matcha_features = a["matcha_features"]
+        if isinstance(matcha_features, str):
+            matcha_features = json.loads(matcha_features or "{}")
         acct_sites = sites_by_account.get(acct_id, [])
         published = sum(1 for s in acct_sites if s["status"] == "published")
         orders = sum(s["order_count"] for s in acct_sites)
@@ -11448,6 +11455,7 @@ async def admin_list_cappe_accounts():
             "plan": plan,
             "status": a["status"],
             "account_type": a["account_type"],
+            "matcha_features": matcha_features or {},
             "created_at": a["created_at"].isoformat() if a["created_at"] else None,
             "site_count": len(acct_sites),
             "published_count": published,
@@ -11467,3 +11475,22 @@ async def admin_list_cappe_accounts():
             "revenue_cents": total_revenue,
         },
     }
+
+
+class CappeMatchaFeaturesUpdate(BaseModel):
+    """Bridged matcha flags for a cappe account (whitelist-validated by
+    `set_matcha_features` — currently only `incidents`)."""
+    features: Dict[str, bool]
+
+
+@router.put("/cappe/accounts/{account_id}/matcha-features", dependencies=[Depends(require_admin)])
+async def admin_set_cappe_matcha_features(account_id: UUID, body: CappeMatchaFeaturesUpdate):
+    """Toggle bridged matcha features on a cappe account (parallel entitlement —
+    see `app/cappe/services/matcha_bridge.py`). First enable lazily creates the
+    backing tenant rows; disabling leaves data intact but the cappe-side gate
+    starts 403ing immediately."""
+    from ...cappe.services.matcha_bridge import set_matcha_features
+
+    async with get_connection() as conn:
+        granted = await set_matcha_features(conn, account_id, body.features)
+    return {"account_id": str(account_id), "matcha_features": granted}

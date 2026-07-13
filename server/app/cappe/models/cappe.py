@@ -67,6 +67,9 @@ class CappeAccount(BaseModel):
     plan: str = "free"
     status: str = "active"
     account_type: str = "business"
+    # Bridged matcha feature flags (e.g. {"incidents": true}) — parallel
+    # entitlement, see services/matcha_bridge.py. Empty for most accounts.
+    matcha_features: dict = {}
 
 
 class CappeTokenResponse(BaseModel):

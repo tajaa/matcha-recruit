@@ -4,6 +4,7 @@ Mirrors `core.dependencies.get_current_user` but resolves a Cappe-scoped bearer
 token against `cappe_accounts`. It does NOT touch matcha's RLS contextvars —
 every Cappe query scopes by `account_id` in its WHERE clause instead.
 """
+import json
 from uuid import UUID
 
 from fastapi import Depends, HTTPException, status
@@ -39,7 +40,8 @@ async def require_cappe_account(
 
     async with get_connection() as conn:
         row = await conn.fetchrow(
-            "SELECT id, email, name, plan, status, account_type, tokens_valid_after "
+            "SELECT id, email, name, plan, status, account_type, tokens_valid_after, "
+            "       matcha_features "
             "FROM cappe_accounts WHERE id = $1",
             account_id,
         )
@@ -58,6 +60,10 @@ async def require_cappe_account(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    matcha_features = row["matcha_features"]
+    if isinstance(matcha_features, str):
+        matcha_features = json.loads(matcha_features or "{}")
+
     return CappeAccount(
         id=row["id"],
         email=row["email"],
@@ -65,4 +71,5 @@ async def require_cappe_account(
         plan=row["plan"],
         status=row["status"],
         account_type=row["account_type"],
+        matcha_features=matcha_features or {},
     )

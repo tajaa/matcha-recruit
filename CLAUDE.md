@@ -76,7 +76,7 @@ Which frontend pairs with which backend package (don't re-derive this):
 | **MatchaTutor** (iOS) | `platforms/ios/` (SwiftUI, dormant) | matcha-work language-tutor endpoints | — | Language tutor |
 | **Ops agent** | `agent-ui/` (Preact; build copied into `server/agent/static/` by `build-and-push.sh`) | `server/agent/` — standalone service :9100 (not part of `app/`) | — | Internal leads/ops console |
 
-Cross-product import rule: `cappe/` and `tellus/` import only from `app/core/*` (shared db pool, email, storage, auth, redis). One documented exception: `tellus/services/geo.py` reuses `matcha.services.property_cat.geocode` (single US Census geocoder — keep its signature stable).
+Cross-product import rule: `cappe/` and `tellus/` import only from `app/core/*` (shared db pool, email, storage, auth, redis). Two documented exceptions: `tellus/services/geo.py` reuses `matcha.services.property_cat.geocode` (single US Census geocoder — keep its signature stable); and the **cappe↔matcha feature bridge** (`cappe/services/matcha_bridge.py` + adapter routers like `cappe/routes/ir.py`) deliberately wraps matcha handlers so cappe accounts can hold bridged matcha features (parallel entitlement + backing tenant rows — see `docs/plans/CAPPE_MATCHA_BRIDGE.md`). Keep matcha imports confined to those bridge files.
 
 ## Stack
 
