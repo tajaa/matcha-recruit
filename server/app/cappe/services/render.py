@@ -1454,7 +1454,7 @@ document.addEventListener('pointerup',function(e){
 });
 window.addEventListener('message',function(e){
   var d=e.data||{};
-  if(d.type==='cz-highlight')highlight(d.block);
+  if(d.type==='cz-highlight'){highlight(d.block);if(d.scroll){var _hb=blockEl(d.block);if(_hb&&_hb.scrollIntoView)_hb.scrollIntoView({block:'center',behavior:'smooth'});}}
   else if(d.type==='cz-clear')clearSel();
   else if(d.type==='cz-bp')curBp=(d.bp==='m')?'m':'d';
   else if(d.type==='cz-elem-highlight'){var el=document.querySelector('.cz-el[data-cz-id="'+d.id+'"]');if(el)selectEl(el);}

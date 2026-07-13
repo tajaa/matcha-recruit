@@ -19,8 +19,8 @@ export function FormModeView({
   postToCanvas: (msg: unknown) => void
   /** Last block selected via a page click in the preview (form mode). */
   selectedBlock: number | null
-  /** Bumped whenever `selectedBlock` changes, so a re-click on the same index
-   *  still re-triggers the force-open+scroll. */
+  /** Bumped on every preview cz-select message (not just distinct blocks), so
+   *  a re-click on the same index still re-triggers the force-open+scroll. */
   selectTick: number
   /** Stable `_k` of the block just added — opens expanded once instead of
    *  starting collapsed. */
@@ -71,6 +71,7 @@ export function FormModeView({
                 onDragEnd={() => { setDragFrom(null); setDragOver(null) }}
                 onHoverStart={() => postToCanvas({ type: 'cz-highlight', block: i })}
                 onHoverEnd={() => postToCanvas({ type: 'cz-clear' })}
+                onExpand={() => postToCanvas({ type: 'cz-highlight', block: i, scroll: true })}
                 forceOpenTick={selectedBlock === i ? selectTick : undefined}
               />
             </div>

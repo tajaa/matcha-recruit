@@ -100,13 +100,15 @@ export default function PageEditor() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [siteId, pageId])
 
-  const preview = usePagePreview(siteId, page, title, blocks, themeEditor.theme, meta, editMode, canvas.refreshTick, canvas.suspendPreview)
+  const preview = usePagePreview(siteId, page, title, blocks, themeEditor.theme, meta, canvas.refreshTick, canvas.suspendPreview)
 
-  // Form<->preview block sync: bumped whenever the preview reports a new
-  // selection (page click), so FormModeView can force-open + scroll the
-  // matching card even if the user had collapsed it.
+  // Form<->preview block sync: bumped on every cz-select from the preview
+  // (selectSeq counts messages, not distinct blocks — a repeat click on the
+  // same block must still re-open + re-scroll its card), so FormModeView can
+  // force-open the matching card even if the user had collapsed it.
   const [selectTick, setSelectTick] = useState(0)
-  useEffect(() => { if (editMode === 'form' && canvas.selBlock != null) setSelectTick((t) => t + 1) }, [editMode, canvas.selBlock])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { if (editMode === 'form' && canvas.selBlock != null) setSelectTick((t) => t + 1) }, [editMode, canvas.selectSeq])
   // The block just added should open expanded once, instead of the new
   // collapsed-by-default state.
   const [justAddedKey, setJustAddedKey] = useState<string | null>(null)

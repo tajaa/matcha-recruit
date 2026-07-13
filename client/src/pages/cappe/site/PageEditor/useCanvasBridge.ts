@@ -48,6 +48,10 @@ export function useCanvasBridge(
   }
   const suspendPreview = useRef(false)
   const [refreshTick, setRefreshTick] = useState(0)
+  // Bumped on EVERY cz-select message (unlike selBlock, which is stable when
+  // the same block is clicked twice) — consumers that must re-trigger on a
+  // repeat click (form-mode card sync) key off this.
+  const [selectSeq, setSelectSeq] = useState(0)
   // Refs mirror state for the (mount-once) postMessage handler — avoid stale closures.
   const selBlockRef = useRef<number | null>(null)
   const blocksRef = useRef<CappeBlock[]>([])
@@ -101,6 +105,7 @@ export function useCanvasBridge(
         }
         case 'cz-select': {
           setSelBlock(d.block)
+          setSelectSeq((n) => n + 1)
           const onEl = isCanvasBlock(blocksRef.current[d.block]) && d.field != null
           setSelElement(onEl ? d.field : null)
           // Anchor the floating editor near the clicked element (iframe rect +
@@ -164,6 +169,7 @@ export function useCanvasBridge(
     iframeRef,
     suspendPreview,
     refreshTick,
+    selectSeq,
     postToCanvas,
     patchCanvasElement,
     addCanvasElement,

@@ -57,7 +57,7 @@ function BlockMenu({ index, total, onMove, onDuplicate, onCopyStyle, onPasteStyl
 export function BlockCard({
   block, index, total, onChange, onRemove, onMove, defaultOpen,
   onDuplicate, onCopyStyle, onPasteStyle, canPasteStyle, onDragStart, onDragEnd,
-  onHoverStart, onHoverEnd, forceOpenTick,
+  onHoverStart, onHoverEnd, onExpand, forceOpenTick,
 }: {
   block: CappeBlock; index: number; total: number
   onChange: (b: CappeBlock) => void
@@ -74,6 +74,10 @@ export function BlockCard({
   /** Hover sync — highlights this block in the live preview. */
   onHoverStart?: () => void
   onHoverEnd?: () => void
+  /** Expand sync — highlight + scroll the block into view in the preview
+   *  (deliberate action, unlike hover, so scrolling won't yank the preview
+   *  around while mousing down the card list). */
+  onExpand?: () => void
   /** Bumped when this block is clicked in the preview — expands + scrolls to it. */
   forceOpenTick?: number
 }) {
@@ -81,6 +85,7 @@ export function BlockCard({
   const schema = BLOCK_SCHEMAS[block.type]
   const premium = usePremium()
   const rootRef = useRef<HTMLDivElement>(null)
+  const toggle = () => setOpen((o) => { if (!o) onExpand?.(); return !o })
 
   // A page click (form-mode preview → card sync) forces this card open and
   // scrolls it into view, even if the user had collapsed it.
@@ -110,7 +115,7 @@ export function BlockCard({
           >
             <GripVertical className="h-4 w-4" />
           </span>
-          <button type="button" onClick={() => setOpen((o) => !o)} className="truncate text-sm font-semibold text-zinc-100">
+          <button type="button" onClick={toggle} className="truncate text-sm font-semibold text-zinc-100">
             {schema?.label || block.type}
           </button>
         </div>
@@ -129,7 +134,7 @@ export function BlockCard({
             canPasteStyle={canPasteStyle} premium={premium}
           />
           <button type="button" onClick={onRemove} className="hover:text-red-400"><Trash2 className="h-4 w-4" /></button>
-          <button type="button" onClick={() => setOpen((o) => !o)} className="hover:text-zinc-200">{open ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</button>
+          <button type="button" onClick={toggle} className="hover:text-zinc-200">{open ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</button>
         </div>
       </div>
       {open && block.type === 'canvas' && <CanvasFormEditor block={block} onChange={onChange} />}

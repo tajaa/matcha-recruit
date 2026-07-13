@@ -17,7 +17,6 @@ export function usePagePreview(
   blocks: CappeBlock[],
   theme: Record<string, unknown>,
   meta: Record<string, unknown>,
-  editMode: 'form' | 'canvas',
   refreshTick: number,
   suspendPreview: MutableRefObject<boolean>,
 ) {
@@ -37,7 +36,10 @@ export function usePagePreview(
         .catch(() => { /* keep last good preview */ })
     }, 400)
     return () => clearTimeout(t)
-  }, [siteId, page, title, blocks, theme, meta, editMode, refreshTick])
+    // No editMode dep: the render is mode-independent now (editable always
+    // true), so switching Form<->Canvas must not refetch identical HTML and
+    // flash the iframe.
+  }, [siteId, page, title, blocks, theme, meta, refreshTick])
 
   return preview
 }
