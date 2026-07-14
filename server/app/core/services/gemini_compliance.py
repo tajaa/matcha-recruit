@@ -37,10 +37,18 @@ DEFAULT_HEAVY_FALLBACK_MODEL = "gemini-2.5-pro"
 # research functions, so they should NOT be included in the default sweep.
 
 VALID_JURISDICTION_LEVELS = {"state", "county", "city", "federal", "national", "province", "region"}
+# MUST stay in step with compliance_service.VALID_RATE_TYPES — a rate_type this
+# set doesn't know is flattened to "general" by _normalize_rate_type_value, and
+# for minimum_wage the rate_type IS the write identity (_compute_key_parts). So
+# a missing entry here doesn't merely drop a label: it files the row under the
+# WRONG obligation. That is how a regional exempt-salary threshold (a weekly
+# salary figure) came to overwrite a state's general minimum-wage row.
+# tests/compliance/test_rate_type_registry.py pins the two sets together.
 VALID_RATE_TYPES = {
     "general",
     "tipped",
     "exempt_salary",
+    "exempt_salary_regional",
     "hotel",
     "fast_food",
     "healthcare",
@@ -65,6 +73,13 @@ _RATE_TYPE_ALIASES = {
     "exempt": "exempt_salary",
     "salary_threshold": "exempt_salary",
     "salary_basis": "exempt_salary",
+    # Sub-state regional tier (NY downstate). Ordered AFTER the generic exempt
+    # aliases above only for readability — lookup is exact-match, so there is no
+    # precedence issue; a bare "exempt" still means the statewide tier.
+    "exempt_salary_downstate": "exempt_salary_regional",
+    "downstate": "exempt_salary_regional",
+    "regional_exempt_salary": "exempt_salary_regional",
+    "salary_threshold_regional": "exempt_salary_regional",
 }
 
 # Errors that should not be retried (API config / quota issues)

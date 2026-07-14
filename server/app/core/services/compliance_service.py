@@ -712,9 +712,28 @@ def _coerce_minimum_wage_rate_type(req: dict) -> str:
     if normalized in VALID_RATE_TYPES:
         return normalized
 
+    # For minimum_wage the rate_type IS the write identity (_compute_key_parts
+    # keys off it and ignores regulation_key entirely), so a regulation_key that
+    # names a specific tier must decide the rate_type — otherwise a producer that
+    # correctly emits `exempt_salary_threshold_regional` still gets keyed as the
+    # STATEWIDE threshold and overwrites that row. The key→rate_type direction is
+    # deterministic; this is the inverse of keys._RATE_TYPE_TO_KEY.
+    from app.core.services.compliance_evals.keys import _RATE_TYPE_TO_KEY
+
+    reg_key = (req.get("regulation_key") or "").strip()
+    if reg_key:
+        for rate_type, key in _RATE_TYPE_TO_KEY.items():
+            if key == reg_key and rate_type in VALID_RATE_TYPES:
+                return rate_type
+
     text = " ".join(
         str(req.get(k) or "") for k in ("title", "description", "current_value")
     ).lower()
+
+    # Region-qualified exempt thresholds before the generic exempt tokens: a
+    # "(Downstate)" title must not collapse into the statewide tier.
+    if any(token in text for token in ("downstate", "regional tier")):
+        return "exempt_salary_regional"
 
     if any(
         token in text
