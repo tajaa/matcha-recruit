@@ -496,6 +496,14 @@ VALID_RATE_TYPES = {
     "general",
     "tipped",
     "exempt_salary",
+    # A sub-state REGION's own exempt threshold (NY downstate: NYC + Nassau /
+    # Suffolk / Westchester carry a higher figure than the rest of the state).
+    # minimum_wage derives its write identity from rate_type, not from
+    # regulation_key (see _compute_key_parts), so without a distinct rate_type
+    # the regional row and the statewide row collapse onto ONE identity — two
+    # live obligations wearing one tag, which is exactly the polymorphy the
+    # anti-polymorphy work forbids.
+    "exempt_salary_regional",
     "hotel",
     "fast_food",
     "healthcare",
