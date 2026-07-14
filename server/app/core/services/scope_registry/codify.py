@@ -160,6 +160,10 @@ def _authority_governs(link: Dict[str, Any], req_state: Optional[str]) -> bool:
     return bool(astate) and astate == rstate
 
 
+# scope_codifications.source width (codify03). Keep in step with the migration:
+# an over-long label must never be what rolls back a reconcile.
+_SOURCE_MAX_LEN = 64
+
 _LEVEL_RANK = {"federal": 0, "national": 0, "state": 1, "county": 2, "city": 3,
                "local": 3, "special_district": 3}
 
@@ -657,6 +661,23 @@ async def reconcile_codifications(
     ``inserted``, ``updated``, ``unmatched_keys`` (keyed classifications with no
     catalog match — vocabulary drift / genuinely uncodified).
     """
+    # `source` is a provenance breadcrumb, not an enum, and it is the LAST thing
+    # that should be able to abort a reconcile: overflowing the column raises
+    # StringDataRightTruncationError inside the transaction below, rolling back
+    # every link and citation stamp. Clamp to the column width (codify03 widens
+    # it to 64) so an over-long label degrades to a truncated tag instead of
+    # losing the run. NOTE: this tracks the POST-codify03 width — on a DB where
+    # that migration hasn't been applied the column is still VARCHAR(20), and
+    # only labels ≤20 are safe there. Every current caller is ≤18
+    # ('scheduled_research'), which is exactly how close this came to breaking.
+    if source and len(source) > _SOURCE_MAX_LEN:
+        logger.warning(
+            "reconcile source %r exceeds %d chars — truncating (the label is a "
+            "breadcrumb; failing the run over it would be worse)",
+            source, _SOURCE_MAX_LEN,
+        )
+        source = source[:_SOURCE_MAX_LEN]
+
     if state and state.strip():
         jur = await resolve_jurisdiction_chain(conn, state.strip().upper(), city)
         chain_ids = jur["ids"]

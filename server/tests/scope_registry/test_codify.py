@@ -420,3 +420,35 @@ def test_mixed_direct_and_baseline_on_one_row():
     )
     assert stamps["r_ca"]["statute_citation"] == "Cal. Lab. Code § 515"
     assert [b["citation"] for b in baselines["r_ca"]] == ["29 CFR § 541.600"]
+
+
+# ── source-label width ──────────────────────────────────────────────────────
+
+def test_source_max_len_matches_the_migrated_column_width():
+    """codify03 widens scope_codifications.source to VARCHAR(64). The clamp in
+    reconcile_codifications must track it — if the column is narrowed or widened
+    and this constant isn't, an over-long label raises
+    StringDataRightTruncationError *inside* the reconcile transaction, rolling
+    back every link and citation stamp the run just computed."""
+    from pathlib import Path
+
+    from app.core.services.scope_registry.codify import _SOURCE_MAX_LEN
+
+    migration = (
+        Path(__file__).resolve().parents[2]
+        / "alembic" / "versions" / "codify03_widen_codification_source.py"
+    ).read_text()
+    assert f"VARCHAR({_SOURCE_MAX_LEN})" in migration, (
+        f"_SOURCE_MAX_LEN={_SOURCE_MAX_LEN} does not match codify03's column width"
+    )
+
+
+def test_every_shipped_source_label_fits_the_pre_migration_width():
+    """Until codify03 is applied the column is still VARCHAR(20). Every label a
+    caller actually passes must fit THAT, or the reconcile aborts on an
+    un-migrated DB. 'scheduled_research' is 18 — this has two chars of slack."""
+    shipped = ["reconcile", "backfill", "manual", "research_run", "scheduled_research"]
+    too_long = [s for s in shipped if len(s) > 20]
+    assert not too_long, (
+        f"these source labels overflow the un-migrated VARCHAR(20) column: {too_long}"
+    )
