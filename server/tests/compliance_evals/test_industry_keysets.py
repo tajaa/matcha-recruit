@@ -120,3 +120,34 @@ def test_wrong_industry_tag_does_not_satisfy():
 ])
 def test_resolve_industry_delegates_to_pipeline_aliases(raw, expected):
     assert iks.resolve_industry(raw) == expected
+
+
+# ── state-scoped keys ───────────────────────────────────────────────────────
+
+def test_a_state_scoped_key_is_not_expected_of_every_state():
+    """`exempt_salary_threshold_regional` is NY's downstate tier. It must stay in
+    EXPECTED_REGULATION_KEYS (that set doubles as the VALIDITY vocabulary — drop
+    it and NY's real row is branded invalid_key), but expecting it of the other
+    49 states emits a missing_key finding against each and drags every state's
+    completeness score for something they will never have."""
+    ny = iks.expected_keys("manufacturing", country_code="US", state="NY")
+    tx = iks.expected_keys("manufacturing", country_code="US", state="TX")
+
+    assert "exempt_salary_threshold_regional" in ny["minimum_wage"]
+    assert "exempt_salary_threshold_regional" not in tx["minimum_wage"]
+    # the ordinary statewide key is expected of both
+    assert "exempt_salary_threshold" in ny["minimum_wage"]
+    assert "exempt_salary_threshold" in tx["minimum_wage"]
+
+
+def test_a_jurisdiction_with_no_state_expects_no_state_scoped_key():
+    """Federal / country-level rows. '' means 'we know: it has none' — distinct
+    from None, which means 'unknown, don't filter'."""
+    federal = iks.expected_keys("manufacturing", country_code="US", state="")
+    assert "exempt_salary_threshold_regional" not in federal["minimum_wage"]
+
+
+def test_omitting_state_keeps_every_key_expected():
+    """The conservative default every pre-existing caller gets."""
+    unscoped = iks.expected_keys("manufacturing", country_code="US")
+    assert "exempt_salary_threshold_regional" in unscoped["minimum_wage"]

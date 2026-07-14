@@ -620,3 +620,18 @@ async def test_preemption_filter_survives_a_location_with_no_state():
     out = await cs._filter_with_preemption(None, reqs, None)  # conn unused on this path
 
     assert out == reqs
+
+
+def test_an_empty_not_does_not_universalize_a_conditional():
+    """The last shape still failing OPEN. `_condition_shape_error` rejects it at
+    write time on the scope-registry side; nothing gates it on the research
+    side."""
+    assert cs.evaluate_trigger_conditions(
+        {"op": "not", "conditions": []}, {"anything": True}) is False
+    # A well-formed `not` still negates.
+    psm = {"type": "attribute", "key": "psm_covered_chemicals",
+           "operator": "eq", "value": True}
+    assert cs.evaluate_trigger_conditions(
+        {"op": "not", "conditions": [psm]}, {"psm_covered_chemicals": True}) is False
+    assert cs.evaluate_trigger_conditions(
+        {"op": "not", "conditions": [psm]}, {}) is True

@@ -8663,7 +8663,15 @@ def _eval_condition(cond: Dict[str, Any], attrs: Dict[str, Any]) -> bool:
         elif op == "not":
             if children:
                 return not _eval_condition(children[0], attrs)
-            return True
+            # `not` with nothing to negate is malformed — and it was the last
+            # shape still failing OPEN, i.e. silently universalizing a
+            # conditional obligation. _condition_shape_error rejects it at write
+            # time on the scope-registry side; nothing gates it on the research
+            # side, so fail closed here too.
+            logger.warning(
+                "Trigger condition has an empty 'not' — treating as not matched."
+            )
+            return False
         # An unrecognized op used to return True — which silently turned a
         # CONDITIONAL obligation into a universal one: every company got it.
         # `trigger_conditions` on jurisdiction_requirements are written by Gemini
