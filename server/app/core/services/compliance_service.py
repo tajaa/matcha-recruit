@@ -1401,6 +1401,77 @@ async def _load_jurisdiction_requirements(conn, jurisdiction_id: UUID) -> List[D
     return [{**dict(r), "jurisdiction_requirement_id": r["id"]} for r in rows]
 
 
+async def _load_chain_requirements(conn, leaf_jurisdiction_id: UUID) -> List[Dict]:
+    """Every active requirement across a location's WHOLE jurisdiction chain.
+
+    What a business is liable for is the union of city + county + state + federal
+    law that reaches it — not whatever the last research pass happened to return.
+
+    The check used to build a tenant's set from the LEAF jurisdiction's rows plus
+    ``_fill_missing_categories_from_parents``, which only backfills categories the
+    leaf lacks *entirely*. So a federal obligation never arrived if the leaf
+    already held some row in the same category. That is how a Los Angeles dental
+    practice was served no OSHA Bloodborne Pathogens standard, no infection
+    control, no hazardous-waste generator rules and no radiation-machine
+    registration — every one of them sitting in the catalog, in its chain, the
+    whole time.
+
+    Research fills gaps in the CATALOG. It does not decide what a tenant sees.
+    Callers still apply the industry filter, facility triggers and preemption on
+    top of this — this is the candidate set, not the final one.
+    """
+    rows = await conn.fetch(
+        """
+        WITH RECURSIVE chain AS (
+            SELECT id, parent_id FROM jurisdictions WHERE id = $1
+            UNION ALL
+            SELECT j.id, j.parent_id
+            FROM jurisdictions j
+            JOIN chain c ON j.id = c.parent_id
+        )
+        SELECT r.* FROM jurisdiction_requirements r
+        JOIN chain c ON c.id = r.jurisdiction_id
+        WHERE r.status NOT IN ('under_review', 'repealed')
+        """,
+        leaf_jurisdiction_id,
+    )
+    return [{**dict(r), "jurisdiction_requirement_id": r["id"]} for r in rows]
+
+
+async def _project_chain_to_location(
+    conn, company_id: UUID, location, leaf_jurisdiction_id: UUID
+) -> List[Dict]:
+    """The requirement set a location is actually liable for.
+
+    Chain union -> normalize -> industry filter -> FACILITY TRIGGERS -> preemption.
+
+    The trigger pass is what keeps "exhaustive" from becoming "everything".
+    Catalog rows carry conditions like ``{"type": "entity_type", "value":
+    "behavioral_health"}`` (SAMHSA opioid-treatment certification) or
+    ``{"key": "payer_contracts", "operator": "contains", "value": "medicare"}``
+    (Hospital IQR). Nothing in the tenant read path ever evaluated them — only
+    the hierarchical view did, and the Compliance tab doesn't use it — so a
+    dental practice was served hospital and opioid-clinic obligations.
+    """
+    requirements = await _load_chain_requirements(conn, leaf_jurisdiction_id)
+    requirements = [_jurisdiction_row_to_dict(r) for r in requirements]
+
+    _normalize_requirement_categories(requirements)
+    requirements = await _filter_requirements_for_company(conn, company_id, requirements)
+
+    facility_attributes = _decode_jsonb(getattr(location, "facility_attributes", None)) or {}
+    kept: List[Dict] = []
+    for req in requirements:
+        trigger = _decode_jsonb(req.get("trigger_conditions"))
+        if trigger and not evaluate_trigger_conditions(trigger, facility_attributes):
+            continue
+        kept.append(req)
+    requirements = kept
+
+    requirements = await _filter_with_preemption(conn, requirements, location.state)
+    return requirements
+
+
 async def _load_jurisdiction_legislation(conn, jurisdiction_id: UUID) -> List[Dict]:
     """Read legislation from the jurisdiction repository."""
     rows = await conn.fetch(
@@ -1408,6 +1479,48 @@ async def _load_jurisdiction_legislation(conn, jurisdiction_id: UUID) -> List[Di
         jurisdiction_id,
     )
     return [dict(r) for r in rows]
+
+
+def _as_jsonb(value: Any) -> Optional[str]:
+    """Serialize a value for a JSONB column — WITHOUT re-encoding an encoded one.
+
+    asyncpg hands JSONB back as a `str`. So a row that is read out of the catalog
+    and written back (which is every research pass: catalog -> dict -> upsert)
+    used to hit `json.dumps(already_a_json_string)` and gain another layer of
+    escaping. Each pass added one:
+
+        {"type": "entity_type", ...}
+        "{\\"type\\": \\"entity_type\\", ...}"
+        "\\"{\\\\\\"type\\\\\\": ...}\\""
+
+    trigger_conditions then no longer parses as an object, the evaluator can't
+    read it, and the requirement fails OPEN — which is how "SAMHSA Opioid
+    Treatment Program Certification" (trigger: entity_type == behavioral_health)
+    was served to a dental practice.
+    """
+    if value is None or value == "":
+        return None
+    if isinstance(value, str):
+        # Already JSON text. Trust it only if it parses; a bare string that isn't
+        # JSON is a caller bug we shouldn't silently persist as garbage.
+        try:
+            json.loads(value)
+            return value
+        except (TypeError, ValueError):
+            return json.dumps(value)
+    return json.dumps(value)
+
+
+def _decode_jsonb(value: Any) -> Any:
+    """Read a JSONB value that may have been multi-encoded by the bug above."""
+    seen = 0
+    while isinstance(value, str) and seen < 5:
+        try:
+            value = json.loads(value)
+        except (TypeError, ValueError):
+            return value
+        seen += 1
+    return value
 
 
 def _jurisdiction_row_to_dict(jr: dict) -> dict:
@@ -1851,10 +1964,11 @@ async def _upsert_requirements_additive(
         # RKD is keyed on the NORMALIZED category (same form as the bare key);
         # the raw req category may be cased/aliased ('Meal-Breaks').
         normalized_category = _normalize_category(req.get("category"))
-        tc = req.get("trigger_conditions")
-        tc_json = json.dumps(tc) if tc else None
-        aet_raw = req.get("applicable_entity_types")
-        aet = json.dumps(aet_raw) if aet_raw else None
+        # _as_jsonb, not json.dumps: these values often come straight off a JSONB
+        # read (asyncpg returns them as str), and dumps() would add another layer
+        # of escaping on every research pass. See _as_jsonb.
+        tc_json = _as_jsonb(req.get("trigger_conditions"))
+        aet = _as_jsonb(req.get("applicable_entity_types"))
         steps_raw = req.get("implementation_steps")
         steps_json = json.dumps(steps_raw) if isinstance(steps_raw, list) and steps_raw else None
         # Grounding verdict → status intent (tri-state, consumed by the INSERT
@@ -2852,10 +2966,11 @@ async def _upsert_jurisdiction_requirements(
                 )
                 continue
 
-        tc = req.get("trigger_conditions")
-        tc_json = json.dumps(tc) if tc else None
-        aet_raw = req.get("applicable_entity_types")
-        aet = json.dumps(aet_raw) if aet_raw else None
+        # _as_jsonb, not json.dumps: these values often come straight off a JSONB
+        # read (asyncpg returns them as str), and dumps() would add another layer
+        # of escaping on every research pass. See _as_jsonb.
+        tc_json = _as_jsonb(req.get("trigger_conditions"))
+        aet = _as_jsonb(req.get("applicable_entity_types"))
         await conn.execute(
             """
             INSERT INTO jurisdiction_requirements
@@ -5542,6 +5657,32 @@ async def run_compliance_check_stream(
                                 req.get("source_name"),
                                 req.get("category", ""),
                             )
+
+            # Re-project from the CATALOG over the location's whole jurisdiction
+            # chain, now that this run's research has been contributed to it.
+            #
+            # `requirements` up to here is one research pass's result set — the
+            # deltas. What the tenant is liable for is the union of every active
+            # obligation in its city/county/state/federal chain. Syncing the
+            # research result instead of the chain is why an LA dental practice
+            # saw no OSHA Bloodborne Pathogens standard, no infection control and
+            # no hazardous-waste rules: all three were in the catalog, in its
+            # chain, and simply never made it into the projection.
+            #
+            # Falls back to the research set if the chain projection comes back
+            # empty — an empty sync would wipe the tenant's tab.
+            chain_requirements = await _project_chain_to_location(
+                conn, company_id, location, jurisdiction_id
+            )
+            if chain_requirements:
+                yield {
+                    "type": "processing",
+                    "message": (
+                        f"Applying {len(chain_requirements)} requirements across "
+                        f"{location_name}'s full jurisdiction stack..."
+                    ),
+                }
+                requirements = chain_requirements
 
             # Sync requirements to location (change detection, alerts, history)
             # Only create alerts for fresh Gemini data — repository data is cached
