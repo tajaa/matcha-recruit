@@ -169,6 +169,14 @@ export function ComplianceRequirementsTab({ requirements, loading, onPin, checkM
                         {req.statute_citation}
                       </span>
                     )}
+                    {req.jurisdictional_basis?.map((b) => (
+                      <span
+                        key={b.item_id}
+                        className="text-[10px] px-1.5 py-0.5 rounded bg-white/[0.04] text-zinc-400 border border-white/[0.08]"
+                        title={`This ${req.jurisdiction_level} requirement sits on top of the ${b.level} floor — it must meet or exceed ${b.citation}, which does not itself set this value.`}>
+                        {b.level} floor: {b.citation}
+                      </span>
+                    ))}
                     {!readOnly && (
                       <button type="button" onClick={() => onPin(req.id, !req.is_pinned)}
                         className={`text-[11px] transition-colors ${req.is_pinned ? 'text-amber-400' : 'text-zinc-600 hover:text-amber-400'}`}>

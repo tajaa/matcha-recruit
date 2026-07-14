@@ -91,9 +91,17 @@ export interface ComplianceRequirement {
   source_url: string | null
   /** Liveness of source_url: 'unchecked' | 'ok' | 'dead' (null = no catalog link). */
   source_url_status?: 'unchecked' | 'ok' | 'dead' | null
-  /** Statute/reg citation the scope-registry codification engine stamped onto the catalog row (null = not yet codified). */
+  /** The OPERATIVE statute for this row's value, verified against the authority's own text (null = not yet codified). */
   statute_citation?: string | null
   citation_verified_at?: string | null
+  /** Higher-level authorities this row sits on top of rather than restates — e.g. the federal floor a state threshold must meet or exceed. */
+  jurisdictional_basis?: Array<{
+    citation: string
+    item_id: string
+    index_slug: string | null
+    level: string
+    relation: 'floor'
+  }> | null
   source_name: string | null
   effective_date: string | null
   previous_value: string | null

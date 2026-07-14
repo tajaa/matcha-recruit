@@ -160,21 +160,62 @@ def _authority_governs(link: Dict[str, Any], req_state: Optional[str]) -> bool:
     return bool(astate) and astate == rstate
 
 
+_LEVEL_RANK = {"federal": 0, "national": 0, "state": 1, "county": 2, "city": 3,
+               "local": 3, "special_district": 3}
+
+
+def _norm_value(text: Any) -> str:
+    return " ".join(str(text or "").split()).casefold()
+
+
+def _values_equal(row: Dict[str, Any], basis: Dict[str, Any]) -> bool:
+    """Does this row restate the authority-level value (the floor)?"""
+    rn, bn = row.get("numeric_value"), basis.get("numeric_value")
+    if rn is not None and bn is not None:
+        try:
+            return float(rn) == float(bn)
+        except (TypeError, ValueError):
+            pass
+    rv, bv = _norm_value(row.get("current_value")), _norm_value(basis.get("current_value"))
+    return bool(rv) and rv == bv
+
+
 def build_citation_stamps(
     links: List[Dict[str, Any]],
     requirement_meta: Optional[Dict[Any, Dict[str, Any]]] = None,
-) -> Dict[Any, Dict[str, Any]]:
+    value_basis: Optional[Dict[tuple, Dict[str, Any]]] = None,
+) -> tuple:
     """Collapse per-(classification×requirement) links carrying item metadata into
-    a per-requirement stamp: the primary ``statute_citation`` + ``citation_item_id``
-    plus the full ``verified_citations`` set for ``metadata``. Pure.
+    per-requirement stamps, split by JURISDICTIONAL relation. Pure.
+
+    Returns ``(direct, baseline)``:
+
+    * ``direct`` — the citation IS the row's operative authority, stamped onto
+      ``statute_citation``. Two ways to qualify: the authority and the row are
+      at the SAME level (a federal reg citing a federal row, a CA code section
+      citing a CA row), or the authority sits ABOVE the row and the row's value
+      RESTATES the authority-level value (TX's exempt threshold is $684/week —
+      the FLSA floor — so 29 CFR § 541.600 genuinely is its citation).
+    * ``baseline`` — the authority sits above the row and the row sets its OWN
+      value (CA's $70,304 threshold is CA law, not the FLSA). Stamping the
+      federal citation there is FALSE PROVENANCE — telling a customer their
+      state obligation comes from a federal reg that says something else. Both
+      circumstances are still stored: the linkage + a
+      ``metadata.jurisdictional_basis`` entry recording the federal/floor
+      citation, so precedence logic can reason over floor-vs-own-law without
+      the row's ``statute_citation`` lying about which law sets the value.
 
     Each link must carry ``jurisdiction_requirement_id`` and item/authority fields
     (``item_id``, ``citation``, ``hierarchy``, ``index_slug``, ``source_type``,
     ``jurisdiction_level``, ``authority_jurisdiction_id``, ``authority_state``).
-    ``requirement_meta`` maps requirement id → ``{level, state}`` — ``level`` drives
-    the primary-citation tie-break, ``state`` the jurisdiction guard.
+    ``requirement_meta`` maps requirement id → ``{level, state, numeric_value,
+    current_value, regulation_key}``. ``value_basis`` maps
+    ``(regulation_key, authority_level)`` → the authority-level row's value
+    fields — absent basis ⇒ restatement can't be verified ⇒ baseline
+    (conservative: never guess a citation onto a row).
     """
     requirement_meta = requirement_meta or {}
+    value_basis = value_basis or {}
     by_req: Dict[Any, List[Dict[str, Any]]] = {}
     for link in links:
         rid = link.get("jurisdiction_requirement_id")
@@ -184,15 +225,37 @@ def build_citation_stamps(
             continue  # a state authority can't codify another state's row
         by_req.setdefault(rid, []).append(link)
 
-    stamps: Dict[Any, Dict[str, Any]] = {}
+    direct: Dict[Any, Dict[str, Any]] = {}
+    baseline: Dict[Any, List[Dict[str, Any]]] = {}
     for rid, cands in by_req.items():
+        meta = requirement_meta.get(rid) or {}
+        row_rank = _LEVEL_RANK.get((meta.get("level") or "").lower(), 99)
+
+        direct_cands: List[Dict[str, Any]] = []
+        for c in cands:
+            auth_rank = _LEVEL_RANK.get((c.get("jurisdiction_level") or "").lower(), 99)
+            if auth_rank == row_rank:
+                direct_cands.append(c)
+                continue
+            basis = value_basis.get(
+                (c.get("regulation_key"), (c.get("jurisdiction_level") or "").lower())
+            )
+            if basis is not None and _values_equal(meta, basis):
+                direct_cands.append(c)  # the row restates the floor verbatim
+            else:
+                baseline.setdefault(rid, []).append({
+                    "citation": c["citation"], "item_id": str(c["item_id"]),
+                    "index_slug": c.get("index_slug"),
+                    "level": (c.get("jurisdiction_level") or "").lower(),
+                    "relation": "floor",
+                })
+
         # de-dupe on item_id (same citation reached via two classifications)
         seen: Dict[Any, Dict[str, Any]] = {}
-        for c in cands:
+        for c in direct_cands:
             seen.setdefault(c["item_id"], c)
         uniq = list(seen.values())
-        primary = select_primary_citation(
-            uniq, requirement_level=(requirement_meta.get(rid) or {}).get("level"))
+        primary = select_primary_citation(uniq, requirement_level=meta.get("level"))
         if primary is None:
             continue
         verified = sorted(
@@ -203,12 +266,19 @@ def build_citation_stamps(
             ),
             key=lambda v: v["citation"],
         )
-        stamps[rid] = {
+        direct[rid] = {
             "statute_citation": primary["citation"],
             "citation_item_id": primary["item_id"],
             "verified_citations": verified,
         }
-    return stamps
+
+    # de-dupe baselines on item_id too, stable-sorted for deterministic metadata
+    for rid, entries in baseline.items():
+        uniq_b: Dict[Any, Dict[str, Any]] = {}
+        for e in entries:
+            uniq_b.setdefault(e["item_id"], e)
+        baseline[rid] = sorted(uniq_b.values(), key=lambda e: e["citation"])
+    return direct, baseline
 
 
 async def chain_uncodified(
@@ -636,6 +706,7 @@ async def reconcile_codifications(
             f"""
             SELECT jr.id, jr.regulation_key, jr.jurisdiction_id, jr.category,
                    jr.jurisdiction_level, jr.statute_citation, jr.citation_verified_at,
+                   jr.current_value, jr.numeric_value,
                    j.state AS requirement_state,
                    COALESCE(j.country_code, 'US') AS requirement_country
             FROM jurisdiction_requirements jr
@@ -668,9 +739,23 @@ async def reconcile_codifications(
     # hand-edited citation (the overwrite is counted, not silent).
     class_meta = {c["id"]: c for c in classifications}
     req_meta = {
-        r["id"]: {"level": r.get("jurisdiction_level"), "state": r.get("requirement_state")}
+        r["id"]: {"level": r.get("jurisdiction_level"), "state": r.get("requirement_state"),
+                  "numeric_value": r.get("numeric_value"),
+                  "current_value": r.get("current_value")}
         for r in requirement_rows
     }
+    # The authority-level value per key — the basis for the restatement test
+    # (does a state row merely restate the federal floor, or set its own
+    # value?). Deterministic pick when a key collides at one level: first by
+    # row id, so re-runs can't flap between direct and baseline.
+    value_basis: Dict[tuple, Dict[str, Any]] = {}
+    for r in sorted(requirement_rows, key=lambda x: str(x["id"])):
+        lvl = (r.get("jurisdiction_level") or "").lower()
+        key = (r.get("regulation_key"), "federal" if lvl == "national" else lvl)
+        value_basis.setdefault(key, {
+            "numeric_value": r.get("numeric_value"),
+            "current_value": r.get("current_value"),
+        })
     # A prior manual citation = citation present but never registry-verified.
     manual_before = {
         r["id"] for r in requirement_rows
@@ -690,11 +775,12 @@ async def reconcile_codifications(
             "authority_jurisdiction_id": meta.get("authority_jurisdiction_id"),
             "authority_state": meta.get("authority_state"),
         }})
-    stamps = build_citation_stamps(stamp_links, req_meta)
+    stamps, baselines = build_citation_stamps(stamp_links, req_meta, value_basis)
     stamped_ids = list(stamps.keys())
 
     inserted = updated = 0
     citations_stamped = 0
+    baselines_recorded = 0
     overwrote_manual = 0
     cleared = 0
     # Insert the linkage, stamp verified citations, and self-correct stale stamps
@@ -754,6 +840,40 @@ async def reconcile_codifications(
                 and stamps[rid]["statute_citation"] != prior_citation_by_id.get(rid)
             )
 
+        if baselines:
+            # Cross-level floor relations: recorded in metadata, NEVER on
+            # statute_citation (that would claim e.g. 29 CFR § 541.600 sets
+            # CA's $70,304 threshold — false provenance). The precedence
+            # engine reads jurisdictional_basis to reason floor-vs-own-law.
+            b_ids = list(baselines.keys())
+            b_json = [json.dumps({"jurisdictional_basis": baselines[r]}) for r in b_ids]
+            await conn.execute(
+                """
+                UPDATE jurisdiction_requirements AS jr
+                SET metadata = COALESCE(jr.metadata, '{}'::jsonb) || t.basis::jsonb,
+                    -- A previous reconcile (pre jurisdictional-logic) may have
+                    -- DIRECT-stamped this very item here; that stamp is now
+                    -- known false provenance for this row — remove it, text
+                    -- included, unlike the transient-churn sweep below.
+                    statute_citation = CASE
+                        WHEN t.basis::jsonb -> 'jurisdictional_basis'
+                             @> jsonb_build_array(jsonb_build_object('item_id', jr.citation_item_id::text))
+                        THEN NULL ELSE jr.statute_citation END,
+                    citation_verified_at = CASE
+                        WHEN t.basis::jsonb -> 'jurisdictional_basis'
+                             @> jsonb_build_array(jsonb_build_object('item_id', jr.citation_item_id::text))
+                        THEN NULL ELSE jr.citation_verified_at END,
+                    citation_item_id = CASE
+                        WHEN t.basis::jsonb -> 'jurisdictional_basis'
+                             @> jsonb_build_array(jsonb_build_object('item_id', jr.citation_item_id::text))
+                        THEN NULL ELSE jr.citation_item_id END
+                FROM unnest($1::uuid[], $2::jsonb[]) AS t(req_id, basis)
+                WHERE jr.id = t.req_id
+                """,
+                b_ids, b_json,
+            )
+            baselines_recorded = len(baselines)
+
         # Self-correct: a row that was registry-verified but no longer has a
         # supporting citation this run (classification removed, or the jurisdiction
         # guard now rejects a cross-state link written by an older reconcile) is
@@ -792,6 +912,7 @@ async def reconcile_codifications(
         "updated": updated,
         "unmatched_keys": unmatched_keys,
         "citations_stamped": citations_stamped,
+        "baselines_recorded": baselines_recorded,
         "overwrote_manual": overwrote_manual,
         "citations_cleared": int(cleared or 0),
     }

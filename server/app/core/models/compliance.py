@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Optional, List, Any
+from typing import Optional, List, Any, Dict
 from pydantic import BaseModel, field_validator
 from uuid import UUID
 from datetime import datetime, date
@@ -247,8 +247,17 @@ class RequirementResponse(BaseModel):
     # Statute/reg citation the scope-registry codification engine stamped onto
     # the catalog row (None until codify.py has reconciled a match — most rows
     # today). Joined live off jurisdiction_requirements, same as source_url_status.
+    # This is the OPERATIVE authority for this row's value — a higher-level
+    # authority only lands here when the row restates that level's value
+    # verbatim (see jurisdictional_basis).
     statute_citation: Optional[str] = None
     citation_verified_at: Optional[str] = None
+    # Higher-level authorities this row sits ON TOP of rather than restates:
+    # e.g. CA's $70,304 exempt threshold is CA law, but 29 CFR § 541.600 is the
+    # federal floor it must meet or exceed. Citing the federal reg as this row's
+    # statute would be false provenance, so the relation is recorded here
+    # instead. [{citation, item_id, index_slug, level, relation: 'floor'}]
+    jurisdictional_basis: Optional[List[Dict[str, Any]]] = None
     source_name: Optional[str] = None
     effective_date: Optional[str] = None
     previous_value: Optional[str] = None

@@ -1318,6 +1318,19 @@ async def _is_jurisdiction_fresh(
     return age < timedelta(days=threshold_days)
 
 
+def _parse_jsonb_list(value: Any) -> Optional[List[Dict]]:
+    """asyncpg hands JSONB back as a str on this pool — the API must not leak
+    strings where a list of objects belongs."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (TypeError, ValueError):
+            return None
+    return value if isinstance(value, list) else None
+
+
 async def _load_jurisdiction_requirements(conn, jurisdiction_id: UUID) -> List[Dict]:
     """Read requirements from the jurisdiction repository.
 
@@ -6239,7 +6252,8 @@ async def get_location_requirements(
         # read time — never mirrored, so they can't go stale. Null-FK
         # (Gemini-fresh) rows read as NULL = unchecked / uncited.
         query = """
-            SELECT r.*, cat.source_url_status, cat.statute_citation, cat.citation_verified_at
+            SELECT r.*, cat.source_url_status, cat.statute_citation, cat.citation_verified_at,
+                   cat.metadata -> 'jurisdictional_basis' AS jurisdictional_basis
             FROM compliance_requirements r
             JOIN business_locations l ON r.location_id = l.id
             LEFT JOIN jurisdiction_requirements cat
@@ -6302,6 +6316,7 @@ async def get_location_requirements(
                 citation_verified_at=row["citation_verified_at"].isoformat()
                 if row.get("citation_verified_at")
                 else None,
+                jurisdictional_basis=_parse_jsonb_list(row.get("jurisdictional_basis")),
                 source_name=row["source_name"],
                 effective_date=row["effective_date"].isoformat()
                 if row["effective_date"]
