@@ -6,6 +6,7 @@ endpoints admin-gated. The service layer lives in
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Literal, Optional
 from uuid import UUID
@@ -41,20 +42,28 @@ def _worker_online() -> bool:
     operator clicks Ingest, watches the counts never move, and concludes the
     pipeline is broken. No worker runs in local dev by default.
 
+    BLOCKING: kombu's broadcast-and-wait is synchronous socket I/O, so this must
+    never be called directly from an async route — see _dispatch. `limit=1`
+    returns as soon as one worker answers instead of always waiting out the full
+    timeout.
+
     Best-effort: a broker that can't be reached is reported as offline rather
     than raising, because this is advisory — it must never block the dispatch.
     """
     try:
         from app.workers.celery_app import celery_app
-        replies = celery_app.control.ping(timeout=0.5)
+        replies = celery_app.control.ping(timeout=0.5, limit=1)
         return bool(replies)
     except Exception:
         logger.warning("celery ping failed — reporting worker offline", exc_info=True)
         return False
 
 
-def _dispatch(status: str, slug: str) -> DispatchResponse:
-    online = _worker_online()
+async def _dispatch(status: str, slug: str) -> DispatchResponse:
+    # _worker_online blocks on broker I/O. Called inline it would freeze the
+    # whole uvicorn process — every in-flight request, not just this one — for
+    # the ping timeout, and longer against a half-dead broker.
+    online = await asyncio.to_thread(_worker_online)
     return DispatchResponse(
         status=status if online else "queued_no_worker",
         dispatched_to="celery",
@@ -102,7 +111,7 @@ async def trigger_ingest(slug: str, current_user=Depends(require_admin)) -> Disp
 
     from app.workers.tasks.scope_registry import ingest_authority_index
     ingest_authority_index.delay(index_slug=slug, trigger_source="manual")
-    return _dispatch("running", slug)
+    return await _dispatch("running", slug)
 
 
 @router.get("/drift", dependencies=[Depends(require_admin)])
@@ -205,7 +214,7 @@ async def trigger_fetch_bodies(slug: str, current_user=Depends(require_admin)) -
         raise HTTPException(status_code=404, detail=f"Unknown authority index: {slug}")
     from app.workers.tasks.scope_registry import fetch_authority_bodies
     fetch_authority_bodies.delay(index_slug=slug, triggered_by=str(current_user.id))
-    return _dispatch("running", slug)
+    return await _dispatch("running", slug)
 
 
 @router.get("/items/{item_id}/body", dependencies=[Depends(require_admin)])
@@ -292,7 +301,7 @@ async def trigger_classify(slug: str, current_user=Depends(require_admin)) -> Di
 
     from app.workers.tasks.scope_registry import classify_authority_index
     classify_authority_index.delay(index_slug=slug, triggered_by=str(current_user.id))
-    return _dispatch("running", slug)
+    return await _dispatch("running", slug)
 
 
 @router.post("/seed", dependencies=[Depends(require_admin)])
