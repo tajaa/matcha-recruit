@@ -1345,6 +1345,25 @@ async def _is_jurisdiction_fresh(
     return age < timedelta(days=threshold_days)
 
 
+def _basis_from_metadata(metadata: Any) -> Optional[List[Dict]]:
+    """The floor relations recorded on a catalog row's metadata by codify.py.
+
+    A row whose value is its OWN (CA's $70,304 threshold) carries no
+    statute_citation for the federal reg it sits on top of — citing it would be
+    false provenance — so the relation lives here instead. Surfacing it is what
+    makes a demotion legible rather than a citation silently disappearing.
+    """
+    if isinstance(metadata, str):
+        try:
+            metadata = json.loads(metadata)
+        except (TypeError, ValueError):
+            return None
+    if not isinstance(metadata, dict):
+        return None
+    basis = metadata.get("jurisdictional_basis")
+    return basis if isinstance(basis, list) else None
+
+
 def _parse_jsonb_list(value: Any) -> Optional[List[Dict]]:
     """asyncpg hands JSONB back as a str on this pool — the API must not leak
     strings where a list of objects belongs."""
@@ -9113,6 +9132,11 @@ async def get_hierarchical_requirements(
                     "source_url": row.get("source_url"),
                     "source_url_status": row.get("source_url_status"),
                     "statute_citation": row.get("statute_citation"),
+                    # A row demoted to a floor relation has NO statute_citation
+                    # (citing the floor would be false provenance). Without the
+                    # basis here the hierarchical view just loses the citation
+                    # with nothing explaining why.
+                    "jurisdictional_basis": _basis_from_metadata(row.get("metadata")),
                     "status": row.get("req_status", "active"),
                     "canonical_key": row.get("canonical_key"),
                     "triggered_by": _compute_triggered_by(row.get("trigger_conditions"), facility_attrs),
@@ -9149,6 +9173,7 @@ async def get_hierarchical_requirements(
                     "source_url": gov.get("source_url"),
                     "source_url_status": gov.get("source_url_status"),
                     "statute_citation": gov.get("statute_citation"),
+                    "jurisdictional_basis": _basis_from_metadata(gov.get("metadata")),
                     "status": gov.get("req_status", "active"),
                     "canonical_key": gov.get("canonical_key"),
                     "triggered_by": _compute_triggered_by(gov.get("trigger_conditions"), facility_attrs),
