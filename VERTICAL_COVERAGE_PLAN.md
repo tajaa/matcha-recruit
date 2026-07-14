@@ -1,5 +1,13 @@
 # Tenant-triggered vertical coverage: auto-scope any US industry, once, for everyone
 
+> **STATUS: implemented 2026-07-14.** Migration `vertcov01`,
+> `server/app/core/services/vertical_coverage.py`, and the vertical phase in
+> `matcha_x_onboarding.py` `POST /build/stream`. Verified end-to-end on dev —
+> see "Results" at the bottom. Two bugs found while verifying (a hardcoded
+> category vocabulary and a top-level industry tag shape) are written up there;
+> both were silent, and both would have shipped a catalog full of wage law
+> mislabelled as dental.
+
 ## Context
 
 The product promises to scope *any* US company. Driving a real LA dental office
@@ -154,6 +162,110 @@ surface the new rows automatically, for this tenant and every future one.
   still need `TRIGGER_PROFILES` entries; that tuple is frozen in code and has 3
   consumers. Industry *tagging* — which is what scopes dental — does not.
 - Cross-category duplicate obligations ("Final Pay Upon Termination" filed under
-  both `final_pay` and `pay_frequency`) — a separate identity bug.
+  both `final_pay` and `pay_frequency`) — a separate identity bug. **Partly
+  addressed:** it bit hard inside a vertical (see Results), so the fill now
+  guards it at the prompt and dedupes deterministically. The generic labor
+  catalog still has it.
 - `expiration_date` is still absent from `RequirementResponse`.
 - Backfilling verticals for existing tenants (they fill on their next check).
+
+---
+
+# Results — what shipped, and the two bugs verification found
+
+Everything below was found by driving the product, not by a test.
+
+## The vocabulary was hardcoded, and failing meant researching the wrong subject
+
+The first dental fill reported `new: 153` and every SSE event said success. The
+153 rows were California **wage law**, tagged `healthcare:dental`.
+
+`_normalize_category_value` (gemini_compliance.py) gated categories on
+`CATEGORY_KEYS` — a **frozen constant compiled from `compliance_registry.py`**.
+Oncology's categories are baked into it. Dental's, discovered at runtime and
+written to `compliance_categories`, are not. So all 7 dental categories
+normalized to `None`, and:
+
+```python
+for category in categories or DEFAULT_RESEARCH_CATEGORIES:
+    normalized = _normalize_category_value(category)   # None, for every one
+    if normalized and normalized not in selected_categories:
+        selected_categories.append(normalized)
+if not selected_categories:
+    selected_categories = list(DEFAULT_RESEARCH_CATEGORIES)   # ← the harm
+```
+
+The fallback doesn't under-deliver — it researches a **different subject** and
+returns it under the caller's label, and
+`research_specialization_for_jurisdiction` then force-tags every row with the
+vertical's `industry_tag`. A vertical fill that finds nothing is supposed to look
+like nothing; this one looked like a success.
+
+Fixed three ways: the vocabulary now unions the DB's `compliance_categories`
+(`register_dynamic_categories` / `refresh_dynamic_categories`, called at the top
+of the specialty-research path); an explicit category list that fully drops now
+returns `[]` and logs an error rather than silently swapping in the default set;
+and unknown categories are logged when dropped.
+
+## `hospitality:hospitality` would have been invisible forever
+
+When the vertical IS the industry (a hotel has no sub-specialty above
+hospitality), `industry_tag()` produced `hospitality:hospitality` — but
+`_get_company_industry_tags` gives such a company the bare tag `hospitality`, and
+`_filter_requirements_for_company` intersects the two. Every row researched for
+hospitality would have been filtered straight back out of the tab of the company
+that triggered the research. `industry_tag()` now collapses `(x, x)` to `x`, and
+the discovery prompt has a top-level branch (asking for the industry's own
+obligations instead of ones "beyond the {industry} baseline", which was
+self-contradictory).
+
+## Duplicate obligations, inside one vertical
+
+`requirement_key` is `<category>:<regulation_key>` — so the **category is part of
+an obligation's identity**. The catch-all `dental_practice_act_scope` returned
+the entire dental corpus, so radiology, sedation, infection control and amalgam
+each landed twice and the tenant saw every dental obligation listed twice.
+Guarded at the prompt (each category call now names its siblings and is told not
+to return their obligations) and deduped deterministically afterwards
+(`_dedupe_by_regulation_key`, which collapses on `regulation_key` **or** on
+normalized title — `regulation_key` is model-generated and drifts between runs,
+so a key match alone misses re-researched duplicates).
+
+## Verified on dev
+
+1. **Dental fill** — Sunset Smile Dental (LA) triggers discovery of 7 dental
+   categories, researches them, gets **12 distinct dental obligations** spanning
+   all three levels: EPA Dental Effluent Guidelines (40 CFR 441, federal), CA
+   Dental Practice Act / Dental Board sedation permits / CCR Title 16 § 1005
+   infection control / CDPH radiation protection program / CURES PDMP (state),
+   and an LA County X-ray shielding plan (county). No duplicates.
+2. **Reuse — the whole point.** A *second* LA dental office (Westlake Family
+   Dental) builds with `vertical_scoping` → straight to `complete`. Every cell
+   reads `covered` from the ledger, **zero** Gemini research calls, identical 12
+   dental rows on its tab.
+3. **Generalization — the real test of the claim.** A *hospitality* company in
+   Austin, TX — nothing healthcare anywhere in the path, zero hospitality rows in
+   the catalog beforehand — discovers 8 categories from cold (food safety,
+   alcohol service liability, lodging fire codes, pool/spa safety, guest data
+   privacy, tip pooling, housekeeping ergonomics, ADA public accommodation) and
+   researches Texas Dram Shop Act, TABC, TFER 25 TAC 228, Austin Fire Code, TX
+   pool/spa 25 TAC § 265, TDPSA, ADA Title III, FLSA tip pooling. **Zero**
+   hospitality rows leaked onto the dental tenant.
+4. **No regression** — 756 passing, the same 7 pre-existing failures.
+
+## Still open
+
+- The vertical fill runs only in the **Matcha-X onboarding build**. The periodic
+  `compliance_checks` worker and `run_compliance_check_stream` do not trigger it,
+  so an existing tenant fills on its next *onboarding* build, not its next check.
+- `MAX_CELLS_PER_FILL = 40` caps one build. A vertical with more
+  (jurisdiction × category) cells than that fills over successive builds; the
+  skipped remainder is not yet surfaced to the user.
+- `in_progress` is not self-healing: a crashed fill leaves the cell wedged and a
+  later build will not retry it. Deliberate (never double-bill a research call),
+  but it needs a sweeper.
+- The "no additional rule applies" filler rows the research prompt emits still
+  land as real requirements (e.g. "No State-Specific Housekeeping Ergonomics
+  Mandate"). They are honest, but they are noise on the tab.
+- `vertcov01` is **dev-applied only** — it must run on prod, alongside the still
+  un-applied `jparent01` / `jsonfix01` / `rekey01` / `rekey02`.

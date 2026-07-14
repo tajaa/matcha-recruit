@@ -19,6 +19,18 @@ Then read exactly what the tenant's Compliance tab is served.
 
 ## Verdict: the demo fails on all three legs
 
+> **Update 2026-07-14 — legs one, two and three now pass.** The reachability
+> fixes (`3eb777e`, `d13d095`, `6ee1700`, `4124589`) restored federal + CA law,
+> and the vertical-coverage engine (`VERTICAL_COVERAGE_PLAN.md`, migration
+> `vertcov01`) makes dental-specific compliance real: the LA dental office is
+> now served **12 distinct dental obligations** — EPA amalgam separator rule (40
+> CFR 441), CA Dental Practice Act, Dental Board sedation permits, CCR Title 16
+> § 1005 infection control, CDPH radiation protection program, CURES PDMP, and an
+> LA County X-ray shielding plan. A second LA dental office gets them with zero
+> research calls, and a hospitality company in Austin scopes itself the same way.
+> **Expiration dates and the out-of-compliance roll-up (rows 4 and 5) are still
+> open.** The original findings are preserved below as written.
+
 | Leg | Expected | Actual |
 |---|---|---|
 | Federal | applicable federal employment law | 21 rows, but the wrong ones (below) |
