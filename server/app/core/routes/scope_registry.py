@@ -32,6 +32,42 @@ router = APIRouter()
 _JSONB_FIELDS = ("entity_condition", "unmodeled_coordinates", "jurisdiction_scope")
 
 
+def _worker_online() -> bool:
+    """Is any Celery worker actually listening?
+
+    `.delay()` onto an empty queue succeeds — the task just sits in Redis until
+    a worker starts — so a dispatch route returns 200 and NOTHING HAPPENS. At
+    the UI that is indistinguishable from success, which is exactly how an
+    operator clicks Ingest, watches the counts never move, and concludes the
+    pipeline is broken. No worker runs in local dev by default.
+
+    Best-effort: a broker that can't be reached is reported as offline rather
+    than raising, because this is advisory — it must never block the dispatch.
+    """
+    try:
+        from app.workers.celery_app import celery_app
+        replies = celery_app.control.ping(timeout=0.5)
+        return bool(replies)
+    except Exception:
+        logger.warning("celery ping failed — reporting worker offline", exc_info=True)
+        return False
+
+
+def _dispatch(status: str, slug: str) -> DispatchResponse:
+    online = _worker_online()
+    return DispatchResponse(
+        status=status if online else "queued_no_worker",
+        dispatched_to="celery",
+        slug=slug,
+        worker_online=online,
+        message=(
+            None if online else
+            "Queued, but NO Celery worker is running — this task will not execute "
+            "until one starts. (Local dev runs no worker by default.)"
+        ),
+    )
+
+
 def _row_out(row) -> dict:
     """dict(row) with JSONB fields normalized — asyncpg returns JSONB as a str
     on this pool, and the API must not leak strings where objects belong."""
@@ -66,7 +102,7 @@ async def trigger_ingest(slug: str, current_user=Depends(require_admin)) -> Disp
 
     from app.workers.tasks.scope_registry import ingest_authority_index
     ingest_authority_index.delay(index_slug=slug, trigger_source="manual")
-    return DispatchResponse(status="running", dispatched_to="celery", slug=slug)
+    return _dispatch("running", slug)
 
 
 @router.get("/drift", dependencies=[Depends(require_admin)])
@@ -169,7 +205,7 @@ async def trigger_fetch_bodies(slug: str, current_user=Depends(require_admin)) -
         raise HTTPException(status_code=404, detail=f"Unknown authority index: {slug}")
     from app.workers.tasks.scope_registry import fetch_authority_bodies
     fetch_authority_bodies.delay(index_slug=slug, triggered_by=str(current_user.id))
-    return DispatchResponse(status="running", dispatched_to="celery", slug=slug)
+    return _dispatch("running", slug)
 
 
 @router.get("/items/{item_id}/body", dependencies=[Depends(require_admin)])
@@ -256,7 +292,7 @@ async def trigger_classify(slug: str, current_user=Depends(require_admin)) -> Di
 
     from app.workers.tasks.scope_registry import classify_authority_index
     classify_authority_index.delay(index_slug=slug, triggered_by=str(current_user.id))
-    return DispatchResponse(status="running", dispatched_to="celery", slug=slug)
+    return _dispatch("running", slug)
 
 
 @router.post("/seed", dependencies=[Depends(require_admin)])

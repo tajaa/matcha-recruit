@@ -343,6 +343,7 @@ function ClassificationEditor({
 export default function AuthorityCockpit({ onMutate }: { onMutate?: () => void }) {
   const [indexes, setIndexes] = useState<AuthorityIndex[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
   const [nonce, setNonce] = useState(0)
   const [busy, setBusy] = useState<string | null>(null)
 
@@ -409,8 +410,15 @@ export default function AuthorityCockpit({ onMutate }: { onMutate?: () => void }
     async (label: string, fn: () => Promise<unknown>) => {
       setBusy(label)
       setError(null)
+      setNotice(null)
       try {
-        await fn()
+        const res = (await fn()) as { worker_online?: boolean; message?: string } | undefined
+        // Ingest/Classify only .delay() onto Celery. With no worker listening the
+        // POST still 200s and the task sits in Redis forever — so a bare "running"
+        // is a lie, and the operator watches the counts never move. Say so.
+        if (res && res.worker_online === false) {
+          setNotice(res.message ?? 'Queued, but no Celery worker is running.')
+        }
         refresh()
       } catch (e) {
         setError(e instanceof Error ? e.message : `${label} failed`)
@@ -487,6 +495,11 @@ export default function AuthorityCockpit({ onMutate }: { onMutate?: () => void }
       </div>
 
       {error && <div className="mb-2 text-xs text-red-400">{error}</div>}
+      {notice && (
+        <div className="mb-2 rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[11px] text-amber-300">
+          {notice}
+        </div>
+      )}
 
       {!indexes ? (
         <div className="text-xs text-zinc-500">Loading…</div>

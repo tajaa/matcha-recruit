@@ -8608,7 +8608,21 @@ def _eval_condition(cond: Dict[str, Any], attrs: Dict[str, Any]) -> bool:
             if children:
                 return not _eval_condition(children[0], attrs)
             return True
-        return True
+        # An unrecognized op used to return True — which silently turned a
+        # CONDITIONAL obligation into a universal one: every company got it.
+        # `trigger_conditions` on jurisdiction_requirements are written by Gemini
+        # research with NO shape gate (unlike scope-registry classifications,
+        # which validate_proposal rejects), so a plausible model typo
+        # ({"op": "greater_than"}, a leaf that says "op" where it means
+        # "operator") is enough to serve e.g. the PSM standard to a bakery.
+        # Fail closed and say so — the same convention this function already
+        # uses for an unevaluable numeric comparison below.
+        logger.warning(
+            "Trigger condition has unknown op %r — treating as not matched. "
+            "This requirement will NOT apply; fix the trigger_conditions JSON.",
+            op,
+        )
+        return False
 
     # Leaf conditions
     ctype = cond.get("type")
@@ -8669,7 +8683,15 @@ def _eval_condition(cond: Dict[str, Any], attrs: Dict[str, Any]) -> bool:
     if ctype in ("requirement_active", "category_active"):
         return True
 
-    return True
+    # Unrecognized node shape. Same reasoning as the unknown-op branch above:
+    # returning True here would universalize a conditional obligation on the
+    # strength of malformed JSON.
+    logger.warning(
+        "Trigger condition has unknown type %r — treating as not matched. "
+        "This requirement will NOT apply; fix the trigger_conditions JSON.",
+        ctype,
+    )
+    return False
 
 
 async def resolve_jurisdiction_stacks(
