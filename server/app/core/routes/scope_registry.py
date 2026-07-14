@@ -236,6 +236,7 @@ async def list_authority_items(
             SELECT i.id, i.citation, i.heading, i.parent_item_id, i.source_url,
                    c.disposition, c.applies_to_categories, c.excludes_categories,
                    c.entity_condition, c.regulation_key, c.status,
+                   c.excluded_reason,
                    c.proposed_by, c.inherits_from_item_id, c.jurisdiction_scope
             FROM authority_index_items i
             LEFT JOIN authority_item_classifications c ON c.item_id = i.id
@@ -274,6 +275,38 @@ async def confirm_classifications_endpoint(
     from app.core.services.scope_registry.classify import confirm_classifications
     async with get_connection() as conn:
         return await confirm_classifications(conn, payload.item_ids, current_user.id)
+
+
+@router.get("/vocabulary", dependencies=[Depends(require_admin)])
+async def classification_vocabulary():
+    """Everything the classification editor must choose FROM: the dispositions,
+    the business-category taxonomy (applies_to/excludes), and the RKD keys by
+    category (regulation_key + its category_slug).
+
+    Without this the KEY/override editor cannot exist — `validate_proposal`
+    rejects any category slug outside the taxonomy and downgrades any
+    regulation_key outside the RKD, so the operator would be guessing at a
+    vocabulary the server already knows.
+    """
+    from app.core.services.scope_registry.categories import CATEGORIES
+    from app.core.services.scope_registry.classify import (
+        DISPOSITIONS, fetch_rkd_keys_by_category,
+    )
+
+    async with get_connection() as conn:
+        rkd = await fetch_rkd_keys_by_category(conn)
+
+    return {
+        "dispositions": list(DISPOSITIONS),
+        "categories": sorted(
+            (
+                {"slug": c.slug, "label": c.label, "parent": c.parent}
+                for c in CATEGORIES.values()
+            ),
+            key=lambda c: c["slug"],
+        ),
+        "keys_by_category": {cat: sorted(keys) for cat, keys in sorted(rkd.items())},
+    }
 
 
 @router.put("/items/{item_id}/classification", dependencies=[Depends(require_admin)])
