@@ -1569,31 +1569,82 @@ async def _get_county_jurisdiction_id(
 
 
 async def _get_state_jurisdiction_id(conn, jurisdiction_id: UUID) -> Optional[UUID]:
-    """Walk parent_id chain to find the state jurisdiction ID."""
+    """Walk the parent chain to the state node.
+
+    Keys on ``level``, not on a city-string heuristic. The previous version
+    tested ``city == ""`` — but 27 of 28 state rows carry city NULL, so the test
+    was always false, this returned None, and the caller silently filed state law
+    under the LEAF CITY. That single mismatch misparented 1,157 rows and is why a
+    Los Angeles tenant was served no California minimum wage (migration jparent01).
+    """
     current_id = jurisdiction_id
-    for _ in range(3):  # Walk up to 3 levels (city -> county -> state)
+    for _ in range(4):  # city -> county -> state -> federal
         row = await conn.fetchrow(
-            "SELECT parent_id FROM jurisdictions WHERE id = $1", current_id
+            "SELECT id, level, parent_id FROM jurisdictions WHERE id = $1", current_id
         )
-        if not row or not row["parent_id"]:
+        if not row:
+            return None
+        if row["level"] == "state":
+            return row["id"]
+        if not row["parent_id"]:
             return None
         current_id = row["parent_id"]
-        j_row = await conn.fetchrow(
-            "SELECT id, city FROM jurisdictions WHERE id = $1", current_id
-        )
-        if j_row and j_row["city"] == "":  # State jurisdictions have empty city
-            return j_row["id"]
     return None
+
+
+async def _get_or_create_state_jurisdiction_id(
+    conn, leaf_jurisdiction_id: UUID
+) -> Optional[UUID]:
+    """The state node for a leaf, creating it if the tree simply lacks one.
+
+    Falling back to the leaf (what this code used to do) is never acceptable for
+    a state-level obligation: it makes the row invisible to every other city in
+    the same state. If the walk finds nothing, look the state up by code, and
+    create the node as a last resort.
+    """
+    state_id = await _get_state_jurisdiction_id(conn, leaf_jurisdiction_id)
+    if state_id:
+        return state_id
+
+    leaf = await conn.fetchrow(
+        "SELECT state, country_code FROM jurisdictions WHERE id = $1", leaf_jurisdiction_id
+    )
+    if not leaf or not leaf["state"]:
+        return None
+
+    existing = await conn.fetchval(
+        "SELECT id FROM jurisdictions WHERE level = 'state' AND state = $1 LIMIT 1",
+        leaf["state"],
+    )
+    if existing:
+        return existing
+
+    federal_id = await conn.fetchval(
+        "SELECT id FROM jurisdictions WHERE level = 'federal' AND state = 'US' LIMIT 1"
+    )
+    return await conn.fetchval(
+        """
+        INSERT INTO jurisdictions (display_name, level, state, country_code, parent_id, authority_type)
+        VALUES ($1, 'state', $1, $2, $3, 'geographic')
+        RETURNING id
+        """,
+        leaf["state"],
+        leaf["country_code"] or "US",
+        federal_id,
+    )
 
 
 async def _resolve_jurisdiction_id_for_level(
     conn, leaf_jurisdiction_id: UUID, jurisdiction_level: str
-) -> UUID:
-    """Resolve the correct jurisdiction ID for a requirement based on its level.
+) -> Optional[UUID]:
+    """Resolve the jurisdiction a requirement belongs on, from its stamped level.
 
-    Routes federal/state/county requirements to their proper jurisdiction row
-    instead of dumping everything into the leaf city. Falls back to leaf if
-    the parent jurisdiction doesn't exist yet.
+    Returns None when the level is known but no home for it can be resolved.
+    **Never falls back to the leaf.** That fallback is what corrupted 63% of the
+    catalog (jparent01): chain resolution walks jurisdiction_id, so a state law
+    filed under a city is invisible to every other city in that state — while
+    still *displaying* as "California / state", so nothing looked wrong. Dropping
+    the row is loud; misfiling it is silent. Callers park the None rows.
     """
     level = (jurisdiction_level or "").lower().strip()
 
@@ -1601,28 +1652,29 @@ async def _resolve_jurisdiction_id_for_level(
         return leaf_jurisdiction_id
 
     if level == "county":
-        county_id = await _get_county_jurisdiction_id(conn, leaf_jurisdiction_id)
-        return county_id or leaf_jurisdiction_id
+        return await _get_county_jurisdiction_id(conn, leaf_jurisdiction_id)
 
     if level == "state":
-        state_id = await _get_state_jurisdiction_id(conn, leaf_jurisdiction_id)
-        return state_id or leaf_jurisdiction_id
+        return await _get_or_create_state_jurisdiction_id(conn, leaf_jurisdiction_id)
 
-    if level == "federal":
-        # Look up the leaf's state to find the federal jurisdiction
+    # 'national' is the same tier as 'federal' — a country's own law. It had no
+    # case at all here, so it fell through to "unknown level, treat as city" and
+    # 232 national rows were filed under cities.
+    if level in ("federal", "national"):
         leaf = await conn.fetchrow(
-            "SELECT state FROM jurisdictions WHERE id = $1", leaf_jurisdiction_id
+            "SELECT country_code FROM jurisdictions WHERE id = $1", leaf_jurisdiction_id
         )
-        if leaf:
-            fed_row = await conn.fetchrow(
-                "SELECT id FROM jurisdictions WHERE level = 'federal' AND state = 'US'"
+        country = (leaf["country_code"] if leaf else None) or "US"
+        if country == "US":
+            return await conn.fetchval(
+                "SELECT id FROM jurisdictions WHERE level = 'federal' AND state = 'US' LIMIT 1"
             )
-            if fed_row:
-                return fed_row["id"]
-        return leaf_jurisdiction_id
+        return await conn.fetchval(
+            "SELECT id FROM jurisdictions WHERE level = 'national' AND country_code = $1 LIMIT 1",
+            country,
+        )
 
-    # Unknown level — treat as city
-    return leaf_jurisdiction_id
+    return None
 
 
 async def _upsert_jurisdiction_requirements_routed(
@@ -1648,10 +1700,22 @@ async def _upsert_jurisdiction_requirements_routed(
     affected_jurisdictions: set = set()
     city_keys: set = set()  # Track city-level keys for cleanup
 
+    unroutable = 0
     for level, group_reqs in level_groups.items():
         target_jid = await _resolve_jurisdiction_id_for_level(
             conn, leaf_jurisdiction_id, level
         )
+        if target_jid is None:
+            # No home for this level. Writing it to the leaf anyway is what broke
+            # the catalog (jparent01) — the row would render as "state law" while
+            # being reachable only from this one city. Skip and count it.
+            unroutable += len(group_reqs)
+            logger.warning(
+                "compliance: cannot route %d %r-level requirement(s) from leaf %s — skipped",
+                len(group_reqs), level, leaf_jurisdiction_id,
+            )
+            continue
+
         affected_jurisdictions.add(target_jid)
 
         await _upsert_requirements_additive(conn, target_jid, group_reqs, research_source=research_source)
@@ -1661,7 +1725,12 @@ async def _upsert_jurisdiction_requirements_routed(
                 city_keys.add(_compute_requirement_key(req))
 
     # Level-scoped cleanup: only delete stale CITY-level rows from the leaf
-    # (preserves inherited requirements; only cleans up local ones)
+    # (preserves inherited requirements; only cleans up local ones).
+    #
+    # Scoped to `city` AND to this leaf on purpose. The sibling non-routed upsert
+    # deletes any row of ANY level whose key this run didn't re-emit — against the
+    # SHARED catalog, so one tenant's research pass can delete rows every other
+    # tenant reads. See _upsert_jurisdiction_requirements.
     if city_keys:
         existing_rows = await conn.fetch(
             """SELECT id, requirement_key FROM jurisdiction_requirements
@@ -2863,17 +2932,20 @@ async def _upsert_jurisdiction_requirements(
             uncategorized_id,      # $21: drift-park sentinel — never downgrades an existing tag
         )
 
-    # Remove jurisdiction rows not in new result set
-    if new_keys:
-        existing_rows = await conn.fetch(
-            "SELECT id, requirement_key FROM jurisdiction_requirements WHERE jurisdiction_id = $1",
-            jurisdiction_id,
-        )
-        for row in existing_rows:
-            if row["requirement_key"] not in new_keys:
-                await conn.execute(
-                    "DELETE FROM jurisdiction_requirements WHERE id = $1", row["id"]
-                )
+    # NO DELETE HERE — deliberately.
+    #
+    # This used to be: "Remove jurisdiction rows not in new result set" — every
+    # row on this jurisdiction whose key THIS ONE RUN didn't re-emit was deleted.
+    # jurisdiction_requirements is the SHARED catalog, so one tenant's research
+    # pass (a single Gemini call, which returns a different slice every time)
+    # deleted obligations every other tenant reads. It also destroyed rows whose
+    # ids were still held by the caller's in-flight list, which then FK-aborted
+    # the location sync mid-write (see _refresh_catalog_links).
+    #
+    # A row leaves the catalog by being *repealed* (status='repealed', which the
+    # read path already excludes) or superseded — never by being absent from one
+    # non-deterministic research result. Staleness is what last_verified_at and
+    # the drift sweep are for.
 
     # Update jurisdiction counts and timestamp
     count = await conn.fetchval(
@@ -2971,6 +3043,48 @@ async def _filter_requirements_for_company(
     return filtered
 
 
+async def _refresh_catalog_links(conn, reqs: List[Dict]) -> None:
+    """Drop ``jurisdiction_requirement_id`` values the catalog no longer has.
+
+    The in-flight requirement dicts are loaded from the catalog BEFORE the upsert
+    runs (``_jurisdiction_row_to_dict`` stamps the id), and the upsert can delete
+    or merge rows out from under them. The next call — this sync — then inserts a
+    compliance_requirements row FK'd to a dead id and the whole location's sync
+    aborts on ``compliance_requirements_jurisdiction_requirement_id_fkey``. That
+    is what made a real onboarding build report "your compliance baseline is
+    live" while having written only part of it.
+
+    A stale link is dropped to NULL rather than raising: the requirement itself is
+    still real and the tenant should see it. The FK is an enrichment link, not the
+    row's identity.
+    """
+    ids = {
+        req["jurisdiction_requirement_id"]
+        for req in reqs
+        if req.get("jurisdiction_requirement_id")
+    }
+    if not ids:
+        return
+
+    live = {
+        row["id"]
+        for row in await conn.fetch(
+            "SELECT id FROM jurisdiction_requirements WHERE id = ANY($1::uuid[])",
+            [UUID(str(i)) for i in ids],
+        )
+    }
+    stale = {str(i) for i in ids} - {str(i) for i in live}
+    if not stale:
+        return
+
+    for req in reqs:
+        if str(req.get("jurisdiction_requirement_id") or "") in stale:
+            req["jurisdiction_requirement_id"] = None
+    logger.warning(
+        "compliance: dropped %d stale catalog link(s) before location sync", len(stale)
+    )
+
+
 async def _sync_requirements_to_location(
     conn,
     location_id: UUID,
@@ -2991,6 +3105,7 @@ async def _sync_requirements_to_location(
         if cat:
             req["category"] = cat
     await _validate_source_urls(reqs)
+    await _refresh_catalog_links(conn, reqs)
 
     new_count = 0
     updated_count = 0
@@ -3163,17 +3278,27 @@ async def _sync_requirements_to_location(
             if material_change:
                 previous_value = old_value
                 last_changed_at = datetime.utcnow()
-                # Log granular field changes to policy_change_log
-                if old_value != new_value:
-                    await _log_policy_change(
-                        conn, existing["id"], "current_value",
-                        old_value, new_value,
-                    )
-                if old_num is not None and new_num is not None and abs(float(old_num) - float(new_num)) > 0.001:
-                    await _log_policy_change(
-                        conn, existing["id"], "numeric_value",
-                        str(old_num), str(new_num),
-                    )
+                # Log granular field changes to policy_change_log.
+                #
+                # requirement_id FKs jurisdiction_requirements (the CATALOG), but
+                # `existing` is a compliance_requirements row — the per-location
+                # projection. Passing existing["id"] here FK-violated every time,
+                # killing the whole check. It stayed invisible because it only
+                # fires when a value materially changes, and the sync used to die
+                # earlier. An unlinked projection row has no catalog id to log
+                # against, so it is skipped rather than faked.
+                catalog_id = existing.get("jurisdiction_requirement_id")
+                if catalog_id:
+                    if old_value != new_value:
+                        await _log_policy_change(
+                            conn, catalog_id, "current_value",
+                            old_value, new_value,
+                        )
+                    if old_num is not None and new_num is not None and abs(float(old_num) - float(new_num)) > 0.001:
+                        await _log_policy_change(
+                            conn, catalog_id, "numeric_value",
+                            str(old_num), str(new_num),
+                        )
 
             await _update_requirement(
                 conn,
@@ -3544,7 +3669,13 @@ async def _log_policy_change(
     field_changed: str,
     old_value: Optional[str],
     new_value: Optional[str],
-    change_source: str = "compliance_check",
+    # change_source_enum = (ai_fetch, manual_review, legislative_update,
+    # system_migration). The default used to be "compliance_check", which is not
+    # a member — so the first time a requirement's value actually CHANGED, the
+    # check died with InvalidTextRepresentation. It stayed hidden because the
+    # location sync aborted on a dangling FK before it ever got here.
+    # A compliance check is an AI fetch.
+    change_source: str = "ai_fetch",
     change_reason: Optional[str] = None,
 ) -> None:
     """Record a granular field-level change in the policy_change_log table."""
