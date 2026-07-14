@@ -40,6 +40,7 @@ type AuthorityItem = {
   applies_to_categories: string[] | null
   excludes_categories: string[] | null
   excluded_reason: string | null
+  entity_condition: Record<string, unknown> | null
 }
 
 type Vocabulary = {
@@ -130,7 +131,9 @@ function ClassificationEditor({
   item: AuthorityItem
   vocab: Vocabulary
   onClose: () => void
-  onSaved: () => void
+  // keepOpen: the write landed but produced warnings the operator must read —
+  // reload the queue, but don't dismiss the editor out from under them.
+  onSaved: (opts?: { keepOpen?: boolean }) => void
 }) {
   const [disposition, setDisposition] = useState(item.disposition ?? 'universal_in_domain')
   const [categorySlug, setCategorySlug] = useState<string>(() => {
@@ -163,6 +166,9 @@ function ClassificationEditor({
       // Only send what the operator actually set — the endpoint is a PATCH over
       // model_fields_set, so an unsent jurisdiction_scope keeps its existing
       // value instead of silently widening to whole-index reach.
+      // entity_condition is deliberately NOT sent: the route PATCH-preserves it
+      // when unset. There is no trigger-authoring UI yet, and sending null would
+      // wipe the condition — turning a conditional obligation universal.
       const body: Record<string, unknown> = {
         disposition,
         applies_to_categories: appliesTo,
@@ -182,9 +188,14 @@ function ClassificationEditor({
       // Swallowing that would be the worst possible outcome here — the operator
       // would believe they had keyed the item (the whole point of this editor)
       // while it stayed uncodifiable. Keep the editor open and say so.
+      //
+      // The write DID land, though (confirmed, key NULL), so the queue must
+      // still reload — otherwise it keeps showing this row as unconfirmed and
+      // the funnel counts are wrong until a manual refresh.
       if (res?.warnings?.length) {
         setWarnings(res.warnings)
         setRegulationKey('')
+        onSaved({ keepOpen: true })
         return
       }
       onSaved()
@@ -317,6 +328,19 @@ function ClassificationEditor({
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {item.entity_condition && (
+        <div className="mt-2 rounded border border-white/[0.08] bg-white/[0.02] px-2 py-1">
+          <span className="text-[10px] uppercase tracking-wider text-zinc-500">
+            Trigger (kept as-is)
+          </span>
+          <div
+            className="mt-0.5 font-mono text-[10px] text-zinc-400"
+            title="This obligation only applies to facilities matching this condition. There is no trigger editor yet — saving preserves it rather than wiping it, which would make the obligation apply to everyone.">
+            {JSON.stringify(item.entity_condition)}
+          </div>
         </div>
       )}
 
@@ -684,11 +708,18 @@ export default function AuthorityCockpit({ onMutate }: { onMutate?: () => void }
 
           {editing && vocab && (
             <ClassificationEditor
+              // Keyed by item id: without this, React reuses the mounted
+              // component when you click Edit on a different row, the form keeps
+              // the PREVIOUS row's values, and saving writes row A's
+              // classification onto row B — confirmed, and propagated to B's
+              // inheriting children. Silent corruption in the tool built to
+              // correct data.
+              key={editing.id}
               item={editing}
               vocab={vocab}
               onClose={() => setEditing(null)}
-              onSaved={() => {
-                setEditing(null)
+              onSaved={(opts) => {
+                if (!opts?.keepOpen) setEditing(null)
                 if (openSlug) loadItems(openSlug)
                 refresh()
               }}
