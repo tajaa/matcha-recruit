@@ -253,14 +253,97 @@ so a key match alone misses re-researched duplicates).
    hospitality rows leaked onto the dental tenant.
 4. **No regression** — 756 passing, the same 7 pre-existing failures.
 
+## Round 2 — what the code review caught
+
+The first implementation shipped the vertical engine with the **same class of bug
+it was written to fix**. A review over the unreviewed range found it:
+
+- **The fill re-created jparent01's misparenting.**
+  `research_specialization_for_jurisdiction` writes via
+  `_upsert_requirements_additive`, which files rows on whatever jurisdiction it is
+  handed. The fill handed it the tenant's LEAF — so stamped-`state` dental rows
+  were physically parented to the `los angeles, CA` city node, and hospitality's
+  to `austin, TX`. Fixed with `_upsert_requirements_routed_additive` (a routing
+  upsert with **no delete pass** — the existing routed upsert deletes leaf city
+  rows the run didn't re-emit, which for a one-industry pass would delete every
+  other industry's city rows) behind `route_by_level=True`.
+- **Cells were keyed on the leaf, so reuse only worked same-city.** A San
+  Francisco dental office could never read the California rows Los Angeles paid
+  for. Cells are now chain nodes (`expand_to_chains`, broadest-first).
+- **One level per cell.** Researching a category at all four chain levels means
+  each pass volunteers the same state obligation, all four route to the state
+  node, and the model names it differently every time — no deterministic dedupe
+  can collapse that. `only_levels` gives each cell sole ownership of one level.
+- **The ledger started cold over seeded verticals.** `healthcare` already has 17
+  categories and 300+ rows; the next plain-healthcare tenant would have
+  re-researched all of it synchronously. `backfill_ledger` reconciles first.
+- Plus: an unreadable `trigger_conditions` string crashed the whole chain
+  projection (`'str' has no attribute 'get'` — one bad catalog row would break
+  every tenant whose chain contains it); the chain query admitted `superseded` and
+  `pending` rows; the recursive CTE had no cycle guard; inferred `entity_type`
+  minted `healthcare:dental_practice` alongside signup's `healthcare:dental` (two
+  disjoint ledger namespaces); roster-only tenants were never reprojected after a
+  fill; one pool connection was pinned across dozens of Gemini calls; the cell cap
+  truncated silently; and the `complete` event under-reported the requirement
+  count because it was summed before the vertical fill ran.
+
+## Round 3 — reviewing the round-2 fixes found the fixes' own bugs
+
+The chain-cell design (round 2) was re-reviewed before commit. Eight findings,
+the sharpest of which was structural:
+
+- **County cells could never write, and the ledger recorded the loss as
+  "covered".** `_get_county_jurisdiction_id` assumes it is handed a CITY and
+  inspects the node's *parent* for the `_county_` marker — handed the county node
+  itself, it returns None, routing skips every row, and the verdict was computed
+  from the PRE-ROUTE count, so the cell was marked covered with zero rows in the
+  catalog. Terminal status ⇒ permanent, invisible hole. Fixed twice over:
+  `_resolve_jurisdiction_id_for_level` now returns the node itself when its own
+  level already matches, and verdicts come from `written_by_level` — what
+  actually landed.
+- **4× the Gemini spend, most of it discarded.** Researching each chain node
+  separately meant every call returned the full federal+state+local picture and
+  kept one slice. Restructured: one research call per **(leaf, category)**
+  covering all missing cells of that category (`plan_fill`), rows routed by
+  stamped level. 7 calls instead of 28 for the demo tenant, and the
+  cross-level-duplicate problem can't recur because one call can't disagree with
+  itself.
+- **The inference-path tenant never saw its rows.** The specialty tag is
+  persisted at step 3c, *after* step 3 projected; with a fully-covered ledger the
+  reproject never ran, so the tenant whose vertical was auto-detected got zero
+  vertical rows this build. `resolve_vertical` now reports `minted_now` and the
+  route reprojects whenever the tag was just written.
+- **entity_type is a closed enum — the suffix heuristic was solving the wrong
+  problem** and mangled the enum's own values (`nursing_facility`→`nursing`).
+  Replaced with an explicit enum→specialty map; facility *shapes*
+  (hospital/clinic/fqhc) map to nothing, and inference can never mint a new
+  specialty — signup is the only entry into the vocabulary.
+- **The dedupe could delete pre-existing shared-catalog rows** (title collisions
+  across categories — "Recordkeeping Requirements" names distinct obligations)
+  and their projections for *other* tenants, from inside an unrelated tenant's
+  onboarding. Now: title matches count only within a category, key matches
+  across, and only rows created after the fill started are ever deleted.
+- Plus: the verdict `_mark` moved onto the research call's own connection (a
+  fresh acquire could fail after a paid call and wedge the cell at
+  `in_progress`); `backfill_ledger` judges coverage by category membership, not
+  tag containment (untagged legacy rows are covered too); the `_county_` name
+  sentinel no longer leaks into the research prompt as a city; and the recount's
+  falsy-zero `or` fallback is gone.
+
+Verified refuted, not fixed: the routed-additive's missing `last_verified_at`
+stamp is **correct** — stamping it after a one-industry pass would make
+`_is_jurisdiction_fresh` suppress the generic research the jurisdiction still
+needs. Documented in the function instead.
+
 ## Still open
 
 - The vertical fill runs only in the **Matcha-X onboarding build**. The periodic
   `compliance_checks` worker and `run_compliance_check_stream` do not trigger it,
   so an existing tenant fills on its next *onboarding* build, not its next check.
-- `MAX_CELLS_PER_FILL = 40` caps one build. A vertical with more
-  (jurisdiction × category) cells than that fills over successive builds; the
-  skipped remainder is not yet surfaced to the user.
+- `MAX_CELLS_PER_FILL = 40` caps one build. The overflow is now **reported**
+  (`deferred` on the `vertical_researching` and `complete` events) and picked up by
+  the next build, since the ledger holds no verdict for a deferred cell — but
+  nothing yet *drives* that next build automatically.
 - `in_progress` is not self-healing: a crashed fill leaves the cell wedged and a
   later build will not retry it. Deliberate (never double-bill a research call),
   but it needs a sweeper.

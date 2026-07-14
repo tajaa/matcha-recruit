@@ -524,13 +524,16 @@ async def build_compliance_baseline_stream(
         # catalog tagged with the industry_tag, so the next tenant in the same
         # jurisdiction reads them instantly with zero research calls.
         vertical_new = 0
+        vertical_deduped = 0
         vertical_label = None
+        vertical_deferred = 0
+        vertical_minted = False
         try:
             async with get_connection() as vconn:
                 resolved = await vertical_coverage.resolve_vertical(vconn, company_id)
 
             if resolved:
-                v_parent, v_slug, v_label, v_tag = resolved
+                v_parent, v_slug, v_label, v_tag, vertical_minted = resolved
                 vertical_label = v_label
                 async with get_connection() as vconn:
                     v_categories, v_context = await vertical_coverage.ensure_specialty(
@@ -543,38 +546,85 @@ async def build_compliance_baseline_stream(
                         "vertical": v_label,
                         "message": f"Checking {v_label}-specific requirements…",
                     }
-                    jur_ids = [UUID(j) for j in jurisdictions_seen]
                     async with get_connection() as vconn:
-                        cells = await vertical_coverage.missing_cells(
-                            vconn, jur_ids, v_tag, v_categories
+                        # Ledger cells live on chain NODES (federal/state/county/
+                        # city), not on the tenant's leaf: state law is researched
+                        # once for the state, federal once nationally — which is
+                        # what makes the next tenant in the state free rather than
+                        # only the next tenant in the same city. The research CALL
+                        # is per (leaf, category); routing files each row on its
+                        # level's node.
+                        leaf_chains = await vertical_coverage.chains_for_leaves(
+                            vconn, [UUID(j) for j in jurisdictions_seen]
+                        )
+                        all_nodes = sorted(
+                            {jid for chain in leaf_chains.values() for jid, _ in chain}
+                        )
+                        # Reconcile the ledger with what the catalog already holds
+                        # BEFORE deciding what to research, or a seeded vertical
+                        # (healthcare has 17 categories and 300+ rows) gets
+                        # re-researched from scratch on the next tenant's onboarding.
+                        await vertical_coverage.backfill_ledger(
+                            vconn, all_nodes, v_tag, v_categories
+                        )
+                        plan, vertical_deferred = await vertical_coverage.plan_fill(
+                            vconn, leaf_chains, v_tag, v_categories
                         )
 
-                    if cells:
+                    if plan:
                         yield {
                             "type": "vertical_researching",
                             "vertical": v_label,
-                            "cells": len(cells),
-                            "message": f"Researching {len(cells)} {v_label} requirement area(s)…",
+                            "cells": len(plan),
+                            "deferred": vertical_deferred,
+                            "message": (
+                                f"Researching {len(plan)} {v_label} requirement area(s)…"
+                                + (f" ({vertical_deferred} more queued for the next build)"
+                                   if vertical_deferred else "")
+                            ),
                         }
-                        async with get_connection() as vconn:
-                            async for vev in vertical_coverage.fill(
-                                vconn, company_id, cells, v_tag, v_context
-                            ):
-                                vertical_new += vev.get("new", 0)
-                                yield {**vev, "type": "vertical_codified", "vertical": v_label}
+                        # A connection factory, not a connection: the fill runs
+                        # many sequential Gemini calls and must not hold a single
+                        # pool slot across all of them.
+                        async for vev in vertical_coverage.fill(
+                            get_connection, company_id, plan, v_tag, v_context
+                        ):
+                            vertical_new += vev.get("new", 0)
+                            vertical_deduped += vev.get("deduped", 0)
+                            if vev.get("category") is None:
+                                # Trailing dedupe summary — already folded into the
+                                # totals above; not a research event.
+                                continue
+                            yield {**vev, "type": "vertical_codified", "vertical": v_label}
 
-                        if vertical_new:
-                            async with get_connection() as vconn:
-                                for loc in locs:
-                                    await vertical_coverage.reproject_location(
-                                        vconn, company_id, loc["id"]
-                                    )
-                            yield {
-                                "type": "vertical_complete",
-                                "vertical": v_label,
-                                "requirements_added": vertical_new,
-                                "message": f"{v_label}: {vertical_new} requirement(s) added.",
-                            }
+                # Reproject when the catalog changed under the tenant (new rows OR
+                # deduped rows their step-3 projection may reference), and ALWAYS
+                # when the specialty tag was minted this build: every projection
+                # made before that write filtered the vertical's rows out, so a
+                # fully-covered ledger (zero research) still means the tenant has
+                # no vertical rows on their tab yet.
+                if vertical_new or vertical_deduped or vertical_minted:
+                    # Re-read the ACTIVE locations rather than reusing `locs`: the
+                    # roster union (3b) can have created locations that aren't in
+                    # it, and those tenants — the CSV-only ones — are exactly who
+                    # would otherwise never see the new rows.
+                    async with get_connection() as vconn:
+                        all_locs = await vconn.fetch(
+                            "SELECT id FROM business_locations "
+                            "WHERE company_id = $1 AND is_active = true",
+                            company_id,
+                        )
+                        for row in all_locs:
+                            await vertical_coverage.reproject_location(
+                                vconn, company_id, row["id"]
+                            )
+                if vertical_new:
+                    yield {
+                        "type": "vertical_complete",
+                        "vertical": v_label,
+                        "requirements_added": vertical_new,
+                        "message": f"{v_label}: {vertical_new} requirement(s) added.",
+                    }
         except Exception as exc:
             # Vertical scoping is additive — never fail a build over it.
             yield {
@@ -698,11 +748,29 @@ async def build_compliance_baseline_stream(
             )
 
         coverage_pct = round(100 * hb_covered / hb_total) if hb_total else None
+
+        # Recount rather than reuse `total_covered`: that was summed per-location in
+        # step 3, before the vertical fill (3c) added rows and reprojected. The
+        # headline number on the finished screen was understating what the tenant
+        # actually has every time a vertical contributed.
+        # No `or total_covered` fallback: COUNT(*) never returns NULL, and the
+        # one case a falsy fallback would fire — a genuine zero — is exactly the
+        # case it must not paper over with the stale pre-fill sum.
+        async with get_connection() as conn:
+            final_covered = await conn.fetchval(
+                """
+                SELECT COUNT(*) FROM compliance_requirements cr
+                JOIN business_locations bl ON bl.id = cr.location_id
+                WHERE bl.company_id = $1 AND bl.is_active = true
+                """,
+                company_id,
+            )
+
         yield {
             "type": "complete",
             "locations": len(locs) + roster_locations_added,
             "jurisdictions": len(jurisdictions_seen),
-            "requirements": total_covered,
+            "requirements": final_covered,
             "codified_new": total_codified,
             "handbook_states_graded": handbook_states_graded,
             "handbook_coverage_pct": coverage_pct,
@@ -710,6 +778,7 @@ async def build_compliance_baseline_stream(
             "skipped_no_work_state": skipped_no_work_state,
             "vertical": vertical_label,
             "vertical_requirements_added": vertical_new,
+            "vertical_deferred": vertical_deferred,
             "message": "Your compliance baseline is live.",
         }
 

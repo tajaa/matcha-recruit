@@ -86,3 +86,71 @@ class TestIndustryTagShape:
         slug = industry_specialties.slugify("Dental Practice")
         assert slug == "dental_practice"
         assert industry_specialties.label_from_slug(slug) == "Dental Practice"
+
+
+class TestEntityTypeSpecialtyMap:
+    """One vertical must have ONE tag, and inference must never mint one.
+
+    `infer_facility_profile` constrains entity_type to a CLOSED ENUM, so the
+    mapping to a specialty slug is a lookup, not a heuristic. An earlier
+    suffix-stripping version mangled the enum's own values ("nursing_facility" →
+    "nursing", "Urgent Care" → "urgent") and could persist a company-name-shaped
+    slug into healthcare_specialties — minting a disjoint ledger namespace and a
+    Gemini discovery run for a vertical that doesn't exist. Signup is the only
+    place a new specialty enters the vocabulary.
+    """
+
+    def test_vertical_enum_values_map_to_their_specialty(self):
+        from app.core.services.vertical_coverage import _specialty_from_entity_type
+
+        assert _specialty_from_entity_type("dental") == "dental"
+        assert _specialty_from_entity_type("pharmacy") == "pharmacy"
+        assert _specialty_from_entity_type("behavioral_health") == "behavioral_health"
+        assert _specialty_from_entity_type("dialysis_center") == "dialysis"
+
+    def test_facility_shapes_are_not_verticals(self):
+        from app.core.services.vertical_coverage import _specialty_from_entity_type
+
+        # hospital/clinic/fqhc describe the FACILITY, not an industry vertical —
+        # trigger profiles handle those. Mapping them to a specialty would scope
+        # every plain clinic into a phantom vertical.
+        for shape in ("hospital", "clinic", "fqhc", "nursing_facility",
+                      "ambulatory_surgery_center", "lab", "other"):
+            assert _specialty_from_entity_type(shape) is None
+
+    def test_free_text_never_mints_a_specialty(self):
+        from app.core.services.vertical_coverage import _specialty_from_entity_type
+
+        assert _specialty_from_entity_type("Dental Surgery Center of Excellence") is None
+        assert _specialty_from_entity_type("Urgent Care") is None
+        assert _specialty_from_entity_type("") is None
+        assert _specialty_from_entity_type(None) is None
+
+
+class TestUnreadableTriggerFailsOpenNotCrash:
+    """A trigger we cannot parse must not take down the projection.
+
+    `_decode_jsonb` returns an unparseable value as-is (and jsonfix01 deliberately
+    leaves such rows in the DB rather than guessing), so a garbage string is
+    truthy. Passing it to the evaluator dies on `cond.get("type")`. One bad
+    catalog row would break the compliance tab of every tenant whose chain
+    contains it.
+    """
+
+    def test_evaluator_would_crash_on_a_string(self):
+        from app.core.services.compliance_service import evaluate_trigger_conditions
+
+        with pytest.raises(AttributeError):
+            evaluate_trigger_conditions("not-a-dict", {})
+
+    def test_projection_guards_with_isinstance(self):
+        # The guard is `isinstance(trigger, dict)` in _project_chain_to_location.
+        # Assert the shape it relies on: a dict trigger evaluates, everything else
+        # is skipped by the caller rather than passed in.
+        from app.core.services.compliance_service import evaluate_trigger_conditions
+
+        trigger = {"type": "entity_type", "value": "behavioral_health"}
+        assert evaluate_trigger_conditions(trigger, {"entity_type": "behavioral_health"})
+        assert not evaluate_trigger_conditions(trigger, {"entity_type": "dental"})
+        # No trigger at all → applies to everyone.
+        assert evaluate_trigger_conditions(None, {})

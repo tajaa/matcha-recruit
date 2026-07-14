@@ -1421,17 +1421,28 @@ async def _load_chain_requirements(conn, leaf_jurisdiction_id: UUID) -> List[Dic
     top of this — this is the candidate set, not the final one.
     """
     rows = await conn.fetch(
+        # `depth` bounds the recursion. The tree is at most city→county→state→
+        # federal, but a parent_id cycle (a bad merge, a hand-edited row — the junk
+        # `ca, CA` / `FL, FL` nodes are still live) would otherwise spin this CTE
+        # forever, hanging the connection and every compliance check behind it.
+        #
+        # status = 'active' only. requirement_status_enum also has 'superseded' and
+        # 'pending': a superseded row would be served next to the row that replaced
+        # it (the same obligation twice, one with a stale value), and 'pending' is
+        # the grounding-quarantine state — not something a tenant should be told
+        # they are liable for.
         """
         WITH RECURSIVE chain AS (
-            SELECT id, parent_id FROM jurisdictions WHERE id = $1
+            SELECT id, parent_id, 0 AS depth FROM jurisdictions WHERE id = $1
             UNION ALL
-            SELECT j.id, j.parent_id
+            SELECT j.id, j.parent_id, c.depth + 1
             FROM jurisdictions j
             JOIN chain c ON j.id = c.parent_id
+            WHERE c.depth < 8
         )
         SELECT r.* FROM jurisdiction_requirements r
         JOIN chain c ON c.id = r.jurisdiction_id
-        WHERE r.status NOT IN ('under_review', 'repealed')
+        WHERE r.status = 'active'
         """,
         leaf_jurisdiction_id,
     )
@@ -1459,12 +1470,30 @@ async def _project_chain_to_location(
     _normalize_requirement_categories(requirements)
     requirements = await _filter_requirements_for_company(conn, company_id, requirements)
 
-    facility_attributes = _decode_jsonb(getattr(location, "facility_attributes", None)) or {}
+    facility_attributes = _decode_jsonb(getattr(location, "facility_attributes", None))
+    if not isinstance(facility_attributes, dict):
+        facility_attributes = {}
     kept: List[Dict] = []
     for req in requirements:
         trigger = _decode_jsonb(req.get("trigger_conditions"))
-        if trigger and not evaluate_trigger_conditions(trigger, facility_attributes):
+        # `isinstance(dict)`, not just truthiness. _decode_jsonb returns an
+        # unparseable value AS-IS (and jsonfix01 deliberately leaves such rows in
+        # the DB rather than guessing at them), so a garbage string is truthy,
+        # reaches _eval_condition, and dies on `cond.get("type")` —
+        # AttributeError: 'str' object has no attribute 'get'. One bad catalog row
+        # would take down the projection for every tenant whose chain contains it.
+        # A trigger we cannot read is not a trigger we can enforce: treat it as
+        # unconditional, which is how a row with no trigger already behaves.
+        if isinstance(trigger, dict) and not evaluate_trigger_conditions(
+            trigger, facility_attributes
+        ):
             continue
+        if trigger is not None and not isinstance(trigger, dict):
+            logger.warning(
+                "compliance: unreadable trigger_conditions on requirement %s — "
+                "serving it unconditionally",
+                req.get("jurisdiction_requirement_id"),
+            )
         kept.append(req)
     requirements = kept
 
@@ -1761,6 +1790,21 @@ async def _resolve_jurisdiction_id_for_level(
     """
     level = (jurisdiction_level or "").lower().strip()
 
+    # If the node we were handed already IS the requested level, it is its own
+    # home. The per-level helpers below assume a CITY leaf and walk the parent
+    # chain — handed a county node, _get_county_jurisdiction_id inspects the
+    # county's PARENT (the state) and returns None, so every county-stamped row
+    # researched *at* a county node was silently skipped while the caller counted
+    # it as written.
+    own = await conn.fetchrow(
+        "SELECT level FROM jurisdictions WHERE id = $1", leaf_jurisdiction_id
+    )
+    own_level = str(own["level"]) if own else None
+    if own_level == level or (
+        {own_level, level} <= {"federal", "national"} and own_level and level
+    ):
+        return leaf_jurisdiction_id
+
     if level == "city" or not level:
         return leaf_jurisdiction_id
 
@@ -1880,6 +1924,76 @@ async def _upsert_jurisdiction_requirements_routed(
         "levels_routed": {level: len(group) for level, group in level_groups.items()},
         "jurisdictions_affected": len(affected_jurisdictions),
     }
+
+
+async def _upsert_requirements_routed_additive(
+    conn, leaf_jurisdiction_id: UUID, reqs: List[Dict], *,
+    research_source: Optional[str] = None,
+) -> Dict[str, Dict[str, Any]]:
+    """Route each requirement to the jurisdiction its stamped level belongs on.
+
+    Like ``_upsert_jurisdiction_requirements_routed`` but with NO delete pass, so
+    it is safe for a research run that covers only one slice of a jurisdiction
+    (a single industry's categories). That sibling's city-cleanup deletes leaf
+    city rows whose key the run didn't re-emit — for a dental-only pass that would
+    delete every OTHER industry's city rows. It also deliberately does NOT stamp
+    ``last_verified_at`` on the affected jurisdictions: a one-industry pass has
+    not verified the jurisdiction, and stamping it would make
+    ``_is_jurisdiction_fresh`` suppress the *generic* research the jurisdiction
+    may still need.
+
+    Without routing, a specialty pass writes state- and federal-stamped rows onto
+    the LEAF CITY (this is what `_upsert_requirements_additive` does — it takes
+    the jurisdiction it is handed). That is precisely the corruption migration
+    jparent01 exists to undo: the row renders as "California / state" while being
+    reachable only from the one city it was researched from, so no other city in
+    the state can ever see it.
+
+    Returns ``{level: {"jurisdiction_id": UUID|None, "written": int}}`` — what
+    actually LANDED, per stamped level. Callers recording coverage must read this,
+    not the input list: a row whose level cannot be routed is skipped, and a
+    ledger that counts skipped rows as written marks a hole in the catalog as
+    "covered", permanently.
+    """
+    from collections import defaultdict
+
+    level_groups: Dict[str, List[Dict]] = defaultdict(list)
+    for req in reqs:
+        level = (req.get("jurisdiction_level") or "city").lower().strip()
+        level_groups[level].append(req)
+
+    outcome: Dict[str, Dict[str, Any]] = {}
+    affected: set = set()
+    for level, group_reqs in level_groups.items():
+        target_jid = await _resolve_jurisdiction_id_for_level(
+            conn, leaf_jurisdiction_id, level
+        )
+        if target_jid is None:
+            logger.warning(
+                "compliance: cannot route %d %r-level requirement(s) from %s — skipped",
+                len(group_reqs), level, leaf_jurisdiction_id,
+            )
+            outcome[level] = {"jurisdiction_id": None, "written": 0}
+            continue
+        await _upsert_requirements_additive(
+            conn, target_jid, group_reqs, research_source=research_source
+        )
+        affected.add(target_jid)
+        prev = outcome.get(level)
+        outcome[level] = {
+            "jurisdiction_id": target_jid,
+            "written": (prev["written"] if prev else 0) + len(group_reqs),
+        }
+
+    for jid in affected:
+        count = await conn.fetchval(
+            "SELECT COUNT(*) FROM jurisdiction_requirements WHERE jurisdiction_id = $1", jid
+        )
+        await conn.execute(
+            "UPDATE jurisdictions SET requirement_count = $1, updated_at = NOW() WHERE id = $2",
+            count, jid,
+        )
+    return outcome
 
 
 async def _upsert_requirements_additive(
@@ -9610,6 +9724,8 @@ async def research_specialization_for_jurisdiction(
     skip_existing: bool = True,
     grounded_corpus: str = "",
     citation_index: Optional[Dict[str, Any]] = None,
+    route_by_level: bool = False,
+    only_levels: Optional[set] = None,
 ) -> Dict[str, Any]:
     """Research specialization-specific categories for a jurisdiction.
 
@@ -9619,6 +9735,30 @@ async def research_specialization_for_jurisdiction(
     jurisdiction already has rows in it — the fetch-queue case, where the
     category exists but a specific key was missed (the missing key is targeted
     via ``industry_context``).
+
+    ``route_by_level=True`` files each returned row on the jurisdiction its
+    STAMPED level belongs to, instead of writing everything to the jurisdiction
+    passed in. Without it, researching a city hands back federal and state
+    obligations and writes them onto the city — the misparenting jparent01 had to
+    migrate away. Off by default so the admin specialization flow keeps its
+    existing behavior; the vertical-coverage path turns it on. Adds
+    ``jurisdictions_written`` and ``written_by_level`` to the result.
+
+    TODO(known-debt): the default-False means the admin specialization flow and
+    the scope-registry research paths still write leaf-misparented rows — the
+    writer jparent01 migrated the damage of is alive on those paths. Flipping the
+    default needs those three flows re-verified (their skip_existing checks read
+    per-jurisdiction state that routing relocates); do it as its own change.
+
+    ``only_levels``: keep ONLY rows whose stamped jurisdiction_level is in this
+    set, dropping the rest before they are written. Researching a category at every
+    node of a chain (which is how the vertical ledger earns its per-state reuse)
+    otherwise collects the same state obligation up to four times — the city, county,
+    state and federal passes each volunteer California's amalgam rule, and the model
+    names it differently every time, so no deterministic key/title dedupe can
+    collapse them. Giving each cell sole ownership of ONE level removes the
+    duplication at the source: a row this cell doesn't own is not dropped from the
+    catalog, it is simply left to the cell that does own it.
 
     ``grounded_corpus`` (+ ``citation_index``): fetched official statute text the
     model must extract values FROM and cite (see grounded.py). When present, each
@@ -9648,7 +9788,17 @@ async def research_specialization_for_jurisdiction(
     city = j["city"]
     state = j["state"]
     county = j.get("county")
-    location_name = f"{city}, {state}" if city else state
+    # County nodes store their name in `city` under an internal sentinel
+    # ('_county_los angeles'). Passed through raw, the Gemini prompt is asked
+    # about a city literally named '_county_los angeles' — degraded or nonsense
+    # research whose empty result then gets recorded as a terminal 'empty'
+    # verdict. Present it as the county it is.
+    if city and city.startswith("_county_"):
+        county = county or city[len("_county_"):]
+        city = ""
+        location_name = f"{county.title()} County, {state}"
+    else:
+        location_name = f"{city}, {state}" if city else state
     # Federal target = the U.S. national baseline itself (state 'US', no city). The
     # research prompt otherwise treats the jurisdiction as a state/local layer ABOVE
     # federal and returns a null "no additional rule" row — degenerate for federal.
@@ -9703,6 +9853,28 @@ async def research_specialization_for_jurisdiction(
     penalties_stripped = 0  # ungrounded penalty blocks dropped in grounded runs
     failed_categories: List[str] = []
     added_requirements: List[Dict[str, Any]] = []
+    jurisdictions_written: set = set()
+    # level -> rows that actually LANDED (routing can skip a level it can't
+    # place). Coverage decisions must read this, never the pre-write count.
+    written_by_level: Dict[str, int] = {}
+
+    async def _write(rows: List[Dict[str, Any]], *, research_source: str) -> None:
+        if route_by_level:
+            outcome = await _upsert_requirements_routed_additive(
+                conn, jurisdiction_id, rows, research_source=research_source
+            )
+            for level, info in outcome.items():
+                written_by_level[level] = written_by_level.get(level, 0) + info["written"]
+                if info["jurisdiction_id"]:
+                    jurisdictions_written.add(info["jurisdiction_id"])
+        else:
+            await _upsert_requirements_additive(
+                conn, jurisdiction_id, rows, research_source=research_source
+            )
+            jurisdictions_written.add(jurisdiction_id)
+            for r in rows:
+                level = (r.get("jurisdiction_level") or "city").lower().strip()
+                written_by_level[level] = written_by_level.get(level, 0) + 1
 
     # Batch categories
     batches = [missing[i:i + batch_size] for i in range(0, len(missing), batch_size)]
@@ -9729,6 +9901,19 @@ async def research_specialization_for_jurisdiction(
                 grounded_corpus=grounded_corpus,
             )
             reqs = reqs or []
+
+            if only_levels:
+                kept = [
+                    r for r in reqs
+                    if (r.get("jurisdiction_level") or "city").lower().strip() in only_levels
+                ]
+                if len(kept) != len(reqs):
+                    logger.info(
+                        "specialization: %s/%s — dropped %d row(s) outside this cell's level %s "
+                        "(owned by another cell in the chain)",
+                        location_name, ",".join(batch), len(reqs) - len(kept), sorted(only_levels),
+                    )
+                reqs = kept
 
             for req in reqs:
                 _clamp_varchar_fields(req)
@@ -9762,13 +9947,11 @@ async def research_specialization_for_jurisdiction(
                     for r in ungrounded:
                         r["grounding"] = "ungrounded"
                     if grounded:
-                        await _upsert_requirements_additive(
-                            conn, jurisdiction_id, grounded, research_source="gemini_grounded")
+                        await _write(grounded, research_source="gemini_grounded")
                     if ungrounded:
-                        await _upsert_requirements_additive(
-                            conn, jurisdiction_id, ungrounded, research_source="gemini")
+                        await _write(ungrounded, research_source="gemini")
                 else:
-                    await _upsert_requirements_additive(conn, jurisdiction_id, reqs, research_source="gemini")
+                    await _write(reqs, research_source="gemini")
                 total_new += len(reqs)
                 added_requirements.extend(reqs)
         except Exception as e:
@@ -9790,6 +9973,8 @@ async def research_specialization_for_jurisdiction(
         "failed": failed_categories,
         "requirements": added_requirements,
         "penalties_stripped": penalties_stripped,
+        "jurisdictions_written": jurisdictions_written,
+        "written_by_level": written_by_level,
     }
 
 
