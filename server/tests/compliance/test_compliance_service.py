@@ -1,3 +1,5 @@
+import pytest
+
 import asyncio
 
 from app.core.services import compliance_service as cs
@@ -599,3 +601,22 @@ def test_wellformed_conditions_still_evaluate_normally():
 
     # No trigger at all still means "always applies" — unchanged.
     assert cs.evaluate_trigger_conditions(None, {}) is True
+
+
+# ── a stateless location must not 500 the compliance page ────────────────────
+
+@pytest.mark.asyncio
+async def test_preemption_filter_survives_a_location_with_no_state():
+    """`_filter_with_preemption` called `state.upper()` unguarded, so any
+    location with a NULL state (10 live rows on dev) raised AttributeError and
+    took the whole tenant compliance page down with a 500. Preemption is a
+    state-law question — with no state there is no rule to apply, so the
+    requirements pass through unfiltered."""
+    reqs = [
+        {"category": "minimum_wage", "jurisdiction_level": "state",
+         "jurisdiction_name": "California", "title": "CA Minimum Wage"},
+    ]
+
+    out = await cs._filter_with_preemption(None, reqs, None)  # conn unused on this path
+
+    assert out == reqs

@@ -4150,7 +4150,7 @@ def _filter_by_jurisdiction_priority(requirements):
     return filtered
 
 
-async def _filter_with_preemption(conn, requirements, state: str):
+async def _filter_with_preemption(conn, requirements, state: Optional[str]):
     """Preemption-aware jurisdiction filter.
 
     For each category group:
@@ -4159,6 +4159,16 @@ async def _filter_with_preemption(conn, requirements, state: str):
     3. If allowed (or no rule): apply most-beneficial-to-employee for wage
        categories, or most-local for others (existing behavior).
     """
+    # A location with no state (10 live rows on dev) reached `state.upper()` and
+    # 500'd the whole compliance page. Preemption is a state-law question — with
+    # no state there is no rule to apply, so pass the requirements through
+    # unfiltered rather than taking the tenant's page down.
+    if not state:
+        logger.warning(
+            "preemption skipped: location has no state — returning requirements unfiltered"
+        )
+        return requirements
+
     norm_state = state.upper().strip()
     state_name = _CODE_TO_STATE_NAME.get(norm_state, norm_state)
 
