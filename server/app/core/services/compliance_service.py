@@ -1321,15 +1321,18 @@ async def _is_jurisdiction_fresh(
 async def _load_jurisdiction_requirements(conn, jurisdiction_id: UUID) -> List[Dict]:
     """Read requirements from the jurisdiction repository.
 
-    Excludes 'under_review' (grounding-quarantined) rows — the single choke
-    point every tenant-sync and gap-detection caller goes through. A
-    quarantined row reads as a gap (triggers re-research) rather than as
+    Excludes 'under_review' (grounding-quarantined) and 'repealed' (an admin
+    reviewed the quarantined value and confirmed it WRONG) rows — the single
+    choke point every tenant-sync and gap-detection caller goes through. A
+    quarantined row reads as a gap (triggers re-research, and a re-research
+    that passes grounding promotes it back to active) rather than as
     served/covered — never silently surfaced to a tenant, never silently
-    treated as permanently missing either.
+    treated as permanently missing either. A rejected row must obviously never
+    be served: it is a known-wrong value kept only as an audit trail.
     """
     rows = await conn.fetch(
         "SELECT * FROM jurisdiction_requirements "
-        "WHERE jurisdiction_id = $1 AND status != 'under_review'",
+        "WHERE jurisdiction_id = $1 AND status NOT IN ('under_review', 'repealed')",
         jurisdiction_id,
     )
     # Carry the catalog row id under an explicit key so the per-location sync can
@@ -1663,16 +1666,31 @@ async def _upsert_requirements_additive(
     category_ids = {r["slug"]: r["id"] for r in await conn.fetch(
         "SELECT id, slug FROM compliance_categories"
     )}
+    # Registry↔seed drift fallback: the code registry has repeatedly gained
+    # categories before their compliance_categories seed migration landed
+    # (baseline01, mfgcat01, catseed01 — each fixed a prior instance). A row
+    # in such a category must still be WRITTEN (the `category` text column is
+    # what nearly every read path filters on) — parked on `uncategorized`
+    # rather than dropped, and never on an arbitrary row (the old LIMIT-1
+    # bug). catseed01's backfill re-homes parked rows once the seed exists.
+    uncategorized_id = category_ids.get("uncategorized")
 
     for req in reqs:
         category_id = category_ids.get(req.get("category"))
         if category_id is None:
             logger.warning(
-                "compliance_service: dropping requirement %r for jurisdiction %s — "
-                "category %r has no compliance_categories row (registry/seed drift)",
-                req.get("title"), jurisdiction_id, req.get("category"),
+                "compliance_service: category %r has no compliance_categories row "
+                "(registry/seed drift) — parking %r on 'uncategorized' for "
+                "jurisdiction %s (author a seed migration; see catseed01)",
+                req.get("category"), req.get("title"), jurisdiction_id,
             )
-            continue
+            category_id = uncategorized_id
+            if category_id is None:
+                logger.error(
+                    "compliance_service: no 'uncategorized' fallback row either — "
+                    "dropping requirement %r", req.get("title"),
+                )
+                continue
 
         # Build per-requirement metadata (research_source + penalties if present)
         meta_dict: dict = {}
@@ -1711,15 +1729,22 @@ async def _upsert_requirements_additive(
         aet = json.dumps(aet_raw) if aet_raw else None
         steps_raw = req.get("implementation_steps")
         steps_json = json.dumps(steps_raw) if isinstance(steps_raw, list) and steps_raw else None
-        # Quarantine: req["grounded"] is an explicit True/False ONLY when this
-        # req was actually checked against a fetched corpus
-        # (validate_requirement_citations) — never set at all on the legacy
-        # ungrounded-by-design research paths (healthcare/oncology/medical
-        # research, general compliance checks), which stay 'active' exactly
-        # as before. Only a req that WAS given real statute text and still
-        # failed to cite it gets quarantined — narrower than "any ungrounded
-        # row", matching requirement_status_enum's 'under_review' value.
-        req_status = "under_review" if req.get("grounded") is False else "active"
+        # Grounding verdict → status intent (tri-state, consumed by the INSERT
+        # VALUES and the ON CONFLICT status CASE below). req["grounded"] is an
+        # explicit True/False ONLY when this req was actually checked against a
+        # fetched corpus (validate_requirement_citations) — never set at all on
+        # the legacy ungrounded-by-design research paths, which pass 'none' and
+        # leave status alone. False ⇒ quarantine ('under_review'); True ⇒
+        # 'promote' (un-quarantines a previously-failed row — without this,
+        # under_review was terminal and the row looped on the research worklist
+        # forever). Narrower than "any ungrounded row" by design.
+        grounded = req.get("grounded")
+        if grounded is False:
+            req_status = "under_review"
+        elif grounded is True:
+            req_status = "promote"
+        else:
+            req_status = "none"
         await conn.execute(
             """
             INSERT INTO jurisdiction_requirements
@@ -1739,7 +1764,9 @@ async def _upsert_requirements_additive(
                      WHERE key = $23::text AND category_slug = $24::text LIMIT 1),
                     COALESCE($25::text, 'unchecked'),
                     CASE WHEN $25::text IS NOT NULL THEN NOW() ELSE NULL END,
-                    $26::requirement_status_enum)
+                    CASE WHEN $26::text = 'under_review'
+                         THEN 'under_review'::requirement_status_enum
+                         ELSE 'active'::requirement_status_enum END)
             ON CONFLICT (jurisdiction_id, requirement_key) DO UPDATE SET
                 category = EXCLUDED.category,
                 rate_type = EXCLUDED.rate_type,
@@ -1803,20 +1830,38 @@ async def _upsert_requirements_additive(
                 END,
                 regulation_key = COALESCE(EXCLUDED.regulation_key, jurisdiction_requirements.regulation_key),
                 key_definition_id = COALESCE(EXCLUDED.key_definition_id, jurisdiction_requirements.key_definition_id),
+                -- Forward-repair: a re-research with a properly-resolved category
+                -- corrects a historically mis-tagged row (the old LIMIT-1 bug).
+                -- NULLIF keeps a drift-parked 'uncategorized' write ($27) from
+                -- downgrading an already-correct tag.
+                category_id = COALESCE(
+                    NULLIF(EXCLUDED.category_id, $27::uuid),
+                    jurisdiction_requirements.category_id),
                 source_url_status = CASE
                     WHEN $25::text IS NOT NULL THEN $25::text
                     ELSE jurisdiction_requirements.source_url_status END,
                 source_checked_at = CASE
                     WHEN $25::text IS NOT NULL THEN NOW()
                     ELSE jurisdiction_requirements.source_checked_at END,
-                -- Escalate-only: a write that failed grounding quarantines the
-                -- row, but a write with no grounding verdict (the ordinary
-                -- case — see req_status above) never silently reactivates a
-                -- row an admin or a prior grounding failure parked here.
+                -- Grounding verdicts move status BOTH ways: a write that failed
+                -- grounding quarantines the row; a write that PASSED grounding
+                -- promotes a quarantined row back to active (without this,
+                -- under_review was terminal — the row stayed off the served
+                -- surface forever while staying ON the research worklist,
+                -- re-burning Gemini every scheduled cycle). A write with no
+                -- verdict (the ordinary ungrounded path) never touches status.
                 status = CASE
-                    WHEN $26::requirement_status_enum = 'under_review' THEN 'under_review'::requirement_status_enum
+                    WHEN $26::text = 'under_review' THEN 'under_review'::requirement_status_enum
+                    WHEN $26::text = 'promote'
+                         AND jurisdiction_requirements.status = 'under_review'
+                    THEN 'active'::requirement_status_enum
                     ELSE jurisdiction_requirements.status END,
                 updated_at = NOW()
+            -- 'repealed' is an admin's explicit "this value is WRONG" verdict
+            -- (POST /under-review/decide) and the row survives only as an audit
+            -- trail. Re-research must not silently overwrite it back into
+            -- existence — leave the row frozen until a human un-rejects it.
+            WHERE jurisdiction_requirements.status <> 'repealed'
             """,
             jurisdiction_id,
             requirement_key,
@@ -1843,7 +1888,8 @@ async def _upsert_requirements_additive(
             regulation_key,        # $23: bare regulation_key (store↔scope join key)
             normalized_category,   # $24: normalized category for the RKD FK lookup
             req.get("source_url_status"),  # $25: liveness flag from _validate_source_urls
-            req_status,             # $26: 'under_review' quarantine iff grounding was checked and failed
+            req_status,             # $26: grounding verdict — 'under_review' | 'promote' | 'none'
+            uncategorized_id,       # $27: drift-park sentinel — never downgrades an existing tag
         )
 
 
@@ -2648,6 +2694,10 @@ async def _upsert_jurisdiction_requirements(
     category_ids = {r["slug"]: r["id"] for r in await conn.fetch(
         "SELECT id, slug FROM compliance_categories"
     )}
+    # Registry↔seed drift fallback — park on 'uncategorized', never drop and
+    # never an arbitrary row. See the twin comment in
+    # _upsert_requirements_additive; catseed01's backfill re-homes these.
+    uncategorized_id = category_ids.get("uncategorized")
 
     new_keys = set()
     for req in reqs:
@@ -2661,11 +2711,18 @@ async def _upsert_jurisdiction_requirements(
         category_id = category_ids.get(req.get("category"))
         if category_id is None:
             logger.warning(
-                "compliance_service: dropping requirement %r for jurisdiction %s — "
-                "category %r has no compliance_categories row (registry/seed drift)",
-                req.get("title"), jurisdiction_id, req.get("category"),
+                "compliance_service: category %r has no compliance_categories row "
+                "(registry/seed drift) — parking %r on 'uncategorized' for "
+                "jurisdiction %s (author a seed migration; see catseed01)",
+                req.get("category"), req.get("title"), jurisdiction_id,
             )
-            continue
+            category_id = uncategorized_id
+            if category_id is None:
+                logger.error(
+                    "compliance_service: no 'uncategorized' fallback row either — "
+                    "dropping requirement %r", req.get("title"),
+                )
+                continue
 
         tc = req.get("trigger_conditions")
         tc_json = json.dumps(tc) if tc else None
@@ -2710,6 +2767,12 @@ async def _upsert_jurisdiction_requirements(
                 last_changed_at = CASE
                     WHEN jurisdiction_requirements.current_value IS DISTINCT FROM EXCLUDED.current_value
                     THEN NOW() ELSE jurisdiction_requirements.last_changed_at END,
+                -- Forward-repair a historically mis-tagged category_id (the old
+                -- LIMIT-1 bug); NULLIF keeps a drift-parked 'uncategorized'
+                -- write ($21) from downgrading an already-correct tag.
+                category_id = COALESCE(
+                    NULLIF(EXCLUDED.category_id, $21::uuid),
+                    jurisdiction_requirements.category_id),
                 source_url_status = CASE
                     WHEN $20::text IS NOT NULL THEN $20::text
                     ELSE jurisdiction_requirements.source_url_status END,
@@ -2738,6 +2801,7 @@ async def _upsert_jurisdiction_requirements(
             aet,
             category_id,           # $19: resolved above — never an arbitrary fallback row
             req.get("source_url_status"),  # $20: liveness flag from _validate_source_urls
+            uncategorized_id,      # $21: drift-park sentinel — never downgrades an existing tag
         )
 
     # Remove jurisdiction rows not in new result set
@@ -9473,6 +9537,12 @@ async def admin_add_requirements_to_location_batch(
     Idempotent: a row already linked to a given catalog requirement at this
     location is skipped via the partial unique index. Returns
     ``{written, skipped_existing, missing_jr}``.
+
+    Non-active rows (grounding-quarantined 'under_review', admin-rejected
+    'repealed') are counted as ``missing_jr`` and never projected. This is an
+    id-keyed path, so it bypasses the ``_load_jurisdiction_requirements`` choke
+    point: a session whose resolved scope was computed BEFORE a row was
+    quarantined would otherwise still serve it to the tenant at finalize.
     """
     if not await verify_location_ownership(conn, location_id, company_id):
         raise ValueError("Location does not belong to this company")
@@ -9480,7 +9550,9 @@ async def admin_add_requirements_to_location_batch(
     written = skipped = missing = 0
     for jr_id in jr_ids:
         jr = await conn.fetchrow(
-            "SELECT * FROM jurisdiction_requirements WHERE id = $1", jr_id
+            "SELECT * FROM jurisdiction_requirements WHERE id = $1 "
+            "AND COALESCE(status, 'active') = 'active'",
+            jr_id,
         )
         if not jr:
             missing += 1

@@ -312,10 +312,14 @@ async def _recount(conn, index_id: str) -> tuple[int, int]:
         "SELECT COUNT(*) FROM authority_index_items WHERE authority_index_id = $1",
         index_id,
     )
+    # Predicate MUST match classify._refresh_unclassified_count (confirmed-only):
+    # this runs on every ingest, so an any-row predicate here would silently
+    # revert the confirmed-only semantics the completeness gate depends on.
     unclassified = await conn.fetchval(
         """
         SELECT COUNT(*) FROM authority_index_items i
-        LEFT JOIN authority_item_classifications c ON c.item_id = i.id
+        LEFT JOIN authority_item_classifications c
+            ON c.item_id = i.id AND c.status = 'confirmed'
         WHERE i.authority_index_id = $1 AND c.id IS NULL
         """,
         index_id,

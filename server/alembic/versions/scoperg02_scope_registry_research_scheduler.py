@@ -26,7 +26,19 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.get_bind().exec_driver_sql("""
+    conn = op.get_bind()
+
+    # Generic run marker. The worker has no celery-beat: the hourly container
+    # restart re-fires @worker_ready, so a task that makes LIVE GEMINI CALLS
+    # needs its own interval guard or it re-runs every hour forever. The ingest
+    # sweep improvises one off authority_indexes.last_ingested_at; a research
+    # cycle has no such natural marker (a fruitless cycle writes no rows at all
+    # but still burns the API), so give every scheduled task a real one.
+    conn.exec_driver_sql(
+        "ALTER TABLE scheduler_settings ADD COLUMN IF NOT EXISTS last_run_at TIMESTAMP"
+    )
+
+    conn.exec_driver_sql("""
         INSERT INTO scheduler_settings (task_key, display_name, description, enabled, max_per_cycle)
         VALUES (
             'scope_registry_research',
@@ -42,6 +54,10 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.get_bind().exec_driver_sql(
+    conn = op.get_bind()
+    conn.exec_driver_sql(
         "DELETE FROM scheduler_settings WHERE task_key = 'scope_registry_research'"
+    )
+    conn.exec_driver_sql(
+        "ALTER TABLE scheduler_settings DROP COLUMN IF EXISTS last_run_at"
     )

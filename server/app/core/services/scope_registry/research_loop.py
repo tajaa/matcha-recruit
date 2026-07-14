@@ -62,8 +62,21 @@ async def corpus_for_jurisdiction(
     ``("", {})`` when the registry has no classified authority covering this
     chain, which degrades that caller to ungrounded research — exactly what it
     did before, never worse.
+
+    Deliberately NOT built on ``chain_uncodified``, for two reasons that each
+    made it a silent no-op:
+      * ``labor_only=True`` (its default) drops every non-labor index —
+        including the ``licensed_professions`` slice a specialty research pass
+        is precisely about, so the healthcare caller could never get a corpus.
+      * it returns only the *uncodified* worklist, so a section's statute text
+        would drop out of the corpus the moment its key codified — re-research
+        of an existing value would silently fall back to model recall.
+
+    So: every CONFIRMED, non-excluded classification covering the chain whose
+    RKD category is in ``categories`` (all categories when empty), codified or
+    not.
     """
-    from .codify import chain_uncodified
+    from .jurisdiction_chain import resolve_jurisdiction_chain
 
     try:
         jur = await conn.fetchrow(
@@ -72,12 +85,32 @@ async def corpus_for_jurisdiction(
         if not jur or not jur["state"]:
             return "", {}
 
-        work = await chain_uncodified(conn, state=jur["state"], city=jur["city"] or None)
-        wanted = set(categories or ())
-        items = [
-            it for it in work["keyed"]
-            if not wanted or it.get("category_slug") in wanted
-        ]
+        chain = await resolve_jurisdiction_chain(
+            conn, jur["state"].upper(), jur["city"] or None
+        )
+        chain_ids = chain.get("ids") or []
+        if not chain_ids:
+            return "", {}
+
+        wanted = sorted({c for c in (categories or ()) if c})
+        rows = await conn.fetch(
+            """
+            SELECT i.id AS item_id, i.citation, i.heading,
+                   (i.body_text IS NOT NULL) AS has_body,
+                   ai.slug AS index_slug
+            FROM authority_item_classifications c
+            JOIN authority_index_items i ON i.id = c.item_id
+            JOIN authority_indexes ai ON ai.id = i.authority_index_id
+            LEFT JOIN regulation_key_definitions rkd ON rkd.id = c.key_definition_id
+            WHERE c.status = 'confirmed'
+              AND c.disposition <> 'excluded'
+              AND (ai.jurisdiction_id IS NULL OR ai.jurisdiction_id = ANY($1::uuid[]))
+              AND ($2::text[] IS NULL OR rkd.category_slug = ANY($2::text[]))
+            ORDER BY i.citation
+            """,
+            chain_ids, wanted or None,
+        )
+        items = [dict(r) for r in rows]
         if not items:
             return "", {}
 

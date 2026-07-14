@@ -511,9 +511,18 @@ async def onboarding_readiness(
         open_critical = await conn.fetchval(
             """
             SELECT COUNT(*) FROM compliance_eval_findings
-            WHERE jurisdiction_id = $1 AND status = 'open' AND severity = 'critical'
+            WHERE status = 'open' AND severity = 'critical'
               AND suite <> 'baseline'
-              AND (industry IS NULL OR industry = $2)
+              AND (
+                  (jurisdiction_id = $1 AND (industry IS NULL OR industry = $2))
+                  -- Federal-attributed criticals (scope emits jurisdiction_id
+                  -- NULL for the federal index) bind every US jurisdiction, so
+                  -- they gate everyone — mirroring run_evals' federal_criticals
+                  -- bucket. Without this the live endpoint and the stored run
+                  -- disagree: the run says NOT_READY, this says READY, on the
+                  -- same broken federal baseline.
+                  OR jurisdiction_id IS NULL
+              )
             """,
             jid, canonical,
         )
@@ -526,6 +535,7 @@ async def onboarding_readiness(
         authority=_score("authority"),
         freshness=_score("freshness"),
         tagging=_score("tagging"),
+        scope=_score("scope"),
     )
     readiness = evaluate_readiness(
         subs,

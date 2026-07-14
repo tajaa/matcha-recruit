@@ -117,6 +117,10 @@ async def recompute_strata(conn) -> Dict[str, Any]:
         )
 
         # Refresh every index's unclassified_count in the same transaction.
+        # Predicate MUST match classify._refresh_unclassified_count (confirmed-
+        # only): this bulk refresh runs on every admin confirm (via
+        # recompute_strata), so an any-row predicate here would silently revert
+        # the confirmed-only semantics the completeness gate depends on.
         await conn.execute(
             """
             UPDATE authority_indexes ai
@@ -124,7 +128,8 @@ async def recompute_strata(conn) -> Dict[str, Any]:
             FROM (
                 SELECT i.authority_index_id, COUNT(*) FILTER (WHERE c.id IS NULL) AS cnt
                 FROM authority_index_items i
-                LEFT JOIN authority_item_classifications c ON c.item_id = i.id
+                LEFT JOIN authority_item_classifications c
+                    ON c.item_id = i.id AND c.status = 'confirmed'
                 GROUP BY i.authority_index_id
             ) sub
             WHERE sub.authority_index_id = ai.id

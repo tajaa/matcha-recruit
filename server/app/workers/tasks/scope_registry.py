@@ -30,6 +30,10 @@ CHANNEL = "admin:scope_registry"
 # indexes (§1) rather than sweeping registry-wide with an empty corpus.
 SCHEDULED_RESEARCH_CHAINS = [{"state": "CA", "city": None}]
 MAX_UNITS_PER_CYCLE = 5
+# The worker has no celery-beat — the hourly container restart re-fires
+# @worker_ready. This task makes LIVE GEMINI CALLS, so it guards its own
+# cadence off scheduler_settings.last_run_at (scoperg02).
+MIN_RESEARCH_INTERVAL_DAYS = 6
 
 
 async def _scheduled_run_is_due() -> bool:
@@ -182,6 +186,11 @@ def run_scheduled_research_cycle():
     counterpart to the admin's manual "Research these · codify" button
     (POST /fetch-queue/research). Runs every configured chain in one task
     invocation; a chain failing doesn't abort the rest.
+
+    Rate-limited like the ingest sweep: the hourly worker restart re-fires
+    @worker_ready, and this task makes LIVE GEMINI CALLS. Without the
+    interval guard a chain whose worklist can't drain (e.g. every key
+    quarantines) would re-research the same keys every hour, forever.
     """
     from app.workers.utils import get_db_connection
     from app.core.services.scope_registry.research_loop import run_research_cycle
@@ -189,6 +198,26 @@ def run_scheduled_research_cycle():
     async def _run():
         conn = await get_db_connection()
         try:
+            # Claim the cycle atomically: stamp last_run_at only if it's stale
+            # (or never set), and skip when the UPDATE matched nothing. Stamped
+            # BEFORE the work and regardless of what the work produces — a
+            # fruitless cycle burns Gemini exactly like a productive one, so it
+            # must count against the interval too.
+            claimed = await conn.fetchval(
+                """
+                UPDATE scheduler_settings
+                SET last_run_at = NOW()
+                WHERE task_key = 'scope_registry_research'
+                  AND (last_run_at IS NULL
+                       OR last_run_at < NOW() - ($1 || ' days')::interval)
+                RETURNING TRUE
+                """,
+                str(MIN_RESEARCH_INTERVAL_DAYS),
+            )
+            if not claimed:
+                return {"status": "skipped",
+                        "reason": "a scheduled research cycle ran recently"}
+
             summaries = []
             for chain in SCHEDULED_RESEARCH_CHAINS:
                 try:

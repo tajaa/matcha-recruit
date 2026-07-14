@@ -7392,6 +7392,11 @@ _LABOR_REGULATION_KEYS: Dict[str, FrozenSet[str]] = {
     "minimum_wage": frozenset([
         "national_minimum_wage",
         "state_minimum_wage", "tipped_minimum_wage", "exempt_salary_threshold",
+        # Sub-state regional tier (NY downstate). MUST be listed here, not only
+        # as a RegulationDef: this dict REPLACES the RegulationDef-derived set
+        # for its categories (see the update() below), so a key missing here is
+        # an `invalid_key` tagging finding on every row that carries it.
+        "exempt_salary_threshold_regional",
         "fast_food_minimum_wage", "healthcare_minimum_wage", "large_employer_minimum_wage",
         "small_employer_minimum_wage", "youth_minimum_wage", "tip_credit_prohibition",
         "local_minimum_wage",

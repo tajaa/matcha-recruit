@@ -3641,6 +3641,9 @@ async def init_db():
                 description TEXT,
                 enabled BOOLEAN DEFAULT true,
                 max_per_cycle INTEGER DEFAULT 2,
+                -- Self-cadence marker for tasks the hourly worker restart would
+                -- otherwise re-fire every hour (see scoperg02).
+                last_run_at TIMESTAMP,
                 created_at TIMESTAMP DEFAULT NOW(),
                 updated_at TIMESTAMP DEFAULT NOW()
             )

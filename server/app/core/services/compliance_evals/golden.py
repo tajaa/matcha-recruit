@@ -333,11 +333,17 @@ async def _inherit_along_chains(conn, per_jur: Dict) -> Dict:
     # Ancestors of a sub-state jurisdiction: its state's row + the federal row.
     # Looked up among the fixture jurisdictions only — a fixture-less ancestor
     # contributes no facts, so it can't contribute stats either.
+    #
+    # BOTH lookups are keyed by country. "Federal law applies everywhere" means
+    # everywhere in ITS OWN country: the first non-US national fixture would
+    # otherwise roll UK facts into every US city and vice versa — the same
+    # bucket-confusion completeness.py documents as a real past bug ("a US city
+    # inheriting from the United Kingdom").
     by_level_state = {}
-    federal_ids = []
+    federal_by_country: Dict[str, List] = {}
     for r in rows:
         if r["level"] in ("federal", "national"):
-            federal_ids.append(r["id"])
+            federal_by_country.setdefault(r["country_code"], []).append(r["id"])
         elif r["level"] == "state":
             by_level_state[(r["state"], r["country_code"])] = r["id"]
 
@@ -347,7 +353,7 @@ async def _inherit_along_chains(conn, per_jur: Dict) -> Dict:
         own = per_jur[jid]
         ancestors = []
         if r["level"] not in ("federal", "national"):
-            ancestors.extend(federal_ids)
+            ancestors.extend(federal_by_country.get(r["country_code"], []))
         if r["level"] not in ("federal", "national", "state"):
             state_id = by_level_state.get((r["state"], r["country_code"]))
             if state_id:

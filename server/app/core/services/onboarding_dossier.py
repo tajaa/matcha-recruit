@@ -120,9 +120,16 @@ def build_gap_analysis_dossier(
 def _counts_with_engine(
     counts: dict[str, Any], engine: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    """Stamp scope-registry provenance into the dossier counts (pure)."""
+    """Stamp scope-registry provenance into the dossier counts (pure).
+
+    'engine_partial' carries real engine numbers too — they are a FLOOR (the
+    confirmed obligations really are in scope; unclassified items may add
+    more), which is exactly what its badge says. Emitting them only for the
+    strict 'engine' verdict left the partial badge rendering false zeros over
+    a bank-derived percentage.
+    """
     counts["coverage_source"] = (engine or {}).get("coverage_source") or "bank"
-    if engine and engine.get("coverage_source") == "engine":
+    if engine and engine.get("coverage_source") in ("engine", "engine_partial"):
         engine_counts = engine.get("counts") or {}
         counts["engine_coverage_pct"] = engine.get("coverage_pct")
         counts["engine_covered"] = engine_counts.get("codified")
