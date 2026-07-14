@@ -234,6 +234,13 @@ async def check_location_compliance_endpoint(
                 loc_uuid,
                 company_id,
                 allow_live_research=allow_live,
+                # The tenant-facing "Run check" is the one caller that should also
+                # fill industry-specific coverage: it's the only way an existing
+                # company (onboarded before its vertical was scoped) ever gets it
+                # without waiting for the nightly sweep. The onboarding build runs
+                # its own vertical phase, and the admin flows must not silently
+                # acquire Gemini spend — hence the opt-in, not a new default.
+                include_vertical_fill=True,
             ):
                 if event.get("type") == "heartbeat":
                     yield ": heartbeat\n\n"

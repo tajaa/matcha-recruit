@@ -8064,6 +8064,13 @@ async def trigger_scheduler(task_key: str):
         from ...workers.tasks.auto_archive import run_auto_archive
         run_auto_archive.delay()
         return {"status": "triggered", "task_key": task_key, "message": "Auto-archive enqueued"}
+    elif task_key == "vertical_coverage_sweep":
+        from ...workers.tasks.vertical_coverage_sweep import run_vertical_coverage_sweep
+        # force=True: an admin pressing Trigger means it, so bypass the
+        # enabled-row + once-a-day guards (those exist to stop the hourly worker
+        # restart from re-billing Gemini, not to override a human).
+        run_vertical_coverage_sweep.delay(force=True)
+        return {"status": "triggered", "task_key": task_key, "message": "Vertical coverage sweep enqueued"}
     else:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown task key: {task_key}")
 

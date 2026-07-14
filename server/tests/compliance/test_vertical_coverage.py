@@ -154,3 +154,81 @@ class TestUnreadableTriggerFailsOpenNotCrash:
         assert not evaluate_trigger_conditions(trigger, {"entity_type": "dental"})
         # No trigger at all → applies to everyone.
         assert evaluate_trigger_conditions(None, {})
+
+
+class TestNoRulePlaceholders:
+    """"No rule applies here" rows belong in the CATALOG but not on the TAB.
+
+    The research prompt deliberately asks for such a row instead of an empty list
+    (an empty list reads downstream as a FAILED category), and `skip_existing`
+    callers use their presence as "this category was researched". But the tab
+    answers "what am I responsible for", and a row whose entire content is
+    "nothing" is noise there.
+
+    The flag has to come from the MODEL. There is no safe heuristic, and a real
+    sweep proved it in both directions: `no_surprises_act` is the regulation_key of
+    an actual federal statute (a title/key matcher would delete real law), while a
+    genuine placeholder came back titled "State-Level Export Control Rule" — no
+    "No..." prefix at all, so a matcher would have kept it.
+    """
+
+    def test_flagged_row_is_hidden(self):
+        from app.core.services.compliance_service import _is_no_rule_placeholder
+
+        assert _is_no_rule_placeholder({"metadata": {"no_rule_applies": True}})
+
+    def test_flag_is_read_from_the_raw_research_shape_too(self):
+        # A dict straight off a research pass carries the flag top-level; only a
+        # row loaded from the catalog has it nested in metadata. The stream syncs
+        # the RAW set on its fallback path, so both shapes must be understood.
+        from app.core.services.compliance_service import _is_no_rule_placeholder
+
+        assert _is_no_rule_placeholder({"no_rule_applies": True})
+
+    def test_jsonb_string_metadata_is_decoded(self):
+        # asyncpg hands JSONB back as a str.
+        from app.core.services.compliance_service import _is_no_rule_placeholder
+
+        assert _is_no_rule_placeholder({"metadata": '{"no_rule_applies": true}'})
+
+    def test_real_law_survives(self):
+        from app.core.services.compliance_service import _is_no_rule_placeholder
+
+        # The exact row a title heuristic would have destroyed.
+        assert not _is_no_rule_placeholder({
+            "title": "No Surprises Act (NSA) Requirements",
+            "regulation_key": "no_surprises_act",
+            "metadata": {"grounding": "grounded"},
+        })
+        # And the one it would have wrongly kept, absent the flag.
+        assert not _is_no_rule_placeholder({"title": "State-Level Export Control Rule"})
+
+    def test_unflagged_and_legacy_rows_are_untouched(self):
+        from app.core.services.compliance_service import (
+            _drop_no_rule_placeholders, _is_no_rule_placeholder,
+        )
+
+        assert not _is_no_rule_placeholder({"metadata": None})
+        assert not _is_no_rule_placeholder({})
+        reqs = [
+            {"title": "real", "metadata": {}},
+            {"title": "filler", "metadata": {"no_rule_applies": True}},
+            {"title": "legacy", "metadata": None},
+        ]
+        kept = _drop_no_rule_placeholders(reqs)
+        assert [r["title"] for r in kept] == ["real", "legacy"]
+
+    def test_coercion_defaults_to_false_not_none(self):
+        # A model that omits the field must not produce a null that later reads as
+        # truthy-unknown; absent means "this is a real requirement".
+        from app.core.services.gemini_compliance import _coerce_requirement_shape
+
+        out = _coerce_requirement_shape({"category": "minimum_wage"}, "minimum_wage")
+        assert out["no_rule_applies"] is False
+
+    def test_coercion_accepts_the_string_form(self):
+        from app.core.services.gemini_compliance import _coerce_requirement_shape
+
+        out = _coerce_requirement_shape(
+            {"category": "minimum_wage", "no_rule_applies": "true"}, "minimum_wage")
+        assert out["no_rule_applies"] is True

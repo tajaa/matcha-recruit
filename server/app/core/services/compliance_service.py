@@ -1449,6 +1449,40 @@ async def _load_chain_requirements(conn, leaf_jurisdiction_id: UUID) -> List[Dic
     return [{**dict(r), "jurisdiction_requirement_id": r["id"]} for r in rows]
 
 
+def _is_no_rule_placeholder(req: Dict) -> bool:
+    """Is this row here only to say that no rule applies?
+
+    The research prompt deliberately asks for such a row rather than an empty list
+    (an empty list reads downstream as a FAILED category), so they are load-bearing
+    in the CATALOG — `skip_existing` callers use their presence as "this category
+    was researched". They are pure noise on a TENANT'S TAB, whose whole job is
+    answering "what am I responsible for".
+
+    Keyed ONLY on the model's own `metadata.no_rule_applies` flag. There is no safe
+    heuristic: `no_surprises_act` is the regulation_key of a real federal statute,
+    and "Daily Overtime Threshold: this state has none" is a genuinely useful
+    answer — guessing from titles or null values would hide real obligations.
+    Rows written before the flag existed simply aren't matched, and are left alone.
+
+    Reads BOTH shapes on purpose: a row loaded from the catalog carries the flag
+    inside `metadata` (where _upsert_requirements_additive puts it), while a dict
+    straight off a research pass still carries it top-level — and the research set
+    is exactly what the stream syncs on its fallback path.
+    """
+    if req.get("no_rule_applies"):
+        return True
+    meta = _decode_jsonb(req.get("metadata"))
+    return bool(meta.get("no_rule_applies")) if isinstance(meta, dict) else False
+
+
+def _drop_no_rule_placeholders(reqs: List[Dict]) -> List[Dict]:
+    kept = [r for r in reqs if not _is_no_rule_placeholder(r)]
+    dropped = len(reqs) - len(kept)
+    if dropped:
+        logger.info("compliance: hid %d 'no rule applies' placeholder(s) from the tab", dropped)
+    return kept
+
+
 async def _project_chain_to_location(
     conn, company_id: UUID, location, leaf_jurisdiction_id: UUID
 ) -> List[Dict]:
@@ -1469,6 +1503,7 @@ async def _project_chain_to_location(
 
     _normalize_requirement_categories(requirements)
     requirements = await _filter_requirements_for_company(conn, company_id, requirements)
+    requirements = _drop_no_rule_placeholders(requirements)
 
     facility_attributes = _decode_jsonb(getattr(location, "facility_attributes", None))
     if not isinstance(facility_attributes, dict):
@@ -2072,6 +2107,14 @@ async def _upsert_requirements_additive(
         penalties = sanitize_penalties_for_persist(req.get("penalties"))
         if penalties is not None:
             meta_dict["penalties"] = penalties
+        # "No rule applies here" placeholder — kept in the catalog (the research
+        # prompt asks for one instead of an empty list, which downstream reads as a
+        # FAILED category), but filtered out of the tenant's tab by
+        # _project_chain_to_location. Only ever set from the model's own flag: no
+        # text heuristic can tell these apart from real law (`no_surprises_act` is
+        # a real statute; "Daily Overtime: none" is a real answer).
+        if req.get("no_rule_applies"):
+            meta_dict["no_rule_applies"] = True
         meta_fragment = json.dumps(meta_dict) if meta_dict else None
 
         requirement_key, regulation_key = _compute_key_parts(req)
@@ -5046,10 +5089,23 @@ async def run_compliance_check_stream(
     company_id: UUID,
     allow_live_research: bool = True,
     categories: Optional[List[str]] = None,
+    include_vertical_fill: bool = False,
 ) -> AsyncGenerator[Dict[str, Any], None]:
     """
     Runs a compliance check for a specific location.
     Checks the jurisdiction repository first; only calls Gemini if stale/missing.
+
+    ``include_vertical_fill``: after the check, research any industry-specific
+    (vertical) compliance the shared catalog is still missing for this company —
+    dental law for a dental office, hospitality law for a hotel.
+
+    OFF by default, and that default is load-bearing. This generator has five
+    callers: the tenant "Run check" route, the Matcha-X onboarding build's
+    per-location loop, the roster-jurisdiction union, and two admin onboarding
+    flows. An unconditional fill would fire three times in a single Matcha-X build
+    (which already runs its own vertical phase, with the reproject-on-mint logic
+    this level has no caller context for) and would silently add Gemini spend to
+    the admin white-glove flows. Only the tenant-facing "Run check" opts in.
     Yields progress dicts as SSE-friendly events.
 
     ``categories`` optionally narrows the "required" set this run cares about
@@ -5797,6 +5853,12 @@ async def run_compliance_check_stream(
                     ),
                 }
                 requirements = chain_requirements
+            else:
+                # Fallback path: syncing this run's raw research set. It has NOT
+                # been through _project_chain_to_location, so the placeholder
+                # filter has to be applied here too — otherwise "no rule applies"
+                # rows reach the tab by the one route that skips the projection.
+                requirements = _drop_no_rule_placeholders(requirements)
 
             # Sync requirements to location (change detection, alerts, history)
             # Only create alerts for fresh Gemini data — repository data is cached
@@ -6130,6 +6192,76 @@ async def run_compliance_check_stream(
             )
             raise
 
+    # Vertical (industry-specific) coverage — research what the shared catalog is
+    # still missing for this company's industry, then re-project.
+    #
+    # Placed HERE, after the `async with get_connection()` block above has exited,
+    # on purpose: that block holds ONE pool connection for the entire check, and a
+    # fill is many sequential Gemini calls. Splicing it inside would pin that
+    # connection for minutes. `vertical_coverage.fill` takes a connection FACTORY
+    # for exactly this reason.
+    vertical_new = 0
+    if include_vertical_fill:
+        from ...database import get_connection as _get_conn
+        from . import vertical_coverage
+
+        try:
+            async with _get_conn() as vconn:
+                resolved = await vertical_coverage.resolve_vertical(vconn, company_id)
+                if resolved:
+                    v_parent, v_slug, v_label, v_tag, v_minted = resolved
+                    v_categories, v_context = await vertical_coverage.ensure_specialty(
+                        vconn, v_parent, v_slug, v_label
+                    )
+                    chains = await vertical_coverage.chains_for_leaves(
+                        vconn, [jurisdiction_id]
+                    )
+                    nodes = sorted({j for c in chains.values() for j, _ in c})
+                    await vertical_coverage.backfill_ledger(
+                        vconn, nodes, v_tag, v_categories
+                    )
+                    plan, v_deferred = await vertical_coverage.plan_fill(
+                        vconn, chains, v_tag, v_categories
+                    )
+                else:
+                    plan, v_deferred, v_minted, v_label = [], 0, False, None
+
+            if resolved and (plan or v_minted):
+                if plan:
+                    yield {
+                        "type": "vertical_researching",
+                        "vertical": v_label,
+                        "cells": len(plan),
+                        "deferred": v_deferred,
+                        "message": f"Researching {v_label}-specific requirements…",
+                    }
+                v_deduped = 0
+                async for vev in vertical_coverage.fill(
+                    _get_conn, company_id, plan, v_tag, v_context
+                ):
+                    vertical_new += vev.get("new", 0)
+                    v_deduped += vev.get("deduped", 0)
+
+                # Re-project on ANY catalog change, and always when the specialty
+                # tag was just minted: every projection before that write filtered
+                # this vertical's rows out (the industry filter reads the company's
+                # own tag set), so a fully-covered ledger still leaves the tab bare.
+                if vertical_new or v_deduped or v_minted:
+                    async with _get_conn() as vconn:
+                        await vertical_coverage.reproject_location(
+                            vconn, company_id, location_id
+                        )
+                    yield {
+                        "type": "vertical_complete",
+                        "vertical": v_label,
+                        "requirements_added": vertical_new,
+                        "message": f"{v_label}: {vertical_new} requirement(s) added.",
+                    }
+        except Exception as e:
+            # Vertical scoping is additive — never fail a check over it.
+            print(f"[Compliance] Vertical fill failed for {location_name}: {e}")
+            yield {"type": "warning", "message": f"Vertical scoping incomplete: {e}"}
+
     from ...config import get_settings as _get_settings
     if _get_settings().compliance_emails_enabled:
         try:
@@ -6144,7 +6276,7 @@ async def run_compliance_check_stream(
     yield {
         "type": "completed",
         "location": location_name,
-        "new": new_count,
+        "new": new_count + vertical_new,
         "updated": updated_count,
         "alerts": alert_count,
     }
@@ -7170,17 +7302,32 @@ async def get_recent_corrections(
     jurisdiction_id: UUID,
     category: Optional[str] = None,
     limit: int = 5,
+    conn=None,
 ) -> List[Dict]:
     """Get recent false positive corrections for a jurisdiction.
 
     Used in Phase 3.1 to inject correction context into future research prompts.
 
+    ``conn``: use this connection instead of borrowing the app pool. Required from
+    CELERY WORKERS — they are deliberately pool-free (each task runs its own
+    asyncio loop; an asyncpg pool bound to another loop cannot be reused), so
+    ``get_connection()`` raises there. Without it, every research call made from
+    the vertical-coverage sweep died here, BEFORE reaching Gemini, and the ledger
+    recorded the cells as failed.
+
     Returns:
         List of dicts with: requirement_key, category, correction_reason, admin_notes, created_at
     """
     from ...database import get_connection
+    from contextlib import asynccontextmanager
 
-    async with get_connection() as conn:
+    @asynccontextmanager
+    async def _borrowed():
+        yield conn
+
+    holder = _borrowed() if conn is not None else get_connection()
+
+    async with holder as conn:
         query = """
             SELECT
                 vo.requirement_key,
@@ -9808,7 +9955,9 @@ async def research_specialization_for_jurisdiction(
     known_sources = await get_known_sources(conn, jurisdiction_id)
     source_context = build_context_prompt(known_sources)
     source_context += get_global_authority_sources(categories)
-    corrections = await get_recent_corrections(jurisdiction_id)
+    # Pass `conn` — this function is reachable from the Celery vertical-coverage
+    # sweep, and workers have no pool (get_connection() raises there).
+    corrections = await get_recent_corrections(jurisdiction_id, conn=conn)
     corrections_context = format_corrections_for_prompt(corrections)
 
     try:

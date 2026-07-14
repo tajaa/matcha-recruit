@@ -284,6 +284,20 @@ def _coerce_requirement_shape(req: dict, requested_category: Optional[str]) -> d
         rwp = rwp.strip().lower() not in ("false", "0", "no", "")
     normalized["requires_written_policy"] = bool(rwp) if rwp is not None else None
 
+    # "No rule applies here" placeholder. The research prompt deliberately asks for
+    # one of these rather than an empty list (an empty list reads as a FAILED
+    # category downstream), so they are load-bearing in the catalog — but they are
+    # noise on a tenant's tab, which answers "what am I responsible for".
+    #
+    # It must be a flag the model sets, not something inferred later: no text or
+    # key heuristic can separate these from real law. `no_surprises_act` is the
+    # regulation_key of an actual federal statute, and "Daily Overtime: none" is a
+    # genuinely useful answer. Guessing from titles would delete real obligations.
+    nra = normalized.get("no_rule_applies")
+    if isinstance(nra, str):
+        nra = nra.strip().lower() in ("true", "1", "yes")
+    normalized["no_rule_applies"] = bool(nra) if nra is not None else False
+
     # Validate trigger_conditions — must be dict or None
     tc = normalized.get("trigger_conditions")
     if tc is not None and not isinstance(tc, dict):
@@ -534,6 +548,7 @@ Respond with JSON:
       "source_url": "https://...",
       "source_name": "Source Name",
       "requires_written_policy": true | false,
+      "no_rule_applies": <true ONLY when this row exists solely to report that no rule applies — i.e. you found NO obligation for this category in this jurisdiction and are returning a placeholder saying so. If the employer has a REAL obligation, this is false EVEN WHEN its value is "none" (e.g. "Daily Overtime Threshold: this state has no daily overtime" is a real requirement — no_rule_applies is false).>,
       "cited_sources": <when statute text is provided above: array of bracketed ids like ["S1"] whose text states this value; else omit>,
       "needs_body_review": <true if the provided statute text did not state the value; else omit>,
       "paid": <for leave only: true|false; else omit>,
@@ -601,6 +616,7 @@ Respond with JSON:
       "source_url": "https://...",
       "source_name": "Source Name",
       "requires_written_policy": true | false,
+      "no_rule_applies": <true ONLY when this row exists solely to report that no rule applies — i.e. you found NO obligation for this category in this jurisdiction and are returning a placeholder saying so. If the employer has a REAL obligation, this is false EVEN WHEN its value is "none" (e.g. "Daily Overtime Threshold: this state has no daily overtime" is a real requirement — no_rule_applies is false).>,
       "trigger_conditions": {{"type": "entity_type or attribute", "value": "trigger value"}},
       "applicable_entity_types": ["{trigger_label.lower().replace(' ', '_')}"]
     }}

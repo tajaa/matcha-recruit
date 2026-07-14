@@ -90,6 +90,59 @@ async def close_pool():
         _pool = None
 
 
+def has_pool() -> bool:
+    """Is the app connection pool initialized in this process?
+
+    False inside Celery workers, which are pool-free BY DESIGN (see the NOTE in
+    workers/celery_app.py: each task runs its own asyncio.run() loop, and an
+    asyncpg pool bound to a different loop cannot be reused).
+    """
+    return _pool is not None
+
+
+@asynccontextmanager
+async def connection_or_direct():
+    """A connection that works in BOTH the API and a Celery worker.
+
+    For code on the SHARED service path that cannot know which world it is running
+    in. The Gemini rate limiter is the load-bearing case: every AI call in the
+    codebase passes through it, and it hard-required the pool — so **no Celery task
+    could ever call Gemini**. It failed at `check_limit`, before the API call, and
+    surfaced only as a research pass that mysteriously produced nothing.
+
+    Pooled connection when a pool exists; otherwise a raw one, opened and closed
+    per use inside the caller's own loop.
+
+    Prefer plain `get_connection()` on request paths, and pass an explicit `conn`
+    down worker paths. This is for the narrow middle: shared code with no caller
+    context.
+    """
+    if _pool is not None:
+        async with get_connection() as conn:
+            yield conn
+        return
+
+    # Env first, settings second: a Celery worker may not have called
+    # load_settings() (get_settings() raises when it hasn't), but DATABASE_URL is
+    # always in its environment — it is how workers/utils.get_db_connection works.
+    import os
+
+    database_url = os.getenv("DATABASE_URL", "").strip().strip('"')
+    ssl_mode = os.getenv("DATABASE_SSL", "disable")
+    if not database_url:
+        from .config import get_settings
+
+        settings = get_settings()
+        database_url = settings.database_url
+        ssl_mode = getattr(settings, "database_ssl", "disable") or "disable"
+
+    conn = await asyncpg.connect(database_url, ssl=_make_ssl_context(ssl_mode))
+    try:
+        yield conn
+    finally:
+        await conn.close()
+
+
 @asynccontextmanager
 async def get_connection(tenant_id: str | None = None):
     """Get a database connection from the pool.
@@ -3958,6 +4011,17 @@ async def init_db():
             INSERT INTO scheduler_settings (task_key, display_name, description, enabled, max_per_cycle)
             VALUES ('handbook_freshness', 'Handbook Freshness Checks',
                     'Automated freshness checks for published handbooks.', false, 5)
+            ON CONFLICT (task_key) DO NOTHING
+        """)
+
+        # Add scheduler setting for the vertical-coverage sweep. Makes live Gemini
+        # calls (industry-specific research), so it is seeded OFF — see
+        # workers/tasks/vertical_coverage_sweep.py.
+        await conn.execute("""
+            INSERT INTO scheduler_settings (task_key, display_name, description, enabled, max_per_cycle)
+            VALUES ('vertical_coverage_sweep', 'Vertical Coverage Sweep',
+                    'Reclaims stale in-progress vertical-research cells, drains deferred research calls, and fills industry-specific compliance for tenants whose vertical was never scoped. Default off.',
+                    false, 12)
             ON CONFLICT (task_key) DO NOTHING
         """)
 

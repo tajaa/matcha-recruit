@@ -335,20 +335,70 @@ stamp is **correct** — stamping it after a one-industry pass would make
 `_is_jurisdiction_fresh` suppress the generic research the jurisdiction still
 needs. Documented in the function instead.
 
+## Round 4 — the worker, the filler flag, and a bug that broke every AI worker task
+
+Three of the five open items are closed by one scheduler-gated Celery task,
+`vertical_coverage_sweep` (migration `vertcov02`, seeded **disabled**):
+
+- **reclaims** stale `in_progress` cells (>2h → `failed`, which `plan_fill` retries;
+  `empty` remains the never-retry verdict),
+- **drains** the calls the per-build cap deferred (a deferred cell holds no ledger
+  verdict, so it is simply picked up), and
+- **fills** tenants who onboarded before their vertical was ever scoped, emailing
+  the admin **only on a real gain**.
+
+Rate-limited to one sweep/day by the atomic `last_run_at` claim — the worker
+restarts hourly and this makes live Gemini calls. The admin Trigger button passes
+`force=True`, because those guards exist to stop the restart loop, not a human.
+The tenant "Run check" also opts in (`include_vertical_fill=True`); the flag is
+opt-in because the stream has five callers, and an unconditional fill would fire
+three times per Matcha-X build and quietly add Gemini spend to the admin
+white-glove flows.
+
+**Driving it surfaced a pre-existing bug far bigger than this feature: no Celery
+task could call Gemini at all.** `rate_limiter.check_limit` and
+`platform_settings.get_jurisdiction_research_model_mode` sit on the path of every
+AI call in the codebase and hard-required the app pool — but workers are
+deliberately pool-free (`celery_app.py` never calls `init_pool`). Every Gemini
+call from a worker raised `Database pool not initialized` *before* reaching the
+API, and surfaced only as a research pass that mysteriously produced nothing.
+That silently affected **ten** task modules (`healthcare_research`,
+`oncology_research`, `er_analysis`, `interview_analysis`, `risk_assessment`,
+`scope_registry` research, …). Fixed at the chokepoint with
+`database.connection_or_direct()` — pooled when a pool exists, raw otherwise.
+
+**Filler rows** ("no rule applies here") now carry a model-emitted
+`no_rule_applies` flag, persisted to `metadata` and filtered out of the tenant
+projection (and out of the stream's raw-set fallback path, the one route that
+skips the projection). They stay in the catalog, because `skip_existing` callers
+read their presence as "this category was researched".
+
+A live sweep proved why the flag has to come from the model, in **both**
+directions: a genuine placeholder came back titled *"State-Level Export Control
+Rule"* — no "No…" prefix, so a title matcher would have kept it — while
+`no_surprises_act` is the regulation_key of a **real federal statute** a matcher
+would have deleted.
+
+Verified on dev: the sweep discovered a **Technology** vertical from cold
+(nobody had ever scoped it), wrote 15 requirements — TDPSA, the Texas Responsible
+AI Governance Act, federal export controls, NY SHIELD Act — with **0 misparented
+rows**, hid 3 placeholders from the tab (15 catalog → 12 served), deferred 20
+calls as retryable, and reclaimed the cell I had wedged. 768 tests pass, same 7
+pre-existing failures.
+
 ## Still open
 
-- The vertical fill runs only in the **Matcha-X onboarding build**. The periodic
-  `compliance_checks` worker and `run_compliance_check_stream` do not trigger it,
-  so an existing tenant fills on its next *onboarding* build, not its next check.
-- `MAX_CELLS_PER_FILL = 40` caps one build. The overflow is now **reported**
-  (`deferred` on the `vertical_researching` and `complete` events) and picked up by
-  the next build, since the ledger holds no verdict for a deferred cell — but
-  nothing yet *drives* that next build automatically.
-- `in_progress` is not self-healing: a crashed fill leaves the cell wedged and a
-  later build will not retry it. Deliberate (never double-bill a research call),
-  but it needs a sweeper.
-- The "no additional rule applies" filler rows the research prompt emits still
-  land as real requirements (e.g. "No State-Specific Housekeeping Ergonomics
-  Mandate"). They are honest, but they are noise on the tab.
-- `vertcov01` is **dev-applied only** — it must run on prod, alongside the still
-  un-applied `jparent01` / `jsonfix01` / `rekey01` / `rekey02`.
+- **PROD.** `vertcov01` + `vertcov02` are **dev-applied only**, alongside the still
+  un-applied `jparent01` / `jsonfix01` / `rekey01` / `rekey02`. **Do not just run
+  `migrate-prod.sh`** — see §3 above: `jparent01` deletes tenant-facing rows with
+  no downgrade, never updates the jurisdiction-encoded `canonical_key` (it has
+  already left 222 rows on dev whose key names the wrong jurisdiction), and
+  `alembic upgrade heads` walks **five** branches. Pre-flight → harden → snapshot →
+  pinned revisions.
+- The sweep's scheduler row is seeded **disabled**. Enable it at
+  `/admin` → Schedulers when you want the spend.
+- The ~27 pre-existing filler rows predate the `no_rule_applies` flag, so they are
+  still on tabs. They need an **admin review list**, never an automated purge (see
+  §2 — a heuristic deletes real law).
+- The sweep budgets 12 Gemini calls per cycle across all companies; a large tenant
+  therefore fills over several nights. Fine for now; revisit if it feels slow.
