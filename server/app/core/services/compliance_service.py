@@ -3364,11 +3364,20 @@ async def _sync_requirements_to_location(
     reqs: List[Dict],
     create_alerts: bool = True,
     service=None,
+    validate_source_urls: bool = True,
 ) -> Dict[str, int]:
     """Sync a list of requirement dicts to a location's compliance_requirements.
 
     Runs the existing change-detection logic (upsert, history snapshot, alerts).
     Returns {"new": N, "updated": N, "alerts": N, "changes_to_verify": [...]}.
+
+    ``validate_source_urls``: HEAD-checks every requirement's source_url for
+    liveness (outbound HTTP to gov sites). That's catalog-quality maintenance —
+    already done on the two research/write paths (``_upsert_requirements_additive``,
+    ``_upsert_jurisdiction_requirements``) when a row is written. Repeating it
+    per tenant, per sync, against the SAME urls every other tenant in the
+    jurisdiction already validated is pure waste. Defaults True so existing
+    callers are unaffected; the catalog-only projection path passes False.
     """
     # ── Data integrity pipeline ──
     for req in reqs:
@@ -3376,7 +3385,8 @@ async def _sync_requirements_to_location(
         cat = _normalize_category(req.get("category"))
         if cat:
             req["category"] = cat
-    await _validate_source_urls(reqs)
+    if validate_source_urls:
+        await _validate_source_urls(reqs)
     await _refresh_catalog_links(conn, reqs)
 
     new_count = 0
@@ -3657,6 +3667,94 @@ async def _sync_requirements_to_location(
         "alerts": alert_count,
         "changes_to_verify": changes_to_verify,
         "existing_by_key": existing_by_key,
+    }
+
+
+async def project_location_from_catalog(
+    conn,
+    company_id: UUID,
+    location_id: UUID,
+    *,
+    create_alerts: bool = False,
+    check_type: str = "manual",
+) -> Dict[str, int]:
+    """Sync a location's tab from the shared catalog. NO Gemini, structurally.
+
+    This is the tenant "Run check" button and the daily auto-sync's entry point,
+    and the guarantee here is stronger than a flag: this function's only calls
+    are ``_project_chain_to_location`` (read the catalog chain) and
+    ``_sync_requirements_to_location(..., validate_source_urls=False)`` (write the
+    projection). Neither imports ``get_gemini_compliance_service``, calls
+    ``service.*``, or reaches ``_refresh_repository_missing_categories``. There is
+    no code path from here to a Gemini call — not "Gemini is off because a flag
+    says so," but "the call simply is not in this function's reachable graph."
+    Research-capable checks (``run_compliance_check_stream`` /
+    ``run_compliance_check_background``) are a deliberately separate,
+    admin/onboarding-only surface.
+
+    ``validate_source_urls=False`` on the sync call: liveness-checking every
+    requirement's source_url is catalog-quality maintenance already done when a
+    row is researched and written (the two write paths). Every tenant in a
+    jurisdiction shares the same catalog rows, so re-validating the same URLs on
+    every tenant's own sync is pure waste, not additional safety.
+
+    Writes a ``compliance_check_log`` row and stamps
+    ``business_locations.last_compliance_check`` like the full check does, so
+    this is a full drop-in for both callers: the History tab shows the sync, and
+    the daily dispatcher's ``ORDER BY last_compliance_check ASC NULLS FIRST``
+    (``workers/tasks/compliance_checks.py``) still rotates correctly.
+
+    Returns ``{"new": N, "updated": N, "alerts": N}``. Returns all-zero
+    (no-op, no log written) if the location has no jurisdiction yet.
+
+    Uses ONLY the passed ``conn`` — never ``get_location`` or any other pool
+    accessor. The daily sweep runs in the pool-free Celery worker
+    (``celery_app.py`` never calls ``init_pool``), where a pooled
+    ``get_connection()`` raises "Database pool not initialized." Every helper
+    below already takes ``conn``; this is the one spot that would otherwise reach
+    for the pool. Same pattern as ``vertical_coverage.reproject_location``, which
+    already runs pool-free in the vertical-coverage sweep worker.
+    """
+    row = await conn.fetchrow(
+        "SELECT * FROM business_locations WHERE id = $1 AND company_id = $2",
+        location_id, company_id,
+    )
+    if not row or not row["jurisdiction_id"]:
+        return {"new": 0, "updated": 0, "alerts": 0}
+    location = BusinessLocation(**dict(row))
+
+    log_id = await _create_check_log(conn, location_id, company_id, check_type)
+
+    requirements = await _project_chain_to_location(
+        conn, company_id, location, location.jurisdiction_id
+    )
+    if not requirements:
+        await conn.execute(
+            "UPDATE business_locations SET last_compliance_check = NOW() WHERE id = $1",
+            location_id,
+        )
+        await _complete_check_log(conn, log_id, 0, 0, 0)
+        return {"new": 0, "updated": 0, "alerts": 0}
+
+    sync_result = await _sync_requirements_to_location(
+        conn,
+        location_id,
+        company_id,
+        requirements,
+        create_alerts=create_alerts,
+        validate_source_urls=False,
+    )
+    await conn.execute(
+        "UPDATE business_locations SET last_compliance_check = NOW() WHERE id = $1",
+        location_id,
+    )
+    await _complete_check_log(
+        conn, log_id, sync_result["new"], sync_result["updated"], sync_result["alerts"]
+    )
+    return {
+        "new": sync_result["new"],
+        "updated": sync_result["updated"],
+        "alerts": sync_result["alerts"],
     }
 
 
@@ -5090,6 +5188,7 @@ async def run_compliance_check_stream(
     allow_live_research: bool = True,
     categories: Optional[List[str]] = None,
     include_vertical_fill: bool = False,
+    allow_repository_refresh: bool = True,
 ) -> AsyncGenerator[Dict[str, Any], None]:
     """
     Runs a compliance check for a specific location.
@@ -5112,6 +5211,15 @@ async def run_compliance_check_stream(
     (e.g. the Matcha-X self-serve onboarding finale passes
     ``MATCHA_X_LITE_CATEGORIES`` for a faster, cheaper basic-law sweep). When
     None — every existing caller — behaviour is identical to before.
+
+    ``allow_repository_refresh``: ``allow_live_research=False`` was meant to mean
+    "no Gemini, ever" for the tenant-facing route, but it only gated the
+    per-company Tier-3 research block. The shared-jurisdiction gap-fill branch
+    (search the catalog on miss, store forever) ran regardless — a "read-only"
+    caller could still trigger a live research call. This flag closes that:
+    False means the run is a pure projection from whatever the catalog already
+    has, with zero Gemini calls, full stop. Defaults True so every existing
+    caller (admin, onboarding) is unaffected; only the tenant route passes False.
     """
     from ...database import get_connection
     from .gemini_compliance import get_gemini_compliance_service
@@ -5189,8 +5297,11 @@ async def run_compliance_check_stream(
             # ============================================================
             # FACILITY INFERENCE: Auto-populate facility_attributes for healthcare companies
             # ============================================================
+            # A Gemini call, so it needs the same gate as the repository refresh
+            # below — a projection-only run (tenant "Run check") must not spend
+            # here either.
             canonical_industry = industry_profile.get("canonical_industry") if industry_profile else None
-            if canonical_industry == "healthcare":
+            if canonical_industry == "healthcare" and allow_repository_refresh:
                 fa = location.facility_attributes
                 if isinstance(fa, str):
                     try:
@@ -5551,7 +5662,30 @@ async def run_compliance_check_stream(
             # source-of-truth is intentional — it fires only for categories never
             # researched in this jurisdiction and upserts into the shared library
             # (library-permanence model: search on miss, store forever).
-            elif not used_repository and not allow_live_research:
+            #
+            # That refresh is itself a Gemini call, so it needs its own gate.
+            # allow_repository_refresh=False (the tenant-facing route) means this
+            # run must be a pure projection with ZERO Gemini spend — a customer's
+            # button click must never research, even indirectly via "the shared
+            # library happened to have a gap." Catalog freshness is our job, on
+            # our schedule (legislation_watch / structured_data_fetch / admin
+            # refresh); a tenant only ever reads what we've already stored.
+            elif not used_repository and not allow_live_research and not allow_repository_refresh:
+                missing_categories = _missing_required_categories(requirements)
+                used_repository = True
+                if missing_categories:
+                    yield {
+                        "type": "repository_only",
+                        "jurisdiction_id": str(jurisdiction_id),
+                        "missing_categories": missing_categories,
+                        "message": (
+                            "Some categories aren't in the library yet for "
+                            f"{location_name} ({', '.join(missing_categories)}). "
+                            "An admin can refresh jurisdiction data to add them."
+                        ),
+                    }
+
+            elif not used_repository and not allow_live_research and allow_repository_refresh:
                 missing_categories = _missing_required_categories(requirements)
                 used_repository = True
                 if missing_categories:
@@ -8133,10 +8267,20 @@ async def run_compliance_check_background(
     company_id: UUID,
     check_type: str = "scheduled",
     allow_live_research: bool = True,
+    allow_repository_refresh: bool = True,
 ) -> Dict[str, Any]:
     """Non-streaming compliance check for Celery tasks.
     Checks the jurisdiction repository first; only calls Gemini if stale/missing.
     Returns summary dict.
+
+    ``allow_repository_refresh=False`` makes this call a pure projection from
+    whatever the shared catalog already has — zero Gemini calls, including the
+    facility-inference call and the shared-jurisdiction gap-fill (see the
+    matching flag on ``run_compliance_check_stream`` for why that gap-fill
+    needed its own gate separate from ``allow_live_research``). The daily
+    per-tenant sweep (``workers/tasks/compliance_checks.py``) passes False:
+    catalog freshness is our job on our own schedule, not a side effect of a
+    scheduled tenant sync.
     """
     from ...database import get_connection
     from .gemini_compliance import get_gemini_compliance_service
@@ -8186,8 +8330,10 @@ async def run_compliance_check_background(
             )
 
             # ── Facility Inference for healthcare companies ──
+            # This is itself a Gemini call, gated the same as the repository
+            # refresh below: a projection-only run must not spend here either.
             canonical_industry = industry_profile.get("canonical_industry") if industry_profile else None
-            if canonical_industry == "healthcare":
+            if canonical_industry == "healthcare" and allow_repository_refresh:
                 fa = location.facility_attributes
                 if isinstance(fa, str):
                     try:
@@ -8428,8 +8574,21 @@ async def run_compliance_check_background(
                         not in target_set
                     ]
                     requirements = preserved + requirements
+            # Repository-only, no catalog refresh: a pure projection from whatever
+            # the shared catalog already has. This is the daily tenant sweep's
+            # path (allow_repository_refresh=False) — catalog freshness is our
+            # job on our own schedule, never a side effect of syncing a tenant.
+            elif not used_repository and not allow_live_research and not allow_repository_refresh:
+                missing_categories = _missing_required_categories(requirements)
+                used_repository = True
+                if missing_categories:
+                    print(
+                        f"[Compliance] Projection-only: missing categories for {location.city}, {location.state}: "
+                        f"{', '.join(missing_categories)}. Not refreshing (allow_repository_refresh=False)."
+                    )
+
             # Repository-only mode — see the twin branch in run_compliance_check_stream for semantics.
-            elif not used_repository and not allow_live_research:
+            elif not used_repository and not allow_live_research and allow_repository_refresh:
                 missing_categories = _missing_required_categories(requirements)
                 used_repository = True
                 if missing_categories:

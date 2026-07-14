@@ -52,6 +52,7 @@ from ..services.compliance_service import (
     update_alert_action_plan,
     run_compliance_check_background,
     run_compliance_check_stream,
+    project_location_from_catalog,
     get_check_log,
     get_upcoming_legislation,
     record_verification_feedback,
@@ -206,27 +207,55 @@ async def check_location_compliance_endpoint(
     if not location:
         raise HTTPException(status_code=404, detail="Location not found")
 
-    # Only admin can trigger live Gemini research (Tier 3).
-    # Clients can only sync from existing repository data.
+    location_name = location.name or f"{location.city}, {location.state}"
     is_admin = current_user.role == "admin"
 
-    allow_live = False
-    if is_admin:
-        async with get_connection() as conn:
-            rows = await conn.fetch(
-                """
-                SELECT r.category
-                FROM business_locations bl
-                LEFT JOIN jurisdiction_requirements r ON r.jurisdiction_id = bl.jurisdiction_id
-                WHERE bl.id = $1
-                """,
-                loc_uuid,
-            )
-        repository_requirements = [
-            {"category": row["category"]} for row in rows if row["category"]
-        ]
-        missing_categories = _missing_required_categories(repository_requirements)
-        allow_live = len(missing_categories) > 0
+    if not is_admin:
+        # Tenants never reach the research-capable stream. This isn't a flag
+        # gate on run_compliance_check_stream — it's a different function whose
+        # only calls are the catalog-projection helpers, with no code path to
+        # Gemini at all (see project_location_from_catalog's docstring). A
+        # customer's button click structurally cannot trigger research; catalog
+        # freshness is our job, on our own schedule (legislation_watch /
+        # structured_data_fetch / admin refresh / vertical_coverage_sweep).
+        async def projection_stream():
+            try:
+                yield f"data: {json.dumps({'type': 'started', 'location': location_name})}\n\n"
+                async with get_connection() as conn:
+                    result = await project_location_from_catalog(
+                        conn, company_id, loc_uuid, create_alerts=True,
+                    )
+                yield f"data: {json.dumps({'type': 'processing', 'message': f'Refreshing {location_name} from the compliance library...'})}\n\n"
+                yield f"data: {json.dumps({'type': 'completed', 'location': location_name, **result})}\n\n"
+            except Exception as e:
+                yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+            yield "data: [DONE]\n\n"
+
+        return StreamingResponse(
+            projection_stream(),
+            media_type="text/event-stream",
+            headers={"X-Accel-Buffering": "no"},
+        )
+
+    # Admin: the deliberate white-glove path — may trigger live Gemini research
+    # (Tier 3) and the shared-jurisdiction gap-fill when the catalog has a gap,
+    # plus vertical fill for an existing company onboarded before its industry
+    # was scoped.
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT r.category
+            FROM business_locations bl
+            LEFT JOIN jurisdiction_requirements r ON r.jurisdiction_id = bl.jurisdiction_id
+            WHERE bl.id = $1
+            """,
+            loc_uuid,
+        )
+    repository_requirements = [
+        {"category": row["category"]} for row in rows if row["category"]
+    ]
+    missing_categories = _missing_required_categories(repository_requirements)
+    allow_live = len(missing_categories) > 0
 
     async def event_stream():
         try:
@@ -234,12 +263,7 @@ async def check_location_compliance_endpoint(
                 loc_uuid,
                 company_id,
                 allow_live_research=allow_live,
-                # The tenant-facing "Run check" is the one caller that should also
-                # fill industry-specific coverage: it's the only way an existing
-                # company (onboarded before its vertical was scoped) ever gets it
-                # without waiting for the nightly sweep. The onboarding build runs
-                # its own vertical phase, and the admin flows must not silently
-                # acquire Gemini spend — hence the opt-in, not a new default.
+                allow_repository_refresh=True,
                 include_vertical_fill=True,
             ):
                 if event.get("type") == "heartbeat":
