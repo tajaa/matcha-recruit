@@ -68,6 +68,18 @@ def default_domain(parent_industry: str) -> str:
 
 
 def industry_tag(parent_industry: str, slug: str) -> str:
+    """`healthcare` + `dental` -> `healthcare:dental`.
+
+    When the slug IS the parent, the vertical is the industry itself (a
+    hospitality employer's vertical is hospitality — there is no sub-specialty
+    above it), and the tag is the bare industry. This matters beyond cosmetics:
+    `_get_company_industry_tags` gives such a company the tag `hospitality`, and
+    `_filter_requirements_for_company` intersects that against the row's
+    `applicable_industries` — so requirements written as `hospitality:hospitality`
+    would match no company and be invisible forever.
+    """
+    if slug == parent_industry:
+        return parent_industry
     return f"{parent_industry}:{slug}"
 
 

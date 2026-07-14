@@ -43,6 +43,7 @@ from ...core.services.handbook_audit_service import (
     _grade_state_coverage,
 )
 from ...core.services.storage import get_storage
+from ...core.services import vertical_coverage
 
 router = APIRouter()
 
@@ -516,6 +517,71 @@ async def build_compliance_baseline_stream(
                     jurisdictions_seen.add(jid)
             yield ev
 
+        # 3c. Vertical (industry sub-specialty) coverage — trigger a shared,
+        # tenant-independent fill for any (jurisdiction, category) cell nobody
+        # has researched for this company's specialty yet (e.g. dental-specific
+        # requirements for a CA dental office). Writes land in the shared
+        # catalog tagged with the industry_tag, so the next tenant in the same
+        # jurisdiction reads them instantly with zero research calls.
+        vertical_new = 0
+        vertical_label = None
+        try:
+            async with get_connection() as vconn:
+                resolved = await vertical_coverage.resolve_vertical(vconn, company_id)
+
+            if resolved:
+                v_parent, v_slug, v_label, v_tag = resolved
+                vertical_label = v_label
+                async with get_connection() as vconn:
+                    v_categories, v_context = await vertical_coverage.ensure_specialty(
+                        vconn, v_parent, v_slug, v_label
+                    )
+
+                if v_categories:
+                    yield {
+                        "type": "vertical_scoping",
+                        "vertical": v_label,
+                        "message": f"Checking {v_label}-specific requirements…",
+                    }
+                    jur_ids = [UUID(j) for j in jurisdictions_seen]
+                    async with get_connection() as vconn:
+                        cells = await vertical_coverage.missing_cells(
+                            vconn, jur_ids, v_tag, v_categories
+                        )
+
+                    if cells:
+                        yield {
+                            "type": "vertical_researching",
+                            "vertical": v_label,
+                            "cells": len(cells),
+                            "message": f"Researching {len(cells)} {v_label} requirement area(s)…",
+                        }
+                        async with get_connection() as vconn:
+                            async for vev in vertical_coverage.fill(
+                                vconn, company_id, cells, v_tag, v_context
+                            ):
+                                vertical_new += vev.get("new", 0)
+                                yield {**vev, "type": "vertical_codified", "vertical": v_label}
+
+                        if vertical_new:
+                            async with get_connection() as vconn:
+                                for loc in locs:
+                                    await vertical_coverage.reproject_location(
+                                        vconn, company_id, loc["id"]
+                                    )
+                            yield {
+                                "type": "vertical_complete",
+                                "vertical": v_label,
+                                "requirements_added": vertical_new,
+                                "message": f"{v_label}: {vertical_new} requirement(s) added.",
+                            }
+        except Exception as exc:
+            # Vertical scoping is additive — never fail a build over it.
+            yield {
+                "type": "warning",
+                "message": f"Vertical scoping incomplete: {exc}",
+            }
+
         # 4. Handbook coverage overlay (per state present across locations).
         handbook_states_graded = 0
         hb_covered = 0
@@ -642,6 +708,8 @@ async def build_compliance_baseline_stream(
             "handbook_coverage_pct": coverage_pct,
             "roster_locations_added": roster_locations_added,
             "skipped_no_work_state": skipped_no_work_state,
+            "vertical": vertical_label,
+            "vertical_requirements_added": vertical_new,
             "message": "Your compliance baseline is live.",
         }
 

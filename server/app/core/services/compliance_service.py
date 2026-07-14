@@ -9527,25 +9527,51 @@ async def discover_specialization_categories(
     from ..compliance_registry import CATEGORY_KEYS
 
     service = get_gemini_compliance_service()
-    industry_tag = f"{parent_industry}:{specialization.lower().replace(' ', '_')}"
+    slug = specialization.lower().replace(" ", "_")
+    # The vertical can BE the industry (a hospitality employer has no
+    # sub-specialty above hospitality). Then there is no "parent baseline" to
+    # research beyond, and the specialization prompt below would be asking the
+    # model to exclude the very categories we want.
+    top_level = slug == parent_industry
+    industry_tag = parent_industry if top_level else f"{parent_industry}:{slug}"
 
-    prompt = (
-        f"You are a compliance expert. For a **{specialization}** practice under the "
-        f"**{parent_industry}** industry, identify the regulatory compliance categories that "
-        f"require specific research beyond the general {parent_industry} baseline.\n\n"
-        f"Return a JSON object with two keys:\n"
-        f"1. \"categories\": an array of objects, each with:\n"
-        f"   - \"key\": a snake_case slug (e.g., \"cardiac_catheterization_safety\")\n"
-        f"   - \"label\": a human-readable name\n"
-        f"   - \"description\": what specific regulations/standards to research for this category\n"
-        f"   - \"authority_sources\": array of authoritative domains (e.g., [\"cms.gov\", \"acc.org\"])\n"
-        f"2. \"research_context\": a paragraph describing the key regulatory bodies, federal statutes, "
-        f"and common state-level variations for {specialization} compliance. This will be used as "
-        f"context for subsequent research calls.\n\n"
-        f"Focus on categories unique to {specialization} — do NOT include general {parent_industry} "
-        f"categories like HIPAA, billing integrity, or clinical safety unless {specialization} has "
-        f"specific sub-requirements. Aim for 5-15 categories."
-    )
+    if top_level:
+        prompt = (
+            f"You are a compliance expert. For a business operating in the **{specialization}** "
+            f"industry in the United States, identify the regulatory compliance categories that "
+            f"are SPECIFIC TO THIS INDUSTRY — the obligations a {specialization} employer has that "
+            f"a generic employer in another industry does NOT.\n\n"
+            f"Return a JSON object with two keys:\n"
+            f"1. \"categories\": an array of objects, each with:\n"
+            f"   - \"key\": a snake_case slug (e.g., \"food_handler_certification\")\n"
+            f"   - \"label\": a human-readable name\n"
+            f"   - \"description\": what specific regulations/standards to research for this category\n"
+            f"   - \"authority_sources\": array of authoritative domains (e.g., [\"fda.gov\", \"osha.gov\"])\n"
+            f"2. \"research_context\": a paragraph describing the key regulatory bodies, federal statutes, "
+            f"and common state-level variations for {specialization} compliance. This will be used as "
+            f"context for subsequent research calls.\n\n"
+            f"Do NOT include generic employment-law categories that apply to EVERY employer regardless "
+            f"of industry (minimum wage, overtime, anti-discrimination, I-9, workers' comp, final pay) — "
+            f"those are already researched separately. Aim for 5-15 categories."
+        )
+    else:
+        prompt = (
+            f"You are a compliance expert. For a **{specialization}** practice under the "
+            f"**{parent_industry}** industry, identify the regulatory compliance categories that "
+            f"require specific research beyond the general {parent_industry} baseline.\n\n"
+            f"Return a JSON object with two keys:\n"
+            f"1. \"categories\": an array of objects, each with:\n"
+            f"   - \"key\": a snake_case slug (e.g., \"cardiac_catheterization_safety\")\n"
+            f"   - \"label\": a human-readable name\n"
+            f"   - \"description\": what specific regulations/standards to research for this category\n"
+            f"   - \"authority_sources\": array of authoritative domains (e.g., [\"cms.gov\", \"acc.org\"])\n"
+            f"2. \"research_context\": a paragraph describing the key regulatory bodies, federal statutes, "
+            f"and common state-level variations for {specialization} compliance. This will be used as "
+            f"context for subsequent research calls.\n\n"
+            f"Focus on categories unique to {specialization} — do NOT include general {parent_industry} "
+            f"categories like HIPAA, billing integrity, or clinical safety unless {specialization} has "
+            f"specific sub-requirements. Aim for 5-15 categories."
+        )
 
     result = await service._call_with_retry(
         prompt,
@@ -9601,8 +9627,16 @@ async def research_specialization_for_jurisdiction(
     ones stay ``'gemini'`` + ``metadata.grounding='ungrounded'``.
     """
     from .scope_registry.grounded import validate_requirement_citations, validate_penalty_citations
-    from .gemini_compliance import get_gemini_compliance_service
+    from .gemini_compliance import get_gemini_compliance_service, refresh_dynamic_categories
     from .jurisdiction_context import get_known_sources, build_context_prompt, get_global_authority_sources
+
+    # A specialty's categories are confirmed into `compliance_categories` at
+    # runtime, but the model-output validator gates on a frozen constant compiled
+    # from compliance_registry. Without this refresh every dental/hospitality/etc
+    # category reads as "invalid", the requested set empties, and the research call
+    # silently falls back to the generic labor default — returning wage law that
+    # then gets force-tagged with this industry_tag below.
+    await refresh_dynamic_categories(conn)
 
     j = await conn.fetchrow(
         "SELECT id, city, state, county FROM jurisdictions WHERE id = $1",
