@@ -8,7 +8,6 @@ import { useComplianceRequirements } from '../../hooks/compliance/useComplianceR
 import type { ComplianceRequirement } from '../../types/compliance'
 import { CATEGORY_LABELS } from '../../types/compliance'
 import type { CategoryGroup } from '../../generated/complianceCategories'
-import { BEHAVIORAL_HEALTH_CATEGORIES } from '../../generated/complianceCategories'
 import { JURISDICTION_LEVEL_LABELS, RATE_TYPE_LABELS } from '../../api/compliance'
 import type { FacilityAttributes } from '../../types/compliance'
 import type { ComplianceCheckMessage } from '../../hooks/compliance/useComplianceCheck'
@@ -62,8 +61,17 @@ export function ComplianceRequirementsTab({ requirements, loading, onPin, checkM
   // user types in the search box.
   const { sectionedCategories: allSections } = useComplianceRequirements(requirements)
 
+  // Keyed on the INDUSTRY TAG, not on BEHAVIORAL_HEALTH_CATEGORIES. That set
+  // contains quality_reporting, hipaa_privacy, state_licensing and
+  // corporate_integrity — generic healthcare categories, not behavioral-health
+  // ones. A dental practice's three Medi-Cal rows (PAVE, TAR, encounter data)
+  // are quality_reporting, so the category set matched them and offered a
+  // Behavioral Health lens to a dentist. `healthcare:behavioral_health` is the
+  // field that actually means "this row is behavioral health".
   const hasBehavioralHealth = useMemo(
-    () => requirements.some((r) => r.category && BEHAVIORAL_HEALTH_CATEGORIES.has(r.category)),
+    () => requirements.some((r) =>
+      (r.applicable_industries ?? []).includes('healthcare:behavioral_health'),
+    ),
     [requirements],
   )
 
@@ -90,11 +98,19 @@ export function ComplianceRequirementsTab({ requirements, loading, onPin, checkM
   const filteredSections = useMemo(() => {
     if (activeGroup === 'all') return sectionedCategories
     if (activeGroup === 'behavioral_health') {
-      // Cross-cutting filter: show categories from any section that are in BEHAVIORAL_HEALTH_CATEGORIES
+      // Cross-cutting lens: pull the behavioral-health rows out of whatever
+      // section they sit in. Matched ONLY on the row's industry tag. A category
+      // like quality_reporting or hipaa_privacy belongs to every healthcare
+      // provider, so BEHAVIORAL_HEALTH_CATEGORIES cannot decide this — falling
+      // back to it for untagged rows would re-admit the same bug it just fixed.
+      const isBh = (r: ComplianceRequirement) =>
+        (r.applicable_industries ?? []).includes('healthcare:behavioral_health')
       return sectionedCategories
         .map((s) => ({
           ...s,
-          categories: s.categories.filter(([cat]) => BEHAVIORAL_HEALTH_CATEGORIES.has(cat)),
+          categories: s.categories
+            .map(([cat, reqs]) => [cat, reqs.filter(isBh)] as [string, ComplianceRequirement[]])
+            .filter(([, reqs]) => reqs.length > 0),
         }))
         .filter((s) => s.categories.length > 0)
     }
