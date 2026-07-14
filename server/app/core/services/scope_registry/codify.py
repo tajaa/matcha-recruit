@@ -860,6 +860,26 @@ async def reconcile_codifications(
     # but citations unstamped, or new stamps written while stale ones aren't
     # cleared (that inconsistency is exactly what a re-run would then act on).
     async with conn.transaction():
+        # Prune links whose two ends no longer name the same obligation. A re-key
+        # (rekey01) moves a requirement onto a different regulation_key, but the
+        # link minted when it shared the OLD key survives — so drift on the
+        # Medicare authority citation still flags the Medicaid row it no longer
+        # describes, and the drift list counts it among `affected_requirements`.
+        # Reconcile was insert/upsert-only and never removed anything.
+        pruned = await conn.fetchval(
+            """
+            WITH p AS (
+                DELETE FROM scope_codifications sc
+                USING authority_item_classifications c,
+                      jurisdiction_requirements jr
+                WHERE c.id = sc.classification_id
+                  AND jr.id = sc.jurisdiction_requirement_id
+                  AND c.regulation_key IS DISTINCT FROM jr.regulation_key
+                RETURNING 1
+            ) SELECT COUNT(*) FROM p
+            """
+        )
+
         if links:
             # One set-based upsert (unnest) instead of N round trips.
             result = await conn.fetch(
@@ -872,7 +892,12 @@ async def reconcile_codifications(
                 ) AS t(classification_id, jurisdiction_requirement_id, regulation_key, jurisdiction_id),
                 LATERAL (SELECT $5::varchar AS source, $6::jsonb AS run_info) s
                 ON CONFLICT (classification_id, jurisdiction_requirement_id) DO UPDATE SET
-                    codified_at = NOW(), source = EXCLUDED.source, run_info = EXCLUDED.run_info
+                    codified_at = NOW(), source = EXCLUDED.source,
+                    run_info = EXCLUDED.run_info,
+                    -- Refresh the key: a re-key (rekey01) leaves the stored
+                    -- column naming the OLD obligation while the row it points
+                    -- at now carries a different one.
+                    regulation_key = EXCLUDED.regulation_key
                 RETURNING (xmax = 0) AS inserted
                 """,
                 [link["classification_id"] for link in links],
@@ -1041,6 +1066,7 @@ async def reconcile_codifications(
         "citations_stamped": citations_stamped,
         "baselines_recorded": baselines_recorded,
         "stale_basis_cleared": int(stale_basis or 0),
+        "stale_links_pruned": int(pruned or 0),
         "overwrote_manual": overwrote_manual,
         "citations_cleared": int(cleared or 0),
     }

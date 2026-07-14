@@ -169,11 +169,25 @@ def upgrade() -> None:
             text("SELECT id FROM compliance_categories WHERE slug = :s LIMIT 1"),
             {"s": new_cat},
         ).scalar()
+        # Fail loudly rather than COALESCE-keeping the OLD key's FK: a silently
+        # retained key_definition_id would leave e.g. a maternity row pointing at
+        # the sick_leave key definition, which is the polymorphy this migration
+        # exists to remove. Dev ran with zero misses; this is prod safety.
+        if rows and new_cat_id is None:
+            raise RuntimeError(
+                f"rekey01: compliance_categories row missing for {new_cat!r} — "
+                f"cannot re-key {title!r}"
+            )
         kd_id = conn.execute(
             text("SELECT id FROM regulation_key_definitions "
                  "WHERE key = :k AND category_slug = :s LIMIT 1"),
             {"k": new_key, "s": new_cat},
         ).scalar()
+        if rows and kd_id is None:
+            raise RuntimeError(
+                f"rekey01: regulation_key_definitions row missing for "
+                f"{new_key!r} in {new_cat!r} — cannot re-key {title!r}"
+            )
 
         for r in rows:
             # Recompute the identity the way the upsert will, so a future
