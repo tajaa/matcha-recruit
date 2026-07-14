@@ -306,8 +306,100 @@ unexercised.
 
 ---
 
+## Round 3 — adversarial review of the round-2 work (`3e8a1a0..587652f`)
+
+A 3-lane review of the six unreviewed commits found **5 HIGH** defects. The
+pattern is worth naming: every one of them was in code that *worked when driven
+manually* and failed only under adversarial sequencing — switch rows in the
+editor, re-research after a re-key, reconcile across countries. Driving it once
+is not the same as driving it wrong.
+
+### The re-key was not durable — the next research pass would have undone it
+
+The load-bearing one. `db58da8` gave NY's downstate threshold its own identity
+via a new rate_type, because for `minimum_wage` **the rate_type IS the write
+identity** (`_compute_key_parts` keys the ON-CONFLICT composite off it and
+ignores `regulation_key` entirely). But a re-key only holds if a **producer can
+re-emit that identity**, and none could:
+
+* `gemini_compliance` keeps its **own** `VALID_RATE_TYPES`, which `db58da8`
+  didn't touch. A Gemini-emitted `exempt_salary_regional` wasn't in that set, so
+  it flattened to `general` — meaning a weekly **salary threshold** figure would
+  have overwritten New York's **general minimum wage** row.
+* And a producer emitting the correct `regulation_key` (which the prompt now
+  advertises) still keyed to the **statewide** row, overwriting it with downstate
+  content and orphaning the regional row forever.
+
+Both reproduced before fixing. Now: `_coerce_minimum_wage_rate_type` derives the
+rate_type from the regulation_key (the inverse of `keys._RATE_TYPE_TO_KEY`), so
+the identity survives whether a producer emits the key, the rate_type, or only
+the title. **A test pins the two `VALID_RATE_TYPES` copies together** — their
+drift *is* the bug, and leaving them independent leaves the trap armed.
+
+### The floor was jurisdiction-blind
+
+`value_basis` was keyed `(regulation_key, level)` — no country, no state. Registry
+keys are a global vocabulary and UK rows carry level `national`, which folds into
+the same tier as US `federal`. So **a UK row could become "the federal floor"**
+every US state is tested against: a TX row genuinely restating the US federal
+value fails the test, demotes, and has its **correct citation stripped**. Same
+shape one level down — all 50 states shared a single `(key, 'state')` bucket.
+
+Also: a demote destroyed the citation even when the mismatch was **unverifiable**
+(the floor isn't codified, or is quarantined). Absent basis is not evidence of
+divergence — but it cleared the stamp anyway, so quarantining *one* federal row
+would strip correct citations off every state row that restates it. Baseline
+entries now carry `verified`; only a **proven** mismatch clears a stamp.
+
+And `jurisdictional_basis` was never removed, so a row promoted to a direct stamp
+kept its old chip — reading *"federal floor: 29 CFR § 541.600 … which does not
+itself set this value"* directly beside a `statute_citation` of 29 CFR § 541.600.
+The record contradicting itself, permanently.
+
+### The editor corrupted rows
+
+`ClassificationEditor` had **no `key={editing.id}`**. All its form state is
+`useState`-initialized from the item, so clicking Edit on a second row while the
+first editor was open reused the mounted component: header showed row B, form
+still held row A's values, and saving wrote **A's classification onto B** —
+confirmed, and propagated to B's inheriting children. Silent corruption in the
+tool built to correct data.
+
+Worse, `override_classification` PATCH-preserved `jurisdiction_scope` but **not
+`entity_condition`**. `validate_proposal` rejects `conditional` without a valid
+condition, so a conditional item could never be re-saved at all — and the natural
+workaround (flip to `universal_in_domain` just to get a key stored) passed
+validation and **wiped the trigger**. That is exactly the PSM-served-to-a-warehouse
+over-scope the §9 acceptance test, shipped the same day, exists to prevent.
+
+### Three more
+
+* **NY's downstate tier was graded against 49 other states.**
+  `EXPECTED_REGULATION_KEYS` does double duty — tagging *validity* and
+  completeness *expectation* — so the key had to be in it (else NY's real row is
+  `invalid_key`) but was then expected of everyone. New `_KEY_STATE_SCOPE`.
+* **The dispatch ping blocked the event loop.** `celery_app.control.ping` is
+  synchronous broker I/O called inline from async routes: every Ingest click
+  froze the *whole uvicorn process* for the timeout. Now `asyncio.to_thread`.
+* **Reconcile never pruned links a re-key invalidated**, so drift on the
+  *Medicare* authority still flagged the *Medicaid* row it no longer describes.
+
+---
+
 ## Still open
 
+* **`_resolve_regulation_key`'s Jaccard threshold can re-collide the maternity
+  rows.** `{statutory, maternity, leave}` ∩ `{statutory, sick, leave}` = 2/4 =
+  **exactly** the 0.5 acceptance threshold. If a sick_leave research pass re-files
+  maternity under `sick_leave` (which is how those rows arose), the resolver maps
+  it straight back onto `statutory_sick_leave`. The re-key moved the rows; nothing
+  stops the producer repeating the original mis-filing.
+* **The regional threshold is invisible to the wage-violation checker.** It
+  buckets exempt employees against `rate_type='exempt_salary'` only, so an NYC
+  exempt employee paid between the statewide and downstate figures reads as
+  compliant. Needs per-region geo applicability (the regional row sits at the NY
+  *state* jurisdiction with nothing marking which counties it binds) — a bigger
+  change than a label.
 * **Data authoring** (5 states, city slices, industry keysets, golden facts) —
   the review's #1 priority. Nothing here moves it; it's skills work, not code.
 * **Schedulers stay seeded disabled** (`compliance_evals`,
