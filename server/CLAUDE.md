@@ -93,6 +93,35 @@ Some pre-existing tests use `importlib.util.spec_from_file_location(...)` with h
 
 These are pre-existing on `main`; don't try to fix them as part of unrelated work. The IR-incidents tests (132 passing) are the model to follow.
 
+## Migration authoring rules
+
+Prod is an RDS instance at the far end of an SSH tunnel (~100ms per round-trip),
+and `migrate-prod.sh` gates every run: uncommitted migrations abort, pending
+revisions are printed, an RDS snapshot is taken, the whole upgrade is **rehearsed
+against live prod rows and rolled back**, and you type `migrate prod` to commit.
+Write migrations that survive that:
+
+- **Set-based SQL, never row-by-row Python loops.** A loop that is instant on the
+  local dev container is ~20,000 sequential round-trips against prod and does not
+  finish — it looks like a lock, but it is the DB idle, waiting on you.
+  `jparent01` is the template: a TEMP table holds the plan, ~20 statements do the
+  work, four seconds end to end.
+- **Every `LIMIT 1` needs a deterministic `ORDER BY`.** Otherwise the pass and its
+  own post-check can disagree, and the terminal `raise` rolls back the lot.
+- **Repointing rows onto a UNIQUE column needs an explicit dedupe pass first**
+  (ctid + `ROW_NUMBER()`, as in `jparent01`). Merging one row at a time hides the
+  collision; merging a set does not.
+- **Write a real `downgrade()`** where feasible. If it is genuinely irreversible,
+  say so in the docstring — the RDS snapshot is then the only rollback.
+- **Commit the migration before applying it to ANY database, dev included.** Dev
+  and prod running different bytes of the same revision id is a silent drift with
+  no alarm on it.
+- **Rehearse:** `MIGRATE_REHEARSAL=1 DATABASE_URL=… alembic upgrade heads` runs
+  the migration for real inside the upgrade transaction and raises at the end to
+  force the rollback. `migrate-prod.sh` does this for you; run it by hand against
+  dev while authoring. Its elapsed time is the signal — a slow rehearsal is a
+  migration that will hang.
+
 ## Common pitfalls
 
 - **Don't run Alembic upgrade automatically.** Schema changes require explicit user approval (see root CLAUDE.md production-safety list).

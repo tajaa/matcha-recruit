@@ -1,6 +1,7 @@
 import asyncio
 import os
 import re
+import time
 from logging.config import fileConfig
 
 from sqlalchemy import pool
@@ -76,6 +77,11 @@ def run_migrations_offline() -> None:
         context.run_migrations()
 
 
+# Sentinel raised to abort a rehearsal. migrate-prod.sh matches on this exact
+# string to tell "the migration ran clean" apart from "the migration failed".
+REHEARSAL_MARKER = "MIGRATE_REHEARSAL"
+
+
 def do_run_migrations(connection):
     context.configure(
         connection=connection,
@@ -85,8 +91,28 @@ def do_run_migrations(connection):
         include_name=include_name,
     )
 
+    rehearsal = os.getenv("MIGRATE_REHEARSAL") == "1"
+
+    # Online mode runs the whole upgrade in ONE transaction, so raising after
+    # run_migrations() rolls back every revision in the run — the migration
+    # executes against real rows, hits the constraints it would really hit, and
+    # commits nothing. This is how a UniqueViolation in jparent01 was found on
+    # prod data before prod. Elapsed time is part of the signal: a rehearsal that
+    # crawls is a migration that is round-trip-bound and will hang over the tunnel.
+    #
+    # Caveat: rehearsal takes real locks and holds them until the rollback.
     with context.begin_transaction():
+        started = time.monotonic()
         context.run_migrations()
+        if rehearsal:
+            elapsed = time.monotonic() - started
+            # RuntimeError, not SystemExit: SystemExit is a BaseException and not
+            # every context manager in the stack unwinds it the same way. The
+            # abort must be boring and certain.
+            raise RuntimeError(
+                f"{REHEARSAL_MARKER}: rehearsal completed in {elapsed:.1f}s — "
+                f"rolling back, nothing was committed."
+            )
 
 
 async def run_async_migrations():
