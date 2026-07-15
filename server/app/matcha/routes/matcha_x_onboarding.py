@@ -19,6 +19,7 @@ localStorage flag.
 
 import asyncio
 import json
+import logging
 from typing import List, Optional
 from uuid import UUID
 
@@ -46,6 +47,7 @@ from ...core.services.storage import get_storage
 from ...core.services import vertical_coverage
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 # ── Status (data-presence step inference; no completion column) ───────────
@@ -260,6 +262,57 @@ def _is_owned_handbook_url(url: str, company_id) -> bool:
 # ── The performative live build (SSE) ─────────────────────────────────────
 
 
+async def _queue_jurisdiction_research(
+    conn,
+    jurisdiction_id,
+    company_id,
+    location_id,
+    missing_categories: List[str],
+    industry: Optional[str],
+) -> None:
+    """Queue a jurisdiction's catalog gap for OUR research team, no Gemini.
+
+    The tenant build is projection-only; anything the shared catalog is missing
+    becomes a pending ``jurisdiction_coverage_requests`` row an admin runs from
+    /admin (Jurisdictions → Coverage Requests / research-queue). Mirrors the
+    unknown-jurisdiction upsert in ``compliance_service.ensure_location_for_employee``.
+    Best-effort — a queueing failure must never break the build.
+    """
+    try:
+        if not jurisdiction_id:
+            return
+        jid = jurisdiction_id if isinstance(jurisdiction_id, UUID) else UUID(str(jurisdiction_id))
+        jur = await conn.fetchrow(
+            "SELECT city, state, county FROM jurisdictions WHERE id = $1",
+            jid,
+        )
+        if not jur or not jur["city"]:
+            return
+        loc_uuid = None
+        if location_id:
+            loc_uuid = location_id if isinstance(location_id, UUID) else UUID(str(location_id))
+        cats = ", ".join(missing_categories) if missing_categories else ""
+        note = f"missing: {cats}" + (f" ({industry})" if industry else "")
+        await conn.execute(
+            """
+            INSERT INTO jurisdiction_coverage_requests
+                (city, state, county, requested_by_company_id, location_id, status, admin_notes)
+            VALUES ($1, $2, $3, $4, $5, 'pending', $6)
+            ON CONFLICT (city, state) DO UPDATE
+                SET location_id = COALESCE(jurisdiction_coverage_requests.location_id, EXCLUDED.location_id),
+                    admin_notes = EXCLUDED.admin_notes,
+                    status = CASE
+                        WHEN jurisdiction_coverage_requests.status = 'dismissed'
+                        THEN jurisdiction_coverage_requests.status
+                        ELSE 'pending'
+                    END
+            """,
+            jur["city"], jur["state"], jur["county"], company_id, loc_uuid, note,
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("matcha-x: failed to queue jurisdiction research: %s", exc)
+
+
 class MatchaXBuildRequest(BaseModel):
     # The exact string returned by POST /matcha-x-onboarding/handbook-upload.
     # Optional — absent / non-PDF / not-owned ⇒ the coverage overlay is skipped.
@@ -417,10 +470,14 @@ async def build_compliance_baseline_stream(
 
             researched_live = False
             try:
+                # Projection-only: NO Gemini on a tenant build. Catalog gaps get
+                # queued for our research team (repository_only → enqueue below),
+                # never researched live on the tenant's dime.
                 async for ev in run_compliance_check_stream(
                     loc_id,
                     company_id,
-                    allow_live_research=True,
+                    allow_live_research=False,
+                    allow_repository_refresh=False,
                     categories=MATCHA_X_LITE_CATEGORIES,
                 ):
                     etype = ev.get("type")
@@ -436,13 +493,23 @@ async def build_compliance_baseline_stream(
                             "label": label,
                         }
                         continue
-                    if etype in (
-                        "researching",
-                        "repository_refresh",
-                        "discovering_sources",
-                        "trigger_research",
-                    ):
-                        researched_live = True
+                    if etype == "repository_only":
+                        # Catalog gap → queue for our side, tell the tenant it's handled.
+                        async with get_connection() as qconn:
+                            await _queue_jurisdiction_research(
+                                qconn, ev.get("jurisdiction_id"), company_id, loc_id,
+                                ev.get("missing_categories") or [], industry,
+                            )
+                        yield {
+                            "type": "queued_for_research",
+                            "location_id": str(loc_id),
+                            "label": label,
+                            "message": (
+                                f"{label}: new requirement areas queued for our "
+                                "research team — they appear automatically once published."
+                            ),
+                        }
+                        continue
                     yield {**ev, "location_id": str(loc_id), "label": label}
             except Exception as exc:
                 yield {
@@ -494,19 +561,37 @@ async def build_compliance_baseline_stream(
             }
 
         # 3b. Union roster-derived jurisdictions (D3.2) — work states the roster
-        # reports that aren't covered by a typed location yet. Same
-        # allow_live_research + categories as the typed-location loop above so
-        # roster-derived jurisdictions get identical treatment.
+        # reports that aren't covered by a typed location yet. Projection-only,
+        # same as the typed-location loop above: catalog gaps get queued for our
+        # research team, never researched live on the tenant's build.
         roster_locations_added = 0
         async for ev in sync_and_check_roster_jurisdictions(
             get_connection,
             company_id,
-            allow_live_research=True,
+            allow_live_research=False,
+            allow_repository_refresh=False,
             categories=MATCHA_X_LITE_CATEGORIES,
         ):
             etype = ev.get("type")
             if etype == "heartbeat":
                 yield {"type": "heartbeat"}
+                continue
+            if etype == "repository_only":
+                async with get_connection() as qconn:
+                    await _queue_jurisdiction_research(
+                        qconn, ev.get("jurisdiction_id"), company_id,
+                        ev.get("location_id"), ev.get("missing_categories") or [], industry,
+                    )
+                yield {
+                    "type": "queued_for_research",
+                    "location_id": ev.get("location_id"),
+                    "label": ev.get("label"),
+                    "message": (
+                        f"{ev.get('label') or 'A roster location'}: new requirement "
+                        "areas queued for our research team — they appear "
+                        "automatically once published."
+                    ),
+                }
                 continue
             if etype == "location_built":
                 roster_locations_added += 1
@@ -517,16 +602,15 @@ async def build_compliance_baseline_stream(
                     jurisdictions_seen.add(jid)
             yield ev
 
-        # 3c. Vertical (industry sub-specialty) coverage — trigger a shared,
-        # tenant-independent fill for any (jurisdiction, category) cell nobody
-        # has researched for this company's specialty yet (e.g. dental-specific
-        # requirements for a CA dental office). Writes land in the shared
-        # catalog tagged with the industry_tag, so the next tenant in the same
-        # jurisdiction reads them instantly with zero research calls.
-        vertical_new = 0
-        vertical_deduped = 0
+        # 3c. Vertical (industry sub-specialty) coverage — projection-only.
+        # A tenant build NEVER researches. We detect the specialty gaps (all
+        # pure SQL: resolve → ledger reconcile → plan) and QUEUE them; our side
+        # runs the actual Gemini fill via the vertical_coverage_sweep worker
+        # (admin: Schedulers → Run now), which then reprojects tenant tabs. So
+        # dental-specific rows appear automatically once we've researched them —
+        # without spending on the customer's onboarding click.
         vertical_label = None
-        vertical_deferred = 0
+        vertical_queued = 0
         vertical_minted = False
         try:
             async with get_connection() as vconn:
@@ -535,25 +619,20 @@ async def build_compliance_baseline_stream(
             if resolved:
                 v_parent, v_slug, v_label, v_tag, vertical_minted = resolved
                 vertical_label = v_label
-                async with get_connection() as vconn:
-                    v_categories, v_context = await vertical_coverage.ensure_specialty(
-                        vconn, v_parent, v_slug, v_label
-                    )
 
-                if v_categories:
-                    yield {
-                        "type": "vertical_scoping",
-                        "vertical": v_label,
-                        "message": f"Checking {v_label}-specific requirements…",
-                    }
+                # Cached categories ONLY — never ensure_specialty(), which triggers
+                # Gemini discovery for a brand-new vertical. An undiscovered
+                # specialty is itself a gap to queue for the sweep.
+                async with get_connection() as vconn:
+                    cat_rows = await vconn.fetch(
+                        "SELECT slug FROM compliance_categories WHERE industry_tag = $1",
+                        v_tag,
+                    )
+                v_categories = [r["slug"] for r in cat_rows]
+
+                plan = []
+                if v_categories and jurisdictions_seen:
                     async with get_connection() as vconn:
-                        # Ledger cells live on chain NODES (federal/state/county/
-                        # city), not on the tenant's leaf: state law is researched
-                        # once for the state, federal once nationally — which is
-                        # what makes the next tenant in the state free rather than
-                        # only the next tenant in the same city. The research CALL
-                        # is per (leaf, category); routing files each row on its
-                        # level's node.
                         leaf_chains = await vertical_coverage.chains_for_leaves(
                             vconn, [UUID(j) for j in jurisdictions_seen]
                         )
@@ -561,53 +640,33 @@ async def build_compliance_baseline_stream(
                             {jid for chain in leaf_chains.values() for jid, _ in chain}
                         )
                         # Reconcile the ledger with what the catalog already holds
-                        # BEFORE deciding what to research, or a seeded vertical
-                        # (healthcare has 17 categories and 300+ rows) gets
-                        # re-researched from scratch on the next tenant's onboarding.
+                        # so a seeded vertical isn't re-flagged as a gap.
                         await vertical_coverage.backfill_ledger(
                             vconn, all_nodes, v_tag, v_categories
                         )
-                        plan, vertical_deferred = await vertical_coverage.plan_fill(
+                        plan, _deferred = await vertical_coverage.plan_fill(
                             vconn, leaf_chains, v_tag, v_categories
                         )
 
-                    if plan:
-                        yield {
-                            "type": "vertical_researching",
-                            "vertical": v_label,
-                            "cells": len(plan),
-                            "deferred": vertical_deferred,
-                            "message": (
-                                f"Researching {len(plan)} {v_label} requirement area(s)…"
-                                + (f" ({vertical_deferred} more queued for the next build)"
-                                   if vertical_deferred else "")
-                            ),
-                        }
-                        # A connection factory, not a connection: the fill runs
-                        # many sequential Gemini calls and must not hold a single
-                        # pool slot across all of them.
-                        async for vev in vertical_coverage.fill(
-                            get_connection, company_id, plan, v_tag, v_context
-                        ):
-                            vertical_new += vev.get("new", 0)
-                            vertical_deduped += vev.get("deduped", 0)
-                            if vev.get("category") is None:
-                                # Trailing dedupe summary — already folded into the
-                                # totals above; not a research event.
-                                continue
-                            yield {**vev, "type": "vertical_codified", "vertical": v_label}
+                # Undiscovered specialty OR unresolved cells → queue for our team.
+                if not v_categories or plan:
+                    vertical_queued = len(plan) if plan else 1
+                    yield {
+                        "type": "vertical_queued",
+                        "vertical": v_label,
+                        "cells": vertical_queued,
+                        "message": (
+                            f"{v_label}: specialty requirement areas queued for our "
+                            "research team — they appear automatically once published."
+                        ),
+                    }
 
-                # Reproject when the catalog changed under the tenant (new rows OR
-                # deduped rows their step-3 projection may reference), and ALWAYS
-                # when the specialty tag was minted this build: every projection
-                # made before that write filtered the vertical's rows out, so a
-                # fully-covered ledger (zero research) still means the tenant has
-                # no vertical rows on their tab yet.
-                if vertical_new or vertical_deduped or vertical_minted:
-                    # Re-read the ACTIVE locations rather than reusing `locs`: the
-                    # roster union (3b) can have created locations that aren't in
-                    # it, and those tenants — the CSV-only ones — are exactly who
-                    # would otherwise never see the new rows.
+                # Reproject ONLY when resolve_vertical just minted the specialty
+                # tag onto the company (SQL-only, Gemini-free): every projection
+                # made before that write filtered the vertical's existing rows
+                # out, so the tenant needs a re-read to see catalog rows we
+                # already hold. New research is NOT done here — the sweep does it.
+                if vertical_minted:
                     async with get_connection() as vconn:
                         all_locs = await vconn.fetch(
                             "SELECT id FROM business_locations "
@@ -618,13 +677,6 @@ async def build_compliance_baseline_stream(
                             await vertical_coverage.reproject_location(
                                 vconn, company_id, row["id"]
                             )
-                if vertical_new:
-                    yield {
-                        "type": "vertical_complete",
-                        "vertical": v_label,
-                        "requirements_added": vertical_new,
-                        "message": f"{v_label}: {vertical_new} requirement(s) added.",
-                    }
         except Exception as exc:
             # Vertical scoping is additive — never fail a build over it.
             yield {
@@ -777,8 +829,7 @@ async def build_compliance_baseline_stream(
             "roster_locations_added": roster_locations_added,
             "skipped_no_work_state": skipped_no_work_state,
             "vertical": vertical_label,
-            "vertical_requirements_added": vertical_new,
-            "vertical_deferred": vertical_deferred,
+            "vertical_queued": vertical_queued,
             "message": "Your compliance baseline is live.",
         }
 

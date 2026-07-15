@@ -533,6 +533,9 @@ export default function Jurisdictions() {
                         </>
                       )}
                     </div>
+                    {req.admin_notes && (
+                      <p className="text-[11px] text-amber-500/80 mt-1 truncate">{req.admin_notes}</p>
+                    )}
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     <Button variant="secondary" size="sm" onClick={() => processRequest(req)}>Process</Button>
