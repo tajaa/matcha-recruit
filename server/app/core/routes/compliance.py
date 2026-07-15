@@ -787,6 +787,91 @@ async def get_compliance_summary_endpoint(
     return await get_compliance_summary(company_id)
 
 
+@shared_router.get("/pending-research")
+async def get_pending_research_endpoint(
+    company_id: Optional[str] = Query(None),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """What we're still researching for this company — drives the tenant
+    "We're working on this for you" panel on the Compliance page.
+
+    Two sources, both read-only, NO Gemini:
+    - `coverage_requests`: pending/in-progress `jurisdiction_coverage_requests`
+      the company's build queued (real catalog gaps, human-readable in
+      `admin_notes`).
+    - `vertical`: industry-specialty cells (e.g. dental) not yet researched for
+      the company's location chains (the vertical ledger's to-do), summarized as
+      a count — filled by the vertical_coverage_sweep, which reprojects the tab
+      and emails the admin when done.
+    """
+    cid = await resolve_company_id(current_user, company_id)
+    if cid is None:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    from ..services import vertical_coverage
+
+    async with get_connection() as conn:
+        req_rows = await conn.fetch(
+            """
+            SELECT DISTINCT jcr.city, jcr.state, jcr.county, jcr.admin_notes,
+                            jcr.created_at
+            FROM jurisdiction_coverage_requests jcr
+            WHERE jcr.status IN ('pending', 'in_progress')
+              AND (
+                jcr.requested_by_company_id = $1
+                OR EXISTS (
+                    SELECT 1 FROM business_locations bl
+                    WHERE bl.company_id = $1 AND bl.is_active = true
+                      AND LOWER(bl.city) = LOWER(jcr.city)
+                      AND UPPER(bl.state) = UPPER(jcr.state)
+                )
+              )
+            ORDER BY jcr.created_at DESC
+            """,
+            cid,
+        )
+        coverage_requests = [
+            {
+                "city": r["city"],
+                "state": r["state"],
+                "county": r["county"],
+                "note": r["admin_notes"],
+                "requested_at": r["created_at"].isoformat() if r["created_at"] else None,
+            }
+            for r in req_rows
+        ]
+
+        vertical = None
+        try:
+            resolved = await vertical_coverage.resolve_vertical(conn, cid)
+            if resolved:
+                _parent, _slug, v_label, v_tag, _minted = resolved
+                cat_rows = await conn.fetch(
+                    "SELECT slug FROM compliance_categories WHERE industry_tag = $1",
+                    v_tag,
+                )
+                v_categories = [r["slug"] for r in cat_rows]
+                leaf_rows = await conn.fetch(
+                    "SELECT jurisdiction_id FROM business_locations "
+                    "WHERE company_id = $1 AND is_active = true AND jurisdiction_id IS NOT NULL",
+                    cid,
+                )
+                leaf_ids = [r["jurisdiction_id"] for r in leaf_rows]
+                areas = 0
+                if v_categories and leaf_ids:
+                    leaf_chains = await vertical_coverage.chains_for_leaves(conn, leaf_ids)
+                    plan, _deferred = await vertical_coverage.plan_fill(
+                        conn, leaf_chains, v_tag, v_categories
+                    )
+                    areas = len(plan)
+                if areas:
+                    vertical = {"label": v_label, "areas": areas}
+        except Exception:
+            vertical = None
+
+    return {"coverage_requests": coverage_requests, "vertical": vertical}
+
+
 @router.get("/dashboard")
 async def get_compliance_dashboard_endpoint(
     horizon_days: int = Query(

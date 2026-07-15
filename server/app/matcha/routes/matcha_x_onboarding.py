@@ -291,16 +291,34 @@ async def _queue_jurisdiction_research(
         loc_uuid = None
         if location_id:
             loc_uuid = location_id if isinstance(location_id, UUID) else UUID(str(location_id))
-        cats = ", ".join(missing_categories) if missing_categories else ""
-        note = f"missing: {cats}" + (f" ({industry})" if industry else "")
+        # Resolve category KEYS → human labels so the admin queue reads
+        # "Anti-Discrimination, Final Pay, I-9 & E-Verify…" not raw slugs. This
+        # is the exhaustive set of required categories the shared catalog is
+        # missing for this jurisdiction — everything an admin needs to research.
+        labels = []
+        if missing_categories:
+            name_rows = await conn.fetch(
+                "SELECT slug, name FROM compliance_categories WHERE slug = ANY($1::text[])",
+                missing_categories,
+            )
+            name_by_slug = {r["slug"]: r["name"] for r in name_rows}
+            labels = [name_by_slug.get(k, k) for k in missing_categories]
+        cats = ", ".join(labels) if labels else ""
+        note = f"Needs research: {cats}" + (f" — {industry}" if industry else "")
         await conn.execute(
             """
             INSERT INTO jurisdiction_coverage_requests
                 (city, state, county, requested_by_company_id, location_id, status, admin_notes)
             VALUES ($1, $2, $3, $4, $5, 'pending', $6)
             ON CONFLICT (city, state) DO UPDATE
-                SET location_id = COALESCE(jurisdiction_coverage_requests.location_id, EXCLUDED.location_id),
+                SET requested_by_company_id = EXCLUDED.requested_by_company_id,
+                    location_id = EXCLUDED.location_id,
                     admin_notes = EXCLUDED.admin_notes,
+                    -- bump recency so the queue surfaces the LATEST business to
+                    -- hit this gap first (created_at doubles as "last requested"
+                    -- — the table has no updated_at). We don't keep per-business
+                    -- history; the newest trigger is what an admin follows up on.
+                    created_at = NOW(),
                     status = CASE
                         WHEN jurisdiction_coverage_requests.status = 'dismissed'
                         THEN jurisdiction_coverage_requests.status

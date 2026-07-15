@@ -5,6 +5,7 @@ import { useComplianceData } from '../../hooks/compliance/useComplianceData'
 import { useLocationDetail } from '../../hooks/compliance/useLocationDetail'
 import { ComplianceLocationList } from './ComplianceLocationList'
 import { ComplianceRequirementsTab } from './ComplianceRequirementsTab'
+import PendingResearchPanel from './PendingResearchPanel'
 import { ComplianceUpcomingTab } from './ComplianceUpcomingTab'
 import { UpgradeUpsellCard } from '../UpgradeUpsellCard'
 
@@ -146,6 +147,7 @@ export function ComplianceLiteView() {
                     {selectedLoc.name && <span className="text-zinc-500 ml-2 text-sm">({selectedLoc.name})</span>}
                   </h2>
                 </div>
+                {tab === 'requirements' && <PendingResearchPanel />}
                 {tab === 'requirements' && (
                   <ComplianceRequirementsTab
                     requirements={detail.requirements}

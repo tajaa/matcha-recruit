@@ -9531,13 +9531,100 @@ async def get_research_queue():
         ]
 
 
+async def _publish_research_to_requesters(jurisdiction_id: UUID) -> dict:
+    """After we research a jurisdiction into the shared catalog, close the loop
+    for every tenant who was waiting on it: mark their coverage request done,
+    auto-populate their compliance tab from the (now-richer) catalog, and email
+    their admins. Gemini-free — pure projection. Best-effort; never raises.
+    """
+    from ..services.compliance_service import (
+        project_location_from_catalog,
+        _get_company_admin_contacts,
+    )
+
+    tenants_updated = 0
+    emails_sent = 0
+    try:
+        async with get_connection() as conn:
+            jur = await conn.fetchrow(
+                "SELECT city, state FROM jurisdictions WHERE id = $1", jurisdiction_id
+            )
+            if not jur or not jur["city"]:
+                return {"tenants_updated": 0, "emails_sent": 0}
+
+            reqs = await conn.fetch(
+                """
+                SELECT id, requested_by_company_id
+                FROM jurisdiction_coverage_requests
+                WHERE status IN ('pending', 'in_progress')
+                  AND LOWER(city) = LOWER($1) AND UPPER(state) = UPPER($2)
+                """,
+                jur["city"], jur["state"],
+            )
+            if not reqs:
+                return {"tenants_updated": 0, "emails_sent": 0}
+
+            email_service = get_email_service()
+            for req in reqs:
+                company_id = req["requested_by_company_id"]
+                # Project every active location this company has in the jurisdiction.
+                locs = await conn.fetch(
+                    """
+                    SELECT id, name, city, state FROM business_locations
+                    WHERE company_id = $1 AND is_active = true
+                      AND LOWER(city) = LOWER($2) AND UPPER(state) = UPPER($3)
+                    """,
+                    company_id, jur["city"], jur["state"],
+                )
+                total_new = 0
+                loc_name = None
+                for loc in locs:
+                    try:
+                        result = await project_location_from_catalog(
+                            conn, company_id, loc["id"],
+                            create_alerts=True, check_type="research_publish",
+                        )
+                        total_new += result.get("new", 0)
+                        loc_name = loc["name"] or f"{loc['city']}, {loc['state']}"
+                    except Exception as exc:
+                        logger.warning("publish: projection failed for %s: %s", loc["id"], exc)
+
+                await conn.execute(
+                    "UPDATE jurisdiction_coverage_requests "
+                    "SET status = 'completed', processed_at = NOW() WHERE id = $1",
+                    req["id"],
+                )
+                tenants_updated += 1
+
+                # Email the company's admins that their pending items are live.
+                try:
+                    company_name, contacts = await _get_company_admin_contacts(company_id)
+                    for c in contacts:
+                        ok = await email_service.send_compliance_change_notification_email(
+                            to_email=c["email"],
+                            to_name=c.get("name"),
+                            company_name=company_name,
+                            location_name=loc_name or f"{jur['city']}, {jur['state']}",
+                            changed_requirements_count=total_new,
+                            jurisdictions=[f"{jur['city']}, {jur['state']}"],
+                        )
+                        if ok:
+                            emails_sent += 1
+                except Exception as exc:
+                    logger.warning("publish: email failed for company %s: %s", company_id, exc)
+    except Exception as exc:
+        logger.warning("publish: research-to-requesters failed: %s", exc)
+
+    return {"tenants_updated": tenants_updated, "emails_sent": emails_sent}
+
+
 @router.post("/research-queue/{jurisdiction_id}/research", dependencies=[Depends(require_admin)])
 async def research_jurisdiction(jurisdiction_id: UUID):
     """Trigger Gemini research for a jurisdiction. Returns SSE stream.
 
-    Writes only to jurisdiction_requirements (the shared repo).
-    Does NOT mutate any tenant's compliance_requirements, compliance_check_logs,
-    or compliance_alerts.
+    Writes to jurisdiction_requirements (the shared repo). When research adds
+    new rows, closes the loop for waiting tenants: projects their compliance
+    tabs from the enriched catalog (Gemini-free) and emails their admins.
     """
     async with get_connection() as conn:
         j = await conn.fetchrow(
@@ -9548,14 +9635,24 @@ async def research_jurisdiction(jurisdiction_id: UUID):
             raise HTTPException(status_code=404, detail="Jurisdiction not found")
 
     async def event_stream():
+        total_new = 0
         try:
             async for event in research_jurisdiction_repo_only(jurisdiction_id):
                 if event.get("type") == "heartbeat":
                     yield ": heartbeat\n\n"
                 else:
+                    if event.get("type") == "complete":
+                        total_new = event.get("new", 0) or 0
                     yield f"data: {json.dumps(event)}\n\n"
         except Exception as e:
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+            yield "data: [DONE]\n\n"
+            return
+
+        # Loop-close: publish the enriched catalog to waiting tenants.
+        if total_new > 0:
+            summary = await _publish_research_to_requesters(jurisdiction_id)
+            yield f"data: {json.dumps({'type': 'tenants_notified', **summary})}\n\n"
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(

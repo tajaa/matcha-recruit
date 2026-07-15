@@ -5671,7 +5671,16 @@ async def run_compliance_check_stream(
             # our schedule (legislation_watch / structured_data_fetch / admin
             # refresh); a tenant only ever reads what we've already stored.
             elif not used_repository and not allow_live_research and not allow_repository_refresh:
-                missing_categories = _missing_required_categories(requirements)
+                # Real gaps only. The tier stages above build `requirements` from
+                # a leaf-only or freshness-windowed slice, so a category the FULL
+                # chain covers can look "missing" here (false gap → false queue).
+                # Recompute against the exact set the tab projects
+                # (`_project_chain_to_location`, whole chain, no freshness limit)
+                # so we only ever queue jurisdictions we genuinely lack.
+                chain_reqs = await _project_chain_to_location(
+                    conn, company_id, location, jurisdiction_id
+                )
+                missing_categories = _missing_required_categories(chain_reqs)
                 used_repository = True
                 if missing_categories:
                     yield {
@@ -8579,7 +8588,12 @@ async def run_compliance_check_background(
             # path (allow_repository_refresh=False) — catalog freshness is our
             # job on our own schedule, never a side effect of syncing a tenant.
             elif not used_repository and not allow_live_research and not allow_repository_refresh:
-                missing_categories = _missing_required_categories(requirements)
+                # Real gaps only — recompute against the full chain the tab
+                # projects, not the tier-stage slice (see the stream twin).
+                chain_reqs = await _project_chain_to_location(
+                    conn, company_id, location, jurisdiction_id
+                )
+                missing_categories = _missing_required_categories(chain_reqs)
                 used_repository = True
                 if missing_categories:
                     print(

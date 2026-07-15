@@ -15,6 +15,7 @@ import { ComplianceHistoryTab } from '../../components/compliance/ComplianceHist
 import { CompliancePostersTab } from '../../components/compliance/CompliancePostersTab'
 import { ComplianceCredentialsTab } from '../../components/compliance/ComplianceCredentialsTab'
 import { ComplianceScanProgress } from '../../components/compliance/ComplianceScanProgress'
+import PendingResearchPanel from '../../components/compliance/PendingResearchPanel'
 import { FacilityProfileBanner } from '../../components/compliance/FacilityProfileBanner'
 import { RegulatoryQuickAsk } from '../../components/compliance/RegulatoryQuickAsk'
 import { PayerPolicyNavigator } from '../../components/compliance/PayerPolicyNavigator'
@@ -232,6 +233,8 @@ function ComplianceFull() {
                 />
 
                 <ComplianceScanProgress scanning={check.scanning} messages={check.messages} />
+
+                {tab === 'requirements' && <PendingResearchPanel />}
 
                 {tab === 'requirements' && (
                   <ComplianceRequirementsTab

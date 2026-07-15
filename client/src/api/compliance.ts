@@ -172,6 +172,21 @@ export function fetchSummary() {
   return api.get<ComplianceSummary>('/compliance/summary')
 }
 
+export type PendingResearch = {
+  coverage_requests: {
+    city: string
+    state: string
+    county: string | null
+    note: string | null
+    requested_at: string | null
+  }[]
+  vertical: { label: string; areas: number } | null
+}
+
+export function fetchPendingResearch() {
+  return api.get<PendingResearch>('/compliance/pending-research')
+}
+
 export function fetchComplianceDashboard(horizonDays = 90) {
   return api.get<import('../types/dashboard').ComplianceDashboard>(
     `/compliance/dashboard?horizon_days=${horizonDays}`
