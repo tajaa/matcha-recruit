@@ -2184,7 +2184,7 @@ async def _upsert_requirements_additive(
                 jurisdiction_name = EXCLUDED.jurisdiction_name,
                 title = EXCLUDED.title,
                 description = EXCLUDED.description,
-                previous_value = jurisdiction_requirements.current_value,
+                previous_value = LEFT(jurisdiction_requirements.current_value, 100),
                 current_value = EXCLUDED.current_value,
                 numeric_value = EXCLUDED.numeric_value,
                 source_url = EXCLUDED.source_url,
@@ -3159,7 +3159,7 @@ async def _upsert_jurisdiction_requirements(
                 jurisdiction_name = EXCLUDED.jurisdiction_name,
                 title = EXCLUDED.title,
                 description = EXCLUDED.description,
-                previous_value = jurisdiction_requirements.current_value,
+                previous_value = LEFT(jurisdiction_requirements.current_value, 100),
                 current_value = EXCLUDED.current_value,
                 numeric_value = EXCLUDED.numeric_value,
                 source_url = EXCLUDED.source_url,
@@ -4463,7 +4463,9 @@ async def _update_requirement(
         req.get("title"),
         req.get("current_value"),
         req.get("numeric_value"),
-        previous_value,
+        # previous_value is varchar(100) but holds a copy of current_value
+        # (varchar 500) — clamp, same overflow as the catalog ON-CONFLICT paths.
+        previous_value[:100] if previous_value else previous_value,
         last_changed_at,
         req.get("description"),
         req.get("source_url"),

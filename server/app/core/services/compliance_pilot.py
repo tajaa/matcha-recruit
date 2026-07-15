@@ -545,7 +545,9 @@ async def _run_research(action_id: UUID, actor_id, params: dict):
         # NOTE(fast-follow): this path does NOT read/write jurisdiction_vertical_coverage,
         # so the nightly sweep may re-research what the pilot paid for, and ledger
         # `empty` cells are re-spent. Ledger integration is its own change.
-        run_started = await conn.fetchval("SELECT NOW()")
+        # created_at is `timestamp WITHOUT time zone` (naive) — match it, or asyncpg
+        # can't compare a tz-aware NOW() against the column.
+        run_started = await conn.fetchval("SELECT NOW()::timestamp")
         result = await research_specialization_for_jurisdiction(
             conn, jid, categories, industry_tag,
             route_by_level=True, initial_status="pending",
