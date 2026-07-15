@@ -88,6 +88,27 @@ type VerticalPendingItem = {
 
 type PendingItem = CategoryPendingItem | VerticalPendingItem
 
+type ReviewRow = {
+  id: string
+  category: string
+  category_name: string
+  title: string
+  description: string | null
+  current_value: string | null
+  source_url: string | null
+  source_name: string | null
+}
+
+type ReviewGroup = {
+  jurisdiction_id: string
+  label: string
+  city: string
+  state: string
+  request_ids: string[]
+  company_ids: string[]
+  rows: ReviewRow[]
+}
+
 type ActivityLog = {
   id: string
   location_name: string | null
@@ -110,7 +131,7 @@ type SchedulerSetting = {
   stats: Record<string, unknown>
 }
 
-type Tab = 'jurisdictions' | 'research_queue' | 'coverage_requests' | 'activity' | 'jobs'
+type Tab = 'jurisdictions' | 'research_queue' | 'coverage_requests' | 'review' | 'activity' | 'jobs'
 
 function fmtDate(d: string | null) {
   if (!d) return '—'
@@ -155,6 +176,14 @@ export default function Jurisdictions() {
   const [pending, setPending] = useState<PendingItem[]>([])
   const [loadingRequests, setLoadingRequests] = useState(false)
   const [openIds, setOpenIds] = useState<Set<string>>(new Set())
+  // Per-accordion category selection + queue-run progress
+  const [selected, setSelected] = useState<Record<string, Set<string>>>({})
+  const [runningId, setRunningId] = useState<string | null>(null)
+  const [runMessages, setRunMessages] = useState<string[]>([])
+
+  // Review (staged research awaiting approval)
+  const [reviewGroups, setReviewGroups] = useState<ReviewGroup[]>([])
+  const [loadingReview, setLoadingReview] = useState(false)
 
   // Activity
   const [activity, setActivity] = useState<ActivityLog[]>([])
@@ -197,6 +226,15 @@ export default function Jurisdictions() {
     finally { setLoadingRequests(false) }
   }, [])
 
+  const fetchReview = useCallback(async () => {
+    setLoadingReview(true)
+    try {
+      const r = await api.get<{ groups: ReviewGroup[] }>('/admin/research-review')
+      setReviewGroups(r.groups)
+    } catch { setReviewGroups([]) }
+    finally { setLoadingReview(false) }
+  }, [])
+
   const fetchActivity = useCallback(async () => {
     setLoadingActivity(true)
     try {
@@ -218,9 +256,10 @@ export default function Jurisdictions() {
   useEffect(() => {
     if (tab === 'research_queue' && researchQueue.length === 0) fetchResearchQueue()
     if (tab === 'coverage_requests' && pending.length === 0) fetchRequests()
+    if (tab === 'review' && reviewGroups.length === 0) fetchReview()
     if (tab === 'activity' && activity.length === 0) fetchActivity()
     if (tab === 'jobs' && schedulers.length === 0) fetchJobs()
-  }, [tab, researchQueue.length, pending.length, activity.length, schedulers.length, fetchResearchQueue, fetchRequests, fetchActivity, fetchJobs])
+  }, [tab, researchQueue.length, pending.length, reviewGroups.length, activity.length, schedulers.length, fetchResearchQueue, fetchRequests, fetchReview, fetchActivity, fetchJobs])
 
   // ── Actions ──
 
@@ -316,6 +355,63 @@ export default function Jurisdictions() {
     setPending((prev) => prev.filter((p) => !(p.type === 'category' && p.id === id)))
   }
 
+  function toggleSelectCategory(rowId: string, catId: string) {
+    setSelected((prev) => {
+      const next = { ...prev }
+      const set = new Set(next[rowId] ?? [])
+      if (set.has(catId)) set.delete(catId)
+      else set.add(catId)
+      next[rowId] = set
+      return next
+    })
+  }
+
+  function runResearch(rowId: string, item: PendingItem, categoryKeys: string[] | null) {
+    setRunningId(rowId); setRunMessages([])
+    const body = item.type === 'category'
+      ? { item_type: 'category', request_id: item.id, city: item.city, state: item.state, county: item.county, categories: categoryKeys }
+      : { item_type: 'vertical', company_id: item.company_id, categories: categoryKeys }
+    const base = import.meta.env.VITE_API_URL || '/api'
+    authStreamHeaders().then((headers) => fetch(`${base}/admin/pending-research/run`, {
+      method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    })).then(async (res) => {
+      const reader = res.body?.getReader()
+      const decoder = new TextDecoder()
+      if (!reader) { setRunningId(null); return }
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        for (const line of decoder.decode(value).split('\n')) {
+          if (line.startsWith(': ')) continue
+          if (!line.startsWith('data: ')) continue
+          const data = line.slice(6)
+          if (data === '[DONE]') {
+            setRunningId(null)
+            setSelected((prev) => { const next = { ...prev }; delete next[rowId]; return next })
+            fetchRequests(); fetchReview()
+            return
+          }
+          try {
+            const ev = JSON.parse(data)
+            if (ev.type === 'error') { setRunMessages((p) => [...p, `Error: ${ev.message}`]); setRunningId(null); return }
+            if (ev.message) setRunMessages((p) => [...p, ev.message])
+          } catch {}
+        }
+      }
+      setRunningId(null)
+    }).catch(() => setRunningId(null))
+  }
+
+  async function approveReview(ids: string[], group: ReviewGroup) {
+    await api.post('/admin/research-review/approve', { ids, request_ids: group.request_ids, company_ids: group.company_ids })
+    fetchReview(); fetchRequests()
+  }
+
+  async function rejectReview(ids: string[], group: ReviewGroup) {
+    await api.post('/admin/research-review/reject', { ids, request_ids: group.request_ids })
+    fetchReview(); fetchRequests()
+  }
+
   async function toggleScheduler(taskKey: string, currentEnabled: boolean) {
     await api.patch(`/admin/schedulers/${taskKey}`, { enabled: !currentEnabled })
     setSchedulers((prev) => prev.map((s) => s.task_key === taskKey ? { ...s, enabled: !s.enabled } : s))
@@ -343,6 +439,7 @@ export default function Jurisdictions() {
     { id: 'jurisdictions', label: 'Jurisdictions', count: jurisdictions.length },
     { id: 'research_queue', label: 'Research Queue', count: needsResearchCount || undefined },
     { id: 'coverage_requests', label: 'Coverage Requests', count: pendingRequestCount || undefined },
+    { id: 'review', label: 'Review', count: reviewGroups.reduce((n, g) => n + g.rows.length, 0) || undefined },
     { id: 'activity', label: 'Recent Activity' },
     { id: 'jobs', label: 'Scheduled Jobs', count: schedulers.length || undefined },
   ]
@@ -623,29 +720,72 @@ export default function Jurisdictions() {
                         </div>
 
                         <div className="space-y-1.5">
-                          {item.categories.map((c, i) => (
-                            <div key={c.key ?? `${c.name}-${i}`}
-                              className="rounded-lg border border-white/[0.06] bg-white/[0.02] p-3">
-                              <div className="flex items-center justify-between gap-2">
-                                <span className="text-xs font-medium text-zinc-200">{c.name}</span>
-                                <span className="rounded border px-1.5 py-0.5 text-[10px] border-amber-500/30 bg-amber-500/10 text-amber-300 shrink-0">
-                                  Needs research
-                                </span>
-                              </div>
-                              {c.description && (
-                                <p className="mt-1 text-[11px] text-zinc-400 leading-relaxed">{c.description}</p>
-                              )}
-                            </div>
-                          ))}
+                          {item.categories.map((c, i) => {
+                            const catId = c.key ?? c.name
+                            const checked = selected[rowId]?.has(catId) ?? false
+                            return (
+                              <label key={c.key ?? `${c.name}-${i}`}
+                                className="flex cursor-pointer gap-2 rounded-lg border border-white/[0.06] bg-white/[0.02] p-3">
+                                <input type="checkbox" checked={checked} disabled={runningId !== null}
+                                  onChange={() => toggleSelectCategory(rowId, catId)}
+                                  className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-emerald-500" />
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className="text-xs font-medium text-zinc-200">{c.name}</span>
+                                    <span className="rounded border px-1.5 py-0.5 text-[10px] border-amber-500/30 bg-amber-500/10 text-amber-300 shrink-0">
+                                      Needs research
+                                    </span>
+                                  </div>
+                                  {c.description && (
+                                    <p className="mt-1 text-[11px] text-zinc-400 leading-relaxed">{c.description}</p>
+                                  )}
+                                </div>
+                              </label>
+                            )
+                          })}
                         </div>
 
-                        {item.type === 'category' ? (
-                          <div className="mt-3 flex items-center gap-2">
-                            <Button variant="secondary" size="sm" onClick={() => processRequest(item)}>Process</Button>
-                            <button type="button" onClick={() => dismissRequest(item.id)}
-                              className="text-xs text-zinc-600 hover:text-zinc-300 px-2 py-1 transition-colors">Dismiss</button>
+                        {/* Queue-run progress */}
+                        {runningId === rowId && runMessages.length > 0 && (
+                          <div className="border border-zinc-800 rounded-lg px-3 py-2.5 mt-3 max-h-28 overflow-y-auto">
+                            {runMessages.map((msg, i) => (
+                              <p key={i} className="text-xs text-zinc-500 leading-5">{msg}</p>
+                            ))}
                           </div>
-                        ) : (
+                        )}
+
+                        {(() => {
+                          const selCount = selected[rowId]?.size ?? 0
+                          const selKeys = [...(selected[rowId] ?? [])]
+                          if (runningId === rowId) {
+                            return (
+                              <p className="mt-3 text-xs text-zinc-500">Researching… (staged for review)</p>
+                            )
+                          }
+                          return (
+                            <div className="mt-3 flex flex-wrap items-center gap-2">
+                              <Button variant="secondary" size="sm"
+                                disabled={selCount === 0 || runningId !== null}
+                                onClick={() => runResearch(rowId, item, selKeys)}>
+                                Research selected ({selCount})
+                              </Button>
+                              <Button variant="ghost" size="sm"
+                                disabled={runningId !== null}
+                                onClick={() => runResearch(rowId, item, null)}>
+                                Research all
+                              </Button>
+                              {item.type === 'category' && (
+                                <>
+                                  <Button variant="ghost" size="sm" onClick={() => processRequest(item)}>Process</Button>
+                                  <button type="button" onClick={() => dismissRequest(item.id)}
+                                    className="text-xs text-zinc-600 hover:text-zinc-300 px-2 py-1 transition-colors">Dismiss</button>
+                                </>
+                              )}
+                            </div>
+                          )
+                        })()}
+
+                        {item.type === 'vertical' && (
                           <>
                             <p className="mt-3 text-sm text-zinc-400 leading-relaxed">
                               Filled by the Vertical Coverage sweep — run it from the Scheduled Jobs tab
@@ -660,6 +800,82 @@ export default function Jurisdictions() {
                       </div>
                     )}
                   </article>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Review (staged research awaiting approval) ── */}
+      {tab === 'review' && (
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <h2 className={LABEL}>Staged research — approve to publish</h2>
+            <Button variant="ghost" size="sm" onClick={fetchReview}>Refresh</Button>
+          </div>
+
+          {loadingReview ? (
+            <p className="text-sm text-zinc-500">Loading...</p>
+          ) : reviewGroups.length === 0 ? (
+            <div className="border border-white/[0.06] rounded-lg px-4 py-8 text-center">
+              <p className="text-sm text-zinc-600">Nothing staged for review.</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {reviewGroups.map((group) => {
+                const allIds = group.rows.map((r) => r.id)
+                return (
+                  <div key={group.jurisdiction_id} className="border border-white/[0.06] rounded-lg overflow-hidden">
+                    <div className="flex items-start justify-between gap-3 border-b border-white/[0.06] px-4 py-3">
+                      <div className="min-w-0">
+                        <h3 className="truncate text-[15px] font-semibold text-zinc-100">{group.label}</h3>
+                        <p className="mt-0.5 font-mono text-[10px] uppercase tracking-wide text-zinc-500">
+                          {group.state} · {group.rows.length} staged
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <Button variant="secondary" size="sm" onClick={() => approveReview(allIds, group)}>
+                          Approve all ({group.rows.length})
+                        </Button>
+                        <button type="button" onClick={() => rejectReview(allIds, group)}
+                          className="text-xs text-zinc-600 hover:text-red-400 px-2 py-1 transition-colors">Reject all</button>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5 p-3">
+                      {group.rows.map((row) => (
+                        <div key={row.id} className="rounded-lg border border-white/[0.06] bg-white/[0.02] p-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-xs font-medium text-zinc-200">{row.title}</span>
+                            <span className="rounded border px-1.5 py-0.5 text-[10px] border-amber-500/30 bg-amber-500/10 text-amber-300 shrink-0">
+                              Staged
+                            </span>
+                          </div>
+                          <p className="mt-0.5 text-[11px] text-zinc-500">
+                            {row.category_name}
+                            {row.source_name && (
+                              <> · {row.source_url
+                                ? <a href={row.source_url} target="_blank" rel="noreferrer" className="text-cyan-400/70 hover:text-cyan-300">{row.source_name}</a>
+                                : <span className="text-zinc-400">{row.source_name}</span>}</>
+                            )}
+                          </p>
+                          {row.description && (
+                            <p className="mt-1 text-[11px] text-zinc-400 leading-relaxed">{row.description}</p>
+                          )}
+                          {row.current_value && (
+                            <p className="mt-1 text-[11px] text-zinc-300">{row.current_value}</p>
+                          )}
+                          <div className="mt-2 flex items-center gap-3">
+                            <button type="button" onClick={() => approveReview([row.id], group)}
+                              className="text-xs text-emerald-400 hover:text-emerald-300 transition-colors">Approve</button>
+                            <button type="button" onClick={() => rejectReview([row.id], group)}
+                              className="text-xs text-zinc-600 hover:text-red-400 transition-colors">Reject</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 )
               })}
             </div>

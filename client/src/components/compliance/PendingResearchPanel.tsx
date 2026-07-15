@@ -28,8 +28,9 @@ export default function PendingResearchPanel() {
   if (loading || !data) return null
 
   const areas = data.vertical?.areas ?? 0
+  const inReview = data.vertical?.in_review ?? 0
   const hasCoverage = data.coverage_requests.length > 0
-  if (!hasCoverage && areas === 0) return null
+  if (!hasCoverage && areas === 0 && inReview === 0) return null
 
   const cleanNote = (note: string | null): string | null => {
     if (!note) return null
@@ -51,6 +52,12 @@ export default function PendingResearchPanel() {
           <li>
             <span className="text-amber-300 font-medium">{data.vertical.label}-specific</span>
             {' '}requirements — {areas} area{areas === 1 ? '' : 's'} in progress.
+          </li>
+        )}
+        {data.vertical && inReview > 0 && (
+          <li>
+            <span className="text-amber-300 font-medium">{data.vertical.label}-specific</span>
+            {' '}requirements — {inReview} area{inReview === 1 ? '' : 's'} researched, in final review.
           </li>
         )}
         {data.coverage_requests.map((r, i) => (

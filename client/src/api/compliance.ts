@@ -180,7 +180,7 @@ export type PendingResearch = {
     note: string | null
     requested_at: string | null
   }[]
-  vertical: { label: string; areas: number } | null
+  vertical: { label: string; areas: number; in_review?: number } | null
 }
 
 export function fetchPendingResearch() {
