@@ -16,6 +16,7 @@ type JurisdictionReq = {
   category: string
   jurisdiction_level: string
   jurisdiction_name: string
+  applicable_industries?: string[]
   title: string
   description: string | null
   current_value: string | null
@@ -65,6 +66,24 @@ type Props = {
   selectedProfile?: IndustryProfile | null
   onCheckComplete?: () => void
   onNavigate?: (id: string) => void
+  // URL-driven focus: 'general' (or empty) → General employment law section;
+  // an industry tag (e.g. 'manufacturing', 'healthcare') → that industry section.
+  initialIndustry?: string | null
+  // Optional cross-link to the Coverage map for this coordinate.
+  onViewCoverage?: () => void
+}
+
+// Pretty-print an applicable_industries tag: 'healthcare:oncology' → 'Healthcare · Oncology'.
+function industryLabel(tag: string): string {
+  return tag
+    .split(':')
+    .map((p) => p.split('_').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' '))
+    .join(' · ')
+}
+
+// Anchor slug for a section (URL focus targets these).
+function sectionAnchor(key: string): string {
+  return `lib-sec-${key.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`
 }
 
 const LEVEL_ORDER = ['federal', 'state', 'county', 'city']
@@ -121,7 +140,7 @@ async function readSSEStream(
 
 // ── Component ──────────────────────────────────────────────────────────────────
 
-export default function JurisdictionDetailPanel({ id, city, state, categoriesMissing, preemptionRules, selectedProfile, onCheckComplete, onNavigate }: Props) {
+export default function JurisdictionDetailPanel({ id, city, state, categoriesMissing, preemptionRules, selectedProfile, onCheckComplete, onNavigate, initialIndustry, onViewCoverage }: Props) {
   const [detail, setDetail] = useState<JurisdictionDetail | null>(null)
   const [loading, setLoading] = useState(false)
   const [scanning, setScanning] = useState(false)
@@ -353,16 +372,42 @@ export default function JurisdictionDetailPanel({ id, city, state, categoriesMis
     return filteredReqs.filter(r => r.category === categoryFilter)
   }, [filteredReqs, categoryFilter])
 
-  // Group by category
-  const groupedByCategory = useMemo(() => {
-    const map: Record<string, JurisdictionReq[]> = {}
+  // Requirements view is split into two sections grounded on the row's actual
+  // `applicable_industries` (empty = general employment law that every business
+  // here answers to; tagged = industry-specific). Industry rows are sub-grouped
+  // by tag, then category. A multi-tag row shows under each of its industries.
+  const sectioned = useMemo(() => {
+    const general: Record<string, JurisdictionReq[]> = {}
+    const industries: Record<string, Record<string, JurisdictionReq[]>> = {}
     for (const r of categoryFilteredReqs) {
       const cat = r.category || 'other'
-      if (!map[cat]) map[cat] = []
-      map[cat].push(r)
+      const tags = r.applicable_industries ?? []
+      if (tags.length === 0) {
+        (general[cat] ??= []).push(r)
+      } else {
+        for (const tag of tags) {
+          ((industries[tag] ??= {})[cat] ??= []).push(r)
+        }
+      }
     }
-    return map
+    const generalCount = Object.values(general).reduce((n, a) => n + a.length, 0)
+    const industryTags = Object.keys(industries).sort((a, b) => a.localeCompare(b))
+    return { general, generalCount, industries, industryTags }
   }, [categoryFilteredReqs])
+
+  // Scroll the URL-focused section into view once detail + rows are present.
+  useEffect(() => {
+    if (loading || !detail || !initialIndustry) return
+    const target = initialIndustry === 'general'
+      ? sectionAnchor('general')
+      : sectionAnchor(initialIndustry)
+    // Defer to next frame so the section nodes are mounted.
+    const t = window.setTimeout(() => {
+      document.getElementById(target)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }, 80)
+    return () => window.clearTimeout(t)
+    // Focus once per load/coordinate — not on every category-filter change.
+  }, [loading, detail, initialIndustry])
 
   // Hierarchy view: category → jurisdiction_level → requirements
   const hierarchyGrouped = useMemo(() => {
@@ -481,12 +526,35 @@ export default function JurisdictionDetailPanel({ id, city, state, categoriesMis
     )
   }
 
+  // Render category sub-groups within a section (shared by General + Industry).
+  function renderCatGroups(map: Record<string, JurisdictionReq[]>) {
+    return Object.entries(map)
+      .sort(([a], [b]) => getCategoryLabel(a).localeCompare(getCategoryLabel(b)))
+      .map(([cat, reqs], catIdx) => (
+        <div key={cat}>
+          {catIdx > 0 && <div className="border-t border-zinc-800/30" />}
+          <div className="px-4 pt-2 pb-1">
+            <p className="text-xs uppercase tracking-wide text-zinc-400">{getCategoryLabel(cat)}</p>
+          </div>
+          {reqs.map(renderReqRow)}
+        </div>
+      ))
+  }
+
   return (
     <div>
       {/* Header */}
       <div className="flex items-center justify-between mb-3">
         <div>
-          <h2 className="text-base font-medium text-zinc-100">{city}, {state}</h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-base font-medium text-zinc-100">{city}, {state}</h2>
+            {onViewCoverage && (
+              <button type="button" onClick={onViewCoverage}
+                className="text-[11px] text-emerald-400/80 hover:text-emerald-300 transition-colors">
+                View coverage →
+              </button>
+            )}
+          </div>
           {detail && (
             <p className="text-[11px] text-zinc-500 mt-0.5">
               {detail.requirements.length} requirements · {detail.legislation.length} legislation · {detail.locations.length} locations
@@ -693,16 +761,35 @@ export default function JurisdictionDetailPanel({ id, city, state, categoriesMis
                 )}
               </div>
             ) : (
-              <div className="border border-zinc-800 rounded-lg max-h-[55vh] overflow-y-auto">
-                {Object.entries(groupedByCategory).map(([cat, reqs], catIdx) => (
-                  <div key={cat}>
-                    {catIdx > 0 && <div className="border-t border-zinc-800/60" />}
-                    <div className="px-4 pt-3 pb-1">
-                      <p className="text-xs uppercase tracking-wide text-zinc-400">{getCategoryLabel(cat)}</p>
+              <div className="border border-zinc-800 rounded-lg max-h-[55vh] overflow-y-auto divide-y divide-zinc-800/60">
+                {/* General employment law — applies to every business here */}
+                {sectioned.generalCount > 0 && (
+                  <div id={sectionAnchor('general')}>
+                    <div className="px-4 py-2 bg-emerald-500/[0.06]">
+                      <p className="text-[11px] font-semibold text-emerald-300 uppercase tracking-wide">
+                        General employment law
+                        <span className="ml-1.5 text-zinc-500 font-normal normal-case">· {sectioned.generalCount} · every business here answers to these</span>
+                      </p>
                     </div>
-                    {reqs.map(renderReqRow)}
+                    {renderCatGroups(sectioned.general)}
                   </div>
-                ))}
+                )}
+                {/* Industry-specific — grouped by applicable industry tag */}
+                {sectioned.industryTags.map((tag) => {
+                  const cats = sectioned.industries[tag]
+                  const count = Object.values(cats).reduce((n, a) => n + a.length, 0)
+                  return (
+                    <div key={tag} id={sectionAnchor(tag)}>
+                      <div className="px-4 py-2 bg-blue-500/[0.06]">
+                        <p className="text-[11px] font-semibold text-blue-300 uppercase tracking-wide">
+                          {industryLabel(tag)}
+                          <span className="ml-1.5 text-zinc-500 font-normal normal-case">· {count} · industry-specific</span>
+                        </p>
+                      </div>
+                      {renderCatGroups(cats)}
+                    </div>
+                  )
+                })}
               </div>
             )
           )}

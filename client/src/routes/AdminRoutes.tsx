@@ -1,4 +1,4 @@
-import { Routes, Route, Navigate } from 'react-router-dom'
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import RequireRole from '../components/auth/RequireRole'
 import AppLayout from '../layouts/AppLayout'
 import AdminSidebar from '../components/AdminSidebar'
@@ -9,8 +9,8 @@ import Settings from '../pages/admin/Settings'
 import JurisdictionData from '../pages/admin/JurisdictionData'
 import WcRateData from '../pages/admin/WcRateData'
 import PayerData from '../pages/admin/PayerData'
-import Jurisdictions from '../pages/admin/Jurisdictions'
-import ScopeStudio from '../pages/admin/ScopeStudio'
+import ComplianceStudio from '../pages/admin/studio/ComplianceStudio'
+import Automation from '../pages/admin/Automation'
 import Brokers from '../pages/admin/Brokers'
 import FractionalHR from '../pages/admin/FractionalHR'
 import FractionalClientDetail from '../pages/admin/FractionalClientDetail'
@@ -34,6 +34,16 @@ import LandingMediaAdmin from '../pages/admin/LandingMedia'
 import Blogs from '../pages/admin/Blogs'
 import CategoryDetailPage from '../pages/admin/CategoryDetailPage'
 import PolicyDetailPage from '../pages/admin/PolicyDetailPage'
+
+// Old /admin/jurisdictions + /admin/scope-studio bookmarks/deep-links →
+// unified /admin/studio, preserving any query params (e.g. scope-studio's
+// ?state=&city=&industry= coordinate) onto the target view.
+function StudioRedirect({ view }: { view: string }) {
+  const location = useLocation()
+  const params = new URLSearchParams(location.search)
+  params.set('view', view)
+  return <Navigate to={`/admin/studio?${params.toString()}`} replace />
+}
 
 export default function AdminRoutes() {
   return (
@@ -66,8 +76,10 @@ export default function AdminRoutes() {
         <Route path="jurisdiction-data/category/:slug" element={<CategoryDetailPage />} />
         <Route path="jurisdiction-data/policy/:id" element={<PolicyDetailPage />} />
         <Route path="payer-data" element={<PayerData />} />
-        <Route path="jurisdictions" element={<Jurisdictions />} />
-        <Route path="scope-studio" element={<ScopeStudio />} />
+        <Route path="studio" element={<ComplianceStudio />} />
+        <Route path="automation" element={<Automation />} />
+        <Route path="jurisdictions" element={<StudioRedirect view="pipeline" />} />
+        <Route path="scope-studio" element={<StudioRedirect view="coverage" />} />
         <Route path="brokers" element={<Brokers />} />
         <Route path="fractional-hr" element={<FractionalHR />} />
         <Route path="fractional-hr/:clientId" element={<FractionalClientDetail />} />
