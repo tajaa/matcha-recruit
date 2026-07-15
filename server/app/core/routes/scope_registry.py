@@ -568,6 +568,13 @@ async def fetch_queue_research(payload: FetchQueueResearchRequest):
                             "progress": idx, "total": len(units)})
                 try:
                     corpus, citation_index = await bodies_for_unit(conn, unit)
+                    # No initial_status kwarg → writes rows 'active' directly, by
+                    # design. ScopeStudio IS the admin curation surface; the admin
+                    # driving research here is the reviewer, so there is no separate
+                    # approval gate. The staged-review 'pending' path is exclusive
+                    # to the tenant-triggered coverage queue (routes/admin.py),
+                    # where research fires on a tenant signal and must be gated
+                    # before it can reach that tenant.
                     res = await research_specialization_for_jurisdiction(
                         conn, unit["jurisdiction_id"], unit["categories"],
                         industry_tag="", industry_context=unit["context"],

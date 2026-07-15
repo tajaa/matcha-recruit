@@ -10125,7 +10125,7 @@ async def approve_research_review(body: ResearchReviewDecision):
         activated = await conn.fetch(
             "UPDATE jurisdiction_requirements SET status='active', last_verified_at=NOW(), "
             "updated_at=NOW() WHERE id = ANY($1::uuid[]) AND status='pending' "
-            "RETURNING jurisdiction_id",
+            "RETURNING id, jurisdiction_id",
             ids,
         )
 
@@ -10155,7 +10155,64 @@ async def approve_research_review(body: ResearchReviewDecision):
         except Exception as exc:
             logger.warning("approve: vertical publish failed for %s: %s", cid, exc)
 
-    return {"activated": len(activated), "published": published}
+    # Codification stage: statute-link the newly-active rows. Same choke point as
+    # ScopeStudio ("Research these · codify" + the AuthorityCockpit "Reconcile"
+    # button) and the Celery research loop — reconcile_codifications is the single
+    # writer of scope_codifications, so approving here lights up ScopeStudio's
+    # codified KPIs identically (source="approve"). Only rows whose regulation_key
+    # already has a *confirmed* authority-index classification get a statute
+    # citation; brand-new specialty keys go live but stay "to fetch" in the
+    # cockpit's backlog until an admin classifies+confirms them there. Best-effort
+    # — the rows are already active, so a reconcile error must never fail approve.
+    codified = 0
+    if activated:
+        from ..services.scope_registry.codify import reconcile_codifications
+
+        activated_ids = [r["id"] for r in activated]
+        jurisdiction_ids = list({r["jurisdiction_id"] for r in activated})
+        async with get_connection() as conn:
+            targets = await conn.fetch(
+                "SELECT DISTINCT UPPER(state) AS state, LOWER(city) AS city "
+                "FROM jurisdictions WHERE id = ANY($1::uuid[]) AND state IS NOT NULL",
+                jurisdiction_ids,
+            )
+        # One reconcile per distinct (state, city) of the activated rows. The
+        # chain resolver only reaches city/county nodes when a city is passed
+        # (city=None resolves to [federal, state]) — and routed research files
+        # city-stamped rows on city nodes, so a state-only call would silently
+        # skip codifying exactly the leaf rows this queue produces. County-node
+        # rows ride along: the chain derives the county from its city, and a
+        # routed batch always originates from a city leaf, so an activated
+        # county row co-occurs with a city row of the same city. Idempotent +
+        # deterministic, so overlapping chains (same state, several cities) are
+        # just repeated no-ops on the shared federal/state nodes.
+        pairs = sorted({(t["state"], t["city"]) for t in targets if t["state"]},
+                       key=lambda p: (p[0], p[1] or ""))
+        for st, city in pairs:
+            try:
+                async with get_connection() as conn:
+                    await reconcile_codifications(
+                        conn, state=st, city=city, source="approve"
+                    )
+            except Exception as exc:
+                logger.warning("approve: codify failed for %s/%s: %s", st, city, exc)
+
+        # Count what actually codified among the rows just approved — reconcile's
+        # own `matched` is chain-wide (it re-links every row in the chain), so
+        # reporting it here would claim credit for pre-existing links.
+        async with get_connection() as conn:
+            codified = await conn.fetchval(
+                "SELECT COUNT(*) FROM jurisdiction_requirements "
+                "WHERE id = ANY($1::uuid[]) AND citation_verified_at IS NOT NULL",
+                activated_ids,
+            ) or 0
+
+    return {
+        "activated": len(activated),
+        "published": published,
+        "codified": codified,
+        "uncodified": max(len(activated) - codified, 0),
+    }
 
 
 @router.post("/research-review/reject", dependencies=[Depends(require_admin)])

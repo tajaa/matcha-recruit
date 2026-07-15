@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import type { FormEvent } from 'react'
-import { ChevronDown, Globe2 } from 'lucide-react'
+import { Check, ChevronDown, Globe2, Loader2, Sparkles } from 'lucide-react'
 import { api, authStreamHeaders } from '../../api/client'
 import { Button, Input, Modal } from '../../components/ui'
 import { LABEL } from '../../components/ui/typography'
@@ -184,6 +184,15 @@ export default function Jurisdictions() {
   // Review (staged research awaiting approval)
   const [reviewGroups, setReviewGroups] = useState<ReviewGroup[]>([])
   const [loadingReview, setLoadingReview] = useState(false)
+  // True right after a run auto-jumps here, so we can show a "just staged" cue.
+  const [justStaged, setJustStaged] = useState(false)
+  // Result line after an approve — "Approved N · codified C · M awaiting a statute match".
+  const [reviewResult, setReviewResult] = useState<string | null>(null)
+  // Clear the Review-tab banners once the admin navigates away — they're
+  // one-shot signals for the run/approve just completed, not sticky state.
+  useEffect(() => {
+    if (tab !== 'review') { setJustStaged(false); setReviewResult(null) }
+  }, [tab])
 
   // Activity
   const [activity, setActivity] = useState<ActivityLog[]>([])
@@ -388,7 +397,13 @@ export default function Jurisdictions() {
           if (data === '[DONE]') {
             setRunningId(null)
             setSelected((prev) => { const next = { ...prev }; delete next[rowId]; return next })
-            fetchRequests(); fetchReview()
+            fetchRequests()
+            // Pull the freshly-staged drafts and jump the admin straight to the
+            // Review tab — otherwise the results "vanish" (they're staged, not
+            // live) and there's no signal where they went.
+            setReviewResult(null)
+            setJustStaged(true)
+            fetchReview().then(() => setTab('review'))
             return
           }
           try {
@@ -403,7 +418,18 @@ export default function Jurisdictions() {
   }
 
   async function approveReview(ids: string[], group: ReviewGroup) {
-    await api.post('/admin/research-review/approve', { ids, request_ids: group.request_ids, company_ids: group.company_ids })
+    const res = await api.post<{ activated: number; published: number; codified: number; uncodified: number }>(
+      '/admin/research-review/approve',
+      { ids, request_ids: group.request_ids, company_ids: group.company_ids },
+    )
+    const activated = res?.activated ?? ids.length
+    const codified = res?.codified ?? 0
+    const uncodified = res?.uncodified ?? Math.max(activated - codified, 0)
+    setReviewResult(
+      `Approved ${activated} · codified ${codified}` +
+      (uncodified > 0 ? ` · ${uncodified} live, awaiting a statute match` : ''),
+    )
+    setJustStaged(false)
     fetchReview(); fetchRequests()
   }
 
@@ -673,6 +699,21 @@ export default function Jurisdictions() {
             <Button variant="ghost" size="sm" onClick={fetchRequests}>Refresh</Button>
           </div>
 
+          {/* Persistent running banner — the research call runs for minutes and the
+              per-row progress can scroll out of view; this keeps a signal pinned to
+              the top so the admin knows work is in flight and where it lands. */}
+          {runningId !== null && (
+            <div className="mb-3 flex items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/[0.06] px-3 py-2.5">
+              <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-emerald-400" />
+              <p className="text-xs text-emerald-200">
+                Researching… drafts appear in the <span className="font-medium">Review</span> tab when done.
+                {runMessages.length > 0 && (
+                  <span className="ml-1.5 text-emerald-300/70">{runMessages[runMessages.length - 1]}</span>
+                )}
+              </p>
+            </div>
+          )}
+
           {loadingRequests ? (
             <p className="text-sm text-zinc-500">Loading...</p>
           ) : pending.length === 0 ? (
@@ -785,18 +826,6 @@ export default function Jurisdictions() {
                           )
                         })()}
 
-                        {item.type === 'vertical' && (
-                          <>
-                            <p className="mt-3 text-sm text-zinc-400 leading-relaxed">
-                              Filled by the Vertical Coverage sweep — run it from the Scheduled Jobs tab
-                              to research these {item.label.toLowerCase()} areas for {item.jurisdictions.join(', ')}.
-                              Once published, {item.company_name}'s tab auto-populates and their admin gets an email.
-                            </p>
-                            <div className="mt-3">
-                              <Button variant="secondary" size="sm" onClick={() => setTab('jobs')}>Go to Scheduled Jobs</Button>
-                            </div>
-                          </>
-                        )}
                       </div>
                     )}
                   </article>
@@ -814,6 +843,26 @@ export default function Jurisdictions() {
             <h2 className={LABEL}>Staged research — approve to publish</h2>
             <Button variant="ghost" size="sm" onClick={fetchReview}>Refresh</Button>
           </div>
+
+          {/* Cue shown right after a run auto-jumps here — explains why fresh
+              research landed on this tab instead of going live. */}
+          {justStaged && (
+            <div className="mb-3 flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/[0.06] px-3 py-2.5">
+              <Sparkles className="h-3.5 w-3.5 shrink-0 text-amber-400" />
+              <p className="text-xs text-amber-200">
+                Research complete — staged below, not yet live. Review, then
+                <span className="font-medium"> Approve</span> to publish to the tenant and codify.
+              </p>
+            </div>
+          )}
+
+          {/* Result line after an approve — codified vs still-uncodified counts. */}
+          {reviewResult && (
+            <div className="mb-3 flex items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/[0.06] px-3 py-2.5">
+              <Check className="h-3.5 w-3.5 shrink-0 text-emerald-400" />
+              <p className="text-xs text-emerald-200">{reviewResult}</p>
+            </div>
+          )}
 
           {loadingReview ? (
             <p className="text-sm text-zinc-500">Loading...</p>

@@ -379,13 +379,18 @@ async def fetch_queue(
     # "No codified value" is BOTH a NULL key (never minted) and a named key
     # with no catalog row anywhere — either way the research pipeline owes it
     # a value.
+    # 'pending' counts as covered here (IN ('active','pending')): a row staged for
+    # review by the tenant-triggered coverage queue is research already done,
+    # awaiting approval — not a gap the research pipeline still owes. Excluding it
+    # would make ScopeStudio re-research a key already sitting in /admin/jurisdictions'
+    # Review tab. See the matching filter in codify.chain_uncodified.
     where = [
         "c.status = 'confirmed'",
         "c.disposition <> 'excluded'",
         "(c.regulation_key IS NULL OR NOT EXISTS ("
         "   SELECT 1 FROM jurisdiction_requirements jr"
         "   WHERE jr.regulation_key = c.regulation_key"
-        "     AND COALESCE(jr.status, 'active') = 'active'))",
+        "     AND COALESCE(jr.status, 'active') IN ('active', 'pending')))",
     ]
 
     if state:

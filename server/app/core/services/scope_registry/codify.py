@@ -383,14 +383,21 @@ async def chain_uncodified(
     # authoring view does not (see labor_scope for the same rationale).
     applicable = [r for r in rows if classification_matches(r, [], {})]
 
-    # Codified keys already present in the chain.
+    # Keys already present in the chain — counts as "research done, don't re-fetch".
+    # 'pending' is included deliberately: a row staged for review by the
+    # tenant-triggered coverage queue (/admin/jurisdictions) is research already
+    # performed and awaiting approval, NOT a gap. Excluding it here would make
+    # ScopeStudio's "Research these · codify" re-research the same key (double
+    # Gemini spend) and write a second copy straight to 'active', bypassing the
+    # review gate. Serving/display reads (labor_scope, resolve_scope, gap_surfaces)
+    # keep the active-only filter — there "not yet live" is the honest answer.
     codified_keys = set(await conn.fetchval(
         """
         SELECT COALESCE(array_agg(DISTINCT regulation_key), '{}')
         FROM jurisdiction_requirements
         WHERE jurisdiction_id = ANY($1::uuid[])
           AND regulation_key IS NOT NULL
-          AND COALESCE(status, 'active') = 'active'
+          AND COALESCE(status, 'active') IN ('active', 'pending')
         """,
         ids,
     ) or [])

@@ -139,6 +139,11 @@ async def run_research_units(
     for unit in units:
         try:
             corpus, citation_index = await bodies_for_unit(conn, unit)
+            # No initial_status kwarg → rows written 'active' directly, by design.
+            # This is the headless ScopeStudio-side research cycle; it feeds the
+            # admin curation surface, not a tenant, so it needs no approval gate.
+            # 'pending' staging is exclusive to the tenant-triggered coverage
+            # queue path (routes/admin.py). See routes/scope_registry.py.
             res = await research_specialization_for_jurisdiction(
                 conn, unit["jurisdiction_id"], unit["categories"],
                 industry_tag="", industry_context=unit["context"],
