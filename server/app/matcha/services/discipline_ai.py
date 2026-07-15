@@ -79,7 +79,8 @@ async def build_draft_corpus(
 
     emp = await conn.fetchrow(
         """
-        SELECT id, first_name, last_name, job_title, work_state, hire_date, email
+        SELECT id, first_name, last_name, job_title, work_state,
+               start_date AS hire_date, email
         FROM employees
         WHERE id = $1 AND org_id = $2
         """,
