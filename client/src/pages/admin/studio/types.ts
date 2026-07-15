@@ -27,6 +27,33 @@ export type ListResponse = {
   totals: { total_jurisdictions: number; total_requirements: number; total_legislation: number; total_codified?: number }
 }
 
+// Geography-hierarchy tree for the Library shelf (GET /admin/jurisdictions/tree).
+export type TreeNode = {
+  id: string
+  city: string | null
+  state: string
+  county: string | null
+  level: string
+  parent_id: string | null
+  display_name: string | null
+  requirement_count: number
+  legislation_count: number
+  location_count: number
+  last_verified_at: string | null
+}
+
+export type TreeStateGroup = {
+  code: string
+  state_node: TreeNode | null
+  children: TreeNode[]
+}
+
+export type TreeResponse = {
+  federal: TreeNode[]
+  states: TreeStateGroup[]
+  totals: ListResponse['totals']
+}
+
 export type ResearchItem = {
   jurisdiction_id: string
   city: string
@@ -145,6 +172,29 @@ export type Worklist = {
   // action to clear them. Surfaced on the meter tooltip, not as an action.
   meters: { codified: number; requirements: number; keyless: number; open_items: number }
   actions: WorklistAction[]
+}
+
+// ── Coverage: cross-jurisdiction industry grid (GET /admin/vertical-coverage) ─
+
+export type VerticalIndustry = { tag: string; cells: number; covered: number }
+
+export type VerticalCoverageCell = { status: string; written: number }
+
+export type VerticalCoverageRow = {
+  jurisdiction_id: string
+  display_name: string | null
+  city: string | null
+  state: string | null
+  level: string
+  cells: Record<string, VerticalCoverageCell>
+  summary: Record<string, number>
+}
+
+export type VerticalCoverageResponse = {
+  industry_tag: string | null
+  industries: VerticalIndustry[]
+  categories: { slug: string; name: string }[]
+  jurisdictions: VerticalCoverageRow[]
 }
 
 // ── Studio-wide view routing ─────────────────────────────────────────────────

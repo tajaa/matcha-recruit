@@ -3,7 +3,7 @@ import { Check, ChevronDown, Circle, ExternalLink, Loader2, Sparkles } from 'luc
 import { api, authStreamHeaders } from '../../../api/client'
 import { Button, Modal, Input } from '../../../components/ui'
 import { LABEL } from '../../../components/ui/typography'
-import { extractCitation, coverageLink } from './utils'
+import { extractCitation, coverageLink, libraryLink } from './utils'
 import type { PendingItem, ReviewGroup, ApproveResult, UncodifiedItem } from './types'
 
 function fromUncodified(it: UncodifiedItem): ApproveResult {
@@ -408,6 +408,13 @@ export default function PipelineTab({
                           ? <a href={r.citation_url} target="_blank" rel="noreferrer"
                               className="text-cyan-400 hover:text-cyan-300">{r.statute_citation || 'view statute'}</a>
                           : <span className="text-zinc-300">{r.statute_citation}</span>}
+                        {(r.state || r.city) && <>
+                          {' · '}
+                          <a href={libraryLink(r.state, r.city)}
+                            className="text-emerald-400 hover:text-emerald-300 inline-flex items-center gap-0.5">
+                            View in Library <ExternalLink className="h-3 w-3" />
+                          </a>
+                        </>}
                       </p>
                     ) : (
                       <p className="mt-0.5 text-[11px] text-zinc-500">

@@ -2888,6 +2888,116 @@ async def list_jurisdictions():
     return result
 
 
+@router.get("/jurisdictions/tree", dependencies=[Depends(require_admin)])
+async def get_jurisdictions_tree():
+    """Geography-hierarchy view of the registry for the Library shelf.
+
+    The flat `/admin/jurisdictions` list deliberately HIDES federal/state/county
+    rows (`_is_non_city_jurisdiction`), so Library could never show state-level or
+    federal general employment law. This returns the full hierarchy — federal
+    pinned, then per-state groups carrying the state-level node + its county/city
+    children — so the tree can nest and every level's detail is reachable.
+
+    City rows are deduped by normalized city+state (same casing/alias collapse as
+    the flat list); state/federal/county rows pass through untouched.
+    """
+    async with get_connection() as conn:
+        rows = await conn.fetch("""
+            SELECT j.id, j.city, j.state, j.county, j.parent_id,
+                   j.level::text AS level, j.display_name,
+                   j.requirement_count, j.legislation_count, j.last_verified_at,
+                   COUNT(bl.id) FILTER (WHERE bl.is_active = true) AS location_count
+            FROM jurisdictions j
+            LEFT JOIN business_locations bl ON bl.jurisdiction_id = j.id
+            GROUP BY j.id
+        """)
+
+        def node(r) -> dict:
+            return {
+                "id": str(r["id"]),
+                "city": r["city"],
+                "state": r["state"],
+                "county": r["county"],
+                "level": r["level"],
+                "parent_id": str(r["parent_id"]) if r["parent_id"] else None,
+                "display_name": r["display_name"],
+                "requirement_count": r["requirement_count"] or 0,
+                "legislation_count": r["legislation_count"] or 0,
+                "location_count": int(r["location_count"] or 0),
+                "last_verified_at": r["last_verified_at"].isoformat() if r["last_verified_at"] else None,
+            }
+
+        federal: list = []
+        state_nodes: dict = {}          # state code -> state-level node
+        children_by_state: dict = {}    # state code -> [county/city nodes]
+        seen_city: dict = {}            # (state, normalized city) -> node (dedupe)
+
+        for r in rows:
+            level = r["level"]
+            # Some legacy rows carry a NULL state; bucket them under '' so grouping
+            # + sort never sees a None (a real TypeError we hit in the wild).
+            st = r["state"] or ""
+            if level in ("federal", "national"):
+                federal.append(node(r))
+                continue
+            if level == "state":
+                # Keep the richest of any duplicate state rows.
+                cur = state_nodes.get(st)
+                n = node(r)
+                if cur is None or (n["requirement_count"] + n["legislation_count"]) > (
+                    cur["requirement_count"] + cur["legislation_count"]
+                ):
+                    state_nodes[st] = n
+                continue
+            # county / city / everything else → child of its state group
+            if not _is_non_city_jurisdiction(r["city"]):
+                key = (st, _normalize_city_input(r["city"] or ""))
+                existing = seen_city.get(key)
+                n = node(r)
+                if existing is not None:
+                    # Collapse casing/alias dupes; keep the richer row.
+                    if (n["requirement_count"] + n["legislation_count"]) <= (
+                        existing["requirement_count"] + existing["legislation_count"]
+                    ):
+                        continue
+                    children_by_state[st].remove(existing)
+                seen_city[key] = n
+            else:
+                n = node(r)  # county rows (_county_ prefix) — pass through
+            children_by_state.setdefault(st, []).append(n)
+
+        states = []
+        for code in sorted(set(list(state_nodes.keys()) + list(children_by_state.keys()))):
+            kids = sorted(
+                children_by_state.get(code, []),
+                key=lambda x: (x["city"] or "").lower(),
+            )
+            states.append({
+                "code": code,
+                "state_node": state_nodes.get(code),
+                "children": kids,
+            })
+
+        total_requirements = await conn.fetchval("SELECT COUNT(*) FROM jurisdiction_requirements") or 0
+        total_legislation = await conn.fetchval("SELECT COUNT(*) FROM jurisdiction_legislation") or 0
+        total_codified = await conn.fetchval(
+            "SELECT COUNT(*) FROM jurisdiction_requirements "
+            "WHERE COALESCE(status, 'active') = 'active' AND citation_verified_at IS NOT NULL"
+        ) or 0
+        total_places = sum(len(s["children"]) for s in states)
+
+    return {
+        "federal": sorted(federal, key=lambda x: x["display_name"] or ""),
+        "states": states,
+        "totals": {
+            "total_jurisdictions": total_places,
+            "total_requirements": int(total_requirements),
+            "total_legislation": int(total_legislation),
+            "total_codified": int(total_codified),
+        },
+    }
+
+
 @router.post("/jurisdictions/cleanup-duplicates", dependencies=[Depends(require_admin)])
 async def cleanup_duplicate_jurisdictions(
     dry_run: bool = Query(True),
@@ -5621,7 +5731,7 @@ async def list_golden_facts():
     }
 
 
-@router.get("/jurisdictions/{jurisdiction_id}", dependencies=[Depends(require_admin)])
+@router.get("/jurisdictions/{jurisdiction_id:uuid}", dependencies=[Depends(require_admin)])
 async def get_jurisdiction_detail(jurisdiction_id: UUID):
     """Get full detail for a jurisdiction: requirements, legislation, linked locations."""
     redis = get_redis_cache()
@@ -5646,6 +5756,7 @@ async def get_jurisdiction_detail(jurisdiction_id: UUID):
 
         requirements = await conn.fetch("""
             SELECT id, requirement_key, category, jurisdiction_level, jurisdiction_name,
+                   applicable_industries,
                    title, description, current_value, numeric_value,
                    source_url, source_url_status, source_name, effective_date, expiration_date,
                    previous_value, previous_description, change_status,
@@ -5702,6 +5813,7 @@ async def get_jurisdiction_detail(jurisdiction_id: UUID):
                     "category": r["category"],
                     "jurisdiction_level": r["jurisdiction_level"],
                     "jurisdiction_name": r["jurisdiction_name"],
+                    "applicable_industries": list(r["applicable_industries"]) if r["applicable_industries"] else [],
                     "title": r["title"],
                     "description": r["description"],
                     "current_value": r["current_value"],
@@ -10542,6 +10654,106 @@ async def get_general_coverage(
             for slug, status in sorted(coverage.items())
         ],
     }
+
+
+@router.get("/vertical-coverage", dependencies=[Depends(require_admin)])
+async def get_vertical_coverage_grid(
+    industry_tag: Optional[str] = Query(None, description="Industry tag; omit to list industries only"),
+):
+    """Cross-jurisdiction coverage for ONE industry — the Coverage tab's missing
+    industry-wide view (Means-1 scoping cockpit: "show me Manufacturing everywhere,
+    where's thin, what to research next").
+
+    Reads the `jurisdiction_vertical_coverage` LEDGER, whose statuses
+    (pending/in_progress/covered/empty/failed) reflect the fill PIPELINE — NOT the
+    registry-resolution "covered" the labor-scope panel shows. Kept deliberately
+    separate so the two notions never silently disagree.
+
+    Without `industry_tag`: returns the industries picker list only. With it: the
+    industries list + the category columns + one row per jurisdiction that has any
+    ledger cell for the industry, each row carrying its per-category status.
+    """
+    async with get_connection() as conn:
+        # Picker: every industry that has ledger cells OR a catalog category.
+        industries = await conn.fetch(
+            """
+            SELECT tag, COALESCE(SUM(cells), 0)::int AS cells,
+                   COALESCE(SUM(covered), 0)::int AS covered
+            FROM (
+                SELECT industry_tag AS tag, COUNT(*) AS cells,
+                       COUNT(*) FILTER (WHERE status = 'covered') AS covered
+                FROM jurisdiction_vertical_coverage
+                GROUP BY industry_tag
+                UNION ALL
+                SELECT industry_tag AS tag, 0 AS cells, 0 AS covered
+                FROM compliance_categories
+                WHERE industry_tag IS NOT NULL
+                GROUP BY industry_tag
+            ) u
+            GROUP BY tag
+            ORDER BY tag
+            """
+        )
+        industries_out = [
+            {"tag": r["tag"], "cells": r["cells"], "covered": r["covered"]}
+            for r in industries
+        ]
+
+        if not industry_tag:
+            return {"industry_tag": None, "industries": industries_out,
+                    "categories": [], "jurisdictions": []}
+
+        tag = industry_tag.strip()
+        cells = await conn.fetch(
+            """
+            SELECT jvc.jurisdiction_id, j.display_name, j.city, j.state,
+                   j.level::text AS level, j.parent_id,
+                   jvc.category, jvc.status, jvc.requirements_written, jvc.updated_at
+            FROM jurisdiction_vertical_coverage jvc
+            JOIN jurisdictions j ON j.id = jvc.jurisdiction_id
+            WHERE jvc.industry_tag = $1
+            ORDER BY j.state NULLS FIRST, j.city NULLS FIRST, jvc.category
+            """,
+            tag,
+        )
+        # Category columns present for this industry, with display names.
+        cat_slugs = sorted({c["category"] for c in cells})
+        names = {r["slug"]: r["name"] for r in await conn.fetch(
+            "SELECT slug, name FROM compliance_categories WHERE slug = ANY($1::text[])",
+            cat_slugs,
+        )} if cat_slugs else {}
+        categories = [{"slug": s, "name": names.get(s, s)} for s in cat_slugs]
+
+        rows: dict = {}
+        for c in cells:
+            jid = str(c["jurisdiction_id"])
+            row = rows.get(jid)
+            if row is None:
+                row = rows[jid] = {
+                    "jurisdiction_id": jid,
+                    "display_name": c["display_name"],
+                    "city": c["city"],
+                    "state": c["state"],
+                    "level": c["level"],
+                    "cells": {},
+                    "summary": {"covered": 0, "empty": 0, "in_progress": 0,
+                                "pending": 0, "failed": 0},
+                }
+            row["cells"][c["category"]] = {
+                "status": c["status"],
+                "written": c["requirements_written"],
+            }
+            if c["status"] in row["summary"]:
+                row["summary"][c["status"]] += 1
+
+        # Federal first, then state, then city — same ordering intent as the tree.
+        _level_rank = {"federal": 0, "national": 0, "state": 1, "county": 2, "city": 3}
+        jurisdictions_out = sorted(
+            rows.values(),
+            key=lambda r: (_level_rank.get(r["level"], 9), r["state"] or "", r["city"] or ""),
+        )
+        return {"industry_tag": tag, "industries": industries_out,
+                "categories": categories, "jurisdictions": jurisdictions_out}
 
 
 @router.get("/studio/worklist", dependencies=[Depends(require_admin)])

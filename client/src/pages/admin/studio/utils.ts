@@ -43,3 +43,14 @@ export function coverageLink(state?: string | null, city?: string | null, indust
   if (city) p.set('city', city)
   return `/admin/studio?${p.toString()}`
 }
+
+// Deep-link into the Library shelf for a coordinate — the post-codify "did it
+// land in jurisdiction-data?" proof. `industry` focuses that detail section
+// ('general' → General employment law); omit for a plain jurisdiction open.
+export function libraryLink(state?: string | null, city?: string | null, industry?: string | null) {
+  const p = new URLSearchParams({ view: 'library' })
+  if (state) p.set('state', state)
+  if (city) p.set('city', city)
+  if (industry) p.set('industry', industry)
+  return `/admin/studio?${p.toString()}`
+}

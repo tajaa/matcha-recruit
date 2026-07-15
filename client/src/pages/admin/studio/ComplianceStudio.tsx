@@ -148,10 +148,18 @@ export default function ComplianceStudio() {
               initialCity={searchParams.get('city')}
               initialHeadcount={searchParams.get('headcount')}
               onMutate={fetchWorklist}
+              goto={goto}
             />
           )}
           {view === 'authority' && <AuthorityTab onMutate={fetchWorklist} />}
-          {view === 'library' && <LibraryTab />}
+          {view === 'library' && (
+            <LibraryTab
+              initialState={searchParams.get('state')}
+              initialCity={searchParams.get('city')}
+              initialIndustry={searchParams.get('industry')}
+              goto={goto}
+            />
+          )}
         </div>
 
         {assistantOpen && (

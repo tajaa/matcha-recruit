@@ -5,6 +5,7 @@ import { Button, Input, LABEL, Select } from '../../../components/ui'
 import { Drawer } from '../../../components/ui/Drawer'
 import { HelpHint } from '../../../components/ui/HelpHint'
 import SpecialtyReviewModal, { type DiscoverResponse } from './SpecialtyReviewModal'
+import type { GotoParams, StudioView, VerticalCoverageResponse } from './types'
 
 const BASE = import.meta.env.VITE_API_URL ?? '/api'
 
@@ -38,6 +39,16 @@ const GROUP_ORDER = [
   'Core Labor', 'Supplementary', 'Healthcare', 'Oncology',
   'Medical Compliance', 'Life Sciences', 'Manufacturing',
 ]
+
+// Ledger pipeline-status → dot color for the cross-jurisdiction industry grid.
+const GRID_STATUS: Record<string, string> = {
+  covered: 'bg-emerald-500',
+  empty: 'bg-zinc-600',
+  in_progress: 'bg-blue-400 animate-pulse',
+  pending: 'bg-amber-400',
+  failed: 'bg-red-500',
+  absent: 'bg-zinc-800 border border-zinc-700',
+}
 
 const SOURCE_BADGE: Record<string, string> = {
   base: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
@@ -310,7 +321,7 @@ function ResearchProgress({ r }: { r: ResearchState }) {
 // ── The tab ───────────────────────────────────────────────────────────────────
 
 export default function CoverageTab({
-  initialIndustry, initialState, initialCity, initialHeadcount, onMutate,
+  initialIndustry, initialState, initialCity, initialHeadcount, onMutate, goto,
 }: {
   initialIndustry?: string | null
   initialState?: string | null
@@ -319,6 +330,8 @@ export default function CoverageTab({
   // Bumped after any registry-mutating action here (research/reconcile) so the
   // shell/other tabs can refresh their worklist counts.
   onMutate?: () => void
+  // Cross-link into the Library shelf for a coordinate.
+  goto?: (next: StudioView, params?: GotoParams & { section?: string }) => void
 }) {
   const [industry, setIndustry] = useState(initialIndustry || 'healthcare')
   const [state, setState] = useState((initialState || '').toUpperCase())
@@ -354,7 +367,29 @@ export default function CoverageTab({
   const abortRef = useRef<AbortController | null>(null)
 
   const laborRef = useRef<HTMLDivElement>(null)
-  const [coverageTab, setCoverageTab] = useState<'matrix' | 'resolve'>('matrix')
+  const [coverageTab, setCoverageTab] = useState<'matrix' | 'resolve' | 'industry'>('matrix')
+
+  // Cross-jurisdiction industry grid — one industry across every jurisdiction
+  // that has a ledger cell. Statuses are PIPELINE state (pending/in_progress/
+  // covered/empty/failed), distinct from the registry-resolution numbers above.
+  const [grid, setGrid] = useState<VerticalCoverageResponse | null>(null)
+  const [gridLoading, setGridLoading] = useState(false)
+  const [gridIndustry, setGridIndustry] = useState(initialIndustry || 'healthcare')
+  useEffect(() => {
+    if (coverageTab !== 'industry') return
+    let cancelled = false
+    setGridLoading(true)
+    ;(async () => {
+      try {
+        const params = new URLSearchParams()
+        if (gridIndustry.trim()) params.set('industry_tag', gridIndustry.trim())
+        const res = await api.get<VerticalCoverageResponse>(`/admin/vertical-coverage?${params.toString()}`)
+        if (!cancelled) setGrid(res)
+      } catch { if (!cancelled) setGrid(null) }
+      finally { if (!cancelled) setGridLoading(false) }
+    })()
+    return () => { cancelled = true }
+  }, [coverageTab, gridIndustry, matrixNonce])
 
   // Industry-agnostic (core-labor) coverage STATE for this coordinate —
   // covered / empty (researched-nothing) / unchecked (never researched). The
@@ -1025,18 +1060,19 @@ export default function CoverageTab({
             <div className="mt-0.5 text-[11px] text-zinc-500">The specialization layer that rides on top of the core labor scope above.</div>
           </div>
           <div className="flex items-center gap-1 rounded-lg border border-white/[0.06] bg-white/[0.02] p-0.5">
-            {(['matrix', 'resolve'] as const).map((t) => (
+            {(['matrix', 'resolve', 'industry'] as const).map((t) => (
               <button key={t} onClick={() => setCoverageTab(t)}
                 className={`rounded px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.15em] transition-colors ${
                   coverageTab === t ? 'bg-white/[0.06] text-zinc-200' : 'text-zinc-500 hover:text-zinc-300'
                 }`}>
-                {t === 'matrix' ? 'Coverage matrix' : 'Registry resolution'}
+                {t === 'matrix' ? 'Coverage matrix' : t === 'resolve' ? 'Registry resolution' : 'Across jurisdictions'}
               </button>
             ))}
           </div>
         </div>
 
-        {/* Specialties + research the gap */}
+        {/* Specialties + research the gap (per-coordinate — not the cross-jurisdiction grid) */}
+        {coverageTab !== 'industry' && (
         <div className="mb-4 rounded-lg border border-white/[0.06] bg-white/[0.02] p-4">
           <div className={`mb-2 ${LABEL}`}>Specialties</div>
           <div className="flex flex-wrap gap-2">
@@ -1082,8 +1118,75 @@ export default function CoverageTab({
           )}
           {research && research.source === 'gap' && <ResearchProgress r={research} />}
         </div>
+        )}
 
-        {coverageTab === 'matrix' ? (
+        {coverageTab === 'industry' ? (
+          <div>
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <span className={LABEL}>Industry</span>
+              <select value={gridIndustry} onChange={(e) => setGridIndustry(e.target.value)}
+                className="rounded-lg border border-white/[0.08] bg-white/[0.02] px-2 py-1 text-sm text-zinc-100 outline-none focus:border-white/20">
+                {(grid?.industries?.length ? grid.industries.map((i) => i.tag) : INDUSTRIES.map((i) => i.value))
+                  .map((tag) => <option key={tag} value={tag}>{tag}</option>)}
+              </select>
+              <span className="text-[11px] text-zinc-500">Pipeline status — distinct from the registry coverage above. Click a row → Library.</span>
+            </div>
+
+            {gridLoading ? (
+              <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" /> Loading…</div>
+            ) : !grid || grid.jurisdictions.length === 0 ? (
+              <div className="rounded-lg border border-white/[0.06] px-4 py-6 text-center text-sm text-zinc-600">
+                No ledger cells for this industry yet. Run onboarding or scoping for a coordinate to populate it.
+              </div>
+            ) : (
+              <div className="overflow-x-auto rounded-lg border border-white/[0.06]">
+                <table className="text-[11px]">
+                  <thead>
+                    <tr className="text-zinc-500">
+                      <th className="sticky left-0 z-10 bg-zinc-950 px-3 py-2 text-left font-medium">Jurisdiction</th>
+                      {grid.categories.map((c) => (
+                        <th key={c.slug} className="px-1 py-2 font-medium align-bottom" title={c.name}>
+                          <div className="mx-auto w-5 truncate text-zinc-600">{c.name}</div>
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {grid.jurisdictions.map((row) => (
+                      <tr key={row.jurisdiction_id}
+                        onClick={() => goto?.('library', { state: row.state || undefined, city: row.city || undefined, industry: grid.industry_tag || undefined })}
+                        className="cursor-pointer border-t border-white/[0.04] hover:bg-white/[0.03]">
+                        <td className="sticky left-0 z-10 bg-zinc-950 px-3 py-1.5 text-left whitespace-nowrap">
+                          <span className="text-zinc-200">{row.display_name || row.city || row.state}</span>
+                          <span className="ml-1.5 text-[10px] text-zinc-600 uppercase">{row.level}</span>
+                        </td>
+                        {grid.categories.map((c) => {
+                          const cell = row.cells[c.slug]
+                          const status = cell?.status ?? 'absent'
+                          return (
+                            <td key={c.slug} className="px-1 py-1.5 text-center">
+                              <span className={`inline-block h-2.5 w-2.5 rounded-full ${GRID_STATUS[status] ?? GRID_STATUS.absent}`}
+                                title={`${c.name}: ${cell?.status ?? 'not in ledger'}${cell?.written ? ` · ${cell.written} rows` : ''}`} />
+                            </td>
+                          )
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <div className="mt-2 flex flex-wrap gap-3 text-[10px] text-zinc-500">
+              {([['covered', 'Covered'], ['empty', 'Nothing applies'], ['in_progress', 'Researching'],
+                 ['pending', 'Queued'], ['failed', 'Failed'], ['absent', 'Not in ledger']] as const).map(([k, l]) => (
+                <span key={k} className="flex items-center gap-1">
+                  <span className={`inline-block h-2 w-2 rounded-full ${GRID_STATUS[k]}`} /> {l}
+                </span>
+              ))}
+            </div>
+          </div>
+        ) : coverageTab === 'matrix' ? (
           <>
             {matrix && (
               <div className="mb-3 flex items-center gap-4 text-sm">
