@@ -865,8 +865,29 @@ async def get_pending_research_endpoint(
                         conn, leaf_chains, v_tag, v_categories
                     )
                     areas = len(plan)
-                if areas:
-                    vertical = {"label": v_label, "areas": areas}
+                # Rows an admin staged for this vertical but hasn't approved yet.
+                # Without this the panel would vanish the moment a staged run marks
+                # the ledger cells covered (plan_fill → 0) while nothing is live —
+                # tenant thinks it's done but the tab is still bare. Keep showing
+                # "we're working on it" until approval publishes.
+                in_review = 0
+                if v_categories and leaf_ids:
+                    in_review = await conn.fetchval(
+                        """
+                        WITH RECURSIVE chain AS (
+                            SELECT id, parent_id FROM jurisdictions WHERE id = ANY($1::uuid[])
+                            UNION ALL
+                            SELECT j.id, j.parent_id FROM jurisdictions j JOIN chain c ON j.id = c.parent_id
+                        )
+                        SELECT COUNT(DISTINCT r.category) FROM jurisdiction_requirements r
+                        JOIN chain c ON c.id = r.jurisdiction_id
+                        WHERE r.status = 'pending'
+                          AND r.category = ANY($2::text[])
+                        """,
+                        leaf_ids, v_categories,
+                    ) or 0
+                if areas or in_review:
+                    vertical = {"label": v_label, "areas": areas, "in_review": in_review}
         except Exception:
             vertical = None
 

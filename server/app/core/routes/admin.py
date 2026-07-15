@@ -9815,6 +9815,411 @@ async def research_jurisdiction(jurisdiction_id: UUID):
     )
 
 
+# ─── Queue-triggered research + staged review ──────────────────────────────
+#
+# Run research directly from the /admin pending-research queue (one/many/all
+# selected categories) STAGED for review: rows land status='pending' (invisible
+# to tenants via _load_jurisdiction_requirements / _load_chain_requirements /
+# every audited reader) until an admin approves them, at which point they go
+# 'active' and the publish loop fires (tenant tab auto-populates + email).
+
+class PendingResearchRunRequest(BaseModel):
+    item_type: str  # 'category' | 'vertical'
+    request_id: Optional[str] = None          # jurisdiction_coverage_requests.id (category)
+    city: Optional[str] = None
+    state: Optional[str] = None
+    county: Optional[str] = None
+    company_id: Optional[str] = None          # (vertical)
+    categories: Optional[List[str]] = None    # None = all outstanding
+
+
+@router.post("/pending-research/run", dependencies=[Depends(require_admin)])
+async def run_pending_research(body: PendingResearchRunRequest):
+    """Research selected categories from the queue, STAGED (status='pending').
+    SSE stream. No publish here — deferred to /research-review/approve.
+    """
+    from ..services.compliance_service import (
+        research_specialization_for_jurisdiction,
+        _get_or_create_jurisdiction,
+        _missing_required_categories,
+    )
+    from ..services import vertical_coverage
+    from ..services.scope_registry.research_loop import corpus_for_jurisdiction
+
+    async def sse(gen):
+        try:
+            async for ev in gen:
+                if ev.get("type") == "heartbeat":
+                    yield ": heartbeat\n\n"
+                else:
+                    yield f"data: {json.dumps(ev, default=str)}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+        yield "data: [DONE]\n\n"
+
+    # ---- category item ----
+    if body.item_type == "category":
+        if not body.state:
+            raise HTTPException(status_code=400, detail="state required for a category run")
+
+        async def category_gen():
+            async with get_connection() as conn:
+                jid = await _get_or_create_jurisdiction(
+                    conn, body.city or "", body.state, body.county
+                )
+                if body.request_id:
+                    await conn.execute(
+                        "UPDATE jurisdiction_coverage_requests SET status='in_progress' "
+                        "WHERE id=$1 AND status='pending'",
+                        UUID(body.request_id),
+                    )
+                yield {"type": "started", "jurisdiction_id": str(jid)}
+
+                # Resolve which categories to research (all outstanding if null).
+                cats = body.categories
+                if not cats:
+                    chain = await _project_chain_to_location_categories(conn, jid)
+                    cats = _missing_required_categories(chain)
+                if not cats:
+                    yield {"type": "complete", "new": 0, "message": "Nothing to research."}
+                    return
+
+                yield {"type": "researching", "categories": cats,
+                       "message": f"Researching {len(cats)} category area(s), staged for review…"}
+                try:
+                    corpus, cidx = await corpus_for_jurisdiction(conn, jid, cats)
+                except Exception:
+                    corpus, cidx = "", {}
+                # route_by_level=True: files state/federal rows on their own nodes
+                # (default False writes them onto the leaf city — jparent01).
+                task = asyncio.create_task(research_specialization_for_jurisdiction(
+                    conn, jid, cats, "",
+                    skip_existing=False,
+                    grounded_corpus=corpus, citation_index=cidx,
+                    route_by_level=True,
+                    initial_status="pending",
+                ))
+                async for evt in _heartbeat_while_admin(task):
+                    yield evt
+                result = task.result() or {}
+                yield {"type": "complete", "new": result.get("new", 0),
+                       "message": f"Staged {result.get('new', 0)} requirement(s) for review."}
+
+        return StreamingResponse(sse(category_gen()), media_type="text/event-stream",
+                                 headers={"X-Accel-Buffering": "no"})
+
+    # ---- vertical item ----
+    if body.item_type == "vertical":
+        if not body.company_id:
+            raise HTTPException(status_code=400, detail="company_id required for a vertical run")
+        company_id = UUID(body.company_id)
+
+        async def vertical_gen():
+            async with get_connection() as conn:
+                resolved = await vertical_coverage.resolve_vertical(conn, company_id)
+                if not resolved:
+                    yield {"type": "error", "message": "No vertical for this company."}
+                    return
+                parent, slug, label, tag, _minted = resolved
+                categories, context = await vertical_coverage.ensure_specialty(
+                    conn, parent, slug, label
+                )
+                if not categories:
+                    yield {"type": "complete", "new": 0, "message": "No specialty categories."}
+                    return
+                if body.categories:
+                    categories = [c for c in categories if c in set(body.categories)]
+                leaf_rows = await conn.fetch(
+                    "SELECT DISTINCT jurisdiction_id FROM business_locations "
+                    "WHERE company_id=$1 AND is_active=true AND jurisdiction_id IS NOT NULL",
+                    company_id,
+                )
+                leaves = [r["jurisdiction_id"] for r in leaf_rows]
+                chains = await vertical_coverage.chains_for_leaves(conn, leaves)
+                all_nodes = sorted({jid for ch in chains.values() for jid, _ in ch})
+                await vertical_coverage.backfill_ledger(conn, all_nodes, tag, categories)
+                plan, _deferred = await vertical_coverage.plan_fill(conn, chains, tag, categories)
+
+            if not plan:
+                yield {"type": "complete", "new": 0, "message": "Already covered."}
+                return
+            yield {"type": "researching", "vertical": label, "cells": len(plan),
+                   "message": f"Researching {len(plan)} {label} area(s), staged for review…"}
+
+            # fill yields only between (minutes-long) research calls — merge a
+            # heartbeat so proxies don't drop the stream.
+            queue: asyncio.Queue = asyncio.Queue()
+
+            async def _drive():
+                async for ev in vertical_coverage.fill(
+                    get_connection, company_id, plan, tag, context,
+                    initial_status="pending",
+                ):
+                    await queue.put(ev)
+                await queue.put(None)
+
+            drive_task = asyncio.create_task(_drive())
+            total_new = 0
+            while True:
+                try:
+                    ev = await asyncio.wait_for(queue.get(), timeout=HEARTBEAT_INTERVAL_ADMIN)
+                except asyncio.TimeoutError:
+                    yield {"type": "heartbeat"}
+                    continue
+                if ev is None:
+                    break
+                total_new += ev.get("new", 0)
+                if ev.get("category"):
+                    yield {"type": "cell_done", "category": ev["category"], "new": ev.get("new", 0)}
+            await drive_task
+            yield {"type": "complete", "new": total_new,
+                   "message": f"Staged {total_new} {label} requirement(s) for review."}
+
+        return StreamingResponse(sse(vertical_gen()), media_type="text/event-stream",
+                                 headers={"X-Accel-Buffering": "no"})
+
+    raise HTTPException(status_code=400, detail=f"Unknown item_type {body.item_type!r}")
+
+
+HEARTBEAT_INTERVAL_ADMIN = 10.0
+
+
+async def _heartbeat_while_admin(task):
+    """Heartbeat dicts while a single coroutine task runs (SSE keepalive)."""
+    while not task.done():
+        done, _ = await asyncio.wait({task}, timeout=HEARTBEAT_INTERVAL_ADMIN)
+        if done:
+            break
+        yield {"type": "heartbeat"}
+
+
+async def _project_chain_to_location_categories(conn, jurisdiction_id: UUID) -> List[dict]:
+    """The active-catalog categories present across a jurisdiction's chain — used
+    to compute 'all outstanding' when a category run passes categories=null.
+    """
+    rows = await conn.fetch(
+        """
+        WITH RECURSIVE chain AS (
+            SELECT id, parent_id FROM jurisdictions WHERE id = $1
+            UNION ALL
+            SELECT j.id, j.parent_id FROM jurisdictions j JOIN chain c ON j.id = c.parent_id
+        )
+        SELECT DISTINCT r.category FROM jurisdiction_requirements r
+        JOIN chain c ON c.id = r.jurisdiction_id
+        WHERE r.status = 'active' AND r.category IS NOT NULL
+        """,
+        jurisdiction_id,
+    )
+    return [{"category": r["category"]} for r in rows]
+
+
+@router.get("/research-review", dependencies=[Depends(require_admin)])
+async def get_research_review():
+    """Staged (status='pending') requirements grouped by jurisdiction+category,
+    each annotated with the queue item it satisfies so approve can publish.
+    """
+    from ..services import vertical_coverage
+
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT r.id, r.jurisdiction_id, r.category, r.title, r.description,
+                   r.current_value, r.source_url, r.source_name, r.created_at,
+                   j.city, j.state, j.county, j.display_name
+            FROM jurisdiction_requirements r
+            JOIN jurisdictions j ON j.id = r.jurisdiction_id
+            WHERE r.status = 'pending'
+            ORDER BY j.state, j.city, r.category, r.title
+            """
+        )
+        if not rows:
+            return {"groups": []}
+
+        pending_jids = list({r["jurisdiction_id"] for r in rows})
+
+        # Annotate: which in-progress coverage request each pending row satisfies.
+        # A category run's rows land on chain NODES (state/federal), so match by
+        # the requesting jcr's whole chain, not the leaf.
+        jcr_rows = await conn.fetch(
+            "SELECT id, city, state, county, requested_by_company_id, admin_notes "
+            "FROM jurisdiction_coverage_requests WHERE status = 'in_progress'"
+        )
+        # Map node jurisdiction_id -> [request_id,...] via each jcr's chain.
+        node_to_requests: dict = {}
+        for jcr in jcr_rows:
+            jid = await conn.fetchval(
+                "SELECT id FROM jurisdictions WHERE LOWER(city)=LOWER($1) AND UPPER(state)=UPPER($2) LIMIT 1",
+                jcr["city"], jcr["state"],
+            )
+            if not jid:
+                continue
+            chains = await vertical_coverage.chains_for_leaves(conn, [jid])
+            for _leaf, nodes in chains.items():
+                for node_id, _lvl in nodes:
+                    node_to_requests.setdefault(node_id, []).append(str(jcr["id"]))
+
+        # Vertical ownership: ledger cell -> requesting company.
+        ledger = await conn.fetch(
+            "SELECT jurisdiction_id, category, requested_by_company_id "
+            "FROM jurisdiction_vertical_coverage "
+            "WHERE jurisdiction_id = ANY($1::uuid[]) AND requested_by_company_id IS NOT NULL",
+            pending_jids,
+        )
+        ledger_map = {(l["jurisdiction_id"], l["category"]): l["requested_by_company_id"] for l in ledger}
+
+        # Category display names.
+        cat_slugs = list({r["category"] for r in rows})
+        cat_names = {c["slug"]: c["name"] for c in await conn.fetch(
+            "SELECT slug, name FROM compliance_categories WHERE slug = ANY($1::text[])", cat_slugs
+        )}
+
+        groups: dict = {}
+        for r in rows:
+            key = str(r["jurisdiction_id"])
+            g = groups.setdefault(key, {
+                "jurisdiction_id": key,
+                "label": r["display_name"] or f"{r['city']}, {r['state']}",
+                "city": r["city"], "state": r["state"],
+                "request_ids": set(),
+                "company_ids": set(),
+                "rows": [],
+            })
+            g["rows"].append({
+                "id": str(r["id"]),
+                "category": r["category"],
+                "category_name": cat_names.get(r["category"], r["category"]),
+                "title": r["title"],
+                "description": r["description"],
+                "current_value": r["current_value"],
+                "source_url": r["source_url"],
+                "source_name": r["source_name"],
+            })
+            for rid in node_to_requests.get(r["jurisdiction_id"], []):
+                g["request_ids"].add(rid)
+            owner = ledger_map.get((r["jurisdiction_id"], r["category"]))
+            if owner:
+                g["company_ids"].add(str(owner))
+
+        return {"groups": [
+            {**g, "request_ids": sorted(g["request_ids"]), "company_ids": sorted(g["company_ids"])}
+            for g in groups.values()
+        ]}
+
+
+class ResearchReviewDecision(BaseModel):
+    ids: List[str]
+    request_ids: Optional[List[str]] = None
+    company_ids: Optional[List[str]] = None
+
+
+@router.post("/research-review/approve", dependencies=[Depends(require_admin)])
+async def approve_research_review(body: ResearchReviewDecision):
+    """Activate staged rows, then publish to waiting tenants (project + email).
+
+    Publish context is taken from the request body (request_ids / company_ids),
+    NOT re-derived from the activated rows' jurisdiction_id — routed rows sit on
+    chain nodes, not the leaf a coverage request references.
+    """
+    ids = [UUID(i) for i in body.ids]
+    async with get_connection() as conn:
+        activated = await conn.fetch(
+            "UPDATE jurisdiction_requirements SET status='active', last_verified_at=NOW(), "
+            "updated_at=NOW() WHERE id = ANY($1::uuid[]) AND status='pending' "
+            "RETURNING jurisdiction_id",
+            ids,
+        )
+
+    published = 0
+    # Category side: resolve each request's jurisdiction and run the publish loop.
+    for rid in (body.request_ids or []):
+        async with get_connection() as conn:
+            jcr = await conn.fetchrow(
+                "SELECT city, state, county FROM jurisdiction_coverage_requests WHERE id=$1",
+                UUID(rid),
+            )
+            if not jcr:
+                continue
+            jid = await conn.fetchval(
+                "SELECT id FROM jurisdictions WHERE LOWER(city)=LOWER($1) AND UPPER(state)=UPPER($2) LIMIT 1",
+                jcr["city"], jcr["state"],
+            )
+        if jid:
+            await _publish_research_to_requesters(jid)
+            published += 1
+
+    # Vertical side: reproject the requesting company's tabs + email its admins.
+    for cid in (body.company_ids or []):
+        try:
+            await _publish_vertical_to_company(UUID(cid))
+            published += 1
+        except Exception as exc:
+            logger.warning("approve: vertical publish failed for %s: %s", cid, exc)
+
+    return {"activated": len(activated), "published": published}
+
+
+@router.post("/research-review/reject", dependencies=[Depends(require_admin)])
+async def reject_research_review(body: ResearchReviewDecision):
+    """Delete staged rows; flip their ledger cells to 'failed' so plan_fill
+    retries; revert the queue item to pending so it's actionable again.
+    """
+    ids = [UUID(i) for i in body.ids]
+    async with get_connection() as conn:
+        deleted = await conn.fetch(
+            "DELETE FROM jurisdiction_requirements WHERE id = ANY($1::uuid[]) AND status='pending' "
+            "RETURNING jurisdiction_id, category",
+            ids,
+        )
+        # Flip matching vertical ledger cells covered -> failed (else backfill,
+        # which counts only active rows, leaves a covered cell with zero rows,
+        # never retried).
+        pairs = list({(d["jurisdiction_id"], d["category"]) for d in deleted})
+        for jid, cat in pairs:
+            await conn.execute(
+                "UPDATE jurisdiction_vertical_coverage SET status='failed', updated_at=NOW() "
+                "WHERE jurisdiction_id=$1 AND category=$2 AND status='covered'",
+                jid, cat,
+            )
+        # Revert queue items so they reappear as actionable.
+        for rid in (body.request_ids or []):
+            await conn.execute(
+                "UPDATE jurisdiction_coverage_requests SET status='pending' "
+                "WHERE id=$1 AND status='in_progress'",
+                UUID(rid),
+            )
+    return {"deleted": len(deleted)}
+
+
+async def _publish_vertical_to_company(company_id: UUID) -> None:
+    """Reproject a company's tabs from the catalog + email its admins that new
+    specialty requirements landed. Pooled-conn analog of the sweep's post-fill
+    reproject + _notify (the worker helper is pool-free; here we have a pool).
+    """
+    from ..services import vertical_coverage
+    from ..services.compliance_service import _get_company_admin_contacts
+
+    async with get_connection() as conn:
+        locs = await conn.fetch(
+            "SELECT id FROM business_locations WHERE company_id=$1 AND is_active=true", company_id,
+        )
+        total = 0
+        for row in locs:
+            total += await vertical_coverage.reproject_location(conn, company_id, row["id"])
+    if total <= 0:
+        return
+    try:
+        company_name, contacts = await _get_company_admin_contacts(company_id)
+        email_service = get_email_service()
+        for c in contacts:
+            await email_service.send_compliance_change_notification_email(
+                to_email=c["email"], to_name=c.get("name"),
+                company_name=company_name, location_name=company_name,
+                changed_requirements_count=total,
+            )
+    except Exception as exc:
+        logger.warning("_publish_vertical_to_company: email failed for %s: %s", company_id, exc)
+
+
 # ---------------------------------------------------------------------------
 # Company Management
 # ---------------------------------------------------------------------------
