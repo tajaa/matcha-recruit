@@ -15,16 +15,29 @@ from ..utils import get_db_connection
 
 
 async def _run_check(location_id: str, company_id: str, check_type: str = "scheduled") -> dict:
-    """Run a compliance check for a single location."""
-    from uuid import UUID
-    from app.core.services.compliance_service import run_compliance_check_background
+    """Sync a single location's tab from the shared catalog.
 
-    result = await run_compliance_check_background(
-        location_id=UUID(location_id),
-        company_id=UUID(company_id),
-        check_type=check_type,
-        allow_live_research=False,
-    )
+    Projection-only, and NOT a flag on a research-capable function: this calls
+    project_location_from_catalog, whose only callees are the catalog-projection
+    helpers — there is no code path from here to Gemini at all (see that
+    function's docstring). Catalog freshness (the only place Gemini spend lives)
+    is a separate concern — legislation_watch / structured_data_fetch / admin
+    refresh / vertical_coverage_sweep — never a side effect of this daily sync.
+    """
+    from uuid import UUID
+    from app.core.services.compliance_service import project_location_from_catalog
+
+    conn = await get_db_connection()
+    try:
+        result = await project_location_from_catalog(
+            conn,
+            UUID(company_id),
+            UUID(location_id),
+            create_alerts=True,
+            check_type=check_type,
+        )
+    finally:
+        await conn.close()
     return result
 
 

@@ -212,51 +212,208 @@ for migration filenames that no longer exist, + `test_build_dossier_full`).
 
 ---
 
+## Round 2 — closing the remaining gaps
+
+_Migrations applied. Everything below then shipped in `bc32714..db58da8`._
+
+### The KEY editor — the step that had no UI
+
+`PUT /items/{id}/classification` existed with **zero** frontend callers, so an
+item Gemini classified with a NULL `regulation_key` was permanently stalled: no
+key means `codify.py` can never match it to a catalog row, and there was no way
+to supply one short of curl. The confirm queue could only rubber-stamp Gemini,
+never correct it.
+
+* `GET /vocabulary` — dispositions + taxonomy + RKD keys by category. The editor
+  cannot exist without it: `validate_proposal` rejects any category slug outside
+  the taxonomy and downgrades any key outside the RKD, so a free-text field would
+  be a guessing game against a vocabulary the server already knows.
+* `ClassificationEditor` — disposition, key-category → regulation-key cascade,
+  applies-to/excludes chips, excluded-reason. Lands **confirmed**.
+
+**The editor surfaces the server's warnings instead of swallowing them.** The
+gates *downgrade* rather than reject: a key not in the RKD is stored as NULL with
+a warning. Swallowing that is the worst possible outcome here — the operator
+believes they keyed the item (the entire point) while it stays uncodifiable. My
+first live attempt did exactly that, and the UI would have reported success.
+
+Verified: ingested the CA authority slices (52 provisional classifications, 14
+keyless incl. AB701 §2100-2105), drove the editor's exact call — `8 CCR § 3395`
+is now confirmed + keyed to `heat_illness_prevention` and codifiable.
+
+### §9 acceptance test — through the real SQL
+
+An LA warehouse gets AB 701 + 1910.147 lockout/tagout, and does **not** get
+1910.119 PSM. Every prior test asserted this against hand-built dicts via the
+pure `classification_matches` helper, so the disposition logic was covered but
+the SQL feeding it was not. Seeds its own index in a transaction and rolls back.
+Also asserts the conditional *fires* once the facility does hold PSM chemicals
+(else the exclusion would pass for the wrong reason), that a non-warehouse
+doesn't inherit AB 701, and that provisional classifications contribute nothing.
+
+**It immediately earned its keep.** The fixture had a typo — a leaf saying `op`
+where it meant `operator` — and the test caught PSM being served to a warehouse.
+Root cause: `_eval_condition` returned `True` for an unrecognized node, silently
+turning a **conditional** obligation into a universal one.
+`jurisdiction_requirements.trigger_conditions` are written by **Gemini research
+with no shape gate** (unlike scope-registry classifications, which
+`validate_proposal` rejects), so a plausible model typo was enough to serve the
+PSM standard to every company. Now fails closed and logs — the same convention
+the function already used for an unevaluable numeric comparison. 110 live rows
+carry triggers, **zero** are malformed, so no live behavior changed.
+
+### Collision re-key — the curation `b694559` left to a human
+
+All six resolved. `duplicate_active_obligation` findings: **6 → 0**.
+
+`minimum_wage` was the hard one: it derives its write identity from **rate_type**,
+not `regulation_key`, so the key alone cannot separate the NY rows. The new
+`exempt_salary_regional` rate-type dialect is what makes them two identities.
+
+`requirement_key` is recomputed by **calling `_compute_key_parts`**, never by
+rebuilding the string. Dry-running that caught a corruption before it touched
+anything: `applicable_entity_types` comes back as a JSONB *string* on this
+driver, so `aet[0]` grabbed the `[` character and would have written the identity
+`[:billing_integrity:medicaid_provider_enrollment`.
+
+`rekey02` then healed 3 rows whose **stored** composite no longer matched what
+the upsert computes. That matters: a re-key leaving a stale composite re-opens
+the collision on the very next research pass, because `ON CONFLICT` matches
+nothing and a twin is minted. Both migrations skip-and-report rather than
+overwrite when a target identity is taken — collapsing two rows is a *merge*
+decision, not a re-key. Applied to dev: 34 re-keyed, 3 healed, 0 skipped,
+**identity drift 0**.
+
+### Citations now reach customers
+
+The CA authority is ingested and confirmed, so CA-level authority lands **direct**
+stamps on CA rows: 57 operative citations (`Cal. Lab. Code § 512` on the CA meal-
+break requirement, etc.), plus the floor relations. The citation chip is no longer
+unexercised.
+
+### Two bugs found by driving it
+
+* **Dispatch lied about success.** `.delay()` onto a broker with no worker
+  succeeds — the task sits in Redis forever — so Ingest/Classify returned
+  "running" and nothing happened. Now reports `worker_online` + a
+  `queued_no_worker` status, and the cockpit shows it. (`dev-remote.sh` *does*
+  run a worker — as a **process**, not a container, which is why a `docker ps`
+  check misses it.)
+* **A stateless location 500'd the compliance page.** `_filter_with_preemption`
+  called `state.upper()` unguarded; **10 live locations** have a NULL state and
+  every one was serving a 500. Pre-existing (`9dbf4e2`), found while verifying
+  the citation surface across real tenants.
+
+---
+
+## Round 3 — adversarial review of the round-2 work (`3e8a1a0..587652f`)
+
+A 3-lane review of the six unreviewed commits found **5 HIGH** defects. The
+pattern is worth naming: every one of them was in code that *worked when driven
+manually* and failed only under adversarial sequencing — switch rows in the
+editor, re-research after a re-key, reconcile across countries. Driving it once
+is not the same as driving it wrong.
+
+### The re-key was not durable — the next research pass would have undone it
+
+The load-bearing one. `db58da8` gave NY's downstate threshold its own identity
+via a new rate_type, because for `minimum_wage` **the rate_type IS the write
+identity** (`_compute_key_parts` keys the ON-CONFLICT composite off it and
+ignores `regulation_key` entirely). But a re-key only holds if a **producer can
+re-emit that identity**, and none could:
+
+* `gemini_compliance` keeps its **own** `VALID_RATE_TYPES`, which `db58da8`
+  didn't touch. A Gemini-emitted `exempt_salary_regional` wasn't in that set, so
+  it flattened to `general` — meaning a weekly **salary threshold** figure would
+  have overwritten New York's **general minimum wage** row.
+* And a producer emitting the correct `regulation_key` (which the prompt now
+  advertises) still keyed to the **statewide** row, overwriting it with downstate
+  content and orphaning the regional row forever.
+
+Both reproduced before fixing. Now: `_coerce_minimum_wage_rate_type` derives the
+rate_type from the regulation_key (the inverse of `keys._RATE_TYPE_TO_KEY`), so
+the identity survives whether a producer emits the key, the rate_type, or only
+the title. **A test pins the two `VALID_RATE_TYPES` copies together** — their
+drift *is* the bug, and leaving them independent leaves the trap armed.
+
+### The floor was jurisdiction-blind
+
+`value_basis` was keyed `(regulation_key, level)` — no country, no state. Registry
+keys are a global vocabulary and UK rows carry level `national`, which folds into
+the same tier as US `federal`. So **a UK row could become "the federal floor"**
+every US state is tested against: a TX row genuinely restating the US federal
+value fails the test, demotes, and has its **correct citation stripped**. Same
+shape one level down — all 50 states shared a single `(key, 'state')` bucket.
+
+Also: a demote destroyed the citation even when the mismatch was **unverifiable**
+(the floor isn't codified, or is quarantined). Absent basis is not evidence of
+divergence — but it cleared the stamp anyway, so quarantining *one* federal row
+would strip correct citations off every state row that restates it. Baseline
+entries now carry `verified`; only a **proven** mismatch clears a stamp.
+
+And `jurisdictional_basis` was never removed, so a row promoted to a direct stamp
+kept its old chip — reading *"federal floor: 29 CFR § 541.600 … which does not
+itself set this value"* directly beside a `statute_citation` of 29 CFR § 541.600.
+The record contradicting itself, permanently.
+
+### The editor corrupted rows
+
+`ClassificationEditor` had **no `key={editing.id}`**. All its form state is
+`useState`-initialized from the item, so clicking Edit on a second row while the
+first editor was open reused the mounted component: header showed row B, form
+still held row A's values, and saving wrote **A's classification onto B** —
+confirmed, and propagated to B's inheriting children. Silent corruption in the
+tool built to correct data.
+
+Worse, `override_classification` PATCH-preserved `jurisdiction_scope` but **not
+`entity_condition`**. `validate_proposal` rejects `conditional` without a valid
+condition, so a conditional item could never be re-saved at all — and the natural
+workaround (flip to `universal_in_domain` just to get a key stored) passed
+validation and **wiped the trigger**. That is exactly the PSM-served-to-a-warehouse
+over-scope the §9 acceptance test, shipped the same day, exists to prevent.
+
+### Three more
+
+* **NY's downstate tier was graded against 49 other states.**
+  `EXPECTED_REGULATION_KEYS` does double duty — tagging *validity* and
+  completeness *expectation* — so the key had to be in it (else NY's real row is
+  `invalid_key`) but was then expected of everyone. New `_KEY_STATE_SCOPE`.
+* **The dispatch ping blocked the event loop.** `celery_app.control.ping` is
+  synchronous broker I/O called inline from async routes: every Ingest click
+  froze the *whole uvicorn process* for the timeout. Now `asyncio.to_thread`.
+* **Reconcile never pruned links a re-key invalidated**, so drift on the
+  *Medicare* authority still flagged the *Medicaid* row it no longer describes.
+
+---
+
 ## Still open
 
-**Migrations are authored, NOT applied.** Heads: `cmpreqdrop01`, `scoperg02`,
-`catseed01`, `codify03`. The tree has multiple heads and needs a merge migration
-before `alembic upgrade head` can reach them. `catseed01` is the load-bearing
-one — until it runs, 4 labor categories in the default research sweep park on
-`uncategorized` instead of their own row.
-
-**Gaps deliberately not closed:**
-
-* **No KEY-assignment editor.** `PUT /items/{id}/classification` still has zero
-  frontend callers. The cockpit's Key column is display-only; the amber "no key"
-  label is the *only* KEY surface, and its tooltip points at a UI that doesn't
-  exist. **Unkeyed items remain permanently stalled** — this is the review's own
-  HIGH gap and it is still open. Same for the *override* half of the confirm
-  queue (no way to correct a wrong Gemini disposition from the UI).
-* **No `resolve_scope` §9 acceptance test** — the LA-warehouse → AB701 + 1910.147
-  (excludes 1910.119 PSM) case is still asserted nowhere through a real read path.
-* **Ingest/Classify are fire-and-forget Celery dispatches** with no completion
-  feedback. With no worker running (the dev default) the button 200s and
-  **nothing happens, silently**.
-* **Collision data re-key** — the 2 registry keys landed
-  (`medicaid_provider_enrollment`, `exempt_salary_threshold_regional`) but the
-  data migration did not. The live rows have inconsistent `requirement_key`
-  composites (`minimum_wage:exempt_salary`, `medi_cal:billing_integrity:...`)
-  that `_compute_key_parts` derives from rate_type/title/jurisdiction, one row
-  carries a free-text `regulation_key`, and SB 306 spans 16 jurisdictions — a
-  title-matched UPDATE would corrupt the upsert identity. **This is the curation
-  pass `b694559` explicitly left to a human.**
+* **`_resolve_regulation_key`'s Jaccard threshold can re-collide the maternity
+  rows.** `{statutory, maternity, leave}` ∩ `{statutory, sick, leave}` = 2/4 =
+  **exactly** the 0.5 acceptance threshold. If a sick_leave research pass re-files
+  maternity under `sick_leave` (which is how those rows arose), the resolver maps
+  it straight back onto `statutory_sick_leave`. The re-key moved the rows; nothing
+  stops the producer repeating the original mis-filing.
+* **The regional threshold is invisible to the wage-violation checker.** It
+  buckets exempt employees against `rate_type='exempt_salary'` only, so an NYC
+  exempt employee paid between the statewide and downstate figures reads as
+  compliant. Needs per-region geo applicability (the regional row sits at the NY
+  *state* jurisdiction with nothing marking which counties it binds) — a bigger
+  change than a label.
 * **Data authoring** (5 states, city slices, industry keysets, golden facts) —
   the review's #1 priority. Nothing here moves it; it's skills work, not code.
 * **Schedulers stay seeded disabled** (`compliance_evals`,
   `scope_registry_research`). Flipping them on is a go-live step, and the
   research cycle **makes live Gemini calls**.
-
-**Worth knowing before judging the feature by what's on screen:** the two direct
-citation stamps that survived reconcile (AZ/FL) aren't linked to any tenant
-location, so **no customer currently sees a `statute_citation`** — only floor
-relations. Correct behavior, but the citation chip is effectively unexercised in
-the UI until more authority is codified.
+* **`trigger_conditions` have no write-time shape gate.** Read-time now fails
+  closed, but a malformed Gemini-authored trigger still persists silently. The
+  scope-registry side validates at write (`validate_proposal`); the research side
+  should too.
+* **Migrations `rekey01`/`rekey02` are dev-applied only** — they must run on prod
+  before the next research pass, or prod re-mints the twins they just removed.
 
 **Sharp edge:** `scope_codifications.source` was `VARCHAR(20)` and
 `'scheduled_research'` is 18 — two characters of slack. Overflowing it raises
 `StringDataRightTruncationError` *inside* the reconcile transaction, rolling back
 every link and citation stamp the run computed. `codify03` widens it to 64 and
-the code clamps + warns; a test pins the clamp to the migration's width **and**
-asserts every shipped label still fits the pre-migration width (since the
-migration isn't applied yet).
+the code clamps + warns; a test pins the clamp to the migration's width.

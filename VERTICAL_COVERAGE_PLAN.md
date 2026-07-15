@@ -1,0 +1,404 @@
+# Tenant-triggered vertical coverage: auto-scope any US industry, once, for everyone
+
+> **STATUS: implemented 2026-07-14.** Migration `vertcov01`,
+> `server/app/core/services/vertical_coverage.py`, and the vertical phase in
+> `matcha_x_onboarding.py` `POST /build/stream`. Verified end-to-end on dev —
+> see "Results" at the bottom. Two bugs found while verifying (a hardcoded
+> category vocabulary and a top-level industry tag shape) are written up there;
+> both were silent, and both would have shipped a catalog full of wage law
+> mislabelled as dental.
+
+## Context
+
+The product promises to scope *any* US company. Driving a real LA dental office
+through it end-to-end showed it only scopes verticals someone hand-fed it.
+
+Today's committed fixes (`3eb777e`, `d13d095`, `6ee1700`, plus uncommitted
+chain-projection + trigger-decode work) fixed **reachability**: the catalog was
+63% misparented, the tenant projection synced one research pass instead of the
+jurisdiction-chain union, and `trigger_conditions` was multi-encoded so it failed
+open. An LA dental office now correctly sees LA minimum wage, CA overtime, OSHA
+bloodborne pathogens, HIPAA.
+
+It still sees **nothing dental**, for one structural reason:
+
+**Coverage is remembered per jurisdiction, never per industry.**
+`_is_jurisdiction_fresh` (compliance_service.py:1321) keys on
+`jurisdictions.last_verified_at` alone. Once Los Angeles is verified — by
+anybody, in any industry — every later company reads "fresh" and never triggers
+research. The first tenant in a city freezes the catalog for everyone after.
+Result: every industry-tagged row in the catalog is healthcare (309 `healthcare`
++ 10 hand-seeded sub-verticals); **zero** rows for retail, hospitality,
+construction, manufacturing, and none for dental.
+
+### The engine already exists — it is admin-manual and has no memory
+
+Do not rebuild these. Reuse them:
+
+- `industry_specialties.discover(parent_industry, name)` (industry_specialties.py:128)
+  → Gemini derives the 5–15 categories a vertical needs beyond its parent's
+  baseline, plus a reusable `research_context` paragraph. `confirm()` (:159)
+  commits them to `compliance_categories` tagged `healthcare:dental`,
+  transactionally and idempotently. The `industry_specialties` table already
+  holds `oncology`, `pharmacy`, `behavioral_health`… and **no dental**.
+- `research_specialization_for_jurisdiction(conn, jurisdiction_id, categories,
+  industry_tag, industry_context=…)` (compliance_service.py:9575)
+  → researches a (jurisdiction × industry × categories) slice, grounds it,
+  force-tags `applicable_industries=[industry_tag]` (:9701), and upserts. Derives
+  `is_federal` automatically, so federal/state/city slices all work.
+- `corpus_for_jurisdiction` (scope_registry/research_loop.py:56) for grounding.
+- An admin SSE endpoint (`routes/admin.py:7735 run_specialization_research`)
+  already chains discover → confirm → research.
+
+**What is missing is only two things:**
+1. **Tenants cannot trigger it.** The onboarding build never calls any of it.
+   Facility inference correctly detects `entity_type = "Dental Practice"` and the
+   detection is dropped on the floor — nothing downstream consumes it.
+2. **There is no coverage ledger.** `research_specialization_for_jurisdiction`
+   infers coverage with `skip_existing` — "are there rows tagged `healthcare:dental`
+   in this jurisdiction for this category?" (:9647). That cannot distinguish
+   *never researched* from *researched, genuinely nothing to find*, and cannot
+   record a failure. So empty cells are re-researched forever and the loop never
+   converges.
+
+The catalog is tenant-independent. A dental office in LA *triggers* a fill; the
+result is shared, so every later dental office in that jurisdiction reads it
+instantly with zero Gemini calls. That reuse is the entire point.
+
+## Design
+
+### 1. Migration `vertcov01` — the ledger
+
+`jurisdiction_vertical_coverage`:
+`(jurisdiction_id, industry_tag, category)` **UNIQUE**, plus `status`
+(`pending` | `in_progress` | `covered` | `empty` | `failed`),
+`requirements_written` INT, `error` TEXT, `requested_by_company_id`, timestamps.
+
+`empty` is distinct from `failed` on purpose: "we researched CA × dental ×
+`chemotherapy_handling` and there genuinely is nothing" must never be
+re-researched. `failed` retries; `empty` does not. This is the piece
+`skip_existing` structurally cannot express.
+
+Keyed on `jurisdiction_id`, so federal dental research runs **once nationally**
+and state once per state — chain reuse falls out for free.
+
+### 2. `server/app/core/services/vertical_coverage.py` (new, thin)
+
+- `resolve_vertical(conn, company_id, location)` → `(parent_industry, label,
+  industry_tag)`. Most-specific tag from `_get_company_industry_tags` (:115),
+  falling back to the detected `facility_attributes.entity_type`.
+  **Also persist the specialty onto `companies.healthcare_specialties` if absent** —
+  otherwise `_filter_requirements_for_company` (:3140) drops the rows we just
+  wrote, because the company doesn't carry the tag they're tagged with.
+- `ensure_specialty(conn, parent, label)` → if no `industry_specialties` row or no
+  categories tagged, call `discover()` + `confirm()` (`discovered_by='auto'`).
+  Returns `(categories, research_context)`. Without this, `expand_scope` and the
+  research path silently return **zero** dental categories: `compliance_categories`
+  is a hard post-filter (onboarding_scope_ai.py:561), which is exactly why dental
+  produces nothing today.
+- `missing_cells(conn, chain_jurisdiction_ids, industry_tag, categories)` → ledger diff.
+- `fill(conn, company_id, cells, industry_tag, research_context)` → async generator.
+  Per cell: mark `in_progress` → `corpus_for_jurisdiction` →
+  `research_specialization_for_jurisdiction(..., skip_existing=False)` (the ledger
+  now owns that decision) → mark `covered` / `empty` / `failed` with counts.
+
+### 3. Wire into the onboarding build (synchronous, per the chosen UX)
+
+`matcha_x_onboarding.py` `POST /build/stream`: insert a phase after the roster
+union (**:517**) and before the terminal `complete` (**:635**), where
+`jurisdictions_seen`, `industry`, and the `total_codified`/`total_covered`
+counters (:385-386) are all in scope. Emit `vertical_scoping` /
+`vertical_researching` / `vertical_codified`; add `vertical` +
+`vertical_requirements_added` to the `complete` payload.
+
+The SSE `type` is a plain string and `Step4Build.tsx:eventStyle` has a graceful
+`default` case — **new event types need no frontend change** to render. A
+first-class icon is a one-line `switch` addition, optional.
+
+Then re-project the affected locations (`_project_chain_to_location` +
+`_sync_requirements_to_location`) so the new rows land on the tab in the same
+build.
+
+### 4. Serving — no change
+
+The chain projection + industry filter + trigger evaluation fixed earlier today
+surface the new rows automatically, for this tenant and every future one.
+
+## Guards
+
+- **Never blanket-tag.** `applicable_industries` is a Postgres `TEXT[]` whose
+  ON-CONFLICT unions, and `_filter_requirements_for_company` drops rows whose tags
+  don't intersect the company's. Tagging generic labor rows `healthcare:dental`
+  would hide them from every non-dental tenant in the jurisdiction — poisoning the
+  shared catalog. Only the specialization pass's own output is tagged, which
+  `research_specialization_for_jurisdiction` already does correctly.
+- Cap cells per build; `log()` what was skipped. Silent truncation reads as
+  "covered everything".
+- Ungrounded rows stay quarantined by the existing grounding gate.
+- The 5 hardcoded `TRIGGER_PROFILES` keep working exactly as today.
+
+## Verification
+
+1. **Dental fill** — the demo tenant's build creates an `industry_specialties`
+   row for dental, dental categories in `compliance_categories`, ledger rows for
+   (Federal | California | LA) × `healthcare:dental` × N, and catalog rows tagged
+   `healthcare:dental`. The Compliance tab shows dental-specific obligations
+   (Dental Practice Act, Dental Board licensure/CE, radiation-machine
+   registration, infection control, amalgam separator).
+2. **Reuse — the whole point.** Create a *second* LA dental office. Its build
+   finds every cell `covered`, makes **zero** Gemini calls, and its tab is
+   identical and instant. Assert the research-call count is 0.
+3. **Generalization — the real test of the claim.** Create a *hospitality*
+   company in Austin, TX. The vertical is discovered, confirmed, researched, and
+   hospitality rows appear. Nothing in the path is healthcare-specific.
+4. **No regression** — `pytest tests/scope_registry tests/compliance
+   tests/compliance_evals` (baseline: 7 pre-existing failures) and `tsc --noEmit`.
+5. **Re-drive the product by hand** and read every served row. Every bug found
+   today was found that way, and none by a test.
+
+## Out of scope (named, not silently skipped)
+
+- Entity/facility *triggers* for new verticals (e.g. dental sedation permit)
+  still need `TRIGGER_PROFILES` entries; that tuple is frozen in code and has 3
+  consumers. Industry *tagging* — which is what scopes dental — does not.
+- Cross-category duplicate obligations ("Final Pay Upon Termination" filed under
+  both `final_pay` and `pay_frequency`) — a separate identity bug. **Partly
+  addressed:** it bit hard inside a vertical (see Results), so the fill now
+  guards it at the prompt and dedupes deterministically. The generic labor
+  catalog still has it.
+- `expiration_date` is still absent from `RequirementResponse`.
+- Backfilling verticals for existing tenants (they fill on their next check).
+
+---
+
+# Results — what shipped, and the two bugs verification found
+
+Everything below was found by driving the product, not by a test.
+
+## The vocabulary was hardcoded, and failing meant researching the wrong subject
+
+The first dental fill reported `new: 153` and every SSE event said success. The
+153 rows were California **wage law**, tagged `healthcare:dental`.
+
+`_normalize_category_value` (gemini_compliance.py) gated categories on
+`CATEGORY_KEYS` — a **frozen constant compiled from `compliance_registry.py`**.
+Oncology's categories are baked into it. Dental's, discovered at runtime and
+written to `compliance_categories`, are not. So all 7 dental categories
+normalized to `None`, and:
+
+```python
+for category in categories or DEFAULT_RESEARCH_CATEGORIES:
+    normalized = _normalize_category_value(category)   # None, for every one
+    if normalized and normalized not in selected_categories:
+        selected_categories.append(normalized)
+if not selected_categories:
+    selected_categories = list(DEFAULT_RESEARCH_CATEGORIES)   # ← the harm
+```
+
+The fallback doesn't under-deliver — it researches a **different subject** and
+returns it under the caller's label, and
+`research_specialization_for_jurisdiction` then force-tags every row with the
+vertical's `industry_tag`. A vertical fill that finds nothing is supposed to look
+like nothing; this one looked like a success.
+
+Fixed three ways: the vocabulary now unions the DB's `compliance_categories`
+(`register_dynamic_categories` / `refresh_dynamic_categories`, called at the top
+of the specialty-research path); an explicit category list that fully drops now
+returns `[]` and logs an error rather than silently swapping in the default set;
+and unknown categories are logged when dropped.
+
+## `hospitality:hospitality` would have been invisible forever
+
+When the vertical IS the industry (a hotel has no sub-specialty above
+hospitality), `industry_tag()` produced `hospitality:hospitality` — but
+`_get_company_industry_tags` gives such a company the bare tag `hospitality`, and
+`_filter_requirements_for_company` intersects the two. Every row researched for
+hospitality would have been filtered straight back out of the tab of the company
+that triggered the research. `industry_tag()` now collapses `(x, x)` to `x`, and
+the discovery prompt has a top-level branch (asking for the industry's own
+obligations instead of ones "beyond the {industry} baseline", which was
+self-contradictory).
+
+## Duplicate obligations, inside one vertical
+
+`requirement_key` is `<category>:<regulation_key>` — so the **category is part of
+an obligation's identity**. The catch-all `dental_practice_act_scope` returned
+the entire dental corpus, so radiology, sedation, infection control and amalgam
+each landed twice and the tenant saw every dental obligation listed twice.
+Guarded at the prompt (each category call now names its siblings and is told not
+to return their obligations) and deduped deterministically afterwards
+(`_dedupe_by_regulation_key`, which collapses on `regulation_key` **or** on
+normalized title — `regulation_key` is model-generated and drifts between runs,
+so a key match alone misses re-researched duplicates).
+
+## Verified on dev
+
+1. **Dental fill** — Sunset Smile Dental (LA) triggers discovery of 7 dental
+   categories, researches them, gets **12 distinct dental obligations** spanning
+   all three levels: EPA Dental Effluent Guidelines (40 CFR 441, federal), CA
+   Dental Practice Act / Dental Board sedation permits / CCR Title 16 § 1005
+   infection control / CDPH radiation protection program / CURES PDMP (state),
+   and an LA County X-ray shielding plan (county). No duplicates.
+2. **Reuse — the whole point.** A *second* LA dental office (Westlake Family
+   Dental) builds with `vertical_scoping` → straight to `complete`. Every cell
+   reads `covered` from the ledger, **zero** Gemini research calls, identical 12
+   dental rows on its tab.
+3. **Generalization — the real test of the claim.** A *hospitality* company in
+   Austin, TX — nothing healthcare anywhere in the path, zero hospitality rows in
+   the catalog beforehand — discovers 8 categories from cold (food safety,
+   alcohol service liability, lodging fire codes, pool/spa safety, guest data
+   privacy, tip pooling, housekeeping ergonomics, ADA public accommodation) and
+   researches Texas Dram Shop Act, TABC, TFER 25 TAC 228, Austin Fire Code, TX
+   pool/spa 25 TAC § 265, TDPSA, ADA Title III, FLSA tip pooling. **Zero**
+   hospitality rows leaked onto the dental tenant.
+4. **No regression** — 756 passing, the same 7 pre-existing failures.
+
+## Round 2 — what the code review caught
+
+The first implementation shipped the vertical engine with the **same class of bug
+it was written to fix**. A review over the unreviewed range found it:
+
+- **The fill re-created jparent01's misparenting.**
+  `research_specialization_for_jurisdiction` writes via
+  `_upsert_requirements_additive`, which files rows on whatever jurisdiction it is
+  handed. The fill handed it the tenant's LEAF — so stamped-`state` dental rows
+  were physically parented to the `los angeles, CA` city node, and hospitality's
+  to `austin, TX`. Fixed with `_upsert_requirements_routed_additive` (a routing
+  upsert with **no delete pass** — the existing routed upsert deletes leaf city
+  rows the run didn't re-emit, which for a one-industry pass would delete every
+  other industry's city rows) behind `route_by_level=True`.
+- **Cells were keyed on the leaf, so reuse only worked same-city.** A San
+  Francisco dental office could never read the California rows Los Angeles paid
+  for. Cells are now chain nodes (`expand_to_chains`, broadest-first).
+- **One level per cell.** Researching a category at all four chain levels means
+  each pass volunteers the same state obligation, all four route to the state
+  node, and the model names it differently every time — no deterministic dedupe
+  can collapse that. `only_levels` gives each cell sole ownership of one level.
+- **The ledger started cold over seeded verticals.** `healthcare` already has 17
+  categories and 300+ rows; the next plain-healthcare tenant would have
+  re-researched all of it synchronously. `backfill_ledger` reconciles first.
+- Plus: an unreadable `trigger_conditions` string crashed the whole chain
+  projection (`'str' has no attribute 'get'` — one bad catalog row would break
+  every tenant whose chain contains it); the chain query admitted `superseded` and
+  `pending` rows; the recursive CTE had no cycle guard; inferred `entity_type`
+  minted `healthcare:dental_practice` alongside signup's `healthcare:dental` (two
+  disjoint ledger namespaces); roster-only tenants were never reprojected after a
+  fill; one pool connection was pinned across dozens of Gemini calls; the cell cap
+  truncated silently; and the `complete` event under-reported the requirement
+  count because it was summed before the vertical fill ran.
+
+## Round 3 — reviewing the round-2 fixes found the fixes' own bugs
+
+The chain-cell design (round 2) was re-reviewed before commit. Eight findings,
+the sharpest of which was structural:
+
+- **County cells could never write, and the ledger recorded the loss as
+  "covered".** `_get_county_jurisdiction_id` assumes it is handed a CITY and
+  inspects the node's *parent* for the `_county_` marker — handed the county node
+  itself, it returns None, routing skips every row, and the verdict was computed
+  from the PRE-ROUTE count, so the cell was marked covered with zero rows in the
+  catalog. Terminal status ⇒ permanent, invisible hole. Fixed twice over:
+  `_resolve_jurisdiction_id_for_level` now returns the node itself when its own
+  level already matches, and verdicts come from `written_by_level` — what
+  actually landed.
+- **4× the Gemini spend, most of it discarded.** Researching each chain node
+  separately meant every call returned the full federal+state+local picture and
+  kept one slice. Restructured: one research call per **(leaf, category)**
+  covering all missing cells of that category (`plan_fill`), rows routed by
+  stamped level. 7 calls instead of 28 for the demo tenant, and the
+  cross-level-duplicate problem can't recur because one call can't disagree with
+  itself.
+- **The inference-path tenant never saw its rows.** The specialty tag is
+  persisted at step 3c, *after* step 3 projected; with a fully-covered ledger the
+  reproject never ran, so the tenant whose vertical was auto-detected got zero
+  vertical rows this build. `resolve_vertical` now reports `minted_now` and the
+  route reprojects whenever the tag was just written.
+- **entity_type is a closed enum — the suffix heuristic was solving the wrong
+  problem** and mangled the enum's own values (`nursing_facility`→`nursing`).
+  Replaced with an explicit enum→specialty map; facility *shapes*
+  (hospital/clinic/fqhc) map to nothing, and inference can never mint a new
+  specialty — signup is the only entry into the vocabulary.
+- **The dedupe could delete pre-existing shared-catalog rows** (title collisions
+  across categories — "Recordkeeping Requirements" names distinct obligations)
+  and their projections for *other* tenants, from inside an unrelated tenant's
+  onboarding. Now: title matches count only within a category, key matches
+  across, and only rows created after the fill started are ever deleted.
+- Plus: the verdict `_mark` moved onto the research call's own connection (a
+  fresh acquire could fail after a paid call and wedge the cell at
+  `in_progress`); `backfill_ledger` judges coverage by category membership, not
+  tag containment (untagged legacy rows are covered too); the `_county_` name
+  sentinel no longer leaks into the research prompt as a city; and the recount's
+  falsy-zero `or` fallback is gone.
+
+Verified refuted, not fixed: the routed-additive's missing `last_verified_at`
+stamp is **correct** — stamping it after a one-industry pass would make
+`_is_jurisdiction_fresh` suppress the generic research the jurisdiction still
+needs. Documented in the function instead.
+
+## Round 4 — the worker, the filler flag, and a bug that broke every AI worker task
+
+Three of the five open items are closed by one scheduler-gated Celery task,
+`vertical_coverage_sweep` (migration `vertcov02`, seeded **disabled**):
+
+- **reclaims** stale `in_progress` cells (>2h → `failed`, which `plan_fill` retries;
+  `empty` remains the never-retry verdict),
+- **drains** the calls the per-build cap deferred (a deferred cell holds no ledger
+  verdict, so it is simply picked up), and
+- **fills** tenants who onboarded before their vertical was ever scoped, emailing
+  the admin **only on a real gain**.
+
+Rate-limited to one sweep/day by the atomic `last_run_at` claim — the worker
+restarts hourly and this makes live Gemini calls. The admin Trigger button passes
+`force=True`, because those guards exist to stop the restart loop, not a human.
+The tenant "Run check" also opts in (`include_vertical_fill=True`); the flag is
+opt-in because the stream has five callers, and an unconditional fill would fire
+three times per Matcha-X build and quietly add Gemini spend to the admin
+white-glove flows.
+
+**Driving it surfaced a pre-existing bug far bigger than this feature: no Celery
+task could call Gemini at all.** `rate_limiter.check_limit` and
+`platform_settings.get_jurisdiction_research_model_mode` sit on the path of every
+AI call in the codebase and hard-required the app pool — but workers are
+deliberately pool-free (`celery_app.py` never calls `init_pool`). Every Gemini
+call from a worker raised `Database pool not initialized` *before* reaching the
+API, and surfaced only as a research pass that mysteriously produced nothing.
+That silently affected **ten** task modules (`healthcare_research`,
+`oncology_research`, `er_analysis`, `interview_analysis`, `risk_assessment`,
+`scope_registry` research, …). Fixed at the chokepoint with
+`database.connection_or_direct()` — pooled when a pool exists, raw otherwise.
+
+**Filler rows** ("no rule applies here") now carry a model-emitted
+`no_rule_applies` flag, persisted to `metadata` and filtered out of the tenant
+projection (and out of the stream's raw-set fallback path, the one route that
+skips the projection). They stay in the catalog, because `skip_existing` callers
+read their presence as "this category was researched".
+
+A live sweep proved why the flag has to come from the model, in **both**
+directions: a genuine placeholder came back titled *"State-Level Export Control
+Rule"* — no "No…" prefix, so a title matcher would have kept it — while
+`no_surprises_act` is the regulation_key of a **real federal statute** a matcher
+would have deleted.
+
+Verified on dev: the sweep discovered a **Technology** vertical from cold
+(nobody had ever scoped it), wrote 15 requirements — TDPSA, the Texas Responsible
+AI Governance Act, federal export controls, NY SHIELD Act — with **0 misparented
+rows**, hid 3 placeholders from the tab (15 catalog → 12 served), deferred 20
+calls as retryable, and reclaimed the cell I had wedged. 768 tests pass, same 7
+pre-existing failures.
+
+## Still open
+
+- **PROD.** `vertcov01` + `vertcov02` are **dev-applied only**, alongside the still
+  un-applied `jparent01` / `jsonfix01` / `rekey01` / `rekey02`. **Do not just run
+  `migrate-prod.sh`** — see §3 above: `jparent01` deletes tenant-facing rows with
+  no downgrade, never updates the jurisdiction-encoded `canonical_key` (it has
+  already left 222 rows on dev whose key names the wrong jurisdiction), and
+  `alembic upgrade heads` walks **five** branches. Pre-flight → harden → snapshot →
+  pinned revisions.
+- The sweep's scheduler row is seeded **disabled**. Enable it at
+  `/admin` → Schedulers when you want the spend.
+- The ~27 pre-existing filler rows predate the `no_rule_applies` flag, so they are
+  still on tabs. They need an **admin review list**, never an automated purge (see
+  §2 — a heuristic deletes real law).
+- The sweep budgets 12 Gemini calls per cycle across all companies; a large tenant
+  therefore fills over several nights. Fine for now; revisit if it feels slow.

@@ -36,9 +36,24 @@ if ! docker ps --format '{{.Names}}' | grep -q '^matcha-postgres$'; then
 fi
 
 echo "Connecting as: $(echo "$DEV_DATABASE_URL" | sed 's|://[^:]*:[^@]*@|://***:***@|')"
+
+# Dev is disposable, so this warns rather than blocks — but it warns, because
+# "dev ran a different version of the same revision than prod did" is exactly how
+# jparent01 left dev with 222 stale canonical_key rows that prod does not have.
+# migrate-prod.sh makes this a hard gate.
+DIRTY="$(cd "$REPO_ROOT" && git status --porcelain -- server/alembic 2>/dev/null || true)"
+if [[ -n "$DIRTY" ]]; then
+  echo "!! Uncommitted migrations — dev is about to run code git does not have:"
+  echo "$DIRTY" | sed 's/^/     /'
+  echo "!! Commit before running migrate-prod.sh, or the two DBs run different bytes."
+fi
+
 echo "Running Alembic upgrade on dev..."
 cd "$REPO_ROOT/server"
-# `heads` (plural): the history has two permanent branch heads — the matcha
-# line and the cappe line (no branch labels), so `upgrade head` is ambiguous.
+# `heads` (plural): the history carries several permanent branch heads (no branch
+# labels), so `upgrade head` singular is ambiguous.
 DATABASE_URL="$DEV_DATABASE_URL" ./venv/bin/alembic upgrade heads
 echo "Done."
+
+echo
+echo "Tip: MIGRATE_REHEARSAL=1 runs a migration for real and rolls it back."

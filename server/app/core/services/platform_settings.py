@@ -5,7 +5,13 @@ import logging
 import time
 from typing import Sequence
 
-from ...database import get_connection
+# connection_or_direct, not get_connection: these settings are read on the way to
+# EVERY Gemini call (get_jurisdiction_research_model_mode picks the model), so a
+# hard pool requirement here — like the one in the rate limiter — meant no Celery
+# task could call Gemini at all. Workers are pool-free by design (celery_app.py).
+# The `conn=None` managed path is the one that needs it; callers that already hold
+# a connection pass it and never reach this.
+from ...database import connection_or_direct as get_connection
 
 logger = logging.getLogger(__name__)
 

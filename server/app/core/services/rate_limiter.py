@@ -8,7 +8,12 @@ Uses rolling windows for hourly and daily limits.
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from ...database import get_connection
+# connection_or_direct, not get_connection: EVERY Gemini call in the codebase
+# passes through this limiter, including calls made from Celery tasks — and
+# workers are pool-free by design (celery_app.py), so a hard `get_connection()`
+# here meant no worker could ever call Gemini. It raised in check_limit, before
+# the API call, and looked like a research pass that simply found nothing.
+from ...database import connection_or_direct as get_connection
 
 
 class RateLimitExceeded(Exception):

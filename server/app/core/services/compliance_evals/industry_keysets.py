@@ -32,6 +32,7 @@ from app.core.compliance_registry import (
     ONCOLOGY_CATEGORIES,
     SUPPLEMENTARY_CATEGORIES,
     _key_applies_to_country,
+    _key_applies_to_state,
 )
 
 # Every employer, regardless of industry, owes the labor + supplementary stack.
@@ -202,11 +203,19 @@ def expected_keys(
     industry: Optional[str],
     country_code: str = "US",
     categories: Optional[Set[str]] = None,
+    state: Optional[str] = None,
 ) -> Dict[str, Set[str]]:
-    """Expected regulation keys per category for (industry, country).
+    """Expected regulation keys per category for (industry, country, state).
 
     Country filtering reuses ``_key_applies_to_country`` so a UK jurisdiction is
     never flagged for missing ``tipped_minimum_wage``.
+
+    State filtering (``_key_applies_to_state``) does the same one level down, for
+    keys that exist only in named states: without it NY's downstate exempt-salary
+    tier is EXPECTED of the other 49 states, emitting a missing_key finding
+    against each and dragging every state's score for something they will never
+    have. Omitting ``state`` keeps every state-scoped key in the expectation —
+    the conservative default, and what every pre-existing caller gets.
 
     The filter is applied for **every** country, including the US. This differs
     deliberately from ``get_missing_regulations``, which short-circuits the filter
@@ -223,6 +232,8 @@ def expected_keys(
         if not keys:
             continue
         keys = {k for k in keys if _key_applies_to_country(k, cat, country_code)}
+        if state is not None:
+            keys = {k for k in keys if _key_applies_to_state(k, state)}
         if keys:
             out[cat] = set(keys)
     return out

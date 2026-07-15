@@ -168,6 +168,26 @@ _LEVEL_RANK = {"federal": 0, "national": 0, "state": 1, "county": 2, "city": 3,
                "local": 3, "special_district": 3}
 
 
+def _norm_level(level: Any) -> str:
+    """'national' and 'federal' are the same tier — one is the international
+    spelling. Must normalize on BOTH sides of the basis lookup or a national
+    authority never finds its own floor."""
+    lvl = (level or "").lower()
+    return "federal" if lvl == "national" else lvl
+
+
+def _basis_key(regulation_key: Any, level: Any, country: Any, state: Any) -> tuple:
+    """Identity of a 'floor' value: one per (key, tier, country, state).
+
+    A federal/national floor is country-wide, so it carries no state. Anything
+    at or below the state tier is state-specific — TX's floor is not CA's.
+    """
+    lvl = _norm_level(level)
+    ctry = (country or "US").upper()
+    st = None if lvl == "federal" else (state or None)
+    return (regulation_key, lvl, ctry, st)
+
+
 def _norm_value(text: Any) -> str:
     return " ".join(str(text or "").split()).casefold()
 
@@ -237,21 +257,37 @@ def build_citation_stamps(
 
         direct_cands: List[Dict[str, Any]] = []
         for c in cands:
-            auth_rank = _LEVEL_RANK.get((c.get("jurisdiction_level") or "").lower(), 99)
+            auth_rank = _LEVEL_RANK.get(_norm_level(c.get("jurisdiction_level")), 99)
             if auth_rank == row_rank:
                 direct_cands.append(c)
                 continue
-            basis = value_basis.get(
-                (c.get("regulation_key"), (c.get("jurisdiction_level") or "").lower())
-            )
+            # The floor to test against is the one in the AUTHORITY's own
+            # jurisdiction — a US federal authority's floor is the US federal
+            # row, never the UK's.
+            basis = value_basis.get(_basis_key(
+                c.get("regulation_key"),
+                c.get("jurisdiction_level"),
+                c.get("authority_country") or meta.get("country"),
+                c.get("authority_state"),
+            ))
             if basis is not None and _values_equal(meta, basis):
                 direct_cands.append(c)  # the row restates the floor verbatim
             else:
                 baseline.setdefault(rid, []).append({
                     "citation": c["citation"], "item_id": str(c["item_id"]),
                     "index_slug": c.get("index_slug"),
-                    "level": (c.get("jurisdiction_level") or "").lower(),
+                    "level": _norm_level(c.get("jurisdiction_level")),
                     "relation": "floor",
+                    # verified=True  -> we HAVE the floor's value and this row's
+                    #   value differs: the citation is false provenance for this
+                    #   row and any existing stamp of it must be cleared.
+                    # verified=False -> the floor isn't codified (or is
+                    #   quarantined), so we cannot tell restatement from
+                    #   divergence. Record the relation, but do NOT destroy an
+                    #   existing citation on a guess — a temporary quarantine of
+                    #   one federal row would otherwise strip correct citations
+                    #   off every state row that restates it.
+                    "verified": basis is not None,
                 })
 
         # de-dupe on item_id (same citation reached via two classifications)
@@ -767,12 +803,27 @@ async def reconcile_codifications(
     }
     # The authority-level value per key — the basis for the restatement test
     # (does a state row merely restate the federal floor, or set its own
-    # value?). Deterministic pick when a key collides at one level: first by
+    # value?).
+    #
+    # Keyed by COUNTRY and STATE too, not just (key, level). Registry keys are a
+    # global vocabulary — `national_minimum_wage` is as true of the UK as of the
+    # US — and UK rows carry level 'national', which folds into the same
+    # 'federal' bucket as the US federal row. Without the country dimension a
+    # UK row could become "the federal floor" every US state is tested against:
+    # a TX row that genuinely restates the US federal value would fail the test,
+    # demote, and have its CORRECT citation stripped. Same shape one level down:
+    # all 50 states share one (key, 'state') bucket unless keyed by state.
+    #
+    # Deterministic pick when a key still collides within one bucket: first by
     # row id, so re-runs can't flap between direct and baseline.
     value_basis: Dict[tuple, Dict[str, Any]] = {}
     for r in sorted(requirement_rows, key=lambda x: str(x["id"])):
-        lvl = (r.get("jurisdiction_level") or "").lower()
-        key = (r.get("regulation_key"), "federal" if lvl == "national" else lvl)
+        key = _basis_key(
+            r.get("regulation_key"),
+            r.get("jurisdiction_level"),
+            r.get("requirement_country"),
+            r.get("requirement_state"),
+        )
         value_basis.setdefault(key, {
             "numeric_value": r.get("numeric_value"),
             "current_value": r.get("current_value"),
@@ -809,6 +860,26 @@ async def reconcile_codifications(
     # but citations unstamped, or new stamps written while stale ones aren't
     # cleared (that inconsistency is exactly what a re-run would then act on).
     async with conn.transaction():
+        # Prune links whose two ends no longer name the same obligation. A re-key
+        # (rekey01) moves a requirement onto a different regulation_key, but the
+        # link minted when it shared the OLD key survives — so drift on the
+        # Medicare authority citation still flags the Medicaid row it no longer
+        # describes, and the drift list counts it among `affected_requirements`.
+        # Reconcile was insert/upsert-only and never removed anything.
+        pruned = await conn.fetchval(
+            """
+            WITH p AS (
+                DELETE FROM scope_codifications sc
+                USING authority_item_classifications c,
+                      jurisdiction_requirements jr
+                WHERE c.id = sc.classification_id
+                  AND jr.id = sc.jurisdiction_requirement_id
+                  AND c.regulation_key IS DISTINCT FROM jr.regulation_key
+                RETURNING 1
+            ) SELECT COUNT(*) FROM p
+            """
+        )
+
         if links:
             # One set-based upsert (unnest) instead of N round trips.
             result = await conn.fetch(
@@ -821,7 +892,12 @@ async def reconcile_codifications(
                 ) AS t(classification_id, jurisdiction_requirement_id, regulation_key, jurisdiction_id),
                 LATERAL (SELECT $5::varchar AS source, $6::jsonb AS run_info) s
                 ON CONFLICT (classification_id, jurisdiction_requirement_id) DO UPDATE SET
-                    codified_at = NOW(), source = EXCLUDED.source, run_info = EXCLUDED.run_info
+                    codified_at = NOW(), source = EXCLUDED.source,
+                    run_info = EXCLUDED.run_info,
+                    -- Refresh the key: a re-key (rekey01) leaves the stored
+                    -- column naming the OLD obligation while the row it points
+                    -- at now carries a different one.
+                    regulation_key = EXCLUDED.regulation_key
                 RETURNING (xmax = 0) AS inserted
                 """,
                 [link["classification_id"] for link in links],
@@ -847,7 +923,15 @@ async def reconcile_codifications(
                 SET statute_citation = t.citation,
                     citation_item_id = t.item_id,
                     citation_verified_at = NOW(),
-                    metadata = COALESCE(jr.metadata, '{}'::jsonb) || t.verified::jsonb
+                    -- Strip any stale floor relation first: a row that now has a
+                    -- DIRECT citation is not sitting on top of that floor, it IS
+                    -- the floor (or restates it). Leaving the old entry behind
+                    -- renders a chip reading "federal floor: 29 CFR § 541.600 …
+                    -- which does not itself set this value" directly beside a
+                    -- statute_citation of 29 CFR § 541.600 — the record
+                    -- contradicting itself, permanently.
+                    metadata = (COALESCE(jr.metadata, '{}'::jsonb) - 'jurisdictional_basis')
+                               || t.verified::jsonb
                 FROM unnest($1::uuid[], $2::text[], $3::uuid[], $4::jsonb[])
                     AS t(req_id, citation, item_id, verified)
                 WHERE jr.id = t.req_id
@@ -868,32 +952,79 @@ async def reconcile_codifications(
             # engine reads jurisdictional_basis to reason floor-vs-own-law.
             b_ids = list(baselines.keys())
             b_json = [json.dumps({"jurisdictional_basis": baselines[r]}) for r in b_ids]
+            # Only a VERIFIED mismatch (we hold the floor's value and this row's
+            # differs) proves the stamp is false provenance. An unverifiable one
+            # (the floor isn't codified, or is quarantined) must record the
+            # relation WITHOUT destroying the existing citation — otherwise
+            # quarantining a single federal row strips correct citations off
+            # every state row that restates it.
+            b_clear = [
+                json.dumps([
+                    {"item_id": e["item_id"]}
+                    for e in baselines[r] if e.get("verified")
+                ])
+                for r in b_ids
+            ]
             await conn.execute(
                 """
                 UPDATE jurisdiction_requirements AS jr
-                SET metadata = COALESCE(jr.metadata, '{}'::jsonb) || t.basis::jsonb,
-                    -- A previous reconcile (pre jurisdictional-logic) may have
-                    -- DIRECT-stamped this very item here; that stamp is now
-                    -- known false provenance for this row — remove it, text
-                    -- included, unlike the transient-churn sweep below.
+                SET metadata = (
+                        CASE
+                            -- Clearing the stamp must also drop its
+                            -- verified_citations breadcrumb. The churn sweep
+                            -- below can't do it: this statement nulls
+                            -- citation_verified_at first, and the sweep's guard
+                            -- is `verified_at IS NOT NULL` — so the breadcrumb
+                            -- would be orphaned, listing the false citation as
+                            -- verified, forever.
+                            WHEN t.clear::jsonb
+                                 @> jsonb_build_array(jsonb_build_object('item_id', jr.citation_item_id::text))
+                            THEN COALESCE(jr.metadata, '{}'::jsonb) - 'verified_citations'
+                            ELSE COALESCE(jr.metadata, '{}'::jsonb)
+                        END
+                    ) || t.basis::jsonb,
+                    -- A previous reconcile (or the pre-jurisdictional-logic one)
+                    -- may have DIRECT-stamped this very item here; a VERIFIED
+                    -- demote proves that stamp is false provenance for this row,
+                    -- so remove it — text included, unlike the transient-churn
+                    -- sweep below, which deliberately preserves the text.
                     statute_citation = CASE
-                        WHEN t.basis::jsonb -> 'jurisdictional_basis'
+                        WHEN t.clear::jsonb
                              @> jsonb_build_array(jsonb_build_object('item_id', jr.citation_item_id::text))
                         THEN NULL ELSE jr.statute_citation END,
                     citation_verified_at = CASE
-                        WHEN t.basis::jsonb -> 'jurisdictional_basis'
+                        WHEN t.clear::jsonb
                              @> jsonb_build_array(jsonb_build_object('item_id', jr.citation_item_id::text))
                         THEN NULL ELSE jr.citation_verified_at END,
                     citation_item_id = CASE
-                        WHEN t.basis::jsonb -> 'jurisdictional_basis'
+                        WHEN t.clear::jsonb
                              @> jsonb_build_array(jsonb_build_object('item_id', jr.citation_item_id::text))
                         THEN NULL ELSE jr.citation_item_id END
-                FROM unnest($1::uuid[], $2::jsonb[]) AS t(req_id, basis)
+                FROM unnest($1::uuid[], $2::jsonb[], $3::jsonb[])
+                    AS t(req_id, basis, clear)
                 WHERE jr.id = t.req_id
                 """,
-                b_ids, b_json,
+                b_ids, b_json, b_clear,
             )
             baselines_recorded = len(baselines)
+
+        # Drop stale floor relations from rows that have none this run: the
+        # classification was removed, or the row's value changed so it now
+        # restates the floor and got a DIRECT stamp instead. Without this the
+        # chip outlives the relation it describes.
+        stale_basis = await conn.fetchval(
+            """
+            WITH c AS (
+                UPDATE jurisdiction_requirements AS jr
+                SET metadata = jr.metadata - 'jurisdictional_basis'
+                WHERE jr.id = ANY($1::uuid[])
+                  AND jr.metadata ? 'jurisdictional_basis'
+                  AND NOT (jr.id = ANY($2::uuid[]))
+                RETURNING 1
+            ) SELECT COUNT(*) FROM c
+            """,
+            [r["id"] for r in requirement_rows], list(baselines.keys()),
+        )
 
         # Self-correct: a row that was registry-verified but no longer has a
         # supporting citation this run (classification removed, or the jurisdiction
@@ -934,6 +1065,8 @@ async def reconcile_codifications(
         "unmatched_keys": unmatched_keys,
         "citations_stamped": citations_stamped,
         "baselines_recorded": baselines_recorded,
+        "stale_basis_cleared": int(stale_basis or 0),
+        "stale_links_pruned": int(pruned or 0),
         "overwrote_manual": overwrote_manual,
         "citations_cleared": int(cleared or 0),
     }

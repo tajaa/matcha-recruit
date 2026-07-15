@@ -25,6 +25,11 @@ from typing import Optional
 _RATE_TYPE_TO_KEY = {
     "tipped": "tipped_minimum_wage",
     "exempt_salary": "exempt_salary_threshold",
+    # A named sub-state region's own exempt threshold (NY downstate). Distinct
+    # from the statewide tier: two different dollar figures, both live, both
+    # binding on their own geography. minimum_wage keys off rate_type, so
+    # without this dialect entry the two rows collide on one identity.
+    "exempt_salary_regional": "exempt_salary_threshold_regional",
     "fast_food": "fast_food_minimum_wage",
     "healthcare": "healthcare_minimum_wage",
     "large_employer": "large_employer_minimum_wage",

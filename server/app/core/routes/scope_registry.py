@@ -6,6 +6,7 @@ endpoints admin-gated. The service layer lives in
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Literal, Optional
 from uuid import UUID
@@ -30,6 +31,50 @@ router = APIRouter()
 
 
 _JSONB_FIELDS = ("entity_condition", "unmodeled_coordinates", "jurisdiction_scope")
+
+
+def _worker_online() -> bool:
+    """Is any Celery worker actually listening?
+
+    `.delay()` onto an empty queue succeeds — the task just sits in Redis until
+    a worker starts — so a dispatch route returns 200 and NOTHING HAPPENS. At
+    the UI that is indistinguishable from success, which is exactly how an
+    operator clicks Ingest, watches the counts never move, and concludes the
+    pipeline is broken. No worker runs in local dev by default.
+
+    BLOCKING: kombu's broadcast-and-wait is synchronous socket I/O, so this must
+    never be called directly from an async route — see _dispatch. `limit=1`
+    returns as soon as one worker answers instead of always waiting out the full
+    timeout.
+
+    Best-effort: a broker that can't be reached is reported as offline rather
+    than raising, because this is advisory — it must never block the dispatch.
+    """
+    try:
+        from app.workers.celery_app import celery_app
+        replies = celery_app.control.ping(timeout=0.5, limit=1)
+        return bool(replies)
+    except Exception:
+        logger.warning("celery ping failed — reporting worker offline", exc_info=True)
+        return False
+
+
+async def _dispatch(status: str, slug: str) -> DispatchResponse:
+    # _worker_online blocks on broker I/O. Called inline it would freeze the
+    # whole uvicorn process — every in-flight request, not just this one — for
+    # the ping timeout, and longer against a half-dead broker.
+    online = await asyncio.to_thread(_worker_online)
+    return DispatchResponse(
+        status=status if online else "queued_no_worker",
+        dispatched_to="celery",
+        slug=slug,
+        worker_online=online,
+        message=(
+            None if online else
+            "Queued, but NO Celery worker is running — this task will not execute "
+            "until one starts. (Local dev runs no worker by default.)"
+        ),
+    )
 
 
 def _row_out(row) -> dict:
@@ -66,7 +111,7 @@ async def trigger_ingest(slug: str, current_user=Depends(require_admin)) -> Disp
 
     from app.workers.tasks.scope_registry import ingest_authority_index
     ingest_authority_index.delay(index_slug=slug, trigger_source="manual")
-    return DispatchResponse(status="running", dispatched_to="celery", slug=slug)
+    return await _dispatch("running", slug)
 
 
 @router.get("/drift", dependencies=[Depends(require_admin)])
@@ -169,7 +214,7 @@ async def trigger_fetch_bodies(slug: str, current_user=Depends(require_admin)) -
         raise HTTPException(status_code=404, detail=f"Unknown authority index: {slug}")
     from app.workers.tasks.scope_registry import fetch_authority_bodies
     fetch_authority_bodies.delay(index_slug=slug, triggered_by=str(current_user.id))
-    return DispatchResponse(status="running", dispatched_to="celery", slug=slug)
+    return await _dispatch("running", slug)
 
 
 @router.get("/items/{item_id}/body", dependencies=[Depends(require_admin)])
@@ -236,6 +281,7 @@ async def list_authority_items(
             SELECT i.id, i.citation, i.heading, i.parent_item_id, i.source_url,
                    c.disposition, c.applies_to_categories, c.excludes_categories,
                    c.entity_condition, c.regulation_key, c.status,
+                   c.excluded_reason,
                    c.proposed_by, c.inherits_from_item_id, c.jurisdiction_scope
             FROM authority_index_items i
             LEFT JOIN authority_item_classifications c ON c.item_id = i.id
@@ -255,7 +301,7 @@ async def trigger_classify(slug: str, current_user=Depends(require_admin)) -> Di
 
     from app.workers.tasks.scope_registry import classify_authority_index
     classify_authority_index.delay(index_slug=slug, triggered_by=str(current_user.id))
-    return DispatchResponse(status="running", dispatched_to="celery", slug=slug)
+    return await _dispatch("running", slug)
 
 
 @router.post("/seed", dependencies=[Depends(require_admin)])
@@ -274,6 +320,38 @@ async def confirm_classifications_endpoint(
     from app.core.services.scope_registry.classify import confirm_classifications
     async with get_connection() as conn:
         return await confirm_classifications(conn, payload.item_ids, current_user.id)
+
+
+@router.get("/vocabulary", dependencies=[Depends(require_admin)])
+async def classification_vocabulary():
+    """Everything the classification editor must choose FROM: the dispositions,
+    the business-category taxonomy (applies_to/excludes), and the RKD keys by
+    category (regulation_key + its category_slug).
+
+    Without this the KEY/override editor cannot exist — `validate_proposal`
+    rejects any category slug outside the taxonomy and downgrades any
+    regulation_key outside the RKD, so the operator would be guessing at a
+    vocabulary the server already knows.
+    """
+    from app.core.services.scope_registry.categories import CATEGORIES
+    from app.core.services.scope_registry.classify import (
+        DISPOSITIONS, fetch_rkd_keys_by_category,
+    )
+
+    async with get_connection() as conn:
+        rkd = await fetch_rkd_keys_by_category(conn)
+
+    return {
+        "dispositions": list(DISPOSITIONS),
+        "categories": sorted(
+            (
+                {"slug": c.slug, "label": c.label, "parent": c.parent}
+                for c in CATEGORIES.values()
+            ),
+            key=lambda c: c["slug"],
+        ),
+        "keys_by_category": {cat: sorted(keys) for cat, keys in sorted(rkd.items())},
+    }
 
 
 @router.put("/items/{item_id}/classification", dependencies=[Depends(require_admin)])

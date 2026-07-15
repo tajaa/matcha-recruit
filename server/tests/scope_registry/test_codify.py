@@ -343,7 +343,11 @@ def test_stamp_state_authority_governs_same_state():
 # is false provenance. Both circumstances get stored — direct on
 # statute_citation, floor relations in metadata.jurisdictional_basis.
 
-_FED_BASIS = {("exempt_salary_threshold", "federal"):
+# The floor is identified by (key, tier, COUNTRY, state) — a federal/national
+# floor is country-wide so it carries no state. Country and state are not
+# decoration: registry keys are a global vocabulary, and 'national' (the
+# international spelling) folds into the same tier as US 'federal'.
+_FED_BASIS = {("exempt_salary_threshold", "federal", "US", None):
               {"numeric_value": 684, "current_value": "$684.00/week"}}
 
 
@@ -371,6 +375,10 @@ def test_state_row_with_its_own_value_gets_a_baseline_not_a_stamp():
     assert baselines["r_ca"] == [{
         "citation": "29 CFR § 541.600", "item_id": "i_cfr",
         "index_slug": "us-flsa", "level": "federal", "relation": "floor",
+        # We HOLD the federal value and CA's differs — the mismatch is proven,
+        # so an existing stamp of this citation is false provenance and gets
+        # cleared. Contrast the unverifiable case below.
+        "verified": True,
     }]
 
 
@@ -391,7 +399,7 @@ def test_value_match_falls_back_to_normalized_text():
         links,
         {"r_nc": _meta("state", state="NC",
                        current_value="  $684.00/WEEK ")},  # spacing/case noise
-        {("exempt_salary_threshold", "federal"):
+        {("exempt_salary_threshold", "federal", "US", None):
          {"numeric_value": None, "current_value": "$684.00/week"}},
     )
     assert stamps["r_nc"]["statute_citation"] == "29 CFR § 541.600"
@@ -452,3 +460,90 @@ def test_every_shipped_source_label_fits_the_pre_migration_width():
     assert not too_long, (
         f"these source labels overflow the un-migrated VARCHAR(20) column: {too_long}"
     )
+
+
+# ── the floor must come from the AUTHORITY's own jurisdiction ────────────────
+#
+# Registry keys are a global vocabulary and UK rows carry level 'national',
+# which folds into the same tier as US 'federal'. Keyed on (key, level) alone,
+# a UK row could become "the federal floor" that every US state is tested
+# against — so a TX row genuinely restating the US federal value fails the test,
+# demotes, and has its CORRECT citation stripped. Same shape one level down: all
+# 50 states shared one (key, 'state') bucket.
+
+def test_a_foreign_national_row_is_never_the_us_federal_floor():
+    basis = {
+        # UK's national living wage — same key, same tier, different country.
+        ("national_minimum_wage", "federal", "GB", None):
+            {"numeric_value": 11.44, "current_value": "£11.44/hour"},
+        ("national_minimum_wage", "federal", "US", None):
+            {"numeric_value": 7.25, "current_value": "$7.25/hour"},
+    }
+    links = [_link("r_tx", "i_flsa", "29 U.S.C. § 206", key="national_minimum_wage")]
+
+    stamps, baselines = build_citation_stamps(
+        links,
+        {"r_tx": _meta("state", state="TX", numeric_value=7.25,
+                       current_value="$7.25/hour")},
+        basis,
+    )
+
+    assert stamps["r_tx"]["statute_citation"] == "29 U.S.C. § 206", (
+        "TX restates the US federal floor verbatim — it must keep its direct "
+        "stamp, not be tested against the UK's £11.44"
+    )
+    assert baselines == {}
+
+
+def test_the_floor_is_state_scoped_below_the_federal_tier():
+    """A CA authority citing a CA city row must be tested against CA's value,
+    not against whichever state's row happens to sort first."""
+    basis = {
+        ("local_minimum_wage", "state", "US", "CA"):
+            {"numeric_value": 16.50, "current_value": "$16.50/hour"},
+        ("local_minimum_wage", "state", "US", "TX"):
+            {"numeric_value": 7.25, "current_value": "$7.25/hour"},
+    }
+    links = [_link("r_la", "i_ca", "Cal. Lab. Code § 1182.12",
+                   src="curated", level="state", slug="ca-labor-code",
+                   auth_jur="CA_ID", auth_state="CA", key="local_minimum_wage")]
+
+    stamps, baselines = build_citation_stamps(
+        links,
+        {"r_la": _meta("city", state="CA", numeric_value=16.50,
+                       current_value="$16.50/hour")},
+        basis,
+    )
+
+    assert stamps["r_la"]["statute_citation"] == "Cal. Lab. Code § 1182.12", (
+        "the LA row restates CA's figure — it must be compared against CA's "
+        "floor, not TX's"
+    )
+
+
+# ── verified vs unverifiable demotes ────────────────────────────────────────
+
+def test_a_verified_mismatch_is_marked_for_clearing():
+    """We hold the floor's value and this row's differs: the stamp is false
+    provenance and must be cleared."""
+    links = [_link("r_ca", "i_cfr", "29 CFR § 541.600")]
+    _stamps, baselines = build_citation_stamps(
+        links,
+        {"r_ca": _meta("state", state="CA", numeric_value=70304)},
+        _FED_BASIS,
+    )
+    assert baselines["r_ca"][0]["verified"] is True
+
+
+def test_an_unverifiable_demote_must_not_destroy_an_existing_citation():
+    """No basis codified (or the federal row is quarantined) — we cannot tell
+    restatement from divergence. Record the relation, but do NOT clear the stamp
+    on a guess: quarantining ONE federal row would otherwise strip correct
+    citations off every state row that restates it."""
+    links = [_link("r_az", "i_cfr", "29 CFR § 541.600")]
+    _stamps, baselines = build_citation_stamps(
+        links,
+        {"r_az": _meta("state", state="AZ", current_value="$684.00/week")},
+        {},  # basis absent
+    )
+    assert baselines["r_az"][0]["verified"] is False

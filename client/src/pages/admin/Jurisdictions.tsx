@@ -1,7 +1,9 @@
 import { useEffect, useState, useCallback } from 'react'
 import type { FormEvent } from 'react'
+import { ChevronDown, Globe2 } from 'lucide-react'
 import { api, authStreamHeaders } from '../../api/client'
 import { Button, Input, Modal } from '../../components/ui'
+import { LABEL } from '../../components/ui/typography'
 import JurisdictionDetailPanel from '../../components/admin/JurisdictionDetailPanel'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -52,6 +54,39 @@ type CoverageRequest = {
   admin_notes: string | null
   created_at: string | null
 }
+
+type PendingCategoryDetail = {
+  key: string | null
+  name: string
+  description: string | null
+}
+
+type CategoryPendingItem = {
+  type: 'category'
+  id: string
+  city: string
+  state: string
+  county: string | null
+  status: string
+  company_name: string
+  employee_count: number
+  note: string | null
+  categories: PendingCategoryDetail[]
+  created_at: string | null
+}
+
+type VerticalPendingItem = {
+  type: 'vertical'
+  company_id: string
+  company_name: string
+  label: string
+  areas: number
+  categories: PendingCategoryDetail[]
+  jurisdictions: string[]
+  created_at: string | null
+}
+
+type PendingItem = CategoryPendingItem | VerticalPendingItem
 
 type ActivityLog = {
   id: string
@@ -116,9 +151,10 @@ export default function Jurisdictions() {
   const [researchingId, setResearchingId] = useState<string | null>(null)
   const [researchMessages, setResearchMessages] = useState<string[]>([])
 
-  // Coverage requests
-  const [requests, setRequests] = useState<CoverageRequest[]>([])
+  // Coverage requests — one date-sorted list, category gaps + industry-specialty to-dos merged server-side
+  const [pending, setPending] = useState<PendingItem[]>([])
   const [loadingRequests, setLoadingRequests] = useState(false)
+  const [openIds, setOpenIds] = useState<Set<string>>(new Set())
 
   // Activity
   const [activity, setActivity] = useState<ActivityLog[]>([])
@@ -154,8 +190,10 @@ export default function Jurisdictions() {
 
   const fetchRequests = useCallback(async () => {
     setLoadingRequests(true)
-    try { setRequests(await api.get<CoverageRequest[]>('/admin/jurisdiction-requests?status=pending')) }
-    catch { setRequests([]) }
+    try {
+      const res = await api.get<{ items: PendingItem[] }>('/admin/pending-research')
+      setPending(res.items)
+    } catch { setPending([]) }
     finally { setLoadingRequests(false) }
   }, [])
 
@@ -179,10 +217,10 @@ export default function Jurisdictions() {
 
   useEffect(() => {
     if (tab === 'research_queue' && researchQueue.length === 0) fetchResearchQueue()
-    if (tab === 'coverage_requests' && requests.length === 0) fetchRequests()
+    if (tab === 'coverage_requests' && pending.length === 0) fetchRequests()
     if (tab === 'activity' && activity.length === 0) fetchActivity()
     if (tab === 'jobs' && schedulers.length === 0) fetchJobs()
-  }, [tab, researchQueue.length, requests.length, activity.length, schedulers.length, fetchResearchQueue, fetchRequests, fetchActivity, fetchJobs])
+  }, [tab, researchQueue.length, pending.length, activity.length, schedulers.length, fetchResearchQueue, fetchRequests, fetchActivity, fetchJobs])
 
   // ── Actions ──
 
@@ -266,16 +304,16 @@ export default function Jurisdictions() {
     }).catch(() => setTopMetroRunning(false))
   }
 
-  async function processRequest(req: CoverageRequest) {
+  async function processRequest(req: CategoryPendingItem) {
     await api.post(`/admin/jurisdiction-requests/${req.id}/process`, {
       has_local_ordinance: false, county: req.county || null, admin_notes: null,
     })
-    setRequests((prev) => prev.filter((r) => r.id !== req.id))
+    setPending((prev) => prev.filter((p) => !(p.type === 'category' && p.id === req.id)))
   }
 
   async function dismissRequest(id: string) {
     await api.post(`/admin/jurisdiction-requests/${id}/dismiss`, {})
-    setRequests((prev) => prev.filter((r) => r.id !== id))
+    setPending((prev) => prev.filter((p) => !(p.type === 'category' && p.id === id)))
   }
 
   async function toggleScheduler(taskKey: string, currentEnabled: boolean) {
@@ -299,7 +337,7 @@ export default function Jurisdictions() {
   })
   const selectedJurisdiction = jurisdictions.find((j) => j.id === selectedId) ?? null
   const needsResearchCount = researchQueue.filter((r) => r.status === 'needs_research').length
-  const pendingRequestCount = requests.filter((r) => r.status === 'pending').length
+  const pendingRequestCount = pending.length
 
   const tabItems: { id: Tab; label: string; count?: number }[] = [
     { id: 'jurisdictions', label: 'Jurisdictions', count: jurisdictions.length },
@@ -309,15 +347,24 @@ export default function Jurisdictions() {
     { id: 'jobs', label: 'Scheduled Jobs', count: schedulers.length || undefined },
   ]
 
+  const toggleOpen = (id: string) => {
+    setOpenIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
   return (
-    <div>
+    <div className="flex h-[calc(100vh-7rem)] flex-col overflow-hidden rounded-xl border border-white/[0.06] bg-black">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-zinc-100">Jurisdictions</h1>
-          <p className="mt-1 text-sm text-zinc-500">Manage the jurisdiction registry — add, research, and remove entries.</p>
-        </div>
+      <div className="flex items-center justify-between border-b border-white/[0.06] px-4 py-3">
+        <h1 className="flex items-center gap-2 text-sm font-semibold text-zinc-100">
+          <Globe2 className="h-4 w-4 text-emerald-400" /> Jurisdictions
+        </h1>
         <div className="flex items-center gap-2">
+          <span className="hidden text-xs text-zinc-500 md:block">Manage the jurisdiction registry — add, research, and remove entries.</span>
           <Button variant="ghost" size="sm" disabled={topMetroRunning} onClick={handleRunTopMetros}>
             {topMetroRunning ? 'Running Top 15...' : 'Run Top 15 Metros'}
           </Button>
@@ -328,14 +375,36 @@ export default function Jurisdictions() {
         </div>
       </div>
 
+      {/* Stat bar */}
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-1 border-b border-white/[0.06] px-4 py-2 font-mono text-[11px] uppercase tracking-wide text-zinc-500">
+        <span>Jurisdictions <b className="text-zinc-100">{totals?.total_jurisdictions ?? '—'}</b></span>
+        <span>Requirements <b className="text-zinc-100">{totals?.total_requirements ?? '—'}</b></span>
+        <span className={needsResearchCount > 0 ? 'text-amber-400' : ''}>
+          Needs research <b>{needsResearchCount || '—'}</b>
+        </span>
+        <span className={pendingRequestCount > 0 ? 'text-amber-400' : ''}>
+          Researching for tenants <b>{pendingRequestCount || '—'}</b>
+        </span>
+      </div>
+
       {/* Tabs */}
-      <div className="flex items-center gap-1 mt-4 mb-5">
+      <div className="flex flex-wrap items-center gap-1 border-b border-white/[0.06] px-2 py-1.5">
         {tabItems.map((t) => (
-          <Button key={t.id} variant={tab === t.id ? 'secondary' : 'ghost'} size="sm" onClick={() => setTab(t.id)}>
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => setTab(t.id)}
+            className={`rounded px-2 py-1 font-mono text-[10px] uppercase tracking-wide transition-colors ${
+              tab === t.id ? 'bg-white/[0.06] text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'
+            }`}
+          >
             {t.label}{t.count !== undefined ? ` (${t.count})` : ''}
-          </Button>
+          </button>
         ))}
       </div>
+
+      {/* Scrolling body */}
+      <div className="flex-1 overflow-y-auto px-4 py-4">
 
       {/* Top metros SSE progress */}
       {topMetroRunning && topMetroMessages.length > 0 && (
@@ -499,48 +568,100 @@ export default function Jurisdictions() {
         </div>
       )}
 
-      {/* ── Coverage Requests ── */}
+      {/* ── Coverage Requests (category gaps + industry-specialty to-dos, one date-sorted list) ── */}
       {tab === 'coverage_requests' && (
         <div>
           <div className="flex items-center justify-between mb-2">
-            <h2 className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Pending Coverage Requests</h2>
+            <h2 className={LABEL}>Researching for tenants — newest first</h2>
             <Button variant="ghost" size="sm" onClick={fetchRequests}>Refresh</Button>
           </div>
 
           {loadingRequests ? (
             <p className="text-sm text-zinc-500">Loading...</p>
-          ) : requests.length === 0 ? (
-            <div className="border border-zinc-800 rounded-lg px-4 py-8 text-center">
-              <p className="text-sm text-zinc-600">No pending requests</p>
+          ) : pending.length === 0 ? (
+            <div className="border border-white/[0.06] rounded-lg px-4 py-8 text-center">
+              <p className="text-sm text-zinc-600">Nothing outstanding — every onboarded tenant is fully covered.</p>
             </div>
           ) : (
-            <div className="border border-zinc-800 rounded-lg divide-y divide-zinc-800/60">
-              {requests.map((req) => (
-                <div key={req.id} className="flex items-center gap-4 px-4 py-3">
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-zinc-200">
-                      {req.city}, {req.state}
-                      {req.county && <span className="text-zinc-500 ml-1.5">({req.county} County)</span>}
-                    </p>
-                    <div className="flex items-center gap-3 mt-0.5">
-                      <span className="text-[11px] text-zinc-500">{req.company_name}</span>
-                      <span className="text-[11px] text-zinc-600">·</span>
-                      <span className="text-[11px] text-zinc-500">{req.employee_count} employees</span>
-                      {req.created_at && (
-                        <>
-                          <span className="text-[11px] text-zinc-600">·</span>
-                          <span className="text-[11px] text-zinc-600">{fmtDate(req.created_at)}</span>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <Button variant="secondary" size="sm" onClick={() => processRequest(req)}>Process</Button>
-                    <button type="button" onClick={() => dismissRequest(req.id)}
-                      className="text-xs text-zinc-600 hover:text-zinc-300 px-2 py-1 transition-colors">Dismiss</button>
-                  </div>
-                </div>
-              ))}
+            <div className="border border-white/[0.06] rounded-lg overflow-hidden">
+              {pending.map((item) => {
+                const rowId = item.type === 'category' ? `cat-${item.id}` : `vert-${item.company_id}-${item.label}`
+                const open = openIds.has(rowId)
+                const categoryNames = item.categories.map((c) => c.name).join(', ')
+                return (
+                  <article key={rowId} className="border-b border-white/[0.06] last:border-b-0">
+                    <button type="button" onClick={() => toggleOpen(rowId)}
+                      className="flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-white/[0.02]">
+                      <ChevronDown className={`mt-1 h-4 w-4 shrink-0 text-zinc-600 transition-transform ${open ? 'rotate-0' : '-rotate-90'}`} />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-3 font-mono text-[10px] uppercase tracking-wide text-zinc-500">
+                          {item.created_at && <span className="tabular-nums">{fmtDate(item.created_at)}</span>}
+                          <span>{item.type === 'category' ? 'Category gap' : `Specialty · ${item.label}`}</span>
+                        </div>
+                        <h3 className="mt-1 truncate text-[15px] font-semibold text-zinc-100">
+                          {item.type === 'category'
+                            ? <>{item.city}, {item.state}{item.county && <span className="text-zinc-500 font-normal ml-1.5">({item.county} County)</span>}</>
+                            : item.company_name}
+                        </h3>
+                        <p className="mt-0.5 truncate text-sm text-zinc-500">
+                          {item.type === 'category' ? `${item.company_name} · ` : `${item.jurisdictions.join(', ')} · `}
+                          {categoryNames}
+                        </p>
+                      </div>
+                    </button>
+                    {open && (
+                      <div className="px-4 pb-4 pl-11">
+                        <div className="flex items-center gap-2 mb-2">
+                          <span className="text-amber-400 text-[11px]">
+                            {item.categories.length} to research
+                          </span>
+                          <span className="text-[10px] text-zinc-500">
+                            · {item.type === 'category'
+                              ? `${item.city}, ${item.state}`
+                              : item.jurisdictions.join(', ')}
+                          </span>
+                        </div>
+
+                        <div className="space-y-1.5">
+                          {item.categories.map((c, i) => (
+                            <div key={c.key ?? `${c.name}-${i}`}
+                              className="rounded-lg border border-white/[0.06] bg-white/[0.02] p-3">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-xs font-medium text-zinc-200">{c.name}</span>
+                                <span className="rounded border px-1.5 py-0.5 text-[10px] border-amber-500/30 bg-amber-500/10 text-amber-300 shrink-0">
+                                  Needs research
+                                </span>
+                              </div>
+                              {c.description && (
+                                <p className="mt-1 text-[11px] text-zinc-400 leading-relaxed">{c.description}</p>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+
+                        {item.type === 'category' ? (
+                          <div className="mt-3 flex items-center gap-2">
+                            <Button variant="secondary" size="sm" onClick={() => processRequest(item)}>Process</Button>
+                            <button type="button" onClick={() => dismissRequest(item.id)}
+                              className="text-xs text-zinc-600 hover:text-zinc-300 px-2 py-1 transition-colors">Dismiss</button>
+                          </div>
+                        ) : (
+                          <>
+                            <p className="mt-3 text-sm text-zinc-400 leading-relaxed">
+                              Filled by the Vertical Coverage sweep — run it from the Scheduled Jobs tab
+                              to research these {item.label.toLowerCase()} areas for {item.jurisdictions.join(', ')}.
+                              Once published, {item.company_name}'s tab auto-populates and their admin gets an email.
+                            </p>
+                            <div className="mt-3">
+                              <Button variant="secondary" size="sm" onClick={() => setTab('jobs')}>Go to Scheduled Jobs</Button>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </article>
+                )
+              })}
             </div>
           )}
         </div>
@@ -641,6 +762,8 @@ export default function Jurisdictions() {
           )}
         </div>
       )}
+
+      </div>
 
       {/* Add Jurisdiction modal */}
       <Modal open={showAddForm} onClose={() => setShowAddForm(false)} title="Add Jurisdiction" width="sm">

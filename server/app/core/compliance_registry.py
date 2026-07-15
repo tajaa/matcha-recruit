@@ -7732,6 +7732,21 @@ _KEY_COUNTRY_SCOPE: Dict[str, Optional[list]] = {
 }
 
 
+# Keys that exist only in NAMED STATES. The country scope above can't express
+# this, and without it a state-specific concept is EXPECTED of every US state:
+# `exempt_salary_threshold_regional` (NY's downstate tier) would emit a
+# missing_key finding against the other 49 and drag every state's completeness
+# score for something they will never have. The key must stay in
+# EXPECTED_REGULATION_KEYS regardless — that set doubles as the VALIDITY
+# vocabulary, and dropping it there would brand NY's real row `invalid_key`.
+#
+# A jurisdiction with no state (federal, or a country-level row) never expects
+# a state-scoped key.
+_KEY_STATE_SCOPE: Dict[str, list] = {
+    "exempt_salary_threshold_regional": ["NY"],
+}
+
+
 def _key_applies_to_country(key: str, category: str, country_code: str) -> bool:
     """Check if a regulation key applies to a given country.
 
@@ -7746,6 +7761,19 @@ def _key_applies_to_country(key: str, category: str, country_code: str) -> bool:
     if scope is None:
         return True  # Explicitly universal
     return country_code in scope
+
+
+def _key_applies_to_state(key: str, state: Optional[str]) -> bool:
+    """Is this key expected of a jurisdiction in `state`?
+
+    Only constrains keys listed in _KEY_STATE_SCOPE; everything else is
+    state-agnostic. `state=None` (federal / country-level) never expects a
+    state-scoped key.
+    """
+    scope = _KEY_STATE_SCOPE.get(key)
+    if scope is None:
+        return True
+    return bool(state) and state.upper() in scope
 
 
 # ---------------------------------------------------------------------------

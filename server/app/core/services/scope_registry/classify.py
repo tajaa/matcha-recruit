@@ -587,15 +587,33 @@ async def override_classification(
     from .strata import recompute_strata
     from .resolve import parse_jsonb
 
-    # PATCH semantics: an override that doesn't mention jurisdiction_scope keeps
-    # the existing one, rather than defaulting it to None (which would widen a
-    # narrowed classification to whole-index reach). An explicit null still clears.
-    if "jurisdiction_scope" not in proposal:
-        existing_scope = await conn.fetchval(
-            "SELECT jurisdiction_scope FROM authority_item_classifications WHERE item_id = $1",
+    # PATCH semantics: an override that doesn't mention jurisdiction_scope or
+    # entity_condition keeps the existing one, rather than defaulting it to None.
+    # An explicit null still clears.
+    #
+    # jurisdiction_scope: defaulting to None would WIDEN a narrowed
+    # classification to whole-index reach.
+    #
+    # entity_condition: defaulting to None is worse. `conditional` is REJECTED
+    # by validate_proposal without a valid condition, so an editor that can't
+    # re-supply it simply cannot save a conditional item at all — and the
+    # tempting workaround (flip the disposition to universal_in_domain just to
+    # get a key stored) silently WIPES the trigger and serves e.g. the PSM
+    # standard to every company. That is exactly the over-scope the §9
+    # acceptance test exists to prevent.
+    missing = [
+        f for f in ("jurisdiction_scope", "entity_condition") if f not in proposal
+    ]
+    if missing:
+        row = await conn.fetchrow(
+            "SELECT jurisdiction_scope, entity_condition "
+            "FROM authority_item_classifications WHERE item_id = $1",
             item_id,
         )
-        proposal = {**proposal, "jurisdiction_scope": parse_jsonb(existing_scope)}
+        proposal = {
+            **proposal,
+            **{f: parse_jsonb(row[f]) if row else None for f in missing},
+        }
 
     rkd = await fetch_rkd_keys_by_category(conn)
     normalized, warnings = validate_proposal(proposal, rkd)

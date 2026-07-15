@@ -8064,6 +8064,13 @@ async def trigger_scheduler(task_key: str):
         from ...workers.tasks.auto_archive import run_auto_archive
         run_auto_archive.delay()
         return {"status": "triggered", "task_key": task_key, "message": "Auto-archive enqueued"}
+    elif task_key == "vertical_coverage_sweep":
+        from ...workers.tasks.vertical_coverage_sweep import run_vertical_coverage_sweep
+        # force=True: an admin pressing Trigger means it, so bypass the
+        # enabled-row + once-a-day guards (those exist to stop the hourly worker
+        # restart from re-billing Gemini, not to override a human).
+        run_vertical_coverage_sweep.delay(force=True)
+        return {"status": "triggered", "task_key": task_key, "message": "Vertical coverage sweep enqueued"}
     else:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown task key: {task_key}")
 
@@ -9329,6 +9336,159 @@ async def list_jurisdiction_requests(
         ]
 
 
+@router.get("/pending-research", dependencies=[Depends(require_admin)])
+async def get_pending_research():
+    """Unified admin view of everything Matcha is still researching, across
+    BOTH mechanisms — real catalog gaps (`jurisdiction_coverage_requests`) and
+    industry-specialty ledger to-dos (dental, etc. — `jurisdiction_vertical_coverage`,
+    only surfaced here, never as its own table row). Same data the tenant-facing
+    "we're working on it" panel reads from, so what an admin sees here should
+    match what a business sees on their Compliance page.
+
+    Returns ONE list, sorted newest-first, each item naming exactly which
+    categories are outstanding (not just a count) — admins need to know WHAT
+    is queued, not just how much.
+    """
+    from ..services import vertical_coverage
+
+    async with get_connection() as conn:
+        cat_rows = await conn.fetch(
+            """
+            SELECT jcr.id, jcr.city, jcr.state, jcr.county, jcr.status,
+                   jcr.admin_notes, jcr.created_at, jcr.location_id,
+                   c.name AS company_name,
+                   COALESCE(emp_count.cnt, 0) AS employee_count
+            FROM jurisdiction_coverage_requests jcr
+            JOIN companies c ON c.id = jcr.requested_by_company_id
+            LEFT JOIN LATERAL (
+                SELECT COUNT(*) AS cnt FROM employees e
+                WHERE e.work_location_id = jcr.location_id AND e.termination_date IS NULL
+            ) emp_count ON true
+            WHERE jcr.status IN ('pending', 'in_progress')
+            """
+        )
+        items: List[dict] = []
+        for r in cat_rows:
+            # admin_notes holds a human-readable label list ("Needs research:
+            # Anti-Discrimination, Final Pay — healthcare") on rows written
+            # after the readable-names fix, or raw slugs ("missing: anti_dis-
+            # crimination, final_pay (healthcare)") on older rows. Parse either
+            # out and resolve both formats in one query so every row — old or
+            # new — gets full name+description cards, never just the flat note.
+            note = r["admin_notes"] or ""
+            body = re.sub(r"^(needs research:|missing:)\s*", "", note, flags=re.IGNORECASE)
+            body = re.sub(r"\s*—.*$", "", body)
+            body = re.sub(r"\s*\([^)]*\)\s*$", "", body)
+            labels = [t.strip() for t in body.split(",") if t.strip()]
+            categories: List[dict] = []
+            if labels:
+                cat_defs = await conn.fetch(
+                    "SELECT slug, name, description FROM compliance_categories "
+                    "WHERE name = ANY($1::text[]) OR slug = ANY($1::text[]) "
+                    "ORDER BY sort_order, name",
+                    labels,
+                )
+                resolved_names = {c["name"] for c in cat_defs} | {c["slug"] for c in cat_defs}
+                categories = [
+                    {"key": c["slug"], "name": c["name"], "description": c["description"]}
+                    for c in cat_defs
+                ]
+                # Any label that didn't resolve still shows up (name-only, no
+                # description) rather than silently vanishing from the count.
+                for label in labels:
+                    if label not in resolved_names:
+                        categories.append({"key": None, "name": label, "description": None})
+
+            items.append({
+                "id": str(r["id"]),
+                "type": "category",
+                "city": r["city"],
+                "state": r["state"],
+                "county": r["county"],
+                "status": r["status"],
+                "company_name": r["company_name"],
+                "employee_count": r["employee_count"],
+                "note": r["admin_notes"],
+                "categories": categories,
+                "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+                "sort_at": r["created_at"],
+            })
+
+        # Vertical ledger to-dos, per company. No table row exists for these —
+        # computed live off the same pure-SQL path the wizard/panel use. Capped
+        # at the companies with an active location, which bounds this to real
+        # tenants (not every row in the DB).
+        comp_rows = await conn.fetch(
+            """
+            SELECT DISTINCT c.id, c.name, c.created_at
+            FROM companies c
+            JOIN business_locations bl ON bl.company_id = c.id AND bl.is_active = true
+            ORDER BY c.created_at DESC
+            LIMIT 200
+            """
+        )
+        for comp in comp_rows:
+            try:
+                resolved = await vertical_coverage.resolve_vertical(conn, comp["id"])
+                if not resolved:
+                    continue
+                _parent, _slug, v_label, v_tag, _minted = resolved
+                cat_slugs = [
+                    r["slug"] for r in await conn.fetch(
+                        "SELECT slug FROM compliance_categories WHERE industry_tag = $1",
+                        v_tag,
+                    )
+                ]
+                if not cat_slugs:
+                    continue
+                leaf_rows = await conn.fetch(
+                    "SELECT jurisdiction_id, city, state FROM business_locations "
+                    "WHERE company_id = $1 AND is_active = true AND jurisdiction_id IS NOT NULL",
+                    comp["id"],
+                )
+                if not leaf_rows:
+                    continue
+                leaf_ids = [r["jurisdiction_id"] for r in leaf_rows]
+                leaf_chains = await vertical_coverage.chains_for_leaves(conn, leaf_ids)
+                plan, _deferred = await vertical_coverage.plan_fill(
+                    conn, leaf_chains, v_tag, cat_slugs
+                )
+                if plan:
+                    # WHAT, not just how many: full name + description per
+                    # outstanding category, sort_order-ordered — renders as
+                    # cards, not a bare count or a flat comma list.
+                    plan_slugs = sorted({p[1] for p in plan})
+                    cat_defs = await conn.fetch(
+                        "SELECT slug, name, description FROM compliance_categories "
+                        "WHERE slug = ANY($1::text[]) ORDER BY sort_order, name",
+                        plan_slugs,
+                    )
+                    categories = [
+                        {"key": c["slug"], "name": c["name"], "description": c["description"]}
+                        for c in cat_defs
+                    ]
+                    jurisdictions = sorted({f"{r['city']}, {r['state']}" for r in leaf_rows})
+                    items.append({
+                        "type": "vertical",
+                        "company_id": str(comp["id"]),
+                        "company_name": comp["name"],
+                        "label": v_label,
+                        "areas": len(plan),
+                        "categories": categories,
+                        "jurisdictions": jurisdictions,
+                        "created_at": comp["created_at"].isoformat() if comp["created_at"] else None,
+                        "sort_at": comp["created_at"],
+                    })
+            except Exception as exc:
+                logger.warning("pending-research: vertical scan failed for %s: %s", comp["id"], exc)
+
+    items.sort(key=lambda it: it["sort_at"] or datetime.min, reverse=True)
+    for it in items:
+        del it["sort_at"]
+
+    return {"items": items}
+
+
 @router.post("/jurisdiction-requests/{request_id}/process")
 async def process_jurisdiction_request(
     request_id: UUID,
@@ -9524,13 +9684,100 @@ async def get_research_queue():
         ]
 
 
+async def _publish_research_to_requesters(jurisdiction_id: UUID) -> dict:
+    """After we research a jurisdiction into the shared catalog, close the loop
+    for every tenant who was waiting on it: mark their coverage request done,
+    auto-populate their compliance tab from the (now-richer) catalog, and email
+    their admins. Gemini-free — pure projection. Best-effort; never raises.
+    """
+    from ..services.compliance_service import (
+        project_location_from_catalog,
+        _get_company_admin_contacts,
+    )
+
+    tenants_updated = 0
+    emails_sent = 0
+    try:
+        async with get_connection() as conn:
+            jur = await conn.fetchrow(
+                "SELECT city, state FROM jurisdictions WHERE id = $1", jurisdiction_id
+            )
+            if not jur or not jur["city"]:
+                return {"tenants_updated": 0, "emails_sent": 0}
+
+            reqs = await conn.fetch(
+                """
+                SELECT id, requested_by_company_id
+                FROM jurisdiction_coverage_requests
+                WHERE status IN ('pending', 'in_progress')
+                  AND LOWER(city) = LOWER($1) AND UPPER(state) = UPPER($2)
+                """,
+                jur["city"], jur["state"],
+            )
+            if not reqs:
+                return {"tenants_updated": 0, "emails_sent": 0}
+
+            email_service = get_email_service()
+            for req in reqs:
+                company_id = req["requested_by_company_id"]
+                # Project every active location this company has in the jurisdiction.
+                locs = await conn.fetch(
+                    """
+                    SELECT id, name, city, state FROM business_locations
+                    WHERE company_id = $1 AND is_active = true
+                      AND LOWER(city) = LOWER($2) AND UPPER(state) = UPPER($3)
+                    """,
+                    company_id, jur["city"], jur["state"],
+                )
+                total_new = 0
+                loc_name = None
+                for loc in locs:
+                    try:
+                        result = await project_location_from_catalog(
+                            conn, company_id, loc["id"],
+                            create_alerts=True, check_type="research_publish",
+                        )
+                        total_new += result.get("new", 0)
+                        loc_name = loc["name"] or f"{loc['city']}, {loc['state']}"
+                    except Exception as exc:
+                        logger.warning("publish: projection failed for %s: %s", loc["id"], exc)
+
+                await conn.execute(
+                    "UPDATE jurisdiction_coverage_requests "
+                    "SET status = 'completed', processed_at = NOW() WHERE id = $1",
+                    req["id"],
+                )
+                tenants_updated += 1
+
+                # Email the company's admins that their pending items are live.
+                try:
+                    company_name, contacts = await _get_company_admin_contacts(company_id)
+                    for c in contacts:
+                        ok = await email_service.send_compliance_change_notification_email(
+                            to_email=c["email"],
+                            to_name=c.get("name"),
+                            company_name=company_name,
+                            location_name=loc_name or f"{jur['city']}, {jur['state']}",
+                            changed_requirements_count=total_new,
+                            jurisdictions=[f"{jur['city']}, {jur['state']}"],
+                        )
+                        if ok:
+                            emails_sent += 1
+                except Exception as exc:
+                    logger.warning("publish: email failed for company %s: %s", company_id, exc)
+    except Exception as exc:
+        logger.warning("publish: research-to-requesters failed: %s", exc)
+
+    return {"tenants_updated": tenants_updated, "emails_sent": emails_sent}
+
+
 @router.post("/research-queue/{jurisdiction_id}/research", dependencies=[Depends(require_admin)])
 async def research_jurisdiction(jurisdiction_id: UUID):
     """Trigger Gemini research for a jurisdiction. Returns SSE stream.
 
-    Writes only to jurisdiction_requirements (the shared repo).
-    Does NOT mutate any tenant's compliance_requirements, compliance_check_logs,
-    or compliance_alerts.
+    Writes to jurisdiction_requirements (the shared repo). When research adds
+    new rows, closes the loop for waiting tenants: projects their compliance
+    tabs from the enriched catalog (Gemini-free) and emails their admins.
     """
     async with get_connection() as conn:
         j = await conn.fetchrow(
@@ -9541,14 +9788,24 @@ async def research_jurisdiction(jurisdiction_id: UUID):
             raise HTTPException(status_code=404, detail="Jurisdiction not found")
 
     async def event_stream():
+        total_new = 0
         try:
             async for event in research_jurisdiction_repo_only(jurisdiction_id):
                 if event.get("type") == "heartbeat":
                     yield ": heartbeat\n\n"
                 else:
+                    if event.get("type") == "complete":
+                        total_new = event.get("new", 0) or 0
                     yield f"data: {json.dumps(event)}\n\n"
         except Exception as e:
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+            yield "data: [DONE]\n\n"
+            return
+
+        # Loop-close: publish the enriched catalog to waiting tenants.
+        if total_new > 0:
+            summary = await _publish_research_to_requesters(jurisdiction_id)
+            yield f"data: {json.dumps({'type': 'tenants_notified', **summary})}\n\n"
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(

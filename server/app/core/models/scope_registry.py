@@ -31,6 +31,13 @@ class DispatchResponse(BaseModel):
     status: str
     dispatched_to: Literal["celery", "inline"]
     slug: Optional[str] = None
+    # Is a Celery worker actually listening? A dispatch to an empty queue
+    # returns 200 and then NOTHING HAPPENS — the task sits in Redis until a
+    # worker starts. That is indistinguishable from success at the UI, which is
+    # how "click Ingest, watch nothing change, conclude the feature is broken"
+    # happens. No worker runs in local dev by default.
+    worker_online: Optional[bool] = None
+    message: Optional[str] = None
 
 
 class ReconcileRequest(BaseModel):

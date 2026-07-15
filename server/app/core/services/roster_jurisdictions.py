@@ -76,6 +76,7 @@ async def sync_and_check_roster_jurisdictions(
     company_id: UUID,
     *,
     allow_live_research: bool,
+    allow_repository_refresh: bool = True,
     categories: Optional[list[str]] = None,
 ) -> AsyncGenerator[dict, None]:
     """D3.2 — union roster-derived jurisdictions into a live build.
@@ -170,6 +171,7 @@ async def sync_and_check_roster_jurisdictions(
             async for ev in run_compliance_check_stream(
                 location_id, company_id,
                 allow_live_research=allow_live_research,
+                allow_repository_refresh=allow_repository_refresh,
                 categories=categories,
             ):
                 etype = ev.get("type")
@@ -182,6 +184,13 @@ async def sync_and_check_roster_jurisdictions(
                         "message": ev.get("message") or f"Research issue for {label}",
                         "location_id": str(location_id), "label": label,
                     }
+                    continue
+                if etype == "repository_only":
+                    # Projection-only build: bubble the gap up so the caller can
+                    # queue it for the research team (carries jurisdiction_id +
+                    # missing_categories). Not a live research event.
+                    yield {**ev, "source": "roster",
+                           "location_id": str(location_id), "label": label}
                     continue
                 if etype in (
                     "researching", "repository_refresh",

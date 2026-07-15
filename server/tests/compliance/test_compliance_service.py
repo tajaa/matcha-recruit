@@ -1,3 +1,5 @@
+import pytest
+
 import asyncio
 
 from app.core.services import compliance_service as cs
@@ -557,3 +559,79 @@ def test_jurisdiction_row_to_dict_null_trigger_fields():
     result = cs._jurisdiction_row_to_dict(row)
     assert result["trigger_conditions"] is None
     assert result["applicable_entity_types"] is None
+
+
+# ── trigger conditions must fail CLOSED on malformed JSON ────────────────────
+#
+# `trigger_conditions` on jurisdiction_requirements are written by Gemini
+# research with no shape gate (unlike scope-registry classifications, which
+# validate_proposal rejects). An unrecognized node used to evaluate to True,
+# which silently turned a CONDITIONAL obligation into a universal one — e.g.
+# the PSM standard served to every company. Found by the §9 acceptance test,
+# whose fixture had exactly this typo.
+
+def test_unknown_compound_op_does_not_universalize_a_conditional():
+    # A plausible model typo: a LEAF that says "op" where it means "operator".
+    malformed = {"type": "attribute", "key": "psm_covered_chemicals", "op": "is_true"}
+
+    assert cs.evaluate_trigger_conditions(malformed, {}) is False
+    assert cs.evaluate_trigger_conditions(malformed, {"psm_covered_chemicals": True}) is False
+
+
+def test_unknown_leaf_type_does_not_universalize_a_conditional():
+    assert cs.evaluate_trigger_conditions({"type": "vibes"}, {"anything": True}) is False
+
+
+def test_wellformed_conditions_still_evaluate_normally():
+    psm = {"type": "attribute", "key": "psm_covered_chemicals",
+           "operator": "eq", "value": True}
+    assert cs.evaluate_trigger_conditions(psm, {"psm_covered_chemicals": True}) is True
+    assert cs.evaluate_trigger_conditions(psm, {"psm_covered_chemicals": False}) is False
+    assert cs.evaluate_trigger_conditions(psm, {}) is False
+
+    fmla = {"type": "attribute", "key": "employee_count", "operator": "gte", "value": 50}
+    assert cs.evaluate_trigger_conditions(fmla, {"employee_count": 60}) is True
+    assert cs.evaluate_trigger_conditions(fmla, {"employee_count": 10}) is False
+
+    both = {"op": "and", "conditions": [psm, fmla]}
+    assert cs.evaluate_trigger_conditions(
+        both, {"psm_covered_chemicals": True, "employee_count": 60}) is True
+    assert cs.evaluate_trigger_conditions(
+        both, {"psm_covered_chemicals": True, "employee_count": 10}) is False
+
+    # No trigger at all still means "always applies" — unchanged.
+    assert cs.evaluate_trigger_conditions(None, {}) is True
+
+
+# ── a stateless location must not 500 the compliance page ────────────────────
+
+@pytest.mark.asyncio
+async def test_preemption_filter_survives_a_location_with_no_state():
+    """`_filter_with_preemption` called `state.upper()` unguarded, so any
+    location with a NULL state (10 live rows on dev) raised AttributeError and
+    took the whole tenant compliance page down with a 500. Preemption is a
+    state-law question — with no state there is no rule to apply, so the
+    requirements pass through unfiltered."""
+    reqs = [
+        {"category": "minimum_wage", "jurisdiction_level": "state",
+         "jurisdiction_name": "California", "title": "CA Minimum Wage"},
+    ]
+
+    out = await cs._filter_with_preemption(None, reqs, None)  # conn unused on this path
+
+    assert out == reqs
+
+
+def test_an_empty_not_does_not_universalize_a_conditional():
+    """The last shape still failing OPEN. `_condition_shape_error` rejects it at
+    write time on the scope-registry side; nothing gates it on the research
+    side."""
+    assert cs.evaluate_trigger_conditions(
+        {"op": "not", "conditions": []}, {"anything": True}) is False
+    # A well-formed `not` still negates.
+    psm = {"type": "attribute", "key": "psm_covered_chemicals",
+           "operator": "eq", "value": True}
+    assert cs.evaluate_trigger_conditions(
+        {"op": "not", "conditions": [psm]}, {"psm_covered_chemicals": True}) is False
+    assert cs.evaluate_trigger_conditions(
+        {"op": "not", "conditions": [psm]}, {}) is True

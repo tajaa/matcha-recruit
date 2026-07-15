@@ -14,6 +14,7 @@ regression invariant, not exact counts (which depend on live classification).
 All app imports are inside the tests so plain collection never pulls asyncpg.
 """
 import os
+from contextlib import asynccontextmanager
 
 import pytest
 
@@ -23,9 +24,28 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+@asynccontextmanager
+async def _conn():
+    """Own the connection instead of borrowing app.database's pool.
+
+    ``get_connection()`` needs ``init_pool()`` to have run in the app lifespan —
+    under pytest it never has, so it raised "Database pool not initialized" and
+    these tests failed the moment RUN_DB_GAP_TESTS=1 turned them on. A pool would
+    also bind to whichever event loop created it, which pytest-asyncio recycles
+    per test. A plain connection sidesteps both.
+    """
+    import asyncpg
+    from app.config import load_settings
+
+    conn = await asyncpg.connect(load_settings().database_url)
+    try:
+        yield conn
+    finally:
+        await conn.close()
+
+
 @pytest.mark.asyncio
 async def test_chain_category_coverage_shape():
-    from app.database import get_connection
     from app.core.services.scope_registry.gap_surfaces import (
         resolve_chain_category_coverage,
     )
@@ -33,7 +53,7 @@ async def test_chain_category_coverage_shape():
 
     state = os.getenv("GAP_TEST_STATE", "CA")
     industry = os.getenv("GAP_TEST_INDUSTRY", "healthcare")
-    async with get_connection() as conn:
+    async with _conn() as conn:
         chain = await _resolve_jurisdiction_chain(conn, state.upper(), None)
         assert chain["state_found"], f"no jurisdiction row for {state}"
         cov = await resolve_chain_category_coverage(
@@ -49,7 +69,6 @@ async def test_chain_category_coverage_shape():
 
 @pytest.mark.asyncio
 async def test_company_scope_shape_and_source():
-    from app.database import get_connection
     from app.core.services.scope_registry.gap_surfaces import resolve_company_scope
 
     company_id = os.getenv("GAP_TEST_COMPANY_ID")
@@ -58,18 +77,29 @@ async def test_company_scope_shape_and_source():
     from uuid import UUID
 
     industry = os.getenv("GAP_TEST_INDUSTRY", "healthcare")
-    async with get_connection() as conn:
+    async with _conn() as conn:
         # use_cache=False keeps this genuinely read-only — use_cache=True would
         # INSERT into scope_resolutions, violating this file's contract.
         agg = await resolve_company_scope(
             conn, UUID(company_id), industry=industry, use_cache=False,
         )
-    assert agg["coverage_source"] in ("engine", "bank")
+    assert agg["coverage_source"] in ("engine", "engine_partial", "bank")
     assert 0 <= agg["coverage_pct"] <= 100
-    assert agg["gate"]["engine"] + agg["gate"]["fallback"] == agg["gate"]["total"]
-    assert agg["counts"]["locations"] + agg["counts"]["locations_failed"] == agg["gate"]["total"]
+    # The gate is three-way: a coordinate is engine-definitive, engine-PARTIAL
+    # (an engine verdict resting on a partially-classified index — the keys are a
+    # floor, not the whole truth), or falls back to the bank. Omitting `partial`
+    # here is what made this assertion fail on live dev: 19 + 0 != 24.
+    gate = agg["gate"]
+    assert gate["engine"] + gate["partial"] + gate["fallback"] == gate["total"]
+    assert agg["counts"]["locations"] + agg["counts"]["locations_failed"] == gate["total"]
     # Engine verdict requires every coordinate resolved + definitive, none degraded.
     if agg["coverage_source"] == "engine":
-        assert agg["gate"]["fallback"] == 0
+        assert gate["engine"] == gate["total"]
+        assert gate["partial"] == 0 and gate["fallback"] == 0
         assert agg["counts"]["locations_failed"] == 0
+        assert not agg["degraded"]
+    # A partial verdict still means every coordinate had SOME engine answer.
+    if agg["coverage_source"] == "engine_partial":
+        assert gate["fallback"] == 0
+        assert gate["partial"] > 0
         assert not agg["degraded"]

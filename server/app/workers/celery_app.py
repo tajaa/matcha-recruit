@@ -32,6 +32,7 @@ celery_app = Celery(
         "app.workers.tasks.legal_deadline_reminders",
         "app.workers.tasks.handbook_freshness",
         "app.workers.tasks.coi_expiry",
+        "app.workers.tasks.vertical_coverage_sweep",
         "app.workers.tasks.risk_assessment",
         "app.workers.tasks.healthcare_research",
         "app.workers.tasks.research_browse",
@@ -220,6 +221,13 @@ def on_worker_ready(**kwargs):
         run_coi_expiry_sweep.delay()
     else:
         print("[Worker] COI expiry scheduler is disabled, skipping.")
+
+    from app.workers.tasks.vertical_coverage_sweep import run_vertical_coverage_sweep
+
+    if _is_scheduler_enabled("vertical_coverage_sweep"):
+        run_vertical_coverage_sweep.delay()
+    else:
+        print("[Worker] Vertical coverage sweep scheduler is disabled, skipping.")
 
     from app.workers.tasks.risk_assessment import enqueue_scheduled_risk_assessments
 

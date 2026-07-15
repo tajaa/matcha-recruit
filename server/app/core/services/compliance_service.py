@@ -496,6 +496,14 @@ VALID_RATE_TYPES = {
     "general",
     "tipped",
     "exempt_salary",
+    # A sub-state REGION's own exempt threshold (NY downstate: NYC + Nassau /
+    # Suffolk / Westchester carry a higher figure than the rest of the state).
+    # minimum_wage derives its write identity from rate_type, not from
+    # regulation_key (see _compute_key_parts), so without a distinct rate_type
+    # the regional row and the statewide row collapse onto ONE identity — two
+    # live obligations wearing one tag, which is exactly the polymorphy the
+    # anti-polymorphy work forbids.
+    "exempt_salary_regional",
     "hotel",
     "fast_food",
     "healthcare",
@@ -704,9 +712,28 @@ def _coerce_minimum_wage_rate_type(req: dict) -> str:
     if normalized in VALID_RATE_TYPES:
         return normalized
 
+    # For minimum_wage the rate_type IS the write identity (_compute_key_parts
+    # keys off it and ignores regulation_key entirely), so a regulation_key that
+    # names a specific tier must decide the rate_type — otherwise a producer that
+    # correctly emits `exempt_salary_threshold_regional` still gets keyed as the
+    # STATEWIDE threshold and overwrites that row. The key→rate_type direction is
+    # deterministic; this is the inverse of keys._RATE_TYPE_TO_KEY.
+    from app.core.services.compliance_evals.keys import _RATE_TYPE_TO_KEY
+
+    reg_key = (req.get("regulation_key") or "").strip()
+    if reg_key:
+        for rate_type, key in _RATE_TYPE_TO_KEY.items():
+            if key == reg_key and rate_type in VALID_RATE_TYPES:
+                return rate_type
+
     text = " ".join(
         str(req.get(k) or "") for k in ("title", "description", "current_value")
     ).lower()
+
+    # Region-qualified exempt thresholds before the generic exempt tokens: a
+    # "(Downstate)" title must not collapse into the statewide tier.
+    if any(token in text for token in ("downstate", "regional tier")):
+        return "exempt_salary_regional"
 
     if any(
         token in text
@@ -1318,6 +1345,25 @@ async def _is_jurisdiction_fresh(
     return age < timedelta(days=threshold_days)
 
 
+def _basis_from_metadata(metadata: Any) -> Optional[List[Dict]]:
+    """The floor relations recorded on a catalog row's metadata by codify.py.
+
+    A row whose value is its OWN (CA's $70,304 threshold) carries no
+    statute_citation for the federal reg it sits on top of — citing it would be
+    false provenance — so the relation lives here instead. Surfacing it is what
+    makes a demotion legible rather than a citation silently disappearing.
+    """
+    if isinstance(metadata, str):
+        try:
+            metadata = json.loads(metadata)
+        except (TypeError, ValueError):
+            return None
+    if not isinstance(metadata, dict):
+        return None
+    basis = metadata.get("jurisdictional_basis")
+    return basis if isinstance(basis, list) else None
+
+
 def _parse_jsonb_list(value: Any) -> Optional[List[Dict]]:
     """asyncpg hands JSONB back as a str on this pool — the API must not leak
     strings where a list of objects belongs."""
@@ -1355,6 +1401,141 @@ async def _load_jurisdiction_requirements(conn, jurisdiction_id: UUID) -> List[D
     return [{**dict(r), "jurisdiction_requirement_id": r["id"]} for r in rows]
 
 
+async def _load_chain_requirements(conn, leaf_jurisdiction_id: UUID) -> List[Dict]:
+    """Every active requirement across a location's WHOLE jurisdiction chain.
+
+    What a business is liable for is the union of city + county + state + federal
+    law that reaches it — not whatever the last research pass happened to return.
+
+    The check used to build a tenant's set from the LEAF jurisdiction's rows plus
+    ``_fill_missing_categories_from_parents``, which only backfills categories the
+    leaf lacks *entirely*. So a federal obligation never arrived if the leaf
+    already held some row in the same category. That is how a Los Angeles dental
+    practice was served no OSHA Bloodborne Pathogens standard, no infection
+    control, no hazardous-waste generator rules and no radiation-machine
+    registration — every one of them sitting in the catalog, in its chain, the
+    whole time.
+
+    Research fills gaps in the CATALOG. It does not decide what a tenant sees.
+    Callers still apply the industry filter, facility triggers and preemption on
+    top of this — this is the candidate set, not the final one.
+    """
+    rows = await conn.fetch(
+        # `depth` bounds the recursion. The tree is at most city→county→state→
+        # federal, but a parent_id cycle (a bad merge, a hand-edited row — the junk
+        # `ca, CA` / `FL, FL` nodes are still live) would otherwise spin this CTE
+        # forever, hanging the connection and every compliance check behind it.
+        #
+        # status = 'active' only. requirement_status_enum also has 'superseded' and
+        # 'pending': a superseded row would be served next to the row that replaced
+        # it (the same obligation twice, one with a stale value), and 'pending' is
+        # the grounding-quarantine state — not something a tenant should be told
+        # they are liable for.
+        """
+        WITH RECURSIVE chain AS (
+            SELECT id, parent_id, 0 AS depth FROM jurisdictions WHERE id = $1
+            UNION ALL
+            SELECT j.id, j.parent_id, c.depth + 1
+            FROM jurisdictions j
+            JOIN chain c ON j.id = c.parent_id
+            WHERE c.depth < 8
+        )
+        SELECT r.* FROM jurisdiction_requirements r
+        JOIN chain c ON c.id = r.jurisdiction_id
+        WHERE r.status = 'active'
+        """,
+        leaf_jurisdiction_id,
+    )
+    return [{**dict(r), "jurisdiction_requirement_id": r["id"]} for r in rows]
+
+
+def _is_no_rule_placeholder(req: Dict) -> bool:
+    """Is this row here only to say that no rule applies?
+
+    The research prompt deliberately asks for such a row rather than an empty list
+    (an empty list reads downstream as a FAILED category), so they are load-bearing
+    in the CATALOG — `skip_existing` callers use their presence as "this category
+    was researched". They are pure noise on a TENANT'S TAB, whose whole job is
+    answering "what am I responsible for".
+
+    Keyed ONLY on the model's own `metadata.no_rule_applies` flag. There is no safe
+    heuristic: `no_surprises_act` is the regulation_key of a real federal statute,
+    and "Daily Overtime Threshold: this state has none" is a genuinely useful
+    answer — guessing from titles or null values would hide real obligations.
+    Rows written before the flag existed simply aren't matched, and are left alone.
+
+    Reads BOTH shapes on purpose: a row loaded from the catalog carries the flag
+    inside `metadata` (where _upsert_requirements_additive puts it), while a dict
+    straight off a research pass still carries it top-level — and the research set
+    is exactly what the stream syncs on its fallback path.
+    """
+    if req.get("no_rule_applies"):
+        return True
+    meta = _decode_jsonb(req.get("metadata"))
+    return bool(meta.get("no_rule_applies")) if isinstance(meta, dict) else False
+
+
+def _drop_no_rule_placeholders(reqs: List[Dict]) -> List[Dict]:
+    kept = [r for r in reqs if not _is_no_rule_placeholder(r)]
+    dropped = len(reqs) - len(kept)
+    if dropped:
+        logger.info("compliance: hid %d 'no rule applies' placeholder(s) from the tab", dropped)
+    return kept
+
+
+async def _project_chain_to_location(
+    conn, company_id: UUID, location, leaf_jurisdiction_id: UUID
+) -> List[Dict]:
+    """The requirement set a location is actually liable for.
+
+    Chain union -> normalize -> industry filter -> FACILITY TRIGGERS -> preemption.
+
+    The trigger pass is what keeps "exhaustive" from becoming "everything".
+    Catalog rows carry conditions like ``{"type": "entity_type", "value":
+    "behavioral_health"}`` (SAMHSA opioid-treatment certification) or
+    ``{"key": "payer_contracts", "operator": "contains", "value": "medicare"}``
+    (Hospital IQR). Nothing in the tenant read path ever evaluated them — only
+    the hierarchical view did, and the Compliance tab doesn't use it — so a
+    dental practice was served hospital and opioid-clinic obligations.
+    """
+    requirements = await _load_chain_requirements(conn, leaf_jurisdiction_id)
+    requirements = [_jurisdiction_row_to_dict(r) for r in requirements]
+
+    _normalize_requirement_categories(requirements)
+    requirements = await _filter_requirements_for_company(conn, company_id, requirements)
+    requirements = _drop_no_rule_placeholders(requirements)
+
+    facility_attributes = _decode_jsonb(getattr(location, "facility_attributes", None))
+    if not isinstance(facility_attributes, dict):
+        facility_attributes = {}
+    kept: List[Dict] = []
+    for req in requirements:
+        trigger = _decode_jsonb(req.get("trigger_conditions"))
+        # `isinstance(dict)`, not just truthiness. _decode_jsonb returns an
+        # unparseable value AS-IS (and jsonfix01 deliberately leaves such rows in
+        # the DB rather than guessing at them), so a garbage string is truthy,
+        # reaches _eval_condition, and dies on `cond.get("type")` —
+        # AttributeError: 'str' object has no attribute 'get'. One bad catalog row
+        # would take down the projection for every tenant whose chain contains it.
+        # A trigger we cannot read is not a trigger we can enforce: treat it as
+        # unconditional, which is how a row with no trigger already behaves.
+        if isinstance(trigger, dict) and not evaluate_trigger_conditions(
+            trigger, facility_attributes
+        ):
+            continue
+        if trigger is not None and not isinstance(trigger, dict):
+            logger.warning(
+                "compliance: unreadable trigger_conditions on requirement %s — "
+                "serving it unconditionally",
+                req.get("jurisdiction_requirement_id"),
+            )
+        kept.append(req)
+    requirements = kept
+
+    requirements = await _filter_with_preemption(conn, requirements, location.state)
+    return requirements
+
+
 async def _load_jurisdiction_legislation(conn, jurisdiction_id: UUID) -> List[Dict]:
     """Read legislation from the jurisdiction repository."""
     rows = await conn.fetch(
@@ -1362,6 +1543,48 @@ async def _load_jurisdiction_legislation(conn, jurisdiction_id: UUID) -> List[Di
         jurisdiction_id,
     )
     return [dict(r) for r in rows]
+
+
+def _as_jsonb(value: Any) -> Optional[str]:
+    """Serialize a value for a JSONB column — WITHOUT re-encoding an encoded one.
+
+    asyncpg hands JSONB back as a `str`. So a row that is read out of the catalog
+    and written back (which is every research pass: catalog -> dict -> upsert)
+    used to hit `json.dumps(already_a_json_string)` and gain another layer of
+    escaping. Each pass added one:
+
+        {"type": "entity_type", ...}
+        "{\\"type\\": \\"entity_type\\", ...}"
+        "\\"{\\\\\\"type\\\\\\": ...}\\""
+
+    trigger_conditions then no longer parses as an object, the evaluator can't
+    read it, and the requirement fails OPEN — which is how "SAMHSA Opioid
+    Treatment Program Certification" (trigger: entity_type == behavioral_health)
+    was served to a dental practice.
+    """
+    if value is None or value == "":
+        return None
+    if isinstance(value, str):
+        # Already JSON text. Trust it only if it parses; a bare string that isn't
+        # JSON is a caller bug we shouldn't silently persist as garbage.
+        try:
+            json.loads(value)
+            return value
+        except (TypeError, ValueError):
+            return json.dumps(value)
+    return json.dumps(value)
+
+
+def _decode_jsonb(value: Any) -> Any:
+    """Read a JSONB value that may have been multi-encoded by the bug above."""
+    seen = 0
+    while isinstance(value, str) and seen < 5:
+        try:
+            value = json.loads(value)
+        except (TypeError, ValueError):
+            return value
+        seen += 1
+    return value
 
 
 def _jurisdiction_row_to_dict(jr: dict) -> dict:
@@ -1523,60 +1746,127 @@ async def _get_county_jurisdiction_id(
 
 
 async def _get_state_jurisdiction_id(conn, jurisdiction_id: UUID) -> Optional[UUID]:
-    """Walk parent_id chain to find the state jurisdiction ID."""
+    """Walk the parent chain to the state node.
+
+    Keys on ``level``, not on a city-string heuristic. The previous version
+    tested ``city == ""`` — but 27 of 28 state rows carry city NULL, so the test
+    was always false, this returned None, and the caller silently filed state law
+    under the LEAF CITY. That single mismatch misparented 1,157 rows and is why a
+    Los Angeles tenant was served no California minimum wage (migration jparent01).
+    """
     current_id = jurisdiction_id
-    for _ in range(3):  # Walk up to 3 levels (city -> county -> state)
+    for _ in range(4):  # city -> county -> state -> federal
         row = await conn.fetchrow(
-            "SELECT parent_id FROM jurisdictions WHERE id = $1", current_id
+            "SELECT id, level, parent_id FROM jurisdictions WHERE id = $1", current_id
         )
-        if not row or not row["parent_id"]:
+        if not row:
+            return None
+        if row["level"] == "state":
+            return row["id"]
+        if not row["parent_id"]:
             return None
         current_id = row["parent_id"]
-        j_row = await conn.fetchrow(
-            "SELECT id, city FROM jurisdictions WHERE id = $1", current_id
-        )
-        if j_row and j_row["city"] == "":  # State jurisdictions have empty city
-            return j_row["id"]
     return None
+
+
+async def _get_or_create_state_jurisdiction_id(
+    conn, leaf_jurisdiction_id: UUID
+) -> Optional[UUID]:
+    """The state node for a leaf, creating it if the tree simply lacks one.
+
+    Falling back to the leaf (what this code used to do) is never acceptable for
+    a state-level obligation: it makes the row invisible to every other city in
+    the same state. If the walk finds nothing, look the state up by code, and
+    create the node as a last resort.
+    """
+    state_id = await _get_state_jurisdiction_id(conn, leaf_jurisdiction_id)
+    if state_id:
+        return state_id
+
+    leaf = await conn.fetchrow(
+        "SELECT state, country_code FROM jurisdictions WHERE id = $1", leaf_jurisdiction_id
+    )
+    if not leaf or not leaf["state"]:
+        return None
+
+    existing = await conn.fetchval(
+        "SELECT id FROM jurisdictions WHERE level = 'state' AND state = $1 LIMIT 1",
+        leaf["state"],
+    )
+    if existing:
+        return existing
+
+    federal_id = await conn.fetchval(
+        "SELECT id FROM jurisdictions WHERE level = 'federal' AND state = 'US' LIMIT 1"
+    )
+    return await conn.fetchval(
+        """
+        INSERT INTO jurisdictions (display_name, level, state, country_code, parent_id, authority_type)
+        VALUES ($1, 'state', $1, $2, $3, 'geographic')
+        RETURNING id
+        """,
+        leaf["state"],
+        leaf["country_code"] or "US",
+        federal_id,
+    )
 
 
 async def _resolve_jurisdiction_id_for_level(
     conn, leaf_jurisdiction_id: UUID, jurisdiction_level: str
-) -> UUID:
-    """Resolve the correct jurisdiction ID for a requirement based on its level.
+) -> Optional[UUID]:
+    """Resolve the jurisdiction a requirement belongs on, from its stamped level.
 
-    Routes federal/state/county requirements to their proper jurisdiction row
-    instead of dumping everything into the leaf city. Falls back to leaf if
-    the parent jurisdiction doesn't exist yet.
+    Returns None when the level is known but no home for it can be resolved.
+    **Never falls back to the leaf.** That fallback is what corrupted 63% of the
+    catalog (jparent01): chain resolution walks jurisdiction_id, so a state law
+    filed under a city is invisible to every other city in that state — while
+    still *displaying* as "California / state", so nothing looked wrong. Dropping
+    the row is loud; misfiling it is silent. Callers park the None rows.
     """
     level = (jurisdiction_level or "").lower().strip()
+
+    # If the node we were handed already IS the requested level, it is its own
+    # home. The per-level helpers below assume a CITY leaf and walk the parent
+    # chain — handed a county node, _get_county_jurisdiction_id inspects the
+    # county's PARENT (the state) and returns None, so every county-stamped row
+    # researched *at* a county node was silently skipped while the caller counted
+    # it as written.
+    own = await conn.fetchrow(
+        "SELECT level FROM jurisdictions WHERE id = $1", leaf_jurisdiction_id
+    )
+    own_level = str(own["level"]) if own else None
+    if own_level == level or (
+        {own_level, level} <= {"federal", "national"} and own_level and level
+    ):
+        return leaf_jurisdiction_id
 
     if level == "city" or not level:
         return leaf_jurisdiction_id
 
     if level == "county":
-        county_id = await _get_county_jurisdiction_id(conn, leaf_jurisdiction_id)
-        return county_id or leaf_jurisdiction_id
+        return await _get_county_jurisdiction_id(conn, leaf_jurisdiction_id)
 
     if level == "state":
-        state_id = await _get_state_jurisdiction_id(conn, leaf_jurisdiction_id)
-        return state_id or leaf_jurisdiction_id
+        return await _get_or_create_state_jurisdiction_id(conn, leaf_jurisdiction_id)
 
-    if level == "federal":
-        # Look up the leaf's state to find the federal jurisdiction
+    # 'national' is the same tier as 'federal' — a country's own law. It had no
+    # case at all here, so it fell through to "unknown level, treat as city" and
+    # 232 national rows were filed under cities.
+    if level in ("federal", "national"):
         leaf = await conn.fetchrow(
-            "SELECT state FROM jurisdictions WHERE id = $1", leaf_jurisdiction_id
+            "SELECT country_code FROM jurisdictions WHERE id = $1", leaf_jurisdiction_id
         )
-        if leaf:
-            fed_row = await conn.fetchrow(
-                "SELECT id FROM jurisdictions WHERE level = 'federal' AND state = 'US'"
+        country = (leaf["country_code"] if leaf else None) or "US"
+        if country == "US":
+            return await conn.fetchval(
+                "SELECT id FROM jurisdictions WHERE level = 'federal' AND state = 'US' LIMIT 1"
             )
-            if fed_row:
-                return fed_row["id"]
-        return leaf_jurisdiction_id
+        return await conn.fetchval(
+            "SELECT id FROM jurisdictions WHERE level = 'national' AND country_code = $1 LIMIT 1",
+            country,
+        )
 
-    # Unknown level — treat as city
-    return leaf_jurisdiction_id
+    return None
 
 
 async def _upsert_jurisdiction_requirements_routed(
@@ -1602,10 +1892,22 @@ async def _upsert_jurisdiction_requirements_routed(
     affected_jurisdictions: set = set()
     city_keys: set = set()  # Track city-level keys for cleanup
 
+    unroutable = 0
     for level, group_reqs in level_groups.items():
         target_jid = await _resolve_jurisdiction_id_for_level(
             conn, leaf_jurisdiction_id, level
         )
+        if target_jid is None:
+            # No home for this level. Writing it to the leaf anyway is what broke
+            # the catalog (jparent01) — the row would render as "state law" while
+            # being reachable only from this one city. Skip and count it.
+            unroutable += len(group_reqs)
+            logger.warning(
+                "compliance: cannot route %d %r-level requirement(s) from leaf %s — skipped",
+                len(group_reqs), level, leaf_jurisdiction_id,
+            )
+            continue
+
         affected_jurisdictions.add(target_jid)
 
         await _upsert_requirements_additive(conn, target_jid, group_reqs, research_source=research_source)
@@ -1615,7 +1917,12 @@ async def _upsert_jurisdiction_requirements_routed(
                 city_keys.add(_compute_requirement_key(req))
 
     # Level-scoped cleanup: only delete stale CITY-level rows from the leaf
-    # (preserves inherited requirements; only cleans up local ones)
+    # (preserves inherited requirements; only cleans up local ones).
+    #
+    # Scoped to `city` AND to this leaf on purpose. The sibling non-routed upsert
+    # deletes any row of ANY level whose key this run didn't re-emit — against the
+    # SHARED catalog, so one tenant's research pass can delete rows every other
+    # tenant reads. See _upsert_jurisdiction_requirements.
     if city_keys:
         existing_rows = await conn.fetch(
             """SELECT id, requirement_key FROM jurisdiction_requirements
@@ -1652,6 +1959,76 @@ async def _upsert_jurisdiction_requirements_routed(
         "levels_routed": {level: len(group) for level, group in level_groups.items()},
         "jurisdictions_affected": len(affected_jurisdictions),
     }
+
+
+async def _upsert_requirements_routed_additive(
+    conn, leaf_jurisdiction_id: UUID, reqs: List[Dict], *,
+    research_source: Optional[str] = None,
+) -> Dict[str, Dict[str, Any]]:
+    """Route each requirement to the jurisdiction its stamped level belongs on.
+
+    Like ``_upsert_jurisdiction_requirements_routed`` but with NO delete pass, so
+    it is safe for a research run that covers only one slice of a jurisdiction
+    (a single industry's categories). That sibling's city-cleanup deletes leaf
+    city rows whose key the run didn't re-emit — for a dental-only pass that would
+    delete every OTHER industry's city rows. It also deliberately does NOT stamp
+    ``last_verified_at`` on the affected jurisdictions: a one-industry pass has
+    not verified the jurisdiction, and stamping it would make
+    ``_is_jurisdiction_fresh`` suppress the *generic* research the jurisdiction
+    may still need.
+
+    Without routing, a specialty pass writes state- and federal-stamped rows onto
+    the LEAF CITY (this is what `_upsert_requirements_additive` does — it takes
+    the jurisdiction it is handed). That is precisely the corruption migration
+    jparent01 exists to undo: the row renders as "California / state" while being
+    reachable only from the one city it was researched from, so no other city in
+    the state can ever see it.
+
+    Returns ``{level: {"jurisdiction_id": UUID|None, "written": int}}`` — what
+    actually LANDED, per stamped level. Callers recording coverage must read this,
+    not the input list: a row whose level cannot be routed is skipped, and a
+    ledger that counts skipped rows as written marks a hole in the catalog as
+    "covered", permanently.
+    """
+    from collections import defaultdict
+
+    level_groups: Dict[str, List[Dict]] = defaultdict(list)
+    for req in reqs:
+        level = (req.get("jurisdiction_level") or "city").lower().strip()
+        level_groups[level].append(req)
+
+    outcome: Dict[str, Dict[str, Any]] = {}
+    affected: set = set()
+    for level, group_reqs in level_groups.items():
+        target_jid = await _resolve_jurisdiction_id_for_level(
+            conn, leaf_jurisdiction_id, level
+        )
+        if target_jid is None:
+            logger.warning(
+                "compliance: cannot route %d %r-level requirement(s) from %s — skipped",
+                len(group_reqs), level, leaf_jurisdiction_id,
+            )
+            outcome[level] = {"jurisdiction_id": None, "written": 0}
+            continue
+        await _upsert_requirements_additive(
+            conn, target_jid, group_reqs, research_source=research_source
+        )
+        affected.add(target_jid)
+        prev = outcome.get(level)
+        outcome[level] = {
+            "jurisdiction_id": target_jid,
+            "written": (prev["written"] if prev else 0) + len(group_reqs),
+        }
+
+    for jid in affected:
+        count = await conn.fetchval(
+            "SELECT COUNT(*) FROM jurisdiction_requirements WHERE jurisdiction_id = $1", jid
+        )
+        await conn.execute(
+            "UPDATE jurisdictions SET requirement_count = $1, updated_at = NOW() WHERE id = $2",
+            count, jid,
+        )
+    return outcome
 
 
 async def _upsert_requirements_additive(
@@ -1730,16 +2107,25 @@ async def _upsert_requirements_additive(
         penalties = sanitize_penalties_for_persist(req.get("penalties"))
         if penalties is not None:
             meta_dict["penalties"] = penalties
+        # "No rule applies here" placeholder — kept in the catalog (the research
+        # prompt asks for one instead of an empty list, which downstream reads as a
+        # FAILED category), but filtered out of the tenant's tab by
+        # _project_chain_to_location. Only ever set from the model's own flag: no
+        # text heuristic can tell these apart from real law (`no_surprises_act` is
+        # a real statute; "Daily Overtime: none" is a real answer).
+        if req.get("no_rule_applies"):
+            meta_dict["no_rule_applies"] = True
         meta_fragment = json.dumps(meta_dict) if meta_dict else None
 
         requirement_key, regulation_key = _compute_key_parts(req)
         # RKD is keyed on the NORMALIZED category (same form as the bare key);
         # the raw req category may be cased/aliased ('Meal-Breaks').
         normalized_category = _normalize_category(req.get("category"))
-        tc = req.get("trigger_conditions")
-        tc_json = json.dumps(tc) if tc else None
-        aet_raw = req.get("applicable_entity_types")
-        aet = json.dumps(aet_raw) if aet_raw else None
+        # _as_jsonb, not json.dumps: these values often come straight off a JSONB
+        # read (asyncpg returns them as str), and dumps() would add another layer
+        # of escaping on every research pass. See _as_jsonb.
+        tc_json = _as_jsonb(req.get("trigger_conditions"))
+        aet = _as_jsonb(req.get("applicable_entity_types"))
         steps_raw = req.get("implementation_steps")
         steps_json = json.dumps(steps_raw) if isinstance(steps_raw, list) and steps_raw else None
         # Grounding verdict → status intent (tri-state, consumed by the INSERT
@@ -2737,10 +3123,11 @@ async def _upsert_jurisdiction_requirements(
                 )
                 continue
 
-        tc = req.get("trigger_conditions")
-        tc_json = json.dumps(tc) if tc else None
-        aet_raw = req.get("applicable_entity_types")
-        aet = json.dumps(aet_raw) if aet_raw else None
+        # _as_jsonb, not json.dumps: these values often come straight off a JSONB
+        # read (asyncpg returns them as str), and dumps() would add another layer
+        # of escaping on every research pass. See _as_jsonb.
+        tc_json = _as_jsonb(req.get("trigger_conditions"))
+        aet = _as_jsonb(req.get("applicable_entity_types"))
         await conn.execute(
             """
             INSERT INTO jurisdiction_requirements
@@ -2817,17 +3204,20 @@ async def _upsert_jurisdiction_requirements(
             uncategorized_id,      # $21: drift-park sentinel — never downgrades an existing tag
         )
 
-    # Remove jurisdiction rows not in new result set
-    if new_keys:
-        existing_rows = await conn.fetch(
-            "SELECT id, requirement_key FROM jurisdiction_requirements WHERE jurisdiction_id = $1",
-            jurisdiction_id,
-        )
-        for row in existing_rows:
-            if row["requirement_key"] not in new_keys:
-                await conn.execute(
-                    "DELETE FROM jurisdiction_requirements WHERE id = $1", row["id"]
-                )
+    # NO DELETE HERE — deliberately.
+    #
+    # This used to be: "Remove jurisdiction rows not in new result set" — every
+    # row on this jurisdiction whose key THIS ONE RUN didn't re-emit was deleted.
+    # jurisdiction_requirements is the SHARED catalog, so one tenant's research
+    # pass (a single Gemini call, which returns a different slice every time)
+    # deleted obligations every other tenant reads. It also destroyed rows whose
+    # ids were still held by the caller's in-flight list, which then FK-aborted
+    # the location sync mid-write (see _refresh_catalog_links).
+    #
+    # A row leaves the catalog by being *repealed* (status='repealed', which the
+    # read path already excludes) or superseded — never by being absent from one
+    # non-deterministic research result. Staleness is what last_verified_at and
+    # the drift sweep are for.
 
     # Update jurisdiction counts and timestamp
     count = await conn.fetchval(
@@ -2925,6 +3315,48 @@ async def _filter_requirements_for_company(
     return filtered
 
 
+async def _refresh_catalog_links(conn, reqs: List[Dict]) -> None:
+    """Drop ``jurisdiction_requirement_id`` values the catalog no longer has.
+
+    The in-flight requirement dicts are loaded from the catalog BEFORE the upsert
+    runs (``_jurisdiction_row_to_dict`` stamps the id), and the upsert can delete
+    or merge rows out from under them. The next call — this sync — then inserts a
+    compliance_requirements row FK'd to a dead id and the whole location's sync
+    aborts on ``compliance_requirements_jurisdiction_requirement_id_fkey``. That
+    is what made a real onboarding build report "your compliance baseline is
+    live" while having written only part of it.
+
+    A stale link is dropped to NULL rather than raising: the requirement itself is
+    still real and the tenant should see it. The FK is an enrichment link, not the
+    row's identity.
+    """
+    ids = {
+        req["jurisdiction_requirement_id"]
+        for req in reqs
+        if req.get("jurisdiction_requirement_id")
+    }
+    if not ids:
+        return
+
+    live = {
+        row["id"]
+        for row in await conn.fetch(
+            "SELECT id FROM jurisdiction_requirements WHERE id = ANY($1::uuid[])",
+            [UUID(str(i)) for i in ids],
+        )
+    }
+    stale = {str(i) for i in ids} - {str(i) for i in live}
+    if not stale:
+        return
+
+    for req in reqs:
+        if str(req.get("jurisdiction_requirement_id") or "") in stale:
+            req["jurisdiction_requirement_id"] = None
+    logger.warning(
+        "compliance: dropped %d stale catalog link(s) before location sync", len(stale)
+    )
+
+
 async def _sync_requirements_to_location(
     conn,
     location_id: UUID,
@@ -2932,11 +3364,20 @@ async def _sync_requirements_to_location(
     reqs: List[Dict],
     create_alerts: bool = True,
     service=None,
+    validate_source_urls: bool = True,
 ) -> Dict[str, int]:
     """Sync a list of requirement dicts to a location's compliance_requirements.
 
     Runs the existing change-detection logic (upsert, history snapshot, alerts).
     Returns {"new": N, "updated": N, "alerts": N, "changes_to_verify": [...]}.
+
+    ``validate_source_urls``: HEAD-checks every requirement's source_url for
+    liveness (outbound HTTP to gov sites). That's catalog-quality maintenance —
+    already done on the two research/write paths (``_upsert_requirements_additive``,
+    ``_upsert_jurisdiction_requirements``) when a row is written. Repeating it
+    per tenant, per sync, against the SAME urls every other tenant in the
+    jurisdiction already validated is pure waste. Defaults True so existing
+    callers are unaffected; the catalog-only projection path passes False.
     """
     # ── Data integrity pipeline ──
     for req in reqs:
@@ -2944,7 +3385,9 @@ async def _sync_requirements_to_location(
         cat = _normalize_category(req.get("category"))
         if cat:
             req["category"] = cat
-    await _validate_source_urls(reqs)
+    if validate_source_urls:
+        await _validate_source_urls(reqs)
+    await _refresh_catalog_links(conn, reqs)
 
     new_count = 0
     updated_count = 0
@@ -3117,17 +3560,27 @@ async def _sync_requirements_to_location(
             if material_change:
                 previous_value = old_value
                 last_changed_at = datetime.utcnow()
-                # Log granular field changes to policy_change_log
-                if old_value != new_value:
-                    await _log_policy_change(
-                        conn, existing["id"], "current_value",
-                        old_value, new_value,
-                    )
-                if old_num is not None and new_num is not None and abs(float(old_num) - float(new_num)) > 0.001:
-                    await _log_policy_change(
-                        conn, existing["id"], "numeric_value",
-                        str(old_num), str(new_num),
-                    )
+                # Log granular field changes to policy_change_log.
+                #
+                # requirement_id FKs jurisdiction_requirements (the CATALOG), but
+                # `existing` is a compliance_requirements row — the per-location
+                # projection. Passing existing["id"] here FK-violated every time,
+                # killing the whole check. It stayed invisible because it only
+                # fires when a value materially changes, and the sync used to die
+                # earlier. An unlinked projection row has no catalog id to log
+                # against, so it is skipped rather than faked.
+                catalog_id = existing.get("jurisdiction_requirement_id")
+                if catalog_id:
+                    if old_value != new_value:
+                        await _log_policy_change(
+                            conn, catalog_id, "current_value",
+                            old_value, new_value,
+                        )
+                    if old_num is not None and new_num is not None and abs(float(old_num) - float(new_num)) > 0.001:
+                        await _log_policy_change(
+                            conn, catalog_id, "numeric_value",
+                            str(old_num), str(new_num),
+                        )
 
             await _update_requirement(
                 conn,
@@ -3214,6 +3667,94 @@ async def _sync_requirements_to_location(
         "alerts": alert_count,
         "changes_to_verify": changes_to_verify,
         "existing_by_key": existing_by_key,
+    }
+
+
+async def project_location_from_catalog(
+    conn,
+    company_id: UUID,
+    location_id: UUID,
+    *,
+    create_alerts: bool = False,
+    check_type: str = "manual",
+) -> Dict[str, int]:
+    """Sync a location's tab from the shared catalog. NO Gemini, structurally.
+
+    This is the tenant "Run check" button and the daily auto-sync's entry point,
+    and the guarantee here is stronger than a flag: this function's only calls
+    are ``_project_chain_to_location`` (read the catalog chain) and
+    ``_sync_requirements_to_location(..., validate_source_urls=False)`` (write the
+    projection). Neither imports ``get_gemini_compliance_service``, calls
+    ``service.*``, or reaches ``_refresh_repository_missing_categories``. There is
+    no code path from here to a Gemini call — not "Gemini is off because a flag
+    says so," but "the call simply is not in this function's reachable graph."
+    Research-capable checks (``run_compliance_check_stream`` /
+    ``run_compliance_check_background``) are a deliberately separate,
+    admin/onboarding-only surface.
+
+    ``validate_source_urls=False`` on the sync call: liveness-checking every
+    requirement's source_url is catalog-quality maintenance already done when a
+    row is researched and written (the two write paths). Every tenant in a
+    jurisdiction shares the same catalog rows, so re-validating the same URLs on
+    every tenant's own sync is pure waste, not additional safety.
+
+    Writes a ``compliance_check_log`` row and stamps
+    ``business_locations.last_compliance_check`` like the full check does, so
+    this is a full drop-in for both callers: the History tab shows the sync, and
+    the daily dispatcher's ``ORDER BY last_compliance_check ASC NULLS FIRST``
+    (``workers/tasks/compliance_checks.py``) still rotates correctly.
+
+    Returns ``{"new": N, "updated": N, "alerts": N}``. Returns all-zero
+    (no-op, no log written) if the location has no jurisdiction yet.
+
+    Uses ONLY the passed ``conn`` — never ``get_location`` or any other pool
+    accessor. The daily sweep runs in the pool-free Celery worker
+    (``celery_app.py`` never calls ``init_pool``), where a pooled
+    ``get_connection()`` raises "Database pool not initialized." Every helper
+    below already takes ``conn``; this is the one spot that would otherwise reach
+    for the pool. Same pattern as ``vertical_coverage.reproject_location``, which
+    already runs pool-free in the vertical-coverage sweep worker.
+    """
+    row = await conn.fetchrow(
+        "SELECT * FROM business_locations WHERE id = $1 AND company_id = $2",
+        location_id, company_id,
+    )
+    if not row or not row["jurisdiction_id"]:
+        return {"new": 0, "updated": 0, "alerts": 0}
+    location = BusinessLocation(**dict(row))
+
+    log_id = await _create_check_log(conn, location_id, company_id, check_type)
+
+    requirements = await _project_chain_to_location(
+        conn, company_id, location, location.jurisdiction_id
+    )
+    if not requirements:
+        await conn.execute(
+            "UPDATE business_locations SET last_compliance_check = NOW() WHERE id = $1",
+            location_id,
+        )
+        await _complete_check_log(conn, log_id, 0, 0, 0)
+        return {"new": 0, "updated": 0, "alerts": 0}
+
+    sync_result = await _sync_requirements_to_location(
+        conn,
+        location_id,
+        company_id,
+        requirements,
+        create_alerts=create_alerts,
+        validate_source_urls=False,
+    )
+    await conn.execute(
+        "UPDATE business_locations SET last_compliance_check = NOW() WHERE id = $1",
+        location_id,
+    )
+    await _complete_check_log(
+        conn, log_id, sync_result["new"], sync_result["updated"], sync_result["alerts"]
+    )
+    return {
+        "new": sync_result["new"],
+        "updated": sync_result["updated"],
+        "alerts": sync_result["alerts"],
     }
 
 
@@ -3498,7 +4039,13 @@ async def _log_policy_change(
     field_changed: str,
     old_value: Optional[str],
     new_value: Optional[str],
-    change_source: str = "compliance_check",
+    # change_source_enum = (ai_fetch, manual_review, legislative_update,
+    # system_migration). The default used to be "compliance_check", which is not
+    # a member — so the first time a requirement's value actually CHANGED, the
+    # check died with InvalidTextRepresentation. It stayed hidden because the
+    # location sync aborted on a dangling FK before it ever got here.
+    # A compliance check is an AI fetch.
+    change_source: str = "ai_fetch",
     change_reason: Optional[str] = None,
 ) -> None:
     """Record a granular field-level change in the policy_change_log table."""
@@ -4150,7 +4697,7 @@ def _filter_by_jurisdiction_priority(requirements):
     return filtered
 
 
-async def _filter_with_preemption(conn, requirements, state: str):
+async def _filter_with_preemption(conn, requirements, state: Optional[str]):
     """Preemption-aware jurisdiction filter.
 
     For each category group:
@@ -4159,6 +4706,16 @@ async def _filter_with_preemption(conn, requirements, state: str):
     3. If allowed (or no rule): apply most-beneficial-to-employee for wage
        categories, or most-local for others (existing behavior).
     """
+    # A location with no state (10 live rows on dev) reached `state.upper()` and
+    # 500'd the whole compliance page. Preemption is a state-law question — with
+    # no state there is no rule to apply, so pass the requirements through
+    # unfiltered rather than taking the tenant's page down.
+    if not state:
+        logger.warning(
+            "preemption skipped: location has no state — returning requirements unfiltered"
+        )
+        return requirements
+
     norm_state = state.upper().strip()
     state_name = _CODE_TO_STATE_NAME.get(norm_state, norm_state)
 
@@ -4630,16 +5187,39 @@ async def run_compliance_check_stream(
     company_id: UUID,
     allow_live_research: bool = True,
     categories: Optional[List[str]] = None,
+    include_vertical_fill: bool = False,
+    allow_repository_refresh: bool = True,
 ) -> AsyncGenerator[Dict[str, Any], None]:
     """
     Runs a compliance check for a specific location.
     Checks the jurisdiction repository first; only calls Gemini if stale/missing.
+
+    ``include_vertical_fill``: after the check, research any industry-specific
+    (vertical) compliance the shared catalog is still missing for this company —
+    dental law for a dental office, hospitality law for a hotel.
+
+    OFF by default, and that default is load-bearing. This generator has five
+    callers: the tenant "Run check" route, the Matcha-X onboarding build's
+    per-location loop, the roster-jurisdiction union, and two admin onboarding
+    flows. An unconditional fill would fire three times in a single Matcha-X build
+    (which already runs its own vertical phase, with the reproject-on-mint logic
+    this level has no caller context for) and would silently add Gemini spend to
+    the admin white-glove flows. Only the tenant-facing "Run check" opts in.
     Yields progress dicts as SSE-friendly events.
 
     ``categories`` optionally narrows the "required" set this run cares about
     (e.g. the Matcha-X self-serve onboarding finale passes
     ``MATCHA_X_LITE_CATEGORIES`` for a faster, cheaper basic-law sweep). When
     None — every existing caller — behaviour is identical to before.
+
+    ``allow_repository_refresh``: ``allow_live_research=False`` was meant to mean
+    "no Gemini, ever" for the tenant-facing route, but it only gated the
+    per-company Tier-3 research block. The shared-jurisdiction gap-fill branch
+    (search the catalog on miss, store forever) ran regardless — a "read-only"
+    caller could still trigger a live research call. This flag closes that:
+    False means the run is a pure projection from whatever the catalog already
+    has, with zero Gemini calls, full stop. Defaults True so every existing
+    caller (admin, onboarding) is unaffected; only the tenant route passes False.
     """
     from ...database import get_connection
     from .gemini_compliance import get_gemini_compliance_service
@@ -4717,8 +5297,11 @@ async def run_compliance_check_stream(
             # ============================================================
             # FACILITY INFERENCE: Auto-populate facility_attributes for healthcare companies
             # ============================================================
+            # A Gemini call, so it needs the same gate as the repository refresh
+            # below — a projection-only run (tenant "Run check") must not spend
+            # here either.
             canonical_industry = industry_profile.get("canonical_industry") if industry_profile else None
-            if canonical_industry == "healthcare":
+            if canonical_industry == "healthcare" and allow_repository_refresh:
                 fa = location.facility_attributes
                 if isinstance(fa, str):
                     try:
@@ -5079,7 +5662,39 @@ async def run_compliance_check_stream(
             # source-of-truth is intentional — it fires only for categories never
             # researched in this jurisdiction and upserts into the shared library
             # (library-permanence model: search on miss, store forever).
-            elif not used_repository and not allow_live_research:
+            #
+            # That refresh is itself a Gemini call, so it needs its own gate.
+            # allow_repository_refresh=False (the tenant-facing route) means this
+            # run must be a pure projection with ZERO Gemini spend — a customer's
+            # button click must never research, even indirectly via "the shared
+            # library happened to have a gap." Catalog freshness is our job, on
+            # our schedule (legislation_watch / structured_data_fetch / admin
+            # refresh); a tenant only ever reads what we've already stored.
+            elif not used_repository and not allow_live_research and not allow_repository_refresh:
+                # Real gaps only. The tier stages above build `requirements` from
+                # a leaf-only or freshness-windowed slice, so a category the FULL
+                # chain covers can look "missing" here (false gap → false queue).
+                # Recompute against the exact set the tab projects
+                # (`_project_chain_to_location`, whole chain, no freshness limit)
+                # so we only ever queue jurisdictions we genuinely lack.
+                chain_reqs = await _project_chain_to_location(
+                    conn, company_id, location, jurisdiction_id
+                )
+                missing_categories = _missing_required_categories(chain_reqs)
+                used_repository = True
+                if missing_categories:
+                    yield {
+                        "type": "repository_only",
+                        "jurisdiction_id": str(jurisdiction_id),
+                        "missing_categories": missing_categories,
+                        "message": (
+                            "Some categories aren't in the library yet for "
+                            f"{location_name} ({', '.join(missing_categories)}). "
+                            "An admin can refresh jurisdiction data to add them."
+                        ),
+                    }
+
+            elif not used_repository and not allow_live_research and allow_repository_refresh:
                 missing_categories = _missing_required_categories(requirements)
                 used_repository = True
                 if missing_categories:
@@ -5355,6 +5970,38 @@ async def run_compliance_check_stream(
                                 req.get("source_name"),
                                 req.get("category", ""),
                             )
+
+            # Re-project from the CATALOG over the location's whole jurisdiction
+            # chain, now that this run's research has been contributed to it.
+            #
+            # `requirements` up to here is one research pass's result set — the
+            # deltas. What the tenant is liable for is the union of every active
+            # obligation in its city/county/state/federal chain. Syncing the
+            # research result instead of the chain is why an LA dental practice
+            # saw no OSHA Bloodborne Pathogens standard, no infection control and
+            # no hazardous-waste rules: all three were in the catalog, in its
+            # chain, and simply never made it into the projection.
+            #
+            # Falls back to the research set if the chain projection comes back
+            # empty — an empty sync would wipe the tenant's tab.
+            chain_requirements = await _project_chain_to_location(
+                conn, company_id, location, jurisdiction_id
+            )
+            if chain_requirements:
+                yield {
+                    "type": "processing",
+                    "message": (
+                        f"Applying {len(chain_requirements)} requirements across "
+                        f"{location_name}'s full jurisdiction stack..."
+                    ),
+                }
+                requirements = chain_requirements
+            else:
+                # Fallback path: syncing this run's raw research set. It has NOT
+                # been through _project_chain_to_location, so the placeholder
+                # filter has to be applied here too — otherwise "no rule applies"
+                # rows reach the tab by the one route that skips the projection.
+                requirements = _drop_no_rule_placeholders(requirements)
 
             # Sync requirements to location (change detection, alerts, history)
             # Only create alerts for fresh Gemini data — repository data is cached
@@ -5688,6 +6335,76 @@ async def run_compliance_check_stream(
             )
             raise
 
+    # Vertical (industry-specific) coverage — research what the shared catalog is
+    # still missing for this company's industry, then re-project.
+    #
+    # Placed HERE, after the `async with get_connection()` block above has exited,
+    # on purpose: that block holds ONE pool connection for the entire check, and a
+    # fill is many sequential Gemini calls. Splicing it inside would pin that
+    # connection for minutes. `vertical_coverage.fill` takes a connection FACTORY
+    # for exactly this reason.
+    vertical_new = 0
+    if include_vertical_fill:
+        from ...database import get_connection as _get_conn
+        from . import vertical_coverage
+
+        try:
+            async with _get_conn() as vconn:
+                resolved = await vertical_coverage.resolve_vertical(vconn, company_id)
+                if resolved:
+                    v_parent, v_slug, v_label, v_tag, v_minted = resolved
+                    v_categories, v_context = await vertical_coverage.ensure_specialty(
+                        vconn, v_parent, v_slug, v_label
+                    )
+                    chains = await vertical_coverage.chains_for_leaves(
+                        vconn, [jurisdiction_id]
+                    )
+                    nodes = sorted({j for c in chains.values() for j, _ in c})
+                    await vertical_coverage.backfill_ledger(
+                        vconn, nodes, v_tag, v_categories
+                    )
+                    plan, v_deferred = await vertical_coverage.plan_fill(
+                        vconn, chains, v_tag, v_categories
+                    )
+                else:
+                    plan, v_deferred, v_minted, v_label = [], 0, False, None
+
+            if resolved and (plan or v_minted):
+                if plan:
+                    yield {
+                        "type": "vertical_researching",
+                        "vertical": v_label,
+                        "cells": len(plan),
+                        "deferred": v_deferred,
+                        "message": f"Researching {v_label}-specific requirements…",
+                    }
+                v_deduped = 0
+                async for vev in vertical_coverage.fill(
+                    _get_conn, company_id, plan, v_tag, v_context
+                ):
+                    vertical_new += vev.get("new", 0)
+                    v_deduped += vev.get("deduped", 0)
+
+                # Re-project on ANY catalog change, and always when the specialty
+                # tag was just minted: every projection before that write filtered
+                # this vertical's rows out (the industry filter reads the company's
+                # own tag set), so a fully-covered ledger still leaves the tab bare.
+                if vertical_new or v_deduped or v_minted:
+                    async with _get_conn() as vconn:
+                        await vertical_coverage.reproject_location(
+                            vconn, company_id, location_id
+                        )
+                    yield {
+                        "type": "vertical_complete",
+                        "vertical": v_label,
+                        "requirements_added": vertical_new,
+                        "message": f"{v_label}: {vertical_new} requirement(s) added.",
+                    }
+        except Exception as e:
+            # Vertical scoping is additive — never fail a check over it.
+            print(f"[Compliance] Vertical fill failed for {location_name}: {e}")
+            yield {"type": "warning", "message": f"Vertical scoping incomplete: {e}"}
+
     from ...config import get_settings as _get_settings
     if _get_settings().compliance_emails_enabled:
         try:
@@ -5702,7 +6419,7 @@ async def run_compliance_check_stream(
     yield {
         "type": "completed",
         "location": location_name,
-        "new": new_count,
+        "new": new_count + vertical_new,
         "updated": updated_count,
         "alerts": alert_count,
     }
@@ -6728,17 +7445,32 @@ async def get_recent_corrections(
     jurisdiction_id: UUID,
     category: Optional[str] = None,
     limit: int = 5,
+    conn=None,
 ) -> List[Dict]:
     """Get recent false positive corrections for a jurisdiction.
 
     Used in Phase 3.1 to inject correction context into future research prompts.
 
+    ``conn``: use this connection instead of borrowing the app pool. Required from
+    CELERY WORKERS — they are deliberately pool-free (each task runs its own
+    asyncio loop; an asyncpg pool bound to another loop cannot be reused), so
+    ``get_connection()`` raises there. Without it, every research call made from
+    the vertical-coverage sweep died here, BEFORE reaching Gemini, and the ledger
+    recorded the cells as failed.
+
     Returns:
         List of dicts with: requirement_key, category, correction_reason, admin_notes, created_at
     """
     from ...database import get_connection
+    from contextlib import asynccontextmanager
 
-    async with get_connection() as conn:
+    @asynccontextmanager
+    async def _borrowed():
+        yield conn
+
+    holder = _borrowed() if conn is not None else get_connection()
+
+    async with holder as conn:
         query = """
             SELECT
                 vo.requirement_key,
@@ -7544,10 +8276,20 @@ async def run_compliance_check_background(
     company_id: UUID,
     check_type: str = "scheduled",
     allow_live_research: bool = True,
+    allow_repository_refresh: bool = True,
 ) -> Dict[str, Any]:
     """Non-streaming compliance check for Celery tasks.
     Checks the jurisdiction repository first; only calls Gemini if stale/missing.
     Returns summary dict.
+
+    ``allow_repository_refresh=False`` makes this call a pure projection from
+    whatever the shared catalog already has — zero Gemini calls, including the
+    facility-inference call and the shared-jurisdiction gap-fill (see the
+    matching flag on ``run_compliance_check_stream`` for why that gap-fill
+    needed its own gate separate from ``allow_live_research``). The daily
+    per-tenant sweep (``workers/tasks/compliance_checks.py``) passes False:
+    catalog freshness is our job on our own schedule, not a side effect of a
+    scheduled tenant sync.
     """
     from ...database import get_connection
     from .gemini_compliance import get_gemini_compliance_service
@@ -7597,8 +8339,10 @@ async def run_compliance_check_background(
             )
 
             # ── Facility Inference for healthcare companies ──
+            # This is itself a Gemini call, gated the same as the repository
+            # refresh below: a projection-only run must not spend here either.
             canonical_industry = industry_profile.get("canonical_industry") if industry_profile else None
-            if canonical_industry == "healthcare":
+            if canonical_industry == "healthcare" and allow_repository_refresh:
                 fa = location.facility_attributes
                 if isinstance(fa, str):
                     try:
@@ -7839,8 +8583,26 @@ async def run_compliance_check_background(
                         not in target_set
                     ]
                     requirements = preserved + requirements
+            # Repository-only, no catalog refresh: a pure projection from whatever
+            # the shared catalog already has. This is the daily tenant sweep's
+            # path (allow_repository_refresh=False) — catalog freshness is our
+            # job on our own schedule, never a side effect of syncing a tenant.
+            elif not used_repository and not allow_live_research and not allow_repository_refresh:
+                # Real gaps only — recompute against the full chain the tab
+                # projects, not the tier-stage slice (see the stream twin).
+                chain_reqs = await _project_chain_to_location(
+                    conn, company_id, location, jurisdiction_id
+                )
+                missing_categories = _missing_required_categories(chain_reqs)
+                used_repository = True
+                if missing_categories:
+                    print(
+                        f"[Compliance] Projection-only: missing categories for {location.city}, {location.state}: "
+                        f"{', '.join(missing_categories)}. Not refreshing (allow_repository_refresh=False)."
+                    )
+
             # Repository-only mode — see the twin branch in run_compliance_check_stream for semantics.
-            elif not used_repository and not allow_live_research:
+            elif not used_repository and not allow_live_research and allow_repository_refresh:
                 missing_categories = _missing_required_categories(requirements)
                 used_repository = True
                 if missing_categories:
@@ -8607,8 +9369,30 @@ def _eval_condition(cond: Dict[str, Any], attrs: Dict[str, Any]) -> bool:
         elif op == "not":
             if children:
                 return not _eval_condition(children[0], attrs)
-            return True
-        return True
+            # `not` with nothing to negate is malformed — and it was the last
+            # shape still failing OPEN, i.e. silently universalizing a
+            # conditional obligation. _condition_shape_error rejects it at write
+            # time on the scope-registry side; nothing gates it on the research
+            # side, so fail closed here too.
+            logger.warning(
+                "Trigger condition has an empty 'not' — treating as not matched."
+            )
+            return False
+        # An unrecognized op used to return True — which silently turned a
+        # CONDITIONAL obligation into a universal one: every company got it.
+        # `trigger_conditions` on jurisdiction_requirements are written by Gemini
+        # research with NO shape gate (unlike scope-registry classifications,
+        # which validate_proposal rejects), so a plausible model typo
+        # ({"op": "greater_than"}, a leaf that says "op" where it means
+        # "operator") is enough to serve e.g. the PSM standard to a bakery.
+        # Fail closed and say so — the same convention this function already
+        # uses for an unevaluable numeric comparison below.
+        logger.warning(
+            "Trigger condition has unknown op %r — treating as not matched. "
+            "This requirement will NOT apply; fix the trigger_conditions JSON.",
+            op,
+        )
+        return False
 
     # Leaf conditions
     ctype = cond.get("type")
@@ -8669,7 +9453,15 @@ def _eval_condition(cond: Dict[str, Any], attrs: Dict[str, Any]) -> bool:
     if ctype in ("requirement_active", "category_active"):
         return True
 
-    return True
+    # Unrecognized node shape. Same reasoning as the unknown-op branch above:
+    # returning True here would universalize a conditional obligation on the
+    # strength of malformed JSON.
+    logger.warning(
+        "Trigger condition has unknown type %r — treating as not matched. "
+        "This requirement will NOT apply; fix the trigger_conditions JSON.",
+        ctype,
+    )
+    return False
 
 
 async def resolve_jurisdiction_stacks(
@@ -9054,6 +9846,11 @@ async def get_hierarchical_requirements(
                     "source_url": row.get("source_url"),
                     "source_url_status": row.get("source_url_status"),
                     "statute_citation": row.get("statute_citation"),
+                    # A row demoted to a floor relation has NO statute_citation
+                    # (citing the floor would be false provenance). Without the
+                    # basis here the hierarchical view just loses the citation
+                    # with nothing explaining why.
+                    "jurisdictional_basis": _basis_from_metadata(row.get("metadata")),
                     "status": row.get("req_status", "active"),
                     "canonical_key": row.get("canonical_key"),
                     "triggered_by": _compute_triggered_by(row.get("trigger_conditions"), facility_attrs),
@@ -9090,6 +9887,7 @@ async def get_hierarchical_requirements(
                     "source_url": gov.get("source_url"),
                     "source_url_status": gov.get("source_url_status"),
                     "statute_citation": gov.get("statute_citation"),
+                    "jurisdictional_basis": _basis_from_metadata(gov.get("metadata")),
                     "status": gov.get("req_status", "active"),
                     "canonical_key": gov.get("canonical_key"),
                     "triggered_by": _compute_triggered_by(gov.get("trigger_conditions"), facility_attrs),
@@ -9163,25 +9961,51 @@ async def discover_specialization_categories(
     from ..compliance_registry import CATEGORY_KEYS
 
     service = get_gemini_compliance_service()
-    industry_tag = f"{parent_industry}:{specialization.lower().replace(' ', '_')}"
+    slug = specialization.lower().replace(" ", "_")
+    # The vertical can BE the industry (a hospitality employer has no
+    # sub-specialty above hospitality). Then there is no "parent baseline" to
+    # research beyond, and the specialization prompt below would be asking the
+    # model to exclude the very categories we want.
+    top_level = slug == parent_industry
+    industry_tag = parent_industry if top_level else f"{parent_industry}:{slug}"
 
-    prompt = (
-        f"You are a compliance expert. For a **{specialization}** practice under the "
-        f"**{parent_industry}** industry, identify the regulatory compliance categories that "
-        f"require specific research beyond the general {parent_industry} baseline.\n\n"
-        f"Return a JSON object with two keys:\n"
-        f"1. \"categories\": an array of objects, each with:\n"
-        f"   - \"key\": a snake_case slug (e.g., \"cardiac_catheterization_safety\")\n"
-        f"   - \"label\": a human-readable name\n"
-        f"   - \"description\": what specific regulations/standards to research for this category\n"
-        f"   - \"authority_sources\": array of authoritative domains (e.g., [\"cms.gov\", \"acc.org\"])\n"
-        f"2. \"research_context\": a paragraph describing the key regulatory bodies, federal statutes, "
-        f"and common state-level variations for {specialization} compliance. This will be used as "
-        f"context for subsequent research calls.\n\n"
-        f"Focus on categories unique to {specialization} — do NOT include general {parent_industry} "
-        f"categories like HIPAA, billing integrity, or clinical safety unless {specialization} has "
-        f"specific sub-requirements. Aim for 5-15 categories."
-    )
+    if top_level:
+        prompt = (
+            f"You are a compliance expert. For a business operating in the **{specialization}** "
+            f"industry in the United States, identify the regulatory compliance categories that "
+            f"are SPECIFIC TO THIS INDUSTRY — the obligations a {specialization} employer has that "
+            f"a generic employer in another industry does NOT.\n\n"
+            f"Return a JSON object with two keys:\n"
+            f"1. \"categories\": an array of objects, each with:\n"
+            f"   - \"key\": a snake_case slug (e.g., \"food_handler_certification\")\n"
+            f"   - \"label\": a human-readable name\n"
+            f"   - \"description\": what specific regulations/standards to research for this category\n"
+            f"   - \"authority_sources\": array of authoritative domains (e.g., [\"fda.gov\", \"osha.gov\"])\n"
+            f"2. \"research_context\": a paragraph describing the key regulatory bodies, federal statutes, "
+            f"and common state-level variations for {specialization} compliance. This will be used as "
+            f"context for subsequent research calls.\n\n"
+            f"Do NOT include generic employment-law categories that apply to EVERY employer regardless "
+            f"of industry (minimum wage, overtime, anti-discrimination, I-9, workers' comp, final pay) — "
+            f"those are already researched separately. Aim for 5-15 categories."
+        )
+    else:
+        prompt = (
+            f"You are a compliance expert. For a **{specialization}** practice under the "
+            f"**{parent_industry}** industry, identify the regulatory compliance categories that "
+            f"require specific research beyond the general {parent_industry} baseline.\n\n"
+            f"Return a JSON object with two keys:\n"
+            f"1. \"categories\": an array of objects, each with:\n"
+            f"   - \"key\": a snake_case slug (e.g., \"cardiac_catheterization_safety\")\n"
+            f"   - \"label\": a human-readable name\n"
+            f"   - \"description\": what specific regulations/standards to research for this category\n"
+            f"   - \"authority_sources\": array of authoritative domains (e.g., [\"cms.gov\", \"acc.org\"])\n"
+            f"2. \"research_context\": a paragraph describing the key regulatory bodies, federal statutes, "
+            f"and common state-level variations for {specialization} compliance. This will be used as "
+            f"context for subsequent research calls.\n\n"
+            f"Focus on categories unique to {specialization} — do NOT include general {parent_industry} "
+            f"categories like HIPAA, billing integrity, or clinical safety unless {specialization} has "
+            f"specific sub-requirements. Aim for 5-15 categories."
+        )
 
     result = await service._call_with_retry(
         prompt,
@@ -9220,6 +10044,8 @@ async def research_specialization_for_jurisdiction(
     skip_existing: bool = True,
     grounded_corpus: str = "",
     citation_index: Optional[Dict[str, Any]] = None,
+    route_by_level: bool = False,
+    only_levels: Optional[set] = None,
 ) -> Dict[str, Any]:
     """Research specialization-specific categories for a jurisdiction.
 
@@ -9230,6 +10056,30 @@ async def research_specialization_for_jurisdiction(
     category exists but a specific key was missed (the missing key is targeted
     via ``industry_context``).
 
+    ``route_by_level=True`` files each returned row on the jurisdiction its
+    STAMPED level belongs to, instead of writing everything to the jurisdiction
+    passed in. Without it, researching a city hands back federal and state
+    obligations and writes them onto the city — the misparenting jparent01 had to
+    migrate away. Off by default so the admin specialization flow keeps its
+    existing behavior; the vertical-coverage path turns it on. Adds
+    ``jurisdictions_written`` and ``written_by_level`` to the result.
+
+    TODO(known-debt): the default-False means the admin specialization flow and
+    the scope-registry research paths still write leaf-misparented rows — the
+    writer jparent01 migrated the damage of is alive on those paths. Flipping the
+    default needs those three flows re-verified (their skip_existing checks read
+    per-jurisdiction state that routing relocates); do it as its own change.
+
+    ``only_levels``: keep ONLY rows whose stamped jurisdiction_level is in this
+    set, dropping the rest before they are written. Researching a category at every
+    node of a chain (which is how the vertical ledger earns its per-state reuse)
+    otherwise collects the same state obligation up to four times — the city, county,
+    state and federal passes each volunteer California's amalgam rule, and the model
+    names it differently every time, so no deterministic key/title dedupe can
+    collapse them. Giving each cell sole ownership of ONE level removes the
+    duplication at the source: a row this cell doesn't own is not dropped from the
+    catalog, it is simply left to the cell that does own it.
+
     ``grounded_corpus`` (+ ``citation_index``): fetched official statute text the
     model must extract values FROM and cite (see grounded.py). When present, each
     returned req is gated by ``validate_requirement_citations`` — reqs that cite a
@@ -9237,8 +10087,16 @@ async def research_specialization_for_jurisdiction(
     ones stay ``'gemini'`` + ``metadata.grounding='ungrounded'``.
     """
     from .scope_registry.grounded import validate_requirement_citations, validate_penalty_citations
-    from .gemini_compliance import get_gemini_compliance_service
+    from .gemini_compliance import get_gemini_compliance_service, refresh_dynamic_categories
     from .jurisdiction_context import get_known_sources, build_context_prompt, get_global_authority_sources
+
+    # A specialty's categories are confirmed into `compliance_categories` at
+    # runtime, but the model-output validator gates on a frozen constant compiled
+    # from compliance_registry. Without this refresh every dental/hospitality/etc
+    # category reads as "invalid", the requested set empties, and the research call
+    # silently falls back to the generic labor default — returning wage law that
+    # then gets force-tagged with this industry_tag below.
+    await refresh_dynamic_categories(conn)
 
     j = await conn.fetchrow(
         "SELECT id, city, state, county FROM jurisdictions WHERE id = $1",
@@ -9250,7 +10108,17 @@ async def research_specialization_for_jurisdiction(
     city = j["city"]
     state = j["state"]
     county = j.get("county")
-    location_name = f"{city}, {state}" if city else state
+    # County nodes store their name in `city` under an internal sentinel
+    # ('_county_los angeles'). Passed through raw, the Gemini prompt is asked
+    # about a city literally named '_county_los angeles' — degraded or nonsense
+    # research whose empty result then gets recorded as a terminal 'empty'
+    # verdict. Present it as the county it is.
+    if city and city.startswith("_county_"):
+        county = county or city[len("_county_"):]
+        city = ""
+        location_name = f"{county.title()} County, {state}"
+    else:
+        location_name = f"{city}, {state}" if city else state
     # Federal target = the U.S. national baseline itself (state 'US', no city). The
     # research prompt otherwise treats the jurisdiction as a state/local layer ABOVE
     # federal and returns a null "no additional rule" row — degenerate for federal.
@@ -9260,7 +10128,9 @@ async def research_specialization_for_jurisdiction(
     known_sources = await get_known_sources(conn, jurisdiction_id)
     source_context = build_context_prompt(known_sources)
     source_context += get_global_authority_sources(categories)
-    corrections = await get_recent_corrections(jurisdiction_id)
+    # Pass `conn` — this function is reachable from the Celery vertical-coverage
+    # sweep, and workers have no pool (get_connection() raises there).
+    corrections = await get_recent_corrections(jurisdiction_id, conn=conn)
     corrections_context = format_corrections_for_prompt(corrections)
 
     try:
@@ -9305,6 +10175,28 @@ async def research_specialization_for_jurisdiction(
     penalties_stripped = 0  # ungrounded penalty blocks dropped in grounded runs
     failed_categories: List[str] = []
     added_requirements: List[Dict[str, Any]] = []
+    jurisdictions_written: set = set()
+    # level -> rows that actually LANDED (routing can skip a level it can't
+    # place). Coverage decisions must read this, never the pre-write count.
+    written_by_level: Dict[str, int] = {}
+
+    async def _write(rows: List[Dict[str, Any]], *, research_source: str) -> None:
+        if route_by_level:
+            outcome = await _upsert_requirements_routed_additive(
+                conn, jurisdiction_id, rows, research_source=research_source
+            )
+            for level, info in outcome.items():
+                written_by_level[level] = written_by_level.get(level, 0) + info["written"]
+                if info["jurisdiction_id"]:
+                    jurisdictions_written.add(info["jurisdiction_id"])
+        else:
+            await _upsert_requirements_additive(
+                conn, jurisdiction_id, rows, research_source=research_source
+            )
+            jurisdictions_written.add(jurisdiction_id)
+            for r in rows:
+                level = (r.get("jurisdiction_level") or "city").lower().strip()
+                written_by_level[level] = written_by_level.get(level, 0) + 1
 
     # Batch categories
     batches = [missing[i:i + batch_size] for i in range(0, len(missing), batch_size)]
@@ -9331,6 +10223,19 @@ async def research_specialization_for_jurisdiction(
                 grounded_corpus=grounded_corpus,
             )
             reqs = reqs or []
+
+            if only_levels:
+                kept = [
+                    r for r in reqs
+                    if (r.get("jurisdiction_level") or "city").lower().strip() in only_levels
+                ]
+                if len(kept) != len(reqs):
+                    logger.info(
+                        "specialization: %s/%s — dropped %d row(s) outside this cell's level %s "
+                        "(owned by another cell in the chain)",
+                        location_name, ",".join(batch), len(reqs) - len(kept), sorted(only_levels),
+                    )
+                reqs = kept
 
             for req in reqs:
                 _clamp_varchar_fields(req)
@@ -9364,13 +10269,11 @@ async def research_specialization_for_jurisdiction(
                     for r in ungrounded:
                         r["grounding"] = "ungrounded"
                     if grounded:
-                        await _upsert_requirements_additive(
-                            conn, jurisdiction_id, grounded, research_source="gemini_grounded")
+                        await _write(grounded, research_source="gemini_grounded")
                     if ungrounded:
-                        await _upsert_requirements_additive(
-                            conn, jurisdiction_id, ungrounded, research_source="gemini")
+                        await _write(ungrounded, research_source="gemini")
                 else:
-                    await _upsert_requirements_additive(conn, jurisdiction_id, reqs, research_source="gemini")
+                    await _write(reqs, research_source="gemini")
                 total_new += len(reqs)
                 added_requirements.extend(reqs)
         except Exception as e:
@@ -9392,6 +10295,8 @@ async def research_specialization_for_jurisdiction(
         "failed": failed_categories,
         "requirements": added_requirements,
         "penalties_stripped": penalties_stripped,
+        "jurisdictions_written": jurisdictions_written,
+        "written_by_level": written_by_level,
     }
 
 

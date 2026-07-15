@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import re
 import os
 from typing import List, Optional, Dict, Any, Callable
@@ -25,6 +26,8 @@ from ..compliance_registry import (
     INDUSTRY_TAGS as _MC_INDUSTRY_TAGS,
 )
 
+logger = logging.getLogger(__name__)
+
 # Timeout for individual Gemini API calls (seconds)
 GEMINI_CALL_TIMEOUT = 45
 
@@ -37,10 +40,18 @@ DEFAULT_HEAVY_FALLBACK_MODEL = "gemini-2.5-pro"
 # research functions, so they should NOT be included in the default sweep.
 
 VALID_JURISDICTION_LEVELS = {"state", "county", "city", "federal", "national", "province", "region"}
+# MUST stay in step with compliance_service.VALID_RATE_TYPES — a rate_type this
+# set doesn't know is flattened to "general" by _normalize_rate_type_value, and
+# for minimum_wage the rate_type IS the write identity (_compute_key_parts). So
+# a missing entry here doesn't merely drop a label: it files the row under the
+# WRONG obligation. That is how a regional exempt-salary threshold (a weekly
+# salary figure) came to overwrite a state's general minimum-wage row.
+# tests/compliance/test_rate_type_registry.py pins the two sets together.
 VALID_RATE_TYPES = {
     "general",
     "tipped",
     "exempt_salary",
+    "exempt_salary_regional",
     "hotel",
     "fast_food",
     "healthcare",
@@ -65,6 +76,13 @@ _RATE_TYPE_ALIASES = {
     "exempt": "exempt_salary",
     "salary_threshold": "exempt_salary",
     "salary_basis": "exempt_salary",
+    # Sub-state regional tier (NY downstate). Ordered AFTER the generic exempt
+    # aliases above only for readability — lookup is exact-match, so there is no
+    # precedence issue; a bare "exempt" still means the statewide tier.
+    "exempt_salary_downstate": "exempt_salary_regional",
+    "downstate": "exempt_salary_regional",
+    "regional_exempt_salary": "exempt_salary_regional",
+    "salary_threshold_regional": "exempt_salary_regional",
 }
 
 # Errors that should not be retried (API config / quota issues)
@@ -112,11 +130,50 @@ def _normalize_token(value: Optional[str]) -> Optional[str]:
     return token or None
 
 
+# Categories confirmed at RUNTIME, into `compliance_categories`, by the specialty
+# discovery flow (industry_specialties.confirm). `VALID_CATEGORIES` is a frozen
+# constant compiled from compliance_registry, so it can only ever know the
+# verticals someone hand-authored — oncology's categories are in it, and a dental
+# practice's are not.
+#
+# That made the gate below silently destructive rather than merely incomplete: an
+# unknown category normalizes to None, `research_location_compliance_parallel`
+# drops it, its `selected_categories` empties, and it FALLS BACK to
+# DEFAULT_RESEARCH_CATEGORIES — so a caller that asked for 7 dental categories was
+# handed 12 generic labor ones, which `research_specialization_for_jurisdiction`
+# then force-tagged `healthcare:dental`. The catalog fills with wage law wearing a
+# dental label and every check reports success.
+#
+# The DB is the source of truth for what a category is. This set is refreshed from
+# it (see `refresh_dynamic_categories`) before any specialty research runs.
+_DYNAMIC_CATEGORIES: set = set()
+
+
+def register_dynamic_categories(keys) -> None:
+    """Admit runtime-confirmed category slugs to the validation vocabulary."""
+    _DYNAMIC_CATEGORIES.update(k for k in (keys or []) if k)
+
+
+async def refresh_dynamic_categories(conn) -> None:
+    """Load every category slug the DB knows about into the vocabulary.
+
+    Cheap (one indexed read of a small table) and idempotent. Called at the top of
+    the specialty-research path so a vertical confirmed in this same request is
+    already valid by the time the model's output is validated.
+    """
+    rows = await conn.fetch("SELECT slug FROM compliance_categories")
+    register_dynamic_categories(r["slug"] for r in rows)
+
+
+def is_valid_category(token: Optional[str]) -> bool:
+    return bool(token) and (token in VALID_CATEGORIES or token in _DYNAMIC_CATEGORIES)
+
+
 def _normalize_category_value(value: Optional[str]) -> Optional[str]:
     token = _normalize_token(value)
     if not token:
         return None
-    if token in VALID_CATEGORIES:
+    if is_valid_category(token):
         return token
     return _CATEGORY_ALIASES.get(token)
 
@@ -227,6 +284,20 @@ def _coerce_requirement_shape(req: dict, requested_category: Optional[str]) -> d
         rwp = rwp.strip().lower() not in ("false", "0", "no", "")
     normalized["requires_written_policy"] = bool(rwp) if rwp is not None else None
 
+    # "No rule applies here" placeholder. The research prompt deliberately asks for
+    # one of these rather than an empty list (an empty list reads as a FAILED
+    # category downstream), so they are load-bearing in the catalog — but they are
+    # noise on a tenant's tab, which answers "what am I responsible for".
+    #
+    # It must be a flag the model sets, not something inferred later: no text or
+    # key heuristic can separate these from real law. `no_surprises_act` is the
+    # regulation_key of an actual federal statute, and "Daily Overtime: none" is a
+    # genuinely useful answer. Guessing from titles would delete real obligations.
+    nra = normalized.get("no_rule_applies")
+    if isinstance(nra, str):
+        nra = nra.strip().lower() in ("true", "1", "yes")
+    normalized["no_rule_applies"] = bool(nra) if nra is not None else False
+
     # Validate trigger_conditions — must be dict or None
     tc = normalized.get("trigger_conditions")
     if tc is not None and not isinstance(tc, dict):
@@ -311,7 +382,7 @@ def _clean_json_text(text: str) -> str:
 def _validate_requirement(req: dict) -> Optional[str]:
     """Validate a single requirement dict. Returns error string or None if valid."""
     cat = req.get("category")
-    if cat not in VALID_CATEGORIES:
+    if not is_valid_category(cat):
         return f"invalid category '{cat}'"
 
     level = req.get("jurisdiction_level")
@@ -477,6 +548,7 @@ Respond with JSON:
       "source_url": "https://...",
       "source_name": "Source Name",
       "requires_written_policy": true | false,
+      "no_rule_applies": <true ONLY when this row exists solely to report that no rule applies — i.e. you found NO obligation for this category in this jurisdiction and are returning a placeholder saying so. If the employer has a REAL obligation, this is false EVEN WHEN its value is "none" (e.g. "Daily Overtime Threshold: this state has no daily overtime" is a real requirement — no_rule_applies is false).>,
       "cited_sources": <when statute text is provided above: array of bracketed ids like ["S1"] whose text states this value; else omit>,
       "needs_body_review": <true if the provided statute text did not state the value; else omit>,
       "paid": <for leave only: true|false; else omit>,
@@ -544,6 +616,7 @@ Respond with JSON:
       "source_url": "https://...",
       "source_name": "Source Name",
       "requires_written_policy": true | false,
+      "no_rule_applies": <true ONLY when this row exists solely to report that no rule applies — i.e. you found NO obligation for this category in this jurisdiction and are returning a placeholder saying so. If the employer has a REAL obligation, this is false EVEN WHEN its value is "none" (e.g. "Daily Overtime Threshold: this state has no daily overtime" is a real requirement — no_rule_applies is false).>,
       "trigger_conditions": {{"type": "entity_type or attribute", "value": "trigger value"}},
       "applicable_entity_types": ["{trigger_label.lower().replace(' ', '_')}"]
     }}
@@ -782,11 +855,37 @@ class GeminiComplianceService:
             context_section += f"\n\n{corrections_context}"
 
         selected_categories: List[str] = []
+        dropped: List[str] = []
         for category in categories or DEFAULT_RESEARCH_CATEGORIES:
             normalized = _normalize_category_value(category)
             if normalized and normalized not in selected_categories:
                 selected_categories.append(normalized)
+            elif not normalized:
+                dropped.append(str(category))
+
+        if dropped:
+            # Never silently proceed with a subset: the caller asked for these and
+            # the result set will be attributed to them (the specialty path tags
+            # every returned row with its industry_tag).
+            logger.warning(
+                "research_location_compliance: dropping unknown categories %s "
+                "(not in the registry, and not confirmed in compliance_categories)",
+                dropped,
+            )
+
         if not selected_categories:
+            if categories:
+                # The caller named categories and NONE survived. Falling back to the
+                # generic default set here would research wage-and-hour law and hand
+                # it back as if it were the vertical the caller asked for — which is
+                # exactly how a dental research pass produced 153 rows of California
+                # labor law tagged `healthcare:dental`. Return nothing instead.
+                logger.error(
+                    "research_location_compliance: every requested category was unknown "
+                    "(%s) — returning no requirements rather than researching the default set",
+                    categories,
+                )
+                return []
             selected_categories = list(DEFAULT_RESEARCH_CATEGORIES)
 
         # Federal targets the national baseline itself — the state-search strategy

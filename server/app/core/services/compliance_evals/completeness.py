@@ -311,7 +311,13 @@ async def evaluate_pair(
         expected = registry_expected
         expectation_source = "registry"
     else:
-        expected = iks.expected_keys(industry, country_code=country)
+        # `or ""` not `or None`: an empty string still means "we know this
+        # jurisdiction's state — it has none", which must EXCLUDE state-scoped
+        # keys. Passing None would tell expected_keys to skip the filter and
+        # expect NY's downstate tier of the federal jurisdiction.
+        expected = iks.expected_keys(
+            industry, country_code=country, state=jur.get("state") or "",
+        )
         expectation_source = "registry_groups"
     present = present_keys_for(graph, jurisdiction_id)
     focused = iks.focused_categories(industry, weights)

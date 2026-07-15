@@ -172,6 +172,21 @@ export function fetchSummary() {
   return api.get<ComplianceSummary>('/compliance/summary')
 }
 
+export type PendingResearch = {
+  coverage_requests: {
+    city: string
+    state: string
+    county: string | null
+    note: string | null
+    requested_at: string | null
+  }[]
+  vertical: { label: string; areas: number } | null
+}
+
+export function fetchPendingResearch() {
+  return api.get<PendingResearch>('/compliance/pending-research')
+}
+
 export function fetchComplianceDashboard(horizonDays = 90) {
   return api.get<import('../types/dashboard').ComplianceDashboard>(
     `/compliance/dashboard?horizon_days=${horizonDays}`
@@ -242,6 +257,9 @@ export const RATE_TYPE_LABELS: Record<string, string> = {
   general: 'General',
   tipped: 'Tipped',
   exempt_salary: 'Exempt Salary',
+  // A named sub-state region's own exempt threshold (NY downstate: NYC, Nassau,
+  // Suffolk, Westchester carry a higher figure than the rest of the state).
+  exempt_salary_regional: 'Exempt Salary (Regional)',
   hotel: 'Hotel',
   fast_food: 'Fast Food',
   healthcare: 'Healthcare',
