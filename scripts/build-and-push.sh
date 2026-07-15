@@ -35,6 +35,12 @@ PUSH_TO_ECR=true
 TRIGGER_DEPLOY=false
 PLATFORM="linux/arm64"
 NO_CACHE=false
+# Off by default on a local machine — see usage text. Auto-flips on in CI
+# since a fresh runner has no local BuildKit cache to fall back on.
+REGISTRY_CACHE=false
+if [ "${GITHUB_ACTIONS:-}" = "true" ] || [ "${CI:-}" = "true" ]; then
+    REGISTRY_CACHE=true
+fi
 BUILD_BACKEND=true
 BUILD_FRONTEND=true
 BUILD_GUMMFIT_BACKEND=false
@@ -104,6 +110,11 @@ Build and push Docker images for Matcha-Recruit backend and frontend.
 OPTIONS:
     --no-push              Build images locally without pushing to ECR
     --no-cache             Do not use cache when building the image
+    --registry-cache       Read/write the ECR :buildcache layer cache (slow local
+                           uploads; auto-enabled in CI via \$GITHUB_ACTIONS/\$CI).
+                           Off by default locally — relies on Docker's local
+                           BuildKit cache instead, which is already warm on repeat
+                           builds on the same machine.
     --deploy               Trigger deployment after pushing (sets deploy flag)
     --platform ARCH        Target platform (default: linux/arm64)
     --backend-only         Build only the matcha backend image
@@ -169,6 +180,10 @@ parse_args() {
                 ;;
             --no-cache)
                 NO_CACHE=true
+                shift
+                ;;
+            --registry-cache)
+                REGISTRY_CACHE=true
                 shift
                 ;;
             --deploy)
@@ -393,7 +408,6 @@ build_image() {
         "${tag_args[@]}"
         --build-arg "BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
         --build-arg "GIT_SHA=${git_sha}"
-        --build-arg "BUILDKIT_INLINE_CACHE=1"
         -f "$dockerfile_path"
     )
 
@@ -405,6 +419,13 @@ build_image() {
     if [ "$NO_CACHE" = true ]; then
         build_args+=("--no-cache")
         log_info "Building with --no-cache"
+    elif [ "$REGISTRY_CACHE" != true ]; then
+        # Default local path: rely on Docker Desktop's own BuildKit cache
+        # (already warm on repeat builds on the same machine). Skipping the
+        # ECR round-trip here is what makes local builds fast — mode=max
+        # cache-to was uploading the full dependencies-stage layer (~1GB+
+        # for the backend) to ECR on every single local run.
+        log_info "Local BuildKit cache only (pass --registry-cache to also read/write ECR :buildcache)"
     elif [ "$PUSH_TO_ECR" = true ]; then
         local current_branch
         current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")

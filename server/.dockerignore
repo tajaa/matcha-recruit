@@ -18,3 +18,10 @@ htmlcov/
 # Agent local models and workspace (1.7GB+ of GGUF files)
 agent/models/
 agent/workspace/
+
+# Agent UI source — only agent/static/ (its build output) belongs in the image
+agent-ui/node_modules/
+agent-ui/dist/
+
+# Local upload scratch dir — S3 in prod, never needed in the image
+uploads/
