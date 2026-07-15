@@ -9367,8 +9367,39 @@ async def get_pending_research():
             WHERE jcr.status IN ('pending', 'in_progress')
             """
         )
-        items: List[dict] = [
-            {
+        items: List[dict] = []
+        for r in cat_rows:
+            # admin_notes holds a human-readable label list ("Needs research:
+            # Anti-Discrimination, Final Pay — healthcare") on rows written
+            # after the readable-names fix, or raw slugs ("missing: anti_dis-
+            # crimination, final_pay (healthcare)") on older rows. Parse either
+            # out and resolve both formats in one query so every row — old or
+            # new — gets full name+description cards, never just the flat note.
+            note = r["admin_notes"] or ""
+            body = re.sub(r"^(needs research:|missing:)\s*", "", note, flags=re.IGNORECASE)
+            body = re.sub(r"\s*—.*$", "", body)
+            body = re.sub(r"\s*\([^)]*\)\s*$", "", body)
+            labels = [t.strip() for t in body.split(",") if t.strip()]
+            categories: List[dict] = []
+            if labels:
+                cat_defs = await conn.fetch(
+                    "SELECT slug, name, description FROM compliance_categories "
+                    "WHERE name = ANY($1::text[]) OR slug = ANY($1::text[]) "
+                    "ORDER BY sort_order, name",
+                    labels,
+                )
+                resolved_names = {c["name"] for c in cat_defs} | {c["slug"] for c in cat_defs}
+                categories = [
+                    {"key": c["slug"], "name": c["name"], "description": c["description"]}
+                    for c in cat_defs
+                ]
+                # Any label that didn't resolve still shows up (name-only, no
+                # description) rather than silently vanishing from the count.
+                for label in labels:
+                    if label not in resolved_names:
+                        categories.append({"key": None, "name": label, "description": None})
+
+            items.append({
                 "id": str(r["id"]),
                 "type": "category",
                 "city": r["city"],
@@ -9378,11 +9409,10 @@ async def get_pending_research():
                 "company_name": r["company_name"],
                 "employee_count": r["employee_count"],
                 "note": r["admin_notes"],
+                "categories": categories,
                 "created_at": r["created_at"].isoformat() if r["created_at"] else None,
                 "sort_at": r["created_at"],
-            }
-            for r in cat_rows
-        ]
+            })
 
         # Vertical ledger to-dos, per company. No table row exists for these —
         # computed live off the same pure-SQL path the wizard/panel use. Capped
@@ -9424,16 +9454,19 @@ async def get_pending_research():
                     conn, leaf_chains, v_tag, cat_slugs
                 )
                 if plan:
-                    # WHAT, not just how many: resolve the distinct outstanding
-                    # category slugs to human labels — "Dental Sedation &
-                    # Anesthesia", not "dental_sedation_anesthesia".
+                    # WHAT, not just how many: full name + description per
+                    # outstanding category, sort_order-ordered — renders as
+                    # cards, not a bare count or a flat comma list.
                     plan_slugs = sorted({p[1] for p in plan})
-                    name_rows = await conn.fetch(
-                        "SELECT slug, name FROM compliance_categories WHERE slug = ANY($1::text[])",
+                    cat_defs = await conn.fetch(
+                        "SELECT slug, name, description FROM compliance_categories "
+                        "WHERE slug = ANY($1::text[]) ORDER BY sort_order, name",
                         plan_slugs,
                     )
-                    name_by_slug = {r["slug"]: r["name"] for r in name_rows}
-                    category_labels = [name_by_slug.get(s, s) for s in plan_slugs]
+                    categories = [
+                        {"key": c["slug"], "name": c["name"], "description": c["description"]}
+                        for c in cat_defs
+                    ]
                     jurisdictions = sorted({f"{r['city']}, {r['state']}" for r in leaf_rows})
                     items.append({
                         "type": "vertical",
@@ -9441,7 +9474,7 @@ async def get_pending_research():
                         "company_name": comp["name"],
                         "label": v_label,
                         "areas": len(plan),
-                        "categories": category_labels,
+                        "categories": categories,
                         "jurisdictions": jurisdictions,
                         "created_at": comp["created_at"].isoformat() if comp["created_at"] else None,
                         "sort_at": comp["created_at"],

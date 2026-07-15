@@ -55,6 +55,12 @@ type CoverageRequest = {
   created_at: string | null
 }
 
+type PendingCategoryDetail = {
+  key: string | null
+  name: string
+  description: string | null
+}
+
 type CategoryPendingItem = {
   type: 'category'
   id: string
@@ -65,6 +71,7 @@ type CategoryPendingItem = {
   company_name: string
   employee_count: number
   note: string | null
+  categories: PendingCategoryDetail[]
   created_at: string | null
 }
 
@@ -74,7 +81,7 @@ type VerticalPendingItem = {
   company_name: string
   label: string
   areas: number
-  categories: string[]
+  categories: PendingCategoryDetail[]
   jurisdictions: string[]
   created_at: string | null
 }
@@ -580,9 +587,7 @@ export default function Jurisdictions() {
               {pending.map((item) => {
                 const rowId = item.type === 'category' ? `cat-${item.id}` : `vert-${item.company_id}-${item.label}`
                 const open = openIds.has(rowId)
-                const categoryNames = item.type === 'category'
-                  ? (item.note || '').replace(/^(needs research:|missing:)\s*/i, '').replace(/\s*—.*$/, '').replace(/\s*\([^)]*\)\s*$/, '')
-                  : item.categories.join(', ')
+                const categoryNames = item.categories.map((c) => c.name).join(', ')
                 return (
                   <article key={rowId} className="border-b border-white/[0.06] last:border-b-0">
                     <button type="button" onClick={() => toggleOpen(rowId)}
@@ -606,21 +611,43 @@ export default function Jurisdictions() {
                     </button>
                     {open && (
                       <div className="px-4 pb-4 pl-11">
-                        {item.type === 'category' ? (
-                          <>
-                            {item.note && <p className="text-sm text-amber-200/80 leading-relaxed">{item.note}</p>}
-                            <div className="mt-3 flex items-center gap-2">
-                              <Button variant="secondary" size="sm" onClick={() => processRequest(item)}>Process</Button>
-                              <button type="button" onClick={() => dismissRequest(item.id)}
-                                className="text-xs text-zinc-600 hover:text-zinc-300 px-2 py-1 transition-colors">Dismiss</button>
+                        <div className="flex items-center gap-2 mb-2">
+                          <span className="text-amber-400 text-[11px]">
+                            {item.categories.length} to research
+                          </span>
+                          <span className="text-[10px] text-zinc-500">
+                            · {item.type === 'category'
+                              ? `${item.city}, ${item.state}`
+                              : item.jurisdictions.join(', ')}
+                          </span>
+                        </div>
+
+                        <div className="space-y-1.5">
+                          {item.categories.map((c, i) => (
+                            <div key={c.key ?? `${c.name}-${i}`}
+                              className="rounded-lg border border-white/[0.06] bg-white/[0.02] p-3">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-xs font-medium text-zinc-200">{c.name}</span>
+                                <span className="rounded border px-1.5 py-0.5 text-[10px] border-amber-500/30 bg-amber-500/10 text-amber-300 shrink-0">
+                                  Needs research
+                                </span>
+                              </div>
+                              {c.description && (
+                                <p className="mt-1 text-[11px] text-zinc-400 leading-relaxed">{c.description}</p>
+                              )}
                             </div>
-                          </>
+                          ))}
+                        </div>
+
+                        {item.type === 'category' ? (
+                          <div className="mt-3 flex items-center gap-2">
+                            <Button variant="secondary" size="sm" onClick={() => processRequest(item)}>Process</Button>
+                            <button type="button" onClick={() => dismissRequest(item.id)}
+                              className="text-xs text-zinc-600 hover:text-zinc-300 px-2 py-1 transition-colors">Dismiss</button>
+                          </div>
                         ) : (
                           <>
-                            <p className="text-sm text-amber-200/80 leading-relaxed">
-                              {item.categories.join(', ')}
-                            </p>
-                            <p className="mt-2 text-sm text-zinc-400 leading-relaxed">
+                            <p className="mt-3 text-sm text-zinc-400 leading-relaxed">
                               Filled by the Vertical Coverage sweep — run it from the Scheduled Jobs tab
                               to research these {item.label.toLowerCase()} areas for {item.jurisdictions.join(', ')}.
                               Once published, {item.company_name}'s tab auto-populates and their admin gets an email.
