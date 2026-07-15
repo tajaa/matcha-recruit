@@ -2863,12 +2863,22 @@ async def list_jurisdictions():
         total_requirements = sum(int(j["requirement_count"] or 0) for j in jurisdictions)
         total_legislation = sum(int(j["legislation_count"] or 0) for j in jurisdictions)
 
+        # The north-star: how many live requirements carry a verified statute
+        # citation. This is what makes the library authoritative rather than just
+        # researched — both funnels (ScopeStudio + Jurisdictions) push it up.
+        total_codified = await conn.fetchval(
+            "SELECT COUNT(*) FROM jurisdiction_requirements "
+            "WHERE COALESCE(status, 'active') = 'active' "
+            "AND citation_verified_at IS NOT NULL"
+        ) or 0
+
         result = {
             "jurisdictions": jurisdictions,
             "totals": {
                 "total_jurisdictions": len(jurisdictions),
                 "total_requirements": total_requirements,
                 "total_legislation": total_legislation,
+                "total_codified": int(total_codified),
             },
         }
 
@@ -10025,6 +10035,7 @@ async def get_research_review():
             """
             SELECT r.id, r.jurisdiction_id, r.category, r.title, r.description,
                    r.current_value, r.source_url, r.source_name, r.created_at,
+                   r.regulation_key,
                    j.city, j.state, j.county, j.display_name
             FROM jurisdiction_requirements r
             JOIN jurisdictions j ON j.id = r.jurisdiction_id
@@ -10036,6 +10047,24 @@ async def get_research_review():
             return {"groups": []}
 
         pending_jids = list({r["jurisdiction_id"] for r in rows})
+
+        # Which pending keys already have a confirmed, non-excluded authority
+        # classification — i.e. approve will reconcile them into a real statute
+        # citation ("codified"), vs the key still needs classifying in ScopeStudio's
+        # cockpit first. Key-level existence (not chain-scoped): a confirmed
+        # classification carrying the key is the prerequisite reconcile checks;
+        # this is a directional "will it codify" hint, not the reconcile itself.
+        pending_keys = list({r["regulation_key"] for r in rows if r["regulation_key"]})
+        codifiable_keys: set = set()
+        if pending_keys:
+            codifiable_keys = {
+                r["regulation_key"] for r in await conn.fetch(
+                    "SELECT DISTINCT regulation_key FROM authority_item_classifications "
+                    "WHERE status='confirmed' AND disposition <> 'excluded' "
+                    "AND regulation_key = ANY($1::text[])",
+                    pending_keys,
+                )
+            }
 
         # Annotate: which in-progress coverage request each pending row satisfies.
         # A category run's rows land on chain NODES (state/federal), so match by
@@ -10093,6 +10122,10 @@ async def get_research_review():
                 "current_value": r["current_value"],
                 "source_url": r["source_url"],
                 "source_name": r["source_name"],
+                "regulation_key": r["regulation_key"],
+                # True → approve reconciles this into a verified statute citation.
+                # False → goes live but needs classifying in ScopeStudio first.
+                "will_codify": bool(r["regulation_key"] and r["regulation_key"] in codifiable_keys),
             })
             for rid in node_to_requests.get(r["jurisdiction_id"], []):
                 g["request_ids"].add(rid)
@@ -10165,6 +10198,7 @@ async def approve_research_review(body: ResearchReviewDecision):
     # cockpit's backlog until an admin classifies+confirms them there. Best-effort
     # — the rows are already active, so a reconcile error must never fail approve.
     codified = 0
+    results: list = []
     if activated:
         from ..services.scope_registry.codify import reconcile_codifications
 
@@ -10197,21 +10231,48 @@ async def approve_research_review(body: ResearchReviewDecision):
             except Exception as exc:
                 logger.warning("approve: codify failed for %s/%s: %s", st, city, exc)
 
-        # Count what actually codified among the rows just approved — reconcile's
-        # own `matched` is chain-wide (it re-links every row in the chain), so
-        # reporting it here would claim credit for pre-existing links.
+        # Per-row codification outcome for the just-approved rows, with the real
+        # statute URL where one now exists (authority_index_items.source_url via
+        # the citation_item_id reconcile stamped). This is what the Review UI
+        # renders as "Codified · <statute link>" vs "Live · finish in ScopeStudio".
         async with get_connection() as conn:
-            codified = await conn.fetchval(
-                "SELECT COUNT(*) FROM jurisdiction_requirements "
-                "WHERE id = ANY($1::uuid[]) AND citation_verified_at IS NOT NULL",
+            detail = await conn.fetch(
+                """
+                SELECT r.id, r.title, r.description, r.current_value,
+                       r.source_url, r.source_name, r.regulation_key,
+                       r.statute_citation, r.citation_verified_at, r.citation_item_id,
+                       ai.source_url AS citation_url,
+                       UPPER(j.state) AS state, LOWER(j.city) AS city
+                FROM jurisdiction_requirements r
+                JOIN jurisdictions j ON j.id = r.jurisdiction_id
+                LEFT JOIN authority_index_items ai ON ai.id = r.citation_item_id
+                WHERE r.id = ANY($1::uuid[])
+                """,
                 activated_ids,
-            ) or 0
+            )
+        results = [{
+            "id": str(d["id"]),
+            "title": d["title"],
+            "description": d["description"],
+            "current_value": d["current_value"],
+            "source_url": d["source_url"],
+            "source_name": d["source_name"],
+            "regulation_key": d["regulation_key"],
+            "codified": d["citation_verified_at"] is not None,
+            "statute_citation": d["statute_citation"],
+            "citation_url": d["citation_url"],
+            "citation_item_id": str(d["citation_item_id"]) if d["citation_item_id"] else None,
+            "state": d["state"],
+            "city": d["city"],
+        } for d in detail]
+        codified = sum(1 for r in results if r["codified"])
 
     return {
         "activated": len(activated),
         "published": published,
         "codified": codified,
         "uncodified": max(len(activated) - codified, 0),
+        "results": results,
     }
 
 
@@ -10245,6 +10306,41 @@ async def reject_research_review(body: ResearchReviewDecision):
                 UUID(rid),
             )
     return {"deleted": len(deleted)}
+
+
+class RequirementCodifyRequest(BaseModel):
+    citation: str
+    heading: Optional[str] = None
+    source_url: Optional[str] = None
+
+
+@router.post("/requirements/{requirement_id}/codify", dependencies=[Depends(require_admin)])
+async def codify_requirement(
+    requirement_id: str,
+    body: RequirementCodifyRequest,
+    current_user=Depends(require_admin),
+):
+    """Codify a single live requirement — the demand-funnel bridge into the same
+    authority registry ScopeStudio writes. Mints the curated index + item +
+    confirmed classification the reconcile step needs, then reconciles. The admin
+    supplies/confirms the statute citation (a legal record).
+    """
+    from ..services.scope_registry.codify import codify_from_requirement
+
+    async with get_connection() as conn:
+        try:
+            result = await codify_from_requirement(
+                conn, UUID(requirement_id),
+                citation=body.citation,
+                heading=body.heading,
+                source_url=body.source_url,
+                admin_id=getattr(current_user, "id", None),
+            )
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc))
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+    return result
 
 
 async def _publish_vertical_to_company(company_id: UUID) -> None:

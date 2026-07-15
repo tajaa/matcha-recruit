@@ -468,10 +468,13 @@ function ResearchProgress({ r }: { r: ResearchState }) {
 // ── The page ─────────────────────────────────────────────────────────────────
 
 export default function ScopeStudio() {
-  const [industry, setIndustry] = useState('healthcare')
-  const [state, setState] = useState('')
-  const [city, setCity] = useState('')
-  const [headcount, setHeadcount] = useState('')
+  // Seed the coordinate from URL params on first render, so /admin/jurisdictions
+  // can deep-link here at the right jurisdiction (?state=CO&city=denver&industry=…).
+  const seed = new URLSearchParams(window.location.search)
+  const [industry, setIndustry] = useState(seed.get('industry') || 'healthcare')
+  const [state, setState] = useState((seed.get('state') || '').toUpperCase())
+  const [city, setCity] = useState(seed.get('city') || '')
+  const [headcount, setHeadcount] = useState(seed.get('headcount') || '')
   const [specialties, setSpecialties] = useState<string[]>([])
   const [available, setAvailable] = useState<Specialty[]>([])
 

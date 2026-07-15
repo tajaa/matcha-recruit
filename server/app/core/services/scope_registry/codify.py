@@ -1077,3 +1077,140 @@ async def reconcile_codifications(
         "overwrote_manual": overwrote_manual,
         "citations_cleared": int(cleared or 0),
     }
+
+
+async def codify_from_requirement(
+    conn,
+    requirement_id,
+    *,
+    citation: str,
+    heading: Optional[str] = None,
+    source_url: Optional[str] = None,
+    admin_id=None,
+) -> Dict[str, Any]:
+    """Codify a single researched requirement in place — the demand-funnel bridge.
+
+    ScopeStudio's supply funnel mints authority classifications by bulk-ingesting
+    a statute source. The demand funnel (a company's coverage gap → research →
+    review → approve) produces a live `jurisdiction_requirements` row whose key
+    has no authority classification, so `reconcile_codifications` finds nothing to
+    match and the row stays "research-cited, not registry-verified". This mints
+    the minimum trio reconcile needs — a curated per-jurisdiction index, one item
+    carrying the admin-confirmed statute citation, and one confirmed keyed
+    classification — then reconciles. The row ends up codified in the SAME
+    registry ScopeStudio reads, so both funnels converge on one library.
+
+    The admin supplies/confirms the `citation` (a legal record — never inferred
+    without review). Idempotent: the index slug (ON CONFLICT), the item
+    (ON CONFLICT (index_id, citation)) and the classification (ON CONFLICT
+    (item_id)) all upsert, and reconcile is deterministic.
+
+    Returns ``{codified, statute_citation, citation_url, regulation_key}`` —
+    ``codified`` is honest (False if the guards still declined the match).
+    """
+    from . import authority_ingest, classify
+
+    citation = (citation or "").strip()
+    if not citation:
+        raise ValueError("citation is required")
+
+    req = await conn.fetchrow(
+        """
+        SELECT r.id, r.regulation_key, r.category, r.status, r.jurisdiction_level,
+               r.jurisdiction_id, j.state, j.city, j.level AS jur_level,
+               COALESCE(j.country_code, 'US') AS country_code
+        FROM jurisdiction_requirements r
+        JOIN jurisdictions j ON j.id = r.jurisdiction_id
+        WHERE r.id = $1
+        """,
+        requirement_id,
+    )
+    if not req:
+        raise LookupError("requirement not found")
+    if not req["regulation_key"]:
+        # Nothing to match on — the codification join is key-equality.
+        raise ValueError("requirement has no regulation_key — cannot codify")
+    if (req["status"] or "active") != "active":
+        # Codify follows approve; a pending row is not yet part of the library.
+        raise ValueError("requirement is not active — approve it first")
+
+    level = _norm_level(req["jur_level"] or req["jurisdiction_level"])
+    state = (req["state"] or "").upper() or None
+    city = req["city"]
+
+    # A federal-node row binds country-wide, so its authority index must have
+    # jurisdiction_id NULL (a non-NULL, state-less jurisdiction would fail the
+    # authority_state == req_state guard). Everything else pins to the
+    # requirement's own jurisdiction so the state/local guard passes.
+    if level in ("federal", "national") or not state:
+        index_slug = "researched-federal"
+        index_name = "Researched statutes — Federal"
+        index_jur = None
+        index_level = "federal"
+    else:
+        index_slug = f"researched-{state.lower()}"
+        index_name = f"Researched statutes — {state}"
+        index_jur = str(req["jurisdiction_id"])
+        index_level = level
+
+    index_id = await authority_ingest._upsert_index(
+        conn,
+        slug=index_slug,
+        name=index_name,
+        level=index_level,
+        jurisdiction_id=index_jur,
+        source_type="curated",
+        domain_categories=[],
+        domain_excludes=[],
+        enumerable=False,
+    )
+
+    await authority_ingest._upsert_items(conn, index_id, [{
+        "citation": citation,
+        "heading": heading,
+        "source_url": source_url,
+        "hierarchy": {},
+    }])
+    item_id = await conn.fetchval(
+        "SELECT id FROM authority_index_items "
+        "WHERE authority_index_id = $1 AND citation = $2",
+        index_id, citation,
+    )
+
+    # Build the confirmed classification directly — deliberately NOT through
+    # classify.validate_proposal, which downgrades an unknown regulation_key to
+    # NULL (a fresh research key usually has no RKD row yet), which would make the
+    # classification permanently unmatchable. The RKD category guard is skipped
+    # when key_definition_id is NULL, so the key still codifies.
+    normalized = {
+        "disposition": "universal_in_domain",
+        "applies_to_categories": [],
+        "excludes_categories": [],
+        "entity_condition": None,
+        "excluded_reason": None,
+        "regulation_key": req["regulation_key"],
+        "category_slug": req["category"],
+        "jurisdiction_scope": None,
+    }
+    await classify._upsert_classification(
+        conn, item_id, normalized,
+        proposed_by="admin", status="confirmed", confirmed_by=admin_id,
+    )
+
+    await reconcile_codifications(conn, state=state, city=city, source="manual_codify")
+
+    stamped = await conn.fetchrow(
+        """
+        SELECT r.statute_citation, r.citation_verified_at, ai.source_url AS citation_url
+        FROM jurisdiction_requirements r
+        LEFT JOIN authority_index_items ai ON ai.id = r.citation_item_id
+        WHERE r.id = $1
+        """,
+        requirement_id,
+    )
+    return {
+        "codified": bool(stamped and stamped["citation_verified_at"] is not None),
+        "statute_citation": stamped["statute_citation"] if stamped else None,
+        "citation_url": stamped["citation_url"] if stamped else source_url,
+        "regulation_key": req["regulation_key"],
+    }

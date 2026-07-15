@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import type { FormEvent } from 'react'
-import { Check, ChevronDown, Globe2, Loader2, Sparkles } from 'lucide-react'
+import { Check, ChevronDown, Circle, ExternalLink, Globe2, Loader2, Sparkles } from 'lucide-react'
 import { api, authStreamHeaders } from '../../api/client'
 import { Button, Input, Modal } from '../../components/ui'
 import { LABEL } from '../../components/ui/typography'
@@ -28,7 +28,7 @@ type Jurisdiction = {
 
 type ListResponse = {
   jurisdictions: Jurisdiction[]
-  totals: { total_jurisdictions: number; total_requirements: number; total_legislation: number }
+  totals: { total_jurisdictions: number; total_requirements: number; total_legislation: number; total_codified?: number }
 }
 
 type ResearchItem = {
@@ -97,6 +97,27 @@ type ReviewRow = {
   current_value: string | null
   source_url: string | null
   source_name: string | null
+  regulation_key: string | null
+  // True → approving reconciles this into a verified statute citation; false →
+  // it goes live but still needs classifying in ScopeStudio to codify.
+  will_codify: boolean
+}
+
+// Per-row codification outcome returned by /research-review/approve.
+type ApproveResult = {
+  id: string
+  title: string
+  description: string | null
+  current_value: string | null
+  source_url: string | null
+  source_name: string | null
+  regulation_key: string | null
+  codified: boolean
+  statute_citation: string | null
+  citation_url: string | null
+  citation_item_id: string | null
+  state: string | null
+  city: string | null
 }
 
 type ReviewGroup = {
@@ -149,6 +170,26 @@ function fmtRelative(iso: string | null): string {
   return `${Math.floor(hrs / 24)}d ago`
 }
 
+// Pull the first statute citation out of research text (deterministic, no AI) to
+// prefill the Codify modal. Handles the common US forms; admin edits/confirms
+// before submit — this is a legal record, never auto-filed.
+function extractCitation(...texts: (string | null | undefined)[]): string {
+  const hay = texts.filter(Boolean).join('  ')
+  const patterns = [
+    /\b\d+\s+U\.?S\.?C\.?\s+§+\s*[\d.\-()a-z]+/i,        // 29 U.S.C. § 654
+    /\b\d+\s+C\.?F\.?R\.?\s+§+\s*[\d.\-()a-z]+/i,        // 29 C.F.R. § 1910
+    /\bC\.?R\.?S\.?\s+§+\s*[\d.\-()a-z]+/i,               // C.R.S. § 12-220-101
+    /\bCal\.?\s+[A-Za-z.&\s]+Code\s+§+\s*[\d.\-()a-z]+/i, // Cal. Lab. Code § 246
+    /\b\d+\s+CCR\s+[\d.\-]+/i,                            // 3 CCR 709-1
+    /§+\s*[\d]+[\d.\-()a-z]*/i,                           // generic § 12-220-101
+  ]
+  for (const re of patterns) {
+    const m = hay.match(re)
+    if (m) return m[0].replace(/\s+/g, ' ').trim()
+  }
+  return ''
+}
+
 // ── Component ──────────────────────────────────────────────────────────────────
 
 export default function Jurisdictions() {
@@ -188,11 +229,29 @@ export default function Jurisdictions() {
   const [justStaged, setJustStaged] = useState(false)
   // Result line after an approve — "Approved N · codified C · M awaiting a statute match".
   const [reviewResult, setReviewResult] = useState<string | null>(null)
+  // Per-row codification outcomes from the last approve, rendered as a summary
+  // (statute link when codified, else a deep-link into ScopeStudio to finish).
+  const [approveResults, setApproveResults] = useState<ApproveResult[]>([])
+  // The Codify modal — walks uncodified approved rows one after another.
+  const [codifyRow, setCodifyRow] = useState<ApproveResult | null>(null)
+  const [codifyForm, setCodifyForm] = useState({ citation: '', heading: '', source_url: '' })
+  const [codifyBusy, setCodifyBusy] = useState(false)
+  const [codifyError, setCodifyError] = useState<string | null>(null)
   // Clear the Review-tab banners once the admin navigates away — they're
   // one-shot signals for the run/approve just completed, not sticky state.
   useEffect(() => {
-    if (tab !== 'review') { setJustStaged(false); setReviewResult(null) }
+    if (tab !== 'review') { setJustStaged(false); setReviewResult(null); setApproveResults([]) }
   }, [tab])
+
+  // Deep-link to ScopeStudio at a jurisdiction — where an approved requirement
+  // gets codified (classify → confirm → reconcile). Industry defaults to
+  // healthcare; the labor/codification panels key on state (+ city).
+  const scopeStudioLink = (state?: string | null, city?: string | null, industry = 'healthcare') => {
+    const p = new URLSearchParams({ industry })
+    if (state) p.set('state', state)
+    if (city) p.set('city', city)
+    return `/admin/scope-studio?${p.toString()}`
+  }
 
   // Activity
   const [activity, setActivity] = useState<ActivityLog[]>([])
@@ -352,13 +411,6 @@ export default function Jurisdictions() {
     }).catch(() => setTopMetroRunning(false))
   }
 
-  async function processRequest(req: CategoryPendingItem) {
-    await api.post(`/admin/jurisdiction-requests/${req.id}/process`, {
-      has_local_ordinance: false, county: req.county || null, admin_notes: null,
-    })
-    setPending((prev) => prev.filter((p) => !(p.type === 'category' && p.id === req.id)))
-  }
-
   async function dismissRequest(id: string) {
     await api.post(`/admin/jurisdiction-requests/${id}/dismiss`, {})
     setPending((prev) => prev.filter((p) => !(p.type === 'category' && p.id === id)))
@@ -418,7 +470,7 @@ export default function Jurisdictions() {
   }
 
   async function approveReview(ids: string[], group: ReviewGroup) {
-    const res = await api.post<{ activated: number; published: number; codified: number; uncodified: number }>(
+    const res = await api.post<{ activated: number; published: number; codified: number; uncodified: number; results?: ApproveResult[] }>(
       '/admin/research-review/approve',
       { ids, request_ids: group.request_ids, company_ids: group.company_ids },
     )
@@ -429,8 +481,51 @@ export default function Jurisdictions() {
       `Approved ${activated} · codified ${codified}` +
       (uncodified > 0 ? ` · ${uncodified} live, awaiting a statute match` : ''),
     )
+    setApproveResults(res?.results ?? [])
     setJustStaged(false)
     fetchReview(); fetchRequests()
+  }
+
+  // Open the Codify modal for a row, prefilling the citation from its research
+  // text + the source link. Admin confirms before it becomes a stored citation.
+  function openCodify(row: ApproveResult) {
+    setCodifyError(null)
+    setCodifyForm({
+      citation: extractCitation(row.current_value, row.description, row.title),
+      heading: row.title || '',
+      source_url: row.source_url || '',
+    })
+    setCodifyRow(row)
+  }
+
+  // The next still-uncodified row after the given id — powers "one after another".
+  function nextUncodified(afterId: string): ApproveResult | null {
+    const rest = approveResults.filter((r) => !r.codified && r.id !== afterId)
+    return rest[0] ?? null
+  }
+
+  async function submitCodify() {
+    if (!codifyRow || !codifyForm.citation.trim()) return
+    setCodifyBusy(true); setCodifyError(null)
+    try {
+      const res = await api.post<{ codified: boolean; statute_citation: string | null; citation_url: string | null }>(
+        `/admin/requirements/${codifyRow.id}/codify`,
+        { citation: codifyForm.citation.trim(), heading: codifyForm.heading.trim() || null, source_url: codifyForm.source_url.trim() || null },
+      )
+      // Patch the outcome row in place.
+      const doneId = codifyRow.id
+      setApproveResults((prev) => prev.map((r) => r.id === doneId ? {
+        ...r, codified: res.codified, statute_citation: res.statute_citation, citation_url: res.citation_url,
+      } : r))
+      // Advance to the next uncodified row, else close.
+      const next = nextUncodified(doneId)
+      if (next) openCodify(next)
+      else setCodifyRow(null)
+    } catch (e) {
+      setCodifyError(e instanceof Error ? e.message : 'Codify failed')
+    } finally {
+      setCodifyBusy(false)
+    }
   }
 
   async function rejectReview(ids: string[], group: ReviewGroup) {
@@ -502,6 +597,10 @@ export default function Jurisdictions() {
       <div className="flex flex-wrap items-center gap-x-6 gap-y-1 border-b border-white/[0.06] px-4 py-2 font-mono text-[11px] uppercase tracking-wide text-zinc-500">
         <span>Jurisdictions <b className="text-zinc-100">{totals?.total_jurisdictions ?? '—'}</b></span>
         <span>Requirements <b className="text-zinc-100">{totals?.total_requirements ?? '—'}</b></span>
+        <span className="text-emerald-400" title="Live requirements carrying a verified statute citation — the authoritative core">
+          Codified <b className="text-emerald-300">{totals?.total_codified ?? '—'}</b>
+          <span className="text-emerald-400/50">/{totals?.total_requirements ?? '—'}</span>
+        </span>
         <span className={needsResearchCount > 0 ? 'text-amber-400' : ''}>
           Needs research <b>{needsResearchCount || '—'}</b>
         </span>
@@ -543,10 +642,11 @@ export default function Jurisdictions() {
         <>
           {/* Totals */}
           {totals && (
-            <div className="grid grid-cols-3 gap-3 mb-4">
+            <div className="grid grid-cols-4 gap-3 mb-4">
               {[
                 { label: 'Jurisdictions', value: totals.total_jurisdictions },
                 { label: 'Requirements', value: totals.total_requirements },
+                { label: 'Codified', value: totals.total_codified ?? 0 },
                 { label: 'Legislation', value: totals.total_legislation },
               ].map((s) => (
                 <div key={s.label} className="border border-zinc-800 rounded-lg px-4 py-3 text-center">
@@ -816,11 +916,8 @@ export default function Jurisdictions() {
                                 Research all
                               </Button>
                               {item.type === 'category' && (
-                                <>
-                                  <Button variant="ghost" size="sm" onClick={() => processRequest(item)}>Process</Button>
-                                  <button type="button" onClick={() => dismissRequest(item.id)}
-                                    className="text-xs text-zinc-600 hover:text-zinc-300 px-2 py-1 transition-colors">Dismiss</button>
-                                </>
+                                <button type="button" onClick={() => dismissRequest(item.id)}
+                                  className="text-xs text-zinc-600 hover:text-zinc-300 px-2 py-1 transition-colors">Dismiss</button>
                               )}
                             </div>
                           )
@@ -864,6 +961,62 @@ export default function Jurisdictions() {
             </div>
           )}
 
+          {/* Per-row codification outcome from the last approve. Each row is now
+              live; this shows whether it got a verified statute citation (with a
+              link to the source) or still needs classifying in ScopeStudio. */}
+          {approveResults.length > 0 && (() => {
+            const remaining = approveResults.filter((r) => !r.codified)
+            return (
+            <div className="mb-4 rounded-lg border border-white/[0.08] bg-white/[0.02] overflow-hidden">
+              <div className="flex items-center justify-between gap-2 border-b border-white/[0.06] px-3 py-2">
+                <p className="font-mono text-[10px] uppercase tracking-wide text-zinc-500">
+                  {remaining.length === 0
+                    ? `All ${approveResults.length} codified`
+                    : `Codification outcome — ${approveResults.length - remaining.length}/${approveResults.length} codified`}
+                </p>
+                {remaining.length > 0 && (
+                  <Button variant="secondary" size="sm" onClick={() => openCodify(remaining[0])}>
+                    Codify {remaining.length} →
+                  </Button>
+                )}
+              </div>
+              <div className="divide-y divide-white/[0.04]">
+                {approveResults.map((r) => (
+                  <div key={r.id} className="flex items-start gap-2.5 px-3 py-2.5">
+                    {r.codified ? (
+                      <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-400" />
+                    ) : (
+                      <Circle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-400/70" />
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-medium text-zinc-200">{r.title}</p>
+                      {r.codified ? (
+                        <p className="mt-0.5 text-[11px] text-zinc-400">
+                          Codified — {r.citation_url
+                            ? <a href={r.citation_url} target="_blank" rel="noreferrer"
+                                className="text-cyan-400 hover:text-cyan-300">{r.statute_citation || 'view statute'}</a>
+                            : <span className="text-zinc-300">{r.statute_citation}</span>}
+                        </p>
+                      ) : (
+                        <p className="mt-0.5 text-[11px] text-zinc-500">
+                          Live, not yet codified.{' '}
+                          <button type="button" onClick={() => openCodify(r)}
+                            className="text-emerald-400 hover:text-emerald-300 font-medium">Codify now</button>
+                          {' '}or open in{' '}
+                          <a href={scopeStudioLink(r.state, r.city)}
+                            className="text-cyan-400 hover:text-cyan-300 inline-flex items-center gap-0.5">
+                            ScopeStudio <ExternalLink className="h-3 w-3" />
+                          </a>.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            )
+          })()}
+
           {loadingReview ? (
             <p className="text-sm text-zinc-500">Loading...</p>
           ) : reviewGroups.length === 0 ? (
@@ -879,8 +1032,12 @@ export default function Jurisdictions() {
                     <div className="flex items-start justify-between gap-3 border-b border-white/[0.06] px-4 py-3">
                       <div className="min-w-0">
                         <h3 className="truncate text-[15px] font-semibold text-zinc-100">{group.label}</h3>
-                        <p className="mt-0.5 font-mono text-[10px] uppercase tracking-wide text-zinc-500">
-                          {group.state} · {group.rows.length} staged
+                        <p className="mt-0.5 flex items-center gap-2 font-mono text-[10px] uppercase tracking-wide text-zinc-500">
+                          <span>{group.state} · {group.rows.length} staged</span>
+                          <a href={scopeStudioLink(group.state, group.city)}
+                            className="inline-flex items-center gap-0.5 text-cyan-400/70 hover:text-cyan-300 normal-case tracking-normal">
+                            ScopeStudio <ExternalLink className="h-2.5 w-2.5" />
+                          </a>
                         </p>
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
@@ -897,8 +1054,16 @@ export default function Jurisdictions() {
                         <div key={row.id} className="rounded-lg border border-white/[0.06] bg-white/[0.02] p-3">
                           <div className="flex items-center justify-between gap-2">
                             <span className="text-xs font-medium text-zinc-200">{row.title}</span>
-                            <span className="rounded border px-1.5 py-0.5 text-[10px] border-amber-500/30 bg-amber-500/10 text-amber-300 shrink-0">
-                              Staged
+                            {/* Codification forecast: will approve produce a verified
+                                statute citation, or does the key need classifying first? */}
+                            <span className={`rounded border px-1.5 py-0.5 text-[10px] shrink-0 ${
+                              row.will_codify
+                                ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+                                : 'border-zinc-600/40 bg-zinc-500/10 text-zinc-400'
+                            }`} title={row.will_codify
+                              ? 'A confirmed authority citation exists — approving will codify this automatically.'
+                              : 'Research-cited, not yet registry-verified — approve, then Codify to confirm the statute citation.'}>
+                              {row.will_codify ? 'Will codify' : 'Codify after approve'}
                             </span>
                           </div>
                           <p className="mt-0.5 text-[11px] text-zinc-500">
@@ -1043,6 +1208,50 @@ export default function Jurisdictions() {
             <Button type="submit" disabled={saving} size="sm">{saving ? 'Adding...' : 'Add Jurisdiction'}</Button>
           </div>
         </form>
+      </Modal>
+
+      {/* Codify modal — mint the authority citation for a live requirement, in
+          place. Walks the approved rows one after another. */}
+      <Modal open={codifyRow !== null} onClose={() => setCodifyRow(null)}
+        title="Codify requirement" width="md">
+        {codifyRow && (
+          <div className="space-y-3">
+            <div className="rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2.5">
+              <p className="text-xs font-medium text-zinc-200">{codifyRow.title}</p>
+              <p className="mt-0.5 font-mono text-[10px] text-zinc-500">
+                {codifyRow.regulation_key || 'no key'} · {(codifyRow.state || '').toUpperCase()}{codifyRow.city ? `, ${codifyRow.city}` : ''}
+              </p>
+              <p className="mt-1 text-[11px] text-zinc-500">
+                Confirm the statute citation for this requirement. It's stored as a
+                verified authority citation — the same registry ScopeStudio reads.
+              </p>
+            </div>
+
+            <Input id="codify-citation" label="Statute citation" required
+              value={codifyForm.citation}
+              onChange={(e) => setCodifyForm({ ...codifyForm, citation: e.target.value })}
+              placeholder="e.g. C.R.S. § 12-220-101" />
+            <Input id="codify-heading" label="Heading (optional)"
+              value={codifyForm.heading}
+              onChange={(e) => setCodifyForm({ ...codifyForm, heading: e.target.value })}
+              placeholder="short label for the statute" />
+            <Input id="codify-source" label="Source URL (optional)"
+              value={codifyForm.source_url}
+              onChange={(e) => setCodifyForm({ ...codifyForm, source_url: e.target.value })}
+              placeholder="https://…" />
+
+            {codifyError && <p className="text-[11px] text-red-400">{codifyError}</p>}
+
+            <div className="flex items-center justify-between gap-2 pt-1">
+              <button type="button"
+                onClick={() => { const n = nextUncodified(codifyRow.id); if (n) openCodify(n); else setCodifyRow(null) }}
+                className="text-xs text-zinc-600 hover:text-zinc-300 transition-colors">Skip</button>
+              <Button size="sm" disabled={codifyBusy || !codifyForm.citation.trim()} onClick={submitCodify}>
+                {codifyBusy ? 'Codifying…' : 'Codify + next'}
+              </Button>
+            </div>
+          </div>
+        )}
       </Modal>
     </div>
   )
