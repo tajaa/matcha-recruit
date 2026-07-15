@@ -7,7 +7,7 @@ import {
   type ContextPreview, type CorpusRecord, type EvidenceMapItem, type GapSeverity,
   type MissingDoc, type PilotMessage, type PilotSession,
 } from '../../../api/brokerPilot'
-import { DISCLAIMER, LABEL, startersFor } from './shared'
+import { DISCLAIMER, LABEL, missingRequired, startersFor } from './shared'
 
 interface ConsoleProps {
   session: PilotSession
@@ -31,6 +31,9 @@ export function Console({ session, context, onTurnComplete, onUploadDocs }: Cons
   // is server-side and stateless, so without this every subsequent turn would
   // re-raise the same 409 and re-nag someone who already answered it.
   const forceRef = useRef(false)
+  // Which session already got its auto-kickoff turn — guards against re-firing
+  // on every context refetch (doc upload, poll) within the same session.
+  const kickoffRef = useRef<string | null>(null)
   const endRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const starters = startersFor(session)
@@ -106,6 +109,26 @@ export function Console({ session, context, onTurnComplete, onUploadDocs }: Cons
       onTurnComplete()
     }
   }
+
+  // Auto-kickoff: a moded session with nothing said yet and no outstanding
+  // required documents opens with the mode's first starter as a real turn,
+  // instead of waiting for someone to type the first question. Fires once
+  // required docs clear (upload, "skip", or platform data already covering
+  // them) — same path as a typed message, so it persists, streams, and
+  // counts against rate limits identically.
+  useEffect(() => {
+    if (!session.template) return
+    if (session.status === 'closed') return
+    if ((session.messages?.length ?? 0) > 0 || live.length > 0) return
+    if (!context) return
+    if (missingRequired(context.doc_requirements).length > 0) return
+    if (kickoffRef.current === session.id) return
+    const starter = startersFor(session)[0]
+    if (!starter) return
+    kickoffRef.current = session.id
+    void send(starter)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session.id, session.template, session.status, session.messages, context])
 
   const askAnyway = () => {
     forceRef.current = true

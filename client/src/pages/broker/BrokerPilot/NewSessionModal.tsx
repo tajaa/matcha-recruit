@@ -79,7 +79,7 @@ export function NewSessionModal({ prefill, onClose, onCreated }: NewSessionModal
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
       <div
-        className="w-full max-w-md rounded-lg border border-zinc-700 bg-zinc-900 p-5"
+        className="max-h-[85vh] w-full max-w-md overflow-y-auto rounded-lg border border-zinc-700 bg-zinc-900 p-5"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-4">
