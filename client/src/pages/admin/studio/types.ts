@@ -199,6 +199,6 @@ export type VerticalCoverageResponse = {
 
 // ── Studio-wide view routing ─────────────────────────────────────────────────
 
-export type StudioView = 'home' | 'pipeline' | 'coverage' | 'authority' | 'library'
+export type StudioView = 'home' | 'pipeline' | 'coverage' | 'authority' | 'library' | 'pilot'
 
 export type GotoParams = { state?: string; city?: string; industry?: string }

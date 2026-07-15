@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Compass, Layers, Library, MessageCircle, Sparkles, Workflow } from 'lucide-react'
+import { Bot, Compass, Layers, Library, MessageCircle, Sparkles, Workflow } from 'lucide-react'
 import { api } from '../../../api/client'
 import CommandCenter from './CommandCenter'
 import PipelineTab from './PipelineTab'
 import CoverageTab from './CoverageTab'
 import AuthorityTab from './AuthorityTab'
 import LibraryTab from './LibraryTab'
+import PilotTab from './pilot/PilotTab'
 import StudioAssistant from './StudioAssistant'
 import type { GotoParams, StudioView, UncodifiedItem, Worklist } from './types'
 
@@ -16,6 +17,7 @@ const TABS: { id: StudioView; label: string; icon: typeof Compass }[] = [
   { id: 'coverage', label: 'Coverage', icon: Sparkles },
   { id: 'authority', label: 'Authority', icon: Layers },
   { id: 'library', label: 'Library', icon: Library },
+  { id: 'pilot', label: 'Pilot', icon: Bot },
 ]
 
 // One studio for the whole compliance library. It grows through two funnels
@@ -160,6 +162,7 @@ export default function ComplianceStudio() {
               goto={goto}
             />
           )}
+          {view === 'pilot' && <PilotTab />}
         </div>
 
         {assistantOpen && (

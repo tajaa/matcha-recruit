@@ -10298,19 +10298,12 @@ async def approve_research_review(body: ResearchReviewDecision,
     NOT re-derived from the activated rows' jurisdiction_id — routed rows sit on
     chain nodes, not the leaf a coverage request references.
     """
-    from ..services.change_context import set_change_context
+    from ..services.research_review import approve_staged
 
     ids = [UUID(i) for i in body.ids]
-    async with get_connection() as conn:
-        # 'approve' is the moment a staged row becomes tenant-visible — label the
-        # activation for the version trigger (jrver01).
-        await set_change_context(conn, "approve", getattr(current_user, "id", None))
-        activated = await conn.fetch(
-            "UPDATE jurisdiction_requirements SET status='active', last_verified_at=NOW(), "
-            "updated_at=NOW() WHERE id = ANY($1::uuid[]) AND status='pending' "
-            "RETURNING id, jurisdiction_id",
-            ids,
-        )
+    # Activate + codify the staged rows (shared core with the Compliance Pilot).
+    # Publish to waiting tenants is admin-queue-specific and stays below.
+    core = await approve_staged(ids, getattr(current_user, "id", None), source="approve")
 
     published = 0
     # Category side: resolve each request's jurisdiction and run the publish loop.
@@ -10338,101 +10331,20 @@ async def approve_research_review(body: ResearchReviewDecision,
         except Exception as exc:
             logger.warning("approve: vertical publish failed for %s: %s", cid, exc)
 
-    # Codification stage: statute-link the newly-active rows. Same choke point as
-    # ScopeStudio ("Research these · codify" + the AuthorityCockpit "Reconcile"
-    # button) and the Celery research loop — reconcile_codifications is the single
-    # writer of scope_codifications, so approving here lights up ScopeStudio's
-    # codified KPIs identically (source="approve"). Only rows whose regulation_key
-    # already has a *confirmed* authority-index classification get a statute
-    # citation; brand-new specialty keys go live but stay "to fetch" in the
-    # cockpit's backlog until an admin classifies+confirms them there. Best-effort
-    # — the rows are already active, so a reconcile error must never fail approve.
-    codified = 0
-    results: list = []
-    if activated:
-        from ..services.scope_registry.codify import reconcile_codifications
-
-        activated_ids = [r["id"] for r in activated]
-        jurisdiction_ids = list({r["jurisdiction_id"] for r in activated})
-        async with get_connection() as conn:
-            targets = await conn.fetch(
-                "SELECT DISTINCT UPPER(state) AS state, LOWER(city) AS city "
-                "FROM jurisdictions WHERE id = ANY($1::uuid[]) AND state IS NOT NULL",
-                jurisdiction_ids,
-            )
-        # One reconcile per distinct (state, city) of the activated rows. The
-        # chain resolver only reaches city/county nodes when a city is passed
-        # (city=None resolves to [federal, state]) — and routed research files
-        # city-stamped rows on city nodes, so a state-only call would silently
-        # skip codifying exactly the leaf rows this queue produces. County-node
-        # rows ride along: the chain derives the county from its city, and a
-        # routed batch always originates from a city leaf, so an activated
-        # county row co-occurs with a city row of the same city. Idempotent +
-        # deterministic, so overlapping chains (same state, several cities) are
-        # just repeated no-ops on the shared federal/state nodes.
-        pairs = sorted({(t["state"], t["city"]) for t in targets if t["state"]},
-                       key=lambda p: (p[0], p[1] or ""))
-        for st, city in pairs:
-            try:
-                async with get_connection() as conn:
-                    await reconcile_codifications(
-                        conn, state=st, city=city, source="approve"
-                    )
-            except Exception as exc:
-                logger.warning("approve: codify failed for %s/%s: %s", st, city, exc)
-
-        # Per-row codification outcome for the just-approved rows, with the real
-        # statute URL where one now exists (authority_index_items.source_url via
-        # the citation_item_id reconcile stamped). This is what the Review UI
-        # renders as "Codified · <statute link>" vs "Live · finish in ScopeStudio".
-        async with get_connection() as conn:
-            detail = await conn.fetch(
-                """
-                SELECT r.id, r.title, r.description, r.current_value,
-                       r.source_url, r.source_name, r.regulation_key,
-                       r.statute_citation, r.citation_verified_at, r.citation_item_id,
-                       ai.source_url AS citation_url,
-                       UPPER(j.state) AS state, LOWER(j.city) AS city
-                FROM jurisdiction_requirements r
-                JOIN jurisdictions j ON j.id = r.jurisdiction_id
-                LEFT JOIN authority_index_items ai ON ai.id = r.citation_item_id
-                WHERE r.id = ANY($1::uuid[])
-                """,
-                activated_ids,
-            )
-        results = [{
-            "id": str(d["id"]),
-            "title": d["title"],
-            "description": d["description"],
-            "current_value": d["current_value"],
-            "source_url": d["source_url"],
-            "source_name": d["source_name"],
-            "regulation_key": d["regulation_key"],
-            "codified": d["citation_verified_at"] is not None,
-            "statute_citation": d["statute_citation"],
-            "citation_url": d["citation_url"],
-            "citation_item_id": str(d["citation_item_id"]) if d["citation_item_id"] else None,
-            "state": d["state"],
-            "city": d["city"],
-        } for d in detail]
-        codified = sum(1 for r in results if r["codified"])
-
     # Freeze each newly-live row's cited page as evidence, AFTER the response —
     # approve is the tenant-visibility moment (the snapshot that matters most in a
     # later dispute), but the fetches are slow external I/O, so they run via
-    # BackgroundTasks rather than pinning this request + a pool connection.
-    # Prefer the statute citation URL, else the research source_url.
-    snap_targets = [(d["id"], d["citation_url"] or d["source_url"])
-                    for d in (detail if activated else [])]
-    if any(u for _, u in snap_targets):
-        background_tasks.add_task(_snapshot_requirements_bg, snap_targets, "approve")
+    # BackgroundTasks. `approve_staged` already activated + codified + built the
+    # per-row results; the snap targets ride back for the admin queue to freeze.
+    if core["snap_targets"]:
+        background_tasks.add_task(_snapshot_requirements_bg, core["snap_targets"], "approve")
 
     return {
-        "activated": len(activated),
+        "activated": core["activated"],
         "published": published,
-        "codified": codified,
-        "uncodified": max(len(activated) - codified, 0),
-        "results": results,
+        "codified": core["codified"],
+        "uncodified": core["uncodified"],
+        "results": core["results"],
     }
 
 
