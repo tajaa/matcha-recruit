@@ -356,6 +356,28 @@ export default function CoverageTab({
   const laborRef = useRef<HTMLDivElement>(null)
   const [coverageTab, setCoverageTab] = useState<'matrix' | 'resolve'>('matrix')
 
+  // Industry-agnostic (core-labor) coverage STATE for this coordinate —
+  // covered / empty (researched-nothing) / unchecked (never researched). The
+  // point is to stop rendering never-checked categories as a silent green.
+  type GeneralCoverage = {
+    summary: { covered: number; empty: number; unchecked: number; total: number }
+    categories: { slug: string; name: string; status: 'covered' | 'empty' | 'unchecked' }[]
+  }
+  const [generalCov, setGeneralCov] = useState<GeneralCoverage | null>(null)
+  useEffect(() => {
+    if (!state.trim()) { setGeneralCov(null); return }
+    let cancelled = false
+    ;(async () => {
+      try {
+        const params = new URLSearchParams({ state: state.trim().toUpperCase() })
+        if (city.trim()) params.set('city', city.trim())
+        const res = await api.get<GeneralCoverage>(`/admin/jurisdictions/general-coverage?${params.toString()}`)
+        if (!cancelled) setGeneralCov(res)
+      } catch { if (!cancelled) setGeneralCov(null) }
+    })()
+    return () => { cancelled = true }
+  }, [state, city, matrixNonce])
+
   // Statute reader — full regulation text in a right drawer.
   type ItemBody = {
     citation: string; heading: string | null; source_url: string | null
@@ -788,6 +810,40 @@ export default function CoverageTab({
                   </span>
                 ))}
               </div>
+
+              {/* Core-labor coverage STATE — the honesty layer. `unchecked` is a
+                  distinct state from `empty`, so a never-researched category no
+                  longer reads as a silent green. */}
+              {generalCov && (
+                <div className="mt-3">
+                  <div className="mb-1.5 flex items-center gap-2">
+                    <span className={LABEL}>Coverage state</span>
+                    <span className="font-mono text-[10px] tabular-nums text-zinc-500">
+                      <span className="text-emerald-400">{generalCov.summary.covered} covered</span>
+                      {' · '}<span className="text-zinc-400">{generalCov.summary.empty} nothing applies</span>
+                      {generalCov.summary.unchecked > 0 && (
+                        <>{' · '}<span className="text-amber-400">{generalCov.summary.unchecked} not yet checked</span></>
+                      )}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {generalCov.categories.map((c) => {
+                      const cls = c.status === 'covered'
+                        ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+                        : c.status === 'empty'
+                          ? 'border-zinc-600/40 bg-zinc-500/10 text-zinc-400'
+                          : 'border-amber-500/30 bg-amber-500/10 text-amber-300'
+                      const label = c.status === 'covered' ? 'covered'
+                        : c.status === 'empty' ? 'checked — nothing applies' : 'not yet checked'
+                      return (
+                        <span key={c.slug} className={`rounded border px-2 py-0.5 text-[11px] ${cls}`} title={label}>
+                          {c.name}
+                        </span>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Federal / State / City */}

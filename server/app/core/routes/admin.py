@@ -5773,8 +5773,9 @@ class RequirementUpdate(BaseModel):
     statute_citation: Optional[str] = None
 
 
-@router.patch("/jurisdictions/requirements/{requirement_id}", dependencies=[Depends(require_admin)])
-async def update_requirement(requirement_id: UUID, body: RequirementUpdate):
+@router.patch("/jurisdictions/requirements/{requirement_id}")
+async def update_requirement(requirement_id: UUID, body: RequirementUpdate,
+                             current_user=Depends(require_admin)):
     """Partially update a jurisdiction requirement (e.g. add applicability notes)."""
     updates = {k: v for k, v in body.model_dump().items() if v is not None}
     if not updates:
@@ -5814,6 +5815,9 @@ async def update_requirement(requirement_id: UUID, body: RequirementUpdate):
     """
 
     async with get_connection() as conn:
+        # Label this write for the version-history trigger (jrver01).
+        from ..services.change_context import set_change_context
+        await set_change_context(conn, "admin_edit", getattr(current_user, "id", None))
         row = await conn.fetchrow(sql, *params)
         if not row:
             raise HTTPException(status_code=404, detail="Requirement not found")
@@ -8081,6 +8085,11 @@ async def trigger_scheduler(task_key: str):
         # restart from re-billing Gemini, not to override a human).
         run_vertical_coverage_sweep.delay(force=True)
         return {"status": "triggered", "task_key": task_key, "message": "Vertical coverage sweep enqueued"}
+    elif task_key == "location_fips_backfill":
+        from ...workers.tasks.location_fips_backfill import run_location_fips_backfill
+        # force=True: a human pressing Trigger bypasses the disabled-row guard.
+        run_location_fips_backfill.delay(force=True)
+        return {"status": "triggered", "task_key": task_key, "message": "Location FIPS backfill enqueued"}
     else:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown task key: {task_key}")
 
@@ -10139,22 +10148,51 @@ async def get_research_review():
         ]}
 
 
+async def _snapshot_requirements_bg(targets: list, context: str) -> None:
+    """Freeze source pages for `targets` = [(requirement_id, url), …] off the
+    request path (BackgroundTasks). Opens its own connection + one shared client;
+    each snapshot is best-effort and never raises. Kept out of the handler so a
+    slow/dead citation host can't add minutes to an approve/codify response or
+    pin a pooled DB connection during network I/O."""
+    urls = [(rid, u) for rid, u in targets if u]
+    if not urls:
+        return
+    try:
+        import httpx as _httpx
+        from ..services.source_snapshot import snapshot_source
+        async with _httpx.AsyncClient(
+            timeout=_httpx.Timeout(10.0, connect=5.0), follow_redirects=True,
+            headers={"User-Agent": "MatchaComplianceBot/1.0 (+compliance evidence capture)"},
+        ) as client, get_connection() as conn:
+            for rid, url in urls:
+                await snapshot_source(conn, rid, url, context, client=client)
+    except Exception as exc:  # evidence capture must never surface as an error
+        logger.warning("background source snapshot pass failed (%s): %s", context, exc)
+
+
 class ResearchReviewDecision(BaseModel):
     ids: List[str]
     request_ids: Optional[List[str]] = None
     company_ids: Optional[List[str]] = None
 
 
-@router.post("/research-review/approve", dependencies=[Depends(require_admin)])
-async def approve_research_review(body: ResearchReviewDecision):
+@router.post("/research-review/approve")
+async def approve_research_review(body: ResearchReviewDecision,
+                                  background_tasks: BackgroundTasks,
+                                  current_user=Depends(require_admin)):
     """Activate staged rows, then publish to waiting tenants (project + email).
 
     Publish context is taken from the request body (request_ids / company_ids),
     NOT re-derived from the activated rows' jurisdiction_id — routed rows sit on
     chain nodes, not the leaf a coverage request references.
     """
+    from ..services.change_context import set_change_context
+
     ids = [UUID(i) for i in body.ids]
     async with get_connection() as conn:
+        # 'approve' is the moment a staged row becomes tenant-visible — label the
+        # activation for the version trigger (jrver01).
+        await set_change_context(conn, "approve", getattr(current_user, "id", None))
         activated = await conn.fetch(
             "UPDATE jurisdiction_requirements SET status='active', last_verified_at=NOW(), "
             "updated_at=NOW() WHERE id = ANY($1::uuid[]) AND status='pending' "
@@ -10267,6 +10305,16 @@ async def approve_research_review(body: ResearchReviewDecision):
         } for d in detail]
         codified = sum(1 for r in results if r["codified"])
 
+    # Freeze each newly-live row's cited page as evidence, AFTER the response —
+    # approve is the tenant-visibility moment (the snapshot that matters most in a
+    # later dispute), but the fetches are slow external I/O, so they run via
+    # BackgroundTasks rather than pinning this request + a pool connection.
+    # Prefer the statute citation URL, else the research source_url.
+    snap_targets = [(d["id"], d["citation_url"] or d["source_url"])
+                    for d in (detail if activated else [])]
+    if any(u for _, u in snap_targets):
+        background_tasks.add_task(_snapshot_requirements_bg, snap_targets, "approve")
+
     return {
         "activated": len(activated),
         "published": published,
@@ -10318,6 +10366,7 @@ class RequirementCodifyRequest(BaseModel):
 async def codify_requirement(
     requirement_id: str,
     body: RequirementCodifyRequest,
+    background_tasks: BackgroundTasks,
     current_user=Depends(require_admin),
 ):
     """Codify a single live requirement — the demand-funnel bridge into the same
@@ -10326,11 +10375,14 @@ async def codify_requirement(
     supplies/confirms the statute citation (a legal record).
     """
     from ..services.scope_registry.codify import codify_from_requirement
+    from ..services.change_context import set_change_context
 
+    req_uuid = UUID(requirement_id)
     async with get_connection() as conn:
+        await set_change_context(conn, "codify", getattr(current_user, "id", None))
         try:
             result = await codify_from_requirement(
-                conn, UUID(requirement_id),
+                conn, req_uuid,
                 citation=body.citation,
                 heading=body.heading,
                 source_url=body.source_url,
@@ -10340,7 +10392,156 @@ async def codify_requirement(
             raise HTTPException(status_code=404, detail=str(exc))
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc))
+    # Freeze the cited page as evidence AFTER the response (slow external fetch —
+    # off the request path + off the codify connection). Prefer the citation URL
+    # the admin confirmed, else the statute's own source_url.
+    snap_url = body.source_url or (result.get("citation_url") if isinstance(result, dict) else None)
+    if snap_url:
+        background_tasks.add_task(_snapshot_requirements_bg, [(req_uuid, snap_url)], "codify")
     return result
+
+
+@router.get("/requirements/{requirement_id}/history", dependencies=[Depends(require_admin)])
+async def get_requirement_history(requirement_id: str):
+    """Transaction-time version log for one requirement (migration jrver01).
+
+    Every INSERT/UPDATE/DELETE is captured by a trigger, so this is the full
+    defensibility trail: what the row said, when we recorded it, and (where a
+    write path labeled it) who/what changed it. Newest first. Plus the frozen
+    source snapshots captured at approve/codify.
+    """
+    # asyncpg returns JSONB as raw text (no codec registered) — decode to objects.
+    def _jsonb(v):
+        return json.loads(v) if isinstance(v, str) else v
+
+    req_uuid = UUID(requirement_id)
+    async with get_connection() as conn:
+        versions = await conn.fetch(
+            """
+            SELECT id, op, row_data, recorded_at, superseded_at, change_source, actor_id
+            FROM jurisdiction_requirement_versions
+            WHERE requirement_id = $1
+            ORDER BY recorded_at DESC, id DESC
+            """,
+            req_uuid,
+        )
+        snapshots = await conn.fetch(
+            """
+            SELECT id, source_url, content_hash, http_status, context, fetched_at,
+                   (content_text IS NOT NULL) AS has_text
+            FROM requirement_source_snapshots
+            WHERE requirement_id = $1
+            ORDER BY fetched_at DESC
+            """,
+            req_uuid,
+        )
+    return {
+        "requirement_id": requirement_id,
+        "versions": [{
+            "id": v["id"],
+            "op": v["op"],
+            "row_data": _jsonb(v["row_data"]),
+            "recorded_at": v["recorded_at"].isoformat() if v["recorded_at"] else None,
+            "superseded_at": v["superseded_at"].isoformat() if v["superseded_at"] else None,
+            "change_source": v["change_source"],
+            "actor_id": str(v["actor_id"]) if v["actor_id"] else None,
+        } for v in versions],
+        "snapshots": [{
+            "id": str(s["id"]),
+            "source_url": s["source_url"],
+            "content_hash": s["content_hash"],
+            "http_status": s["http_status"],
+            "context": s["context"],
+            "has_text": s["has_text"],
+            "fetched_at": s["fetched_at"].isoformat() if s["fetched_at"] else None,
+        } for s in snapshots],
+    }
+
+
+@router.get("/requirements/{requirement_id}/as-of", dependencies=[Depends(require_admin)])
+async def get_requirement_as_of(
+    requirement_id: str,
+    ts: str = Query(..., description="ISO-8601 transaction-time instant to reconstruct at"),
+):
+    """Reconstruct the requirement row exactly as it was RECORDED at instant ``ts``.
+
+    The defensibility query: "what did this row say, as we knew it, on date X?".
+    Returns the version whose transaction-time interval [recorded_at, superseded_at)
+    contains ts. 404 if the row didn't exist yet (or was deleted) at ts.
+    """
+    from datetime import datetime
+
+    req_uuid = UUID(requirement_id)
+    try:
+        as_of = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="ts must be ISO-8601")
+
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT op, row_data, recorded_at, superseded_at, change_source, actor_id
+            FROM jurisdiction_requirement_versions
+            WHERE requirement_id = $1
+              AND recorded_at <= $2
+              AND (superseded_at IS NULL OR superseded_at > $2)
+            ORDER BY recorded_at DESC, id DESC
+            LIMIT 1
+            """,
+            req_uuid, as_of,
+        )
+    if not row or row["op"] == "D":
+        raise HTTPException(status_code=404, detail="No version recorded as of that instant")
+    return {
+        "requirement_id": requirement_id,
+        "as_of": as_of.isoformat(),
+        "recorded_at": row["recorded_at"].isoformat() if row["recorded_at"] else None,
+        "change_source": row["change_source"],
+        "actor_id": str(row["actor_id"]) if row["actor_id"] else None,
+        "row_data": json.loads(row["row_data"]) if isinstance(row["row_data"], str) else row["row_data"],
+    }
+
+
+@router.get("/jurisdictions/general-coverage", dependencies=[Depends(require_admin)])
+async def get_general_coverage(
+    state: str = Query(..., description="Two-letter state (federal chain is always included)"),
+    city: Optional[str] = Query(None),
+):
+    """Industry-agnostic (core-labor) coverage status per category for a coordinate.
+
+    Distinguishes `covered` (rows exist) / `empty` (researched, nothing applies) /
+    `unchecked` (never researched) so the Coverage tab stops rendering a
+    never-checked category as a silent green. Self-populating: backfills `covered`
+    cells from existing rows on first view (idempotent), then folds the general
+    ledger across the location's jurisdiction chain.
+    """
+    from ..services import vertical_coverage
+    from ..services.scope_registry.jurisdiction_chain import resolve_jurisdiction_chain
+
+    async with get_connection() as conn:
+        chain = await resolve_jurisdiction_chain(conn, state.strip().upper(), (city or "").strip() or None)
+        ids = chain["ids"]
+        await vertical_coverage.backfill_general(conn, ids)
+        coverage = await vertical_coverage.general_coverage_map(conn, ids)
+        # Attach display names for the categories.
+        names = {r["slug"]: r["name"] for r in await conn.fetch(
+            "SELECT slug, name FROM compliance_categories WHERE industry_tag IS NULL"
+        )}
+
+    covered = sum(1 for s in coverage.values() if s == "covered")
+    empty = sum(1 for s in coverage.values() if s == "empty")
+    unchecked = sum(1 for s in coverage.values() if s == "unchecked")
+    return {
+        "state": state.strip().upper(),
+        "city": (city or "").strip() or None,
+        "city_found": chain.get("city_found", False),
+        "summary": {"covered": covered, "empty": empty, "unchecked": unchecked,
+                    "total": len(coverage)},
+        "categories": [
+            {"slug": slug, "name": names.get(slug, slug), "status": status}
+            for slug, status in sorted(coverage.items())
+        ],
+    }
 
 
 @router.get("/studio/worklist", dependencies=[Depends(require_admin)])
@@ -10350,20 +10551,54 @@ async def get_studio_worklist():
     Merges BOTH funnels — demand (coverage requests → research → review →
     approve → codify) and supply (ingest → classify → confirm → reconcile) —
     into one prioritized action list, so the admin sees "what needs me now"
-    instead of hunting across tabs. Reuses the existing per-source handlers/
-    queries verbatim; this adds no new funnel logic, only aggregation +
-    priority ordering (closest to AUTHORITATIVE first).
+    instead of hunting across tabs. Aggregation + priority ordering (closest to
+    AUTHORITATIVE first); the review/pending sources reuse the existing
+    handlers, while the baseline backlog runs its own DEMAND-scoped query (only
+    tenant-onboarded jurisdictions — NOT the full research-queue scan, which
+    includes admin-paced manual-scoping cities that don't belong in the worklist).
     """
     review = await get_research_review()
     pending = await get_pending_research()
-    research_queue = await get_research_queue()
 
     async with get_connection() as conn:
+        # keyless: active, uncodified rows with NO regulation_key — they can't
+        # codify (codify_from_requirement's key-equality join 422s them), so
+        # they'd otherwise cap the Authoritative meter below 100% invisibly.
+        # Surfaced on the meter tooltip, not as a worklist action (no flow to
+        # clear them yet — see plan: key-assignment is a follow-up).
         meters_row = await conn.fetchrow(
             "SELECT COUNT(*) FILTER (WHERE COALESCE(status, 'active') = 'active') AS requirements, "
             "COUNT(*) FILTER (WHERE COALESCE(status, 'active') = 'active' "
-            "AND citation_verified_at IS NOT NULL) AS codified "
+            "AND citation_verified_at IS NOT NULL) AS codified, "
+            "COUNT(*) FILTER (WHERE COALESCE(status, 'active') = 'active' "
+            "AND citation_verified_at IS NULL AND regulation_key IS NULL) AS keyless "
             "FROM jurisdiction_requirements"
+        )
+
+        # Baseline backlog — DEMAND-side only: jurisdictions a tenant actually
+        # onboarded into (location_count > 0) that have zero researched rows.
+        # Deliberately NOT the full /admin/research-queue scan: tenant-less
+        # seeded cities are means-#1 (manual scoping) backlog, admin-paced via
+        # the Coverage/Library tabs, and don't belong in "what needs me now".
+        baseline_rows = await conn.fetch(
+            """
+            SELECT j.id AS jurisdiction_id, j.city, j.state, j.county,
+                   lc.location_count, lc.company_count, j.created_at
+            FROM jurisdictions j
+            JOIN LATERAL (
+                SELECT COUNT(*) AS location_count,
+                       COUNT(DISTINCT bl.company_id) AS company_count
+                FROM business_locations bl
+                WHERE bl.jurisdiction_id = j.id
+                  AND COALESCE(bl.is_active, true) = true
+            ) lc ON lc.location_count > 0
+            WHERE j.city IS NOT NULL AND j.city != ''
+              AND NOT EXISTS (
+                  SELECT 1 FROM jurisdiction_requirements jr
+                  WHERE jr.jurisdiction_id = j.id
+              )
+            ORDER BY lc.location_count DESC, j.state, j.city
+            """
         )
 
         # Active rows that went live but carry no verified statute citation —
@@ -10405,7 +10640,17 @@ async def get_studio_worklist():
 
     review_count = sum(len(g["rows"]) for g in review["groups"])
     pending_count = len(pending["items"])
-    baseline_needs = [r for r in research_queue if r["status"] == "needs_research"]
+    # Shape to the frontend's ResearchItem (same fields /admin/research-queue
+    # returns); repo_count is 0 by construction (NOT EXISTS above).
+    baseline_needs = [{
+        "jurisdiction_id": str(r["jurisdiction_id"]),
+        "city": r["city"], "state": r["state"], "county": r["county"],
+        "repo_count": 0,
+        "location_count": r["location_count"],
+        "company_count": r["company_count"],
+        "status": "needs_research",
+        "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+    } for r in baseline_rows]
     confirm_total = sum(int(ix["unclassified_count"] or 0) for ix in authority_indexes)
 
     actions: list = []
@@ -10450,6 +10695,7 @@ async def get_studio_worklist():
         "meters": {
             "codified": int(meters_row["codified"] or 0),
             "requirements": int(meters_row["requirements"] or 0),
+            "keyless": int(meters_row["keyless"] or 0),
             "open_items": open_items,
         },
         "actions": actions,

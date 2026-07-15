@@ -75,10 +75,20 @@ export default function ComplianceStudio() {
         <div className="flex items-center gap-4">
           {/* The two meters — everything in this studio serves one of these. */}
           <div className="hidden items-center gap-4 font-mono text-[11px] uppercase tracking-wide text-zinc-500 sm:flex">
-            <span className="text-emerald-400" title="Live requirements carrying a verified statute citation — what makes the data AUTHORITATIVE">
+            <span className="text-emerald-400"
+                  title={`Live requirements carrying a verified statute citation — what makes the data AUTHORITATIVE.${
+                    meters && meters.keyless > 0
+                      ? ` ${meters.keyless} row${meters.keyless === 1 ? '' : 's'} have no regulation key and can't codify until keyed.`
+                      : ''
+                  }`}>
               Authoritative <b className="text-emerald-300">{meters?.codified ?? '—'}</b>
               <span className="text-emerald-400/50">/{meters?.requirements ?? '—'}</span>
               {codifiedPct !== null && <span className="text-emerald-400/50"> ({codifiedPct}%)</span>}
+              {meters && meters.keyless > 0 && (
+                <span className="ml-1 text-amber-400/70" title={`${meters.keyless} uncodifiable — no regulation key`}>
+                  ⚠{meters.keyless}
+                </span>
+              )}
             </span>
             <span className={meters && meters.open_items > 0 ? 'text-amber-400' : ''}
                   title="Total open worklist items across both funnels">

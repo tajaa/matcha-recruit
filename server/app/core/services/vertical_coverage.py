@@ -314,6 +314,11 @@ async def backfill_ledger(
           AND r.category = ANY($3::text[])
           AND r.status = 'active'
         GROUP BY r.jurisdiction_id, r.category
+        -- Deterministic lock-acquisition order: general-coverage is a
+        -- self-populating GET, so two concurrent tab loads for the same
+        -- coordinate run this insert simultaneously; a stable ORDER BY stops
+        -- them from grabbing the same rows in opposite order (deadlock).
+        ORDER BY r.jurisdiction_id, r.category
         ON CONFLICT (jurisdiction_id, industry_tag, category) DO NOTHING
         """,
         jurisdiction_ids, industry_tag, categories,
@@ -322,6 +327,85 @@ async def backfill_ledger(
         return int(str(result).split()[-1])
     except (ValueError, IndexError):
         return 0
+
+
+# The sentinel industry_tag for industry-AGNOSTIC (core labor) coverage. Every
+# employer needs these regardless of vertical, so their coverage state must be
+# trackable independent of any industry cell. No real industry resolves to
+# 'general' (top-level tags are bare like 'hospitality'; `industry_tag()`
+# collapses (x,x)→x), so it can't collide in the shared ledger.
+GENERAL_TAG = "general"
+
+
+async def _general_categories(conn) -> List[str]:
+    """The industry-agnostic category slugs — those with no industry_tag. These
+    are the core-labor obligations every employer has (min wage, overtime, etc.)."""
+    rows = await conn.fetch(
+        "SELECT slug FROM compliance_categories WHERE industry_tag IS NULL"
+    )
+    return [r["slug"] for r in rows]
+
+
+async def backfill_general(conn, jurisdiction_ids: List[UUID]) -> int:
+    """Seed 'general' coverage cells for these jurisdictions from existing rows.
+
+    The base catalog otherwise can't distinguish "never researched this
+    jurisdiction's core labor" from "researched, nothing applies" — absence of a
+    row reads the same for both, which shows a false green. This records the
+    industry-agnostic axis explicitly. Reuses `backfill_ledger` under the
+    `general` sentinel: cells with active rows → `covered`; everything else stays
+    ABSENT (= unchecked), never inferred `empty` (only a real research pass that
+    looked may write empty — same invariant as the vertical fill)."""
+    cats = await _general_categories(conn)
+    if not cats:
+        return 0
+    return await backfill_ledger(conn, jurisdiction_ids, GENERAL_TAG, cats)
+
+
+async def mark_general_researched(
+    conn, jurisdiction_id: UUID, categories: List[str], written_counts: Dict[str, int],
+) -> None:
+    """Record a general-cell verdict after a research pass that actually LOOKED.
+
+    `covered` where the pass wrote rows for the category, `empty` where it ran and
+    found nothing (the distinction absence can't express). Only categories the
+    pass genuinely researched should be passed in."""
+    for cat in categories:
+        n = int(written_counts.get(cat, 0) or 0)
+        await _mark(conn, jurisdiction_id, GENERAL_TAG, cat,
+                    "covered" if n > 0 else "empty", None, requirements_written=n)
+
+
+async def general_coverage_map(conn, jurisdiction_ids: List[UUID]) -> Dict[str, str]:
+    """Per-category coverage status across the given jurisdiction chain, for the
+    general (industry-agnostic) axis. A category is `covered` if covered on ANY
+    node, else `empty` if marked empty on any node, else `unchecked` (no cell).
+
+    Returns {category_slug: 'covered'|'empty'|'unchecked'} for EVERY general
+    category — unchecked is explicit, never a silent omission."""
+    cats = await _general_categories(conn)
+    result = {c: "unchecked" for c in cats}
+    if not jurisdiction_ids:
+        return result
+    rows = await conn.fetch(
+        """
+        SELECT category, status
+        FROM jurisdiction_vertical_coverage
+        WHERE industry_tag = $1 AND jurisdiction_id = ANY($2::uuid[])
+        """,
+        GENERAL_TAG, jurisdiction_ids,
+    )
+    # Fold across chain nodes: covered wins over empty wins over unchecked.
+    rank = {"unchecked": 0, "empty": 1, "covered": 2}
+    for r in rows:
+        cat, st = r["category"], r["status"]
+        if cat not in result:
+            continue
+        cur = result[cat]
+        cand = st if st in rank else "unchecked"
+        if rank.get(cand, 0) > rank.get(cur, 0):
+            result[cat] = cand
+    return result
 
 
 async def plan_fill(

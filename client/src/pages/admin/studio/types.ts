@@ -140,7 +140,10 @@ export type WorklistAction =
   | { kind: 'research_baseline'; priority: number; count: number; items: ResearchItem[] }
 
 export type Worklist = {
-  meters: { codified: number; requirements: number; open_items: number }
+  // keyless: active, uncodified rows with no regulation_key — they can't codify
+  // (the modal 422s), so they cap the Authoritative % below 100 with no worklist
+  // action to clear them. Surfaced on the meter tooltip, not as an action.
+  meters: { codified: number; requirements: number; keyless: number; open_items: number }
   actions: WorklistAction[]
 }
 
