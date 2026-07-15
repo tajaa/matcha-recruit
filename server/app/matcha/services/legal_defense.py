@@ -683,7 +683,8 @@ async def _src_compliance(conn, company_id, start, end, loc_id, state, topic=_BR
                cr.last_changed_at, bl.name AS location_name, jr.statute_citation
         FROM compliance_requirements cr
         JOIN business_locations bl ON bl.id = cr.location_id
-        LEFT JOIN jurisdiction_requirements jr ON jr.id = cr.jurisdiction_requirement_id
+        LEFT JOIN jurisdiction_requirements jr
+            ON jr.id = cr.jurisdiction_requirement_id AND jr.status = 'active'
         WHERE bl.company_id = $1
           {_scope_direct("cr.location_id", "bl.state", 2)}
           {_topic_filter("cr.category", 4)}
@@ -1776,7 +1777,8 @@ async def _detail_compliance(conn, req_id: str, company_id) -> dict | None:
         """SELECT cr.*, bl.name AS location_name, jr.statute_citation
              FROM compliance_requirements cr
              JOIN business_locations bl ON bl.id = cr.location_id
-             LEFT JOIN jurisdiction_requirements jr ON jr.id = cr.jurisdiction_requirement_id
+             LEFT JOIN jurisdiction_requirements jr
+                 ON jr.id = cr.jurisdiction_requirement_id AND jr.status = 'active'
             WHERE cr.id = $1 AND bl.company_id = $2""",
         req_id, company_id,
     )
@@ -1787,7 +1789,11 @@ async def _detail_law(conn, req_id: str) -> dict | None:
     # jurisdiction_requirements is a global repository table (no company_id) —
     # every company can see the same governing-law text; tenant scoping isn't
     # meaningful here the way it is for the company's own compliance rows.
-    row = await conn.fetchrow("SELECT * FROM jurisdiction_requirements WHERE id = $1", req_id)
+    # status='active' — a Legal Pilot packet must never cite admin-staged
+    # research still awaiting review as settled law.
+    row = await conn.fetchrow(
+        "SELECT * FROM jurisdiction_requirements WHERE id = $1 AND status = 'active'", req_id
+    )
     return dict(row) if row else None
 
 

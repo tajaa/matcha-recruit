@@ -312,7 +312,7 @@ async def generate_policy_draft_stream(
 
             # Load requirements
             reqs = await conn.fetch(
-                "SELECT * FROM jurisdiction_requirements WHERE jurisdiction_id = $1",
+                "SELECT * FROM jurisdiction_requirements WHERE jurisdiction_id = $1 AND status = 'active'",
                 jurisdiction_id,
             )
 

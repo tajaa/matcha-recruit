@@ -335,6 +335,7 @@ async def generate_poster_pdf(conn, jurisdiction_id: UUID) -> dict:
         SELECT title, description, current_value, effective_date, category
         FROM jurisdiction_requirements
         WHERE jurisdiction_id = $1
+          AND status = 'active'
           AND category = ANY($2)
         ORDER BY category, title
         """,
@@ -462,6 +463,7 @@ async def check_and_regenerate_poster(conn, jurisdiction_id: UUID) -> Optional[d
         SELECT EXISTS(
             SELECT 1 FROM jurisdiction_requirements
             WHERE jurisdiction_id = $1
+              AND status = 'active'
               AND category = ANY($2)
         )
         """,
@@ -488,6 +490,7 @@ async def check_and_regenerate_poster(conn, jurisdiction_id: UUID) -> Optional[d
             SELECT EXISTS(
                 SELECT 1 FROM jurisdiction_requirements
                 WHERE jurisdiction_id = $1
+                  AND status = 'active'
                   AND category = ANY($2)
                   AND last_changed_at > $3
             )
@@ -567,7 +570,8 @@ async def generate_all_missing_posters(conn) -> dict:
         SELECT DISTINCT jr.jurisdiction_id
         FROM jurisdiction_requirements jr
         LEFT JOIN poster_templates pt ON pt.jurisdiction_id = jr.jurisdiction_id
-        WHERE jr.category = ANY($1)
+        WHERE jr.status = 'active'
+          AND jr.category = ANY($1)
           AND pt.id IS NULL
         """,
         POSTER_CATEGORIES,

@@ -222,6 +222,7 @@ class LeaveEligibilityService:
                    FROM jurisdiction_requirements jr
                    JOIN jurisdictions j ON jr.jurisdiction_id = j.id
                    WHERE j.state = $1 AND j.city = ''
+                     AND jr.status = 'active'
                      AND jr.category = 'leave'
                    ORDER BY jr.requirement_key""",
                 work_state,

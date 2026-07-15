@@ -191,7 +191,7 @@ async def apply_government_sources(
         result["superseded"] = superseded
 
         count = await conn.fetchval(
-            "SELECT COUNT(*) FROM jurisdiction_requirements WHERE jurisdiction_id = $1",
+            "SELECT COUNT(*) FROM jurisdiction_requirements WHERE jurisdiction_id = $1 AND status = 'active'",
             jurisdiction_id,
         )
         await conn.execute(

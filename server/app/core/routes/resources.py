@@ -1349,7 +1349,8 @@ async def list_state_guides(current_user: CurrentUser = Depends(require_client))
             """
             SELECT j.state, COUNT(jr.id) AS req_count, MAX(jr.last_verified_at) AS last_verified
             FROM jurisdictions j
-            LEFT JOIN jurisdiction_requirements jr ON jr.jurisdiction_id = j.id
+            LEFT JOIN jurisdiction_requirements jr
+                ON jr.jurisdiction_id = j.id AND jr.status = 'active'
             WHERE j.country_code = 'US' AND j.level = 'state'
             GROUP BY j.state
             HAVING COUNT(jr.id) > 0
@@ -1539,7 +1540,7 @@ async def get_state_guide(slug: str, current_user: CurrentUser = Depends(require
             """
             SELECT category, title, current_value
             FROM jurisdiction_requirements
-            WHERE jurisdiction_id = $1
+            WHERE jurisdiction_id = $1 AND status = 'active'
             ORDER BY category, COALESCE(sort_order, 9999), title
             """,
             jurisdiction["id"],

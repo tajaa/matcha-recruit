@@ -1380,18 +1380,20 @@ def _parse_jsonb_list(value: Any) -> Optional[List[Dict]]:
 async def _load_jurisdiction_requirements(conn, jurisdiction_id: UUID) -> List[Dict]:
     """Read requirements from the jurisdiction repository.
 
-    Excludes 'under_review' (grounding-quarantined) and 'repealed' (an admin
-    reviewed the quarantined value and confirmed it WRONG) rows — the single
-    choke point every tenant-sync and gap-detection caller goes through. A
-    quarantined row reads as a gap (triggers re-research, and a re-research
+    Excludes 'under_review' (grounding-quarantined), 'repealed' (an admin
+    reviewed the quarantined value and confirmed it WRONG), and 'pending'
+    (admin-queued research staged for review — not yet approved) rows — the
+    single choke point every tenant-sync and gap-detection caller goes through.
+    A quarantined row reads as a gap (triggers re-research, and a re-research
     that passes grounding promotes it back to active) rather than as
     served/covered — never silently surfaced to a tenant, never silently
     treated as permanently missing either. A rejected row must obviously never
-    be served: it is a known-wrong value kept only as an audit trail.
+    be served: it is a known-wrong value kept only as an audit trail. A pending
+    row reads as a gap too, on purpose — it exists, but nobody approved it yet.
     """
     rows = await conn.fetch(
         "SELECT * FROM jurisdiction_requirements "
-        "WHERE jurisdiction_id = $1 AND status NOT IN ('under_review', 'repealed')",
+        "WHERE jurisdiction_id = $1 AND status NOT IN ('under_review', 'repealed', 'pending')",
         jurisdiction_id,
     )
     # Carry the catalog row id under an explicit key so the per-location sync can
@@ -1963,7 +1965,7 @@ async def _upsert_jurisdiction_requirements_routed(
 
 async def _upsert_requirements_routed_additive(
     conn, leaf_jurisdiction_id: UUID, reqs: List[Dict], *,
-    research_source: Optional[str] = None,
+    research_source: Optional[str] = None, initial_status: str = "active",
 ) -> Dict[str, Dict[str, Any]]:
     """Route each requirement to the jurisdiction its stamped level belongs on.
 
@@ -2011,7 +2013,8 @@ async def _upsert_requirements_routed_additive(
             outcome[level] = {"jurisdiction_id": None, "written": 0}
             continue
         await _upsert_requirements_additive(
-            conn, target_jid, group_reqs, research_source=research_source
+            conn, target_jid, group_reqs, research_source=research_source,
+            initial_status=initial_status,
         )
         affected.add(target_jid)
         prev = outcome.get(level)
@@ -2033,7 +2036,7 @@ async def _upsert_requirements_routed_additive(
 
 async def _upsert_requirements_additive(
     conn, jurisdiction_id: UUID, reqs: List[Dict], *, research_source: Optional[str] = None,
-    source_tier: Optional[str] = None,
+    source_tier: Optional[str] = None, initial_status: str = "active",
 ):
     """Upsert requirements to a jurisdiction without deleting existing rows.
 
@@ -2044,6 +2047,14 @@ async def _upsert_requirements_additive(
         "claude_skill" – Claude compliance skill
         "structured"   – Tier-1 structured data (CSV/scrape)
         "manual"       – Admin manual edit
+
+    initial_status: status a brand-new row is INSERTed with — 'active' (default,
+    every existing caller) or 'pending' (admin-queued research staged for
+    review; invisible to tenants until POST /admin/research-review/approve).
+    Only affects the INSERT branch. The ON CONFLICT UPDATE's status CASE is
+    untouched: a staged write must never demote an already-active row, and a
+    grounding failure still wins over staging (lands 'under_review', the
+    existing quarantine surface) — simpler than a three-way state machine.
     """
     # ── Data integrity pipeline ──
     for req in reqs:
@@ -2165,7 +2176,7 @@ async def _upsert_requirements_additive(
                     CASE WHEN $25::text IS NOT NULL THEN NOW() ELSE NULL END,
                     CASE WHEN $26::text = 'under_review'
                          THEN 'under_review'::requirement_status_enum
-                         ELSE 'active'::requirement_status_enum END)
+                         ELSE $28::requirement_status_enum END)
             ON CONFLICT (jurisdiction_id, requirement_key) DO UPDATE SET
                 category = EXCLUDED.category,
                 rate_type = EXCLUDED.rate_type,
@@ -2289,6 +2300,7 @@ async def _upsert_requirements_additive(
             req.get("source_url_status"),  # $25: liveness flag from _validate_source_urls
             req_status,             # $26: grounding verdict — 'under_review' | 'promote' | 'none'
             uncategorized_id,       # $27: drift-park sentinel — never downgrades an existing tag
+            initial_status,         # $28: INSERT-only status for brand-new rows — 'active' | 'pending'
         )
 
 
@@ -10046,6 +10058,7 @@ async def research_specialization_for_jurisdiction(
     citation_index: Optional[Dict[str, Any]] = None,
     route_by_level: bool = False,
     only_levels: Optional[set] = None,
+    initial_status: str = "active",
 ) -> Dict[str, Any]:
     """Research specialization-specific categories for a jurisdiction.
 
@@ -10183,7 +10196,8 @@ async def research_specialization_for_jurisdiction(
     async def _write(rows: List[Dict[str, Any]], *, research_source: str) -> None:
         if route_by_level:
             outcome = await _upsert_requirements_routed_additive(
-                conn, jurisdiction_id, rows, research_source=research_source
+                conn, jurisdiction_id, rows, research_source=research_source,
+                initial_status=initial_status,
             )
             for level, info in outcome.items():
                 written_by_level[level] = written_by_level.get(level, 0) + info["written"]
@@ -10191,7 +10205,8 @@ async def research_specialization_for_jurisdiction(
                     jurisdictions_written.add(info["jurisdiction_id"])
         else:
             await _upsert_requirements_additive(
-                conn, jurisdiction_id, rows, research_source=research_source
+                conn, jurisdiction_id, rows, research_source=research_source,
+                initial_status=initial_status,
             )
             jurisdictions_written.add(jurisdiction_id)
             for r in rows:

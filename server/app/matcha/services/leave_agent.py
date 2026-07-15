@@ -857,6 +857,7 @@ class LeaveAgent:
                     FROM jurisdiction_requirements jr
                     JOIN jurisdictions j ON jr.jurisdiction_id = j.id
                     WHERE j.state = $1 AND j.city = ''
+                      AND jr.status = 'active'
                       AND jr.category = 'leave'
                     """,
                     leave["work_state"].upper(),

@@ -1455,6 +1455,7 @@ async def _fetch_state_requirements(
             FROM jurisdiction_requirements jr
             JOIN jurisdictions j ON j.id = jr.jurisdiction_id
             WHERE j.state = ANY($1::varchar[])
+              AND jr.status = 'active'
               AND (
                 jr.category = ANY($2::varchar[])
                 OR jr.title ILIKE ANY($3::text[])

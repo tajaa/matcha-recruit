@@ -495,6 +495,8 @@ async def fill(
     plan: List[Tuple[UUID, str, List[Tuple[UUID, str]]]],
     industry_tag: str,
     research_context: str,
+    *,
+    initial_status: str = "active",
 ) -> AsyncGenerator[Dict[str, Any], None]:
     """Run the research plan and record each cell's verdict.
 
@@ -503,6 +505,11 @@ async def fill(
     missing cells' levels, and `route_by_level=True` files each returned row on
     the node its stamped level belongs to. Cell verdicts come from
     ``written_by_level`` — what actually landed, never the pre-route count.
+
+    ``initial_status``: forwarded to the write path — 'active' (default, the
+    sweep) or 'pending' (an admin-triggered run staged for review; ledger cells
+    still mark covered/empty/failed as usual — a reject flips them to 'failed'
+    so plan_fill retries, since backfill_ledger only counts active rows).
 
     Yields one event per plan entry: {leaf_id, category, nodes, new, deduped,
     failed}.
@@ -560,6 +567,7 @@ async def fill(
                     citation_index=citation_index,
                     route_by_level=True,
                     only_levels=owned_levels,
+                    initial_status=initial_status,
                 )
 
                 # Verdicts on the SAME connection, immediately: a fresh acquire

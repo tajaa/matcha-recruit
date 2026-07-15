@@ -246,7 +246,8 @@ async def check_location_compliance_endpoint(
             """
             SELECT r.category
             FROM business_locations bl
-            LEFT JOIN jurisdiction_requirements r ON r.jurisdiction_id = bl.jurisdiction_id
+            LEFT JOIN jurisdiction_requirements r
+                ON r.jurisdiction_id = bl.jurisdiction_id AND r.status = 'active'
             WHERE bl.id = $1
             """,
             loc_uuid,
