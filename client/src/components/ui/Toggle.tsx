@@ -2,9 +2,16 @@ type ToggleProps = {
   checked: boolean
   onChange: (checked: boolean) => void
   disabled?: boolean
+  size?: 'md' | 'sm'
 }
 
-export function Toggle({ checked, onChange, disabled }: ToggleProps) {
+const SIZES = {
+  md: { track: 'h-5 w-9', knob: 'h-4 w-4', on: 'translate-x-4' },
+  sm: { track: 'h-4 w-7', knob: 'h-3 w-3', on: 'translate-x-3' },
+} as const
+
+export function Toggle({ checked, onChange, disabled, size = 'md' }: ToggleProps) {
+  const s = SIZES[size]
   return (
     <button
       type="button"
@@ -12,13 +19,13 @@ export function Toggle({ checked, onChange, disabled }: ToggleProps) {
       aria-checked={checked}
       disabled={disabled}
       onClick={() => onChange(!checked)}
-      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-        checked ? 'bg-zinc-600' : 'bg-zinc-700'
+      className={`relative inline-flex ${s.track} shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+        checked ? 'bg-emerald-600' : 'bg-zinc-700'
       }`}
     >
       <span
-        className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${
-          checked ? 'translate-x-4' : 'translate-x-0'
+        className={`pointer-events-none inline-block ${s.knob} rounded-full bg-white shadow-sm transition-transform ${
+          checked ? s.on : 'translate-x-0'
         }`}
       />
     </button>
