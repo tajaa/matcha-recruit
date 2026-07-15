@@ -352,6 +352,24 @@ cd server && python3 -m pytest tests/ -v
 - Before modifying any function, component, or class, you MUST identify and read all files that import or depend on it.
 - If a task involves data fetching, database schemas, or global state, you are required to load the entire schema and all relevant model files into your context *before* proposing or executing changes.
 
+## Session cost hygiene
+
+Keep per-session cost down — these are standing rules, follow them without being re-asked.
+
+### Subagents (biggest cost driver)
+- Spawn deliberately, not reflexively. One well-scoped query beats 3 parallel scouts.
+- Don't spawn an Explore/search agent for a single-file lookup — use Grep/Read inline.
+- A subagent should return the conclusion, not raw file dumps.
+
+### Context size
+- On a task switch, tell the user to `/clear`; mid-large-task, suggest `/compact`.
+- Don't re-read files already read this session (the harness tracks file state).
+- Keep reads scoped — pull the function/section needed, not the whole schema, unless the Code Modification Rules above require the full load.
+
+### Long / loop / background sessions
+- `/loop` and background agents: set an explicit stop condition — never leave one idle-running.
+- Kill background agents when their work is done.
+
 ## Cloud / background sessions — code + PR only, never build/deploy
 
 When run via the desktop app's cloud/background agent (branch prefix `claude/…`) for tasks like "review X and apply fixes": scope ends at **commit + open PR**. Never run `./scripts/build-and-push.sh`, `docker build`, `gh workflow run`, or otherwise trigger CI/deploy — the user reviews and merges by hand later, often after a token-window reset. `.github/workflows/deploy.yml`'s `build-and-push` job already skips for `claude/*` branches (`if: ${{ !startsWith(github.head_ref, 'claude/') }}`) so PRs from these sessions don't get auto-built either — don't undo that.
