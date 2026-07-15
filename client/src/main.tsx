@@ -7,10 +7,12 @@ import { ErrorBoundary } from './components/ErrorBoundary'
 import { installErrorReporter } from './api/errorReporter'
 import { installUsageTracker } from './lib/usageTracker'
 import { reloadForStaleChunk } from './utils/staleChunk'
+import { applyTheme, getTheme } from './utils/theme'
 import './index.css'
 
 installErrorReporter()
 installUsageTracker()
+applyTheme(getTheme())
 
 // Stale-chunk recovery: after a deploy, hashed chunks from the previous build
 // 404 for tabs that loaded the old index ("Failed to fetch dynamically

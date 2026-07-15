@@ -8,6 +8,7 @@ import { useMe } from '../hooks/useMe'
 import { resetAuthCaches } from '../api/authReset'
 import { disconnectSharedChannelSocket } from '../api/channelSocket'
 import { useLayoutContext } from '../layouts/LayoutContext'
+import ThemeToggle from './ThemeToggle'
 
 export type NavItem = {
   to: string
@@ -162,7 +163,7 @@ function NavGroupSection({ group, location, collapsed }: { group: NavGroup; loca
   )
 }
 
-export default function SidebarShell({ logoTo, logoLabel, nav, user, upgradeFooter, footerSlot }: SidebarShellProps) {
+export default function SidebarShell({ logoTo, logoLabel, nav, user, upgradeFooter, footerSlot = <ThemeToggle /> }: SidebarShellProps) {
   const navigate = useNavigate()
   const location = useLocation()
   const { hasTopNav, sidebarCollapsed } = useLayoutContext()

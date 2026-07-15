@@ -1,6 +1,4 @@
-import { useEffect } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
-import { applyBrokerTheme, getBrokerTheme, clearBrokerThemeAttr } from '../utils/brokerTheme'
 import RequireRole from '../components/auth/RequireRole'
 import AppLayout from '../layouts/AppLayout'
 import BrokerSidebar from '../components/BrokerSidebar'
@@ -16,13 +14,6 @@ import BrokerExternalClientDetail from '../pages/broker/BrokerExternalClientDeta
 import BrokerPilot from '../pages/broker/BrokerPilot'
 
 export default function BrokerRoutes() {
-  // Apply the broker light/dark preference for the lifetime of any /broker route;
-  // clear it on unmount so other surfaces stay dark.
-  useEffect(() => {
-    applyBrokerTheme(getBrokerTheme())
-    return () => clearBrokerThemeAttr()
-  }, [])
-
   return (
     <RequireRole roles={['broker', 'admin']}>
       <Routes>

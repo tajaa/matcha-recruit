@@ -1,17 +1,17 @@
 import { useState } from 'react'
 import { Sun, Moon } from 'lucide-react'
 import { useLayoutContext } from '../layouts/LayoutContext'
-import { getBrokerTheme, setBrokerTheme, type BrokerTheme } from '../utils/brokerTheme'
+import { getTheme, setTheme, type AppTheme } from '../utils/theme'
 
-/** Dark ⇄ light switch for the Broker Portal. Lives in the sidebar footer. */
-export default function BrokerThemeToggle() {
+/** Dark ⇄ light switch. Lives in every sidebar footer (SidebarShell default). */
+export default function ThemeToggle() {
   const { sidebarCollapsed } = useLayoutContext()
-  const [theme, setTheme] = useState<BrokerTheme>(getBrokerTheme())
+  const [theme, setThemeState] = useState<AppTheme>(getTheme())
 
   function toggle() {
-    const next: BrokerTheme = theme === 'dark' ? 'light' : 'dark'
+    const next: AppTheme = theme === 'dark' ? 'light' : 'dark'
+    setThemeState(next)
     setTheme(next)
-    setBrokerTheme(next)
   }
 
   const Icon = theme === 'dark' ? Sun : Moon
