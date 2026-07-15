@@ -10343,6 +10343,197 @@ async def codify_requirement(
     return result
 
 
+@router.get("/studio/worklist", dependencies=[Depends(require_admin)])
+async def get_studio_worklist():
+    """One aggregate call powering the Compliance Studio Command Center.
+
+    Merges BOTH funnels — demand (coverage requests → research → review →
+    approve → codify) and supply (ingest → classify → confirm → reconcile) —
+    into one prioritized action list, so the admin sees "what needs me now"
+    instead of hunting across tabs. Reuses the existing per-source handlers/
+    queries verbatim; this adds no new funnel logic, only aggregation +
+    priority ordering (closest to AUTHORITATIVE first).
+    """
+    review = await get_research_review()
+    pending = await get_pending_research()
+    research_queue = await get_research_queue()
+
+    async with get_connection() as conn:
+        meters_row = await conn.fetchrow(
+            "SELECT COUNT(*) FILTER (WHERE COALESCE(status, 'active') = 'active') AS requirements, "
+            "COUNT(*) FILTER (WHERE COALESCE(status, 'active') = 'active' "
+            "AND citation_verified_at IS NOT NULL) AS codified "
+            "FROM jurisdiction_requirements"
+        )
+
+        # Active rows that went live but carry no verified statute citation —
+        # the codify backlog. Split into auto_reconcilable (a confirmed
+        # authority classification already exists for the key — one global
+        # `POST /admin/scope-registry/reconcile` clears these) vs manual (no
+        # classification yet — the real Codify-modal backlog). Same predicate
+        # `reconcile_codifications` matches on (codify.py).
+        uncodified_rows = await conn.fetch(
+            """
+            SELECT r.id, r.title, r.regulation_key, r.description, r.current_value,
+                   r.source_url, r.source_name, r.created_at,
+                   UPPER(j.state) AS state, LOWER(j.city) AS city,
+                   EXISTS (
+                       SELECT 1 FROM authority_item_classifications c
+                       WHERE c.status = 'confirmed' AND c.disposition <> 'excluded'
+                         AND c.regulation_key = r.regulation_key
+                   ) AS auto_reconcilable
+            FROM jurisdiction_requirements r
+            JOIN jurisdictions j ON j.id = r.jurisdiction_id
+            WHERE COALESCE(r.status, 'active') = 'active'
+              AND r.regulation_key IS NOT NULL
+              AND r.citation_verified_at IS NULL
+            ORDER BY r.created_at DESC
+            """
+        )
+
+        drift_open = await conn.fetchval(
+            "SELECT COUNT(*) FROM authority_index_drift WHERE status = 'open'"
+        ) or 0
+
+        authority_indexes = await conn.fetch(
+            "SELECT slug, name, unclassified_count FROM authority_indexes "
+            "WHERE unclassified_count > 0 ORDER BY unclassified_count DESC"
+        )
+
+    manual_rows = [r for r in uncodified_rows if not r["auto_reconcilable"]]
+    auto_count = len(uncodified_rows) - len(manual_rows)
+
+    review_count = sum(len(g["rows"]) for g in review["groups"])
+    pending_count = len(pending["items"])
+    baseline_needs = [r for r in research_queue if r["status"] == "needs_research"]
+    confirm_total = sum(int(ix["unclassified_count"] or 0) for ix in authority_indexes)
+
+    actions: list = []
+    if review_count:
+        actions.append({
+            "kind": "review_staged", "priority": 1, "count": review_count,
+            "groups": review["groups"],
+        })
+    if manual_rows or auto_count:
+        actions.append({
+            "kind": "codify_uncodified", "priority": 2, "count": len(manual_rows),
+            "auto_reconcilable": auto_count,
+            "items": [{
+                "id": str(r["id"]), "title": r["title"], "regulation_key": r["regulation_key"],
+                "description": r["description"], "current_value": r["current_value"],
+                "source_url": r["source_url"], "source_name": r["source_name"],
+                "state": r["state"], "city": r["city"],
+            } for r in manual_rows[:50]],
+        })
+    if pending_count:
+        actions.append({
+            "kind": "research_coverage", "priority": 3, "count": pending_count,
+            "items": pending["items"][:50],
+        })
+    if confirm_total:
+        actions.append({
+            "kind": "confirm_authority", "priority": 4, "count": confirm_total,
+            "by_index": [{"slug": ix["slug"], "name": ix["name"],
+                          "unclassified_count": ix["unclassified_count"]} for ix in authority_indexes],
+        })
+    if drift_open:
+        actions.append({"kind": "ack_drift", "priority": 5, "count": int(drift_open)})
+    if baseline_needs:
+        actions.append({
+            "kind": "research_baseline", "priority": 6, "count": len(baseline_needs),
+            "items": baseline_needs[:50],
+        })
+
+    open_items = sum(a["count"] for a in actions)
+
+    return {
+        "meters": {
+            "codified": int(meters_row["codified"] or 0),
+            "requirements": int(meters_row["requirements"] or 0),
+            "open_items": open_items,
+        },
+        "actions": actions,
+    }
+
+
+class StudioAssistantRequest(BaseModel):
+    question: str
+    worklist: Optional[Dict[str, Any]] = None
+
+
+@router.post("/studio/assistant", dependencies=[Depends(require_admin)])
+async def studio_assistant(body: StudioAssistantRequest):
+    """Read-only guide over the Compliance Studio worklist. Explains the system
+    (codify = verified statute citation = authoritative; scope = exhaustive) and
+    tells the admin what needs attention and why, grounded on the live worklist
+    snapshot the client sends. NO tool calls, NO mutations — every real action
+    still goes through its existing endpoint; this only narrates + points.
+    """
+    import os
+    from google import genai
+    from google.genai import types as genai_types
+    from ..services.rate_limiter import get_rate_limiter, RateLimitExceeded
+    from ..services.gemini_compliance import DEFAULT_LITE_MODEL
+
+    limiter = get_rate_limiter()
+    try:
+        await limiter.check_limit("studio_assistant")
+    except RateLimitExceeded as exc:
+        raise HTTPException(status_code=429, detail=str(exc))
+
+    # Low-stakes narration call — always flash-lite, independent of the
+    # configured research-model tier (that governs the heavier research runs).
+    model = DEFAULT_LITE_MODEL
+
+    system_prompt = (
+        "You are a read-only guide inside Matcha's Compliance Studio, an internal "
+        "admin tool. The mission: grow the most authoritative compliance library "
+        "anywhere, via two funnels into one repository. SUPPLY funnel: scope a "
+        "regulation -> ingest the authority source -> classify -> confirm -> "
+        "research a value -> codify. DEMAND funnel: a company onboards -> triggers "
+        "a coverage gap -> the gap becomes a coverage request -> research runs -> "
+        "the result is staged for review -> an admin approves it (goes live) -> "
+        "codify (a verified statute citation is attached). CODIFIED means the row "
+        "has a verified statute citation -- that is what makes the data "
+        "AUTHORITATIVE. Businesses rely on this to know they are compliant. "
+        "SCOPING is the exhaustiveness check -- are we covering everything a "
+        "business in a given industry/jurisdiction needs. "
+        "You are given the CURRENT worklist as JSON -- a prioritized action list "
+        "(review_staged, codify_uncodified, research_coverage, confirm_authority, "
+        "ack_drift, research_baseline) each with a count. Answer the admin's "
+        "question using ONLY this data -- do not invent counts or claim you did "
+        "something. You cannot perform any action; you can only explain what an "
+        "action kind means, why it matters, and which one to do next (usually the "
+        "lowest 'priority' number with count > 0 -- review_staged and "
+        "codify_uncodified are closest to making data authoritative). Be concise, "
+        "plain English, 2-4 sentences unless asked to elaborate."
+    )
+    worklist_json = json.dumps(body.worklist or {}, default=str)
+    prompt = f"{system_prompt}\n\nCurrent worklist:\n{worklist_json}\n\nAdmin question: {body.question}"
+
+    async def event_stream():
+        try:
+            api_key = os.getenv("GEMINI_API_KEY") or get_settings().gemini_api_key
+            if not api_key:
+                yield f"data: {json.dumps({'type': 'error', 'message': 'Gemini not configured'})}\n\n"
+                yield "data: [DONE]\n\n"
+                return
+            client = genai.Client(api_key=api_key)
+            await limiter.record_call("studio_assistant")
+            response = await client.aio.models.generate_content_stream(
+                model=model, contents=prompt,
+                config=genai_types.GenerateContentConfig(temperature=0.3, max_output_tokens=800),
+            )
+            async for chunk in response:
+                if chunk.text:
+                    yield f"data: {json.dumps({'type': 'content', 'text': chunk.text})}\n\n"
+        except Exception as exc:
+            yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
 async def _publish_vertical_to_company(company_id: UUID) -> None:
     """Reproject a company's tabs from the catalog + email its admins that new
     specialty requirements landed. Pooled-conn analog of the sweep's post-fill

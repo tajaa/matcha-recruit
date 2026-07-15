@@ -1,4 +1,4 @@
-import { Building2, ToggleRight, Settings, Globe, FileText, Briefcase, ShieldCheck, Mail, Image as ImageIcon, Activity, AlertOctagon, AlertTriangle, BarChart3, BookOpen, Users, Sparkles, Leaf, Calculator, HeartHandshake, LayoutTemplate, Rocket, Database, Layers } from 'lucide-react'
+import { Building2, ToggleRight, Settings, FileText, Briefcase, ShieldCheck, Mail, Image as ImageIcon, Activity, AlertOctagon, AlertTriangle, BarChart3, BookOpen, Users, Sparkles, Leaf, Calculator, HeartHandshake, LayoutTemplate, Rocket, Database, Cog } from 'lucide-react'
 import SidebarShell, { type NavGroup } from './SidebarShell'
 
 // Grouped master-admin nav. SidebarShell renders each group as a collapsible
@@ -38,11 +38,11 @@ const nav: NavGroup[] = [
     label: 'Compliance Data',
     items: [
       { to: '/admin/compliance-mgmt', icon: ShieldCheck, label: 'Compliance Mgmt' },
-      { to: '/admin/jurisdictions', icon: Globe, label: 'Jurisdictions' },
+      { to: '/admin/studio', icon: Sparkles, label: 'Compliance Studio' },
       { to: '/admin/jurisdiction-data', icon: BookOpen, label: 'Compliance Library' },
       { to: '/admin/payer-data', icon: FileText, label: 'Payer Data' },
-      { to: '/admin/scope-studio', icon: Layers, label: 'Scope Studio' },
       { to: '/admin/wc-rate-data', icon: Database, label: 'WC Rate Data' },
+      { to: '/admin/automation', icon: Cog, label: 'Automation' },
     ],
   },
   {
