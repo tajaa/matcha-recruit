@@ -9336,6 +9336,106 @@ async def list_jurisdiction_requests(
         ]
 
 
+@router.get("/pending-research", dependencies=[Depends(require_admin)])
+async def get_pending_research():
+    """Unified admin view of everything Matcha is still researching, across
+    BOTH mechanisms — real catalog gaps (`jurisdiction_coverage_requests`) and
+    industry-specialty ledger to-dos (dental, etc. — `jurisdiction_vertical_coverage`,
+    only surfaced here, never as its own table row). Same data the tenant-facing
+    "we're working on it" panel reads from, so what an admin sees here should
+    match what a business sees on their Compliance page.
+    """
+    from ..services import vertical_coverage
+
+    async with get_connection() as conn:
+        cat_rows = await conn.fetch(
+            """
+            SELECT jcr.id, jcr.city, jcr.state, jcr.county, jcr.status,
+                   jcr.admin_notes, jcr.created_at, jcr.location_id,
+                   c.name AS company_name,
+                   COALESCE(emp_count.cnt, 0) AS employee_count
+            FROM jurisdiction_coverage_requests jcr
+            JOIN companies c ON c.id = jcr.requested_by_company_id
+            LEFT JOIN LATERAL (
+                SELECT COUNT(*) AS cnt FROM employees e
+                WHERE e.work_location_id = jcr.location_id AND e.termination_date IS NULL
+            ) emp_count ON true
+            WHERE jcr.status IN ('pending', 'in_progress')
+            ORDER BY jcr.created_at DESC
+            """
+        )
+        category = [
+            {
+                "id": str(r["id"]),
+                "type": "category",
+                "city": r["city"],
+                "state": r["state"],
+                "county": r["county"],
+                "status": r["status"],
+                "company_name": r["company_name"],
+                "employee_count": r["employee_count"],
+                "note": r["admin_notes"],
+                "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+            }
+            for r in cat_rows
+        ]
+
+        # Vertical ledger to-dos, per company. No table row exists for these —
+        # computed live off the same pure-SQL path the wizard/panel use. Capped
+        # at the companies with an active location, which bounds this to real
+        # tenants (not every row in the DB).
+        vertical: List[dict] = []
+        comp_rows = await conn.fetch(
+            """
+            SELECT DISTINCT c.id, c.name
+            FROM companies c
+            JOIN business_locations bl ON bl.company_id = c.id AND bl.is_active = true
+            ORDER BY c.name
+            LIMIT 200
+            """
+        )
+        for comp in comp_rows:
+            try:
+                resolved = await vertical_coverage.resolve_vertical(conn, comp["id"])
+                if not resolved:
+                    continue
+                _parent, _slug, v_label, v_tag, _minted = resolved
+                cat_slugs = [
+                    r["slug"] for r in await conn.fetch(
+                        "SELECT slug FROM compliance_categories WHERE industry_tag = $1",
+                        v_tag,
+                    )
+                ]
+                if not cat_slugs:
+                    continue
+                leaf_rows = await conn.fetch(
+                    "SELECT jurisdiction_id, city, state FROM business_locations "
+                    "WHERE company_id = $1 AND is_active = true AND jurisdiction_id IS NOT NULL",
+                    comp["id"],
+                )
+                if not leaf_rows:
+                    continue
+                leaf_ids = [r["jurisdiction_id"] for r in leaf_rows]
+                leaf_chains = await vertical_coverage.chains_for_leaves(conn, leaf_ids)
+                plan, _deferred = await vertical_coverage.plan_fill(
+                    conn, leaf_chains, v_tag, cat_slugs
+                )
+                if plan:
+                    jurisdictions = sorted({f"{r['city']}, {r['state']}" for r in leaf_rows})
+                    vertical.append({
+                        "type": "vertical",
+                        "company_id": str(comp["id"]),
+                        "company_name": comp["name"],
+                        "label": v_label,
+                        "areas": len(plan),
+                        "jurisdictions": jurisdictions,
+                    })
+            except Exception as exc:
+                logger.warning("pending-research: vertical scan failed for %s: %s", comp["id"], exc)
+
+    return {"category": category, "vertical": vertical}
+
+
 @router.post("/jurisdiction-requests/{request_id}/process")
 async def process_jurisdiction_request(
     request_id: UUID,

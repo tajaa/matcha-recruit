@@ -1,7 +1,9 @@
 import { useEffect, useState, useCallback } from 'react'
 import type { FormEvent } from 'react'
+import { ChevronDown, Globe2 } from 'lucide-react'
 import { api, authStreamHeaders } from '../../api/client'
 import { Button, Input, Modal } from '../../components/ui'
+import { LABEL } from '../../components/ui/typography'
 import JurisdictionDetailPanel from '../../components/admin/JurisdictionDetailPanel'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -51,6 +53,15 @@ type CoverageRequest = {
   employee_count: number
   admin_notes: string | null
   created_at: string | null
+}
+
+type VerticalPending = {
+  type: 'vertical'
+  company_id: string
+  company_name: string
+  label: string
+  areas: number
+  jurisdictions: string[]
 }
 
 type ActivityLog = {
@@ -116,9 +127,11 @@ export default function Jurisdictions() {
   const [researchingId, setResearchingId] = useState<string | null>(null)
   const [researchMessages, setResearchMessages] = useState<string[]>([])
 
-  // Coverage requests
+  // Coverage requests (category gaps + industry-specialty vertical to-dos)
   const [requests, setRequests] = useState<CoverageRequest[]>([])
+  const [verticalPending, setVerticalPending] = useState<VerticalPending[]>([])
   const [loadingRequests, setLoadingRequests] = useState(false)
+  const [openIds, setOpenIds] = useState<Set<string>>(new Set())
 
   // Activity
   const [activity, setActivity] = useState<ActivityLog[]>([])
@@ -154,8 +167,11 @@ export default function Jurisdictions() {
 
   const fetchRequests = useCallback(async () => {
     setLoadingRequests(true)
-    try { setRequests(await api.get<CoverageRequest[]>('/admin/jurisdiction-requests?status=pending')) }
-    catch { setRequests([]) }
+    try {
+      const res = await api.get<{ category: CoverageRequest[]; vertical: VerticalPending[] }>('/admin/pending-research')
+      setRequests(res.category)
+      setVerticalPending(res.vertical)
+    } catch { setRequests([]); setVerticalPending([]) }
     finally { setLoadingRequests(false) }
   }, [])
 
@@ -299,7 +315,7 @@ export default function Jurisdictions() {
   })
   const selectedJurisdiction = jurisdictions.find((j) => j.id === selectedId) ?? null
   const needsResearchCount = researchQueue.filter((r) => r.status === 'needs_research').length
-  const pendingRequestCount = requests.filter((r) => r.status === 'pending').length
+  const pendingRequestCount = requests.filter((r) => r.status === 'pending').length + verticalPending.length
 
   const tabItems: { id: Tab; label: string; count?: number }[] = [
     { id: 'jurisdictions', label: 'Jurisdictions', count: jurisdictions.length },
@@ -309,15 +325,24 @@ export default function Jurisdictions() {
     { id: 'jobs', label: 'Scheduled Jobs', count: schedulers.length || undefined },
   ]
 
+  const toggleOpen = (id: string) => {
+    setOpenIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
   return (
-    <div>
+    <div className="flex h-[calc(100vh-7rem)] flex-col overflow-hidden rounded-xl border border-white/[0.06] bg-black">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-zinc-100">Jurisdictions</h1>
-          <p className="mt-1 text-sm text-zinc-500">Manage the jurisdiction registry — add, research, and remove entries.</p>
-        </div>
+      <div className="flex items-center justify-between border-b border-white/[0.06] px-4 py-3">
+        <h1 className="flex items-center gap-2 text-sm font-semibold text-zinc-100">
+          <Globe2 className="h-4 w-4 text-emerald-400" /> Jurisdictions
+        </h1>
         <div className="flex items-center gap-2">
+          <span className="hidden text-xs text-zinc-500 md:block">Manage the jurisdiction registry — add, research, and remove entries.</span>
           <Button variant="ghost" size="sm" disabled={topMetroRunning} onClick={handleRunTopMetros}>
             {topMetroRunning ? 'Running Top 15...' : 'Run Top 15 Metros'}
           </Button>
@@ -328,14 +353,36 @@ export default function Jurisdictions() {
         </div>
       </div>
 
+      {/* Stat bar */}
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-1 border-b border-white/[0.06] px-4 py-2 font-mono text-[11px] uppercase tracking-wide text-zinc-500">
+        <span>Jurisdictions <b className="text-zinc-100">{totals?.total_jurisdictions ?? '—'}</b></span>
+        <span>Requirements <b className="text-zinc-100">{totals?.total_requirements ?? '—'}</b></span>
+        <span className={needsResearchCount > 0 ? 'text-amber-400' : ''}>
+          Needs research <b>{needsResearchCount || '—'}</b>
+        </span>
+        <span className={pendingRequestCount > 0 ? 'text-amber-400' : ''}>
+          Researching for tenants <b>{pendingRequestCount || '—'}</b>
+        </span>
+      </div>
+
       {/* Tabs */}
-      <div className="flex items-center gap-1 mt-4 mb-5">
+      <div className="flex flex-wrap items-center gap-1 border-b border-white/[0.06] px-2 py-1.5">
         {tabItems.map((t) => (
-          <Button key={t.id} variant={tab === t.id ? 'secondary' : 'ghost'} size="sm" onClick={() => setTab(t.id)}>
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => setTab(t.id)}
+            className={`rounded px-2 py-1 font-mono text-[10px] uppercase tracking-wide transition-colors ${
+              tab === t.id ? 'bg-white/[0.06] text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'
+            }`}
+          >
             {t.label}{t.count !== undefined ? ` (${t.count})` : ''}
-          </Button>
+          </button>
         ))}
       </div>
+
+      {/* Scrolling body */}
+      <div className="flex-1 overflow-y-auto px-4 py-4">
 
       {/* Top metros SSE progress */}
       {topMetroRunning && topMetroMessages.length > 0 && (
@@ -499,51 +546,91 @@ export default function Jurisdictions() {
         </div>
       )}
 
-      {/* ── Coverage Requests ── */}
+      {/* ── Coverage Requests (category gaps + industry-specialty to-dos) ── */}
       {tab === 'coverage_requests' && (
         <div>
           <div className="flex items-center justify-between mb-2">
-            <h2 className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Pending Coverage Requests</h2>
+            <h2 className={LABEL}>Researching for tenants — newest first</h2>
             <Button variant="ghost" size="sm" onClick={fetchRequests}>Refresh</Button>
           </div>
 
           {loadingRequests ? (
             <p className="text-sm text-zinc-500">Loading...</p>
-          ) : requests.length === 0 ? (
-            <div className="border border-zinc-800 rounded-lg px-4 py-8 text-center">
-              <p className="text-sm text-zinc-600">No pending requests</p>
+          ) : requests.length === 0 && verticalPending.length === 0 ? (
+            <div className="border border-white/[0.06] rounded-lg px-4 py-8 text-center">
+              <p className="text-sm text-zinc-600">Nothing outstanding — every onboarded tenant is fully covered.</p>
             </div>
           ) : (
-            <div className="border border-zinc-800 rounded-lg divide-y divide-zinc-800/60">
-              {requests.map((req) => (
-                <div key={req.id} className="flex items-center gap-4 px-4 py-3">
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-zinc-200">
-                      {req.city}, {req.state}
-                      {req.county && <span className="text-zinc-500 ml-1.5">({req.county} County)</span>}
-                    </p>
-                    <div className="flex items-center gap-3 mt-0.5">
-                      <span className="text-[11px] text-zinc-500">{req.company_name}</span>
-                      <span className="text-[11px] text-zinc-600">·</span>
-                      <span className="text-[11px] text-zinc-500">{req.employee_count} employees</span>
-                      {req.created_at && (
-                        <>
-                          <span className="text-[11px] text-zinc-600">·</span>
-                          <span className="text-[11px] text-zinc-600">{fmtDate(req.created_at)}</span>
-                        </>
-                      )}
-                    </div>
-                    {req.admin_notes && (
-                      <p className="text-[11px] text-amber-500/80 mt-1 truncate">{req.admin_notes}</p>
+            <div className="border border-white/[0.06] rounded-lg overflow-hidden">
+              {requests.map((req) => {
+                const rowId = `cat-${req.id}`
+                const open = openIds.has(rowId)
+                return (
+                  <article key={rowId} className="border-b border-white/[0.06] last:border-b-0">
+                    <button type="button" onClick={() => toggleOpen(rowId)}
+                      className="flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-white/[0.02]">
+                      <ChevronDown className={`mt-1 h-4 w-4 shrink-0 text-zinc-600 transition-transform ${open ? 'rotate-0' : '-rotate-90'}`} />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-3 font-mono text-[10px] uppercase tracking-wide text-zinc-500">
+                          {req.created_at && <span className="tabular-nums">{fmtDate(req.created_at)}</span>}
+                          <span>Category gap</span>
+                        </div>
+                        <h3 className="mt-1 truncate text-[15px] font-semibold text-zinc-100">
+                          {req.city}, {req.state}{req.county && <span className="text-zinc-500 font-normal ml-1.5">({req.county} County)</span>}
+                        </h3>
+                        <p className="mt-0.5 truncate text-sm text-zinc-500">
+                          {req.company_name} · {req.employee_count} employee{req.employee_count === 1 ? '' : 's'}
+                        </p>
+                      </div>
+                    </button>
+                    {open && (
+                      <div className="px-4 pb-4 pl-11">
+                        {req.admin_notes && <p className="text-sm text-amber-200/80 leading-relaxed">{req.admin_notes}</p>}
+                        <div className="mt-3 flex items-center gap-2">
+                          <Button variant="secondary" size="sm" onClick={() => processRequest(req)}>Process</Button>
+                          <button type="button" onClick={() => dismissRequest(req.id)}
+                            className="text-xs text-zinc-600 hover:text-zinc-300 px-2 py-1 transition-colors">Dismiss</button>
+                        </div>
+                      </div>
                     )}
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <Button variant="secondary" size="sm" onClick={() => processRequest(req)}>Process</Button>
-                    <button type="button" onClick={() => dismissRequest(req.id)}
-                      className="text-xs text-zinc-600 hover:text-zinc-300 px-2 py-1 transition-colors">Dismiss</button>
-                  </div>
-                </div>
-              ))}
+                  </article>
+                )
+              })}
+              {verticalPending.map((v) => {
+                const rowId = `vert-${v.company_id}-${v.label}`
+                const open = openIds.has(rowId)
+                return (
+                  <article key={rowId} className="border-b border-white/[0.06] last:border-b-0">
+                    <button type="button" onClick={() => toggleOpen(rowId)}
+                      className="flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-white/[0.02]">
+                      <ChevronDown className={`mt-1 h-4 w-4 shrink-0 text-zinc-600 transition-transform ${open ? 'rotate-0' : '-rotate-90'}`} />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-3 font-mono text-[10px] uppercase tracking-wide text-zinc-500">
+                          <span>Specialty · {v.label}</span>
+                        </div>
+                        <h3 className="mt-1 truncate text-[15px] font-semibold text-zinc-100">
+                          {v.company_name}
+                        </h3>
+                        <p className="mt-0.5 truncate text-sm text-zinc-500">
+                          {v.areas} area{v.areas === 1 ? '' : 's'} · {v.jurisdictions.join(', ')}
+                        </p>
+                      </div>
+                    </button>
+                    {open && (
+                      <div className="px-4 pb-4 pl-11">
+                        <p className="text-sm text-zinc-400 leading-relaxed">
+                          Filled by the Vertical Coverage sweep — run it from the Scheduled Jobs tab
+                          to research these {v.label.toLowerCase()} areas. Once published, {v.company_name}'s
+                          tab auto-populates and their admin gets an email.
+                        </p>
+                        <div className="mt-3">
+                          <Button variant="secondary" size="sm" onClick={() => setTab('jobs')}>Go to Scheduled Jobs</Button>
+                        </div>
+                      </div>
+                    )}
+                  </article>
+                )
+              })}
             </div>
           )}
         </div>
@@ -644,6 +731,8 @@ export default function Jurisdictions() {
           )}
         </div>
       )}
+
+      </div>
 
       {/* Add Jurisdiction modal */}
       <Modal open={showAddForm} onClose={() => setShowAddForm(false)} title="Add Jurisdiction" width="sm">
