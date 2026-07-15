@@ -42,6 +42,8 @@ const DAYS_OPTIONS = [
   { value: '180', label: 'Last 180 days' },
 ]
 
+const THEME_SEVERITY_ORDER: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 }
+
 function formatLocationLabel(loc: LocationRow): string {
   const name = (loc.name || '').trim()
   const place = [loc.city, loc.state].filter(Boolean).join(', ')
@@ -163,6 +165,13 @@ export function IRRiskInsightsTab({ onNavigateIncident }: Props) {
   const assessment = useMemo(
     () => synthesizeAssessment(matrix, insights),
     [matrix, insights],
+  )
+
+  const sortedThemes = useMemo(
+    () => [...(insights?.themes ?? [])].sort(
+      (a, b) => (THEME_SEVERITY_ORDER[a.severity] ?? 4) - (THEME_SEVERITY_ORDER[b.severity] ?? 4),
+    ),
+    [insights],
   )
 
   const fullyLoading = matrixLoading && !matrix
@@ -296,7 +305,7 @@ export function IRRiskInsightsTab({ onNavigateIncident }: Props) {
               </div>
             ) : (
               <div className="grid gap-4 grid-cols-1 lg:grid-cols-2">
-                {insights.themes.map((t, idx) => (
+                {sortedThemes.map((t, idx) => (
                   <IRThemeCard
                     key={`${t.label}-${idx}`}
                     theme={t}
