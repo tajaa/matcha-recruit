@@ -9344,6 +9344,10 @@ async def get_pending_research():
     only surfaced here, never as its own table row). Same data the tenant-facing
     "we're working on it" panel reads from, so what an admin sees here should
     match what a business sees on their Compliance page.
+
+    Returns ONE list, sorted newest-first, each item naming exactly which
+    categories are outstanding (not just a count) — admins need to know WHAT
+    is queued, not just how much.
     """
     from ..services import vertical_coverage
 
@@ -9361,10 +9365,9 @@ async def get_pending_research():
                 WHERE e.work_location_id = jcr.location_id AND e.termination_date IS NULL
             ) emp_count ON true
             WHERE jcr.status IN ('pending', 'in_progress')
-            ORDER BY jcr.created_at DESC
             """
         )
-        category = [
+        items: List[dict] = [
             {
                 "id": str(r["id"]),
                 "type": "category",
@@ -9376,6 +9379,7 @@ async def get_pending_research():
                 "employee_count": r["employee_count"],
                 "note": r["admin_notes"],
                 "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+                "sort_at": r["created_at"],
             }
             for r in cat_rows
         ]
@@ -9384,13 +9388,12 @@ async def get_pending_research():
         # computed live off the same pure-SQL path the wizard/panel use. Capped
         # at the companies with an active location, which bounds this to real
         # tenants (not every row in the DB).
-        vertical: List[dict] = []
         comp_rows = await conn.fetch(
             """
-            SELECT DISTINCT c.id, c.name
+            SELECT DISTINCT c.id, c.name, c.created_at
             FROM companies c
             JOIN business_locations bl ON bl.company_id = c.id AND bl.is_active = true
-            ORDER BY c.name
+            ORDER BY c.created_at DESC
             LIMIT 200
             """
         )
@@ -9421,19 +9424,36 @@ async def get_pending_research():
                     conn, leaf_chains, v_tag, cat_slugs
                 )
                 if plan:
+                    # WHAT, not just how many: resolve the distinct outstanding
+                    # category slugs to human labels — "Dental Sedation &
+                    # Anesthesia", not "dental_sedation_anesthesia".
+                    plan_slugs = sorted({p[1] for p in plan})
+                    name_rows = await conn.fetch(
+                        "SELECT slug, name FROM compliance_categories WHERE slug = ANY($1::text[])",
+                        plan_slugs,
+                    )
+                    name_by_slug = {r["slug"]: r["name"] for r in name_rows}
+                    category_labels = [name_by_slug.get(s, s) for s in plan_slugs]
                     jurisdictions = sorted({f"{r['city']}, {r['state']}" for r in leaf_rows})
-                    vertical.append({
+                    items.append({
                         "type": "vertical",
                         "company_id": str(comp["id"]),
                         "company_name": comp["name"],
                         "label": v_label,
                         "areas": len(plan),
+                        "categories": category_labels,
                         "jurisdictions": jurisdictions,
+                        "created_at": comp["created_at"].isoformat() if comp["created_at"] else None,
+                        "sort_at": comp["created_at"],
                     })
             except Exception as exc:
                 logger.warning("pending-research: vertical scan failed for %s: %s", comp["id"], exc)
 
-    return {"category": category, "vertical": vertical}
+    items.sort(key=lambda it: it["sort_at"] or datetime.min, reverse=True)
+    for it in items:
+        del it["sort_at"]
+
+    return {"items": items}
 
 
 @router.post("/jurisdiction-requests/{request_id}/process")

@@ -55,14 +55,31 @@ type CoverageRequest = {
   created_at: string | null
 }
 
-type VerticalPending = {
+type CategoryPendingItem = {
+  type: 'category'
+  id: string
+  city: string
+  state: string
+  county: string | null
+  status: string
+  company_name: string
+  employee_count: number
+  note: string | null
+  created_at: string | null
+}
+
+type VerticalPendingItem = {
   type: 'vertical'
   company_id: string
   company_name: string
   label: string
   areas: number
+  categories: string[]
   jurisdictions: string[]
+  created_at: string | null
 }
+
+type PendingItem = CategoryPendingItem | VerticalPendingItem
 
 type ActivityLog = {
   id: string
@@ -127,9 +144,8 @@ export default function Jurisdictions() {
   const [researchingId, setResearchingId] = useState<string | null>(null)
   const [researchMessages, setResearchMessages] = useState<string[]>([])
 
-  // Coverage requests (category gaps + industry-specialty vertical to-dos)
-  const [requests, setRequests] = useState<CoverageRequest[]>([])
-  const [verticalPending, setVerticalPending] = useState<VerticalPending[]>([])
+  // Coverage requests — one date-sorted list, category gaps + industry-specialty to-dos merged server-side
+  const [pending, setPending] = useState<PendingItem[]>([])
   const [loadingRequests, setLoadingRequests] = useState(false)
   const [openIds, setOpenIds] = useState<Set<string>>(new Set())
 
@@ -168,10 +184,9 @@ export default function Jurisdictions() {
   const fetchRequests = useCallback(async () => {
     setLoadingRequests(true)
     try {
-      const res = await api.get<{ category: CoverageRequest[]; vertical: VerticalPending[] }>('/admin/pending-research')
-      setRequests(res.category)
-      setVerticalPending(res.vertical)
-    } catch { setRequests([]); setVerticalPending([]) }
+      const res = await api.get<{ items: PendingItem[] }>('/admin/pending-research')
+      setPending(res.items)
+    } catch { setPending([]) }
     finally { setLoadingRequests(false) }
   }, [])
 
@@ -195,10 +210,10 @@ export default function Jurisdictions() {
 
   useEffect(() => {
     if (tab === 'research_queue' && researchQueue.length === 0) fetchResearchQueue()
-    if (tab === 'coverage_requests' && requests.length === 0) fetchRequests()
+    if (tab === 'coverage_requests' && pending.length === 0) fetchRequests()
     if (tab === 'activity' && activity.length === 0) fetchActivity()
     if (tab === 'jobs' && schedulers.length === 0) fetchJobs()
-  }, [tab, researchQueue.length, requests.length, activity.length, schedulers.length, fetchResearchQueue, fetchRequests, fetchActivity, fetchJobs])
+  }, [tab, researchQueue.length, pending.length, activity.length, schedulers.length, fetchResearchQueue, fetchRequests, fetchActivity, fetchJobs])
 
   // ── Actions ──
 
@@ -282,16 +297,16 @@ export default function Jurisdictions() {
     }).catch(() => setTopMetroRunning(false))
   }
 
-  async function processRequest(req: CoverageRequest) {
+  async function processRequest(req: CategoryPendingItem) {
     await api.post(`/admin/jurisdiction-requests/${req.id}/process`, {
       has_local_ordinance: false, county: req.county || null, admin_notes: null,
     })
-    setRequests((prev) => prev.filter((r) => r.id !== req.id))
+    setPending((prev) => prev.filter((p) => !(p.type === 'category' && p.id === req.id)))
   }
 
   async function dismissRequest(id: string) {
     await api.post(`/admin/jurisdiction-requests/${id}/dismiss`, {})
-    setRequests((prev) => prev.filter((r) => r.id !== id))
+    setPending((prev) => prev.filter((p) => !(p.type === 'category' && p.id === id)))
   }
 
   async function toggleScheduler(taskKey: string, currentEnabled: boolean) {
@@ -315,7 +330,7 @@ export default function Jurisdictions() {
   })
   const selectedJurisdiction = jurisdictions.find((j) => j.id === selectedId) ?? null
   const needsResearchCount = researchQueue.filter((r) => r.status === 'needs_research').length
-  const pendingRequestCount = requests.filter((r) => r.status === 'pending').length + verticalPending.length
+  const pendingRequestCount = pending.length
 
   const tabItems: { id: Tab; label: string; count?: number }[] = [
     { id: 'jurisdictions', label: 'Jurisdictions', count: jurisdictions.length },
@@ -546,7 +561,7 @@ export default function Jurisdictions() {
         </div>
       )}
 
-      {/* ── Coverage Requests (category gaps + industry-specialty to-dos) ── */}
+      {/* ── Coverage Requests (category gaps + industry-specialty to-dos, one date-sorted list) ── */}
       {tab === 'coverage_requests' && (
         <div>
           <div className="flex items-center justify-between mb-2">
@@ -556,15 +571,18 @@ export default function Jurisdictions() {
 
           {loadingRequests ? (
             <p className="text-sm text-zinc-500">Loading...</p>
-          ) : requests.length === 0 && verticalPending.length === 0 ? (
+          ) : pending.length === 0 ? (
             <div className="border border-white/[0.06] rounded-lg px-4 py-8 text-center">
               <p className="text-sm text-zinc-600">Nothing outstanding — every onboarded tenant is fully covered.</p>
             </div>
           ) : (
             <div className="border border-white/[0.06] rounded-lg overflow-hidden">
-              {requests.map((req) => {
-                const rowId = `cat-${req.id}`
+              {pending.map((item) => {
+                const rowId = item.type === 'category' ? `cat-${item.id}` : `vert-${item.company_id}-${item.label}`
                 const open = openIds.has(rowId)
+                const categoryNames = item.type === 'category'
+                  ? (item.note || '').replace(/^(needs research:|missing:)\s*/i, '').replace(/\s*—.*$/, '').replace(/\s*\([^)]*\)\s*$/, '')
+                  : item.categories.join(', ')
                 return (
                   <article key={rowId} className="border-b border-white/[0.06] last:border-b-0">
                     <button type="button" onClick={() => toggleOpen(rowId)}
@@ -572,60 +590,46 @@ export default function Jurisdictions() {
                       <ChevronDown className={`mt-1 h-4 w-4 shrink-0 text-zinc-600 transition-transform ${open ? 'rotate-0' : '-rotate-90'}`} />
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-3 font-mono text-[10px] uppercase tracking-wide text-zinc-500">
-                          {req.created_at && <span className="tabular-nums">{fmtDate(req.created_at)}</span>}
-                          <span>Category gap</span>
+                          {item.created_at && <span className="tabular-nums">{fmtDate(item.created_at)}</span>}
+                          <span>{item.type === 'category' ? 'Category gap' : `Specialty · ${item.label}`}</span>
                         </div>
                         <h3 className="mt-1 truncate text-[15px] font-semibold text-zinc-100">
-                          {req.city}, {req.state}{req.county && <span className="text-zinc-500 font-normal ml-1.5">({req.county} County)</span>}
+                          {item.type === 'category'
+                            ? <>{item.city}, {item.state}{item.county && <span className="text-zinc-500 font-normal ml-1.5">({item.county} County)</span>}</>
+                            : item.company_name}
                         </h3>
                         <p className="mt-0.5 truncate text-sm text-zinc-500">
-                          {req.company_name} · {req.employee_count} employee{req.employee_count === 1 ? '' : 's'}
+                          {item.type === 'category' ? `${item.company_name} · ` : `${item.jurisdictions.join(', ')} · `}
+                          {categoryNames}
                         </p>
                       </div>
                     </button>
                     {open && (
                       <div className="px-4 pb-4 pl-11">
-                        {req.admin_notes && <p className="text-sm text-amber-200/80 leading-relaxed">{req.admin_notes}</p>}
-                        <div className="mt-3 flex items-center gap-2">
-                          <Button variant="secondary" size="sm" onClick={() => processRequest(req)}>Process</Button>
-                          <button type="button" onClick={() => dismissRequest(req.id)}
-                            className="text-xs text-zinc-600 hover:text-zinc-300 px-2 py-1 transition-colors">Dismiss</button>
-                        </div>
-                      </div>
-                    )}
-                  </article>
-                )
-              })}
-              {verticalPending.map((v) => {
-                const rowId = `vert-${v.company_id}-${v.label}`
-                const open = openIds.has(rowId)
-                return (
-                  <article key={rowId} className="border-b border-white/[0.06] last:border-b-0">
-                    <button type="button" onClick={() => toggleOpen(rowId)}
-                      className="flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-white/[0.02]">
-                      <ChevronDown className={`mt-1 h-4 w-4 shrink-0 text-zinc-600 transition-transform ${open ? 'rotate-0' : '-rotate-90'}`} />
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-3 font-mono text-[10px] uppercase tracking-wide text-zinc-500">
-                          <span>Specialty · {v.label}</span>
-                        </div>
-                        <h3 className="mt-1 truncate text-[15px] font-semibold text-zinc-100">
-                          {v.company_name}
-                        </h3>
-                        <p className="mt-0.5 truncate text-sm text-zinc-500">
-                          {v.areas} area{v.areas === 1 ? '' : 's'} · {v.jurisdictions.join(', ')}
-                        </p>
-                      </div>
-                    </button>
-                    {open && (
-                      <div className="px-4 pb-4 pl-11">
-                        <p className="text-sm text-zinc-400 leading-relaxed">
-                          Filled by the Vertical Coverage sweep — run it from the Scheduled Jobs tab
-                          to research these {v.label.toLowerCase()} areas. Once published, {v.company_name}'s
-                          tab auto-populates and their admin gets an email.
-                        </p>
-                        <div className="mt-3">
-                          <Button variant="secondary" size="sm" onClick={() => setTab('jobs')}>Go to Scheduled Jobs</Button>
-                        </div>
+                        {item.type === 'category' ? (
+                          <>
+                            {item.note && <p className="text-sm text-amber-200/80 leading-relaxed">{item.note}</p>}
+                            <div className="mt-3 flex items-center gap-2">
+                              <Button variant="secondary" size="sm" onClick={() => processRequest(item)}>Process</Button>
+                              <button type="button" onClick={() => dismissRequest(item.id)}
+                                className="text-xs text-zinc-600 hover:text-zinc-300 px-2 py-1 transition-colors">Dismiss</button>
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <p className="text-sm text-amber-200/80 leading-relaxed">
+                              {item.categories.join(', ')}
+                            </p>
+                            <p className="mt-2 text-sm text-zinc-400 leading-relaxed">
+                              Filled by the Vertical Coverage sweep — run it from the Scheduled Jobs tab
+                              to research these {item.label.toLowerCase()} areas for {item.jurisdictions.join(', ')}.
+                              Once published, {item.company_name}'s tab auto-populates and their admin gets an email.
+                            </p>
+                            <div className="mt-3">
+                              <Button variant="secondary" size="sm" onClick={() => setTab('jobs')}>Go to Scheduled Jobs</Button>
+                            </div>
+                          </>
+                        )}
                       </div>
                     )}
                   </article>
