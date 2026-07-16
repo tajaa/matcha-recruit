@@ -11,6 +11,7 @@ type Props = {
   initialState?: string | null
   initialCity?: string | null
   initialIndustry?: string | null
+  initialReq?: string | null
   goto: (next: StudioView, params?: GotoParams & { section?: string }) => void
 }
 
@@ -18,7 +19,7 @@ type Props = {
 // collapsible state groups carrying the statewide node + its counties/cities.
 // This is the "shelf" — the raw registry, its housekeeping (add/delete/cleanup),
 // and the baseline "needs research" worklist. Both funnels write into it.
-export default function LibraryTab({ initialState, initialCity, initialIndustry, goto }: Props) {
+export default function LibraryTab({ initialState, initialCity, initialIndustry, initialReq, goto }: Props) {
   const [tree, setTree] = useState<TreeResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -372,6 +373,7 @@ export default function LibraryTab({ initialState, initialCity, initialIndustry,
               city={selectedJurisdiction.city}
               state={selectedJurisdiction.state}
               initialIndustry={initialIndustry}
+              initialReq={initialReq}
               onViewCoverage={() => goto('coverage', {
                 state: selectedJurisdiction.state,
                 city: selectedJurisdiction.city || undefined,

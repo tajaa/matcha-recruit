@@ -294,7 +294,7 @@ function ActionCard({ action, onApproved, committedRowIds }: {
                 <span className="text-zinc-500 shrink-0">live · {row.gate_reason || 'not codified'}</span>
               )}
               {(row.state || row.city) && (
-                <a href={libraryLink(row.state, row.city)}
+                <a href={libraryLink(row.state, row.city, undefined, row.id)}
                   className="text-cyan-400/60 hover:text-cyan-300 shrink-0 inline-flex items-center gap-0.5">
                   Library <ExternalLink className="h-2.5 w-2.5" />
                 </a>

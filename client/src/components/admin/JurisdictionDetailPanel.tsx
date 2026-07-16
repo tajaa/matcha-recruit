@@ -69,6 +69,9 @@ type Props = {
   // URL-driven focus: 'general' (or empty) → General employment law section;
   // an industry tag (e.g. 'manufacturing', 'healthcare') → that industry section.
   initialIndustry?: string | null
+  // URL-driven focus on ONE requirement id — scroll to + highlight it (the
+  // post-codify "here's the exact policy" deep-link). Takes precedence over section.
+  initialReq?: string | null
   // Optional cross-link to the Coverage map for this coordinate.
   onViewCoverage?: () => void
 }
@@ -84,6 +87,11 @@ function industryLabel(tag: string): string {
 // Anchor slug for a section (URL focus targets these).
 function sectionAnchor(key: string): string {
   return `lib-sec-${key.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`
+}
+
+// Anchor for one requirement row (the post-codify deep-link target).
+function reqAnchor(id: string): string {
+  return `lib-req-${id}`
 }
 
 const LEVEL_ORDER = ['federal', 'state', 'county', 'city']
@@ -140,7 +148,7 @@ async function readSSEStream(
 
 // ── Component ──────────────────────────────────────────────────────────────────
 
-export default function JurisdictionDetailPanel({ id, city, state, categoriesMissing, preemptionRules, selectedProfile, onCheckComplete, onNavigate, initialIndustry, onViewCoverage }: Props) {
+export default function JurisdictionDetailPanel({ id, city, state, categoriesMissing, preemptionRules, selectedProfile, onCheckComplete, onNavigate, initialIndustry, initialReq, onViewCoverage }: Props) {
   const [detail, setDetail] = useState<JurisdictionDetail | null>(null)
   const [loading, setLoading] = useState(false)
   const [scanning, setScanning] = useState(false)
@@ -395,19 +403,21 @@ export default function JurisdictionDetailPanel({ id, city, state, categoriesMis
     return { general, generalCount, industries, industryTags }
   }, [categoryFilteredReqs])
 
-  // Scroll the URL-focused section into view once detail + rows are present.
+  // Scroll the URL focus into view once detail + rows are present. A specific
+  // requirement (initialReq) wins over a section (initialIndustry).
   useEffect(() => {
-    if (loading || !detail || !initialIndustry) return
-    const target = initialIndustry === 'general'
-      ? sectionAnchor('general')
-      : sectionAnchor(initialIndustry)
-    // Defer to next frame so the section nodes are mounted.
+    if (loading || !detail) return
+    const target = initialReq ? reqAnchor(initialReq)
+      : initialIndustry ? (initialIndustry === 'general' ? sectionAnchor('general') : sectionAnchor(initialIndustry))
+      : null
+    if (!target) return
+    // Defer so the section/row nodes are mounted.
     const t = window.setTimeout(() => {
-      document.getElementById(target)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      document.getElementById(target)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
     }, 80)
     return () => window.clearTimeout(t)
     // Focus once per load/coordinate — not on every category-filter change.
-  }, [loading, detail, initialIndustry])
+  }, [loading, detail, initialIndustry, initialReq])
 
   // Hierarchy view: category → jurisdiction_level → requirements
   const hierarchyGrouped = useMemo(() => {
@@ -468,8 +478,10 @@ export default function JurisdictionDetailPanel({ id, city, state, categoriesMis
       )
     }
 
+    const isTarget = req.id === initialReq
     return (
-      <div key={req.id} className={`group flex items-start gap-2 px-4 py-2 border-t border-zinc-800/30 ${!isFocused ? 'opacity-40' : ''}`}>
+      <div key={req.id} id={reqAnchor(req.id)}
+        className={`group flex items-start gap-2 px-4 py-2 border-t border-zinc-800/30 ${!isFocused ? 'opacity-40' : ''} ${isTarget ? 'bg-emerald-500/[0.07] ring-1 ring-inset ring-emerald-500/40' : ''}`}>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <p className="text-sm text-zinc-200">{req.title}</p>

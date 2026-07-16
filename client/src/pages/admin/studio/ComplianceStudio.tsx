@@ -159,6 +159,7 @@ export default function ComplianceStudio() {
               initialState={searchParams.get('state')}
               initialCity={searchParams.get('city')}
               initialIndustry={searchParams.get('industry')}
+              initialReq={searchParams.get('req')}
               goto={goto}
             />
           )}
