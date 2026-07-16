@@ -86,15 +86,23 @@ def _missing_ita_fields(est: dict) -> list[str]:
     """Return the list of required ITA fields absent from an establishment dict.
 
     Pure (no DB) so it can be unit-tested. `est` carries the EIN/NAICS already
-    resolved with company-level fallback, plus street_address + total_hours_worked.
+    resolved with company-level fallback, plus the address parts + hours/headcount.
+    Mirrors what the ITA API requires to CREATE an establishment + 300A (data
+    dictionary), so a filer sees the gap in the pre-flight checklist rather than
+    as an OSHA rejection mid-submission. `ein` is kept required here for hygiene
+    even though the API itself treats it as optional.
     """
     missing = []
-    for field in ("ein", "naics", "street_address"):
+    # Required to create the establishment (address parts + naics + ein).
+    for field in ("ein", "naics", "street_address", "city", "state", "zip_code"):
         val = est.get(field)
         if val is None or (isinstance(val, str) and not val.strip()):
             missing.append(field)
-    if est.get("total_hours_worked") is None:
+    # Required on the 300A summary: both must be present AND > 0 (API validation).
+    if not (est.get("total_hours_worked") or 0) > 0:
         missing.append("total_hours_worked")
+    if not (est.get("annual_average_employees") or 0) > 0:
+        missing.append("annual_average_employees")
     return missing
 
 
@@ -1371,9 +1379,14 @@ async def submit_ita(
         )
         encrypted_token = token_row["api_token"] if token_row else None
 
-        result = await submit_establishments(encrypted_token, establishments, year)
+        result = await submit_establishments(
+            encrypted_token, establishments, year, resubmit=payload.resubmit,
+        )
 
         # Persist every attempt (including not_configured) for the filing history.
+        # ita_submission_id is a single column: with multiple establishments we
+        # store the first submission id; the full per-establishment id list +
+        # trace lives in response_payload.
         row = await conn.fetchrow(
             """
             INSERT INTO osha_ita_submissions
