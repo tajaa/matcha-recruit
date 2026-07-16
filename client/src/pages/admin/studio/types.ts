@@ -156,6 +156,46 @@ export type UncodifiedItem = {
   city: string | null
 }
 
+// ── Codified tab (the asset, and the funnel that feeds it) ───────────────────
+
+// GET /admin/studio/codified-funnel. `scoped` is null until a state is picked:
+// it comes from a per-chain walk (chain_uncodified), and it counts LABOR-domain
+// obligations only — say so wherever it renders.
+export type CodifiedFunnel = {
+  state: string | null
+  category: string | null
+  scoped: { keyed: number; unkeyed: number } | null
+  pending: number
+  researched: number
+  codified: number
+  keyless: number
+}
+
+// One row of GET /admin/jurisdictions/quality-audit.
+export type AuditRow = {
+  id: string
+  jurisdiction_id: string
+  category: string | null
+  title: string | null
+  description: string | null
+  source_url: string | null
+  source_url_status: string | null
+  current_value: string | null
+  jurisdiction_name: string | null
+  state: string | null
+  city: string | null
+  statute_citation: string | null
+  citation_verified: boolean
+  citation_verified_at: string | null
+  regulation_key: string | null
+  last_verified_at: string | null
+}
+
+export type AuditResponse = {
+  summary: { total: number; verified_citation: number; unverified_citation: number }
+  requirements: AuditRow[]
+}
+
 // ── Command Center worklist ──────────────────────────────────────────────────
 
 export type WorklistAction =
@@ -199,6 +239,6 @@ export type VerticalCoverageResponse = {
 
 // ── Studio-wide view routing ─────────────────────────────────────────────────
 
-export type StudioView = 'home' | 'pipeline' | 'coverage' | 'authority' | 'library' | 'pilot'
+export type StudioView = 'home' | 'pipeline' | 'coverage' | 'authority' | 'library' | 'codified' | 'pilot'
 
 export type GotoParams = { state?: string; city?: string; industry?: string }

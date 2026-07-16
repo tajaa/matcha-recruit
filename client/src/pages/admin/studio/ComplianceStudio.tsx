@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Bot, Compass, Layers, Library, MessageCircle, Sparkles, Workflow } from 'lucide-react'
+import { BadgeCheck, Bot, Compass, Layers, Library, MessageCircle, Sparkles, Workflow } from 'lucide-react'
 import { api } from '../../../api/client'
 import CommandCenter from './CommandCenter'
 import PipelineTab from './PipelineTab'
 import CoverageTab from './CoverageTab'
 import AuthorityTab from './AuthorityTab'
 import LibraryTab from './LibraryTab'
+import CodifiedTab from './CodifiedTab'
 import PilotTab from './pilot/PilotTab'
 import StudioAssistant from './StudioAssistant'
 import type { GotoParams, StudioView, UncodifiedItem, Worklist } from './types'
@@ -17,6 +18,7 @@ const TABS: { id: StudioView; label: string; icon: typeof Compass }[] = [
   { id: 'coverage', label: 'Coverage', icon: Sparkles },
   { id: 'authority', label: 'Authority', icon: Layers },
   { id: 'library', label: 'Library', icon: Library },
+  { id: 'codified', label: 'Codified', icon: BadgeCheck },
   { id: 'pilot', label: 'Pilot', icon: Bot },
 ]
 
@@ -161,6 +163,13 @@ export default function ComplianceStudio() {
               initialIndustry={searchParams.get('industry')}
               initialReq={searchParams.get('req')}
               goto={goto}
+            />
+          )}
+          {view === 'codified' && (
+            <CodifiedTab
+              initialState={searchParams.get('state')}
+              goto={goto}
+              gotoUncodified={gotoUncodified}
             />
           )}
           {view === 'pilot' && <PilotTab />}

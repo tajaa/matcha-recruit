@@ -2,10 +2,35 @@
 from app.core.services.scope_registry.codify import (
     build_citation_stamps,
     build_research_context,
+    codified_sql,
     group_research_units,
     match_codifications,
     select_primary_citation,
 )
+
+
+class TestCodifiedPredicate:
+    """The definition of the asset. Every reader must agree on it — the studio
+    meter and the library tile once counted `citation_verified_at IS NOT NULL`
+    while the quality audit counted all three, so the same screen showed two
+    different codified numbers."""
+
+    def test_requires_all_three_columns(self):
+        sql = codified_sql("jr")
+        for col in ("statute_citation", "citation_verified_at", "citation_item_id"):
+            assert f"jr.{col} IS NOT NULL" in sql
+        assert sql.count("AND") == 2
+
+    def test_alias_is_applied_to_every_column(self):
+        # A missing alias is ambiguous the moment the query JOINs jurisdictions.
+        sql = codified_sql("r")
+        assert "jr." not in sql
+        assert sql.count("r.") == 3
+
+    def test_negation_stays_a_single_term(self):
+        # Callers write NOT (...) for the uncodified backlog; the predicate must
+        # be parenthesizable as one unit, i.e. no bare OR at the top level.
+        assert " OR " not in codified_sql()
 
 
 def _item(key, category, level, cite="X", heading="h"):

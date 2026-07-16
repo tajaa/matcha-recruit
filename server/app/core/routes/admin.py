@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 from ...database import get_connection
 from ..dependencies import require_admin
 from ..services.credential_crypto import decrypt_credential_fields
+from ..services.scope_registry.codify import codified_sql
 from ..feature_flags import merge_company_features
 from ..services.email import get_email_service
 from ..models.compliance import AutoCheckSettings, LocationCreate
@@ -2978,11 +2979,18 @@ async def get_jurisdictions_tree():
                 "children": kids,
             })
 
-        total_requirements = await conn.fetchval("SELECT COUNT(*) FROM jurisdiction_requirements") or 0
+        # Both counts are active-only, and codified is the full trio — otherwise
+        # this tile's ratio disagrees with the Authoritative meter in the studio
+        # header directly above it (the denominator used to include pending +
+        # under_review + repealed rows, and the numerator a looser predicate).
+        total_requirements = await conn.fetchval(
+            "SELECT COUNT(*) FROM jurisdiction_requirements "
+            "WHERE COALESCE(status, 'active') = 'active'"
+        ) or 0
         total_legislation = await conn.fetchval("SELECT COUNT(*) FROM jurisdiction_legislation") or 0
         total_codified = await conn.fetchval(
-            "SELECT COUNT(*) FROM jurisdiction_requirements "
-            "WHERE COALESCE(status, 'active') = 'active' AND citation_verified_at IS NOT NULL"
+            "SELECT COUNT(*) FROM jurisdiction_requirements jr "
+            f"WHERE COALESCE(jr.status, 'active') = 'active' AND {codified_sql('jr')}"
         ) or 0
         total_places = sum(len(s["children"]) for s in states)
 
@@ -4214,7 +4222,7 @@ async def get_quality_audit(
     """
     import hashlib
 
-    cache_key = "admin:quality-audit:v2:" + hashlib.md5(
+    cache_key = "admin:quality-audit:v3:" + hashlib.md5(
         f"{state}:{category}:{min_completeness}:{max_completeness}:{stale_only}:{tier}:{source}:{citation}:{needs_review}:{limit}:{offset}".encode()
     ).hexdigest()
 
@@ -4230,14 +4238,8 @@ async def get_quality_audit(
         # item is deleted, so verified_at alone would render a phantom ✓ badge with
         # a dead statute-reader link. Kept as one predicate so the filter and the
         # summary counters below can never diverge.
-        cite_verified_sql = (
-            "jr.statute_citation IS NOT NULL AND jr.citation_verified_at IS NOT NULL "
-            "AND jr.citation_item_id IS NOT NULL"
-        )
-        cite_unverified_sql = (
-            "(jr.statute_citation IS NULL OR jr.citation_verified_at IS NULL "
-            "OR jr.citation_item_id IS NULL)"
-        )
+        cite_verified_sql = codified_sql("jr")
+        cite_unverified_sql = f"NOT ({cite_verified_sql})"
 
         # Base WHERE conditions for paginated results
         conditions = ["jr.status = 'active'"]
@@ -4334,7 +4336,7 @@ async def get_quality_audit(
                     jr.id, jr.jurisdiction_id, jr.category, jr.title, jr.description,
                     jr.source_url, jr.source_url_status,
                     jr.statute_citation, jr.citation_verified_at, jr.citation_item_id,
-                    jr.change_status,
+                    jr.change_status, jr.regulation_key,
                     jr.source_tier::text AS source_tier, jr.status::text AS status,
                     jr.current_value, jr.effective_date, jr.last_verified_at, jr.is_bookmarked,
                     jr.created_at, jr.updated_at, jr.metadata,
@@ -4398,6 +4400,11 @@ async def get_quality_audit(
                     "research_source": _row_metadata(r["metadata"]).get("research_source"),
                     "statute_citation": r["statute_citation"],
                     "citation_verified": r["citation_verified_at"] is not None and r["citation_item_id"] is not None,
+                    "citation_verified_at": fmt(r["citation_verified_at"]),
+                    # The Codified tab needs this to know whether a row CAN codify:
+                    # a keyless row 422s at POST /requirements/{id}/codify, so it
+                    # gets a badge instead of a button.
+                    "regulation_key": r["regulation_key"],
                     "change_status": r["change_status"],
                 }
                 for r in rows
@@ -10691,12 +10698,12 @@ async def get_studio_worklist():
         # Surfaced on the meter tooltip, not as a worklist action (no flow to
         # clear them yet — see plan: key-assignment is a follow-up).
         meters_row = await conn.fetchrow(
-            "SELECT COUNT(*) FILTER (WHERE COALESCE(status, 'active') = 'active') AS requirements, "
-            "COUNT(*) FILTER (WHERE COALESCE(status, 'active') = 'active' "
-            "AND citation_verified_at IS NOT NULL) AS codified, "
-            "COUNT(*) FILTER (WHERE COALESCE(status, 'active') = 'active' "
-            "AND citation_verified_at IS NULL AND regulation_key IS NULL) AS keyless "
-            "FROM jurisdiction_requirements"
+            "SELECT COUNT(*) FILTER (WHERE COALESCE(jr.status, 'active') = 'active') AS requirements, "
+            "COUNT(*) FILTER (WHERE COALESCE(jr.status, 'active') = 'active' "
+            f"AND {codified_sql('jr')}) AS codified, "
+            "COUNT(*) FILTER (WHERE COALESCE(jr.status, 'active') = 'active' "
+            f"AND NOT ({codified_sql('jr')}) AND jr.regulation_key IS NULL) AS keyless "
+            "FROM jurisdiction_requirements jr"
         )
 
         # Baseline backlog — DEMAND-side only: jurisdictions a tenant actually
@@ -10745,7 +10752,7 @@ async def get_studio_worklist():
             JOIN jurisdictions j ON j.id = r.jurisdiction_id
             WHERE COALESCE(r.status, 'active') = 'active'
               AND r.regulation_key IS NOT NULL
-              AND r.citation_verified_at IS NULL
+              AND NOT (""" + codified_sql("r") + """)
             ORDER BY r.created_at DESC
             """
         )
@@ -10823,6 +10830,69 @@ async def get_studio_worklist():
             "open_items": open_items,
         },
         "actions": actions,
+    }
+
+
+@router.get("/studio/codified-funnel", dependencies=[Depends(require_admin)])
+async def get_codified_funnel(
+    state: Optional[str] = None,
+    category: Optional[str] = None,
+):
+    """Stage counts for the Codified tab: scoped → pending → researched → codified.
+
+    Every stage but `scoped` is one GROUP BY over `jurisdiction_requirements`,
+    because every stage but `scoped` IS a row in it. `scoped` is the obligation
+    we know applies and have not written a row for yet, which only
+    `chain_uncodified` can answer, and only per jurisdiction chain — so it stays
+    null until a state is picked. It is also labor-domain only (its `labor_only`
+    default, matching the Labor scope panel that triggers the research), which
+    the tile has to say out loud rather than imply a whole-corpus number.
+    """
+    from ..services.scope_registry.codify import chain_uncodified
+
+    conditions: List[str] = []
+    params: List[Any] = []
+    if state and state.strip():
+        params.append(state.strip().upper())
+        conditions.append(f"j.state = ${len(params)}")
+    if category and category.strip():
+        params.append(category.strip())
+        conditions.append(f"jr.category = ${len(params)}")
+    where_clause = (" WHERE " + " AND ".join(conditions)) if conditions else ""
+
+    trio = codified_sql("jr")
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            f"""
+            SELECT
+                COUNT(*) FILTER (WHERE jr.status = 'pending') AS pending,
+                COUNT(*) FILTER (WHERE COALESCE(jr.status, 'active') = 'active'
+                                   AND NOT ({trio})) AS researched,
+                COUNT(*) FILTER (WHERE COALESCE(jr.status, 'active') = 'active'
+                                   AND {trio}) AS codified,
+                COUNT(*) FILTER (WHERE COALESCE(jr.status, 'active') = 'active'
+                                   AND NOT ({trio})
+                                   AND jr.regulation_key IS NULL) AS keyless
+            FROM jurisdiction_requirements jr
+            JOIN jurisdictions j ON j.id = jr.jurisdiction_id
+            {where_clause}
+            """,
+            *params,
+        )
+
+        scoped = None
+        if state and state.strip():
+            work = await chain_uncodified(conn, state=state.strip().upper())
+            scoped = {"keyed": len(work["keyed"]), "unkeyed": len(work["unkeyed"])}
+
+    return {
+        "state": state.strip().upper() if state and state.strip() else None,
+        "category": category or None,
+        "scoped": scoped,
+        "pending": int(row["pending"] or 0),
+        "researched": int(row["researched"] or 0),
+        "codified": int(row["codified"] or 0),
+        "keyless": int(row["keyless"] or 0),
     }
 
 

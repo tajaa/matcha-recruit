@@ -21,6 +21,28 @@ from .jurisdiction_chain import resolve_jurisdiction_chain
 logger = logging.getLogger(__name__)
 
 
+def codified_sql(alias: str = "jr") -> str:
+    """The one predicate for "this requirement is CODIFIED".
+
+    All three columns, because `reconcile_codifications` below writes all three
+    together and nothing else writes any of them. `citation_verified_at` alone
+    is not enough: `citation_item_id` is `ON DELETE SET NULL`, so deleting the
+    backing authority item leaves a row claiming a verified citation whose
+    statute-reader link is dead — it must fall back OUT of codified and back
+    into the codify backlog, not sit in the asset count as a phantom.
+
+    Kept here, next to the writer, because the readers had drifted: the studio
+    meter and the library tile each counted `citation_verified_at IS NOT NULL`
+    while the quality audit counted the trio, so the two headline numbers on
+    the same screen disagreed.
+    """
+    return (
+        f"{alias}.statute_citation IS NOT NULL "
+        f"AND {alias}.citation_verified_at IS NOT NULL "
+        f"AND {alias}.citation_item_id IS NOT NULL"
+    )
+
+
 def match_codifications(
     classifications: List[Dict[str, Any]],
     requirement_rows: List[Dict[str, Any]],
