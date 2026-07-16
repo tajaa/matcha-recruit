@@ -172,6 +172,10 @@ export function fetchSummary() {
   return api.get<ComplianceSummary>('/compliance/summary')
 }
 
+export function fetchRiskSummary() {
+  return api.get<import('../types/compliance').ComplianceRiskSummary>('/compliance/risk-summary')
+}
+
 export type PendingResearch = {
   coverage_requests: {
     city: string

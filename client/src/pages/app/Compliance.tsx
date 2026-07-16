@@ -5,7 +5,8 @@ import { LABEL } from '../../components/ui/typography'
 import { useComplianceData } from '../../hooks/compliance/useComplianceData'
 import { useLocationDetail } from '../../hooks/compliance/useLocationDetail'
 import { useComplianceCheck } from '../../hooks/compliance/useComplianceCheck'
-import { ComplianceOverviewTab } from '../../components/compliance/ComplianceOverviewTab'
+import { ComplianceRiskCockpit } from '../../components/compliance/ComplianceRiskCockpit'
+import { useRiskSummary } from '../../hooks/compliance/useRiskSummary'
 import { ComplianceLocationList } from '../../components/compliance/ComplianceLocationList'
 import { ComplianceLocationModal } from '../../components/compliance/ComplianceLocationModal'
 import { ComplianceRequirementsTab } from '../../components/compliance/ComplianceRequirementsTab'
@@ -24,6 +25,7 @@ import { PolicyDrafter } from '../../components/compliance/PolicyDrafter'
 import { updateAlertActionPlan } from '../../api/compliance'
 import { useMe } from '../../hooks/useMe'
 import { ComplianceLiteView } from '../../components/compliance/ComplianceLiteView'
+import { CLINICAL_ENTITY_TYPES } from '../../types/compliance'
 import type { BusinessLocation, LocationCreate, ComplianceActionPlanUpdate } from '../../types/compliance'
 
 type Tab = 'overview' | 'requirements' | 'credentials' | 'alerts' | 'upcoming' | 'history' | 'posters' | 'payer-policies' | 'protocol-analysis' | 'policy-drafting'
@@ -40,6 +42,11 @@ const TABS: { value: Tab; label: string }[] = [
   { value: 'protocol-analysis', label: 'Protocol Analysis' },
   { value: 'policy-drafting', label: 'Policy Drafting' },
 ]
+
+// Payer/protocol/policy tabs only apply to clinical-care facilities. A dental
+// office, pharmacy, or lab never sees them (a dental office can carry payer
+// contracts and still not need payer policies — the gate is the entity type).
+const CLINICAL_TABS: Tab[] = ['payer-policies', 'protocol-analysis', 'policy-drafting']
 
 // Route gate admits compliance OR compliance_lite. Dispatch here: full
 // `compliance` (Pro) → the tabbed page below; the Matcha-X read-only taste
@@ -64,13 +71,22 @@ function ComplianceFull() {
 
   const data = useComplianceData(selectedId)
   const detail = useLocationDetail(selectedId)
+  const risk = useRiskSummary()
 
   const onCheckComplete = useCallback(() => {
     detail.refetch()
     data.refreshAll()
-  }, [detail, data])
+    risk.refetch()
+  }, [detail, data, risk])
 
   const check = useComplianceCheck(onCheckComplete)
+
+  // Clinical-tab gate: only a clinical-care facility sees payer/protocol/policy.
+  const isClinical = data.locations.some(
+    (l) => l.is_active && !!l.facility_attributes?.entity_type
+      && CLINICAL_ENTITY_TYPES.has(l.facility_attributes.entity_type),
+  )
+  const visibleTabs = isClinical ? TABS : TABS.filter((t) => !CLINICAL_TABS.includes(t.value))
 
   // Deep-link support
   const [deepLinked, setDeepLinked] = useState(false)
@@ -85,7 +101,7 @@ function ComplianceFull() {
         setTab('requirements')
       }
     }
-    if (paramTab && TABS.some((t) => t.value === paramTab)) {
+    if (paramTab && visibleTabs.some((t) => t.value === paramTab)) {
       setTab(paramTab)
     }
     setDeepLinked(true)
@@ -156,21 +172,22 @@ function ComplianceFull() {
 
       {/* Tab nav */}
       <div className="flex items-center gap-1 mt-4 mb-5">
-        {TABS.map((t) => (
+        {visibleTabs.map((t) => (
           <Button key={t.value} variant={tab === t.value ? 'secondary' : 'ghost'} size="sm" onClick={() => setTab(t.value)}>
             {t.label}{t.value === 'alerts' && data.alerts.length > 0 ? ` (${data.alerts.length})` : ''}
           </Button>
         ))}
       </div>
 
-      {/* Overview tab (no location context needed) */}
+      {/* Overview tab — the manager risk cockpit (no location context needed) */}
       {tab === 'overview' && (
-        <ComplianceOverviewTab
-          summary={data.summary}
-          alerts={data.alerts}
+        <ComplianceRiskCockpit
+          riskSummary={risk.data}
+          loading={risk.loading}
           pinnedReqs={data.pinnedRequirements}
-          onViewAllAlerts={() => setTab('alerts')}
-          onAlertAction={handleAlertAction}
+          onOpenAlerts={() => setTab('alerts')}
+          onUpdateActionPlan={handleUpdateActionPlan}
+          onActioned={() => { risk.refetch(); data.loadAlerts('unread') }}
         />
       )}
 
@@ -269,16 +286,16 @@ function ComplianceFull() {
                 {tab === 'posters' && (
                   <CompliancePostersTab locationId={selectedId!} />
                 )}
-                {tab === 'payer-policies' && (
+                {tab === 'payer-policies' && isClinical && (
                   <PayerPolicyNavigator
                     locationId={selectedId}
                     payerContracts={selectedLoc?.facility_attributes?.payer_contracts || []}
                   />
                 )}
-                {tab === 'protocol-analysis' && (
+                {tab === 'protocol-analysis' && isClinical && (
                   <ProtocolAnalysis locationId={selectedId} />
                 )}
-                {tab === 'policy-drafting' && (
+                {tab === 'policy-drafting' && isClinical && (
                   <PolicyDrafter locationId={selectedId} />
                 )}
               </div>

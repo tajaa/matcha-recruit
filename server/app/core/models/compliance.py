@@ -388,6 +388,71 @@ class ComplianceSummary(BaseModel):
     upcoming_deadlines: list = []
 
 
+# ── Risk Cockpit ──────────────────────────────────────────────────────────
+# The manager-facing compliance surface. The value is not the requirement
+# catalog but the measured RISK: what's out of compliance now, the dollar
+# exposure, who's affected, and what to do about it. All computed server-side
+# by `services/compliance_risk.py`; the frontend just renders these.
+
+
+class RiskPenalty(BaseModel):
+    """Statutory penalty context for an issue, from the catalog row's
+    metadata->'penalties'. Any numeric field may be null (the summary text
+    exists but the statute doesn't name a figure)."""
+    civil_min: Optional[float] = None
+    civil_max: Optional[float] = None
+    per_violation: Optional[bool] = None
+    annual_cap: Optional[float] = None
+    enforcing_agency: Optional[str] = None
+    summary: Optional[str] = None
+
+
+class RiskIssue(BaseModel):
+    """One open compliance issue in the action queue."""
+    id: str
+    source: str  # wage | credential | incident | alert
+    severity: str  # critical | high | moderate
+    title: str
+    detail: Optional[str] = None
+    employee_names: List[str] = []
+    location_label: Optional[str] = None
+    penalty: Optional[RiskPenalty] = None
+    statute_citation: Optional[str] = None
+    recommendation: Optional[str] = None
+    link: Optional[str] = None  # deep-link fix target, or null for in-page (alerts)
+    deadline: Optional[str] = None  # ISO date
+    alert_id: Optional[str] = None  # only for source='alert' — action-plan target
+
+
+class RiskPosture(BaseModel):
+    """The top-line measured posture."""
+    open_critical: int = 0
+    open_high: int = 0
+    open_moderate: int = 0
+    employees_affected: int = 0
+    exposure_min_usd: float = 0
+    exposure_max_usd: float = 0
+    exposure_unquantified_count: int = 0  # issues with a penalty but no numbers
+    next_deadline_days: Optional[int] = None
+    next_deadline_label: Optional[str] = None
+
+
+class RiskGetAhead(BaseModel):
+    """A preventable item on the horizon — legislation or a deadline."""
+    title: str
+    kind: str  # legislation | deadline
+    effective_date: Optional[str] = None  # ISO date
+    days_until: Optional[int] = None
+    location_label: Optional[str] = None
+
+
+class ComplianceRiskSummary(BaseModel):
+    posture: RiskPosture
+    issues: List[RiskIssue] = []  # sorted severity desc, deadline asc
+    get_ahead: List[RiskGetAhead] = []
+    generated_at: str
+
+
 # ── Hierarchical Compliance Response Schemas ──────────────────────────────
 # ALL intelligence is computed server-side. Frontend just renders these.
 

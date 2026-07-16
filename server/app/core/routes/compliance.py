@@ -35,7 +35,9 @@ from ..models.compliance import (
     HierarchicalComplianceResponse,
     CompanyCertificationResponse,
     CompanyLicenseResponse,
+    ComplianceRiskSummary,
 )
+from ..services.compliance_risk import get_compliance_risk_summary
 from ..services.compliance_service import (
     create_location,
     get_locations,
@@ -786,6 +788,21 @@ async def get_compliance_summary_endpoint(
         raise HTTPException(status_code=403, detail="Access denied")
 
     return await get_compliance_summary(company_id)
+
+
+@shared_router.get("/risk-summary", response_model=ComplianceRiskSummary)
+async def get_compliance_risk_summary_endpoint(
+    company_id: Optional[str] = Query(None),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Manager risk cockpit — measured compliance risk (open issues by severity,
+    dollar exposure, employees affected, next deadline) + the action queue and
+    get-ahead lane. Company-scoped, deterministic, no Gemini."""
+    company_id = await resolve_company_id(current_user, company_id)
+    if company_id is None:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    return await get_compliance_risk_summary(company_id)
 
 
 @shared_router.get("/pending-research")

@@ -19,6 +19,79 @@ export interface FacilityAttributes {
   teaching_hospital?: boolean | null
 }
 
+/**
+ * Clinical-care entity types. Presence of one on any active location is what
+ * makes the payer/protocol/policy compliance tabs relevant. A dental office,
+ * pharmacy, or lab is `entity_type` too but does NOT get those tabs — the gate
+ * is this explicit allowlist, not "has an entity_type" or "has payer_contracts"
+ * (a dental office can carry payer contracts and still not need payer policies).
+ */
+export const CLINICAL_ENTITY_TYPES: ReadonlySet<string> = new Set([
+  'fqhc',
+  'hospital',
+  'critical_access_hospital',
+  'clinic',
+  'nursing_facility',
+  'behavioral_health',
+  'ambulatory_surgery_center',
+  'home_health',
+  'hospice',
+  'dialysis_center',
+])
+
+// ── Risk cockpit ──────────────────────────────────────────────────────────
+export interface RiskPenalty {
+  civil_min?: number | null
+  civil_max?: number | null
+  per_violation?: boolean | null
+  annual_cap?: number | null
+  enforcing_agency?: string | null
+  summary?: string | null
+}
+
+export interface RiskIssue {
+  id: string
+  source: 'wage' | 'credential' | 'incident' | 'alert'
+  severity: 'critical' | 'high' | 'moderate'
+  title: string
+  detail?: string | null
+  employee_names: string[]
+  location_label?: string | null
+  penalty?: RiskPenalty | null
+  statute_citation?: string | null
+  recommendation?: string | null
+  link?: string | null
+  deadline?: string | null
+  alert_id?: string | null
+}
+
+export interface RiskPosture {
+  open_critical: number
+  open_high: number
+  open_moderate: number
+  employees_affected: number
+  exposure_min_usd: number
+  exposure_max_usd: number
+  exposure_unquantified_count: number
+  next_deadline_days?: number | null
+  next_deadline_label?: string | null
+}
+
+export interface RiskGetAhead {
+  title: string
+  kind: 'legislation' | 'deadline'
+  effective_date?: string | null
+  days_until?: number | null
+  location_label?: string | null
+}
+
+export interface ComplianceRiskSummary {
+  posture: RiskPosture
+  issues: RiskIssue[]
+  get_ahead: RiskGetAhead[]
+  generated_at: string
+}
+
 export interface LocationCreate {
   name?: string
   address?: string
