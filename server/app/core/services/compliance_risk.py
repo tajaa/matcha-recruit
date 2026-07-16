@@ -287,7 +287,7 @@ async def get_compliance_risk_summary(company_id: UUID) -> ComplianceRiskSummary
             rows = await conn.fetch(
                 """
                 SELECT ca.id, ca.title, ca.message, ca.severity, ca.action_required,
-                       ca.deadline, ca.affected_employee_count, ca.location_id
+                       ca.deadline, ca.location_id
                 FROM compliance_alerts ca
                 WHERE ca.company_id = $1 AND ca.status = 'unread' AND ca.severity = 'critical'
                 ORDER BY ca.deadline ASC NULLS LAST, ca.created_at DESC

@@ -107,18 +107,24 @@ async def reconcile_issue_state(conn, company_id: UUID, current_issues, basis_by
                 await _log(conn, company_id, key, iss.source, _entity_id(iss), "opened")
                 continue
 
-            if prev["status"] == "dismissed" and _as_dict(prev["basis"]) != basis:
-                # The situation the manager dismissed has materially changed.
+            # A live issue that maps to a non-open row means the violation is
+            # back: a previously auto-resolved one always reactivates; a
+            # dismissed false-positive reactivates only if its basis changed
+            # (an unchanged dismissal is the manager's standing call).
+            reactivate = prev["status"] == "resolved" or (
+                prev["status"] == "dismissed" and _as_dict(prev["basis"]) != basis
+            )
+            if reactivate:
                 reopened = await conn.fetchrow(
                     """
                     UPDATE compliance_issue_state
-                       SET status='open', basis=$3, title=$4, detail=$5, severity=$6,
-                           penalty=$7, statute_citation=$8, last_seen_at=NOW(), updated_at=NOW(),
+                       SET status='open', basis=$2, title=$3, detail=$4, severity=$5,
+                           penalty=$6, statute_citation=$7, last_seen_at=NOW(), updated_at=NOW(),
                            resolution_method=NULL, resolution_note=NULL, resolved_at=NULL, resolved_by=NULL
-                     WHERE id=$1 AND status='dismissed'
+                     WHERE id=$1 AND status IN ('dismissed','resolved')
                      RETURNING id
                     """,
-                    prev["id"], None, json.dumps(basis), iss.title, iss.detail,
+                    prev["id"], json.dumps(basis), iss.title, iss.detail,
                     iss.severity, penalty_json, iss.statute_citation,
                 )
                 if reopened:
@@ -177,7 +183,7 @@ async def fetch_recent_remediations(conn, company_id: UUID, days: int = 30) -> l
     cutoff = datetime.utcnow() - timedelta(days=days)
     rows = await conn.fetch(
         """
-        SELECT s.*, u.first_name || ' ' || u.last_name AS resolver_name
+        SELECT s.*, u.email AS resolver_name
         FROM compliance_issue_state s
         LEFT JOIN users u ON u.id = s.resolved_by
         WHERE s.company_id = $1
@@ -254,7 +260,7 @@ async def reopen_issue(conn, company_id: UUID, issue_key: str, actor_user_id) ->
              WHERE company_id=$1 AND issue_key=$2 AND status='dismissed'
              RETURNING entity_type, entity_id
             """,
-            company_id, issue_key, actor_user_id,
+            company_id, issue_key,
         )
         if row:
             await _log(conn, company_id, issue_key, row["entity_type"], row["entity_id"],

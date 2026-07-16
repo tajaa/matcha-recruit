@@ -780,7 +780,7 @@ async def update_alert_action_plan_endpoint(
         alert_uuid,
         company_id,
         updates,
-        actor_user_id=current_user.user_id,
+        actor_user_id=current_user.id,
     )
     if not updated:
         raise HTTPException(status_code=404, detail="Alert not found")
@@ -843,7 +843,7 @@ async def dismiss_remediation_endpoint(
     if not (data.reason or "").strip():
         raise HTTPException(status_code=400, detail="A reason is required to dismiss an issue")
     async with get_connection() as conn:
-        ok = await dismiss_issue(conn, company_id, data.issue_key, data.reason.strip(), current_user.user_id)
+        ok = await dismiss_issue(conn, company_id, data.issue_key, data.reason.strip(), current_user.id)
     if not ok:
         raise HTTPException(status_code=404, detail="No open issue with that key")
     return {"status": "dismissed", "issue_key": data.issue_key}
@@ -860,7 +860,7 @@ async def annotate_remediation_endpoint(
     if company_id is None:
         raise HTTPException(status_code=403, detail="Access denied")
     async with get_connection() as conn:
-        ok = await annotate_issue(conn, company_id, data.issue_key, (data.note or "").strip(), current_user.user_id)
+        ok = await annotate_issue(conn, company_id, data.issue_key, (data.note or "").strip(), current_user.id)
     if not ok:
         raise HTTPException(status_code=404, detail="Unknown issue key")
     return {"status": "noted", "issue_key": data.issue_key}
@@ -877,7 +877,7 @@ async def reopen_remediation_endpoint(
     if company_id is None:
         raise HTTPException(status_code=403, detail="Access denied")
     async with get_connection() as conn:
-        ok = await reopen_issue(conn, company_id, data.issue_key, current_user.user_id)
+        ok = await reopen_issue(conn, company_id, data.issue_key, current_user.id)
     if not ok:
         raise HTTPException(status_code=404, detail="No dismissed issue with that key")
     return {"status": "open", "issue_key": data.issue_key}
