@@ -1497,6 +1497,22 @@ async def _load_chain_requirements(conn, leaf_jurisdiction_id: UUID) -> List[Dic
         # it (the same obligation twice, one with a stale value), and 'pending' is
         # the grounding-quarantine state — not something a tenant should be told
         # they are liable for.
+        #
+        # `status` is OUR state, not the law's. A row can be 'active' — researched,
+        # cited, current in the catalog — and still not be in force, because the
+        # catalog deliberately stores forward-looking law. Those are two different
+        # time axes and both have to be read:
+        #
+        #   expired (expiration_date < today) — dropped. It isn't law; serving it
+        #     tells a business it is liable for a repealed rule.
+        #   future-effective (effective_date > today) — KEPT on purpose. Dropping
+        #     it would hide "this hits you on 2027-07-01", which is the whole
+        #     product value of storing it; the tab lanes it off `effective_date`.
+        #     Whatever is done with it downstream, it must not read as current.
+        #
+        # NULL on either column means unknown, not false, so both predicates let
+        # NULLs through — most of the catalog has no expiration_date, and a NULL
+        # comparison would silently drop every one of those rows.
         """
         WITH RECURSIVE chain AS (
             SELECT id, parent_id, 0 AS depth FROM jurisdictions WHERE id = $1
@@ -1509,6 +1525,7 @@ async def _load_chain_requirements(conn, leaf_jurisdiction_id: UUID) -> List[Dic
         SELECT r.* FROM jurisdiction_requirements r
         JOIN chain c ON c.id = r.jurisdiction_id
         WHERE r.status = 'active'
+          AND (r.expiration_date IS NULL OR r.expiration_date >= CURRENT_DATE)
         """,
         leaf_jurisdiction_id,
     )

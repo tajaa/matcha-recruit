@@ -18,6 +18,18 @@ import { JURISDICTION_LEVEL_LABELS, RATE_TYPE_LABELS } from '../../api/complianc
 import type { FacilityAttributes } from '../../types/compliance'
 import type { ComplianceCheckMessage } from '../../hooks/compliance/useComplianceCheck'
 
+/** Is this effective date still in the future — i.e. researched and current in
+ *  the catalog, but not yet law? Date-only compare: `effective_date` is a DATE,
+ *  so parsing it gives UTC midnight, and comparing that against `new Date()`
+ *  would flip the label early or late depending on the viewer's timezone. */
+function isFuture(effectiveDate: string): boolean {
+  const eff = new Date(effectiveDate)
+  if (Number.isNaN(eff.getTime())) return false
+  const today = new Date()
+  const todayUTC = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate())
+  return Date.UTC(eff.getUTCFullYear(), eff.getUTCMonth(), eff.getUTCDate()) > todayUTC
+}
+
 // The group filter is derived from the requirements this tenant actually has —
 // never from a static list of every group the product supports. A dental office
 // was being offered "Oncology", "Behavioral Health" and "Life Sciences" lenses
@@ -292,7 +304,19 @@ export function ComplianceRequirementsTab({ requirements, loading, onPin, checkM
                 <div className="flex items-center justify-between mt-2">
                   <div className="flex items-center gap-3">
                     {req.effective_date && (
-                      <span className="text-[11px] text-zinc-600">Eff. {new Date(req.effective_date).toLocaleDateString()}</span>
+                      isFuture(req.effective_date) ? (
+                        // A catalog row can be current for us and not yet law:
+                        // the catalog deliberately stores forward-looking rules.
+                        // "Eff. 7/1/2027" reads as "in force since" — the exact
+                        // misread this avoids.
+                        <span
+                          className="text-[11px] px-1.5 py-0.5 rounded bg-amber-900/20 text-amber-400 border border-amber-800/40"
+                          title="Not yet in force — no action required until this date">
+                          Takes effect {new Date(req.effective_date).toLocaleDateString()}
+                        </span>
+                      ) : (
+                        <span className="text-[11px] text-zinc-600">Eff. {new Date(req.effective_date).toLocaleDateString()}</span>
+                      )
                     )}
                     {req.statute_citation && (
                       <span

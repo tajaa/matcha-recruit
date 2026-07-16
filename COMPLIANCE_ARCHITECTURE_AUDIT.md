@@ -150,14 +150,30 @@ link, not frozen text:
 ### 5. World time is stored but never read
 `effective_date` (1271/1781), `expiration_date` (6) are stored and carried through
 the upsert — but only `handbook_service.py:1464` filters on them. The Requirements
-tab does not. Live today:
+tab does not.
 
-> **Colorado EEO-1 Demographic Reporting**, `effective_date = 2027-07-01`, is
-> projected to a tenant right now as a current obligation, unmarked.
+**Corrected 2026-07-16** — an earlier draft of this finding claimed **Colorado
+EEO-1 Demographic Reporting** (`effective_date = 2027-07-01`) "is projected to a
+tenant right now as a current obligation." That overstated it: the claim was read
+off `compliance_requirements` without checking what survives the codified gate.
+The row is uncodified, so PR #44's gate already hides it. Measured on the Denver
+location that projects it:
 
-One row, small blast radius — but the mechanism is wrong and grows with
-forward-looking research. The proposal's proactive framing ("compliant today, X
-takes effect March 1") is product value we're leaving on the table;
+```
+ gate_off_total | gate_on_total | not_yet_law_gate_off | not_yet_law_gate_on
+            144 |            11 |                    1 |                   0
+```
+
+So there is **no live tenant-visible bug**. The finding still stands, as a latent
+one: the mechanism is wrong, it is masked by an unrelated gate rather than by
+design, and it surfaces the moment that row codifies — which is precisely what
+the codification push is for. It also grows with forward-looking research, and
+`tenant_codified_only` is a platform setting somebody can flip off.
+
+Worth keeping honest about, because the FE is *nearly* right already:
+`ComplianceRequirementsTab.tsx:294` renders `Eff. {date}` — which reads as "in
+force since", the exact misread. The proposal's proactive framing ("compliant
+today, X takes effect March 1") is product value we're leaving on the table;
 `upcoming_legislation` does it on a separate axis the catalog ignores.
 
 ### 6. The predicate engine is better than the proposal's, and starved
