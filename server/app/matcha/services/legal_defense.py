@@ -677,6 +677,14 @@ async def _src_compliance(conn, company_id, start, end, loc_id, state, topic=_BR
     # safety matter's corpus — but they are then read as text: the same minted key
     # naming a plainly different subject (`hipaa_privacy_notices` in a wage matter)
     # is demoted. Unclassifiable keys still pass, as before.
+    #
+    # Deliberately NOT codified-gated (platform_settings.tenant_codified_only),
+    # unlike every tenant-facing compliance read. The claim is different: the tab
+    # tells a business "this is the law you must follow", which an uncited row
+    # cannot support; this tells counsel "here is what the company was tracking
+    # on that date", and an uncited row is still true evidence of that. Gating
+    # here would quietly shrink an attorney's evidence packet — the failure mode
+    # runs the opposite direction, so it stays open.
     rows = await conn.fetch(
         f"""
         SELECT cr.id, cr.title, cr.category, cr.current_value, cr.jurisdiction_name,

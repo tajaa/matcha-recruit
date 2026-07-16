@@ -16,7 +16,7 @@ from uuid import UUID
 
 from ...database import get_connection
 from ...config import get_settings
-from ...core.services.compliance_service import get_locations
+from ...core.services.compliance_service import codified_gate_sql, get_locations
 from ...core.services.email import EmailService
 from ...core.services.storage import get_storage
 from .matcha_work_modes import MODE_COLUMNS_SQL, MODES_BY_KEY
@@ -719,14 +719,22 @@ async def get_company_profile_for_ai(company_id: UUID) -> dict:
     location_ids = [loc["id"] for loc in locations if loc.get("id")]
     try:
         async with get_connection() as conn:
+            # Same codified gate as the Requirements tab. This profile is injected
+            # into EVERY matcha-work AI thread, not just compliance-mode ones, so
+            # ungated it is the widest path by which a rule we never tied to a
+            # statute reaches a user — stated by the model, with no tab to check
+            # it against.
             req_rows = await conn.fetch(
                 """
                 SELECT r.location_id, r.category, r.jurisdiction_name,
                        r.current_value, r.title
                 FROM compliance_requirements r
+                LEFT JOIN jurisdiction_requirements cat
+                  ON cat.id = r.jurisdiction_requirement_id
                 WHERE r.location_id = ANY($1::uuid[])
-                ORDER BY r.location_id, r.category, r.jurisdiction_level
-                """,
+                """
+                + await codified_gate_sql("cat", conn=conn)
+                + " ORDER BY r.location_id, r.category, r.jurisdiction_level",
                 location_ids,
             )
     except Exception:
