@@ -189,6 +189,18 @@ def _close_card() -> dict:
 def _has_injury_signal(incident: dict[str, Any], incident_type: str) -> bool:
     if incident_type == "safety":
         return True
+    if incident_type == "near_miss":
+        # A near miss is, by definition, an event where no one was actually
+        # hurt — the report text still routinely uses injury-cue words
+        # ("nearly slipped", "almost struck", "could have fallen") to
+        # describe the hazard that *didn't* result in harm. The keyword
+        # regex below can't distinguish that from a real injury narrative,
+        # so it was intermittently firing the "Was any treatment provided
+        # beyond first aid?" OSHA-recordability card on reports where no
+        # treatment (or injury) ever happened. If a near-miss turns out to
+        # have actually injured someone, the report should be recategorized
+        # to "safety" — which still trips this gate unconditionally above.
+        return False
     text = f"{incident.get('title') or ''} {incident.get('description') or ''}"
     return bool(_INJURY_KEYWORD_RE.search(text))
 
