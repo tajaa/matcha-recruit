@@ -5,7 +5,7 @@
 // there into email-safe HTML). Adding a block = a schema entry here + a
 // renderer there.
 
-export type FieldKind = 'text' | 'textarea' | 'select' | 'bool' | 'image' | 'list'
+export type FieldKind = 'text' | 'textarea' | 'select' | 'bool' | 'image' | 'list' | 'rich'
 
 export type Field = {
   key: string
@@ -75,7 +75,7 @@ export const BLOCK_SCHEMAS: Record<string, BlockSchema> = {
     type: 'text', label: 'Text', icon: '¶', group: 'Content',
     make: () => ({ type: 'text', body: 'Write your paragraph here. Leave a blank line to start a new paragraph.', align: 'left' }),
     fields: [
-      F('body', 'Body', 'textarea'),
+      F('body', 'Body', 'rich'),
       F('align', 'Align', 'select', { options: [{ value: 'left', label: 'Left' }, { value: 'center', label: 'Center' }] }),
     ],
   },

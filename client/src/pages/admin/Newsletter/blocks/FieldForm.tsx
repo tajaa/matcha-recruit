@@ -1,5 +1,7 @@
 import { useState } from 'react'
-import { Loader2, ImagePlus, X, Plus, Trash2, ChevronUp, ChevronDown } from 'lucide-react'
+import { useEditor, EditorContent } from '@tiptap/react'
+import StarterKit from '@tiptap/starter-kit'
+import { Loader2, ImagePlus, X, Plus, Trash2, ChevronUp, ChevronDown, Bold, List } from 'lucide-react'
 import { uploadNewsletterMedia } from '../uploadMedia'
 import type { Field } from './schema'
 
@@ -7,6 +9,70 @@ const inputCls =
   'w-full px-2.5 py-1.5 rounded-lg border border-zinc-700 bg-zinc-900 text-sm text-zinc-200 placeholder-zinc-500 outline-none focus:border-zinc-500'
 
 type Obj = Record<string, unknown>
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+/** Minimal rich-text control: bold + bulleted list only, matching what the
+ * server renderer (`email_blocks.py:_render_text`) accepts via a block's
+ * `html` key. Remounts fresh each time a block is opened for editing (see
+ * NewsletterBuilder's `open && <FieldForm .../>`), so the initial `content`
+ * seed below is all that's needed — no external-sync effect. */
+function RichTextInput({ html, body, onChange }: { html: string; body: string; onChange: (v: { html: string; body: string }) => void }) {
+  const editor = useEditor({
+    extensions: [
+      StarterKit.configure({
+        heading: false,
+        italic: false,
+        strike: false,
+        code: false,
+        codeBlock: false,
+        blockquote: false,
+        horizontalRule: false,
+        orderedList: false,
+      }),
+    ],
+    content: html || (body ? `<p>${escapeHtml(body)}</p>` : ''),
+    onUpdate: ({ editor: e }) => onChange({ html: e.getHTML(), body: e.getText() }),
+    editorProps: {
+      attributes: {
+        class: 'outline-none min-h-[70px] px-2.5 py-1.5 text-sm text-zinc-200',
+      },
+    },
+  })
+
+  if (!editor) return null
+
+  const tb = (active: boolean) =>
+    `p-1 rounded transition-colors ${active ? 'text-emerald-400 bg-zinc-800' : 'text-zinc-500 hover:text-zinc-300'}`
+
+  return (
+    <div className="rounded-lg border border-zinc-700 bg-zinc-900">
+      <div className="flex items-center gap-0.5 px-1.5 py-1 border-b border-zinc-800">
+        <button
+          type="button"
+          onMouseDown={(e) => { e.preventDefault(); editor.chain().focus().toggleBold().run() }}
+          className={tb(editor.isActive('bold'))}
+          title="Bold"
+        ><Bold size={13} /></button>
+        <button
+          type="button"
+          onMouseDown={(e) => { e.preventDefault(); editor.chain().focus().toggleBulletList().run() }}
+          className={tb(editor.isActive('bulletList'))}
+          title="Bullet list"
+        ><List size={13} /></button>
+      </div>
+      <EditorContent editor={editor} />
+      <style>{`
+        .ProseMirror p { margin: 4px 0; }
+        .ProseMirror ul { padding-left: 20px; margin: 4px 0; list-style: disc; }
+        .ProseMirror li { margin: 2px 0; }
+        .ProseMirror strong { color: #e8e8e8; font-weight: 600; }
+      `}</style>
+    </div>
+  )
+}
 
 /** Upload-or-paste image control shared by every image field. */
 function ImageInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
@@ -81,6 +147,13 @@ function FieldRow({ field, obj, onChange }: { field: Field; obj: Obj; onChange: 
       )}
       {field.kind === 'image' && <ImageInput value={(value as string) ?? ''} onChange={set} />}
       {field.kind === 'list' && <ListField field={field} value={(value as Obj[]) ?? []} onChange={set} />}
+      {field.kind === 'rich' && (
+        <RichTextInput
+          html={(obj.html as string) ?? ''}
+          body={(value as string) ?? ''}
+          onChange={({ html, body }) => onChange({ ...obj, [field.key]: body, html })}
+        />
+      )}
       {field.help && <p className="text-[10px] text-zinc-600 leading-snug">{field.help}</p>}
     </div>
   )
