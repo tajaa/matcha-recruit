@@ -216,7 +216,7 @@ function ExposureFigure({ posture: p, issues }: { posture: ComplianceRiskSummary
   // The single most-cited enforcing authority behind the exposure — the
   // signature detail that reads as a legal instrument, not a to-do list.
   const authority = useMemo(() => {
-    const withPenalty = issues.find((i) => i.penalty && (i.penalty.civil_min || i.penalty.civil_max))
+    const withPenalty = issues.find((i) => i.penalty && (i.penalty.civil_min != null || i.penalty.civil_max != null))
     return withPenalty?.penalty?.enforcing_agency || withPenalty?.statute_citation || null
   }, [issues])
 
@@ -278,8 +278,8 @@ function IssueRow({
   const isAlert = issue.source === 'alert'
   const pen = issue.penalty
 
-  const penaltyLine = pen && (pen.civil_min || pen.civil_max)
-    ? `${pen.civil_min ? money(pen.civil_min) : '?'}–${pen.civil_max ? money(pen.civil_max) : '?'}${pen.per_violation ? '/violation' : ''}${pen.enforcing_agency ? ` · ${pen.enforcing_agency}` : ''}`
+  const penaltyLine = pen && (pen.civil_min != null || pen.civil_max != null)
+    ? `${pen.civil_min != null ? money(pen.civil_min) : '?'}–${pen.civil_max != null ? money(pen.civil_max) : '?'}${pen.per_violation ? '/violation' : ''}${pen.enforcing_agency ? ` · ${pen.enforcing_agency}` : ''}`
     : null
 
   return (

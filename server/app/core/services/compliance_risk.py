@@ -62,10 +62,6 @@ def _loc_label(row) -> str:
     return city or state or "Company-wide"
 
 
-def _fmt_money(v: float) -> str:
-    return f"${v:,.0f}"
-
-
 def _parse_penalties(raw) -> dict | None:
     """metadata->'penalties' may arrive as a dict (jsonb) or a JSON string."""
     if raw is None:
@@ -93,6 +89,7 @@ async def _wage_penalty_for_location(conn, jurisdiction_id, rate_type: str) -> t
             UNION ALL
             SELECT j.id, j.parent_id, j.level, c.depth + 1
             FROM jurisdictions j JOIN chain c ON j.id = c.parent_id
+            WHERE c.depth < 10  -- cycle guard: chain is federal→…→city, never deep
         )
         SELECT jr.statute_citation, jr.metadata->'penalties' AS penalties
         FROM chain c
@@ -124,6 +121,10 @@ async def _wage_penalty_for_location(conn, jurisdiction_id, rate_type: str) -> t
 async def get_compliance_risk_summary(company_id: UUID) -> ComplianceRiskSummary:
     issues: list[RiskIssue] = []
     get_ahead: list[RiskGetAhead] = []
+    # Distinct roster employees with an open issue — keyed on employee_id, not
+    # name (two "John Smith"s must not collapse). Alerts carry no employee id,
+    # so they don't contribute to this headcount (company-wide policy gaps).
+    affected_ids: set[str] = set()
     today = date.today()
 
     features = {}
@@ -151,6 +152,7 @@ async def get_compliance_risk_summary(company_id: UUID) -> ComplianceRiskSummary
                     is_hourly = rate_type == "general"
                     for v in violations:
                         name = v["employee_name"]
+                        affected_ids.add(str(v["employee_id"]))
                         rate, threshold = v["pay_rate"], v["threshold"]
                         if is_hourly:
                             detail = f"Paid ${rate:,.2f}/hr — the applicable minimum is ${threshold:,.2f}/hr."
@@ -207,6 +209,7 @@ async def get_compliance_risk_summary(company_id: UUID) -> ComplianceRiskSummary
                     days = (exp - today).days
                     label = _CREDENTIAL_LABELS.get(r["credential_type"], r["credential_type"])
                     name = r["employee_name"]
+                    affected_ids.add(str(r["employee_id"]))
                     if days < 0:
                         severity = "critical"
                         detail = f"{label} expired {exp.isoformat()} ({-days} day{'s' if -days != 1 else ''} ago)."
@@ -289,7 +292,6 @@ async def get_compliance_risk_summary(company_id: UUID) -> ComplianceRiskSummary
             )
             for r in rows:
                 loc = loc_by_id.get(r["location_id"])
-                affected = r["affected_employee_count"] or 0
                 issues.append(RiskIssue(
                     id=f"alert:{r['id']}",
                     source="alert",
@@ -358,11 +360,6 @@ async def get_compliance_risk_summary(company_id: UUID) -> ComplianceRiskSummary
     open_high = sum(1 for i in issues if i.severity == "high")
     open_moderate = sum(1 for i in issues if i.severity == "moderate")
 
-    affected: set[str] = set()
-    for i in issues:
-        for n in i.employee_names:
-            affected.add(n)
-
     exposure_min = 0.0
     exposure_max = 0.0
     unquantified = 0
@@ -373,11 +370,34 @@ async def get_compliance_risk_summary(company_id: UUID) -> ComplianceRiskSummary
         if cmin is None and cmax is None:
             unquantified += 1
         else:
-            exposure_min += cmin or cmax or 0
-            exposure_max += cmax or cmin or 0
+            # A statute may set a $0 floor ("up to $X") — treat 0 as a real
+            # bound, never as "missing" (a falsy 0 would borrow the max).
+            lo = cmin if cmin is not None else cmax
+            hi = cmax if cmax is not None else cmin
+            exposure_min += lo or 0
+            exposure_max += hi or 0
 
-    next_days = get_ahead[0].days_until if get_ahead else None
-    next_label = get_ahead[0].title if get_ahead else None
+    # Next deadline = the soonest UPCOMING date across everything that carries
+    # one — credential/incident/alert issues AND the get-ahead lane — not just
+    # legislation. A license expiring tomorrow must win this cell.
+    next_days: int | None = None
+    next_label: str | None = None
+    _best = None  # (days_until, label)
+    for g in get_ahead:
+        if g.days_until is not None and g.days_until >= 0:
+            if _best is None or g.days_until < _best[0]:
+                _best = (g.days_until, g.title)
+    for i in issues:
+        if not i.deadline:
+            continue
+        try:
+            d = (date.fromisoformat(i.deadline) - today).days
+        except ValueError:
+            continue
+        if d >= 0 and (_best is None or d < _best[0]):
+            _best = (d, i.title)
+    if _best is not None:
+        next_days, next_label = _best
 
     issues.sort(key=lambda i: (
         _SEV_RANK.get(i.severity, 9),
@@ -388,7 +408,7 @@ async def get_compliance_risk_summary(company_id: UUID) -> ComplianceRiskSummary
         open_critical=open_critical,
         open_high=open_high,
         open_moderate=open_moderate,
-        employees_affected=len(affected),
+        employees_affected=len(affected_ids),
         exposure_min_usd=round(exposure_min, 2),
         exposure_max_usd=round(exposure_max, 2),
         exposure_unquantified_count=unquantified,
