@@ -355,6 +355,10 @@ class IRDocumentResponse(BaseModel):
     mime_type: Optional[str] = None
     file_size: Optional[int] = None
     uploaded_by: Optional[UUID] = None
+    # 'authed' | 'magic_link' | None (legacy rows). Distinguishes an anonymous
+    # magic-link attachment from an authed upload — both have uploaded_by NULL
+    # on the anonymous path, so uploaded_by alone can't tell them apart.
+    uploaded_via: Optional[str] = None
     created_at: datetime
 
 

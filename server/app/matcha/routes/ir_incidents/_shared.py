@@ -6,6 +6,7 @@ the original flat `ir_incidents.py` during the package split.
 import asyncio
 import json
 import logging
+import os
 import re
 import secrets
 from datetime import datetime, time, timedelta, timezone
@@ -128,6 +129,97 @@ async def _read_audio_or_400(file: UploadFile) -> bytes:
     if len(audio) < 12 or audio[:4] != b"RIFF" or audio[8:12] != b"WAVE":
         raise HTTPException(status_code=400, detail="Unsupported audio format — expected WAV.")
     return audio
+
+
+# ---------------------------------------------------------------------------
+# Document upload validation — shared by the authed upload (documents.py) and
+# the public per-location magic-link intake (inbound_email.py).
+# ---------------------------------------------------------------------------
+
+# Max IR document size on the authenticated path. Matches the voice-intake
+# guard; keeps a single large upload from being buffered whole into memory
+# unbounded.
+MAX_DOCUMENT_BYTES = 25 * 1024 * 1024
+
+# Tighter caps for the *unauthenticated* magic-link intake. The authed path is
+# bounded by a login; this one is bounded only by a token that may have leaked,
+# so a submit can't spend 5 × 25MB of backend memory and S3 on one request.
+MAX_INTAKE_FILES = 5
+MAX_INTAKE_FILE_BYTES = 10 * 1024 * 1024
+MAX_INTAKE_TOTAL_BYTES = 25 * 1024 * 1024
+
+# Server-derived MIME per allowed extension. We do NOT trust the client-supplied
+# content_type for storage: a .png uploaded as text/html would be a stored-XSS
+# vector if the object is ever served inline. The stored/served type is derived
+# from the validated extension here.
+_EXT_MIME = {
+    ".pdf": "application/pdf",
+    ".doc": "application/msword",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".txt": "text/plain",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".csv": "text/csv",
+    ".json": "application/json",
+}
+
+# Extensions that map to ir_incident_documents.document_type = 'photo'. The
+# intake form has no type picker, so the type is derived from the extension.
+_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif"}
+
+
+def validate_upload_name(filename: Optional[str]) -> tuple[str, str, str]:
+    """Validate an upload's filename and derive its stored name/ext/MIME.
+
+    Returns (safe_name, ext, mime). Raises 400 on a disallowed extension.
+
+    The client filename is attacker-controlled: it can contain path separators
+    or be absent entirely, so it is reduced to a bare basename before anything
+    else touches it. The MIME comes from the validated extension, never from
+    the client-supplied content_type.
+    """
+    raw_name = filename or ""
+    safe_name = os.path.basename(raw_name.replace("\\", "/")).strip() or "upload"
+    _, ext = os.path.splitext(safe_name)
+    ext = ext.lower()
+    if ext not in _EXT_MIME:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File type not allowed. Allowed: {sorted(_EXT_MIME)}",
+        )
+    return safe_name, ext, _EXT_MIME[ext]
+
+
+def document_type_for_ext(ext: str) -> str:
+    """Map a validated extension onto the ir_incident_documents type CHECK."""
+    return "photo" if ext in _IMAGE_EXTS else "other"
+
+
+async def read_upload_capped(file: UploadFile, max_bytes: int) -> bytes:
+    """Read an UploadFile in chunks, aborting at ``max_bytes``.
+
+    Chunked rather than a bare ``await file.read()`` so an oversize body on the
+    public intake is rejected at the cap instead of after it has already been
+    pulled into the process.
+    """
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(1024 * 1024)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File too large. Max {max_bytes // (1024 * 1024)} MB per file.",
+            )
+        chunks.append(chunk)
+    if total == 0:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+    return b"".join(chunks)
 
 
 def _info_request_effective_status(row) -> str:

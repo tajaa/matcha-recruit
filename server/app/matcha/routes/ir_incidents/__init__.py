@@ -82,14 +82,20 @@ router.include_router(_voice_router)
 from .analytics import compute_wc_metrics  # noqa: F401  (used by broker_portfolio.py)
 from .analytics import compute_behavioral_friction  # noqa: F401  (used by broker_risk_alerts worker)
 from ._shared import (  # noqa: F401  (used by inbound_email.py)
+    MAX_INTAKE_FILES,
+    MAX_INTAKE_FILE_BYTES,
+    MAX_INTAKE_TOTAL_BYTES,
     _location_label,
     _parse_occurred_at,
     _read_audio_or_400,
     _safe_json_loads,
     _info_request_effective_status,
     create_incident_core,
+    document_type_for_ext,
     generate_incident_number,
+    read_upload_capped,
     send_ir_notifications_task,
     send_ir_info_request_notification_task,
+    validate_upload_name,
 )
 from .copilot import _close_incident_via_copilot  # noqa: F401  (future cross-router use)

@@ -156,6 +156,9 @@ export type IRDocument = {
   document_type: string
   filename: string
   file_size: number | null
+  // How the file arrived. 'magic_link' means an anonymous reporter attached it
+  // through a per-location intake link; null on rows predating the column.
+  uploaded_via: 'authed' | 'magic_link' | null
   created_at: string
 }
 

@@ -117,14 +117,16 @@ def test_invite_expiry_boundaries():
 # ---------------------------------------------------------------------------
 
 def test_document_upload_guards():
-    from app.matcha.routes.ir_incidents import documents
+    # The cap + extension→MIME map moved to _shared when the magic-link intake
+    # became a second caller; documents.py still re-exports the cap it uses.
+    from app.matcha.routes.ir_incidents import _shared, documents
 
     assert documents.MAX_DOCUMENT_BYTES == 25 * 1024 * 1024
     # Every allowed extension maps to a safe, non-HTML content type.
-    for ext, mime in documents._EXT_MIME.items():
+    for ext, mime in _shared._EXT_MIME.items():
         assert ext.startswith(".")
         assert mime and "html" not in mime, f"{ext} must never be served as HTML"
-    assert ".pdf" in documents._EXT_MIME and ".png" in documents._EXT_MIME
+    assert ".pdf" in _shared._EXT_MIME and ".png" in _shared._EXT_MIME
 
 
 @pytest.mark.parametrize(
@@ -139,10 +141,17 @@ def test_document_upload_guards():
     ],
 )
 def test_document_extension_whitelist(raw, expected_ok):
-    import os
+    from fastapi import HTTPException
 
-    from app.matcha.routes.ir_incidents.documents import _EXT_MIME
+    from app.matcha.routes.ir_incidents._shared import validate_upload_name
 
-    safe_name = os.path.basename(raw.replace("\\", "/")).strip() or "upload"
-    _, ext = os.path.splitext(safe_name)
-    assert (ext.lower() in _EXT_MIME) is expected_ok
+    # The basename-then-whitelist logic this used to re-implement inline now
+    # lives in validate_upload_name, so exercise that directly — an inline copy
+    # can't catch the helper drifting.
+    if expected_ok:
+        _, ext, mime = validate_upload_name(raw)
+        assert mime and "html" not in mime
+    else:
+        with pytest.raises(HTTPException) as e:
+            validate_upload_name(raw)
+        assert e.value.status_code == 400

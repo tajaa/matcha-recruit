@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { Loader2, CheckCircle2, XCircle, AlertTriangle, MapPin } from 'lucide-react'
+import { Loader2, CheckCircle2, XCircle, AlertTriangle, MapPin, Paperclip, X } from 'lucide-react'
 import { IRPersonMultiSelect } from '../../components/ir/IRPersonMultiSelect'
 import { IRPublicDictate } from '../../components/ir/IRPublicDictate'
 import { SubmissionDisclaimer } from '../../components/ir/SubmissionDisclaimer'
@@ -9,6 +9,13 @@ const BASE = import.meta.env.VITE_API_URL ?? '/api'
 
 const inputCls =
   'mt-1 w-full bg-zinc-900 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-emerald-700'
+
+// Mirrors the server caps in ir_incidents/_shared.py. Client-side checks are UX
+// only — the server re-validates every one of these.
+const MAX_FILES = 5
+const MAX_FILE_BYTES = 10 * 1024 * 1024
+const MAX_TOTAL_BYTES = 25 * 1024 * 1024
+const ACCEPT = '.jpg,.jpeg,.png,.gif,.pdf,.txt,.doc,.docx'
 
 type Stage = 'validating' | 'invalid' | 'used' | 'form' | 'submitting' | 'submitted' | 'error'
 
@@ -35,10 +42,35 @@ export default function LocationIntake() {
   const [witnesses, setWitnesses] = useState<string[]>([])
   const [nextSteps, setNextSteps] = useState('')
   const [honeypot, setHoneypot] = useState('')
+  const [files, setFiles] = useState<File[]>([])
+  const [fileError, setFileError] = useState<string | null>(null)
   // Verbatim transcript from the last successful dictation — rides along to
   // the submission as evidence of what was spoken, regardless of edits made
   // to the (AI-prefilled) form fields afterward.
   const [voiceTranscript, setVoiceTranscript] = useState<string | null>(null)
+
+  function addFiles(picked: FileList | null) {
+    if (!picked?.length) return
+    setFileError(null)
+    const next = [...files]
+    for (const f of Array.from(picked)) {
+      if (next.length >= MAX_FILES) {
+        setFileError(`You can attach at most ${MAX_FILES} files.`)
+        break
+      }
+      if (f.size > MAX_FILE_BYTES) {
+        setFileError(`"${f.name}" is over ${MAX_FILE_BYTES / (1024 * 1024)} MB.`)
+        continue
+      }
+      if (next.some((n) => n.name === f.name && n.size === f.size)) continue
+      next.push(f)
+    }
+    if (next.reduce((sum, f) => sum + f.size, 0) > MAX_TOTAL_BYTES) {
+      setFileError(`Attachments total over ${MAX_TOTAL_BYTES / (1024 * 1024)} MB.`)
+      return
+    }
+    setFiles(next)
+  }
 
   useEffect(() => {
     if (!token) {
@@ -68,10 +100,13 @@ export default function LocationIntake() {
     setStage('submitting')
     setError(null)
     try {
-      const res = await fetch(`${BASE}/intake/${token}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      // Multipart: the report itself rides as a JSON `payload` field so the
+      // server-side model keeps its shape, with attachments alongside it. One
+      // request — the incident and its files land together or not at all.
+      const fd = new FormData()
+      fd.append(
+        'payload',
+        JSON.stringify({
           description: description.trim(),
           reported_by_name: reportedByName.trim(),
           occurred_at: occurredAt.trim() || null,
@@ -80,7 +115,10 @@ export default function LocationIntake() {
           internal_ref: honeypot,
           ...(voiceTranscript ? { voice_transcript: voiceTranscript } : {}),
         }),
-      })
+      )
+      for (const f of files) fd.append('files', f)
+      // No Content-Type header — the browser must set the multipart boundary.
+      const res = await fetch(`${BASE}/intake/${token}`, { method: 'POST', body: fd })
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
         setError(data.detail ?? 'Submission failed. Please try again.')
@@ -215,6 +253,59 @@ export default function LocationIntake() {
             className={inputCls}
           />
         </Field>
+
+        <div>
+          <span className="text-xs text-zinc-400 uppercase tracking-wide">
+            Photos or documents
+            <span className="ml-1 normal-case tracking-normal text-zinc-600">(optional)</span>
+          </span>
+          <span className="block text-[11px] text-zinc-500 mt-0.5">
+            Up to {MAX_FILES} files, {MAX_FILE_BYTES / (1024 * 1024)} MB each.
+          </span>
+
+          {files.length < MAX_FILES && (
+            <label className="mt-2 flex items-center justify-center gap-2 border border-dashed border-zinc-800 hover:border-zinc-700 rounded px-3 py-3 cursor-pointer transition-colors">
+              <Paperclip className="w-4 h-4 text-zinc-500" />
+              <span className="text-sm text-zinc-400">Add photos or documents</span>
+              <input
+                type="file"
+                multiple
+                accept={ACCEPT}
+                className="hidden"
+                onChange={(e) => {
+                  addFiles(e.target.files)
+                  e.target.value = ''
+                }}
+              />
+            </label>
+          )}
+
+          {files.length > 0 && (
+            <ul className="mt-2 border border-zinc-800 rounded divide-y divide-zinc-800/60">
+              {files.map((f) => (
+                <li key={`${f.name}-${f.size}`} className="flex items-center justify-between px-3 py-2 gap-3">
+                  <span className="text-sm text-zinc-300 truncate">{f.name}</span>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="text-[11px] text-zinc-600">{Math.max(1, Math.round(f.size / 1024))} KB</span>
+                    <button
+                      type="button"
+                      aria-label={`Remove ${f.name}`}
+                      onClick={() => {
+                        setFileError(null)
+                        setFiles((prev) => prev.filter((p) => p !== f))
+                      }}
+                      className="text-zinc-600 hover:text-red-400 transition-colors"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {fileError && <p className="text-sm text-red-400 mt-2">{fileError}</p>}
+        </div>
 
         {/* Honeypot — hidden from real users; bots fill this. Implausible name
             (not company_name/email) so browser autofill won't populate it for a

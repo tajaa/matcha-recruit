@@ -15,6 +15,7 @@ export function IRDocumentPanel({ incidentId }: { incidentId: string }) {
   const [loading, setLoading] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [docType, setDocType] = useState('other')
+  const [openError, setOpenError] = useState<string | null>(null)
 
   const fetchDocs = useCallback(async () => {
     setLoading(true)
@@ -43,6 +44,20 @@ export function IRDocumentPanel({ incidentId }: { incidentId: string }) {
     setDocs((prev) => prev.filter((d) => d.id !== docId))
   }
 
+  // Documents live in the private bucket, so there is no durable URL to render —
+  // fetch a short-lived presigned one at click time.
+  async function handleOpen(docId: string) {
+    setOpenError(null)
+    try {
+      const { url } = await api.get<{ url: string }>(
+        `/ir/incidents/${incidentId}/documents/${docId}/download`,
+      )
+      window.open(url, '_blank', 'noopener,noreferrer')
+    } catch {
+      setOpenError('That file could not be opened.')
+    }
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex items-end gap-3">
@@ -53,6 +68,7 @@ export function IRDocumentPanel({ incidentId }: { incidentId: string }) {
           {uploading ? 'Uploading...' : 'Drop files here or browse'}
         </FileUpload>
       </div>
+      {openError && <p className="text-sm text-red-400">{openError}</p>}
       {loading ? (
         <p className="text-sm text-zinc-500">Loading documents...</p>
       ) : docs.length === 0 ? (
@@ -62,9 +78,16 @@ export function IRDocumentPanel({ incidentId }: { incidentId: string }) {
           {docs.map((doc) => (
             <div key={doc.id} className="flex items-center justify-between px-4 py-2.5">
               <div>
-                <p className="text-sm text-zinc-200">{doc.filename}</p>
+                <button
+                  type="button"
+                  onClick={() => handleOpen(doc.id)}
+                  className="text-sm text-zinc-200 hover:text-emerald-400 hover:underline transition-colors text-left"
+                >
+                  {doc.filename}
+                </button>
                 <div className="flex items-center gap-2 mt-0.5">
                   <Badge variant="neutral">{doc.document_type}</Badge>
+                  {doc.uploaded_via === 'magic_link' && <Badge variant="neutral">via magic link</Badge>}
                   {doc.file_size && <span className="text-[11px] text-zinc-600">{Math.round(doc.file_size / 1024)} KB</span>}
                 </div>
               </div>

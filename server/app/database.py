@@ -2098,6 +2098,10 @@ async def init_db():
                 mime_type VARCHAR(100),
                 file_size INTEGER,
                 uploaded_by UUID REFERENCES users(id),
+                -- 'authed' | 'magic_link' | NULL (legacy). Anonymous magic-link
+                -- attachments have no uploaded_by, so this is what tells them
+                -- apart from a row whose uploader is simply unknown.
+                uploaded_via VARCHAR(30),
                 created_at TIMESTAMP DEFAULT NOW()
             )
         """)

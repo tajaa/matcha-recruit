@@ -11,19 +11,27 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Request, UploadFile
-from pydantic import BaseModel, Field, field_validator
+from fastapi.exceptions import RequestValidationError
+from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from ...database import get_connection
 from app.core.services.redis_cache import check_rate_limit, client_ip
+from app.core.services.storage import get_storage
 from app.matcha.models.ir_incident import Witness
 from app.matcha.services.ir_voice_parser import parse_voice_incident
 from .ir_incidents import (
+    MAX_INTAKE_FILES,
+    MAX_INTAKE_FILE_BYTES,
+    MAX_INTAKE_TOTAL_BYTES,
     _location_label,
     _read_audio_or_400,
     _safe_json_loads,
     _info_request_effective_status,
     create_incident_core,
+    document_type_for_ext,
+    read_upload_capped,
     send_ir_info_request_notification_task,
+    validate_upload_name,
 )
 
 logger = logging.getLogger(__name__)
@@ -370,10 +378,115 @@ async def validate_location_intake_token(token: str):
     }
 
 
+async def _parse_intake_body(request: Request) -> tuple[LocationReportRequest, list[UploadFile]]:
+    """Read POST /intake/{token} as either JSON or multipart.
+
+    Multipart is the current shape: a `payload` JSON field plus optional `files`.
+    The bare-JSON branch is kept because deploys are blue-green — a browser
+    holding the previous SPA bundle will keep posting JSON at the new backend for
+    a while, and a 422 there means a real incident report is silently lost. It
+    can be dropped once the new frontend has been live long enough.
+
+    The model is validated from a JSON string rather than flattened into Form()
+    fields so `witnesses: list[str]` and the min_length constraints keep working.
+    """
+    content_type = (request.headers.get("content-type") or "").lower()
+
+    if not content_type.startswith("multipart/form-data"):
+        try:
+            raw = await request.json()
+        except Exception:
+            raise HTTPException(status_code=422, detail="Malformed request body")
+        try:
+            return LocationReportRequest.model_validate(raw), []
+        except ValidationError as e:
+            raise RequestValidationError(e.errors())
+
+    form = await request.form()
+    payload = form.get("payload")
+    if not isinstance(payload, str):
+        raise HTTPException(status_code=422, detail="Missing report payload")
+    try:
+        body = LocationReportRequest.model_validate_json(payload)
+    except ValidationError as e:
+        raise RequestValidationError(e.errors())
+    except Exception:
+        raise HTTPException(status_code=422, detail="Malformed report payload")
+
+    files = [f for f in form.getlist("files") if isinstance(f, UploadFile) and f.filename]
+    if len(files) > MAX_INTAKE_FILES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Too many files. Attach at most {MAX_INTAKE_FILES}.",
+        )
+    return body, files
+
+
+async def _stage_intake_attachments(
+    files: list[UploadFile], company_id: str
+) -> list[dict]:
+    """Validate + upload intake attachments to the private bucket.
+
+    Runs BEFORE the incident transaction opens: a multi-megabyte S3 round-trip
+    while holding FOR UPDATE on ir_report_links would block every other submit
+    on that link. The key doesn't need the incident id — the DB row is what
+    links them — so nothing here depends on the incident existing yet.
+
+    Returns staged rows; the caller INSERTs them and is responsible for calling
+    `_discard_staged_attachments` if the transaction then fails.
+    """
+    if not files:
+        return []
+
+    storage = get_storage()
+    staged: list[dict] = []
+    total = 0
+    for f in files:
+        safe_name, ext, mime = validate_upload_name(f.filename)
+        content = await read_upload_capped(f, MAX_INTAKE_FILE_BYTES)
+        total += len(content)
+        if total > MAX_INTAKE_TOTAL_BYTES:
+            await _discard_staged_attachments(staged)
+            raise HTTPException(
+                status_code=413,
+                detail=f"Attachments too large. Max {MAX_INTAKE_TOTAL_BYTES // (1024 * 1024)} MB total.",
+            )
+        try:
+            path = await storage.upload_private_file(
+                content,
+                safe_name,
+                prefix=f"ir-incidents/{company_id}",
+                content_type=mime,
+            )
+        except Exception:
+            logger.exception("[IR] intake attachment upload failed for company %s", company_id)
+            await _discard_staged_attachments(staged)
+            raise HTTPException(
+                status_code=500, detail="Failed to upload attachment. Please try again."
+            )
+        staged.append({
+            "document_type": document_type_for_ext(ext),
+            "filename": safe_name,
+            "file_path": path,
+            "mime_type": mime,
+            "file_size": len(content),
+        })
+    return staged
+
+
+async def _discard_staged_attachments(staged: list[dict]) -> None:
+    """Best-effort cleanup of objects uploaded for an incident that never landed."""
+    storage = get_storage()
+    for doc in staged:
+        try:
+            await storage.delete_private_file(doc["file_path"])
+        except Exception:
+            logger.warning("[IR] failed to clean up staged attachment %s", doc["file_path"])
+
+
 @router.post("/intake/{token}")
 async def submit_location_report(
     token: str,
-    body: LocationReportRequest,
     request: Request,
     background_tasks: BackgroundTasks,
 ):
@@ -383,8 +496,16 @@ async def submit_location_report(
     (never trusted from the client), witnesses + reporter name are recorded,
     and AI auto-classify / policy-map / notifications fire — so the incident is
     indistinguishable in quality from a logged-in submission.
+
+    Optionally carries up to MAX_INTAKE_FILES attachments (multipart). Files ride
+    this one request rather than a follow-up call so there is no window where the
+    incident exists without them, and — more importantly — so no public endpoint
+    ever accepts a client-supplied incident_id to attach to.
     """
-    # Honeypot — bots fill this hidden field; silently accept so as not to tip them off.
+    body, files = await _parse_intake_body(request)
+
+    # Honeypot — bots fill this hidden field; silently accept so as not to tip
+    # them off. Before any file work: a bot gets no uploads out of us.
     if body.internal_ref:
         logger.warning("[IR] location report honeypot tripped (token=%s…)", token[:8])
         return {"submitted": True}
@@ -406,6 +527,7 @@ async def submit_location_report(
         link = await conn.fetchrow(
             """
             SELECT rl.location_id,
+                   rl.is_active, rl.expires_at, rl.max_uses, rl.use_count,
                    c.id AS company_id, c.enabled_features
             FROM ir_report_links rl
             JOIN companies c ON c.id = rl.company_id
@@ -421,9 +543,17 @@ async def submit_location_report(
     if not (features or {}).get("incidents", False):
         raise HTTPException(status_code=404, detail="Invalid reporting link")
 
+    # Usability is re-checked under FOR UPDATE inside the txn (that lock is what
+    # actually guards the max_uses ceiling). Checking it here too keeps a revoked
+    # or expired link from spending S3 writes on attachments it will never keep.
+    _check_link_usable(link)
+
     company_id = str(link["company_id"])
     location_id = str(link["location_id"]) if link["location_id"] else None
     await _submit_budget(token, company_id, "intake")
+
+    # 2. Stage attachments outside the transaction (see _stage_intake_attachments).
+    staged_docs = await _stage_intake_attachments(files, company_id)
 
     category_data = None
     if body.voice_transcript and body.voice_transcript.strip():
@@ -435,66 +565,92 @@ async def submit_location_report(
         if n and n.strip()
     ][:50]
 
-    # 2. Tenant-scoped atomic write — ir_incidents has RLS, so the tenant must
+    # 3. Tenant-scoped atomic write — ir_incidents has RLS, so the tenant must
     #    be set on the connection. Re-check usability under FOR UPDATE so a
     #    burst of concurrent submits can't overshoot a max_uses cap (the link is
     #    reusable, so the lock guards the ceiling, not single-use).
-    async with get_connection(tenant_id=company_id) as conn:
-        async with conn.transaction():
-            link_row = await conn.fetchrow(
-                """
-                SELECT is_active, expires_at, max_uses, use_count
-                FROM ir_report_links WHERE token = $1 FOR UPDATE
-                """,
-                token,
-            )
-            if not link_row:
-                raise HTTPException(status_code=404, detail="Invalid reporting link")
-            _check_link_usable(link_row)
-
-            # Location label + active-state, read under the tenant (RLS-safe).
-            # A link for a since-deactivated location is rejected (parity with
-            # the authed create, which requires is_active=true).
-            loc = None
-            if location_id:
-                loc = await conn.fetchrow(
-                    "SELECT name, city, state, is_active FROM business_locations WHERE id = $1",
-                    location_id,
+    #    Anything that fails from here on leaves the staged S3 objects orphaned,
+    #    so the whole block cleans up on its way out.
+    try:
+        async with get_connection(tenant_id=company_id) as conn:
+            async with conn.transaction():
+                link_row = await conn.fetchrow(
+                    """
+                    SELECT is_active, expires_at, max_uses, use_count
+                    FROM ir_report_links WHERE token = $1 FOR UPDATE
+                    """,
+                    token,
                 )
-            if loc is not None and not loc["is_active"]:
-                raise HTTPException(
-                    status_code=410,
-                    detail="This location is no longer active. Contact your HR team for a new link.",
+                if not link_row:
+                    raise HTTPException(status_code=404, detail="Invalid reporting link")
+                _check_link_usable(link_row)
+
+                # Location label + active-state, read under the tenant (RLS-safe).
+                # A link for a since-deactivated location is rejected (parity with
+                # the authed create, which requires is_active=true).
+                loc = None
+                if location_id:
+                    loc = await conn.fetchrow(
+                        "SELECT name, city, state, is_active FROM business_locations WHERE id = $1",
+                        location_id,
+                    )
+                if loc is not None and not loc["is_active"]:
+                    raise HTTPException(
+                        status_code=410,
+                        detail="This location is no longer active. Contact your HR team for a new link.",
+                    )
+                location_label = _location_label(
+                    loc["name"] if loc else None,
+                    loc["city"] if loc else None,
+                    loc["state"] if loc else None,
                 )
-            location_label = _location_label(
-                loc["name"] if loc else None,
-                loc["city"] if loc else None,
-                loc["state"] if loc else None,
-            )
 
-            response_row, bg_tasks = await create_incident_core(
-                conn,
-                company_id=company_id,
-                description=description_trimmed,
-                occurred_at=body.occurred_at,
-                reported_by_name=reporter,
-                location=location_label,
-                location_id=location_id,
-                witnesses=witnesses,
-                category_data=category_data,
-                corrective_actions=(body.corrective_actions or None),
-                created_by=None,
-                actor_user_id=None,
-                actor_email=None,
-                actor_ip=ip,
-                current_user=None,
-            )
+                response_row, bg_tasks = await create_incident_core(
+                    conn,
+                    company_id=company_id,
+                    description=description_trimmed,
+                    occurred_at=body.occurred_at,
+                    reported_by_name=reporter,
+                    location=location_label,
+                    location_id=location_id,
+                    witnesses=witnesses,
+                    category_data=category_data,
+                    corrective_actions=(body.corrective_actions or None),
+                    created_by=None,
+                    actor_user_id=None,
+                    actor_email=None,
+                    actor_ip=ip,
+                    current_user=None,
+                )
 
-            # Reusable: bump the counter + last-used stamp instead of burning it.
-            await conn.execute(
-                "UPDATE ir_report_links SET use_count = use_count + 1, used_at = NOW() WHERE token = $1",
-                token,
-            )
+                # Attachments: rows land in the same transaction as the incident,
+                # so a report either keeps all of its files or is not created.
+                for doc in staged_docs:
+                    await conn.execute(
+                        """
+                        INSERT INTO ir_incident_documents (
+                            incident_id, document_type, filename, file_path,
+                            mime_type, file_size, uploaded_by, uploaded_via
+                        )
+                        VALUES ($1, $2, $3, $4, $5, $6, NULL, 'magic_link')
+                        """,
+                        str(response_row["id"]),
+                        doc["document_type"],
+                        doc["filename"],
+                        doc["file_path"],
+                        doc["mime_type"],
+                        doc["file_size"],
+                    )
+
+                # Reusable: bump the counter + last-used stamp instead of burning it.
+                await conn.execute(
+                    "UPDATE ir_report_links SET use_count = use_count + 1, used_at = NOW() WHERE token = $1",
+                    token,
+                )
+    except Exception:
+        # The incident never committed; its files must not linger in the bucket.
+        await _discard_staged_attachments(staged_docs)
+        raise
 
     # Schedule notifications + AI auto-classify + policy-map after the commit.
     for fn, args, kwargs in bg_tasks:
