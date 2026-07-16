@@ -204,7 +204,7 @@ export function BulkUploadModal({ open, onClose, onSuccess }: Props) {
 
 ```bash
 cd /Users/finch/Documents/github/matcha/server && ./venv/bin/python -m py_compile app/matcha/routes/<entity>.py
-cd /Users/finch/Documents/github/matcha/client && npx tsc --noEmit
+cd /Users/finch/Documents/github/matcha/client && npx tsc -p tsconfig.app.json --noEmit
 ```
 
 Then grep your new CSV template for accidentally-realistic domains:

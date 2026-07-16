@@ -11,8 +11,9 @@
 #   not a per-edit hook.
 #
 # Why no TypeScript check here:
-# - `npx tsc --noEmit` takes 10-30s on this project, too slow to gate
-#   every .tsx edit. Run manually: `cd client && npx tsc --noEmit`.
+# - A real typecheck takes 10-30s on this project, too slow to gate every
+#   .tsx edit. Run manually: `cd client && npx tsc -p tsconfig.app.json --noEmit`
+#   (the bare `npx tsc --noEmit` checks nothing — root tsconfig is files:[]).
 
 set -u
 

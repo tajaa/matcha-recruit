@@ -9627,21 +9627,24 @@ async def resolve_jurisdiction_stacks(
     for row in rows:
         out = dict(row)
         # The pool sets no JSONB codec, so asyncpg hands every JSONB column back
-        # as a str. Decode trigger_conditions HERE, at the single producer of
-        # these rows, rather than at each consumer: the two downstream readers
-        # (evaluate_trigger_conditions, _compute_triggered_by) index it as a
-        # mapping, and both raised on the string.
-        trigger = out.get("trigger_conditions")
-        if isinstance(trigger, str):
+        # as a str. Decode the two trigger columns HERE, at the single producer
+        # of these rows, rather than at each consumer: the downstream readers
+        # (evaluate_trigger_conditions, _compute_triggered_by) index them as
+        # mappings, and raised on the string. `rule_trigger_condition` also goes
+        # out verbatim on the hierarchical response, where a JSON-encoded string
+        # is not what the shape promises.
+        for col in ("trigger_conditions", "rule_trigger_condition"):
+            value = out.get(col)
+            if not isinstance(value, str):
+                continue
             try:
-                out["trigger_conditions"] = json.loads(trigger)
+                out[col] = json.loads(value)
             except (json.JSONDecodeError, TypeError):
                 # Unparseable trigger — leave the raw value. Callers fail CLOSED
                 # on a non-object (the requirement does not apply), which is the
                 # convention for a malformed trigger everywhere else here.
                 logger.warning(
-                    "Requirement %s has unparseable trigger_conditions.",
-                    out.get("id"),
+                    "Requirement %s has unparseable %s.", out.get("id"), col
                 )
         grouped[row["root_id"]].append(out)
     return grouped

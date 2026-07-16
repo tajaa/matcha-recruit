@@ -133,6 +133,15 @@ function ComplianceFull() {
     }
   }, [targetReq, selectedId, data.locations])
 
+  // Picking a location by hand retires any pending citation. A location with no
+  // requirements can never consume one (the tab can't tell "empty because none"
+  // from "empty because still fetching"), and an armed target would otherwise
+  // fire its title-search at whatever location is opened next.
+  function handleSelectLocation(locId: string | null) {
+    setTargetReq(null)
+    setSelectedId(locId)
+  }
+
   async function handleLocationSubmit(formData: LocationCreate, editId?: string) {
     setSaving(true)
     try {
@@ -223,7 +232,7 @@ function ComplianceFull() {
             <ComplianceLocationList
               locations={data.locations}
               selectedId={selectedId}
-              onSelect={setSelectedId}
+              onSelect={handleSelectLocation}
               onEdit={handleEdit}
               onDelete={handleDelete}
               onAdd={() => { setEditingLocation(null); setShowModal(true) }}

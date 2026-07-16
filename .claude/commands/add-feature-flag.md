@@ -79,7 +79,7 @@ from app.core.feature_flags import DEFAULT_COMPANY_FEATURES
 assert '<flag_name>' in DEFAULT_COMPANY_FEATURES, 'flag missing from defaults'
 print('OK:', DEFAULT_COMPANY_FEATURES['<flag_name>'])
 "
-cd /Users/finch/Documents/github/matcha/client && npx tsc --noEmit
+cd /Users/finch/Documents/github/matcha/client && npx tsc -p tsconfig.app.json --noEmit
 ```
 
 Report back: the 5 files touched and the flag's effective default.

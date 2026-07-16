@@ -105,8 +105,15 @@ cd client && npm run dev   # :5174
 
 Typecheck:
 ```bash
-cd client && npx tsc --noEmit
+cd client && npx tsc -p tsconfig.app.json --noEmit
 ```
+
+**Not `npx tsc --noEmit` — it checks nothing and always exits 0.** The root
+`tsconfig.json` is `{"files": [], "references": [...]}`; plain `tsc` compiles the
+root project's (empty) file list and does not build referenced projects, so it
+reports clean on any codebase state. Point it at `tsconfig.app.json` (or use
+`npx tsc -b`). A "clean" run that returns instantly on a large change is the
+tell that nothing was checked.
 
 ## Common pitfalls
 

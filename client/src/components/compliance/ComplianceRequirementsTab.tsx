@@ -54,8 +54,11 @@ export function ComplianceRequirementsTab({ requirements, loading, onPin, checkM
   const [groupFilter, setGroupFilter] = useState<'all' | CategoryGroup>('all')
   const [searchQuery, setSearchQuery] = useState('')
   const [highlightId, setHighlightId] = useState<string | null>(null)
-  const [groupBy, setGroupBy] = useState<GroupBy>(
-    () => (localStorage.getItem(GROUP_BY_STORAGE_KEY) as GroupBy) || 'topic',
+  const [groupBy, setGroupBy] = useState<GroupBy>(() =>
+    // Validate rather than cast: an unrecognized stored value is neither lens,
+    // which hides the topic filter and leaves both toggle buttons unpressed
+    // while the body still renders topic.
+    localStorage.getItem(GROUP_BY_STORAGE_KEY) === 'jurisdiction' ? 'jurisdiction' : 'topic',
   )
 
   function changeGroupBy(next: GroupBy) {
@@ -94,12 +97,18 @@ export function ComplianceRequirementsTab({ requirements, loading, onPin, checkM
     const jurKey = `${jurisdictionSectionId(authority.level, authority.name)}::${cat}`
     setExpanded((prev) => new Set(prev).add(cat).add(jurKey))
     setHighlightId(match.id)
-    const t = setTimeout(() => {
+    // Deliberately NOT cleaned up. Consuming the target below re-renders with
+    // changed deps, which runs this effect's own cleanup — a clearTimeout there
+    // killed the 60ms scroll before it ever fired (and left the highlight on
+    // forever), which is most of the "chips don't take me to the requirement"
+    // this whole path exists to fix. Both timers are one-shot and harmless late:
+    // querySelector just misses, and setHighlightId on an unmounted component is
+    // a no-op.
+    setTimeout(() => {
       document.querySelector(`[data-req-id="${match.id}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
     }, 60)
-    const clear = setTimeout(() => setHighlightId(null), 4000)
+    setTimeout(() => setHighlightId(null), 4000)
     onTargetConsumed?.()
-    return () => { clearTimeout(t); clearTimeout(clear) }
   }, [targetReq, requirements, loading, knownAuthorities, onTargetConsumed])
 
   const filteredRequirements = useMemo(() => {
@@ -125,7 +134,7 @@ export function ComplianceRequirementsTab({ requirements, loading, onPin, checkM
 
   // Sections present in the UNFILTERED set — so the options don't churn as the
   // user types in the search box.
-  const { sectionedCategories: allSections } = useComplianceRequirements(requirements)
+  const { sectionedCategories: allSections } = useComplianceRequirements(requirements, knownAuthorities)
 
   // Keyed on the INDUSTRY TAG, not on BEHAVIORAL_HEALTH_CATEGORIES. That set
   // contains quality_reporting, hipaa_privacy, state_licensing and

@@ -515,7 +515,7 @@ Repo-shared scaffolding lives in `.claude/commands/*.md`:
 
 ### Post-edit hook
 
-`.claude/hooks/post-edit-python.sh` runs after every `Edit`/`Write`/`MultiEdit`. On `.py` files it runs `python3 -m py_compile` (silent on success, surfaces `SyntaxError` with file+line on failure) plus an optional `ruff check` if installed. No TypeScript check at the hook level — `npx tsc --noEmit` is too slow per-edit; run manually.
+`.claude/hooks/post-edit-python.sh` runs after every `Edit`/`Write`/`MultiEdit`. On `.py` files it runs `python3 -m py_compile` (silent on success, surfaces `SyntaxError` with file+line on failure) plus an optional `ruff check` if installed. No TypeScript check at the hook level — a real typecheck is too slow per-edit; run `cd client && npx tsc -p tsconfig.app.json --noEmit` manually (the bare `npx tsc --noEmit` checks NOTHING — root tsconfig is `files: []` + project references, so it always exits 0).
 
 Wired in `.claude/settings.json` (shared) — personal allowlist lives in `.claude/settings.local.json` (gitignored).
 
