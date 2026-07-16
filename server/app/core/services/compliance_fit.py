@@ -324,7 +324,8 @@ _CHAIN_KEYS_SQL = """
         JOIN chain c ON j.id = c.parent_id
         WHERE c.depth < 8
     )
-    SELECT DISTINCT chain.location_id, jr.category, jr.regulation_key,
+    SELECT DISTINCT chain.location_id, jr.id AS requirement_id,
+           jr.category, jr.regulation_key,
            jr.requirement_key, jr.jurisdiction_level, jr.status::text AS status,
            j2.country_code,
            -- Touched since this location last synced ⇒ the projection has never
@@ -462,6 +463,30 @@ async def company_fit_map(conn, company_id: UUID) -> Dict[str, Any]:
         has_jurisdiction=any_jurisdiction,
     )
 
+    # Attach the handles each reason's FIX needs, so the panel can DO the thing
+    # instead of describing it and sending the admin to another page:
+    #   staged -> the pending requirement ids to POST to /research-review/approve
+    #   stale_projection -> the location ids to re-check
+    # Done here, after bucketing, so `bucket_fit` stays pure and DB-free.
+    staged_ids: Dict[tuple, List[str]] = {}
+    for r in chain_rows:
+        if r["status"] != "pending":
+            continue
+        key = normalized_key_of(r)
+        if r.get("category") and key:
+            staged_ids.setdefault((r["category"], key), []).append(str(r["requirement_id"]))
+
+    unsynced_locs = sorted({
+        str(r["location_id"]) for r in chain_rows
+        if r["status"] == "active" and r["unsynced"]
+    })
+
+    for m in rollup["missing"]:
+        if m["reason"] == REASON_STAGED:
+            m["requirement_ids"] = staged_ids.get((m["category"], m["regulation_key"]), [])
+        elif m["reason"] == REASON_STALE_PROJECTION:
+            m["location_ids"] = unsynced_locs
+
     return {
         "company_id": str(company_id),
         "industry": industry,
@@ -474,5 +499,13 @@ async def company_fit_map(conn, company_id: UUID) -> Dict[str, Any]:
         ),
         "counts": rollup["counts"],
         "missing": rollup["missing"],
+        # Where a "research this gap" action should aim: the company's locations
+        # that actually resolved to a jurisdiction. An unresolved location is not
+        # a research target — there is no chain to research against, which is the
+        # whole point of the `no_jurisdiction` reason.
+        "research_targets": [
+            {"location_id": str(loc["id"]), "state": loc["state"], "city": loc["city"]}
+            for loc in roster if loc["jurisdiction_id"]
+        ],
         "locations": locations,
     }

@@ -1,7 +1,10 @@
-import { useEffect, useState } from 'react'
-import { Loader2, ShieldCheck, EyeOff, AlertTriangle, Layers } from 'lucide-react'
-import { adminOnboarding } from '../../api/adminOnboarding'
+import { useCallback, useEffect, useState } from 'react'
+import { Loader2, ShieldCheck, EyeOff, AlertTriangle, Layers, Check, Search, RefreshCw, ExternalLink } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { api, ensureFreshToken } from '../../api/client'
+import { adminOnboarding, getLocationCheckUrl } from '../../api/adminOnboarding'
 import type { FitMapResponse, FitMissing, FitReason } from '../../api/adminOnboarding'
+import { useResearchGaps } from '../../hooks/useResearchGaps'
 
 // Each reason is a different fix. Collapsing them into one "missing" number is
 // what makes a gap list unusable: a preempted rule needs nothing done, a staged
@@ -51,6 +54,18 @@ const ORDER: FitReason[] = [
   'stale_projection', 'covered_by_stricter',
 ]
 
+function ActionButton({ onClick, busy, icon: Icon, label, disabled }: {
+  onClick: () => void; busy: boolean; icon: typeof Check; label: string; disabled?: boolean
+}) {
+  return (
+    <button type="button" onClick={onClick} disabled={busy || disabled}
+      className="inline-flex shrink-0 items-center gap-1 rounded border border-white/[0.14] bg-white/[0.06] px-1.5 py-0.5 text-[10px] font-medium text-zinc-100 hover:bg-white/[0.12] disabled:opacity-40">
+      {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Icon className="h-3 w-3" />}
+      {label}
+    </button>
+  )
+}
+
 function Tile({ icon: Icon, label, value, sub, tone }: {
   icon: typeof ShieldCheck; label: string; value: number; sub: string; tone: string
 }) {
@@ -71,16 +86,82 @@ function Tile({ icon: Icon, label, value, sub, tone }: {
 export default function StatutoryFitPanel({ companyId }: { companyId: string }) {
   const [fit, setFit] = useState<FitMapResponse | null>(null)
   const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState<FitReason | null>(null)
+  const [note, setNote] = useState<string | null>(null)
+  const research = useResearchGaps()
 
-  useEffect(() => {
-    let live = true
-    setLoading(true)
-    adminOnboarding.getFitMap(companyId)
-      .then((d) => { if (live) setFit(d) })
+  const load = useCallback(() => {
+    return adminOnboarding.getFitMap(companyId)
+      .then(setFit)
       .catch(() => {})
-      .finally(() => { if (live) setLoading(false) })
-    return () => { live = false }
+      .finally(() => setLoading(false))
   }, [companyId])
+
+  useEffect(() => { void load() }, [load])
+  // A research run rewrites the catalog + re-syncs the location, so every bucket
+  // can move. Re-measure rather than patching counts client-side.
+  useEffect(() => { if (research.done) void load() }, [research.done, load])
+
+  /** Approve the staged rows behind these keys, then re-measure.
+   *  They go active — NOT codified (`will_codify` is false for them), so they
+   *  land in `gated`, not `visible`. The button says so; promising the tenant
+   *  would see them is the lie this panel exists to avoid. */
+  const approveStaged = useCallback(async (items: FitMissing[]) => {
+    const ids = items.flatMap((m) => m.requirement_ids ?? [])
+    if (!ids.length) return
+    setBusy('staged'); setNote(null)
+    try {
+      await api.post('/admin/research-review/approve', { ids })
+      setNote(`Approved ${ids.length} — now live but still uncodified; codify to release them.`)
+      await load()
+    } catch {
+      setNote('Approve failed.')
+    } finally { setBusy(null) }
+  }, [load])
+
+  /** Re-project the locations that never saw these rows.
+   *
+   *  This endpoint answers with SSE, not JSON — `api.post` would choke parsing
+   *  `data: {...}`. And the stream is the WORK: the server projects as it
+   *  yields, so the body has to be drained to completion or the check is
+   *  abandoned half-done. Same fetch+reader shape useResearchGaps uses. */
+  const runCheck = useCallback(async (items: FitMissing[]) => {
+    const locs = [...new Set(items.flatMap((m) => m.location_ids ?? []))]
+    if (!locs.length) return
+    setBusy('stale_projection'); setNote(null)
+    try {
+      const token = await ensureFreshToken()
+      for (const id of locs) {
+        const res = await fetch(
+          getLocationCheckUrl(id, companyId),
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+            body: '{}',
+          },
+        )
+        if (!res.ok) throw new Error(String(res.status))
+        const reader = res.body?.getReader()
+        while (reader) { const { done } = await reader.read(); if (done) break }
+      }
+      setNote(`Re-checked ${locs.length} location${locs.length === 1 ? '' : 's'}.`)
+      await load()
+    } catch {
+      setNote('Compliance check failed.')
+    } finally { setBusy(null) }
+  }, [companyId, load])
+
+  /** Research these categories, for every location that resolved to a place.
+   *  Reuses the same selective-fill stream the dossier's gap list uses, so this
+   *  never triggers an all-jurisdictions sweep. */
+  const researchGaps = useCallback((items: FitMissing[]) => {
+    if (!fit?.research_targets.length) return
+    const cats = [...new Set(items.map((m) => m.category))]
+    setNote(null)
+    void research.run(companyId, fit.research_targets.flatMap((t) =>
+      cats.map((category_slug) => ({ category_slug, state: t.state, city: t.city })),
+    ))
+  }, [companyId, fit, research])
 
   if (loading) {
     return (
@@ -116,12 +197,37 @@ export default function StatutoryFitPanel({ companyId }: { companyId: string }) 
           {fit.keyset_note}
         </p>
       )}
+      {note && (
+        <p className="mb-3 rounded-lg border border-white/[0.1] bg-white/[0.03] px-2.5 py-1.5 text-[11px] text-zinc-300">
+          {note}
+        </p>
+      )}
+      {(research.running || research.error) && (
+        <p className="mb-3 flex items-center gap-1.5 rounded-lg border border-white/[0.1] bg-white/[0.03] px-2.5 py-1.5 text-[11px] text-zinc-400">
+          {research.running && <Loader2 className="h-3 w-3 animate-spin" />}
+          {research.error
+            ? <span className="text-red-300">{research.error}</span>
+            : (research.events[research.events.length - 1]?.message ?? 'Researching…')}
+        </p>
+      )}
 
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         <Tile icon={ShieldCheck} label="Visible" value={fit.counts.visible} tone="text-emerald-400"
               sub="codified — on their tab today" />
-        <Tile icon={EyeOff} label="Gated" value={fit.counts.gated} tone="text-amber-400"
-              sub="researched but withheld until codified" />
+        <div className="relative">
+          <Tile icon={EyeOff} label="Gated" value={fit.counts.gated} tone="text-amber-400"
+                sub="researched but withheld until codified" />
+          {/* The dominant number on this page, and the only bucket whose fix
+              isn't here: codification runs through the Studio's queue + modal.
+              Link out rather than pretend, and rank by demand so the rows
+              blocking the most tenants (these among them) come first. */}
+          {fit.counts.gated > 0 && (
+            <Link to="/admin/studio?view=home"
+                  className="absolute right-2 top-2 inline-flex items-center gap-0.5 text-[10px] text-amber-400 hover:text-amber-300">
+              Codify <ExternalLink className="h-2.5 w-2.5" />
+            </Link>
+          )}
+        </div>
         <Tile icon={AlertTriangle} label="Real gaps" value={fit.counts.gaps} tone="text-rose-400"
               sub={`of ${fit.counts.expected} expected · ${fit.counts.covered_by_stricter} preempted, not a gap`} />
         <Tile icon={Layers} label="Beyond core" value={fit.counts.beyond_core} tone="text-sky-400"
@@ -177,6 +283,25 @@ export default function StatutoryFitPanel({ companyId }: { companyId: string }) 
                   <span className="rounded-full bg-white/[0.06] px-1.5 py-0.5 font-mono text-[10px]">
                     {items.length}
                   </span>
+                  <span className="flex-1" />
+                  {/* The fix, as a button. A bucket that can't be actioned from
+                      here says nothing rather than offering a dead control. */}
+                  {reason === 'staged' && (
+                    <ActionButton onClick={() => void approveStaged(items)}
+                                  busy={busy === 'staged'} icon={Check}
+                                  label={`Approve ${items.reduce((n, m) => n + (m.requirement_ids?.length ?? 0), 0)}`} />
+                  )}
+                  {reason === 'stale_projection' && (
+                    <ActionButton onClick={() => void runCheck(items)}
+                                  busy={busy === 'stale_projection'} icon={RefreshCw}
+                                  label="Run compliance check" />
+                  )}
+                  {(reason === 'never_researched' || reason === 'researched_elsewhere') && (
+                    <ActionButton onClick={() => researchGaps(items)}
+                                  busy={research.running} icon={Search}
+                                  label={`Research ${items.length}`}
+                                  disabled={!fit.research_targets.length} />
+                  )}
                 </div>
                 <p className="mt-0.5 text-[10px] leading-tight text-zinc-500">{meta.fix}</p>
                 <div className="mt-1.5 flex flex-wrap gap-1">

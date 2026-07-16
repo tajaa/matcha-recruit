@@ -329,7 +329,19 @@ export type FitReason =
   | 'researched_elsewhere'  // exists for other jurisdictions; research here / re-parent
   | 'never_researched'      // nowhere in the catalog; research it
 
-export type FitMissing = { category: string; regulation_key: string; reason: FitReason }
+// `requirement_ids` / `location_ids` are the handles the FIX needs — present
+// only on the reason that can use them (staged -> approve those rows,
+// stale_projection -> re-check those locations). Everything else is researched
+// via `research_targets` on the response.
+export type FitMissing = {
+  category: string
+  regulation_key: string
+  reason: FitReason
+  requirement_ids?: string[]
+  location_ids?: string[]
+}
+
+export type FitResearchTarget = { location_id: string; state: string | null; city: string | null }
 
 export type FitCounts = {
   visible: number          // projected + codified — what the tenant sees today
@@ -364,6 +376,9 @@ export type FitMapResponse = {
   keyset_note: string | null
   counts: FitCounts
   missing: FitMissing[]
+  // Locations that resolved to a jurisdiction — where a "research this" action
+  // aims. An unresolved location isn't a target: there's no chain to research.
+  research_targets: FitResearchTarget[]
   locations: FitLocation[]
 }
 
@@ -462,6 +477,14 @@ export function getEnrichStreamUrl(companyId: string): string {
 export function getResearchGapsUrl(companyId: string): string {
   const base = import.meta.env.VITE_API_URL || '/api'
   return `${base}/admin/onboarding/research-gaps/${companyId}/stream`
+}
+
+/** Per-location compliance re-check. Answers with SSE, not JSON — the stream IS
+ *  the work (the server projects as it yields), so callers must fetch+drain it
+ *  rather than go through `api.post`, which would choke parsing `data: {...}`. */
+export function getLocationCheckUrl(locationId: string, companyId: string): string {
+  const base = import.meta.env.VITE_API_URL || '/api'
+  return `${base}/compliance/locations/${locationId}/check?company_id=${companyId}`
 }
 
 export const adminOnboarding = {
