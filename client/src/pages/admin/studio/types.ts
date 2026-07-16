@@ -171,6 +171,52 @@ export type CodifiedFunnel = {
   keyless: number
 }
 
+// One cell of GET /admin/studio/codified-breakdown: an authority × category.
+// `level` is NOT an authority identity — 'national' means a foreign country in
+// this catalog, while US federal law is 'federal'. Key on jurisdiction_id.
+export type BreakdownRow = {
+  jurisdiction_id: string
+  level: string
+  country_code: string | null
+  state: string | null
+  jurisdiction_name: string | null
+  category: string
+  group: string
+  category_name: string
+  total: number
+  codified: number
+}
+
+// The shapes buildCodifiedSchema() folds those cells into.
+export type CategoryStat = { category: string; name: string; total: number; codified: number }
+export type GroupStat = { group: string; total: number; codified: number; categories: CategoryStat[] }
+export type AuthorityNode = {
+  id: string
+  level: string
+  state: string | null
+  label: string
+  total: number
+  codified: number
+  groups: GroupStat[]
+}
+export type SchemaSection = {
+  code: string
+  label: string
+  total: number
+  codified: number
+  nodes: AuthorityNode[]
+}
+
+// What the schema panel hands the table when a cell is clicked.
+export type CodifiedSelection = {
+  jurisdictionId: string
+  state: string | null
+  label: string
+  category?: string
+  categoryName?: string
+  group?: string
+}
+
 // One row of GET /admin/jurisdictions/quality-audit.
 export type AuditRow = {
   id: string

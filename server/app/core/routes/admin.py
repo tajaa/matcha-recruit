@@ -4210,6 +4210,7 @@ def _row_metadata(value) -> dict:
 @router.get("/jurisdictions/quality-audit", dependencies=[Depends(require_admin)])
 async def get_quality_audit(
     state: Optional[str] = None,
+    jurisdiction_id: Optional[UUID] = None,
     category: Optional[str] = None,
     min_completeness: Optional[int] = None,
     max_completeness: Optional[int] = None,
@@ -4228,8 +4229,8 @@ async def get_quality_audit(
     """
     import hashlib
 
-    cache_key = "admin:quality-audit:v3:" + hashlib.md5(
-        f"{state}:{category}:{min_completeness}:{max_completeness}:{stale_only}:{tier}:{source}:{citation}:{needs_review}:{limit}:{offset}".encode()
+    cache_key = "admin:quality-audit:v4:" + hashlib.md5(
+        f"{state}:{jurisdiction_id}:{category}:{min_completeness}:{max_completeness}:{stale_only}:{tier}:{source}:{citation}:{needs_review}:{limit}:{offset}".encode()
     ).hexdigest()
 
     redis = get_redis_cache()
@@ -4254,6 +4255,12 @@ async def get_quality_audit(
         if state:
             params.append(state.upper())
             conditions.append(f"j.state = ${len(params)}")
+        if jurisdiction_id:
+            # The Codified tab's schema selects an AUTHORITY, and an authority is
+            # a jurisdiction row — not a (level, state) pair, which cannot tell
+            # US federal law from Mexico's (both would be "no state").
+            params.append(jurisdiction_id)
+            conditions.append(f"j.id = ${len(params)}")
         if category:
             params.append(category)
             conditions.append(f"jr.category = ${len(params)}")
@@ -10862,6 +10869,73 @@ async def get_studio_worklist():
             "open_items": open_items,
         },
         "actions": actions,
+    }
+
+
+@router.get("/studio/codified-breakdown", dependencies=[Depends(require_admin)])
+async def get_codified_breakdown():
+    """The corpus as `jurisdiction × domain × category`, each cell `codified/total`.
+
+    The Codified tab's schema. A flat list of 1773 rows cannot answer the only
+    question worth asking here — "how much of federal labor law have we actually
+    proven?" — so the shape has to be the jurisdiction that imposes the rule
+    crossed with the subject it governs.
+
+    Cells key on `jurisdiction_id`, not on the level string, because level does
+    NOT identify an authority: `national` in this catalog means a foreign
+    country (Mexico, the UK, France, Singapore — 119 rows), while US federal law
+    is level `federal`. Collapsing the two — the fold the tenant-side lens does,
+    where every row IS American — files Mexican labor law under "Federal" and
+    inflates the US denominator from 175 to 294.
+
+    `compliance_categories` is the vocabulary: `.group` is the noun ("federal
+    LABOR laws") and `.name` the human label. It's a LEFT JOIN because the
+    category set is discovered at runtime (vertical_coverage writes new ones),
+    so a row can carry a category the table doesn't know yet — that bucket reads
+    'other' rather than vanishing from a total the tab must reconcile.
+
+    One GROUP BY over the whole catalog (~780 cells), so the tab filters
+    client-side and never re-queries to open a section.
+    """
+    trio = codified_sql("jr")
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            f"""
+            SELECT
+                j.id AS jurisdiction_id,
+                j.level::text AS level,
+                j.country_code,
+                UPPER(j.state) AS state,
+                j.display_name AS jurisdiction_name,
+                jr.category,
+                cc."group" AS cat_group,
+                cc.name AS category_name,
+                COUNT(*) AS total,
+                COUNT(*) FILTER (WHERE {trio}) AS codified
+            FROM jurisdiction_requirements jr
+            JOIN jurisdictions j ON j.id = jr.jurisdiction_id
+            LEFT JOIN compliance_categories cc ON cc.slug = jr.category
+            WHERE COALESCE(jr.status, 'active') = 'active'
+            GROUP BY 1, 2, 3, 4, 5, 6, 7, 8
+            """
+        )
+
+    return {
+        "rows": [
+            {
+                "jurisdiction_id": str(r["jurisdiction_id"]),
+                "level": r["level"],
+                "country_code": r["country_code"],
+                "state": r["state"],
+                "jurisdiction_name": r["jurisdiction_name"],
+                "category": r["category"],
+                "group": r["cat_group"] or "other",
+                "category_name": r["category_name"] or r["category"],
+                "total": int(r["total"]),
+                "codified": int(r["codified"]),
+            }
+            for r in rows
+        ]
     }
 
 
