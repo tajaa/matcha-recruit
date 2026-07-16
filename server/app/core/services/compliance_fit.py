@@ -30,6 +30,11 @@ researched it: the federal row sits `pending`, and the only active copies are
 misparented onto Idaho, Colorado, Texas, AZ and San Diego, none of which are in
 an LA business's chain. Same word, opposite meanings. So:
 
+    no_jurisdiction — the location has no `jurisdiction_id` at all, so it has no
+        chain and nothing can ever project to it. Every other reason is a claim
+        about the catalog; this one is a claim about the location. Fix the
+        address/onboarding first — researching law for it is meaningless until
+        it resolves to a place.
     covered_by_stricter — the key IS in this location's chain, active, and older
         than the location's last sync, so the projection saw it and dropped it on
         purpose (preemption by a stricter local rule, an unmet facility trigger).
@@ -47,9 +52,9 @@ an LA business's chain. Same word, opposite meanings. So:
         re-parent.
     never_researched — the key appears nowhere in the catalog. Fix: research it.
 
-Only the first is benign. `stale_projection` is a DELIVERY failure, not a data
-one — the row exists and the tenant still can't see it — so it must not sit in
-the same bucket as "working as designed".
+Only `covered_by_stricter` is benign. `stale_projection` is a DELIVERY failure,
+not a data one — the row exists and the tenant still can't see it — so it must
+not sit in the same bucket as "working as designed".
 
 Two deliberate choices:
 
@@ -138,6 +143,7 @@ def normalized_key_of(row: Any) -> Optional[str]:
 #: Why an expected key isn't on the tenant's tab. Ordered most-benign first;
 #: `classify_missing` returns the first that applies, so a key that is both in
 #: the chain and elsewhere reports the chain answer — the nearer fact wins.
+REASON_NO_JURISDICTION = "no_jurisdiction"
 REASON_COVERED_BY_STRICTER = "covered_by_stricter"
 REASON_STALE_PROJECTION = "stale_projection"
 REASON_STAGED = "staged"
@@ -159,6 +165,7 @@ def classify_missing(
     chain_pending: Dict[str, Set[str]],
     catalog_anywhere: Dict[str, Set[str]],
     chain_unsynced: Optional[Dict[str, Set[str]]] = None,
+    has_jurisdiction: bool = True,
 ) -> str:
     """Why is this expected key not on the tenant's tab? Pure.
 
@@ -166,7 +173,13 @@ def classify_missing(
     Checked BEFORE `covered_by_stricter` — a row the projection has never run
     against wasn't filtered, it was never considered, and calling that
     "preempted" would file a delivery bug under "working as designed".
+
+    `has_jurisdiction=False` short-circuits everything: with no chain there is
+    nothing to have filtered, staged or researched, and the catalog-shaped
+    answers below would all be lies about a location that isn't on the map yet.
     """
+    if not has_jurisdiction:
+        return REASON_NO_JURISDICTION
     chain_unsynced = chain_unsynced or {}
     if key in chain_unsynced.get(category, set()):
         return REASON_STALE_PROJECTION
@@ -188,6 +201,7 @@ def bucket_fit(
     chain_pending: Optional[Dict[str, Set[str]]] = None,
     catalog_anywhere: Optional[Dict[str, Set[str]]] = None,
     chain_unsynced: Optional[Dict[str, Set[str]]] = None,
+    has_jurisdiction: bool = True,
 ) -> Dict[str, Any]:
     """Split a company's projected rows against its expected checklist.
 
@@ -243,7 +257,8 @@ def bucket_fit(
                 "category": cat,
                 "regulation_key": key,
                 "reason": classify_missing(
-                    cat, key, chain_active, chain_pending, catalog_anywhere, chain_unsynced,
+                    cat, key, chain_active, chain_pending, catalog_anywhere,
+                    chain_unsynced, has_jurisdiction,
                 ),
             })
 
@@ -312,11 +327,19 @@ _CHAIN_KEYS_SQL = """
     SELECT DISTINCT chain.location_id, jr.category, jr.regulation_key,
            jr.requirement_key, jr.jurisdiction_level, jr.status::text AS status,
            j2.country_code,
-           -- Written since this location last synced ⇒ the projection has never
-           -- run against it. COALESCE: a location that has NEVER been checked
-           -- can't have filtered anything, so everything in its chain is
-           -- unsynced rather than "preempted".
-           (jr.created_at > COALESCE(bl.last_compliance_check, '-infinity'::timestamp))
+           -- Touched since this location last synced ⇒ the projection has never
+           -- run against it in its current shape. COALESCE on the sync: a
+           -- location that has NEVER been checked can't have filtered anything,
+           -- so everything in its chain is unsynced rather than "preempted".
+           --
+           -- GREATEST(created_at, updated_at), not created_at alone: approve
+           -- flips a staged row to active and bumps `updated_at`. Keyed on
+           -- creation, such a row reads as "in the chain, active, older than the
+           -- sync" ⇒ covered_by_stricter ⇒ BENIGN, though the projection has
+           -- never once seen it active. Only unprojected keys reach this, so a
+           -- re-research bump on a row the tenant already has can't over-fire it.
+           (GREATEST(jr.created_at, COALESCE(jr.updated_at, jr.created_at))
+                > COALESCE(bl.last_compliance_check, '-infinity'::timestamp))
                AS unsynced
     FROM chain
     JOIN business_locations bl ON bl.id = chain.location_id
@@ -371,9 +394,10 @@ async def company_fit_map(conn, company_id: UUID) -> Dict[str, Any]:
 
     chain_active_all = _index_keys([r for r in chain_rows if r["status"] == "active"])
     chain_pending_all = _index_keys([r for r in chain_rows if r["status"] == "pending"])
-    # Company rollup: a key is stale if EVERY location holding it is unsynced for
-    # it. If one location already has it projected, the company has it — so the
-    # per-location detail, not this, is where a single stale site shows up.
+    # Rollup union: ANY location unsynced for a key ⇒ the company reads stale for
+    # it. Deliberate — `stale_projection` outranks `covered_by_stricter`, so the
+    # rollup errs toward "run a check" over "preempted, ignore". Which site is
+    # behind is the per-location detail's job.
     chain_unsynced_all = _index_keys(
         [r for r in chain_rows if r["status"] == "active" and r["unsynced"]]
     )
@@ -382,19 +406,37 @@ async def company_fit_map(conn, company_id: UUID) -> Dict[str, Any]:
     for r in rows:
         by_location.setdefault(r["location_id"], []).append(r)
 
+    # Seed from the ROSTER, not from projected rows. Keying the loop off `rows`
+    # silently dropped every location with nothing projected — which is exactly
+    # the set that most needs looking at. Live: Onc showed 9 of its 24 locations,
+    # and 100 Behavioral Health showed 0 of 11.
+    roster = await conn.fetch(
+        """
+        SELECT id, city, state, jurisdiction_id
+        FROM business_locations
+        WHERE company_id = $1 AND COALESCE(is_active, true) = true
+        ORDER BY state, city
+        """,
+        company_id,
+    )
+    any_jurisdiction = any(loc["jurisdiction_id"] for loc in roster)
+
     locations = []
-    for loc_id, loc_rows in by_location.items():
+    for loc in roster:
+        loc_id = loc["id"]
         fit = bucket_fit(
-            loc_rows, expected,
+            by_location.get(loc_id, []), expected,
             chain_active=_index_keys(chain_active_by_loc.get(loc_id, [])),
             chain_pending=_index_keys(chain_pending_by_loc.get(loc_id, [])),
             catalog_anywhere=catalog_anywhere,
             chain_unsynced=_index_keys(chain_unsynced_by_loc.get(loc_id, [])),
+            has_jurisdiction=loc["jurisdiction_id"] is not None,
         )
         locations.append({
             "location_id": str(loc_id),
-            "city": loc_rows[0].get("location_city"),
-            "state": loc_rows[0].get("location_state"),
+            "city": loc["city"],
+            "state": loc["state"],
+            "has_jurisdiction": loc["jurisdiction_id"] is not None,
             **fit,
         })
     locations.sort(key=lambda x: (x["state"] or "", x["city"] or ""))
@@ -404,12 +446,20 @@ async def company_fit_map(conn, company_id: UUID) -> Dict[str, Any]:
     # not another is present for the COMPANY, and summing would report it both
     # missing and present. Per-location detail below is where that distinction
     # lives.
+    # `has_jurisdiction` at the rollup means "did ANY location resolve": if one
+    # did, the catalog-shaped reasons are true for the company and the
+    # unresolved sites show up in the per-location detail. Only when NOTHING
+    # resolved is the company itself un-mappable, and then every core key is
+    # `no_jurisdiction` — the honest answer for a company whose addresses never
+    # onboarded, instead of "researched elsewhere", which would send an admin
+    # off to research law for a place we can't locate.
     rollup = bucket_fit(
         rows, expected,
         chain_active=chain_active_all,
         chain_pending=chain_pending_all,
         catalog_anywhere=catalog_anywhere,
         chain_unsynced=chain_unsynced_all,
+        has_jurisdiction=any_jurisdiction,
     )
 
     return {

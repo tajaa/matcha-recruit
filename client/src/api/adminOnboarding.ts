@@ -322,6 +322,7 @@ export type GapDrift = {
 // dossier below: this one's "missing" means "the law expects this of a business
 // like yours", never "the model thought of it this time".
 export type FitReason =
+  | 'no_jurisdiction'       // location never resolved to a place; fix onboarding first
   | 'covered_by_stricter'   // in their chain, filtered on purpose (preemption) — not a gap
   | 'stale_projection'      // written since their last sync; run a compliance check
   | 'staged'                // in their chain but status='pending'; approve it
@@ -345,6 +346,10 @@ export type FitLocation = {
   location_id: string
   city: string | null
   state: string | null
+  // False = the location has no jurisdiction_id, so it has no chain and nothing
+  // can ever project to it. Every location is listed, including ones with zero
+  // projected rows — those are the ones most worth seeing.
+  has_jurisdiction: boolean
   counts: FitCounts
   missing: FitMissing[]
 }

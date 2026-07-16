@@ -15,6 +15,7 @@ from app.core.services.compliance_fit import (  # noqa: E402
     BENIGN_REASONS,
     REASON_COVERED_BY_STRICTER,
     REASON_NEVER_RESEARCHED,
+    REASON_NO_JURISDICTION,
     REASON_RESEARCHED_ELSEWHERE,
     REASON_STAGED,
     REASON_STALE_PROJECTION,
@@ -171,6 +172,29 @@ class TestClassifyMissing:
         # A caller that can't see the catalog must not invent a benign reason.
         assert classify_missing("leave", "fmla", {}, {}, {}) == REASON_NEVER_RESEARCHED
 
+    def test_unresolved_location_short_circuits_every_catalog_reason(self):
+        # Live: all 11 of "100 Behavioral Health"'s locations have a NULL
+        # jurisdiction_id, so they contribute no chain rows and every core key
+        # fell through to `researched_elsewhere` — prescribing "research this
+        # chain" for a location that HAS no chain. With no jurisdiction, the
+        # catalog-shaped answers are all lies about a place we can't locate.
+        assert classify_missing(
+            "leave", "fmla",
+            chain_active={}, chain_pending={},
+            catalog_anywhere={"leave": {"fmla"}},   # would say researched_elsewhere
+            has_jurisdiction=False,
+        ) == REASON_NO_JURISDICTION
+        assert REASON_NO_JURISDICTION not in BENIGN_REASONS
+
+    def test_no_jurisdiction_beats_even_a_chain_hit(self):
+        # Defensive: a location with no jurisdiction should have no chain keys at
+        # all, so if both are somehow set the location fact must still win.
+        assert classify_missing(
+            "leave", "fmla",
+            chain_active={"leave": {"fmla"}}, chain_pending={}, catalog_anywhere={},
+            has_jurisdiction=False,
+        ) == REASON_NO_JURISDICTION
+
 
 class TestCountsAndBuckets:
     def test_gaps_excludes_benign_but_missing_counts_everything(self):
@@ -212,3 +236,14 @@ class TestCountsAndBuckets:
         fit = bucket_fit([], {"leave": {"fmla"}, "overtime": {"daily_weekly_overtime"}})
         assert fit["counts"]["missing"] == 2
         assert fit["counts"]["projected"] == 0
+
+    def test_unresolved_location_reports_every_key_as_no_jurisdiction(self):
+        # A location with nothing projected AND no jurisdiction must not read as
+        # a research backlog — it reads as an onboarding failure.
+        fit = bucket_fit(
+            [], {"leave": {"fmla"}, "overtime": {"daily_weekly_overtime"}},
+            catalog_anywhere={"leave": {"fmla"}},
+            has_jurisdiction=False,
+        )
+        assert {m["reason"] for m in fit["missing"]} == {REASON_NO_JURISDICTION}
+        assert fit["counts"]["gaps"] == 2

@@ -8,6 +8,12 @@ import type { FitMapResponse, FitMissing, FitReason } from '../../api/adminOnboa
 // row needs one click, and only the last two are research. Ordered benign-first
 // so the eye lands on real work last — where the actions are.
 const REASON_META: Record<FitReason, { label: string; fix: string; tone: string; gap: boolean }> = {
+  no_jurisdiction: {
+    label: 'Location not on the map',
+    fix: "This location has no jurisdiction resolved, so it has no chain and nothing can project to it. Fix the address/onboarding first — researching law for it is meaningless until it resolves to a place.",
+    tone: 'text-rose-400 border-rose-800/40 bg-rose-900/20',
+    gap: true,
+  },
   covered_by_stricter: {
     label: 'Covered by a stricter rule',
     fix: 'Nothing to do — a local rule preempts this, or a facility trigger correctly excluded it.',
@@ -41,7 +47,8 @@ const REASON_META: Record<FitReason, { label: string; fix: string; tone: string;
 }
 
 const ORDER: FitReason[] = [
-  'never_researched', 'researched_elsewhere', 'staged', 'stale_projection', 'covered_by_stricter',
+  'no_jurisdiction', 'never_researched', 'researched_elsewhere', 'staged',
+  'stale_projection', 'covered_by_stricter',
 ]
 
 function Tile({ icon: Icon, label, value, sub, tone }: {
@@ -120,6 +127,40 @@ export default function StatutoryFitPanel({ companyId }: { companyId: string }) 
         <Tile icon={Layers} label="Beyond core" value={fit.counts.beyond_core} tone="text-sky-400"
               sub="extra coverage — breadth, not excess" />
       </div>
+
+      {/* Per-location, ALL of them — including sites with nothing projected,
+          which are the ones worth seeing. Onc shows 24 here; before the roster
+          seed it showed the 9 that happened to have rows. */}
+      {fit.locations.length > 1 && (
+        <div className="mt-3 rounded-lg border border-white/[0.06] bg-black/20 p-2">
+          <div className="mb-1.5 text-[10px] uppercase tracking-wide text-zinc-600">
+            {fit.locations.length} locations
+          </div>
+          <div className="space-y-0.5">
+            {fit.locations.map((l) => (
+              <div key={l.location_id}
+                   className="flex items-center justify-between gap-3 rounded px-1.5 py-1 text-[11px] hover:bg-white/[0.03]">
+                <span className="min-w-0 flex-1 truncate text-zinc-400">
+                  {l.city || '—'}{l.state ? `, ${l.state}` : ''}
+                </span>
+                {l.has_jurisdiction ? (
+                  <span className="flex shrink-0 items-center gap-2 font-mono text-[10px]">
+                    <span className="text-emerald-400" title="visible — codified, on their tab">{l.counts.visible}</span>
+                    <span className="text-amber-400" title="gated — researched, withheld until codified">{l.counts.gated}</span>
+                    <span className={l.counts.gaps > 0 ? 'text-rose-400' : 'text-zinc-600'}
+                          title="real gaps (preempted rules excluded)">{l.counts.gaps} gap{l.counts.gaps === 1 ? '' : 's'}</span>
+                  </span>
+                ) : (
+                  <span className="shrink-0 rounded-full border border-rose-800/40 bg-rose-900/20 px-1.5 py-0.5 font-mono text-[10px] text-rose-400"
+                        title="No jurisdiction resolved — nothing can project to this location until its address is fixed">
+                    no jurisdiction
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {byReason.length === 0 ? (
         <p className="mt-3 text-[11px] text-emerald-400">
