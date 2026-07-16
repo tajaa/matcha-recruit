@@ -250,11 +250,63 @@ async def _fetch_existing_establishments(client: httpx.AsyncClient, token: str) 
 
 
 def _form300a_links(est_obj: dict) -> list[str]:
+    # OSHA returns the snake_case `form300a_links`; tolerate the camel variant too.
     links = est_obj.get("links") or {}
-    form_links = links.get("form300ALinks")
+    form_links = links.get("form300a_links") or links.get("form300ALinks")
     if isinstance(form_links, list):
         return [x for x in form_links if isinstance(x, str)]
     return []
+
+
+def _result_errors(r: dict) -> list[str]:
+    """A /submissions (or create) result object may carry per-item `errors` with
+    no `id` while the envelope still reports `success: true`."""
+    errs = r.get("errors")
+    if isinstance(errs, list):
+        return [str(e) for e in errs if e]
+    return []
+
+
+def _stored_form_year(body: Any, fallback: int) -> int:
+    """OSHA may stamp the 300A with the current open collection year regardless of
+    the `year_filing_for` we send, so read the year back from the create/patch
+    response — that is the year a submission must reference."""
+    for r in _results_list(body):
+        y = r.get("year_filing_for")
+        if y is not None:
+            try:
+                return int(str(y).strip())
+            except (TypeError, ValueError):
+                pass
+    return fallback
+
+
+async def _fetch_form_years(client: httpx.AsyncClient, token: str,
+                            est_obj: dict) -> list[tuple[str, int]]:
+    """GET each linked 300A → [(form_id, year_filing_for)] (best-effort; a failed
+    GET is skipped, not fatal)."""
+    out: list[tuple[str, int]] = []
+    for link in _form300a_links(est_obj):
+        fid = link.rstrip("/").rsplit("/", 1)[-1]
+        if not fid:
+            continue
+        resp = await client.get(
+            f"{_api_url()}/forms/form300A/{fid}",
+            headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+        )
+        if not resp.is_success:
+            continue
+        try:
+            fbody = resp.json()
+        except ValueError:
+            continue
+        for fr in _results_list(fbody):
+            try:
+                fy = int(str(fr.get("year_filing_for")).strip())
+            except (TypeError, ValueError):
+                continue
+            out.append((str(fr.get("id") or fid), fy))
+    return out
 
 
 async def submit_establishments(
@@ -313,55 +365,72 @@ async def submit_establishments(
                     establishment_id = str(results[0]["id"])
                     est_obj = results[0]
 
-                # Step 2 — add or amend the 300A for the year.
+                # Step 2 — add or amend the 300A. OSHA may store the form under
+                # the current open collection year regardless of the year we
+                # request, so we bind the later submission to the year the form is
+                # actually stored under (`filed_year`) — a submission whose year
+                # has no 300A is rejected with "No 300A form record was filed".
                 form_payload = build_ita_form300a_payload(est, establishment_id, year)
-                existing_form_id = None
-                for link in _form300a_links(est_obj):
-                    # links look like /oshaApi/v1/forms/form300A/{id}; we can only
-                    # cheaply reuse the id, then confirm the year on GET.
-                    fid = link.rstrip("/").rsplit("/", 1)[-1]
-                    if not fid:
-                        continue
-                    resp = await client.get(
-                        f"{base}/forms/form300A/{fid}",
-                        headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
-                    )
-                    if not resp.is_success:
-                        continue
-                    try:
-                        fbody = resp.json()
-                    except ValueError:
-                        continue
-                    for fr in _results_list(fbody):
-                        if str(fr.get("year_filing_for", "")).strip() == str(year):
-                            existing_form_id = str(fr.get("id") or fid)
-                            break
-                    if existing_form_id:
-                        break
+                existing_forms = await _fetch_form_years(client, token, est_obj)
+                match_form = next((f for f in existing_forms if f[1] == year), None)
 
-                if existing_form_id:
-                    await _patch(client, f"{base}/forms/form300A/{existing_form_id}",
-                                 token, {**form_payload, "id": existing_form_id})
+                if match_form:
+                    resp = await _patch(client, f"{base}/forms/form300A/{match_form[0]}",
+                                        token, {**form_payload, "id": match_form[0]})
+                    filed_year = _stored_form_year(resp, match_form[1])
+                    amended = True
                 else:
-                    await _post(client, f"{base}/forms/form300A", token, form_payload)
+                    try:
+                        resp = await _post(client, f"{base}/forms/form300A", token, form_payload)
+                        filed_year = _stored_form_year(resp, year)
+                        amended = False
+                    except _ITAError:
+                        # A create 400s when OSHA already holds a 300A for the
+                        # collection year it maps this filing onto (it overrides
+                        # `year_filing_for`). Fall back to amending the
+                        # establishment's most-recent existing form.
+                        if not existing_forms:
+                            raise
+                        fid, fy = max(existing_forms, key=lambda f: f[1])
+                        resp = await _patch(client, f"{base}/forms/form300A/{fid}",
+                                            token, {**form_payload, "id": fid})
+                        filed_year = _stored_form_year(resp, fy)
+                        amended = True
 
-                submit_obj = {"establishment_id": establishment_id, "year_filing_for": year}
+                submit_obj = {"establishment_id": establishment_id, "year_filing_for": filed_year}
                 if resubmit:
                     submit_obj["change_reason"] = "Amended filing"
                 submit_objects.append(submit_obj)
                 steps[est.get("establishment_name") or establishment_id] = {
                     "establishment_id": establishment_id,
                     "reused": bool(match),
-                    "amended_300a": bool(existing_form_id),
+                    "amended_300a": amended,
+                    "year_filed": filed_year,
                 }
 
             # Step 3 — one submissions POST with the whole array. This is what
             # OSHA treats as "filing complete" and confirms by email.
             body = await _post(client, f"{base}/submissions", token,
                                submit_objects if len(submit_objects) != 1 else submit_objects[0])
+            # OSHA wraps per-item failures in `results[].errors` with no `id` while
+            # the envelope still says `success: true` — surface those as a rejection
+            # instead of a hollow "submitted" with no id.
+            errors: list[str] = []
             for r in _results_list(body):
                 if r.get("id"):
                     submission_ids.append(str(r["id"]))
+                else:
+                    errors.extend(_result_errors(r))
+            if errors:
+                raise _ITAError(
+                    "; ".join(dict.fromkeys(errors)),
+                    response={"submission_ids": submission_ids, "errors": errors},
+                )
+            if not submission_ids:
+                raise _ITAError(
+                    "OSHA did not return a submission id.",
+                    response=body if isinstance(body, dict) else None,
+                )
 
     except httpx.HTTPError as exc:
         logger.warning("ITA submit transport error: %s", exc)

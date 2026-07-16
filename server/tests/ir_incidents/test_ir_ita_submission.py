@@ -11,6 +11,9 @@ from app.matcha.services.ir_ita_submission import (
     build_ita_establishment_payload,
     build_ita_form300a_payload,
     _normalize_zip,
+    _form300a_links,
+    _result_errors,
+    _stored_form_year,
 )
 
 # `_missing_ita_fields` lives in the osha ROUTE module, which can't be imported in
@@ -168,3 +171,31 @@ def test_missing_ita_fields_flags_address_parts():
 def test_missing_ita_fields_flags_zero_headcount_and_hours():
     m = _missing_ita_fields(_est(annual_average_employees=0, total_hours_worked=0))
     assert "annual_average_employees" in m and "total_hours_worked" in m
+
+
+# --- response-shape helpers (verified against the live sandbox) -------------
+
+def test_form300a_links_reads_snake_case():
+    # OSHA returns `form300a_links` (snake); the camel variant is tolerated too.
+    obj = {"links": {"form300a_links": ["/oshaApi/v1/forms/form300A/2270100"]}}
+    assert _form300a_links(obj) == ["/oshaApi/v1/forms/form300A/2270100"]
+    assert _form300a_links({"links": {"form300ALinks": ["/x/1"]}}) == ["/x/1"]
+    assert _form300a_links({"links": {}}) == []
+    assert _form300a_links({}) == []
+
+
+def test_result_errors_extracts_per_item_errors():
+    # /submissions wraps per-item failures in `errors` with no `id`.
+    assert _result_errors({"errors": ["No 300A form record was filed for this establishment"]}) == \
+        ["No 300A form record was filed for this establishment"]
+    assert _result_errors({"id": "123"}) == []
+    assert _result_errors({}) == []
+
+
+def test_stored_form_year_reads_back_osha_year():
+    # OSHA may override year_filing_for to the open collection year — read it back.
+    body = {"results": [{"id": 2270100, "year_filing_for": 2025}]}
+    assert _stored_form_year(body, fallback=2024) == 2025
+    # No year in the body → fall back to the requested year.
+    assert _stored_form_year({"results": [{"id": 1}]}, fallback=2024) == 2024
+    assert _stored_form_year({}, fallback=2023) == 2023
