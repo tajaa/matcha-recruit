@@ -10777,11 +10777,22 @@ async def get_studio_worklist():
         # `POST /admin/scope-registry/reconcile` clears these) vs manual (no
         # classification yet — the real Codify-modal backlog). Same predicate
         # `reconcile_codifications` matches on (codify.py).
+        #
+        # blocked_* is the DEMAND on each row: how many live tenant locations /
+        # companies already have it projected and are therefore being SHOWN
+        # NOTHING for it, because the codified gate withholds uncited rows from
+        # their tab. Without this the backlog is a flat list ordered by age, and
+        # the admin cannot tell the row 15 companies are waiting on from the one
+        # nobody has. Ordering by it is load-bearing, not cosmetic: `items`
+        # truncates to 50 below, so demand-heavy rows must sort first or the
+        # signal is cut off exactly where it matters most.
         uncodified_rows = await conn.fetch(
             """
             SELECT r.id, r.title, r.regulation_key, r.description, r.current_value,
                    r.source_url, r.source_name, r.created_at,
                    UPPER(j.state) AS state, LOWER(j.city) AS city,
+                   COALESCE(d.blocked_locations, 0) AS blocked_locations,
+                   COALESCE(d.blocked_companies, 0) AS blocked_companies,
                    EXISTS (
                        SELECT 1 FROM authority_item_classifications c
                        WHERE c.status = 'confirmed' AND c.disposition <> 'excluded'
@@ -10789,12 +10800,40 @@ async def get_studio_worklist():
                    ) AS auto_reconcilable
             FROM jurisdiction_requirements r
             JOIN jurisdictions j ON j.id = r.jurisdiction_id
+            LEFT JOIN LATERAL (
+                SELECT COUNT(DISTINCT cr.location_id) AS blocked_locations,
+                       COUNT(DISTINCT bl.company_id) AS blocked_companies
+                FROM compliance_requirements cr
+                JOIN business_locations bl ON bl.id = cr.location_id
+                                          AND COALESCE(bl.is_active, true) = true
+                WHERE cr.jurisdiction_requirement_id = r.id
+            ) d ON true
             WHERE COALESCE(r.status, 'active') = 'active'
               AND r.regulation_key IS NOT NULL
               AND NOT (""" + codified_sql("r") + """)
-            ORDER BY r.created_at DESC
+            ORDER BY d.blocked_companies DESC NULLS LAST,
+                     d.blocked_locations DESC NULLS LAST,
+                     r.created_at DESC
             """
         )
+
+        # Same demand question across the WHOLE uncodified set — including the
+        # keyless rows the query above filters out. Those can't codify yet, but
+        # a tenant is still being denied them, so the meter must count them or
+        # it under-reports what the gate is withholding.
+        tenant_blocked = await conn.fetchval(
+            """
+            SELECT COUNT(*) FROM jurisdiction_requirements r
+            WHERE COALESCE(r.status, 'active') = 'active'
+              AND NOT (""" + codified_sql("r") + """)
+              AND EXISTS (
+                  SELECT 1 FROM compliance_requirements cr
+                  JOIN business_locations bl ON bl.id = cr.location_id
+                                            AND COALESCE(bl.is_active, true) = true
+                  WHERE cr.jurisdiction_requirement_id = r.id
+              )
+            """
+        ) or 0
 
         drift_open = await conn.fetchval(
             "SELECT COUNT(*) FROM authority_index_drift WHERE status = 'open'"
@@ -10833,11 +10872,19 @@ async def get_studio_worklist():
         actions.append({
             "kind": "codify_uncodified", "priority": 2, "count": len(manual_rows),
             "auto_reconcilable": auto_count,
+            # Of the backlog, how much has a live tenant waiting on it — split
+            # the same way the work is: by hand vs one Reconcile click.
+            "tenant_blocked": sum(1 for r in manual_rows if r["blocked_companies"]),
+            "tenant_blocked_auto": sum(
+                1 for r in uncodified_rows if r["auto_reconcilable"] and r["blocked_companies"]
+            ),
             "items": [{
                 "id": str(r["id"]), "title": r["title"], "regulation_key": r["regulation_key"],
                 "description": r["description"], "current_value": r["current_value"],
                 "source_url": r["source_url"], "source_name": r["source_name"],
                 "state": r["state"], "city": r["city"],
+                "blocked_locations": int(r["blocked_locations"] or 0),
+                "blocked_companies": int(r["blocked_companies"] or 0),
             } for r in manual_rows[:50]],
         })
     if pending_count:
@@ -10866,6 +10913,11 @@ async def get_studio_worklist():
             "codified": int(meters_row["codified"] or 0),
             "requirements": int(meters_row["requirements"] or 0),
             "keyless": int(meters_row["keyless"] or 0),
+            # Uncodified rows a live tenant already has projected — i.e. what the
+            # codified gate is actively withholding from somebody's tab right now.
+            # Counts keyless rows too: they can't codify yet, but a tenant is
+            # still being denied them.
+            "tenant_blocked": int(tenant_blocked),
             "open_items": open_items,
         },
         "actions": actions,

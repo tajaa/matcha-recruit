@@ -131,6 +131,10 @@ export type ApproveResult = {
   citation_item_id: string | null
   state: string | null
   city: string | null
+  // Only known for rows seeded from the Command Center worklist (see
+  // UncodifiedItem). A row from a fresh approve has no demand count yet —
+  // undefined means "unknown", not "zero tenants waiting".
+  blocked_companies?: number
 }
 
 export type ReviewGroup = {
@@ -144,6 +148,10 @@ export type ReviewGroup = {
 }
 
 // A live-but-uncodified requirement surfaced by the Command Center worklist.
+// blocked_*: live tenant locations/companies that already have this row
+// projected and are being shown NOTHING for it, because the codified gate
+// withholds uncited rows from their tab. This is the demand signal — codify the
+// row, and that many tenants gain a requirement. Items are server-ordered by it.
 export type UncodifiedItem = {
   id: string
   title: string
@@ -154,6 +162,11 @@ export type UncodifiedItem = {
   source_name: string | null
   state: string | null
   city: string | null
+  // Optional because only the worklist computes demand. CodifiedTab builds these
+  // from library rows, where the count is genuinely UNKNOWN — and undefined says
+  // that, where a hardcoded 0 would claim "no tenant is waiting" and be wrong.
+  blocked_locations?: number
+  blocked_companies?: number
 }
 
 // ── Codified tab (the asset, and the funnel that feeds it) ───────────────────
@@ -246,7 +259,14 @@ export type AuditResponse = {
 
 export type WorklistAction =
   | { kind: 'review_staged'; priority: number; count: number; groups: ReviewGroup[] }
-  | { kind: 'codify_uncodified'; priority: number; count: number; auto_reconcilable: number; items: UncodifiedItem[] }
+  | {
+      kind: 'codify_uncodified'; priority: number; count: number; auto_reconcilable: number
+      // How much of the backlog has a live tenant waiting on it, split the same
+      // way the work is: tenant_blocked = by hand, tenant_blocked_auto = one
+      // Reconcile click unblocks this many.
+      tenant_blocked: number; tenant_blocked_auto: number
+      items: UncodifiedItem[]
+    }
   | { kind: 'research_coverage'; priority: number; count: number; items: PendingItem[] }
   | { kind: 'confirm_authority'; priority: number; count: number; by_index: { slug: string; name: string; unclassified_count: number }[] }
   | { kind: 'ack_drift'; priority: number; count: number }
@@ -256,7 +276,13 @@ export type Worklist = {
   // keyless: active, uncodified rows with no regulation_key — they can't codify
   // (the modal 422s), so they cap the Authoritative % below 100 with no worklist
   // action to clear them. Surfaced on the meter tooltip, not as an action.
-  meters: { codified: number; requirements: number; keyless: number; open_items: number }
+  // tenant_blocked: uncodified rows a live tenant already has projected — what
+  // the codified gate is withholding from somebody's tab right now. Counts
+  // keyless rows too: they can't codify yet, but a tenant is still denied them.
+  meters: {
+    codified: number; requirements: number; keyless: number
+    tenant_blocked: number; open_items: number
+  }
   actions: WorklistAction[]
 }
 

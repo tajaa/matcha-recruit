@@ -94,6 +94,17 @@ export default function ComplianceStudio() {
                 </span>
               )}
             </span>
+            {/* The demand meter: not "how much work is left" but "how much of it
+                a paying tenant is already waiting on". Uncodified rows sitting in
+                a live tenant's projection are withheld from their tab by the
+                codified gate — this is the only place that number is visible
+                without opening a card. */}
+            {meters && meters.tenant_blocked > 0 && (
+              <span className="text-amber-400"
+                    title="Uncodified requirements a live tenant already has projected — withheld from their tab until codified. Codifying these releases them.">
+                Tenants waiting <b className="text-amber-300">{meters.tenant_blocked}</b>
+              </span>
+            )}
             <span className={meters && meters.open_items > 0 ? 'text-amber-400' : ''}
                   title="Total open worklist items across both funnels">
               Open <b>{meters?.open_items ?? '—'}</b>

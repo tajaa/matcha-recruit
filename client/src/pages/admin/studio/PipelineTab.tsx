@@ -12,6 +12,7 @@ function fromUncodified(it: UncodifiedItem): ApproveResult {
     source_url: it.source_url, source_name: it.source_name, regulation_key: it.regulation_key,
     codified: false, statute_citation: null, citation_url: null, citation_item_id: null,
     state: it.state, city: it.city,
+    blocked_companies: it.blocked_companies,
   }
 }
 
@@ -401,7 +402,19 @@ export default function PipelineTab({
                     <Circle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-400/70" />
                   )}
                   <div className="min-w-0 flex-1">
-                    <p className="text-xs font-medium text-zinc-200">{r.title}</p>
+                    <div className="flex items-center gap-1.5">
+                      <p className="text-xs font-medium text-zinc-200">{r.title}</p>
+                      {!r.codified && !!r.blocked_companies && (
+                        // Which of these rows a customer is actually waiting on.
+                        // Hidden once codified — the wait is over — and absent on
+                        // fresh approves, where demand is unknown rather than zero.
+                        <span
+                          className="shrink-0 rounded-full border border-amber-800/40 bg-amber-900/20 px-1.5 py-0.5 font-mono text-[10px] text-amber-400"
+                          title="Live tenants with this requirement projected but withheld from their tab">
+                          blocks {r.blocked_companies}
+                        </span>
+                      )}
+                    </div>
                     {r.codified ? (
                       <p className="mt-0.5 text-[11px] text-zinc-400">
                         Codified — {r.citation_url

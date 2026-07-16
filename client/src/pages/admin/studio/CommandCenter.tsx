@@ -14,7 +14,11 @@ const ACTION_META: Record<WorklistAction['kind'], { icon: typeof ListChecks; ver
   },
   codify_uncodified: {
     icon: PenLine, verb: 'Codify live requirements',
-    why: 'These are live and serving tenants, but carry no verified statute citation yet — codifying is what makes them AUTHORITATIVE.',
+    // Pre-gate this read "live and serving tenants". Since the codified gate,
+    // the opposite is true: these rows are in tenants' projections and WITHHELD
+    // from their tabs until cited. Saying "serving" hid that a paying customer
+    // is waiting on this queue.
+    why: 'These are live in tenant projections but withheld from their tabs until cited — a tenant is waiting on every blocked row. Codifying is what releases them.',
   },
   research_coverage: {
     icon: Sparkles, verb: 'Research tenant gaps',
@@ -38,10 +42,21 @@ function summarizeAction(a: WorklistAction): string {
   switch (a.kind) {
     case 'review_staged':
       return `${a.count} requirement${a.count === 1 ? '' : 's'} across ${a.groups.length} jurisdiction${a.groups.length === 1 ? '' : 's'}`
-    case 'codify_uncodified':
-      return a.auto_reconcilable > 0
-        ? `${a.count} need a citation by hand · ${a.auto_reconcilable} fixable with one reconcile`
-        : `${a.count} need a citation by hand`
+    case 'codify_uncodified': {
+      // Lead with the tenant-blocking count when there is one: "88 need a
+      // citation" is a chore, "614 blocking live tenants" is a customer waiting.
+      const parts: string[] = []
+      if (a.tenant_blocked > 0) parts.push(`${a.tenant_blocked} blocking live tenants`)
+      parts.push(`${a.count} need a citation by hand`)
+      if (a.auto_reconcilable > 0) {
+        parts.push(
+          a.tenant_blocked_auto > 0
+            ? `${a.auto_reconcilable} fixable with one reconcile (${a.tenant_blocked_auto} blocking)`
+            : `${a.auto_reconcilable} fixable with one reconcile`,
+        )
+      }
+      return parts.join(' · ')
+    }
     case 'research_coverage':
       return `${a.count} categor${a.count === 1 ? 'y' : 'ies'} requested by onboarded tenants`
     case 'confirm_authority':
@@ -140,6 +155,15 @@ export default function CommandCenter({
                     <span className="rounded-full bg-white/[0.06] px-1.5 py-0.5 font-mono text-[10px] text-zinc-300">
                       {a.count}
                     </span>
+                    {a.kind === 'codify_uncodified' && a.tenant_blocked > 0 && (
+                      // The one number that means a paying customer is waiting.
+                      // Amber, next to the verb, so it lands without opening the card.
+                      <span
+                        className="rounded-full border border-amber-800/40 bg-amber-900/20 px-1.5 py-0.5 font-mono text-[10px] text-amber-400"
+                        title="Uncodified rows a live tenant already has projected — withheld from their tab until cited">
+                        {a.tenant_blocked} tenant-blocking
+                      </span>
+                    )}
                   </div>
                   <p className="mt-0.5 text-xs text-zinc-500">{summarizeAction(a)}</p>
                   <p className="mt-1 text-[11px] text-zinc-600">{meta.why}</p>
