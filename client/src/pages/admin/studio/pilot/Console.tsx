@@ -209,9 +209,14 @@ function ProposalCard({ proposal, onRun, disabled }: {
           <p className="text-xs font-medium text-emerald-200">
             Research {proposal.industry_tag} × {place}
           </p>
-          <p className="text-[11px] text-zinc-400 mt-1">
-            {proposal.category_count} categories · {proposal.coverage.covered} covered ·{' '}
-            {proposal.coverage.unchecked} unchecked · {proposal.existing_active_rows} active rows on file
+          <p className="text-[11px] text-zinc-300 mt-1">
+            {(proposal.category_labels ?? proposal.categories).slice(0, 6).join(', ')}
+            {proposal.category_count > 6 && ` +${proposal.category_count - 6} more`}
+            <span className="text-zinc-500"> ({proposal.category_count} categor{proposal.category_count === 1 ? 'y' : 'ies'})</span>
+          </p>
+          <p className="text-[11px] text-zinc-500 mt-0.5">
+            {proposal.coverage.covered} covered · {proposal.coverage.unchecked} unchecked ·{' '}
+            {proposal.existing_active_rows} active rows on file
             {!proposal.city_found && proposal.city && <span className="text-amber-400/80"> · city not on file (will be created)</span>}
           </p>
         </>

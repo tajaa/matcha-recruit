@@ -26,6 +26,7 @@ export type ResearchProposal = {
   rationale: string
   industry_tag: string
   categories: string[]
+  category_labels?: string[]
   category_count: number
   coverage: { covered: number; empty: number; unchecked: number }
   existing_active_rows: number

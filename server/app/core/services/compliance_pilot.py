@@ -22,8 +22,15 @@ the request; never hand it a request-scoped connection).
 import asyncio
 import json
 import logging
+import re
 from typing import Any, Dict, List, Optional
 from uuid import UUID
+
+
+def _norm_cat(s) -> str:
+    """Collapse a category slug/name/topic to a comparable key: lowercase, no
+    spaces/underscores/hyphens. 'Clinical Safety' == 'clinical_safety'."""
+    return re.sub(r"[\s_\-]+", "", str(s or "").strip().lower())
 
 from app.core.services.genai_client import get_genai_client
 
@@ -73,17 +80,23 @@ PILOT_TEMPLATES: tuple[dict, ...] = (
             "You help an admin BUILD the shared compliance catalog. When the admin "
             "names an industry and a place (e.g. 'manufacturing in Los Angeles'), "
             "emit ONE proposal: {\"kind\":\"research\", \"industry\":\"<industry>\", "
-            "\"state\":\"<2-letter>\", \"city\":\"<city or null>\", \"categories\":null, "
-            "\"rationale\":\"<one sentence>\"}. Infer the 2-letter state from the city "
-            "when obvious (Los Angeles→CA, NYC→NY, Chicago→IL). Leave categories null "
-            "to research the full applicable set. Do NOT invent requirement values in "
-            "prose — the research run produces them. If the request is ambiguous, ask a "
-            "short clarifying question and emit no proposal."
+            "\"state\":\"<2-letter>\", \"city\":\"<city or null>\", "
+            "\"categories\":[<topics>]|null, \"rationale\":\"<one sentence>\"}. Infer the "
+            "2-letter state from the city when obvious (Los Angeles→CA, NYC→NY, "
+            "Chicago→IL). CATEGORY SCOPING (important — each category is a Gemini "
+            "research pass, so scope tightly): if the admin names a SPECIFIC topic — "
+            "'clinical safety', 'HIPAA', 'overtime', 'sick leave', 'medical waste' — set "
+            "`categories` to JUST that topic (a short list, snake_case, e.g. "
+            "[\"clinical_safety\"]). Set `categories` to null ONLY when the admin "
+            "explicitly asks for ALL / every / the full set of requirements. Never widen "
+            "a single named topic into the whole catalog. Do NOT invent requirement "
+            "values in prose — the research run produces them. If the request is "
+            "ambiguous, ask a short clarifying question and emit no proposal."
         ),
         "starters": [
-            "Research all compliance requirements for a manufacturing company in Los Angeles.",
-            "Get the healthcare compliance requirements for New York City.",
-            "What would we research for a restaurant in Chicago?",
+            "Research clinical safety requirements for healthcare in Los Angeles.",
+            "Get the HIPAA rules for a clinic in New York City.",
+            "Research ALL compliance requirements for a manufacturing company in Chicago.",
         ],
     },
     {
@@ -436,19 +449,34 @@ async def resolve_proposal(conn, proposal: dict) -> tuple[Optional[dict], List[s
             errors.append(f"Couldn't resolve the industry '{proposal.get('industry')}'.")
             return None, errors
         cats = proposal.get("categories")
+        cat_labels: Dict[str, str] = {}
         if cats:
-            valid = {r["slug"] for r in await conn.fetch(
-                "SELECT slug FROM compliance_categories WHERE slug = ANY($1::text[])", cats)}
-            categories = [c for c in cats if c in valid]
+            # Match each named topic by slug OR normalized display name (the model
+            # may return "clinical safety" or "clinical_safety"). Named-but-unmatched
+            # is an error — never silently widen one topic to the whole catalog.
+            norm = {_norm_cat(c): c for c in cats}
+            rows = await conn.fetch(
+                "SELECT slug, name FROM compliance_categories "
+                "WHERE industry_tag IS NULL OR industry_tag = $1", industry_tag)
+            categories = []
+            for r in rows:
+                if _norm_cat(r["slug"]) in norm or _norm_cat(r["name"]) in norm:
+                    categories.append(r["slug"])
+                    cat_labels[r["slug"]] = r["name"]
+            if not categories:
+                errors.append(f"Couldn't match any category to '{', '.join(cats)}'. "
+                              "Name a topic like 'clinical safety' or 'HIPAA', or say 'all requirements'.")
+                return None, errors
         else:
             categories = await default_categories(conn, industry_tag)
-        if not categories:
-            errors.append("No categories resolved for that industry.")
-            return None, errors
+            rows = await conn.fetch(
+                "SELECT slug, name FROM compliance_categories WHERE slug = ANY($1::text[])", categories)
+            cat_labels = {r["slug"]: r["name"] for r in rows}
         snapshot = await build_scope_snapshot(conn, state, city, industry_tag)
         resolved.update({
             "industry_tag": industry_tag,
             "categories": categories,
+            "category_labels": [cat_labels.get(c, c) for c in categories],
             "category_count": len(categories),
             "coverage": snapshot["general_coverage"],
             "existing_active_rows": snapshot["existing_active_rows"],
