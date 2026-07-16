@@ -169,7 +169,7 @@ class AIChatService:
             "RULES:",
             "- Only cite information from the provided sources. If the data doesn't contain an answer, say so clearly.",
             "- Always include the jurisdiction level and name when citing a requirement.",
-            "- Include source URLs when available.",
+            "- Refer to the enforcing authority by NAME (e.g. 'California Labor Commissioner') — do NOT print external URLs or markdown links. The user opens the underlying requirement from the source chips shown beneath your answer.",
             "- If a question spans multiple jurisdictions, compare them.",
             "- Be specific about dollar amounts, dates, and thresholds.",
         ]

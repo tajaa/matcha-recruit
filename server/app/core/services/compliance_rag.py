@@ -287,8 +287,12 @@ class ComplianceRAGService:
                 entry += f"\n  {result['description']}"
             if result["effective_date"]:
                 entry += f"\n  Effective: {result['effective_date']}"
-            if result["source_url"]:
-                entry += f"\n  Source: {result['source_url']}"
+            # Enforcing authority by NAME only — the external URL is deliberately
+            # NOT fed to the model (it must not print links; the user opens the
+            # requirement from the in-app source chip). URL still travels in the
+            # `sources` payload for the chip's deep-link, not the prose.
+            if result.get("source_name"):
+                entry += f"\n  Authority: {result['source_name']}"
             if result.get("statute_citation"):
                 entry += f"\n  Citation: {result['statute_citation']}"
 
