@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { Badge, Button, Card, Input, Select } from '../../components/ui'
 import { EmployeeStatusBadge } from '../../components/employees/EmployeeStatusBadge'
 import { OnboardingTaskList } from '../../components/employees/OnboardingTaskList'
@@ -50,8 +50,13 @@ export default function EmployeeDetail() {
     employee, loading, error,
     updateEmployee, updateStatus, deleteEmployee,
   } = useEmployeeDetail(employeeId!)
-  const [tab, setTab] = useState<Tab>('profile')
-  const [editing, setEditing] = useState(false)
+  // Deep-link support: the compliance risk cockpit links straight to the
+  // relevant tab (?tab=credentials) and pay editor (?edit=1).
+  const [searchParams] = useSearchParams()
+  const TABS_VALID: Tab[] = ['profile', 'onboarding', 'credentials', 'leave']
+  const initialTab = searchParams.get('tab') as Tab | null
+  const [tab, setTab] = useState<Tab>(initialTab && TABS_VALID.includes(initialTab) ? initialTab : 'profile')
+  const [editing, setEditing] = useState(searchParams.get('edit') === '1')
   const [draft, setDraft] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState('')

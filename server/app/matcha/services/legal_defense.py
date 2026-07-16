@@ -851,6 +851,35 @@ async def _src_compliance_alerts(conn, company_id, start, end, loc_id, state, to
     } for r in rows]
 
 
+async def _src_compliance_remediation(conn, company_id, start, end, loc_id, state, topic=_BROAD) -> list[dict]:
+    # The remediation trail: issues the company detected AND resolved/dismissed
+    # in-window. Strong defensive evidence — "we found the underpayment on 6/1
+    # and corrected it by 6/14". Company-wide (no location link on the row).
+    rows = await conn.fetch(
+        """
+        SELECT s.id, s.issue_key, s.source, s.severity, s.title, s.status,
+               s.resolution_method, s.resolution_note, s.first_seen_at, s.resolved_at
+        FROM compliance_issue_state s
+        WHERE s.company_id = $1
+          AND s.status IN ('resolved','dismissed')
+          AND ($2::date IS NULL OR s.resolved_at >= $2)
+          AND ($3::date IS NULL OR s.resolved_at < ($3::date + 1))
+        ORDER BY s.resolved_at DESC
+        LIMIT 100
+        """,
+        company_id, start, end,
+    )
+    return [{
+        "cid": f"remediation:{r['id']}",
+        "ref": _hum(r["source"]) or "Remediation",
+        "summary": f"{r['title']} — {_hum(r['status'])} via {_hum(r['resolution_method']) or 'update'}"
+                   + (f": {r['resolution_note']}" if r["resolution_note"] else "")
+                   + (f" (flagged {_dt(r['first_seen_at'])})" if r["first_seen_at"] else ""),
+        "when": _dt(r["resolved_at"]),
+        "when_iso": _iso(r["resolved_at"]),
+    } for r in rows]
+
+
 # --------------------------------------------------------------------------- #
 # Matter-scoped external legal context — jurisdiction, governing requirements,
 # pending legislation, and externally-researched case law. Only populated
@@ -1046,6 +1075,8 @@ _SOURCES = [
     ("compliance", "Compliance requirements tracked", _src_compliance,
      lambda f: bool(f.get("compliance") or f.get("compliance_lite"))),
     ("compliance_alerts", "Compliance monitoring alerts", _src_compliance_alerts,
+     lambda f: bool(f.get("compliance") or f.get("compliance_lite"))),
+    ("compliance_remediation", "Compliance issues detected & remediated", _src_compliance_remediation,
      lambda f: bool(f.get("compliance") or f.get("compliance_lite"))),
     ("discipline", "Progressive discipline", _src_discipline,
      lambda f: bool(f.get("discipline"))),

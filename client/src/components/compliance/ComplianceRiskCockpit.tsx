@@ -1,14 +1,16 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  AlertTriangle, ArrowRight, CheckCircle2, ChevronRight,
-  Loader2, ShieldCheck, UserPlus,
+  AlertTriangle, ArrowRight, CheckCircle2, ChevronRight, Clock,
+  History, Loader2, RotateCcw, ShieldCheck, UserPlus, X,
 } from 'lucide-react'
 import { LABEL } from '../ui/typography'
-import { fetchAssignableUsers } from '../../api/compliance'
+import {
+  addRemediationNote, dismissRemediation, fetchAssignableUsers, reopenRemediation,
+} from '../../api/compliance'
 import type {
   AssignableUser, ComplianceActionPlanUpdate, ComplianceRiskSummary,
-  PinnedRequirement, RiskIssue,
+  PinnedRequirement, RemediationRecord, RiskIssue,
 } from '../../types/compliance'
 import { CATEGORY_LABELS } from '../../types/compliance'
 
@@ -36,6 +38,18 @@ function money(v: number) {
   return `$${Math.round(v).toLocaleString()}`
 }
 
+function ageLabel(iso?: string | null): string | null {
+  if (!iso) return null
+  const days = Math.floor((Date.now() - new Date(iso).getTime()) / 86400000)
+  if (days <= 0) return 'flagged today'
+  return `open ${days} day${days === 1 ? '' : 's'}`
+}
+
+function humanize(s?: string | null): string {
+  if (!s) return ''
+  return s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
 type Props = {
   riskSummary: ComplianceRiskSummary | null
   loading: boolean
@@ -61,7 +75,7 @@ export function ComplianceRiskCockpit({
     return <p className="text-sm text-zinc-600 px-4 py-8">Risk summary unavailable. Try again shortly.</p>
   }
 
-  const { posture: p, issues, get_ahead } = riskSummary
+  const { posture: p, issues, get_ahead, recently_resolved, dismissed_count } = riskSummary
   const totalOpen = p.open_critical + p.open_high + p.open_moderate
   const clear = totalOpen === 0
 
@@ -160,6 +174,72 @@ export function ComplianceRiskCockpit({
           )}
         </div>
       </div>
+
+      <RemediationTrail
+        records={recently_resolved}
+        dismissedCount={dismissed_count}
+        onChanged={onActioned}
+      />
+    </div>
+  )
+}
+
+// ── Remediation trail — the documentation record (resolved + dismissed) ──
+function RemediationTrail({
+  records, dismissedCount, onChanged,
+}: { records: RemediationRecord[]; dismissedCount: number; onChanged: () => void }) {
+  const [open, setOpen] = useState(false)
+  if (records.length === 0 && dismissedCount === 0) return null
+
+  const resolved = records.filter((r) => r.status === 'resolved')
+  const dismissed = records.filter((r) => r.status === 'dismissed')
+
+  return (
+    <div className="pt-1">
+      <button type="button" onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-1.5 text-zinc-500 hover:text-zinc-300 transition-colors">
+        <History className="h-3.5 w-3.5" />
+        <span className={LABEL}>Remediation history</span>
+        <span className="text-[11px] text-zinc-600">
+          {resolved.length} resolved{dismissedCount > 0 ? ` · ${dismissedCount} dismissed` : ''}
+        </span>
+        <ChevronRight className={`h-3.5 w-3.5 transition-transform ${open ? 'rotate-90' : ''}`} />
+      </button>
+      {open && (
+        <div className={`${PANEL} mt-2 divide-y divide-white/[0.06]`}>
+          {records.length === 0 && (
+            <p className="px-4 py-3 text-xs text-zinc-600">No resolutions recorded yet.</p>
+          )}
+          {[...resolved, ...dismissed].map((r) => (
+            <div key={r.issue_key} className="flex items-start justify-between gap-3 px-4 py-2.5">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  {r.status === 'resolved'
+                    ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
+                    : <X className="h-3.5 w-3.5 text-zinc-500 shrink-0" />}
+                  <p className="text-sm text-zinc-200 truncate">{r.title}</p>
+                </div>
+                <p className="text-[11px] text-zinc-500 mt-0.5">
+                  {humanize(r.source)} · {r.status === 'resolved' ? 'Resolved' : 'Dismissed'}
+                  {r.resolution_method ? ` via ${humanize(r.resolution_method)}` : ''}
+                  {r.resolved_at ? ` · ${new Date(r.resolved_at).toLocaleDateString()}` : ''}
+                  {r.resolved_by_name ? ` · ${r.resolved_by_name}` : ''}
+                </p>
+                {r.resolution_note && (
+                  <p className="text-[11px] text-zinc-400 mt-0.5">{r.resolution_note}</p>
+                )}
+              </div>
+              {r.status === 'dismissed' && (
+                <button type="button"
+                  onClick={async () => { await reopenRemediation(r.issue_key); onChanged() }}
+                  className="shrink-0 inline-flex items-center gap-1 text-[11px] text-zinc-500 hover:text-zinc-300 transition-colors">
+                  <RotateCcw className="h-3 w-3" /> Reopen
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -275,6 +355,7 @@ function IssueRow({
 }) {
   const sev = SEV[issue.severity]
   const [assignOpen, setAssignOpen] = useState(false)
+  const [dismissOpen, setDismissOpen] = useState(false)
   const isAlert = issue.source === 'alert'
   const pen = issue.penalty
 
@@ -289,6 +370,11 @@ function IssueRow({
           <div className="flex items-center gap-2">
             <span className={`text-[10px] font-mono uppercase tracking-wide ${sev.chip}`}>{SOURCE_LABEL[issue.source]}</span>
             <span className={`text-[10px] uppercase tracking-wide ${sev.text}`}>{issue.severity}</span>
+            {ageLabel(issue.first_seen_at) && (
+              <span className="inline-flex items-center gap-0.5 text-[10px] text-zinc-600">
+                <Clock className="h-2.5 w-2.5" /> {ageLabel(issue.first_seen_at)}
+              </span>
+            )}
           </div>
           <p className="text-sm text-zinc-100 mt-1">{issue.title}</p>
           {issue.detail && <p className="text-xs text-zinc-400 mt-0.5">{issue.detail}</p>}
@@ -299,17 +385,24 @@ function IssueRow({
             <p className="text-xs text-emerald-300/80 mt-1.5">→ {issue.recommendation}</p>
           )}
         </div>
-        <div className="shrink-0">
+        <div className="shrink-0 flex items-center gap-1.5">
           {isAlert ? (
             <button type="button" onClick={() => setAssignOpen((v) => !v)}
               className="inline-flex items-center gap-1 rounded-md border border-white/[0.08] px-2 py-1 text-xs text-zinc-300 hover:border-white/20 transition-colors">
               <UserPlus className="h-3 w-3" /> {FIX_VERB.alert}
             </button>
           ) : (
-            <button type="button" onClick={onFix}
-              className="inline-flex items-center gap-1 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-xs text-emerald-300 hover:bg-emerald-500/20 transition-colors">
-              {FIX_VERB[issue.source]} <ArrowRight className="h-3 w-3" />
-            </button>
+            <>
+              <button type="button" onClick={onFix}
+                className="inline-flex items-center gap-1 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-xs text-emerald-300 hover:bg-emerald-500/20 transition-colors">
+                {FIX_VERB[issue.source]} <ArrowRight className="h-3 w-3" />
+              </button>
+              <button type="button" title="Not a violation — dismiss with a reason"
+                onClick={() => setDismissOpen((v) => !v)}
+                className="inline-flex items-center rounded-md border border-white/[0.08] px-1.5 py-1 text-xs text-zinc-500 hover:text-zinc-300 hover:border-white/20 transition-colors">
+                <X className="h-3 w-3" />
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -325,6 +418,41 @@ function IssueRow({
           }}
         />
       )}
+
+      {!isAlert && dismissOpen && (
+        <DismissPanel
+          onCancel={() => setDismissOpen(false)}
+          onSubmit={async (reason) => {
+            await dismissRemediation(issue.id, reason)
+            setDismissOpen(false)
+            onActioned()
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
+function DismissPanel({ onSubmit, onCancel }: { onSubmit: (reason: string) => Promise<void>; onCancel: () => void }) {
+  const [reason, setReason] = useState('')
+  const [saving, setSaving] = useState(false)
+  return (
+    <div className="mt-3 rounded-md border border-white/[0.06] bg-zinc-900/50 p-3 space-y-2">
+      <p className="text-[11px] text-zinc-500">
+        Dismiss only if this isn't a real violation (e.g. properly classified exempt). It re-surfaces if the underlying data changes. Recorded for the trail.
+      </p>
+      <input type="text" value={reason} onChange={(e) => setReason(e.target.value)} autoFocus
+        placeholder="Reason (e.g. passes the duties test — exempt)"
+        className="w-full rounded-md border border-white/[0.08] bg-zinc-950 px-2 py-1.5 text-xs text-zinc-200" />
+      <div className="flex justify-end gap-1.5">
+        <button type="button" onClick={onCancel}
+          className="rounded-md px-2 py-1 text-xs text-zinc-500 hover:text-zinc-300 transition-colors">Cancel</button>
+        <button type="button" disabled={saving || !reason.trim()}
+          onClick={async () => { setSaving(true); try { await onSubmit(reason.trim()) } finally { setSaving(false) } }}
+          className="rounded-md border border-white/[0.08] px-2 py-1 text-xs text-zinc-300 hover:border-white/20 transition-colors disabled:opacity-40">
+          Dismiss issue
+        </button>
+      </div>
     </div>
   )
 }

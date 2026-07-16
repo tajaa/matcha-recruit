@@ -63,6 +63,22 @@ export interface RiskIssue {
   link?: string | null
   deadline?: string | null
   alert_id?: string | null
+  first_seen_at?: string | null
+}
+
+export interface RemediationRecord {
+  issue_key: string
+  source: string
+  severity?: string | null
+  title?: string | null
+  detail?: string | null
+  status: string
+  resolution_method?: string | null
+  resolution_note?: string | null
+  resolved_at?: string | null
+  resolved_by_name?: string | null
+  first_seen_at?: string | null
+  employee_id?: string | null
 }
 
 export interface RiskPosture {
@@ -89,6 +105,8 @@ export interface ComplianceRiskSummary {
   posture: RiskPosture
   issues: RiskIssue[]
   get_ahead: RiskGetAhead[]
+  recently_resolved: RemediationRecord[]
+  dismissed_count: number
   generated_at: string
 }
 

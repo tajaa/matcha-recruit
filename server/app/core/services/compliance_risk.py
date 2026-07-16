@@ -35,6 +35,7 @@ from ..models.compliance import (
     RiskPosture,
 )
 from .compliance_service import get_employee_impact_for_location
+from .compliance_remediation import fetch_recent_remediations, reconcile_issue_state
 
 logger = logging.getLogger(__name__)
 
@@ -121,10 +122,9 @@ async def _wage_penalty_for_location(conn, jurisdiction_id, rate_type: str) -> t
 async def get_compliance_risk_summary(company_id: UUID) -> ComplianceRiskSummary:
     issues: list[RiskIssue] = []
     get_ahead: list[RiskGetAhead] = []
-    # Distinct roster employees with an open issue — keyed on employee_id, not
-    # name (two "John Smith"s must not collapse). Alerts carry no employee id,
-    # so they don't contribute to this headcount (company-wide policy gaps).
-    affected_ids: set[str] = set()
+    # Per-issue "basis": the raw values that define the violation. Drives the
+    # dismissed-issue re-surface rule + the "before" value in the trail.
+    basis_by_key: dict = {}
     today = date.today()
 
     features = {}
@@ -152,7 +152,6 @@ async def get_compliance_risk_summary(company_id: UUID) -> ComplianceRiskSummary
                     is_hourly = rate_type == "general"
                     for v in violations:
                         name = v["employee_name"]
-                        affected_ids.add(str(v["employee_id"]))
                         rate, threshold = v["pay_rate"], v["threshold"]
                         if is_hourly:
                             detail = f"Paid ${rate:,.2f}/hr — the applicable minimum is ${threshold:,.2f}/hr."
@@ -164,8 +163,10 @@ async def get_compliance_risk_summary(company_id: UUID) -> ComplianceRiskSummary
                             rec = (
                                 f"Raise {name}'s salary to ${threshold:,.0f}/yr or reclassify as non-exempt (overtime-eligible)."
                             )
+                        key = f"wage:{v['employee_id']}:{rate_type}"
+                        basis_by_key[key] = {"pay_rate": float(rate), "threshold": float(threshold)}
                         issues.append(RiskIssue(
-                            id=f"wage:{v['employee_id']}:{rate_type}",
+                            id=key,
                             source="wage",
                             severity="critical",
                             title=f"{name} paid below the applicable minimum",
@@ -175,7 +176,7 @@ async def get_compliance_risk_summary(company_id: UUID) -> ComplianceRiskSummary
                             penalty=penalty,
                             statute_citation=citation,
                             recommendation=rec,
-                            link="/app/employees",
+                            link=f"/app/employees/{v['employee_id']}?tab=profile&edit=1",
                         ))
         except Exception:
             logger.exception("risk-summary: wage section failed for %s", company_id)
@@ -209,7 +210,6 @@ async def get_compliance_risk_summary(company_id: UUID) -> ComplianceRiskSummary
                     days = (exp - today).days
                     label = _CREDENTIAL_LABELS.get(r["credential_type"], r["credential_type"])
                     name = r["employee_name"]
-                    affected_ids.add(str(r["employee_id"]))
                     if days < 0:
                         severity = "critical"
                         detail = f"{label} expired {exp.isoformat()} ({-days} day{'s' if -days != 1 else ''} ago)."
@@ -222,8 +222,10 @@ async def get_compliance_risk_summary(company_id: UUID) -> ComplianceRiskSummary
                         severity = "moderate"
                         detail = f"{label} expires {exp.isoformat()} (in {days} days)."
                         rec = f"Schedule {name}'s {label} renewal — expires within 90 days."
+                    key = f"credential:{r['employee_id']}:{r['credential_type']}"
+                    basis_by_key[key] = {"expiry": exp.isoformat()}
                     issues.append(RiskIssue(
-                        id=f"credential:{r['employee_id']}:{r['credential_type']}",
+                        id=key,
                         source="credential",
                         severity=severity,
                         title=f"{name} — {label} {'expired' if days < 0 else 'expiring'}",
@@ -231,7 +233,7 @@ async def get_compliance_risk_summary(company_id: UUID) -> ComplianceRiskSummary
                         employee_names=[name],
                         location_label=r["job_title"],
                         recommendation=rec,
-                        link="/app/credential-templates",
+                        link=f"/app/employees/{r['employee_id']}?tab=credentials",
                         deadline=exp.isoformat(),
                     ))
             except Exception:
@@ -260,8 +262,10 @@ async def get_compliance_risk_summary(company_id: UUID) -> ComplianceRiskSummary
                         rec = f"Determine OSHA recordability for {num} and complete the investigation before the 300A deadline."
                     else:
                         rec = f"Investigate and resolve {num}; assign corrective actions and close it out."
+                    key = f"incident:{r['id']}"
+                    basis_by_key[key] = {"status": r["status"], "severity": r["severity"]}
                     issues.append(RiskIssue(
-                        id=f"incident:{r['id']}",
+                        id=key,
                         source="incident",
                         severity=sev,
                         title=r["title"] or num,
@@ -271,7 +275,7 @@ async def get_compliance_risk_summary(company_id: UUID) -> ComplianceRiskSummary
                         ),
                         location_label=label,
                         recommendation=rec,
-                        link="/app/ir",
+                        link=f"/app/ir/{r['id']}",
                         deadline=r["occurred_at"].date().isoformat() if r["occurred_at"] else None,
                     ))
             except Exception:
@@ -292,8 +296,13 @@ async def get_compliance_risk_summary(company_id: UUID) -> ComplianceRiskSummary
             )
             for r in rows:
                 loc = loc_by_id.get(r["location_id"])
+                key = f"alert:{r['id']}"
+                basis_by_key[key] = {
+                    "deadline": r["deadline"].isoformat() if r["deadline"] else None,
+                    "severity": r["severity"],
+                }
                 issues.append(RiskIssue(
-                    id=f"alert:{r['id']}",
+                    id=key,
                     source="alert",
                     severity="critical",
                     title=r["title"] or "Critical compliance alert",
@@ -336,6 +345,34 @@ async def get_compliance_risk_summary(company_id: UUID) -> ComplianceRiskSummary
                 ))
         except Exception:
             logger.exception("risk-summary: get-ahead section failed for %s", company_id)
+
+        # ── Remediation lifecycle: persist state, auto-document resolved,
+        #    suppress dismissed. Must run with conn while issues are complete.
+        recently_resolved: list = []
+        dismissed_count = 0
+        current_keys = {i.id for i in issues}
+        try:
+            state_map = await reconcile_issue_state(conn, company_id, issues, basis_by_key)
+            dismissed_keys = {k for k, r in state_map.items() if r["status"] == "dismissed"}
+            # dismissed AND still produced by the live check = hidden-but-real
+            dismissed_count = len(dismissed_keys & current_keys)
+            issues = [i for i in issues if i.id not in dismissed_keys]
+            for i in issues:
+                st = state_map.get(i.id)
+                if st and st["first_seen_at"]:
+                    i.first_seen_at = st["first_seen_at"].isoformat()
+            recently_resolved = await fetch_recent_remediations(conn, company_id, days=30)
+        except Exception:
+            logger.exception("risk-summary: remediation reconcile failed for %s", company_id)
+
+    # Recompute affected employees from the SURVIVING issues (post-dismissal),
+    # keyed on the employee id embedded in the wage/credential issue key.
+    affected_ids = set()
+    for i in issues:
+        if i.source in ("wage", "credential"):
+            parts = i.id.split(":")
+            if len(parts) >= 2:
+                affected_ids.add(parts[1])
 
     # Also surface alert deadlines that are in the future as get-ahead items.
     for iss in issues:
@@ -420,5 +457,7 @@ async def get_compliance_risk_summary(company_id: UUID) -> ComplianceRiskSummary
         posture=posture,
         issues=issues,
         get_ahead=get_ahead,
+        recently_resolved=recently_resolved,
+        dismissed_count=dismissed_count,
         generated_at=datetime.utcnow().isoformat(),
     )

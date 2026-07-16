@@ -422,6 +422,23 @@ class RiskIssue(BaseModel):
     link: Optional[str] = None  # deep-link fix target, or null for in-page (alerts)
     deadline: Optional[str] = None  # ISO date
     alert_id: Optional[str] = None  # only for source='alert' — action-plan target
+    first_seen_at: Optional[str] = None  # when the issue was first observed (age)
+
+
+class RemediationRecord(BaseModel):
+    """A resolved or dismissed compliance issue — the documentation trail."""
+    issue_key: str
+    source: str
+    severity: Optional[str] = None
+    title: Optional[str] = None
+    detail: Optional[str] = None
+    status: str  # resolved | dismissed
+    resolution_method: Optional[str] = None
+    resolution_note: Optional[str] = None
+    resolved_at: Optional[str] = None  # ISO datetime
+    resolved_by_name: Optional[str] = None
+    first_seen_at: Optional[str] = None
+    employee_id: Optional[str] = None
 
 
 class RiskPosture(BaseModel):
@@ -448,9 +465,25 @@ class RiskGetAhead(BaseModel):
 
 class ComplianceRiskSummary(BaseModel):
     posture: RiskPosture
-    issues: List[RiskIssue] = []  # sorted severity desc, deadline asc
+    issues: List[RiskIssue] = []  # sorted severity desc, deadline asc (dismissed excluded)
     get_ahead: List[RiskGetAhead] = []
+    recently_resolved: List[RemediationRecord] = []  # resolved/dismissed in last 30d
+    dismissed_count: int = 0  # currently-dismissed open-in-data issues (hidden)
     generated_at: str
+
+
+class RemediationDismissRequest(BaseModel):
+    issue_key: str
+    reason: str
+
+
+class RemediationNoteRequest(BaseModel):
+    issue_key: str
+    note: str
+
+
+class RemediationReopenRequest(BaseModel):
+    issue_key: str
 
 
 # ── Hierarchical Compliance Response Schemas ──────────────────────────────
