@@ -3,9 +3,11 @@ import { askRegulatoryQuestion, type RegulatoryQASource } from '../../api/compli
 
 type Props = {
   locationId?: string | null
+  /** Open a cited requirement in the Requirements tab (by catalog id). */
+  onOpenSource?: (requirementId: string) => void
 }
 
-export function RegulatoryQuickAsk({ locationId }: Props) {
+export function RegulatoryQuickAsk({ locationId, onOpenSource }: Props) {
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(false)
   const [answer, setAnswer] = useState<string | null>(null)
@@ -82,24 +84,42 @@ export function RegulatoryQuickAsk({ locationId }: Props) {
             <div className="mt-3 pt-3 border-t border-white/[0.06]">
               <span className="text-[10px] text-zinc-500 uppercase tracking-wide">Sources ({sources.length})</span>
               <div className="mt-1.5 flex flex-wrap gap-1.5">
-                {sources.map((s, i) => (
-                  <span key={i} className="inline-flex items-center gap-1 text-[11px] bg-white/[0.06] text-zinc-400 px-2 py-0.5 rounded">
-                    <span className="text-indigo-400">{s.jurisdiction_name}</span>
-                    <span className="text-zinc-600">|</span>
-                    <span>{s.category}</span>
-                    {s.source_url && (
-                      <a
-                        href={s.source_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-indigo-500 hover:text-indigo-400 ml-0.5"
-                        title={s.source_name || 'Source'}
-                      >
-                        link
-                      </a>
-                    )}
-                  </span>
-                ))}
+                {sources.map((s, i) => {
+                  const canOpen = !!onOpenSource && !!s.requirement_id
+                  return (
+                    <span key={i} className="inline-flex items-center gap-1 text-[11px] bg-white/[0.06] text-zinc-400 px-2 py-0.5 rounded">
+                      {canOpen ? (
+                        <button
+                          type="button"
+                          onClick={() => onOpenSource!(s.requirement_id)}
+                          className="inline-flex items-center gap-1 hover:text-zinc-200 transition-colors"
+                          title="Open this requirement"
+                        >
+                          <span className="text-indigo-400">{s.jurisdiction_name}</span>
+                          <span className="text-zinc-600">|</span>
+                          <span>{s.category}</span>
+                        </button>
+                      ) : (
+                        <>
+                          <span className="text-indigo-400">{s.jurisdiction_name}</span>
+                          <span className="text-zinc-600">|</span>
+                          <span>{s.category}</span>
+                        </>
+                      )}
+                      {s.source_url && (
+                        <a
+                          href={s.source_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-indigo-500 hover:text-indigo-400 ml-0.5"
+                          title={s.source_name || 'Source'}
+                        >
+                          link
+                        </a>
+                      )}
+                    </span>
+                  )
+                })}
               </div>
             </div>
           )}

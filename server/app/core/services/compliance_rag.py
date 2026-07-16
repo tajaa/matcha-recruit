@@ -100,11 +100,14 @@ class ComplianceRAGService:
             idx += 1
 
         if industry_tags:
-            # NULL applicable_industries means the requirement is universal
-            # (untagged baseline/federal law) — array overlap against NULL
-            # yields NULL and silently drops those rows, so allow NULL through.
+            # NULL *or empty* applicable_industries means the requirement is
+            # universal (untagged baseline / general labor law — minimum wage,
+            # overtime, etc. are stored as `{}`). Array overlap against NULL
+            # yields NULL, and `{} && $tags` is false, so both silently drop
+            # universal rows unless we let them through explicitly.
             sql += (
                 f" AND (ce.applicable_industries IS NULL"
+                f" OR cardinality(ce.applicable_industries) = 0"
                 f" OR ce.applicable_industries && ${idx}::text[])"
             )
             params.append(industry_tags)
@@ -172,23 +175,55 @@ class ComplianceRAGService:
         tuple[str, list[dict]]
             (context_text, sources) where sources include citation info.
         """
-        # Resolve jurisdictions from company locations
+        # Resolve the company's leaf jurisdictions (the location the question is
+        # about, or all active locations).
         if location_id:
             jids = await conn.fetch(
-                """SELECT jurisdiction_id FROM business_locations
-                   WHERE id = $1 AND jurisdiction_id IS NOT NULL""",
+                """SELECT jurisdiction_id, state FROM business_locations
+                   WHERE id = $1""",
                 location_id,
             )
         else:
             jids = await conn.fetch(
-                """SELECT jurisdiction_id FROM business_locations
-                   WHERE company_id = $1 AND is_active = true
-                     AND jurisdiction_id IS NOT NULL""",
+                """SELECT jurisdiction_id, state FROM business_locations
+                   WHERE company_id = $1 AND is_active = true""",
                 company_id,
             )
-        jurisdiction_ids = [r["jurisdiction_id"] for r in jids] if jids else None
+        leaf_ids = [r["jurisdiction_id"] for r in jids if r["jurisdiction_id"]]
+        loc_states = [r["state"] for r in jids if r["state"]]
 
-        # Also include federal jurisdiction
+        jurisdiction_ids: Optional[list[UUID]] = None
+        if leaf_ids:
+            # Walk the whole chain (city → county → state → federal): minimum
+            # wage / overtime / meal breaks live at STATE level, so a leaf-only
+            # filter can't see them. Same shape as compliance_risk's penalty CTE.
+            chain = await conn.fetch(
+                """
+                WITH RECURSIVE chain AS (
+                    SELECT id, parent_id, 0 AS depth
+                    FROM jurisdictions WHERE id = ANY($1::uuid[])
+                    UNION ALL
+                    SELECT j.id, j.parent_id, c.depth + 1
+                    FROM jurisdictions j JOIN chain c ON j.id = c.parent_id
+                    WHERE c.depth < 10
+                )
+                SELECT DISTINCT id FROM chain
+                """,
+                leaf_ids,
+            )
+            jurisdiction_ids = [r["id"] for r in chain]
+        elif loc_states:
+            # No linked jurisdiction — scope to the company's own states +
+            # federal rather than searching the entire national catalog. The
+            # RAG contract is "requirements that apply to THIS company".
+            state_rows = await conn.fetch(
+                """SELECT id FROM jurisdictions
+                   WHERE UPPER(state) = ANY($1::text[]) OR level = 'federal'""",
+                [s.upper() for s in loc_states],
+            )
+            jurisdiction_ids = [r["id"] for r in state_rows] or None
+
+        # Safety net: ensure federal is present for a resolved chain.
         if jurisdiction_ids:
             federal = await conn.fetchval(
                 "SELECT id FROM jurisdictions WHERE level = 'federal' LIMIT 1"

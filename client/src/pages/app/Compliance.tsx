@@ -68,6 +68,15 @@ function ComplianceFull() {
   const [showModal, setShowModal] = useState(false)
   const [editingLocation, setEditingLocation] = useState<BusinessLocation | null>(null)
   const [saving, setSaving] = useState(false)
+  // A cited requirement to focus when opened from the "Ask" sources.
+  const [targetReqId, setTargetReqId] = useState<string | null>(null)
+
+  // Open a requirement cited by the regulatory Q&A: jump to the Requirements
+  // tab (selecting a location if none is), and mark the row to focus.
+  const openSourceRequirement = useCallback((requirementId: string) => {
+    setTab('requirements')
+    setTargetReqId(requirementId)
+  }, [])
 
   const data = useComplianceData(selectedId)
   const detail = useLocationDetail(selectedId)
@@ -113,6 +122,14 @@ function ComplianceFull() {
       data.loadJurisdictions()
     }
   }, [showModal, data])
+
+  // The Requirements tab needs a selected location; if a source was opened from
+  // the "Ask" box without one, select the first.
+  useEffect(() => {
+    if (targetReqId && !selectedId && data.locations.length > 0) {
+      setSelectedId(data.locations[0].id)
+    }
+  }, [targetReqId, selectedId, data.locations])
 
   async function handleLocationSubmit(formData: LocationCreate, editId?: string) {
     setSaving(true)
@@ -168,7 +185,7 @@ function ComplianceFull() {
       </div>
 
       {/* Regulatory Q&A */}
-      <RegulatoryQuickAsk locationId={selectedId} />
+      <RegulatoryQuickAsk locationId={selectedId} onOpenSource={openSourceRequirement} />
 
       {/* Tab nav */}
       <div className="flex items-center gap-1 mt-4 mb-5">
@@ -260,6 +277,8 @@ function ComplianceFull() {
                     onPin={handlePinRequirement}
                     checkMessages={check.messages}
                     facilityAttributes={selectedLoc?.facility_attributes}
+                    targetReqId={targetReqId}
+                    onTargetConsumed={() => setTargetReqId(null)}
                   />
                 )}
                 {tab === 'alerts' && (

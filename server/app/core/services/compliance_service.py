@@ -7066,6 +7066,9 @@ async def get_location_requirements(
                 affected_employee_names=employee_names or None,
                 min_wage_violation_count=_violation_count_for_row(row),
                 is_pinned=row.get("is_pinned", False),
+                jurisdiction_requirement_id=str(row["jurisdiction_requirement_id"])
+                if row.get("jurisdiction_requirement_id")
+                else None,
             )
             for row in filtered
         ]

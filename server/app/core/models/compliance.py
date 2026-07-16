@@ -266,6 +266,9 @@ class RequirementResponse(BaseModel):
     affected_employee_names: Optional[List[str]] = None
     min_wage_violation_count: Optional[int] = None
     is_pinned: bool = False
+    # The SSOT catalog row id (jurisdiction_requirements.id). Lets the RAG "ask"
+    # sources deep-link a chip straight to this row in the Requirements tab.
+    jurisdiction_requirement_id: Optional[str] = None
 
 
 class PinRequirementRequest(BaseModel):

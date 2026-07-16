@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { Lock } from 'lucide-react'
 import { Select } from '../ui'
 import { LABEL } from '../ui/typography'
@@ -32,12 +32,36 @@ type Props = {
    *  an upgrade CTA. When set, the search/filter controls are hidden so the blur
    *  can't be bypassed. */
   previewCategoryLimit?: number
+  /** A catalog requirement id (jurisdiction_requirement_id) to focus — cited by
+   *  the regulatory-ask sources. Expands its category, scrolls it into view,
+   *  and highlights it. */
+  targetReqId?: string | null
+  onTargetConsumed?: () => void
 }
 
-export function ComplianceRequirementsTab({ requirements, loading, onPin, checkMessages, readOnly, previewCategoryLimit }: Props) {
+export function ComplianceRequirementsTab({ requirements, loading, onPin, checkMessages, readOnly, previewCategoryLimit, targetReqId, onTargetConsumed }: Props) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [groupFilter, setGroupFilter] = useState<'all' | CategoryGroup>('all')
   const [searchQuery, setSearchQuery] = useState('')
+  const [highlightId, setHighlightId] = useState<string | null>(null)
+
+  // Focus a requirement cited by the "Ask" sources: expand its category, scroll
+  // to it, highlight it briefly.
+  useEffect(() => {
+    if (!targetReqId) return
+    const match = requirements.find((r) => r.jurisdiction_requirement_id === targetReqId)
+    if (!match) { onTargetConsumed?.(); return }
+    setSearchQuery('')
+    setGroupFilter('all')
+    setExpanded((prev) => new Set(prev).add(match.category))
+    setHighlightId(match.id)
+    const t = setTimeout(() => {
+      document.querySelector(`[data-req-id="${match.id}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }, 60)
+    const clear = setTimeout(() => setHighlightId(null), 4000)
+    onTargetConsumed?.()
+    return () => { clearTimeout(t); clearTimeout(clear) }
+  }, [targetReqId, requirements, onTargetConsumed])
 
   const filteredRequirements = useMemo(() => {
     const q = searchQuery.trim().toLowerCase()
@@ -158,7 +182,12 @@ export function ComplianceRequirementsTab({ requirements, loading, onPin, checkM
             </p>
           ) : (
             reqs.map((req) => (
-              <div key={req.id} className="px-4 py-3 hover:bg-white/[0.02] transition-colors">
+              <div key={req.id} data-req-id={req.id}
+                className={`px-4 py-3 transition-colors ${
+                  highlightId === req.id
+                    ? 'bg-emerald-500/[0.07] ring-1 ring-inset ring-emerald-500/40'
+                    : 'hover:bg-white/[0.02]'
+                }`}>
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-zinc-200">{req.title}</p>

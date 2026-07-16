@@ -180,6 +180,8 @@ export interface ComplianceRequirement {
   current_value: string | null
   numeric_value: number | null
   source_url: string | null
+  /** The SSOT catalog row id — lets a regulatory-ask source chip deep-link here. */
+  jurisdiction_requirement_id?: string | null
   /** Liveness of source_url: 'unchecked' | 'ok' | 'dead' (null = no catalog link). */
   source_url_status?: 'unchecked' | 'ok' | 'dead' | null
   /** The OPERATIVE statute for this row's value, verified against the authority's own text (null = not yet codified). */
