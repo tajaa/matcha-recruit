@@ -11,21 +11,29 @@ COPY package*.json ./
 RUN --mount=type=cache,target=/root/.npm \
     npm ci --legacy-peer-deps
 
+# Tell-Us — a SEPARATE Vite app in the same repo (client/tellus); emits under
+# base '/tellus/' and is served from /usr/share/nginx/html/tellus by the same
+# nginx (see nginx.conf). Its own package-lock → its own npm ci, own cache
+# mount. Deps + build happen BEFORE the main app's COPY . . / version ARG so
+# a landing-version bump (every build, see bump_landing_build_version in
+# build-and-push.sh) or any client/src edit can't invalidate this layer.
+COPY tellus/package*.json ./tellus/
+RUN --mount=type=cache,target=/root/.npm \
+    cd tellus && npm ci --legacy-peer-deps
+COPY tellus ./tellus
+RUN cd tellus && npx vite build
+
 # Copy source code
 COPY . .
 
 ARG VITE_LANDING_BUILD_VERSION=0
 ENV VITE_LANDING_BUILD_VERSION=${VITE_LANDING_BUILD_VERSION}
 
-# Build application (API_BASE will be replaced at runtime)
-RUN npm run build
-
-# Tell-Us — a SEPARATE Vite app in the same repo (client/tellus). Build it too;
-# it emits under base '/tellus/' and is served from /usr/share/nginx/html/tellus
-# by the same nginx (see nginx.conf). Its own package-lock → its own npm ci.
-RUN cd tellus \
-    && npm ci --legacy-peer-deps \
-    && npm run build
+# Build application (API_BASE will be replaced at runtime). npx vite build
+# directly (not `npm run build`, which runs `tsc -b` first) — typecheck is a
+# local/CI step (`npx tsc -p tsconfig.app.json --noEmit`), not an image-build
+# gate; esbuild strips types without checking them either way.
+RUN npx vite build
 
 # Stage 2: Runtime with nginx
 FROM nginx:1.25-alpine

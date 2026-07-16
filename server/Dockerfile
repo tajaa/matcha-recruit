@@ -44,14 +44,12 @@ RUN groupadd -r matcha && useradd -r -g matcha matcha
 # Create uploads directory
 RUN mkdir -p /app/uploads && chown -R matcha:matcha /app/uploads
 
-# Copy application code
-COPY . .
+# Copy application code with ownership set in the same layer (avoids a
+# separate full-tree `chown -R /app` layer on every source change)
+COPY --chown=matcha:matcha . .
 
 # Pre-compile Python bytecode for faster startup
 RUN python -m compileall -q -x "test" . || true
-
-# Set ownership
-RUN chown -R matcha:matcha /app
 
 # Switch to non-root user
 USER matcha
