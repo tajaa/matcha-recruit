@@ -252,6 +252,26 @@ class ComplianceRAGService:
         if not results:
             return "", []
 
+        # Dedup near-identical rows before building context/sources. The shared
+        # catalog can carry the SAME policy under several category labels (a
+        # research-run mis-categorization — e.g. one SB 525 wage row filed under
+        # pay_frequency / final_pay / i9_everify), which otherwise floods the
+        # answer with a dozen clones of one policy. Key on the content, not the
+        # category; results are already similarity-ordered so first-seen wins.
+        deduped = []
+        seen_keys = set()
+        for result in results:
+            key = (
+                " ".join((result.get("title") or "").lower().split()),
+                result.get("jurisdiction_level"),
+                " ".join((result.get("jurisdiction_name") or "").lower().split()),
+            )
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            deduped.append(result)
+        results = deduped[:8]
+
         # Build context string with token budget
         context_parts = []
         sources = []
