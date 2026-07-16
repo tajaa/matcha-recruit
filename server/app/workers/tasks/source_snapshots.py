@@ -83,9 +83,19 @@ def backfill_source_snapshots(
                 WHERE {_SCOPES[scope]}
                   AND jr.source_url IS NOT NULL
                   AND jr.source_url <> ''
+                  -- A row is "done" only once a fetch actually captured text.
+                  -- snapshot_source INSERTs on failure too (http_status, no
+                  -- text) so misses stay auditable — but keying the candidate
+                  -- filter on mere existence would make that miss permanent:
+                  -- the 2 codified rows whose citation URL 404s today would be
+                  -- skipped by every future run, including the one after an
+                  -- admin fixes the dead URL. Cost of retrying: a handful of
+                  -- known-dead URLs re-fetched per run. Right trade for
+                  -- evidence capture.
                   AND NOT EXISTS (
                       SELECT 1 FROM requirement_source_snapshots s
                       WHERE s.requirement_id = jr.id
+                        AND s.content_text IS NOT NULL
                   )
                 ORDER BY jr.id
                 {"LIMIT " + str(int(limit)) if limit else ""}

@@ -9678,7 +9678,12 @@ async def resolve_jurisdiction_stacks(
                    jc.depth, jc.root_id
             FROM jurisdiction_requirements jr
             JOIN jurisdiction_chain jc ON jr.jurisdiction_id = jc.id
+            -- Same world-time read as the flat path (_load_chain_requirements):
+            -- an expired row is not law. Kept in step deliberately — the two
+            -- paths render the same tab, so a row dropped from one and served by
+            -- the other is a tab that disagrees with itself.
             WHERE jr.status = 'active'
+              AND (jr.expiration_date IS NULL OR jr.expiration_date >= CURRENT_DATE)
         ),
         chain_precedence AS (
             SELECT jc_h.root_id, pr.id AS rule_id, pr.category_id AS rule_category_id,
