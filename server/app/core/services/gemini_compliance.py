@@ -36,6 +36,25 @@ DEFAULT_LIGHT_MODEL = "gemini-3-flash-preview"
 DEFAULT_HEAVY_MODEL = "gemini-3.1-pro-preview"
 DEFAULT_HEAVY_FALLBACK_MODEL = "gemini-2.5-pro"
 
+# The primary-legal-source + statute-citation mandate, shared by every research
+# prompt so a fabricated citation / aggregator URL can't slip in via one variant.
+# Interpolated (no braces of its own — safe inside the f-string prompts).
+_SOURCE_MANDATE = (
+    'SOURCE — CRITICAL: For each requirement, "source_url" MUST point at the PRIMARY '
+    'LEGAL SOURCE — the actual statute or regulation text on an official government '
+    'site (a .gov / .mil domain, ecfr.gov, federalregister.gov, a state legislature '
+    'site like leginfo.legislature.ca.gov or nysenate.gov, or an official municipal '
+    'code host like library.municode.com or codelibrary.amlegal.com). Do NOT use a '
+    'summary page, a news article, a law-firm client alert, or an HR/payroll vendor '
+    'page (shrm.org, adp.com, paycor, gusto, nolo, justia, natlawreview, jdsupra, '
+    'etc.) as the source_url. Also return "statute_citation": the precise legal '
+    'citation for the obligation (e.g. "29 CFR § 1910.1030", "Cal. Health & Safety '
+    'Code § 117600", "L.A.M.C. § 187.02"). If you cannot identify the exact '
+    'statute/regulation and its official-government source, set "statute_citation" '
+    'to null and use the best available "source_url" — never fabricate a citation or '
+    'a .gov URL.'
+)
+
 # Healthcare and oncology categories are researched via dedicated specialty
 # research functions, so they should NOT be included in the default sweep.
 
@@ -528,7 +547,7 @@ For each requirement, include a "penalties" object with enforcement/penalty info
 
 For each requirement, include "implementation_steps": a short ordered list (3-6 items) of concrete, actionable steps an employer takes to come into compliance (e.g. register with the agency, adopt/post the required notice, file a form by its deadline, train staff, retain records). One sentence per step, specific to this requirement and jurisdiction.
 {regulation_key_instruction}
-SOURCE — CRITICAL: For each requirement, "source_url" MUST point at the PRIMARY LEGAL SOURCE — the actual statute or regulation text on an official government site (a .gov / .mil domain, ecfr.gov, federalregister.gov, a state legislature site like leginfo.legislature.ca.gov or nysenate.gov, or an official municipal code host like library.municode.com or codelibrary.amlegal.com). Do NOT use a summary page, a news article, a law-firm client alert, or an HR/payroll vendor page (shrm.org, adp.com, paycor, gusto, nolo, justia, natlawreview, jdsupra, etc.) as the source_url. Also return "statute_citation": the precise legal citation for the obligation (e.g. "29 CFR § 1910.1030", "Cal. Health & Safety Code § 117600", "L.A.M.C. § 187.02"). If you cannot identify the exact statute/regulation and its official-government source, set "statute_citation" to null and use the best available "source_url" — never fabricate a citation or a .gov URL.
+{_SOURCE_MANDATE}
 Today's date is {date.today().isoformat()}. Return ONLY rates/values currently in effect.
 
 Respond with JSON:
@@ -599,6 +618,7 @@ Category: {category.replace('_', ' ')}
 
 IMPORTANT: These requirements are ADDITIONAL to baseline rules. Only return requirements SPECIFIC to {trigger_label} facilities/providers. Do NOT repeat general healthcare or labor requirements.
 {regulation_key_instruction}
+{_SOURCE_MANDATE}
 Today's date is {date.today().isoformat()}. Return ONLY requirements currently in effect.
 
 Respond with JSON:

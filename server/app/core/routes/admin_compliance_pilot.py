@@ -411,7 +411,7 @@ async def approve_action(action_id: str, body: ApproveBody, background_tasks: Ba
     PRIMARY .gov source). Gate failures stay live-but-uncodified with the reason.
     """
     from ..services.research_review import approve_staged
-    from ..services.scope_registry.codify import codify_from_requirement
+    from ..services.scope_registry.codify import codify_from_requirement, reconcile_codifications
     from ..services.compliance_pilot import _codify_gate
 
     actor_id = getattr(current_user, "id", None)
@@ -447,13 +447,27 @@ async def approve_action(action_id: str, body: ApproveBody, background_tasks: Ba
     #    classification). Rows are now 'active' — codify_from_requirement's guard.
     core = await approve_staged(pending_ids, actor_id, source="pilot_commit")
 
-    # 2. Per-row: gate → codify_from_requirement (mints the confirmed classification
-    #    for the admin-confirmed citation, then reconcile stamps citation_verified_at).
-    outcomes = []
-    snap_targets = []
+    # activated set is the TRUTH of what approve_staged flipped (a row rejected /
+    # approved elsewhere between our SELECT and the UPDATE is NOT in here).
+    activated_ids = {o["id"] for o in core["results"]}  # strings
+
+    # 2. Per-row: gate → MINT the codify trio (no reconcile yet). Each mint in its
+    #    own transaction so a mid-mint failure can't leave a half-written
+    #    classification that a later reconcile silently stamps authoritative.
+    outcomes_by_id: dict = {}
+    minted: list = []            # rows we minted a trio for
+    reconcile_pairs: set = set()
     async with get_connection() as conn:
         await set_change_context(conn, "pilot_commit", actor_id)
         for r in rows:
+            rid = str(r["id"])
+            o = {"id": rid, "title": r["title"], "state": r["state"], "city": r["city"],
+                 "activated": rid in activated_ids, "codified": False,
+                 "statute_citation": None, "citation_url": None, "gate_reason": None}
+            outcomes_by_id[rid] = o
+            if not o["activated"]:
+                o["gate_reason"] = "no longer pending (handled elsewhere)"
+                continue
             meta = r["metadata"]
             if isinstance(meta, str):
                 try:
@@ -464,29 +478,59 @@ async def approve_action(action_id: str, body: ApproveBody, background_tasks: Ba
             citation = meta.get("research_citation") or (meta.get("grounded_citations") or [None])[0]
             ok, reason, _cls = _codify_gate(
                 r["regulation_key"], citation, r["source_url"], r["source_url_status"])
-            codified, statute_citation, citation_url = False, None, None
-            if ok:
-                try:
-                    res = await codify_from_requirement(
-                        conn, r["id"], citation=citation, source_url=r["source_url"], admin_id=actor_id)
-                    codified = bool(res.get("codified"))
-                    statute_citation = res.get("statute_citation")
-                    citation_url = res.get("citation_url")
-                    if not codified:
-                        reason = "codify ran but the citation wasn't stamped"
-                except Exception as exc:  # noqa: BLE001 — row is already live; never fail approve
-                    logger.warning("compliance_pilot: codify failed for %s: %s", r["id"], exc)
-                    reason = f"codify error: {str(exc)[:120]}"
-            if codified and (citation_url or r["source_url"]):
-                snap_targets.append((r["id"], citation_url or r["source_url"]))
-            outcomes.append({
-                "id": str(r["id"]), "title": r["title"], "activated": True,
-                "codified": codified, "statute_citation": statute_citation,
-                "citation_url": citation_url, "gate_reason": None if codified else reason,
-                "state": r["state"], "city": r["city"],
-            })
+            if not ok:
+                o["gate_reason"] = reason
+                continue
+            try:
+                async with conn.transaction():
+                    await codify_from_requirement(
+                        conn, r["id"], citation=citation, source_url=r["source_url"],
+                        admin_id=actor_id, run_reconcile=False)
+                minted.append(r)
+                st = (r["state"] or "").upper() or None
+                reconcile_pairs.add((st, (r["city"] or "").lower() or None))
+            except Exception as exc:  # noqa: BLE001 — row is already live; never fail approve
+                logger.warning("compliance_pilot: codify mint failed for %s: %s", r["id"], exc)
+                o["gate_reason"] = f"codify error: {str(exc)[:120]}"
 
+        # 3. ONE reconcile per distinct (state,city) for all minted rows (reconcile
+        #    is a full chain scan — never N times).
+        for st, ci in sorted(reconcile_pairs, key=lambda p: (p[0] or "", p[1] or "")):
+            if st:
+                try:
+                    await reconcile_codifications(conn, state=st, city=ci, source="pilot_commit")
+                except Exception as exc:
+                    logger.warning("compliance_pilot: reconcile failed for %s/%s: %s", st, ci, exc)
+
+        # 4. Batch-read the stamped state for minted rows → final codified verdict.
+        if minted:
+            stamped = await conn.fetch(
+                "SELECT r.id, r.statute_citation, r.citation_verified_at IS NOT NULL AS authoritative, "
+                "       ai.source_url AS citation_url "
+                "FROM jurisdiction_requirements r "
+                "LEFT JOIN authority_index_items ai ON ai.id = r.citation_item_id "
+                "WHERE r.id = ANY($1::uuid[])",
+                [r["id"] for r in minted],
+            )
+            for s in stamped:
+                o = outcomes_by_id[str(s["id"])]
+                o["codified"] = s["authoritative"]
+                o["statute_citation"] = s["statute_citation"]
+                o["citation_url"] = s["citation_url"]
+                if not s["authoritative"]:
+                    o["gate_reason"] = "codify ran but the citation wasn't stamped"
+
+    outcomes = [outcomes_by_id[str(r["id"])] for r in rows]
     codified_n = sum(1 for o in outcomes if o["codified"])
+
+    # Snapshot the union: every activated row with a URL (evidence for live rows,
+    # per the admin approve path), preferring the codified rows' citation_url.
+    snap_map = {rid: url for rid, url in core["snap_targets"]}
+    for r in minted:
+        o = outcomes_by_id[str(r["id"])]
+        if o["codified"]:
+            snap_map[r["id"]] = o["citation_url"] or r["source_url"]
+    snap_targets = [(k, v) for k, v in snap_map.items() if v]
     result = {
         "activated": core["activated"], "codified": codified_n,
         "uncodified": len(outcomes) - codified_n, "already_live": already_live,

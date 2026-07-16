@@ -1087,6 +1087,7 @@ async def codify_from_requirement(
     heading: Optional[str] = None,
     source_url: Optional[str] = None,
     admin_id=None,
+    run_reconcile: bool = True,
 ) -> Dict[str, Any]:
     """Codify a single researched requirement in place — the demand-funnel bridge.
 
@@ -1196,6 +1197,16 @@ async def codify_from_requirement(
         conn, item_id, normalized,
         proposed_by="admin", status="confirmed", confirmed_by=admin_id,
     )
+
+    # Callers minting many rows in one chain (the pilot's batch commit) pass
+    # run_reconcile=False to mint all trios, then run ONE reconcile per (state,city)
+    # afterward — reconcile is a full chain scan, so N per-row reconciles is N× waste.
+    if not run_reconcile:
+        return {
+            "minted": True, "codified": None, "statute_citation": None,
+            "citation_url": source_url, "regulation_key": req["regulation_key"],
+            "state": state, "city": city,
+        }
 
     await reconcile_codifications(conn, state=state, city=city, source="manual_codify")
 

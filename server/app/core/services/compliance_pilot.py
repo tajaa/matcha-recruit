@@ -633,6 +633,29 @@ async def _run_research(action_id: UUID, actor_id, params: dict):
                 "state": r["state"], "city": r["city"],
                 "gate_ok": ok, "gate_reason": reason,
             })
+
+        # Recover PRIMARY sources the crude research HEAD marked 'dead' — many .gov /
+        # legislature / municode hosts reject HEAD (403/405) but are perfectly live.
+        # Re-check just those with the GET-based liveness (403/405/429 => alive), fix
+        # source_url_status, and recompute the gate so they can codify.
+        from .compliance_evals.authority import check_liveness
+        falsely_dead = [s for s in staged_rows
+                        if s["gate_reason"] == "source link is dead"
+                        and s["source_domain_class"] == "primary" and s["source_url"]]
+        if falsely_dead:
+            liveness = await check_liveness(sorted({s["source_url"] for s in falsely_dead}))
+            fixed = []
+            for s in falsely_dead:
+                if liveness.get(s["source_url"]) != "dead":
+                    ok2, reason2, _c = _codify_gate(
+                        s["regulation_key"], s["research_citation"], s["source_url"], "ok")
+                    s["source_url_status"], s["gate_ok"], s["gate_reason"] = "ok", ok2, reason2
+                    fixed.append(UUID(s["id"]))
+            if fixed:
+                await conn.execute(
+                    "UPDATE jurisdiction_requirements SET source_url_status='ok', "
+                    "source_checked_at=NOW() WHERE id = ANY($1::uuid[])", fixed)
+
         await _set_action(
             conn, action_id, status="done", staged_ids=staged_ids,
             progress={"phase": "done"},

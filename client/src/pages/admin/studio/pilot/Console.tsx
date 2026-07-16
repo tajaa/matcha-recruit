@@ -33,11 +33,14 @@ export default function Console({ session, onRefetch, onSessionsChanged }: Props
   const persisted = session.messages ?? []
   const actions = session.actions ?? []
   const starters = session.template?.starters ?? []
-  // Research actions whose rows were already committed — hide their approve button.
-  const approvedFrom = new Set(
-    actions.filter((a) => a.kind === 'approve')
-      .map((a) => (a.params && typeof a.params.from_action === 'string' ? a.params.from_action : null))
-      .filter((x): x is string => x !== null))
+  // Requirement ids already committed (across ALL approve actions) — so a research
+  // card greys out just those rows and keeps the rest selectable.
+  const committedRowIds = new Set<string>()
+  for (const a of actions) {
+    if (a.kind !== 'approve') continue
+    const res = (a.result as { results?: Array<{ id?: string }> } | null)?.results ?? []
+    for (const row of res) if (row.id) committedRowIds.add(row.id)
+  }
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
@@ -138,7 +141,7 @@ export default function Console({ session, onRefetch, onSessionsChanged }: Props
             <p className="text-[10px] uppercase tracking-wide text-zinc-500">Runs</p>
             {actions.map((a) => (
               <ActionCard key={a.id} action={a} onApproved={onRefetch}
-                approved={approvedFrom.has(a.id)} />
+                committedRowIds={committedRowIds} />
             ))}
           </div>
         )}
@@ -238,8 +241,8 @@ function ProposalCard({ proposal, onRun, disabled }: {
   )
 }
 
-function ActionCard({ action, onApproved, approved }: {
-  action: PilotAction; onApproved: () => void; approved: boolean
+function ActionCard({ action, onApproved, committedRowIds }: {
+  action: PilotAction; onApproved: () => void; committedRowIds: Set<string>
 }) {
   if (action.status === 'running') {
     const msg = action.progress?.message ?? 'Working…'
@@ -262,7 +265,7 @@ function ActionCard({ action, onApproved, approved }: {
 
   // done
   if (action.kind === 'research') {
-    return <ResearchCard action={action} approved={approved} onApproved={onApproved} />
+    return <ResearchCard action={action} committedRowIds={committedRowIds} onApproved={onApproved} />
   }
 
   if (action.kind === 'approve') {
@@ -341,9 +344,10 @@ const DOMAIN_BADGE: Record<string, string> = {
 
 // Research-done card: the discovered policies as a checklist. Tick the one(s) you
 // want → commit → each passes the codify gate (primary .gov source + citation) to
-// become authoritative, or stays live-but-uncodified with the reason.
-function ResearchCard({ action, approved, onApproved }: {
-  action: PilotAction; approved: boolean; onApproved: () => void
+// become authoritative, or stays live-but-uncodified with the reason. Already-
+// committed rows grey out; the rest stay selectable across multiple commits.
+function ResearchCard({ action, committedRowIds, onApproved }: {
+  action: PilotAction; committedRowIds: Set<string>; onApproved: () => void
 }) {
   const r = (action.result ?? {}) as ResearchResult
   const rows = r.staged_rows ?? []
@@ -351,7 +355,30 @@ function ResearchCard({ action, approved, onApproved }: {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
+  // Legacy actions (pre-checklist) have staged>0 but no staged_rows — keep the
+  // old commit-all path instead of stranding them.
   if (rows.length === 0) {
+    const staged = r.staged ?? 0
+    if (staged > 0) {
+      return (
+        <div className="rounded-lg border border-white/[0.06] px-3 py-2.5">
+          <p className="text-xs text-zinc-200">Staged <b>{staged}</b> requirement{staged === 1 ? '' : 's'} for {r.city ? `${r.city}, ` : ''}{r.state}.</p>
+          <div className="mt-2 flex items-center gap-2">
+            <button disabled={busy}
+              onClick={async () => {
+                setBusy(true); setErr(null)
+                try { await approveAction(action.id); onApproved() }
+                catch { setErr('Commit failed.') } finally { setBusy(false) }
+              }}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/15 px-2.5 py-1 text-xs text-emerald-200 hover:bg-emerald-500/25 disabled:opacity-30">
+              {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />} Commit all
+            </button>
+            <a href="/admin/studio?view=pipeline&section=review" className="text-xs text-cyan-400/80 hover:text-cyan-300">Review in Pipeline →</a>
+          </div>
+          {err && <p className="mt-1 text-[11px] text-red-400">{err}</p>}
+        </div>
+      )
+    }
     return (
       <div className="rounded-lg border border-white/[0.06] px-3 py-2.5">
         <p className="text-xs text-zinc-400">Nothing new for {r.city ? `${r.city}, ` : ''}{r.state} — the catalog already covered this.</p>
@@ -362,20 +389,25 @@ function ResearchCard({ action, approved, onApproved }: {
   const toggle = (id: string) => setSel((p) => {
     const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n
   })
+  const uncommitted = rows.filter((row) => !committedRowIds.has(row.id))
+  const allDone = uncommitted.length === 0
 
   return (
     <div className="rounded-lg border border-white/[0.06] px-3 py-2.5">
       <p className="text-xs text-zinc-200">
         Discovered <b>{rows.length}</b> polic{rows.length === 1 ? 'y' : 'ies'} for {r.city ? `${r.city}, ` : ''}{r.state}
-        <span className="text-zinc-500"> · {r.codifiable ?? 0} codifiable · pick which to commit</span>
+        <span className="text-zinc-500"> · {r.codifiable ?? 0} codifiable{allDone ? ' · all committed' : ' · pick which to commit'}</span>
       </p>
 
       <div className="mt-2 space-y-1.5">
         {rows.map((row: StagedRow) => {
+          const done = committedRowIds.has(row.id)
           const on = sel.has(row.id)
           return (
-            <div key={row.id} className="flex items-start gap-2">
-              {!approved && (
+            <div key={row.id} className={`flex items-start gap-2 ${done ? 'opacity-50' : ''}`}>
+              {done ? (
+                <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-400" />
+              ) : (
                 <button type="button" onClick={() => toggle(row.id)} className="mt-0.5 shrink-0 text-zinc-400 hover:text-emerald-300">
                   {on ? <CheckSquare className="h-3.5 w-3.5 text-emerald-400" /> : <Square className="h-3.5 w-3.5" />}
                 </button>
@@ -387,6 +419,7 @@ function ResearchCard({ action, approved, onApproved }: {
                   <span className={`text-[9px] px-1 py-0.5 rounded ${DOMAIN_BADGE[row.source_domain_class] ?? DOMAIN_BADGE.unknown}`}>
                     {row.source_domain_class}
                   </span>
+                  {done && <span className="text-[9px] text-emerald-400/70">committed</span>}
                 </div>
                 <div className="text-[10px] text-zinc-500 mt-0.5">
                   {row.research_citation
@@ -404,12 +437,12 @@ function ResearchCard({ action, approved, onApproved }: {
         })}
       </div>
 
-      {!approved ? (
+      {!allDone ? (
         <div className="mt-2.5 flex items-center gap-2">
           <button disabled={busy || sel.size === 0}
             onClick={async () => {
               setBusy(true); setErr(null)
-              try { await approveAction(action.id, [...sel]); onApproved() }
+              try { await approveAction(action.id, [...sel]); setSel(new Set()); onApproved() }
               catch { setErr('Commit failed — rows may already be committed.') }
               finally { setBusy(false) }
             }}
@@ -423,7 +456,7 @@ function ResearchCard({ action, approved, onApproved }: {
           </a>
         </div>
       ) : (
-        <p className="mt-2 text-[11px] text-emerald-400/70">Committed — see the outcome below.</p>
+        <p className="mt-2 text-[11px] text-emerald-400/70">All committed — see the outcomes below.</p>
       )}
       {err && <p className="mt-1 text-[11px] text-red-400">{err}</p>}
     </div>
