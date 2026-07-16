@@ -299,14 +299,21 @@ async function _fetchWithRefresh(url: string, init: RequestInit = {}): Promise<R
   return fetch(url, withAuth(localStorage.getItem('matcha_access_token')))
 }
 
-/** Trigger a browser download from a binary Response. */
+/** Trigger a browser download from a binary Response.
+ *
+ * The anchor must be attached to the document before `.click()` — an
+ * untethered anchor's click doesn't reliably register as a real download
+ * gesture in Chrome, which then shows a phantom "Unconfirmed" entry and can
+ * save a second, truncated copy of the file instead of the real one. */
 async function _saveBlobResponse(res: Response, path: string, filename?: string): Promise<void> {
   const blob = await res.blob()
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
   a.download = filename ?? path.split('/').pop() ?? 'download'
+  document.body.appendChild(a)
   a.click()
+  a.remove()
   URL.revokeObjectURL(url)
 }
 
