@@ -85,6 +85,15 @@ class ComplianceRAGService:
             JOIN jurisdiction_requirements jr ON ce.requirement_id = jr.id
             WHERE jr.status = 'active'
         """
+        # This is where the ask-answer's source chips come from, and it reads the
+        # catalog rather than any location's projection — so the gate on
+        # compliance_requirements never reaches it. Ungated, an answer would cite
+        # rows the Requirements tab refuses to show, and the chip's deep-link
+        # would land on nothing.
+        from .compliance_service import codified_gate_sql
+
+        sql += await codified_gate_sql("jr", conn=conn)
+
         embedding_str = "[" + ",".join(str(x) for x in query_embedding) + "]"
         params: list = [embedding_str]
         idx = 2

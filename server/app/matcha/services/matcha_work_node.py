@@ -12,9 +12,12 @@ from uuid import UUID
 from ...database import get_connection
 from ...core.compliance_registry import get_activated_profiles
 from ...core.services.compliance_service import (
+    codified_gate_sql,
     determine_governing_requirement,
+    is_codified_row,
     resolve_jurisdiction_stacks,
 )
+from ...core.services.platform_settings import get_tenant_codified_only
 from ...core.services.redis_cache import cache_get, cache_set, get_redis_cache
 
 logger = logging.getLogger(__name__)
@@ -523,6 +526,15 @@ async def _build_compliance_context_uncached(company_id: UUID) -> ComplianceCont
                 + list(remote_jurisdictions.values()),
             )
 
+            # Same gate the Requirements tab applies, enforced here because this
+            # path reads the catalog directly. A compliance-mode thread telling a
+            # supervisor about a rule the tab won't show is the gate leaking.
+            if await get_tenant_codified_only(conn=conn):
+                stacks_by_jurisdiction = {
+                    jid: [r for r in rows if is_codified_row(r)]
+                    for jid, rows in stacks_by_jurisdiction.items()
+                }
+
             # Process locations with jurisdiction hierarchy
             chars_used = 0
             for loc_idx, loc in enumerate(jurisdiction_locations):
@@ -671,7 +683,12 @@ async def _build_compliance_context_uncached(company_id: UUID) -> ComplianceCont
                            COUNT(*) OVER () AS total_n
                     FROM compliance_requirements cr
                     JOIN business_locations bl ON cr.location_id = bl.id
+                    LEFT JOIN jurisdiction_requirements cat
+                      ON cat.id = cr.jurisdiction_requirement_id
                     WHERE bl.id = ANY($1)
+                    """
+                    + await codified_gate_sql("cat", conn=conn)
+                    + """
                     ORDER BY bl.city, cr.category, cr.jurisdiction_level
                     LIMIT $2
                     """,

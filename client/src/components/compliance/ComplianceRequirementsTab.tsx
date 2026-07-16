@@ -497,6 +497,13 @@ export function ComplianceRequirementsTab({ requirements, loading, onPin, checkM
         </span>
       </div>
 
+      {/* The server serves only requirements tied to a verified statute. Say so:
+          a short list with no explanation reads as missing data, when it is in
+          fact the opposite — everything here is something we can prove. */}
+      <p className="text-[11px] text-zinc-500">
+        Every requirement here is tied to a verified statute citation.
+      </p>
+
       {groupBy === 'topic' && activeGroup === 'behavioral_health' && (
         <div className="rounded-lg border border-violet-800/40 bg-violet-950/20 px-4 py-3">
           <p className="text-sm text-violet-300/90">

@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from ...database import get_connection
 from ..dependencies import require_admin_or_client, get_client_company_id
 from ...core.models.auth import CurrentUser
+from ...core.services.compliance_service import codified_gate_sql
 from ...core.services.redis_cache import (
     get_redis_cache, cache_get, cache_set,
     dashboard_stats_key, dashboard_credentials_key,
@@ -1797,7 +1798,10 @@ _UPCOMING_SOURCES: list[dict] = [
                    cr.expiration_date::date AS deadline
             FROM compliance_requirements cr
             JOIN business_locations bl ON bl.id = cr.location_id
+            LEFT JOIN jurisdiction_requirements cat
+              ON cat.id = cr.jurisdiction_requirement_id
             WHERE ({company_filter_cr})
+              {codified_gate_cr}
               AND cr.expiration_date IS NOT NULL
               AND cr.expiration_date::date <= $2
         """,
@@ -1813,7 +1817,10 @@ _UPCOMING_SOURCES: list[dict] = [
                    cr.effective_date::date AS deadline
             FROM compliance_requirements cr
             JOIN business_locations bl ON bl.id = cr.location_id
+            LEFT JOIN jurisdiction_requirements cat
+              ON cat.id = cr.jurisdiction_requirement_id
             WHERE ({company_filter_cr})
+              {codified_gate_cr}
               AND cr.effective_date IS NOT NULL
               AND cr.effective_date::date > CURRENT_DATE
               AND cr.effective_date::date <= $2
@@ -1867,9 +1874,13 @@ async def get_upcoming_deadlines(
     items: list[UpcomingItem] = []
 
     async with get_connection() as conn:
+        gate = await codified_gate_sql("cat", conn=conn)
         for source in _UPCOMING_SOURCES:
             try:
                 sql = _apply_company_filter(source["sql"], company_id)
+                # A deadline is a claim that a law obliges you by a date. It
+                # gets the same gate as the requirement it came from.
+                sql = sql.replace("{codified_gate_cr}", gate)
                 # Pass only the args the query actually references to avoid asyncpg
                 # "N args passed but server expects M" errors.
                 uses_p1 = "$1" in sql

@@ -56,6 +56,12 @@ class AIChatService:
 
             # Compliance requirements — filtered by jurisdiction priority so
             # superseded entries (e.g. state rule overridden by city) are excluded.
+            # The AI must ground on exactly what the Requirements tab shows: a
+            # source chip citing a row the tab filtered out is a dead link, and
+            # an answer quoting unvetted research is the claim the codified gate
+            # exists to prevent — laundered through a chat bubble.
+            from .compliance_service import codified_gate_sql
+
             reqs = await conn.fetch(
                 """SELECT cr.category, cr.title, cr.current_value,
                           cr.jurisdiction_level, cr.jurisdiction_name,
@@ -65,8 +71,11 @@ class AIChatService:
                           bl.state as location_state
                    FROM compliance_requirements cr
                    JOIN business_locations bl ON cr.location_id = bl.id
-                   WHERE bl.company_id = $1
-                   ORDER BY bl.name, cr.category""",
+                   LEFT JOIN jurisdiction_requirements cat
+                     ON cat.id = cr.jurisdiction_requirement_id
+                   WHERE bl.company_id = $1"""
+                + await codified_gate_sql("cat", conn=conn)
+                + " ORDER BY bl.name, cr.category",
                 company_id,
             )
             if reqs:

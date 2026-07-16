@@ -655,3 +655,53 @@ def test_authority_label_normalizes_display_names():
     # No catalog link → nothing to label with.
     assert cs._authority_label("state", None) is None
     assert cs._authority_label("state", "   ") is None
+
+
+class TestCodifiedGate:
+    """Tenants are served only requirements tied to a verified statute.
+
+    The gate is the product's central promise — a business reads this tab to
+    know, without qualification, what the law requires of it. Gemini-researched
+    rows we never tied to a statute cannot carry that claim, so they are hidden
+    until an admin codifies them.
+    """
+
+    def _gate(self, monkeypatch, enabled):
+        async def fake(*, conn=None):
+            return enabled
+        monkeypatch.setattr(
+            "app.core.services.platform_settings.get_tenant_codified_only", fake
+        )
+        return asyncio.run(cs.codified_gate_sql("cat"))
+
+    def test_gate_on_appends_the_trio(self, monkeypatch):
+        sql = self._gate(monkeypatch, True)
+        assert sql.startswith(" AND ")
+        for col in ("statute_citation", "citation_verified_at", "citation_item_id"):
+            assert f"cat.{col} IS NOT NULL" in sql
+
+    def test_gate_off_appends_nothing(self, monkeypatch):
+        # Not "AND TRUE" — an empty string, so a caller can concatenate it
+        # anywhere, including after a WHERE that ends the statement.
+        assert self._gate(monkeypatch, False) == ""
+
+    def test_gate_carries_no_placeholders(self, monkeypatch):
+        # Callers splice this into queries with their own $n numbering; a
+        # placeholder here would silently shift every argument after it.
+        assert "$" not in self._gate(monkeypatch, True)
+
+    def test_is_codified_row_agrees_with_the_sql(self):
+        # The Python mirror exists for catalog rows read outside SQL (the
+        # hierarchical view, matcha-work compliance mode). It must demand the
+        # same three columns the SQL does.
+        full = {
+            "statute_citation": "Cal. Lab. Code § 246",
+            "citation_verified_at": "2026-07-16T00:00:00",
+            "citation_item_id": "abc",
+        }
+        assert cs.is_codified_row(full) is True
+        for missing in full:
+            partial = dict(full)
+            partial[missing] = None
+            assert cs.is_codified_row(partial) is False, missing
+        assert cs.is_codified_row({}) is False

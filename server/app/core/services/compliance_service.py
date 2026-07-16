@@ -10,6 +10,8 @@ import asyncpg
 import httpx
 from fastapi import HTTPException
 
+from .scope_registry.codify import codified_sql
+
 logger = logging.getLogger(__name__)
 
 from .jurisdiction_context import (
@@ -428,6 +430,39 @@ _CODE_TO_STATE_NAME = {
     "WY": "Wyoming",
     "DC": "District Of Columbia",
 }
+
+
+def is_codified_row(row: Dict[str, Any]) -> bool:
+    """The trio, in Python — for callers holding CATALOG rows, not SQL.
+
+    Mirrors `codified_sql`; kept beside the gate so the two can't drift.
+    """
+    return bool(
+        row.get("statute_citation")
+        and row.get("citation_verified_at")
+        and row.get("citation_item_id")
+    )
+
+
+async def codified_gate_sql(alias: str = "cat", *, conn=None) -> str:
+    """`AND <trio>` when tenants are gated to codified rows, else empty string.
+
+    Every tenant-facing read of requirement CONTENT appends this. The alias is
+    the joined CATALOG row (`jurisdiction_requirements`), not the per-location
+    projection: codification is a property of the law we researched once, not of
+    each tenant's copy. Projection rows with a NULL `jurisdiction_requirement_id`
+    (~6% — written before the SSOT link existed, or by a path that never set it)
+    fail a LEFT JOIN's trio and drop out, which is the honest outcome: with no
+    catalog row there is nothing to have verified.
+
+    Returns SQL with no placeholders, so callers can concatenate it into a query
+    without disturbing their `$n` numbering.
+    """
+    from .platform_settings import get_tenant_codified_only
+
+    if not await get_tenant_codified_only(conn=conn):
+        return ""
+    return f" AND {codified_sql(alias)}"
 
 
 def _filter_city_level_requirements(reqs: list, state: str) -> list:
@@ -6492,7 +6527,13 @@ async def get_location_counts(location_id: UUID) -> dict:
         has_local_ordinance = loc["has_local_ordinance"] if loc else None
 
         rows = await conn.fetch(
-            "SELECT category, jurisdiction_level, title, jurisdiction_name, rate_type FROM compliance_requirements WHERE location_id = $1",
+            "SELECT r.category, r.jurisdiction_level, r.title, r.jurisdiction_name, r.rate_type "
+            "FROM compliance_requirements r "
+            "LEFT JOIN jurisdiction_requirements cat ON cat.id = r.jurisdiction_requirement_id "
+            "WHERE r.location_id = $1"
+            # This tile counts what the Requirements tab lists — the two must
+            # agree or the count is just wrong on screen.
+            + await codified_gate_sql("cat", conn=conn),
             location_id,
         )
         req_dicts = [dict(r) for r in rows]
@@ -6523,11 +6564,14 @@ async def get_locations(company_id: UUID) -> list[dict]:
     from ...database import get_connection
 
     async with get_connection() as conn:
-        rows = await conn.fetch(
-            """SELECT bl.*, jr.has_local_ordinance,
+        # `jurisdiction_repo_count` (jrc below) is deliberately NOT gated — it
+        # reports what the shared catalog holds for this jurisdiction, which is
+        # exactly the number an admin needs to see diverge from the tenant's.
+        query = """SELECT bl.*, jr.has_local_ordinance,
                       COALESCE(ec.cnt, 0) AS employee_count,
                       COALESCE(en.names, ARRAY[]::text[]) AS employee_names,
                       COALESCE(rc.cnt, 0) AS requirements_count,
+                      COALESCE(rall.cnt, 0) AS projected_count,
                       COALESCE(ac.cnt, 0) AS unread_alerts_count,
                       COALESCE(jrc.cnt, 0) AS jurisdiction_repo_count
                FROM business_locations bl
@@ -6565,8 +6609,15 @@ async def get_locations(company_id: UUID) -> list[dict]:
                ) en ON true
                LEFT JOIN LATERAL (
                    SELECT COUNT(*) AS cnt FROM compliance_requirements cr
+                   LEFT JOIN jurisdiction_requirements cat
+                     ON cat.id = cr.jurisdiction_requirement_id
                    WHERE cr.location_id = bl.id
+                   __CODIFIED_GATE__
                ) rc ON true
+               LEFT JOIN LATERAL (
+                   SELECT COUNT(*) AS cnt FROM compliance_requirements cr
+                   WHERE cr.location_id = bl.id
+               ) rall ON true
                LEFT JOIN LATERAL (
                    SELECT COUNT(*) AS cnt FROM compliance_alerts ca
                    WHERE ca.location_id = bl.id AND ca.status = 'unread'
@@ -6576,13 +6627,20 @@ async def get_locations(company_id: UUID) -> list[dict]:
                    WHERE jreq.jurisdiction_id = bl.jurisdiction_id
                ) jrc ON true
                WHERE bl.company_id = $1
-               ORDER BY bl.created_at DESC""",
-            company_id,
+               ORDER BY bl.created_at DESC"""
+        query = query.replace(
+            "__CODIFIED_GATE__", await codified_gate_sql("cat", conn=conn)
         )
+        rows = await conn.fetch(query, company_id)
         result = []
         for row in rows:
             d = dict(row)
-            req_count = d.get("requirements_count", 0)
+            # data_status answers "has this location been synced from the
+            # catalog?" — a pipeline fact. It must read the UNGATED projection
+            # count: a fully-synced location whose rows simply aren't codified
+            # yet would otherwise report 'needs_research' and invite a pointless
+            # (and billable) re-research of data we already hold.
+            req_count = d.pop("projected_count", 0)
             repo_count = d.get("jurisdiction_repo_count", 0)
             if req_count > 0:
                 d["data_status"] = "synced"
@@ -7034,6 +7092,7 @@ async def get_location_requirements(
             LEFT JOIN jurisdictions j ON j.id = cat.jurisdiction_id
             WHERE l.id = $1 AND l.company_id = $2
         """
+        query += await codified_gate_sql("cat", conn=conn)
         params = [location_id, company_id]
 
         if category:
@@ -7583,6 +7642,8 @@ async def get_compliance_summary(company_id: UUID) -> ComplianceSummary:
     from ...database import get_connection
 
     async with get_connection() as conn:
+        # Resolved once, outside the per-location loop below.
+        gate = await codified_gate_sql("cat", conn=conn)
         locations = await conn.fetch(
             """SELECT bl.*, jr.has_local_ordinance
                FROM business_locations bl
@@ -7603,7 +7664,10 @@ async def get_compliance_summary(company_id: UUID) -> ComplianceSummary:
                 auto_check_count += 1
 
             reqs = await conn.fetch(
-                "SELECT * FROM compliance_requirements WHERE location_id = $1",
+                "SELECT r.* FROM compliance_requirements r "
+                "LEFT JOIN jurisdiction_requirements cat "
+                "  ON cat.id = r.jurisdiction_requirement_id "
+                "WHERE r.location_id = $1" + gate,
                 loc["id"],
             )
             req_dicts = [dict(r) for r in reqs]
@@ -9342,11 +9406,16 @@ async def get_pinned_requirements(company_id: UUID) -> list[dict]:
                    bl.name AS location_name, bl.city, bl.state
             FROM compliance_requirements cr
             JOIN business_locations bl ON cr.location_id = bl.id
+            LEFT JOIN jurisdiction_requirements cat
+              ON cat.id = cr.jurisdiction_requirement_id
             WHERE bl.company_id = $1
               AND cr.is_pinned = true
               AND bl.is_active = true
-            ORDER BY cr.category, cr.jurisdiction_level
-            """,
+            """
+            # A pin is a bookmark into the tab. If the row isn't listed there
+            # any more, a pin pointing at it is a dead link.
+            + await codified_gate_sql("cat", conn=conn)
+            + " ORDER BY cr.category, cr.jurisdiction_level",
             company_id,
         )
     return [
@@ -9583,6 +9652,9 @@ async def resolve_jurisdiction_stacks(
                    jr.last_changed_at, jr.expiration_date,
                    jr.requires_written_policy, jr.metadata,
                    jr.rate_type, jr.canonical_key, jr.statute_citation,
+                   -- The other two thirds of the codified trio, so tenant-facing
+                   -- callers can apply `is_codified_row` without a second query.
+                   jr.citation_verified_at, jr.citation_item_id,
                    jr.status::text AS req_status, jr.category_id,
                    jr.trigger_conditions, jr.applicable_entity_types,
                    jc.level AS jur_level, jc.display_name AS jur_display_name,
@@ -9890,6 +9962,15 @@ async def get_hierarchical_requirements(
         # 2. Resolve jurisdiction stack
         stack_rows = await resolve_jurisdiction_stack(conn, loc["jurisdiction_id"])
 
+        # This view reads the catalog directly rather than the location's
+        # projection, so the SQL gate on compliance_requirements never reaches
+        # it — filter the rows themselves, or the hierarchical view becomes the
+        # hole every uncodified row walks back through.
+        from .platform_settings import get_tenant_codified_only
+
+        if await get_tenant_codified_only(conn=conn):
+            stack_rows = [r for r in stack_rows if is_codified_row(r)]
+
         # 3. Group by category
         by_category: Dict[str, List[Dict[str, Any]]] = {}
         for row in stack_rows:
@@ -10027,6 +10108,8 @@ async def search_company_requirements(
         SELECT cr.*, bl.city, bl.state, bl.name AS location_name
         FROM compliance_requirements cr
         JOIN business_locations bl ON cr.location_id = bl.id
+        LEFT JOIN jurisdiction_requirements cat
+          ON cat.id = cr.jurisdiction_requirement_id
         WHERE bl.company_id = $1
           AND ($2::uuid IS NULL OR bl.id = $2)
           AND (
@@ -10034,6 +10117,10 @@ async def search_company_requirements(
             OR cr.current_value ILIKE $3 OR cr.jurisdiction_name ILIKE $3
             OR cr.category ILIKE $3
           )
+        """
+        # Search must not be a back door to rows the tab won't show.
+        + await codified_gate_sql("cat", conn=conn)
+        + """
         ORDER BY
           CASE WHEN cr.title ILIKE $3 THEN 0
                WHEN cr.current_value ILIKE $3 THEN 1

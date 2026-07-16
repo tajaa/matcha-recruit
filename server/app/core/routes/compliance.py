@@ -50,6 +50,7 @@ from ..services.compliance_remediation import (
     reopen_issue,
 )
 from ..services.compliance_service import (
+    codified_gate_sql,
     create_location,
     get_locations,
     get_location,
@@ -1849,15 +1850,22 @@ async def protocol_analysis(
     else:
         async with get_connection() as conn:
             # Fetch all requirements across all company locations
-            query = """
+            query = (
+                """
                 SELECT cr.id, cr.category, cr.title, cr.description,
                        cr.current_value, cr.jurisdiction_level,
                        cr.jurisdiction_name, cr.source_url
                 FROM compliance_requirements cr
                 JOIN business_locations bl ON cr.location_id = bl.id
+                LEFT JOIN jurisdiction_requirements cat
+                  ON cat.id = cr.jurisdiction_requirement_id
                 WHERE bl.company_id = $1
-                ORDER BY cr.category, cr.jurisdiction_level
-            """
+                """
+                # The gap analysis compares the handbook against what we tell
+                # the business it must do — that has to be the same list.
+                + await codified_gate_sql("cat", conn=conn)
+                + " ORDER BY cr.category, cr.jurisdiction_level"
+            )
             rows = await conn.fetch(query, company_id)
             requirements = [
                 {

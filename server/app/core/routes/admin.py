@@ -55,6 +55,7 @@ from ..services.platform_settings import (
     get_matcha_work_model_mode, prime_matcha_work_model_mode_cache,
     get_jurisdiction_research_model_mode, prime_jurisdiction_research_model_mode_cache,
     get_er_similarity_weights, prime_er_similarity_weights_cache,
+    get_tenant_codified_only, prime_tenant_codified_only_cache,
     DEFAULT_ER_SIMILARITY_WEIGHTS, EXPECTED_WEIGHT_KEYS,
 )
 from ...matcha.services import billing_service as mw_billing_service
@@ -105,6 +106,11 @@ class PlatformSettingsResponse(BaseModel):
     matcha_work_model_mode: str
     jurisdiction_research_model_mode: str
     er_similarity_weights: dict[str, float]
+    tenant_codified_only: bool
+
+
+class TenantCodifiedOnlyUpdate(BaseModel):
+    enabled: bool
 
 
 STRICT_CONFIDENCE_THRESHOLD = 0.95
@@ -8649,11 +8655,13 @@ async def get_all_platform_settings():
     mw_mode = await get_matcha_work_model_mode()
     jr_mode = await get_jurisdiction_research_model_mode()
     er_weights = await get_er_similarity_weights()
+    codified_only = await get_tenant_codified_only()
     return {
         "visible_features": visible,
         "matcha_work_model_mode": mw_mode,
         "jurisdiction_research_model_mode": jr_mode,
         "er_similarity_weights": er_weights,
+        "tenant_codified_only": codified_only,
     }
 
 
@@ -8700,6 +8708,30 @@ async def update_matcha_work_model_mode(
         )
     mode = prime_matcha_work_model_mode_cache(body.mode)
     return {"matcha_work_model_mode": mode}
+
+
+@router.put("/platform-settings/tenant-codified-only", dependencies=[Depends(require_admin)])
+async def update_tenant_codified_only(
+    body: TenantCodifiedOnlyUpdate,
+    admin=Depends(require_admin)
+):
+    """Flip whether tenants see ONLY requirements with a verified statute citation.
+
+    Turning it OFF shows every researched row again — nothing was deleted, the
+    gate is read-time. Turning it ON is the product's default position: a
+    business must not be shown unvetted research as if it were law.
+    """
+    async with get_connection() as conn:
+        await conn.execute(
+            """
+            INSERT INTO platform_settings (key, value, updated_at)
+            VALUES ('tenant_codified_only', $1::jsonb, NOW())
+            ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+            """,
+            json.dumps({"enabled": body.enabled})
+        )
+    enabled = prime_tenant_codified_only_cache(body.enabled)
+    return {"tenant_codified_only": enabled}
 
 
 @router.put("/platform-settings/jurisdiction-research-model-mode", dependencies=[Depends(require_admin)])

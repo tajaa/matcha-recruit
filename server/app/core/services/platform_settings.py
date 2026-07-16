@@ -29,6 +29,19 @@ DEFAULT_MATCHA_WORK_MODEL_MODE = "light"
 DEFAULT_JURISDICTION_RESEARCH_MODEL_MODE = "light"
 VISIBLE_FEATURES_CACHE_TTL_SECONDS = 30
 
+# Serve tenants ONLY requirements whose catalog row carries a verified statute
+# citation. Defaults TRUE and is fail-closed everywhere below (an unreadable
+# value gates rather than opens): a business reading our compliance tab must be
+# able to say "these are the laws that apply to me" without qualification, and a
+# Gemini-researched row we have not tied to a statute cannot carry that claim.
+#
+# The gate is READ-time only. `_sync_requirements_to_location` prunes — it
+# deletes any per-location row a check run does not re-emit — so filtering the
+# WRITE path would destroy the uncodified projections instead of hiding them,
+# and turning the gate back off would show an empty tab until every location
+# re-researched. Hidden, not deleted, is what makes this reversible.
+DEFAULT_TENANT_CODIFIED_ONLY = True
+
 _visible_features_cache: list[str] | None = None
 _visible_features_cached_at: float = 0.0
 
@@ -40,6 +53,9 @@ _jurisdiction_research_model_mode_cached_at: float = 0.0
 
 _er_similarity_weights_cache: dict[str, float] | None = None
 _er_similarity_weights_cached_at: float = 0.0
+
+_tenant_codified_only_cache: bool | None = None
+_tenant_codified_only_cached_at: float = 0.0
 
 DEFAULT_ER_SIMILARITY_WEIGHTS = {
     "category": 0.30,
@@ -203,6 +219,83 @@ async def get_jurisdiction_research_model_mode(*, conn=None) -> str:
     _jurisdiction_research_model_mode_cache = mode
     _jurisdiction_research_model_mode_cached_at = now
     return mode
+
+
+def invalidate_tenant_codified_only_cache() -> None:
+    global _tenant_codified_only_cache, _tenant_codified_only_cached_at
+    _tenant_codified_only_cache = None
+    _tenant_codified_only_cached_at = 0.0
+
+
+def prime_tenant_codified_only_cache(enabled: bool) -> bool:
+    global _tenant_codified_only_cache, _tenant_codified_only_cached_at
+    _tenant_codified_only_cache = bool(enabled)
+    _tenant_codified_only_cached_at = time.monotonic()
+    return bool(enabled)
+
+
+def _normalize_tenant_codified_only(value: object) -> bool:
+    """Fail CLOSED. Every unreadable shape gates rather than opens.
+
+    The failure modes are asymmetric: gating wrongly shows a business fewer
+    laws than we hold, which is visible and complained about. Opening wrongly
+    presents unvetted research as verified law, which looks exactly like the
+    real thing — nobody reports it, and it is the whole reason the gate exists.
+    """
+    if value is None:
+        return DEFAULT_TENANT_CODIFIED_ONLY
+
+    parsed = value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            logger.warning("Invalid tenant_codified_only payload; keeping the gate ON")
+            return True
+
+    # Accepts {"enabled": bool} (the admin route's shape) or a bare bool.
+    if isinstance(parsed, dict):
+        parsed = parsed.get("enabled")
+    if isinstance(parsed, bool):
+        return parsed
+
+    logger.warning(
+        "tenant_codified_only is %s, expected a bool — keeping the gate ON",
+        type(parsed).__name__,
+    )
+    return True
+
+
+async def get_tenant_codified_only(*, conn=None) -> bool:
+    """Is the tenant-facing compliance surface restricted to codified rows?"""
+    global _tenant_codified_only_cache, _tenant_codified_only_cached_at
+
+    now = time.monotonic()
+    if (
+        _tenant_codified_only_cache is not None
+        and now - _tenant_codified_only_cached_at < VISIBLE_FEATURES_CACHE_TTL_SECONDS
+    ):
+        return _tenant_codified_only_cache
+
+    try:
+        if conn is None:
+            async with get_connection() as managed_conn:
+                raw = await managed_conn.fetchval(
+                    "SELECT value FROM platform_settings WHERE key = 'tenant_codified_only'"
+                )
+        else:
+            raw = await conn.fetchval(
+                "SELECT value FROM platform_settings WHERE key = 'tenant_codified_only'"
+            )
+    except Exception:
+        # A DB hiccup reading a display policy must not open the gate.
+        logger.exception("tenant_codified_only read failed; keeping the gate ON")
+        return True
+
+    enabled = _normalize_tenant_codified_only(raw)
+    _tenant_codified_only_cache = enabled
+    _tenant_codified_only_cached_at = now
+    return enabled
 
 
 def invalidate_er_similarity_weights_cache() -> None:
