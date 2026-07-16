@@ -217,6 +217,34 @@ async def trigger_fetch_bodies(slug: str, current_user=Depends(require_admin)) -
     return await _dispatch("running", slug)
 
 
+@router.post("/snapshots/backfill", dependencies=[Depends(require_admin)])
+async def trigger_snapshot_backfill(
+    scope: str = "codified",
+    limit: Optional[int] = None,
+    current_user=Depends(require_admin),
+) -> DispatchResponse:
+    """Freeze the cited source page for requirements that have none (Celery).
+
+    Evidence capture only runs at approve/codify, so anything older than
+    `jrver01` — including 27 of the 29 codified rows — has a citation and a link
+    but no frozen page. Narrowest scope first: 'codified' (the asset) | 'tier1'
+    (primary-government sources) | 'all'.
+    """
+    from app.workers.tasks.source_snapshots import backfill_source_snapshots, _SCOPES
+
+    if scope not in _SCOPES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unknown scope {scope!r}; expected one of {sorted(_SCOPES)}",
+        )
+    if limit is not None and limit < 1:
+        raise HTTPException(status_code=422, detail="limit must be >= 1")
+    backfill_source_snapshots.delay(
+        scope=scope, limit=limit, triggered_by=str(current_user.id)
+    )
+    return await _dispatch("running", scope)
+
+
 @router.get("/items/{item_id}/body", dependencies=[Depends(require_admin)])
 async def get_item_body(item_id: UUID):
     """The full statute/regulation text for one authority item (statute reader)."""

@@ -53,6 +53,7 @@ celery_app = Celery(
         "app.workers.tasks.grievance_deadline_alerts",
         "app.workers.tasks.ir_deadline_alerts",
         "app.workers.tasks.scope_registry",
+        "app.workers.tasks.source_snapshots",
     ],
 )
 

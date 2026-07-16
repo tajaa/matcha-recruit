@@ -107,6 +107,27 @@ def ingest_authority_index(index_slug: Optional[str] = None, trigger_source: str
             except Exception as exc:
                 print(f"[scope_registry] reclassify dispatch failed for {slug}: {exc}")
 
+    def _dispatch_body_fetch(result: dict) -> None:
+        """An ingested citation without its text is a link-out, and RESEARCH
+        grounds on ``body_text`` — so an index that is ingested but never
+        body-fetched silently sends research back to model recall, which is the
+        thing codification exists to prevent. It stayed at 0/59 rows on dev
+        precisely because this was admin-triggered and nobody triggered it.
+
+        Keyed on ``items_upserted`` rather than the drift counts: those are all
+        zero on an index's FIRST ingest (no baseline to diff), which is exactly
+        when every item needs a body. The fetch itself hash-skips unchanged
+        bodies, so a re-ingest that changed nothing costs the fetches and writes
+        nothing.
+        """
+        for r in result.get("results") or []:
+            if not r.get("items_upserted"):
+                continue
+            try:
+                fetch_authority_bodies.delay(index_slug=r["slug"], triggered_by="ingest")
+            except Exception as exc:
+                print(f"[scope_registry] body-fetch dispatch failed for {r.get('slug')}: {exc}")
+
     try:
         result = asyncio.run(_run())
     except Exception as exc:
@@ -114,6 +135,7 @@ def ingest_authority_index(index_slug: Optional[str] = None, trigger_source: str
         raise
 
     _dispatch_reclassify(result)
+    _dispatch_body_fetch(result)
     publish_task_complete(CHANNEL, "scope_registry", index_slug or "all", result)
     return result
 
