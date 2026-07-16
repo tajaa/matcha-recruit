@@ -153,9 +153,9 @@ class Settings:
     apollo_api_key: Optional[str] = None      # Apollo.io - contact database
     clearbit_api_key: Optional[str] = None    # Clearbit - company enrichment
 
-    # AI Chat (local Qwen via llama.cpp / MLX)
-    ai_chat_base_url: str = "http://localhost:8080"
-    ai_chat_model: str = "Qwen2-VL-2B-Instruct"
+    # AI Chat — Gemini (the local Qwen server was retired; base_url is dead).
+    ai_chat_base_url: str = "http://localhost:8080"  # unused; kept to avoid config churn
+    ai_chat_model: str = "gemini-3.1-flash-lite"
     ai_chat_max_tokens: int = 2048
     ai_chat_temperature: float = 0.7
 
@@ -343,7 +343,7 @@ def load_settings() -> Settings:
         apollo_api_key=os.getenv("APOLLO_API_KEY"),
         clearbit_api_key=os.getenv("CLEARBIT_API_KEY"),
         ai_chat_base_url=os.getenv("AI_CHAT_BASE_URL", "http://localhost:8080"),
-        ai_chat_model=os.getenv("AI_CHAT_MODEL", "Qwen2-VL-2B-Instruct"),
+        ai_chat_model=os.getenv("AI_CHAT_MODEL", "gemini-3.1-flash-lite"),
         ai_chat_max_tokens=int(os.getenv("AI_CHAT_MAX_TOKENS", "2048")),
         ai_chat_temperature=float(os.getenv("AI_CHAT_TEMPERATURE", "0.7")),
         redis_url=os.getenv("REDIS_URL", "redis://localhost:6379/0"),

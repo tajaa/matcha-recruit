@@ -1,4 +1,5 @@
 import json
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
 from fastapi.responses import StreamingResponse
@@ -78,6 +79,8 @@ from ..services.compliance_service import (
     search_company_requirements,
     verify_location_ownership,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -1437,12 +1440,18 @@ async def ask_regulatory_question(
         company_id, data.question, location_id=location_id,
     )
 
-    # Generate answer using the chat model
+    # Generate answer using Gemini. Degrade gracefully — a model outage must not
+    # 500; the matched regulatory sources are still worth returning.
     messages = [{"role": "user", "content": data.question}]
 
-    answer_parts = []
-    async for token in service.stream_response(messages, context):
-        answer_parts.append(token)
+    answer_parts: list[str] = []
+    try:
+        async for token in service.stream_response(messages, context):
+            answer_parts.append(token)
+    except Exception:
+        logger.exception("compliance ask: answer generation failed")
+        answer_parts = ["I couldn't generate an answer just now. The matching "
+                        "regulatory sources are listed below — please try again shortly."]
 
     answer = "".join(answer_parts)
     max_similarity = max((s.get("similarity", 0) for s in sources), default=0)
@@ -1556,9 +1565,14 @@ async def ask_payer_policy_question(
     messages = [{"role": "user", "content": data.question}]
 
     service = get_ai_chat_service()
-    answer_parts = []
-    async for token in service.stream_response(messages, system_prompt):
-        answer_parts.append(token)
+    answer_parts: list[str] = []
+    try:
+        async for token in service.stream_response(messages, system_prompt):
+            answer_parts.append(token)
+    except Exception:
+        logger.exception("payer policy ask: answer generation failed")
+        answer_parts = ["I couldn't generate an answer just now. The matching "
+                        "policy sources are listed below — please try again shortly."]
 
     answer = "".join(answer_parts)
     max_similarity = max((s.get("similarity", 0) for s in sources), default=0)

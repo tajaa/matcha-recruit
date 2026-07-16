@@ -1,13 +1,17 @@
-import json
+import asyncio
+import logging
 import os
 from typing import AsyncIterator, List, Optional
 from uuid import UUID
 
-import httpx
+from google.genai import types
 
 from ...config import get_settings
 from ...database import get_connection
 from .compliance_service import _filter_by_jurisdiction_priority
+from .genai_client import get_genai_client
+
+logger = logging.getLogger(__name__)
 
 _service = None
 
@@ -197,38 +201,38 @@ class AIChatService:
         messages: List[dict],
         company_context: str,
     ) -> AsyncIterator[str]:
-        system_messages = [{"role": "system", "content": company_context}]
-        full_messages = system_messages + messages
+        """Stream the assistant reply from Gemini (the codebase standard).
 
-        payload = {
-            "model": self.model,
-            "messages": full_messages,
-            "stream": True,
-            "max_tokens": self.max_tokens,
-            "temperature": self.temperature,
-        }
+        Replaces the retired local OpenAI-compatible model. The
+        `company_context` becomes Gemini's system_instruction; OpenAI-style
+        message roles map to Gemini roles (`assistant` -> `model`)."""
+        contents: list[types.Content] = []
+        for m in messages:
+            text = (m.get("content") or "").strip()
+            if not text:
+                continue
+            role = "model" if m.get("role") == "assistant" else "user"
+            contents.append(types.Content(role=role, parts=[types.Part(text=text)]))
+        if not contents:
+            return
 
-        async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=10.0)) as client:
-            async with client.stream(
-                "POST",
-                f"{self.base_url}/v1/chat/completions",
-                json=payload,
-            ) as resp:
-                resp.raise_for_status()
-                async for line in resp.aiter_lines():
-                    if not line.startswith("data: "):
-                        continue
-                    data = line[6:]
-                    if data == "[DONE]":
-                        break
-                    try:
-                        chunk = json.loads(data)
-                        delta = chunk["choices"][0].get("delta", {})
-                        content = delta.get("content")
-                        if content:
-                            yield content
-                    except (json.JSONDecodeError, KeyError, IndexError):
-                        continue
+        client = get_genai_client()
+        stream = await asyncio.wait_for(
+            client.aio.models.generate_content_stream(
+                model=self.model,
+                contents=contents,
+                config=types.GenerateContentConfig(
+                    system_instruction=company_context,
+                    max_output_tokens=self.max_tokens,
+                    temperature=self.temperature,
+                ),
+            ),
+            timeout=30,
+        )
+        async for chunk in stream:
+            text = getattr(chunk, "text", None)
+            if text:
+                yield text
 
 
 def get_ai_chat_service() -> AIChatService:
