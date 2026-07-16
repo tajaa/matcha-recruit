@@ -83,7 +83,7 @@ export default function Automation() {
   }
 
   return (
-    <div className="flex h-[calc(100vh-7rem)] flex-col overflow-hidden rounded-xl border border-white/[0.06] bg-black">
+    <div className="flex h-[calc(100vh-7rem)] flex-col overflow-hidden rounded-xl border border-white/[0.06] bg-zinc-950">
       <div className="flex items-center justify-between border-b border-white/[0.06] px-4 py-3">
         <h1 className="flex items-center gap-2 text-sm font-semibold text-zinc-100">
           <Cog className="h-4 w-4 text-emerald-400" /> Automation

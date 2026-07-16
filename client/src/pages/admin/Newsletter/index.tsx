@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { Loader2, Plus } from 'lucide-react'
 import { api } from '../../../api/client'
+import { LABEL } from '../../../components/ui/typography'
 import type { Subscriber, Newsletter, SubStats, Tag, Template, Idea, GrowthPoint, Analytics, Progress, Tab } from './types'
 import { Sparkline } from './Sparkline'
 import { SubscribersTab } from './SubscribersTab'
@@ -416,6 +417,7 @@ export default function NewsletterAdmin() {
 
   return (
     <div>
+      <div className="rounded-xl border border-white/[0.06] bg-zinc-950 p-6">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-xl font-semibold text-zinc-100">Newsletter</h1>
         <button
@@ -432,19 +434,19 @@ export default function NewsletterAdmin() {
       {/* Stats + growth sparkline */}
       {stats && (
         <div className="flex flex-wrap items-end gap-3 mb-6">
-          <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 px-4 py-2">
-            <p className="text-[10px] text-zinc-500 uppercase">Active</p>
-            <p className="text-lg font-bold text-zinc-100">{stats.active}</p>
+          <div className="rounded-lg border border-white/[0.06] bg-white/[0.02] px-4 py-2">
+            <p className={LABEL}>Active</p>
+            <p className="text-lg font-mono font-bold tabular-nums text-zinc-100">{stats.active}</p>
           </div>
           {Object.entries(stats.by_source).slice(0, 5).map(([src, cnt]) => (
-            <div key={src} className="rounded-lg border border-zinc-800 bg-zinc-900/50 px-4 py-2">
-              <p className="text-[10px] text-zinc-500 uppercase">{src}</p>
-              <p className="text-lg font-bold text-zinc-100">{cnt}</p>
+            <div key={src} className="rounded-lg border border-white/[0.06] bg-white/[0.02] px-4 py-2">
+              <p className={LABEL}>{src}</p>
+              <p className="text-lg font-mono font-bold tabular-nums text-zinc-100">{cnt}</p>
             </div>
           ))}
           {growth.length > 0 && (
-            <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 px-4 py-2 flex-1 min-w-[280px]">
-              <p className="text-[10px] text-zinc-500 uppercase">90-day growth</p>
+            <div className="rounded-lg border border-white/[0.06] bg-white/[0.02] px-4 py-2 flex-1 min-w-[280px]">
+              <p className={LABEL}>90-day growth</p>
               <Sparkline points={growth.map((p) => p.subscribed)} />
               <p className="text-[10px] text-zinc-500 mt-1">
                 +{growth.reduce((sum, p) => sum + p.subscribed, 0)} in last {growth.length} days
@@ -474,7 +476,7 @@ export default function NewsletterAdmin() {
       )}
 
       {/* Tabs */}
-      <div className="flex gap-1 mb-6 border-b border-zinc-800/60 pb-px">
+      <div className="flex gap-1 mb-6 border-b border-white/[0.06] pb-px">
         {(['ideas', 'subscribers', 'newsletters', 'compose', 'tags', 'templates'] as Tab[]).map((t) => {
           const draftCount = t === 'newsletters' ? newsletters.filter(n => n.status === 'draft').length : 0
           return (
@@ -551,6 +553,7 @@ export default function NewsletterAdmin() {
 
       {/* Templates tab */}
       {tab === 'templates' && <TemplatesTab templates={templates} onChange={loadData} onPickTemplate={fromTemplate} onStartFrom={startFromDesign} currentDesign={composeDesign} />}
+      </div>
 
       {/* Send modal */}
       {sendModal && (

@@ -142,7 +142,7 @@ export default function Updates() {
   const setAll = (open: boolean) => setOpenIds(new Set(open && updates ? updates.map((u) => u.id) : []))
 
   return (
-    <div className="flex h-[calc(100vh-7rem)] flex-col overflow-hidden rounded-xl border border-white/[0.06] bg-black">
+    <div className="flex h-[calc(100vh-7rem)] flex-col overflow-hidden rounded-xl border border-white/[0.06] bg-zinc-950">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-white/[0.06] px-4 py-3">
         <h1 className="flex items-center gap-2 text-sm font-semibold text-zinc-100">
@@ -204,7 +204,7 @@ export default function Updates() {
         {!error && !updates && <Loader2 className="m-4 h-5 w-5 animate-spin text-zinc-500" />}
         {groups.map((g) => (
           <div key={g.label}>
-            <div className={`sticky top-0 z-10 border-b border-white/[0.06] bg-black px-4 py-1.5 ${LABEL}`}>{g.label}</div>
+            <div className={`sticky top-0 z-10 border-b border-white/[0.06] bg-zinc-950 px-4 py-1.5 ${LABEL}`}>{g.label}</div>
             <div>
               {g.items.map((u) => (
                 <UpdateRow key={u.id} u={u} open={openIds.has(u.id)} onToggle={() => toggle(u.id)} />

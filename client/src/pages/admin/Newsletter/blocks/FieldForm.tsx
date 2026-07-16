@@ -3,10 +3,11 @@ import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import { Loader2, ImagePlus, X, Plus, Trash2, ChevronUp, ChevronDown, Bold, List } from 'lucide-react'
 import { uploadNewsletterMedia } from '../uploadMedia'
+import { LABEL } from '../../../../components/ui/typography'
 import type { Field } from './schema'
 
 const inputCls =
-  'w-full px-2.5 py-1.5 rounded-lg border border-zinc-700 bg-zinc-900 text-sm text-zinc-200 placeholder-zinc-500 outline-none focus:border-zinc-500'
+  'w-full px-2.5 py-1.5 rounded-lg border border-white/[0.08] bg-zinc-900 text-sm text-zinc-200 placeholder-zinc-500 outline-none focus:border-zinc-500'
 
 type Obj = Record<string, unknown>
 
@@ -48,8 +49,8 @@ function RichTextInput({ html, body, onChange }: { html: string; body: string; o
     `p-1 rounded transition-colors ${active ? 'text-emerald-400 bg-zinc-800' : 'text-zinc-500 hover:text-zinc-300'}`
 
   return (
-    <div className="rounded-lg border border-zinc-700 bg-zinc-900">
-      <div className="flex items-center gap-0.5 px-1.5 py-1 border-b border-zinc-800">
+    <div className="rounded-lg border border-white/[0.08] bg-zinc-900">
+      <div className="flex items-center gap-0.5 px-1.5 py-1 border-b border-white/[0.04]">
         <button
           type="button"
           onMouseDown={(e) => { e.preventDefault(); editor.chain().focus().toggleBold().run() }}
@@ -88,7 +89,7 @@ function ImageInput({ value, onChange }: { value: string; onChange: (v: string) 
     <div className="space-y-1.5">
       {value ? (
         <div className="relative inline-block">
-          <img src={value} alt="" className="max-h-28 rounded-lg border border-zinc-700 object-cover" />
+          <img src={value} alt="" className="max-h-28 rounded-lg border border-white/[0.08] object-cover" />
           <button
             type="button"
             onClick={() => onChange('')}
@@ -98,7 +99,7 @@ function ImageInput({ value, onChange }: { value: string; onChange: (v: string) 
           </button>
         </div>
       ) : (
-        <label className="flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-dashed border-zinc-700 text-xs text-zinc-400 hover:border-zinc-600 hover:text-zinc-300 cursor-pointer">
+        <label className="flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-dashed border-white/[0.08] text-xs text-zinc-400 hover:border-emerald-600/60 hover:text-zinc-300 cursor-pointer">
           {busy ? <Loader2 size={13} className="animate-spin" /> : <ImagePlus size={13} />}
           {busy ? 'Uploading…' : 'Upload image'}
           <input
@@ -133,7 +134,7 @@ function FieldRow({ field, obj, onChange }: { field: Field; obj: Obj; onChange: 
 
   return (
     <div className="space-y-1">
-      <label className="block text-[11px] text-zinc-400">{field.label}</label>
+      <label className={LABEL}>{field.label}</label>
       {field.kind === 'text' && (
         <input value={(value as string) ?? ''} onChange={(e) => set(e.target.value)} placeholder={field.placeholder} className={inputCls} />
       )}
@@ -176,9 +177,9 @@ function ListField({ field, value, onChange }: { field: Field; value: Obj[]; onC
   return (
     <div className="space-y-2">
       {items.map((item, i) => (
-        <div key={i} className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-2.5 space-y-2">
+        <div key={i} className="rounded-lg border border-white/[0.06] bg-zinc-900/40 p-2.5 space-y-2">
           <div className="flex items-center justify-between">
-            <span className="text-[10px] text-zinc-500 uppercase tracking-wide">Item {i + 1}</span>
+            <span className={LABEL}>Item {i + 1}</span>
             <div className="flex items-center gap-1">
               <button type="button" onClick={() => move(i, -1)} disabled={i === 0} className="text-zinc-500 hover:text-zinc-300 disabled:opacity-30"><ChevronUp size={13} /></button>
               <button type="button" onClick={() => move(i, 1)} disabled={i === items.length - 1} className="text-zinc-500 hover:text-zinc-300 disabled:opacity-30"><ChevronDown size={13} /></button>
@@ -192,7 +193,7 @@ function ListField({ field, value, onChange }: { field: Field; value: Obj[]; onC
       ))}
       <button
         type="button" onClick={add}
-        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-dashed border-zinc-700 text-xs text-zinc-400 hover:text-zinc-200 hover:border-zinc-600 w-full justify-center"
+        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-dashed border-white/[0.08] text-xs text-zinc-400 hover:text-zinc-200 hover:border-emerald-600/60 w-full justify-center"
       >
         <Plus size={13} /> {field.addLabel ?? 'Add item'}
       </button>

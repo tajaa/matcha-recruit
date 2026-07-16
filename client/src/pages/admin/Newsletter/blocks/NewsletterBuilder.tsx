@@ -3,6 +3,7 @@ import {
   Plus, ChevronUp, ChevronDown, Copy, Trash2, Pencil, X, Palette, ImageOff, AlertTriangle,
 } from 'lucide-react'
 import { FieldForm } from './FieldForm'
+import { LABEL } from '../../../../components/ui/typography'
 import {
   BLOCK_SCHEMAS, BLOCK_ORDER, makeBlock, designHasMedia,
   type NewsletterDesign, type NLBlock, type ThemePreset,
@@ -76,7 +77,7 @@ export function NewsletterBuilder({
   return (
     <div className="space-y-3">
       {/* Theme / brand controls */}
-      <div className="rounded-xl border border-zinc-800 bg-zinc-900/40">
+      <div className="rounded-xl border border-white/[0.06] bg-zinc-900/40">
         <button
           type="button"
           onClick={() => setShowTheme((v) => !v)}
@@ -86,7 +87,7 @@ export function NewsletterBuilder({
           <span className="font-medium">Theme &amp; branding</span>
           <span className="ml-auto flex items-center gap-1.5">
             <span
-              className="inline-block w-3.5 h-3.5 rounded-full border border-zinc-700"
+              className="inline-block w-3.5 h-3.5 rounded-full border border-white/[0.08]"
               style={{ background: design.theme.brandColor || (design.theme.preset === 'dark' ? '#10b981' : '#059669') }}
             />
             <span className="text-zinc-500 capitalize">{design.theme.preset}</span>
@@ -94,7 +95,7 @@ export function NewsletterBuilder({
           </span>
         </button>
         {showTheme && (
-          <div className="px-3 pb-3 space-y-2.5 border-t border-zinc-800/60 pt-2.5">
+          <div className="px-3 pb-3 space-y-2.5 border-t border-white/[0.06] pt-2.5">
             <div className="flex items-center gap-2">
               <span className="text-[11px] text-zinc-400 w-24">Background</span>
               {(['light', 'dark'] as ThemePreset[]).map((p) => (
@@ -110,7 +111,7 @@ export function NewsletterBuilder({
                 type="color"
                 value={design.theme.brandColor || (design.theme.preset === 'dark' ? '#10b981' : '#059669')}
                 onChange={(e) => setTheme({ brandColor: e.target.value })}
-                className="h-7 w-10 rounded bg-transparent border border-zinc-700 cursor-pointer"
+                className="h-7 w-10 rounded bg-transparent border border-white/[0.08] cursor-pointer"
               />
               {design.theme.brandColor && (
                 <button type="button" onClick={() => setTheme({ brandColor: undefined })} className="text-[10px] text-zinc-500 hover:text-zinc-300">reset</button>
@@ -122,7 +123,7 @@ export function NewsletterBuilder({
                 value={design.theme.brandName ?? ''}
                 onChange={(e) => setTheme({ brandName: e.target.value })}
                 placeholder="Matcha"
-                className="flex-1 px-2.5 py-1 rounded-md border border-zinc-700 bg-zinc-900 text-sm text-zinc-200 outline-none"
+                className="flex-1 px-2.5 py-1 rounded-md border border-white/[0.08] bg-zinc-900 text-sm text-zinc-200 outline-none"
               />
             </div>
           </div>
@@ -139,7 +140,7 @@ export function NewsletterBuilder({
 
       {/* Block list */}
       {blocks.length === 0 && (
-        <div className="rounded-xl border border-dashed border-zinc-800 px-4 py-8 text-center">
+        <div className="rounded-xl border border-dashed border-white/[0.08] px-4 py-8 text-center">
           <ImageOff size={20} className="mx-auto text-zinc-600 mb-2" />
           <p className="text-sm text-zinc-400">No blocks yet.</p>
           <p className="text-xs text-zinc-600 mt-0.5">Add a hero, then build your newsletter section by section.</p>
@@ -151,7 +152,7 @@ export function NewsletterBuilder({
           const schema = BLOCK_SCHEMAS[b.type]
           const open = editingId === b.id
           return (
-            <div key={b.id} className={`rounded-xl border ${open ? 'border-emerald-600/50' : 'border-zinc-800'} bg-zinc-900/30`}>
+            <div key={b.id} className={`rounded-xl border ${open ? 'border-emerald-600/50 border-l-2 border-l-emerald-400' : 'border-white/[0.06]'} bg-zinc-900/30`}>
               <div className="flex items-center gap-2 px-3 py-2">
                 <span className="text-base leading-none w-5 text-center shrink-0" aria-hidden>{schema?.icon ?? '▦'}</span>
                 <button type="button" onClick={() => setEditingId(open ? null : b.id)} className="flex-1 min-w-0 text-left">
@@ -167,7 +168,7 @@ export function NewsletterBuilder({
                 </div>
               </div>
               {open && schema && (
-                <div className="px-3 pb-3 pt-1 border-t border-zinc-800/60">
+                <div className="px-3 pb-3 pt-1 border-t border-white/[0.06]">
                   <FieldForm
                     fields={schema.fields}
                     value={b as unknown as Record<string, unknown>}
@@ -185,18 +186,18 @@ export function NewsletterBuilder({
         <button
           type="button"
           onClick={() => setInsertOpen((v) => !v)}
-          className="w-full flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl border border-dashed border-zinc-700 text-sm text-zinc-300 hover:border-emerald-600/60 hover:text-emerald-300 transition-colors"
+          className="w-full flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl border border-dashed border-white/[0.08] text-sm text-zinc-300 hover:border-emerald-600/60 hover:text-emerald-300 transition-colors"
         >
           {insertOpen ? <X size={15} /> : <Plus size={15} />} Add block
         </button>
         {insertOpen && (
-          <div className="absolute z-20 left-0 right-0 mt-2 rounded-xl border border-zinc-700 bg-zinc-900 shadow-xl p-2 max-h-96 overflow-y-auto">
+          <div className="absolute z-20 left-0 right-0 mt-2 rounded-xl border border-white/[0.06] bg-zinc-900 shadow-xl p-2 max-h-96 overflow-y-auto">
             {GROUPS.map((group) => {
               const types = BLOCK_ORDER.filter((t) => BLOCK_SCHEMAS[t]?.group === group)
               if (!types.length) return null
               return (
                 <div key={group} className="mb-1.5 last:mb-0">
-                  <p className="px-2 pt-1.5 pb-1 text-[10px] uppercase tracking-wider text-zinc-500">{group}</p>
+                  <p className={`px-2 pt-1.5 pb-1 ${LABEL}`}>{group}</p>
                   <div className="grid grid-cols-2 gap-1">
                     {types.map((t) => (
                       <button

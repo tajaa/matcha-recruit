@@ -68,7 +68,7 @@ export default function ComplianceStudio() {
     ? Math.round((meters.codified / meters.requirements) * 100) : null
 
   return (
-    <div className="flex h-[calc(100vh-7rem)] flex-col overflow-hidden rounded-xl border border-white/[0.06] bg-black">
+    <div className="flex h-[calc(100vh-7rem)] flex-col overflow-hidden rounded-xl border border-white/[0.06] bg-zinc-950">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-white/[0.06] px-4 py-3">
         <h1 className="flex items-center gap-2 text-sm font-semibold text-zinc-100">

@@ -1,5 +1,7 @@
 import { Loader2, Plus, Send, Tag as TagIcon, Calendar, Blocks, Code2 } from 'lucide-react'
 import SectionEditor from '../../../components/matcha-work/SectionEditor'
+import { Button } from '../../../components/ui/Button'
+import { LABEL } from '../../../components/ui/typography'
 import { MobilePreview, type ViewportKey } from './MobilePreview'
 import { uploadNewsletterMedia } from './uploadMedia'
 import { NewsletterBuilder } from './blocks/NewsletterBuilder'
@@ -54,35 +56,35 @@ export function ComposeTab({
       <div className={`grid ${previewViewport === 'wide' ? 'grid-cols-1' : previewViewport === 'desktop' ? 'lg:grid-cols-[1fr_660px]' : 'lg:grid-cols-[1fr_376px]'} gap-6 max-w-6xl`}>
         <div className="space-y-4">
           <div>
-            <label className="block text-xs text-zinc-400 mb-1">Title</label>
-            <input value={composeTitle} onChange={(e) => { setComposeTitle(e.target.value); setIsDirty(true); setSaveStatus('unsaved') }} placeholder="Newsletter title..." className="w-full px-3 py-2 rounded-lg border border-zinc-700 bg-zinc-900 text-sm text-zinc-200 placeholder-zinc-500 outline-none focus:border-zinc-500" />
+            <label className={`block ${LABEL} mb-1.5`}>Title</label>
+            <input value={composeTitle} onChange={(e) => { setComposeTitle(e.target.value); setIsDirty(true); setSaveStatus('unsaved') }} placeholder="Newsletter title..." className="w-full px-3 py-2 rounded-lg border border-white/[0.08] bg-zinc-900 text-sm text-zinc-200 placeholder-zinc-500 outline-none focus:border-zinc-500" />
           </div>
           <div>
-            <label className="block text-xs text-zinc-400 mb-1">Subject line</label>
-            <input value={composeSubject} onChange={(e) => { setComposeSubject(e.target.value); setIsDirty(true); setSaveStatus('unsaved') }} placeholder="Email subject..." className="w-full px-3 py-2 rounded-lg border border-zinc-700 bg-zinc-900 text-sm text-zinc-200 placeholder-zinc-500 outline-none focus:border-zinc-500" />
+            <label className={`block ${LABEL} mb-1.5`}>Subject line</label>
+            <input value={composeSubject} onChange={(e) => { setComposeSubject(e.target.value); setIsDirty(true); setSaveStatus('unsaved') }} placeholder="Email subject..." className="w-full px-3 py-2 rounded-lg border border-white/[0.08] bg-zinc-900 text-sm text-zinc-200 placeholder-zinc-500 outline-none focus:border-zinc-500" />
           </div>
           <div>
-            <label className="block text-xs text-zinc-400 mb-1">
-              Preheader <span className="text-zinc-600">— inbox preview snippet, hidden in body</span>
+            <label className={`block ${LABEL} mb-1.5`}>
+              Preheader <span className="normal-case tracking-normal text-zinc-600">— inbox preview snippet, hidden in body</span>
             </label>
-            <input value={composePreheader} onChange={(e) => { setComposePreheader(e.target.value); setIsDirty(true); setSaveStatus('unsaved') }} maxLength={255} placeholder="Short hook seen in the recipient's inbox preview..." className="w-full px-3 py-2 rounded-lg border border-zinc-700 bg-zinc-900 text-sm text-zinc-200 placeholder-zinc-500 outline-none focus:border-zinc-500" />
+            <input value={composePreheader} onChange={(e) => { setComposePreheader(e.target.value); setIsDirty(true); setSaveStatus('unsaved') }} maxLength={255} placeholder="Short hook seen in the recipient's inbox preview..." className="w-full px-3 py-2 rounded-lg border border-white/[0.08] bg-zinc-900 text-sm text-zinc-200 placeholder-zinc-500 outline-none focus:border-zinc-500" />
           </div>
           <div>
             <div className="flex items-center justify-between mb-1.5">
-              <label className="block text-xs text-zinc-400">Content</label>
+              <label className={LABEL}>Content</label>
               {/* Design (block builder) vs raw HTML editor */}
-              <div className="flex items-center gap-1 rounded-lg bg-zinc-900 border border-zinc-800 p-0.5">
+              <div className="flex items-center gap-1 rounded-lg bg-zinc-900 border border-white/[0.06] p-0.5">
                 <button
                   type="button"
                   onClick={() => setComposeMode('design')}
-                  className={`flex items-center gap-1 text-[11px] px-2 py-1 rounded-md ${composeMode === 'design' ? 'bg-zinc-700 text-zinc-100' : 'text-zinc-400 hover:text-zinc-200'}`}
+                  className={`flex items-center gap-1 text-[11px] px-2 py-1 rounded-md ${composeMode === 'design' ? 'bg-white/[0.06] text-zinc-100' : 'text-zinc-400 hover:text-zinc-200'}`}
                 >
                   <Blocks size={12} /> Design
                 </button>
                 <button
                   type="button"
                   onClick={() => setComposeMode('html')}
-                  className={`flex items-center gap-1 text-[11px] px-2 py-1 rounded-md ${composeMode === 'html' ? 'bg-zinc-700 text-zinc-100' : 'text-zinc-400 hover:text-zinc-200'}`}
+                  className={`flex items-center gap-1 text-[11px] px-2 py-1 rounded-md ${composeMode === 'html' ? 'bg-white/[0.06] text-zinc-100' : 'text-zinc-400 hover:text-zinc-200'}`}
                 >
                   <Code2 size={12} /> HTML
                 </button>
@@ -94,7 +96,7 @@ export function ComposeTab({
                 onChange={(next) => { setComposeDesign(next); markDirty() }}
               />
             ) : (
-              <div className="rounded-lg border border-zinc-700 overflow-hidden" style={{ background: '#1e1e1e' }}>
+              <div className="rounded-lg border border-white/[0.06] bg-zinc-950 overflow-hidden">
                 <SectionEditor
                   content={composeHtml}
                   onUpdate={(html) => { setComposeHtml(html); setIsDirty(true); setSaveStatus('unsaved') }}
@@ -121,17 +123,17 @@ export function ComposeTab({
 
       <div className="flex flex-wrap gap-2 max-w-6xl">
         {!editingId ? (
-          <button onClick={handleCreate} disabled={saving || !composeTitle.trim() || !composeSubject.trim()} className="flex items-center gap-1.5 px-4 py-2 bg-zinc-700 hover:bg-zinc-600 text-white text-sm font-medium rounded-lg disabled:opacity-40">
+          <Button onClick={handleCreate} disabled={saving || !composeTitle.trim() || !composeSubject.trim()} variant="secondary" size="md">
             {saving ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />} Create Draft
-          </button>
+          </Button>
         ) : (
           <>
-            <button onClick={handleSave} disabled={saving} className="flex items-center gap-1.5 px-4 py-2 bg-zinc-700 hover:bg-zinc-600 text-white text-sm font-medium rounded-lg disabled:opacity-40">
+            <Button onClick={handleSave} disabled={saving} variant="secondary" size="md">
               {saving ? <Loader2 size={14} className="animate-spin" /> : null} Save Draft
-            </button>
-            <button onClick={handleTestSend} className="flex items-center gap-1.5 px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-sm font-medium rounded-lg border border-zinc-700">
+            </Button>
+            <Button onClick={handleTestSend} variant="ghost" size="md" className="border border-white/[0.08]">
               <Send size={14} /> Send Test
-            </button>
+            </Button>
             <button onClick={() => openSend('now')} className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium rounded-lg">
               <Send size={14} /> Send to all
             </button>

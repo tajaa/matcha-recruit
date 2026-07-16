@@ -128,7 +128,7 @@ export default function Features() {
   }
 
   return (
-    <div className="flex h-[calc(100vh-7rem)] overflow-hidden rounded-xl border border-white/[0.06] bg-black">
+    <div className="flex h-[calc(100vh-7rem)] overflow-hidden rounded-xl border border-white/[0.06] bg-zinc-950">
       {/* Company list */}
       <div className="flex w-72 shrink-0 flex-col border-r border-white/[0.06]">
         <div className="flex items-center gap-2 border-b border-white/[0.06] px-3 py-3">
