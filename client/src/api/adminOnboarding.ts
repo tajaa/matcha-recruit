@@ -316,6 +316,52 @@ export type GapDrift = {
   new_jurisdictions: number
 }
 
+// GET /companies/{id}/fit-map — what a business HAS vs what it NEEDS, measured
+// against the curated statutory checklist (compliance_evals.industry_keysets),
+// NOT against a Gemini scope run. Deliberately a second opinion alongside the
+// dossier below: this one's "missing" means "the law expects this of a business
+// like yours", never "the model thought of it this time".
+export type FitReason =
+  | 'covered_by_stricter'   // in their chain, filtered on purpose (preemption) — not a gap
+  | 'stale_projection'      // written since their last sync; run a compliance check
+  | 'staged'                // in their chain but status='pending'; approve it
+  | 'researched_elsewhere'  // exists for other jurisdictions; research here / re-parent
+  | 'never_researched'      // nowhere in the catalog; research it
+
+export type FitMissing = { category: string; regulation_key: string; reason: FitReason }
+
+export type FitCounts = {
+  visible: number          // projected + codified — what the tenant sees today
+  gated: number            // projected, uncodified — tenant is waiting on us
+  missing: number          // every expected key off the tab (incl. benign)
+  gaps: number             // the subset that is actually somebody's problem
+  covered_by_stricter: number
+  beyond_core: number      // projected beyond the checklist — breadth, not excess
+  expected: number
+  projected: number
+}
+
+export type FitLocation = {
+  location_id: string
+  city: string | null
+  state: string | null
+  counts: FitCounts
+  missing: FitMissing[]
+}
+
+export type FitMapResponse = {
+  company_name: string
+  company_id: string
+  industry: string | null
+  // 'core:healthcare' | 'labor_floor_only' — provenance, so a floor-only check
+  // is never presented as an industry verdict.
+  keyset: string
+  keyset_note: string | null
+  counts: FitCounts
+  missing: FitMissing[]
+  locations: FitLocation[]
+}
+
 // Persistent per-company gap dashboard payload. status='never_run' when the
 // company has no analysis yet (UI shows a "Run first analysis" empty state).
 export type GapDashboardResponse = {
@@ -452,6 +498,9 @@ export const adminOnboarding = {
   // persisted scope against the current bank; no Gemini). Re-run = enrich stream.
   getGapDashboard: (companyId: string) =>
     api.get<GapDashboardResponse>(`${BASE}/companies/${companyId}/gap-dashboard`),
+
+  getFitMap: (companyId: string) =>
+    api.get<FitMapResponse>(`${BASE}/companies/${companyId}/fit-map`),
 
   getRequirementDetail: (companyId: string, requirementId: string) =>
     api.get<GapRequirementDetail>(

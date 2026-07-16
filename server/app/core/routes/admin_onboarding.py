@@ -1676,6 +1676,39 @@ async def _load_company_gap_session(conn, company_id: UUID):
     )
 
 
+@router.get("/onboarding/companies/{company_id}/fit-map")
+async def get_company_fit_map(
+    company_id: UUID,
+    current_user: CurrentUser = Depends(require_master_admin),
+):
+    """What this company HAS vs what it NEEDS — deterministic, business-scoped.
+
+    Deliberately a SECOND opinion alongside ``/gap-dashboard``, not a
+    replacement, and the two will disagree on purpose. The dossier's "needed"
+    is a per-run Gemini ``expand_scope`` snapshot — broad, and only as good as
+    that run. This one's "needed" is the curated statutory checklist
+    (``compliance_evals.industry_keysets``) the evals already measure the
+    catalog against, so a "missing" here means "the law expects this of a
+    business like yours and we never researched it", never "the model thought
+    of it this time".
+
+    Three buckets: visible (projected + codified — what they see today), gated
+    (projected, uncodified — they're waiting on us), missing (needed, never
+    researched). Core depth only: full-depth expectations run 180+ keys per
+    industry, which floods rather than informs.
+    """
+    from app.core.services.compliance_fit import company_fit_map
+
+    async with get_connection() as conn:
+        company = await conn.fetchrow(
+            "SELECT id, name FROM companies WHERE id = $1", company_id,
+        )
+        if not company:
+            raise HTTPException(status_code=404, detail="Company not found")
+        fit = await company_fit_map(conn, company_id)
+    return {"company_name": company["name"], **fit}
+
+
 @router.get("/onboarding/companies/{company_id}/gap-dashboard")
 async def get_company_gap_dashboard(
     company_id: UUID,

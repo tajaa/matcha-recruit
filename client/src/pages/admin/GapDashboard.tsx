@@ -24,6 +24,7 @@ import type {
 } from '../../api/adminOnboarding'
 import { useEnrichStream, type EnrichEvent } from '../../hooks/useEnrichStream'
 import { useResearchGaps, type ResearchGapItem } from '../../hooks/useResearchGaps'
+import StatutoryFitPanel from '../../features/admin-onboarding/StatutoryFitPanel'
 import GapCard, { humanizeCategory, jurisdictionLabel } from '../../features/admin-onboarding/GapCard'
 import { complexityBandClass } from './GapOverview'
 
@@ -463,6 +464,14 @@ export default function GapDashboard() {
               </div>
             </div>
           )}
+
+          {/* Statutory fit — the deterministic second opinion. Sits ABOVE the AI
+              dossier's gaps because it is the one whose "missing" is grounded in
+              a curated statutory checklist rather than a per-run model scope.
+              The two WILL report different numbers; that difference is the point
+              (floor vs breadth), so they're shown side by side rather than
+              reconciled into one figure that hides which is which. */}
+          <StatutoryFitPanel companyId={companyId} />
 
           {/* Gaps — the core */}
           <div className="rounded-xl border border-vsc-border bg-vsc-panel/40 p-4">
