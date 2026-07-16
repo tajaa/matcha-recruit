@@ -59,13 +59,31 @@ export type PilotMessage = {
 export type ActionKind = 'research' | 'approve' | 'check_sources'
 export type ActionStatus = 'running' | 'done' | 'failed'
 
+// One discovered policy in a research run — with provenance + the codify gate.
+export type StagedRow = {
+  id: string
+  title: string
+  jurisdiction_level: string
+  regulation_key: string | null
+  category: string
+  source_url: string | null
+  source_domain_class: 'primary' | 'secondary_official' | 'aggregator' | 'unknown' | 'missing'
+  source_url_status: string | null
+  research_citation: string | null
+  state: string | null
+  city: string | null
+  gate_ok: boolean
+  gate_reason: string | null
+}
+
 export type ApproveRowResult = {
   id: string
   title: string
-  regulation_key: string | null
+  activated?: boolean
   codified: boolean
   statute_citation: string | null
   citation_url: string | null
+  gate_reason?: string | null
   state: string | null
   city: string | null
 }
@@ -114,10 +132,10 @@ export type ActionCreateBody = {
 export const createAction = (sessionId: string, body: ActionCreateBody) =>
   api.post<{ action_id: string }>(`/admin/pilot/sessions/${sessionId}/actions`, body)
 export const getAction = (id: string) => api.get<PilotAction>(`/admin/pilot/actions/${id}`)
-export const approveAction = (id: string) =>
+export const approveAction = (id: string, ids?: string[]) =>
   api.post<{ action_id: string; activated: number; codified: number; uncodified: number;
              already_live: number; results: ApproveRowResult[] }>(
-    `/admin/pilot/actions/${id}/approve`, {})
+    `/admin/pilot/actions/${id}/approve`, ids ? { ids } : {})
 
 export type ChatHandlers = {
   onStatus?: (msg: string) => void

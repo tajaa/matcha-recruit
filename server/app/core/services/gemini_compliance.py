@@ -528,6 +528,7 @@ For each requirement, include a "penalties" object with enforcement/penalty info
 
 For each requirement, include "implementation_steps": a short ordered list (3-6 items) of concrete, actionable steps an employer takes to come into compliance (e.g. register with the agency, adopt/post the required notice, file a form by its deadline, train staff, retain records). One sentence per step, specific to this requirement and jurisdiction.
 {regulation_key_instruction}
+SOURCE — CRITICAL: For each requirement, "source_url" MUST point at the PRIMARY LEGAL SOURCE — the actual statute or regulation text on an official government site (a .gov / .mil domain, ecfr.gov, federalregister.gov, a state legislature site like leginfo.legislature.ca.gov or nysenate.gov, or an official municipal code host like library.municode.com or codelibrary.amlegal.com). Do NOT use a summary page, a news article, a law-firm client alert, or an HR/payroll vendor page (shrm.org, adp.com, paycor, gusto, nolo, justia, natlawreview, jdsupra, etc.) as the source_url. Also return "statute_citation": the precise legal citation for the obligation (e.g. "29 CFR § 1910.1030", "Cal. Health & Safety Code § 117600", "L.A.M.C. § 187.02"). If you cannot identify the exact statute/regulation and its official-government source, set "statute_citation" to null and use the best available "source_url" — never fabricate a citation or a .gov URL.
 Today's date is {date.today().isoformat()}. Return ONLY rates/values currently in effect.
 
 Respond with JSON:
@@ -545,8 +546,9 @@ Respond with JSON:
       "numeric_value": <float or null>,
       "effective_date": "YYYY-MM-DD" or null,
       "expiration_date": <"YYYY-MM-DD" or null — the date this value is scheduled to change or typically changes (e.g. minimum wage adjusts each Jan 1); null when no change is scheduled or the cadence is unknown>,
-      "source_url": "https://...",
+      "source_url": "https://...  (PRIMARY legal source on an official government site — see SOURCE rule above)",
       "source_name": "Source Name",
+      "statute_citation": <precise legal citation e.g. "29 CFR § 1910.1030" | "Cal. Health & Safety Code § 117600"; null if you cannot name the exact statute/regulation>,
       "requires_written_policy": true | false,
       "no_rule_applies": <true ONLY when this row exists solely to report that no rule applies — i.e. you found NO obligation for this category in this jurisdiction and are returning a placeholder saying so. If the employer has a REAL obligation, this is false EVEN WHEN its value is "none" (e.g. "Daily Overtime Threshold: this state has no daily overtime" is a real requirement — no_rule_applies is false).>,
       "cited_sources": <when statute text is provided above: array of bracketed ids like ["S1"] whose text states this value; else omit>,
@@ -613,8 +615,9 @@ Respond with JSON:
       "numeric_value": <float or null>,
       "effective_date": "YYYY-MM-DD" or null,
       "expiration_date": <"YYYY-MM-DD" or null — the date this value is scheduled to change or typically changes; null when no change is scheduled or the cadence is unknown>,
-      "source_url": "https://...",
+      "source_url": "https://...  (PRIMARY legal source on an official government site — see SOURCE rule above)",
       "source_name": "Source Name",
+      "statute_citation": <precise legal citation e.g. "29 CFR § 1910.1030" | "Cal. Health & Safety Code § 117600"; null if you cannot name the exact statute/regulation>,
       "requires_written_policy": true | false,
       "no_rule_applies": <true ONLY when this row exists solely to report that no rule applies — i.e. you found NO obligation for this category in this jurisdiction and are returning a placeholder saying so. If the employer has a REAL obligation, this is false EVEN WHEN its value is "none" (e.g. "Daily Overtime Threshold: this state has no daily overtime" is a real requirement — no_rule_applies is false).>,
       "trigger_conditions": {{"type": "entity_type or attribute", "value": "trigger value"}},

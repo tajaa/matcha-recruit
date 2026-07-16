@@ -494,6 +494,24 @@ async def resolve_proposal(conn, proposal: dict) -> tuple[Optional[dict], List[s
     return resolved, errors
 
 
+def _codify_gate(regulation_key, citation, source_url, source_url_status):
+    """Deterministic 'can this become AUTHORITATIVE?' check. Returns
+    (ok, reason, domain_class). Authoritative demands the actual primary legal
+    source — never a blog/aggregator link. A failed gate never blocks the approve;
+    the row just stays live-but-uncodified with the reason shown."""
+    from .compliance_evals.authority import classify_domain
+    domain_class = classify_domain(source_url) if source_url else "missing"
+    if not regulation_key:
+        return False, "no regulation key", domain_class
+    if not citation or not str(citation).strip():
+        return False, "no statute citation from research", domain_class
+    if domain_class != "primary":
+        return False, f"source is not a primary legal source ({domain_class})", domain_class
+    if source_url_status == "dead":
+        return False, "source link is dead", domain_class
+    return True, None, domain_class
+
+
 # --------------------------------------------------------------------------- #
 # Action runner (background task — owns its connections)
 # --------------------------------------------------------------------------- #
@@ -582,18 +600,47 @@ async def _run_research(action_id: UUID, actor_id, params: dict):
         )
         written = result.get("jurisdictions_written") or [jid]
         staged = await conn.fetch(
-            "SELECT id FROM jurisdiction_requirements "
-            "WHERE status='pending' AND jurisdiction_id = ANY($1::uuid[]) "
-            "AND category = ANY($2::text[]) AND created_at >= $3",
+            "SELECT r.id, r.title, r.jurisdiction_level, r.regulation_key, r.category, "
+            "       r.source_url, r.source_url_status, r.metadata, j.state, j.city "
+            "FROM jurisdiction_requirements r JOIN jurisdictions j ON j.id = r.jurisdiction_id "
+            "WHERE r.status='pending' AND r.jurisdiction_id = ANY($1::uuid[]) "
+            "AND r.category = ANY($2::text[]) AND r.created_at >= $3",
             written, categories, run_started,
         )
         staged_ids = [r["id"] for r in staged]
+        # Per-policy detail for the checklist card — provenance + the codify gate,
+        # computed once here so the frontend needs no extra call.
+        staged_rows = []
+        for r in staged:
+            meta = r["metadata"]
+            if isinstance(meta, str):
+                try:
+                    meta = json.loads(meta)
+                except Exception:
+                    meta = {}
+            meta = meta or {}
+            citation = meta.get("research_citation") or (
+                (meta.get("grounded_citations") or [None])[0])
+            ok, reason, domain_class = _codify_gate(
+                r["regulation_key"], citation, r["source_url"], r["source_url_status"])
+            staged_rows.append({
+                "id": str(r["id"]), "title": r["title"],
+                "jurisdiction_level": r["jurisdiction_level"],
+                "regulation_key": r["regulation_key"], "category": r["category"],
+                "source_url": r["source_url"], "source_domain_class": domain_class,
+                "source_url_status": r["source_url_status"],
+                "research_citation": citation,
+                "state": r["state"], "city": r["city"],
+                "gate_ok": ok, "gate_reason": reason,
+            })
         await _set_action(
             conn, action_id, status="done", staged_ids=staged_ids,
             progress={"phase": "done"},
             result={
                 "new": result.get("new", 0),
                 "staged": len(staged_ids),
+                "staged_rows": staged_rows,
+                "codifiable": sum(1 for s in staged_rows if s["gate_ok"]),
                 "categories_written": result.get("categories") or [],
                 "failed": result.get("failed") or [],
                 "state": state, "city": city, "industry_tag": industry_tag,

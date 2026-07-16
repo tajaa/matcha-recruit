@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field
 from app.database import get_connection
 from ..dependencies import require_admin
 from ..services import compliance_pilot as cp
+from ..services.change_context import set_change_context
 from ..services.redis_cache import check_rate_limit
 
 logger = logging.getLogger(__name__)
@@ -70,6 +71,11 @@ class ActionCreate(BaseModel):
     city: Optional[str] = Field(None, max_length=120)
     industry_tag: Optional[str] = Field(None, max_length=80)
     categories: Optional[List[str]] = None
+
+
+class ApproveBody(BaseModel):
+    # Specific staged requirement ids to commit; omit/empty = all staged.
+    ids: Optional[List[str]] = None
 
 
 # --------------------------------------------------------------------------- #
@@ -397,12 +403,18 @@ async def _snapshot_bg(snap_targets: list):
 
 
 @router.post("/actions/{action_id}/approve")
-async def approve_action(action_id: str, background_tasks: BackgroundTasks,
+async def approve_action(action_id: str, body: ApproveBody, background_tasks: BackgroundTasks,
                          current_user=Depends(require_admin)):
-    """Commit a research action's staged rows: activate + codify (shared core), then
-    re-embed the affected jurisdictions so ask mode can see the new law."""
+    """Commit SELECTED staged policies: activate them, then make each AUTHORITATIVE
+    via codify_from_requirement — but only when it passes the deterministic
+    provenance gate (regulation_key + a statute citation from research + a live
+    PRIMARY .gov source). Gate failures stay live-but-uncodified with the reason.
+    """
     from ..services.research_review import approve_staged
+    from ..services.scope_registry.codify import codify_from_requirement
+    from ..services.compliance_pilot import _codify_gate
 
+    actor_id = getattr(current_user, "id", None)
     async with get_connection() as conn:
         act = await conn.fetchrow(
             "SELECT session_id, kind, staged_ids, status FROM compliance_pilot_actions WHERE id = $1",
@@ -412,48 +424,86 @@ async def approve_action(action_id: str, background_tasks: BackgroundTasks,
             raise HTTPException(status_code=404, detail="Action not found")
         if act["kind"] != "research":
             raise HTTPException(status_code=400, detail="Only research actions can be codified")
-        staged = list(act["staged_ids"] or [])
+        staged = [str(s) for s in (act["staged_ids"] or [])]
+        if body.ids:
+            want = set(body.ids)
+            staged = [s for s in staged if s in want]
         if not staged:
-            raise HTTPException(status_code=400, detail="Nothing staged to codify")
-        # Re-derive still-pending — a concurrent Pipeline approval is benign.
-        pending = await conn.fetch(
-            "SELECT id, jurisdiction_id FROM jurisdiction_requirements "
-            "WHERE id = ANY($1::uuid[]) AND status='pending'",
-            staged,
+            raise HTTPException(status_code=400, detail="Nothing selected to commit")
+        # Still-pending rows among the selection (concurrent Pipeline approval is benign)
+        # + the fields the codify gate needs.
+        rows = await conn.fetch(
+            "SELECT r.id, r.jurisdiction_id, r.title, r.regulation_key, r.source_url, "
+            "       r.source_url_status, r.metadata, j.state, j.city "
+            "FROM jurisdiction_requirements r JOIN jurisdictions j ON j.id = r.jurisdiction_id "
+            "WHERE r.id = ANY($1::uuid[]) AND r.status='pending'",
+            [UUID(s) for s in staged],
         )
-    pending_ids = [r["id"] for r in pending]
-    jurisdiction_ids = list({r["jurisdiction_id"] for r in pending})
+    pending_ids = [r["id"] for r in rows]
+    jurisdiction_ids = list({r["jurisdiction_id"] for r in rows})
     already_live = len(staged) - len(pending_ids)
 
-    actor_id = getattr(current_user, "id", None)
+    # 1. Activate (shared core; also reconciles keys that already had a confirmed
+    #    classification). Rows are now 'active' — codify_from_requirement's guard.
     core = await approve_staged(pending_ids, actor_id, source="pilot_commit")
 
-    # Record the approve as its own action row (transcript re-renders it).
+    # 2. Per-row: gate → codify_from_requirement (mints the confirmed classification
+    #    for the admin-confirmed citation, then reconcile stamps citation_verified_at).
+    outcomes = []
+    snap_targets = []
+    async with get_connection() as conn:
+        await set_change_context(conn, "pilot_commit", actor_id)
+        for r in rows:
+            meta = r["metadata"]
+            if isinstance(meta, str):
+                try:
+                    meta = json.loads(meta)
+                except Exception:
+                    meta = {}
+            meta = meta or {}
+            citation = meta.get("research_citation") or (meta.get("grounded_citations") or [None])[0]
+            ok, reason, _cls = _codify_gate(
+                r["regulation_key"], citation, r["source_url"], r["source_url_status"])
+            codified, statute_citation, citation_url = False, None, None
+            if ok:
+                try:
+                    res = await codify_from_requirement(
+                        conn, r["id"], citation=citation, source_url=r["source_url"], admin_id=actor_id)
+                    codified = bool(res.get("codified"))
+                    statute_citation = res.get("statute_citation")
+                    citation_url = res.get("citation_url")
+                    if not codified:
+                        reason = "codify ran but the citation wasn't stamped"
+                except Exception as exc:  # noqa: BLE001 — row is already live; never fail approve
+                    logger.warning("compliance_pilot: codify failed for %s: %s", r["id"], exc)
+                    reason = f"codify error: {str(exc)[:120]}"
+            if codified and (citation_url or r["source_url"]):
+                snap_targets.append((r["id"], citation_url or r["source_url"]))
+            outcomes.append({
+                "id": str(r["id"]), "title": r["title"], "activated": True,
+                "codified": codified, "statute_citation": statute_citation,
+                "citation_url": citation_url, "gate_reason": None if codified else reason,
+                "state": r["state"], "city": r["city"],
+            })
+
+    codified_n = sum(1 for o in outcomes if o["codified"])
+    result = {
+        "activated": core["activated"], "codified": codified_n,
+        "uncodified": len(outcomes) - codified_n, "already_live": already_live,
+        "results": outcomes,
+    }
     async with get_connection() as conn:
         arow = await conn.fetchrow(
             "INSERT INTO compliance_pilot_actions "
             "(session_id, kind, params, status, result, actor_id, finished_at) "
             "VALUES ($1, 'approve', $2::jsonb, 'done', $3::jsonb, $4, NOW()) RETURNING id",
-            act["session_id"],
-            json.dumps({"from_action": action_id}),
-            json.dumps({
-                "activated": core["activated"], "codified": core["codified"],
-                "uncodified": core["uncodified"], "already_live": already_live,
-                "results": core["results"],
-            }),
-            actor_id,
+            act["session_id"], json.dumps({"from_action": action_id}),
+            json.dumps(result), actor_id,
         )
 
     if jurisdiction_ids:
         background_tasks.add_task(_embed_bg, jurisdiction_ids)
-    if core["snap_targets"]:
-        background_tasks.add_task(_snapshot_bg, core["snap_targets"])
+    if snap_targets:
+        background_tasks.add_task(_snapshot_bg, snap_targets)
 
-    return {
-        "action_id": str(arow["id"]),
-        "activated": core["activated"],
-        "codified": core["codified"],
-        "uncodified": core["uncodified"],
-        "already_live": already_live,
-        "results": core["results"],
-    }
+    return {"action_id": str(arow["id"]), **result}

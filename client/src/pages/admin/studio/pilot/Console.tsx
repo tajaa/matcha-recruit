@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Loader2, Send, Play, Check, ArrowRight, AlertTriangle, ExternalLink } from 'lucide-react'
+import { Loader2, Send, Play, Check, ArrowRight, AlertTriangle, ExternalLink, Circle, Square, CheckSquare } from 'lucide-react'
 import {
   streamPilotChat, createAction, getAction, approveAction,
   type PilotSession, type PilotMessage, type PilotAction, type Proposal,
-  type Citation, type ApproveRowResult,
+  type Citation, type ApproveRowResult, type StagedRow,
 } from '../../../../api/compliancePilot'
 import { libraryLink, coverageLink } from '../utils'
 
@@ -16,7 +16,8 @@ type Props = {
 type LiveMsg = { role: 'user' | 'assistant'; content: string; metadata?: PilotMessage['metadata'] }
 
 // Narrow shapes for each action kind's result JSONB (backend-owned; kept loose).
-type ResearchResult = { staged?: number; state?: string; city?: string | null; industry_tag?: string }
+type ResearchResult = { staged?: number; codifiable?: number; staged_rows?: StagedRow[]
+  state?: string; city?: string | null; industry_tag?: string }
 type ApproveResultBody = { activated?: number; codified?: number; uncodified?: number; already_live?: number; results?: ApproveRowResult[] }
 type DeadRow = { id: string; category: string; source_url: string; state: string; city: string }
 type CheckResult = { checked?: number; dead?: number; unreachable?: number; missing_citation?: number; dead_rows?: DeadRow[]; state?: string; city?: string | null }
@@ -240,9 +241,6 @@ function ProposalCard({ proposal, onRun, disabled }: {
 function ActionCard({ action, onApproved, approved }: {
   action: PilotAction; onApproved: () => void; approved: boolean
 }) {
-  const [approving, setApproving] = useState(false)
-  const [err, setErr] = useState<string | null>(null)
-
   if (action.status === 'running') {
     const msg = action.progress?.message ?? 'Working…'
     return (
@@ -264,61 +262,43 @@ function ActionCard({ action, onApproved, approved }: {
 
   // done
   if (action.kind === 'research') {
-    const r = (action.result ?? {}) as ResearchResult
-    const staged = r.staged ?? 0
-    return (
-      <div className="rounded-lg border border-white/[0.06] px-3 py-2.5">
-        <p className="text-xs text-zinc-200">
-          Staged <b>{staged}</b> requirement{staged === 1 ? '' : 's'} for {r.city ? `${r.city}, ` : ''}{r.state}
-          {r.industry_tag && <span className="text-zinc-500"> · {r.industry_tag}</span>}
-        </p>
-        <p className="text-[11px] text-zinc-500 mt-0.5">
-          Staged rows aren't live or searchable until codified.
-        </p>
-        {staged > 0 && !approved ? (
-          <div className="mt-2 flex items-center gap-2">
-            <button disabled={approving}
-              onClick={async () => {
-                setApproving(true); setErr(null)
-                try { await approveAction(action.id); onApproved() }
-                catch { setErr('Codify failed — the rows may already be committed.') }
-                finally { setApproving(false) }
-              }}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/15 px-2.5 py-1 text-xs text-emerald-200 hover:bg-emerald-500/25 disabled:opacity-40">
-              {approving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
-              Approve &amp; codify all
-            </button>
-            <a href="/admin/studio?view=pipeline&section=review"
-              className="inline-flex items-center gap-1 text-xs text-cyan-400/80 hover:text-cyan-300">
-              Review in Pipeline <ArrowRight className="h-3 w-3" />
-            </a>
-          </div>
-        ) : staged > 0 && approved ? (
-          <p className="mt-1 text-[11px] text-emerald-400/70">Committed.</p>
-        ) : (
-          <p className="mt-1 text-[11px] text-zinc-600">Nothing new — the catalog already covered this.</p>
-        )}
-        {err && <p className="mt-1 text-[11px] text-red-400">{err}</p>}
-      </div>
-    )
+    return <ResearchCard action={action} approved={approved} onApproved={onApproved} />
   }
 
   if (action.kind === 'approve') {
     const r = (action.result ?? {}) as ApproveResultBody
     const results = r.results ?? []
-    const first = results[0]
     return (
       <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/[0.03] px-3 py-2.5">
         <p className="text-xs text-zinc-200">
           Committed <b>{r.activated ?? 0}</b> · codified <b className="text-emerald-300">{r.codified ?? 0}</b>
           {(r.already_live ?? 0) > 0 && <span className="text-zinc-500"> · {r.already_live} already live</span>}
         </p>
-        {first && (first.state || first.city) && (
-          <a href={libraryLink(first.state, first.city)}
-            className="mt-1.5 inline-flex items-center gap-1 text-xs text-emerald-400 hover:text-emerald-300">
-            View in Library <ExternalLink className="h-3 w-3" />
-          </a>
-        )}
+        <div className="mt-1.5 space-y-1">
+          {results.map((row) => (
+            <div key={row.id} className="text-[11px] flex items-center gap-2">
+              {row.codified
+                ? <Check className="h-3 w-3 shrink-0 text-emerald-400" />
+                : <Circle className="h-3 w-3 shrink-0 text-amber-400/70" />}
+              <span className="text-zinc-300 truncate">{row.title}</span>
+              {row.codified ? (
+                <span className="text-emerald-400/80 shrink-0">
+                  {row.citation_url
+                    ? <a href={row.citation_url} target="_blank" rel="noreferrer" className="hover:text-emerald-300">{row.statute_citation || 'codified'}</a>
+                    : (row.statute_citation || 'codified')}
+                </span>
+              ) : (
+                <span className="text-zinc-500 shrink-0">live · {row.gate_reason || 'not codified'}</span>
+              )}
+              {(row.state || row.city) && (
+                <a href={libraryLink(row.state, row.city)}
+                  className="text-cyan-400/60 hover:text-cyan-300 shrink-0 inline-flex items-center gap-0.5">
+                  Library <ExternalLink className="h-2.5 w-2.5" />
+                </a>
+              )}
+            </div>
+          ))}
+        </div>
       </div>
     )
   }
@@ -347,6 +327,105 @@ function ActionCard({ action, onApproved, approved }: {
           ))}
         </div>
       )}
+    </div>
+  )
+}
+
+const DOMAIN_BADGE: Record<string, string> = {
+  primary: 'text-emerald-300 bg-emerald-500/10',
+  secondary_official: 'text-amber-300 bg-amber-500/10',
+  aggregator: 'text-red-300 bg-red-500/10',
+  unknown: 'text-zinc-400 bg-zinc-500/10',
+  missing: 'text-zinc-500 bg-zinc-500/10',
+}
+
+// Research-done card: the discovered policies as a checklist. Tick the one(s) you
+// want → commit → each passes the codify gate (primary .gov source + citation) to
+// become authoritative, or stays live-but-uncodified with the reason.
+function ResearchCard({ action, approved, onApproved }: {
+  action: PilotAction; approved: boolean; onApproved: () => void
+}) {
+  const r = (action.result ?? {}) as ResearchResult
+  const rows = r.staged_rows ?? []
+  const [sel, setSel] = useState<Set<string>>(new Set())
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+
+  if (rows.length === 0) {
+    return (
+      <div className="rounded-lg border border-white/[0.06] px-3 py-2.5">
+        <p className="text-xs text-zinc-400">Nothing new for {r.city ? `${r.city}, ` : ''}{r.state} — the catalog already covered this.</p>
+      </div>
+    )
+  }
+
+  const toggle = (id: string) => setSel((p) => {
+    const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n
+  })
+
+  return (
+    <div className="rounded-lg border border-white/[0.06] px-3 py-2.5">
+      <p className="text-xs text-zinc-200">
+        Discovered <b>{rows.length}</b> polic{rows.length === 1 ? 'y' : 'ies'} for {r.city ? `${r.city}, ` : ''}{r.state}
+        <span className="text-zinc-500"> · {r.codifiable ?? 0} codifiable · pick which to commit</span>
+      </p>
+
+      <div className="mt-2 space-y-1.5">
+        {rows.map((row: StagedRow) => {
+          const on = sel.has(row.id)
+          return (
+            <div key={row.id} className="flex items-start gap-2">
+              {!approved && (
+                <button type="button" onClick={() => toggle(row.id)} className="mt-0.5 shrink-0 text-zinc-400 hover:text-emerald-300">
+                  {on ? <CheckSquare className="h-3.5 w-3.5 text-emerald-400" /> : <Square className="h-3.5 w-3.5" />}
+                </button>
+              )}
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-[12px] text-zinc-200">{row.title}</span>
+                  <span className="text-[9px] uppercase tracking-wide text-zinc-500">{row.jurisdiction_level}</span>
+                  <span className={`text-[9px] px-1 py-0.5 rounded ${DOMAIN_BADGE[row.source_domain_class] ?? DOMAIN_BADGE.unknown}`}>
+                    {row.source_domain_class}
+                  </span>
+                </div>
+                <div className="text-[10px] text-zinc-500 mt-0.5">
+                  {row.research_citation
+                    ? (row.source_url
+                        ? <a href={row.source_url} target="_blank" rel="noreferrer" className="hover:text-zinc-300">{row.research_citation}</a>
+                        : row.research_citation)
+                    : <span className="text-zinc-600">no statute citation</span>}
+                  {row.gate_ok
+                    ? <span className="ml-1.5 text-emerald-400/70">· codifiable</span>
+                    : <span className="ml-1.5 text-amber-400/60">· {row.gate_reason}</span>}
+                </div>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      {!approved ? (
+        <div className="mt-2.5 flex items-center gap-2">
+          <button disabled={busy || sel.size === 0}
+            onClick={async () => {
+              setBusy(true); setErr(null)
+              try { await approveAction(action.id, [...sel]); onApproved() }
+              catch { setErr('Commit failed — rows may already be committed.') }
+              finally { setBusy(false) }
+            }}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/15 px-2.5 py-1 text-xs text-emerald-200 hover:bg-emerald-500/25 disabled:opacity-30">
+            {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+            Commit selected ({sel.size})
+          </button>
+          <a href="/admin/studio?view=pipeline&section=review"
+            className="inline-flex items-center gap-1 text-xs text-cyan-400/80 hover:text-cyan-300">
+            Review in Pipeline <ArrowRight className="h-3 w-3" />
+          </a>
+        </div>
+      ) : (
+        <p className="mt-2 text-[11px] text-emerald-400/70">Committed — see the outcome below.</p>
+      )}
+      {err && <p className="mt-1 text-[11px] text-red-400">{err}</p>}
     </div>
   )
 }

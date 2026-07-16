@@ -2110,6 +2110,12 @@ async def _upsert_requirements_additive(
         meta_dict["grounding"] = req.get("grounding") or "ungrounded"
         if req.get("grounded_citations"):
             meta_dict["grounded_citations"] = req["grounded_citations"]
+        # Candidate legal citation the model returned (primary-source prompt). Kept
+        # in metadata only — the statute_citation COLUMN stays reconcile-owned; this
+        # is the value the pilot's codify step confirms into that trio.
+        rc = req.get("statute_citation")
+        if rc and str(rc).strip():
+            meta_dict["research_citation"] = str(rc).strip()[:500]
         # Sink-side penalty guard for EVERY research path (grounded or not): drop
         # the run-local cited_sources transport key and any insubstantive shell,
         # so ungrounded runs can't persist corpus-local S-ids or inflate the
