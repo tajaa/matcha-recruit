@@ -10,6 +10,7 @@ from .onboarding import router as onboarding_router
 from .invitations import router as invitations_router
 from .offer_letters import router as offer_letters_router, candidate_router as offer_letters_candidate_router
 from .er_copilot import router as er_copilot_router, public_router as er_copilot_public_router
+from .help_assistant import router as help_assistant_router
 from .ir_incidents import router as ir_incidents_router
 from .broker_portfolio import router as broker_portfolio_router
 from .broker_external import router as broker_external_router
@@ -88,6 +89,9 @@ matcha_router.include_router(
     prefix="/shared/er-export",
     tags=["er-export-public"],
 )
+# In-app per-page help guide — no feature gate: available to every authed
+# business tenant; the FE only surfaces it on pages with a pageHelp.ts entry.
+matcha_router.include_router(help_assistant_router, prefix="/assistant", tags=["help-assistant"])
 matcha_router.include_router(ir_incidents_router, prefix="/ir/incidents", tags=["ir-incidents"],
                              dependencies=[Depends(require_feature("incidents"))])
 matcha_router.include_router(ir_onboarding_router, prefix="/ir-onboarding", tags=["ir-onboarding"],

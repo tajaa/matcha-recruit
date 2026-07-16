@@ -4,6 +4,8 @@ import { Menu, X, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { useMe } from '../hooks/useMe'
 import { Logo } from '../components/ui'
 import { LayoutContext } from './LayoutContext'
+import HelpAssistant from '../components/help/HelpAssistant'
+import { resolvePageHelp } from '../data/pageHelp'
 
 const PERSONAL_ALLOWED = new Set(['/app/settings'])
 
@@ -173,6 +175,13 @@ export default function AppLayout({ sidebar, logoLabel, variant }: { sidebar: Re
         }`}>
           <Outlet />
         </main>
+
+        {/* Floating per-page help guide — only on pages with a pageHelp entry.
+            key resets chat state when the user navigates to another page. */}
+        {(() => {
+          const help = resolvePageHelp(pathname)
+          return help ? <HelpAssistant key={help.match} pageHelp={help} /> : null
+        })()}
 
       </div>
     </LayoutContext.Provider>
