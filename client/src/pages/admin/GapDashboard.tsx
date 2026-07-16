@@ -324,6 +324,21 @@ export default function GapDashboard() {
 
       {enrich.error && <div className="mb-4 ml-9 rounded-md border border-red-500/30 bg-red-500/5 p-3 text-sm text-red-300">{enrich.error}</div>}
 
+      {/* Statutory fit — the deterministic second opinion, and deliberately
+          OUTSIDE the `dossier &&` gate below. It needs no gap session: it is
+          computed from the catalog and the company's projections, so it answers
+          on a company that has never been analyzed — which is exactly when
+          "what does this business still need?" is worth asking. Mounted inside
+          the dossier block it silently rendered nothing for every never_run
+          company, Sunset included.
+          It will disagree with the AI dossier's numbers; that difference is the
+          point (curated statutory floor vs per-run model breadth), so they sit
+          side by side rather than reconciled into one figure that hides which
+          is which. */}
+      <div className="ml-9 mb-5">
+        <StatutoryFitPanel companyId={companyId} />
+      </div>
+
       {/* never_run empty state */}
       {data?.status === 'never_run' && !enrich.running && !enrich.done && (
         <div className="ml-9 rounded-xl border border-vsc-border bg-vsc-panel p-8 text-center">
@@ -464,14 +479,6 @@ export default function GapDashboard() {
               </div>
             </div>
           )}
-
-          {/* Statutory fit — the deterministic second opinion. Sits ABOVE the AI
-              dossier's gaps because it is the one whose "missing" is grounded in
-              a curated statutory checklist rather than a per-run model scope.
-              The two WILL report different numbers; that difference is the point
-              (floor vs breadth), so they're shown side by side rather than
-              reconciled into one figure that hides which is which. */}
-          <StatutoryFitPanel companyId={companyId} />
 
           {/* Gaps — the core */}
           <div className="rounded-xl border border-vsc-border bg-vsc-panel/40 p-4">
