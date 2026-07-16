@@ -6,7 +6,7 @@ import {
 } from 'lucide-react'
 import { LABEL } from '../ui/typography'
 import {
-  addRemediationNote, dismissRemediation, fetchAssignableUsers, reopenRemediation,
+  dismissRemediation, fetchAssignableUsers, reopenRemediation,
 } from '../../api/compliance'
 import type {
   AssignableUser, ComplianceActionPlanUpdate, ComplianceRiskSummary,
