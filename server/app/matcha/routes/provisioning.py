@@ -6,6 +6,7 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
 import os
 import secrets
 import time
@@ -40,6 +41,13 @@ from ..services.onboarding_orchestrator import (
     start_slack_onboarding,
 )
 from ..services.hris_service import PROVIDER_HRIS, HRISProvisioningError
+
+# Several handlers below already call logger.error(...) on their failure paths
+# (Gusto company fetch; Finch Connect-session / sandbox / token exchange) but
+# the module never defined one — so those lines raised NameError at request
+# time, replacing a logged upstream error with a 500. Same class of bug as the
+# IR NameErrors that test_review_fixes.py locks down.
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -1655,8 +1663,37 @@ GUSTO_OAUTH_CLIENT_ID = os.getenv("GUSTO_OAUTH_CLIENT_ID")
 GUSTO_OAUTH_CLIENT_SECRET = os.getenv("GUSTO_OAUTH_CLIENT_SECRET")
 GUSTO_OAUTH_REDIRECT_URI = os.getenv("GUSTO_OAUTH_REDIRECT_URI")
 
+def _require_gusto_oauth_config() -> None:
+    """Raise 503 unless the Gusto OAuth env vars are present.
+
+    Mirrors _require_finch_oauth_config. This used to be a module-level `raise`,
+    which made an *optional* integration's credentials a hard requirement for
+    importing app.matcha.routes at all — so every unit test touching any route
+    module had to fake Gusto creds, and a deploy missing them died at import
+    with no clue which of the ~30 routers was at fault. Finch, the primary HRIS
+    path, never did this; Gusto now matches it.
+    """
+    missing = [
+        name
+        for name, value in (
+            ("GUSTO_OAUTH_CLIENT_ID", GUSTO_OAUTH_CLIENT_ID),
+            ("GUSTO_OAUTH_CLIENT_SECRET", GUSTO_OAUTH_CLIENT_SECRET),
+            ("GUSTO_OAUTH_REDIRECT_URI", GUSTO_OAUTH_REDIRECT_URI),
+        )
+        if not value
+    ]
+    if missing:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Gusto OAuth is not configured (missing {', '.join(missing)})",
+        )
+
+
 if not all([GUSTO_OAUTH_CLIENT_ID, GUSTO_OAUTH_CLIENT_SECRET, GUSTO_OAUTH_REDIRECT_URI]):
-    raise RuntimeError("Missing Gusto OAuth env vars: GUSTO_OAUTH_CLIENT_ID, GUSTO_OAUTH_CLIENT_SECRET, GUSTO_OAUTH_REDIRECT_URI")
+    logger.warning(
+        "[Provisioning] Gusto OAuth env vars missing — /provisioning/hris/gusto/* will 503 "
+        "until GUSTO_OAUTH_CLIENT_ID / GUSTO_OAUTH_CLIENT_SECRET / GUSTO_OAUTH_REDIRECT_URI are set."
+    )
 GUSTO_BASE_URL = os.getenv("GUSTO_BASE_URL", "https://api.gusto-demo.com")
 GUSTO_AUTHORIZE_URL = f"{GUSTO_BASE_URL}/oauth/authorize"
 GUSTO_TOKEN_URL = f"{GUSTO_BASE_URL}/oauth/token"
@@ -1668,6 +1705,7 @@ async def authorize_gusto_oauth(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Return Gusto OAuth authorization URL."""
+    _require_gusto_oauth_config()
     company_id = await get_client_company_id(current_user)
 
     # Check feature flag
@@ -1713,6 +1751,7 @@ async def gusto_oauth_callback(
     state: str = Query(...),
 ):
     """Handle Gusto OAuth callback — exchange code for token."""
+    _require_gusto_oauth_config()
     # Validate state
     async with get_connection() as conn:
         oauth_state = await conn.fetchrow(
