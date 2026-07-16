@@ -2,9 +2,10 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   AlertTriangle, ArrowRight, CheckCircle2, ChevronRight, Clock,
-  History, Loader2, RotateCcw, ShieldCheck, UserPlus, X,
+  History, Info, Loader2, RotateCcw, ShieldCheck, UserPlus, X,
 } from 'lucide-react'
 import { LABEL } from '../ui/typography'
+import { HelpHint } from '../ui/HelpHint'
 import {
   dismissRemediation, fetchAssignableUsers, reopenRemediation,
 } from '../../api/compliance'
@@ -33,6 +34,19 @@ const SOURCE_LABEL: Record<RiskIssue['source'], string> = {
 const FIX_VERB: Record<RiskIssue['source'], string> = {
   wage: 'Fix pay', credential: 'Renew', incident: 'Open incident', alert: 'Assign owner',
 }
+
+// Plain-language help for the manager, matched to what each element controls.
+const HELP = {
+  openIssues: 'Everything currently out of compliance, split by urgency. Critical is a live legal violation (e.g. paid below minimum wage); high/moderate are things to get ahead of, like a license expiring soon.',
+  exposure: 'A rough dollar range of the statutory penalties tied to your open violations, summed from the enforcing agencies’ published fines. It’s an estimate to size the risk, not a bill — some laws don’t name a figure (shown as "unquantified").',
+  affected: 'How many of your employees are named in an open issue right now (underpaid, expired license, etc.). Hover the number to see who.',
+  nextDeadline: 'The soonest thing with a due date — a license expiry, an alert deadline, or a new law taking effect. Fix these before they become violations.',
+  actionQueue: 'Your to-do list, worst first. Click Fix to jump straight to the exact record (the underpaid employee, the incident) and correct it. When you do, the issue clears itself and is logged in Remediation history.',
+  fix: 'Opens the exact record where you fix this — the employee’s pay, their license, or the incident. Once the data is corrected the issue leaves this list automatically.',
+  dismiss: 'Use only if this isn’t a real violation (e.g. the employee is correctly classified as exempt). You must give a reason; it’s recorded. It comes back on its own if the underlying numbers change.',
+  getAhead: 'Things coming up — new laws and deadlines — so you can act before they turn into violations.',
+  history: 'The documented record of every issue you’ve resolved or dismissed: what it was, when, how, and who. This is your paper trail if a claim or audit ever asks "what did you do about it?"',
+} as const
 
 function money(v: number) {
   return `$${Math.round(v).toLocaleString()}`
@@ -81,11 +95,12 @@ export function ComplianceRiskCockpit({
 
   return (
     <div className="space-y-4">
+      <GuideBanner />
       <VerdictBanner critical={p.open_critical} totalOpen={totalOpen} clear={clear} />
 
       {/* Posture strip — one panel, four cells, hairline dividers. */}
       <div className={`${PANEL} grid grid-cols-2 divide-x divide-y divide-white/[0.06] md:grid-cols-4 md:divide-y-0`}>
-        <PostureCell label="Open issues">
+        <PostureCell label="Open issues" hint={HELP.openIssues}>
           <div className="flex flex-col gap-1 mt-0.5">
             <SevLine dot={SEV.critical.dot} n={p.open_critical} word="critical" active={p.open_critical > 0} />
             <SevLine dot={SEV.high.dot} n={p.open_high} word="high" active={p.open_high > 0} />
@@ -94,15 +109,15 @@ export function ComplianceRiskCockpit({
         </PostureCell>
 
         {/* Signature cell: the measured dollar figure + the authority behind it. */}
-        <PostureCell label="Est. penalty exposure">
+        <PostureCell label="Est. penalty exposure" hint={HELP.exposure}>
           <ExposureFigure posture={p} issues={issues} />
         </PostureCell>
 
-        <PostureCell label="Employees affected">
+        <PostureCell label="Employees affected" hint={HELP.affected}>
           <EmployeesAffected posture={p} issues={issues} />
         </PostureCell>
 
-        <PostureCell label="Next deadline">
+        <PostureCell label="Next deadline" hint={HELP.nextDeadline}>
           {p.next_deadline_days != null ? (
             <>
               <p className="font-mono text-2xl font-semibold tabular-nums text-zinc-100">
@@ -120,7 +135,7 @@ export function ComplianceRiskCockpit({
         {/* Action queue */}
         <div className="lg:col-span-2 space-y-2">
           <div className="flex items-center justify-between">
-            <h2 className={LABEL}>Action queue</h2>
+            <h2 className={`${LABEL} flex items-center gap-1`}>Action queue<HelpHint text={HELP.actionQueue} /></h2>
             <span className="text-[11px] text-zinc-600">Ranked by severity, then deadline</span>
           </div>
           {issues.length === 0 ? (
@@ -145,7 +160,7 @@ export function ComplianceRiskCockpit({
 
         {/* Get-ahead lane */}
         <div className="space-y-2">
-          <h2 className={LABEL}>Get ahead</h2>
+          <h2 className={`${LABEL} flex items-center gap-1`}>Get ahead<HelpHint text={HELP.getAhead} /></h2>
           {get_ahead.length === 0 ? (
             <div className={`${PANEL} px-4 py-6 text-sm text-zinc-600`}>Nothing on the horizon.</div>
           ) : (
@@ -199,7 +214,7 @@ function RemediationTrail({
       <button type="button" onClick={() => setOpen((v) => !v)}
         className="flex items-center gap-1.5 text-zinc-500 hover:text-zinc-300 transition-colors">
         <History className="h-3.5 w-3.5" />
-        <span className={LABEL}>Remediation history</span>
+        <span className={`${LABEL} flex items-center gap-1`}>Remediation history<HelpHint text={HELP.history} /></span>
         <span className="text-[11px] text-zinc-600">
           {resolved.length} resolved{dismissedCount > 0 ? ` · ${dismissedCount} dismissed` : ''}
         </span>
@@ -244,6 +259,50 @@ function RemediationTrail({
   )
 }
 
+// ── One-time "how this works" guide (collapses to a reopenable link) ──
+const GUIDE_KEY = 'compliance_cockpit_guide_dismissed'
+
+function GuideBanner() {
+  const [open, setOpen] = useState(() => {
+    try { return localStorage.getItem(GUIDE_KEY) !== '1' } catch { return true }
+  })
+  function close() {
+    setOpen(false)
+    try { localStorage.setItem(GUIDE_KEY, '1') } catch { /* ignore */ }
+  }
+
+  if (!open) {
+    return (
+      <button type="button" onClick={() => setOpen(true)}
+        className="inline-flex items-center gap-1.5 text-[11px] text-zinc-500 hover:text-zinc-300 transition-colors">
+        <Info className="h-3.5 w-3.5" /> How this page works
+      </button>
+    )
+  }
+  return (
+    <div className="rounded-lg border border-white/[0.08] bg-zinc-900/40 px-4 py-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-start gap-2">
+          <Info className="h-4 w-4 text-emerald-400 shrink-0 mt-0.5" />
+          <div className="text-xs text-zinc-300 space-y-1.5">
+            <p className="text-zinc-100 font-medium">Your compliance risk at a glance — and how to clear it.</p>
+            <ul className="space-y-1 text-zinc-400">
+              <li>• The <b className="text-zinc-200">strip</b> up top measures where you stand: open issues by urgency, the estimated penalty exposure, who's affected, and your next deadline. Hover any <span className="text-zinc-300">(?)</span> for detail.</li>
+              <li>• The <b className="text-zinc-200">Action queue</b> is your to-do list, worst first. Hit <span className="text-emerald-300">Fix</span> to jump to the exact record and correct it — the issue then clears itself.</li>
+              <li>• Every fix is written to <b className="text-zinc-200">Remediation history</b> automatically (who, when, how) — your paper trail for audits and claims.</li>
+              <li>• Not a real violation? <span className="text-zinc-300">Dismiss</span> it with a reason. It comes back on its own if the numbers change.</li>
+            </ul>
+          </div>
+        </div>
+        <button type="button" onClick={close} aria-label="Dismiss guide"
+          className="shrink-0 text-zinc-500 hover:text-zinc-200 transition-colors">
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+    </div>
+  )
+}
+
 // ── Verdict banner (the glance-value annunciator) ──
 function VerdictBanner({ critical, totalOpen, clear }: { critical: number; totalOpen: number; clear: boolean }) {
   if (clear) {
@@ -272,10 +331,12 @@ function VerdictBanner({ critical, totalOpen, clear }: { critical: number; total
   )
 }
 
-function PostureCell({ label, children }: { label: string; children: React.ReactNode }) {
+function PostureCell({ label, children, hint }: { label: string; children: React.ReactNode; hint?: string }) {
   return (
     <div className="px-4 py-3">
-      <p className={LABEL}>{label}</p>
+      <p className={`${LABEL} flex items-center gap-1`}>
+        {label}{hint && <HelpHint text={hint} />}
+      </p>
       {children}
     </div>
   )
@@ -393,7 +454,7 @@ function IssueRow({
             </button>
           ) : (
             <>
-              <button type="button" onClick={onFix}
+              <button type="button" onClick={onFix} title={HELP.fix}
                 className="inline-flex items-center gap-1 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-xs text-emerald-300 hover:bg-emerald-500/20 transition-colors">
                 {FIX_VERB[issue.source]} <ArrowRight className="h-3 w-3" />
               </button>
