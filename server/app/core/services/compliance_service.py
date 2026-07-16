@@ -1345,6 +1345,35 @@ async def _is_jurisdiction_fresh(
     return age < timedelta(days=threshold_days)
 
 
+def _authority_label(level: Optional[str], display_name: Optional[str]) -> Optional[str]:
+    """A display label for an issuing jurisdiction, from its `jurisdictions` row.
+
+    `display_name` is authored inconsistently ("los angeles, CA" for the city,
+    "Los Angeles, CA" for the county that contains it), so title-case the place
+    while preserving a trailing 2-letter state code, and disambiguate a county
+    from the identically-named city inside it.
+    """
+    if not display_name:
+        return None
+    name = display_name.strip()
+    if not name:
+        return None
+
+    place, _, region = name.partition(",")
+    place = place.strip()
+    region = region.strip()
+    # Only re-case an all-lower place; a name that already carries capitals may
+    # hold something .title() would mangle ("City of Los Angeles" is fine, but
+    # so is a hyphenated or apostrophed name).
+    if place.islower():
+        place = place.title()
+    if level == "county" and "county" not in place.lower():
+        place = f"{place} County"
+    if not region:
+        return place
+    return f"{place}, {region.upper() if len(region) == 2 else region}"
+
+
 def _basis_from_metadata(metadata: Any) -> Optional[List[Dict]]:
     """The floor relations recorded on a catalog row's metadata by codify.py.
 
@@ -6988,13 +7017,21 @@ async def get_location_requirements(
         # (jurisdiction_requirements) and are joined through the SSOT FK at
         # read time — never mirrored, so they can't go stale. Null-FK
         # (Gemini-fresh) rows read as NULL = unchecked / uncited.
+        # `authority_*` is the issuing jurisdiction resolved through the catalog
+        # FK — the trustworthy answer to "who imposes this?". It is deliberately
+        # additive: r.jurisdiction_level / r.jurisdiction_name are free text and
+        # several filters below still key on them, so this joins alongside rather
+        # than overwriting them.
         query = """
             SELECT r.*, cat.source_url_status, cat.statute_citation, cat.citation_verified_at,
-                   cat.metadata -> 'jurisdictional_basis' AS jurisdictional_basis
+                   cat.metadata -> 'jurisdictional_basis' AS jurisdictional_basis,
+                   j.level::text AS authority_level,
+                   j.display_name AS authority_display_name
             FROM compliance_requirements r
             JOIN business_locations l ON r.location_id = l.id
             LEFT JOIN jurisdiction_requirements cat
               ON cat.id = r.jurisdiction_requirement_id
+            LEFT JOIN jurisdictions j ON j.id = cat.jurisdiction_id
             WHERE l.id = $1 AND l.company_id = $2
         """
         params = [location_id, company_id]
@@ -7069,6 +7106,10 @@ async def get_location_requirements(
                 jurisdiction_requirement_id=str(row["jurisdiction_requirement_id"])
                 if row.get("jurisdiction_requirement_id")
                 else None,
+                authority_level=row.get("authority_level"),
+                authority_name=_authority_label(
+                    row.get("authority_level"), row.get("authority_display_name")
+                ),
             )
             for row in filtered
         ]
@@ -9373,6 +9414,25 @@ def evaluate_trigger_conditions(
     """
     if trigger_json is None:
         return True
+    # Not every read path decodes JSONB: the hierarchical resolver's recursive
+    # CTE hands `trigger_conditions` back as a str, and indexing it below raised
+    # TypeError ("string indices must be integers") — a 500 for the whole view.
+    if isinstance(trigger_json, str):
+        try:
+            trigger_json = json.loads(trigger_json)
+        except (json.JSONDecodeError, TypeError):
+            logger.warning(
+                "Trigger condition is unparseable JSON — treating as not matched."
+            )
+            return False
+        if trigger_json is None:
+            return True
+    if not isinstance(trigger_json, dict):
+        logger.warning(
+            "Trigger condition is %s, expected an object — treating as not matched.",
+            type(trigger_json).__name__,
+        )
+        return False
     if facility_attributes is None:
         facility_attributes = {}
 
@@ -9565,7 +9625,25 @@ async def resolve_jurisdiction_stacks(
     rows = await conn.fetch(query, unique_ids)
     grouped: Dict[UUID, List[Dict[str, Any]]] = {jid: [] for jid in unique_ids}
     for row in rows:
-        grouped[row["root_id"]].append(dict(row))
+        out = dict(row)
+        # The pool sets no JSONB codec, so asyncpg hands every JSONB column back
+        # as a str. Decode trigger_conditions HERE, at the single producer of
+        # these rows, rather than at each consumer: the two downstream readers
+        # (evaluate_trigger_conditions, _compute_triggered_by) index it as a
+        # mapping, and both raised on the string.
+        trigger = out.get("trigger_conditions")
+        if isinstance(trigger, str):
+            try:
+                out["trigger_conditions"] = json.loads(trigger)
+            except (json.JSONDecodeError, TypeError):
+                # Unparseable trigger — leave the raw value. Callers fail CLOSED
+                # on a non-object (the requirement does not apply), which is the
+                # convention for a malformed trigger everywhere else here.
+                logger.warning(
+                    "Requirement %s has unparseable trigger_conditions.",
+                    out.get("id"),
+                )
+        grouped[row["root_id"]].append(out)
     return grouped
 
 

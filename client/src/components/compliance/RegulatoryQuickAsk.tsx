@@ -3,8 +3,9 @@ import { askRegulatoryQuestion, type RegulatoryQASource } from '../../api/compli
 
 type Props = {
   locationId?: string | null
-  /** Open a cited requirement in the Requirements tab (by catalog id). */
-  onOpenSource?: (requirementId: string) => void
+  /** Open a cited requirement in the Requirements tab (by catalog id). The title
+   *  is the fallback target when that row isn't in the location's list. */
+  onOpenSource?: (requirementId: string, title?: string | null) => void
 }
 
 export function RegulatoryQuickAsk({ locationId, onOpenSource }: Props) {
@@ -92,7 +93,7 @@ export function RegulatoryQuickAsk({ locationId, onOpenSource }: Props) {
                     <button
                       key={i}
                       type="button"
-                      onClick={() => onOpenSource!(s.requirement_id)}
+                      onClick={() => onOpenSource!(s.requirement_id, s.title)}
                       className="inline-flex items-center gap-1 text-[11px] bg-white/[0.06] hover:bg-white/[0.10] text-zinc-400 hover:text-zinc-200 px-2 py-0.5 rounded transition-colors"
                       title="Open this requirement in your Requirements tab"
                     >

@@ -68,14 +68,16 @@ function ComplianceFull() {
   const [showModal, setShowModal] = useState(false)
   const [editingLocation, setEditingLocation] = useState<BusinessLocation | null>(null)
   const [saving, setSaving] = useState(false)
-  // A cited requirement to focus when opened from the "Ask" sources.
-  const [targetReqId, setTargetReqId] = useState<string | null>(null)
+  // A cited requirement to focus when opened from the "Ask" sources. The title
+  // rides along as the fallback when the catalog row isn't in the location's
+  // materialized list.
+  const [targetReq, setTargetReq] = useState<{ id: string; title?: string | null } | null>(null)
 
   // Open a requirement cited by the regulatory Q&A: jump to the Requirements
   // tab (selecting a location if none is), and mark the row to focus.
-  const openSourceRequirement = useCallback((requirementId: string) => {
+  const openSourceRequirement = useCallback((requirementId: string, title?: string | null) => {
     setTab('requirements')
-    setTargetReqId(requirementId)
+    setTargetReq({ id: requirementId, title })
   }, [])
 
   const data = useComplianceData(selectedId)
@@ -126,10 +128,10 @@ function ComplianceFull() {
   // The Requirements tab needs a selected location; if a source was opened from
   // the "Ask" box without one, select the first.
   useEffect(() => {
-    if (targetReqId && !selectedId && data.locations.length > 0) {
+    if (targetReq && !selectedId && data.locations.length > 0) {
       setSelectedId(data.locations[0].id)
     }
-  }, [targetReqId, selectedId, data.locations])
+  }, [targetReq, selectedId, data.locations])
 
   async function handleLocationSubmit(formData: LocationCreate, editId?: string) {
     setSaving(true)
@@ -277,8 +279,8 @@ function ComplianceFull() {
                     onPin={handlePinRequirement}
                     checkMessages={check.messages}
                     facilityAttributes={selectedLoc?.facility_attributes}
-                    targetReqId={targetReqId}
-                    onTargetConsumed={() => setTargetReqId(null)}
+                    targetReq={targetReq}
+                    onTargetConsumed={() => setTargetReq(null)}
                   />
                 )}
                 {tab === 'alerts' && (

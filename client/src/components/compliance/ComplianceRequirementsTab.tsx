@@ -4,7 +4,13 @@ import { Select } from '../ui'
 import { LABEL } from '../ui/typography'
 import { UpgradeUpsellCard } from '../UpgradeUpsellCard'
 import { EmployeesTooltip } from './EmployeesTooltip'
-import { useComplianceRequirements } from '../../hooks/compliance/useComplianceRequirements'
+import {
+  useComplianceRequirements,
+  useKnownAuthorities,
+  normalizeCategoryKey,
+  jurisdictionSectionId,
+  requirementAuthority,
+} from '../../hooks/compliance/useComplianceRequirements'
 import type { ComplianceRequirement } from '../../types/compliance'
 import { CATEGORY_LABELS } from '../../types/compliance'
 import type { CategoryGroup } from '../../generated/complianceCategories'
@@ -32,28 +38,61 @@ type Props = {
    *  an upgrade CTA. When set, the search/filter controls are hidden so the blur
    *  can't be bypassed. */
   previewCategoryLimit?: number
-  /** A catalog requirement id (jurisdiction_requirement_id) to focus — cited by
-   *  the regulatory-ask sources. Expands its category, scrolls it into view,
-   *  and highlights it. */
-  targetReqId?: string | null
+  /** A catalog requirement (jurisdiction_requirement_id + title) to focus —
+   *  cited by the regulatory-ask sources. Expands its category, scrolls it into
+   *  view, and highlights it. The title is the fallback when the row isn't in
+   *  this location's list. */
+  targetReq?: { id: string; title?: string | null } | null
   onTargetConsumed?: () => void
 }
 
-export function ComplianceRequirementsTab({ requirements, loading, onPin, checkMessages, readOnly, previewCategoryLimit, targetReqId, onTargetConsumed }: Props) {
+const GROUP_BY_STORAGE_KEY = 'compliance_req_groupby'
+type GroupBy = 'topic' | 'jurisdiction'
+
+export function ComplianceRequirementsTab({ requirements, loading, onPin, checkMessages, readOnly, previewCategoryLimit, targetReq, onTargetConsumed }: Props) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [groupFilter, setGroupFilter] = useState<'all' | CategoryGroup>('all')
   const [searchQuery, setSearchQuery] = useState('')
   const [highlightId, setHighlightId] = useState<string | null>(null)
+  const [groupBy, setGroupBy] = useState<GroupBy>(
+    () => (localStorage.getItem(GROUP_BY_STORAGE_KEY) as GroupBy) || 'topic',
+  )
+
+  function changeGroupBy(next: GroupBy) {
+    setGroupBy(next)
+    localStorage.setItem(GROUP_BY_STORAGE_KEY, next)
+  }
+
+  // From the UNFILTERED set, so searching can't shrink the trusted set and
+  // strand a row under a section name that just disappeared.
+  const knownAuthorities = useKnownAuthorities(requirements)
 
   // Focus a requirement cited by the "Ask" sources: expand its category, scroll
   // to it, highlight it briefly.
   useEffect(() => {
-    if (!targetReqId) return
-    const match = requirements.find((r) => r.jurisdiction_requirement_id === targetReqId)
-    if (!match) { onTargetConsumed?.(); return }
+    if (!targetReq) return
+    const match = requirements.find((r) => r.jurisdiction_requirement_id === targetReq.id)
+    if (!match) {
+      // The location's requirements may still be in flight (clicking a source
+      // with no location selected picks one, THEN fetches). Consuming the target
+      // here would drop it before the data it needs ever arrives.
+      if (loading || requirements.length === 0) return
+      // A real miss: the "Ask" cites the shared catalog, which can hold a row
+      // this location never materialized. Search by title so the click still
+      // lands somewhere, instead of doing nothing at all.
+      setSearchQuery(targetReq.title ?? '')
+      setGroupFilter('all')
+      onTargetConsumed?.()
+      return
+    }
     setSearchQuery('')
     setGroupFilter('all')
-    setExpanded((prev) => new Set(prev).add(match.category))
+    // Expand under BOTH lenses' keys — the row is reachable from either, and
+    // this stays correct if the user toggles the view after the jump.
+    const cat = normalizeCategoryKey(match.category || 'other')
+    const authority = requirementAuthority(match, knownAuthorities)
+    const jurKey = `${jurisdictionSectionId(authority.level, authority.name)}::${cat}`
+    setExpanded((prev) => new Set(prev).add(cat).add(jurKey))
     setHighlightId(match.id)
     const t = setTimeout(() => {
       document.querySelector(`[data-req-id="${match.id}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
@@ -61,7 +100,7 @@ export function ComplianceRequirementsTab({ requirements, loading, onPin, checkM
     const clear = setTimeout(() => setHighlightId(null), 4000)
     onTargetConsumed?.()
     return () => { clearTimeout(t); clearTimeout(clear) }
-  }, [targetReqId, requirements, onTargetConsumed])
+  }, [targetReq, requirements, loading, knownAuthorities, onTargetConsumed])
 
   const filteredRequirements = useMemo(() => {
     const q = searchQuery.trim().toLowerCase()
@@ -72,14 +111,17 @@ export function ComplianceRequirementsTab({ requirements, loading, onPin, checkM
         r.title?.toLowerCase().includes(q) ||
         r.description?.toLowerCase().includes(q) ||
         r.current_value?.toLowerCase().includes(q) ||
+        // Match what the row DISPLAYS as its authority, not just the free text
+        // behind it — searching "Los Angeles" should find the city's ordinances.
+        requirementAuthority(r, knownAuthorities).name.toLowerCase().includes(q) ||
         r.jurisdiction_name?.toLowerCase().includes(q) ||
         r.category?.toLowerCase().includes(q) ||
         catLabel.toLowerCase().includes(q)
       )
     })
-  }, [requirements, searchQuery])
+  }, [requirements, searchQuery, knownAuthorities])
 
-  const { sectionedCategories } = useComplianceRequirements(filteredRequirements)
+  const { sectionedCategories, jurisdictionSections } = useComplianceRequirements(filteredRequirements, knownAuthorities)
 
   // Sections present in the UNFILTERED set — so the options don't churn as the
   // user types in the search box.
@@ -141,6 +183,10 @@ export function ComplianceRequirementsTab({ requirements, loading, onPin, checkM
     return sectionedCategories.filter((s) => s.id === activeGroup)
   }, [sectionedCategories, activeGroup])
 
+  // Emptiness is per-lens: the topic lens can be narrowed by the group filter,
+  // the jurisdiction lens only by search.
+  const sectionCount = groupBy === 'jurisdiction' ? jurisdictionSections.length : filteredSections.length
+
   // Detect missing coverage from check messages
   const missingCoverage = useMemo(() => {
     const cats = checkMessages.flatMap((m) => m.missing_categories ?? [])
@@ -156,10 +202,15 @@ export function ComplianceRequirementsTab({ requirements, loading, onPin, checkM
     })
   }
 
-  // One category accordion row — shared by the normal and lite-preview renders.
-  const renderCategoryRow = (cat: string, reqs: ComplianceRequirement[]) => (
-    <div key={cat} className="border-b border-white/[0.06] last:border-0">
-      <button type="button" onClick={() => toggle(cat)}
+  // One category accordion row — the single renderer for every view (topic,
+  // jurisdiction, lite preview). `keyPrefix` namespaces the expansion key: the
+  // same category appears under several authorities in the jurisdiction lens,
+  // and an unprefixed key would open all of them at once.
+  const renderCategoryRow = (cat: string, reqs: ComplianceRequirement[], keyPrefix = '') => {
+    const key = `${keyPrefix}${cat}`
+    return (
+    <div key={key} className="border-b border-white/[0.06] last:border-0">
+      <button type="button" onClick={() => toggle(key)}
         className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-white/[0.02] transition-colors">
         <div className="flex items-center gap-3">
           <span className="text-xs font-medium text-zinc-200 uppercase tracking-wide">
@@ -170,9 +221,9 @@ export function ComplianceRequirementsTab({ requirements, loading, onPin, checkM
             <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-900/20 text-amber-400 border border-amber-800/40">Missing Coverage</span>
           )}
         </div>
-        <span className="text-xs text-zinc-600">{expanded.has(cat) ? '−' : '+'}</span>
+        <span className="text-xs text-zinc-600">{expanded.has(key) ? '−' : '+'}</span>
       </button>
-      {expanded.has(cat) && (
+      {expanded.has(key) && (
         <div className="divide-y divide-white/[0.04]">
           {reqs.length === 0 ? (
             <p className="px-4 py-4 text-xs text-zinc-600">
@@ -181,7 +232,9 @@ export function ComplianceRequirementsTab({ requirements, loading, onPin, checkM
                 : 'No active requirements detected yet.'}
             </p>
           ) : (
-            reqs.map((req) => (
+            reqs.map((req) => {
+              const authority = requirementAuthority(req, knownAuthorities)
+              return (
               <div key={req.id} data-req-id={req.id}
                 className={`px-4 py-3 transition-colors ${
                   highlightId === req.id
@@ -193,9 +246,9 @@ export function ComplianceRequirementsTab({ requirements, loading, onPin, checkM
                     <p className="text-sm font-medium text-zinc-200">{req.title}</p>
                     <div className="flex flex-wrap items-center gap-2 mt-1">
                       <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/[0.04] text-zinc-400 border border-white/[0.08]">
-                        {JURISDICTION_LEVEL_LABELS[req.jurisdiction_level] || req.jurisdiction_level}
+                        {JURISDICTION_LEVEL_LABELS[authority.level] || authority.level}
                       </span>
-                      <span className="text-[11px] text-zinc-500">{req.jurisdiction_name}</span>
+                      <span className="text-[11px] text-zinc-500">{authority.name}</span>
                       {req.rate_type && (
                         <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/[0.04] text-zinc-500 border border-white/[0.08]">
                           {RATE_TYPE_LABELS[req.rate_type] || req.rate_type}
@@ -271,12 +324,14 @@ export function ComplianceRequirementsTab({ requirements, loading, onPin, checkM
                   )}
                 </div>
               </div>
-            ))
+              )
+            })
           )}
         </div>
       )}
     </div>
-  )
+    )
+  }
 
   if (loading) return <p className="text-sm text-zinc-500">Loading requirements...</p>
 
@@ -409,36 +464,65 @@ export function ComplianceRequirementsTab({ requirements, loading, onPin, checkM
             </button>
           )}
         </div>
-        {groupOptions.length > 2 && (
+        {groupBy === 'topic' && groupOptions.length > 2 && (
           <div className="w-48 shrink-0">
             <Select label="" options={groupOptions} value={activeGroup}
               onChange={(e) => setGroupFilter(e.target.value as 'all' | CategoryGroup)} />
           </div>
         )}
+        {/* Same requirements, two questions: "what subject is this?" (topic) vs
+            "who is imposing it?" (jurisdiction). */}
+        <div className="flex shrink-0 rounded-lg border border-white/[0.08] bg-zinc-950 p-0.5">
+          {([['topic', 'By topic'], ['jurisdiction', 'By jurisdiction']] as const).map(([value, label]) => (
+            <button key={value} type="button" onClick={() => changeGroupBy(value)}
+              aria-pressed={groupBy === value}
+              className={`px-2.5 py-1.5 text-[11px] font-medium rounded-md transition-colors ${
+                groupBy === value ? 'bg-white/[0.08] text-zinc-200' : 'text-zinc-500 hover:text-zinc-300'
+              }`}>
+              {label}
+            </button>
+          ))}
+        </div>
         <span className="font-mono text-[11px] font-medium px-2 py-1 rounded-md bg-white/[0.04] text-zinc-400 border border-white/[0.08] shrink-0 tabular-nums">
           {searchQuery ? `${filteredRequirements.length} / ${requirements.length}` : requirements.length}
         </span>
       </div>
 
-      {activeGroup === 'behavioral_health' && (
+      {groupBy === 'topic' && activeGroup === 'behavioral_health' && (
         <div className="rounded-lg border border-violet-800/40 bg-violet-950/20 px-4 py-3">
           <p className="text-sm text-violet-300/90">
             <span className="font-medium">Behavioral Health Facility</span>
-            {' \u2014 '}
+            {' — '}
             Showing requirements for mental health parity, substance use disorder confidentiality (42 CFR Part 2), facility licensing, seclusion &amp; restraint, and workforce credentialing.
           </p>
         </div>
       )}
 
-      {filteredSections.length === 0 && searchQuery ? (
+      {sectionCount === 0 && searchQuery ? (
         <div className="border border-white/[0.06] bg-zinc-950 rounded-lg px-4 py-6 text-center">
           <p className="text-sm text-zinc-500">No requirements matching &ldquo;{searchQuery}&rdquo;</p>
           <button type="button" onClick={() => setSearchQuery('')}
             className="text-xs text-emerald-500 hover:text-emerald-400 mt-1 transition-colors">Clear search</button>
         </div>
-      ) : filteredSections.length === 0 ? (
+      ) : sectionCount === 0 ? (
         <div className="border border-white/[0.06] bg-zinc-950 rounded-lg px-4 py-6 text-center">
           <p className="text-sm text-zinc-600">No requirements found. Run a compliance check to populate.</p>
+        </div>
+      ) : groupBy === 'jurisdiction' ? (
+        <div className="overflow-hidden rounded-xl border border-white/[0.06] bg-zinc-950">
+          {jurisdictionSections.map((section) => (
+            <div key={section.id}>
+              <div className="flex items-center gap-2 border-t border-white/[0.06] first:border-t-0 bg-white/[0.02] px-4 py-2">
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/[0.04] text-zinc-400 border border-white/[0.08]">
+                  {JURISDICTION_LEVEL_LABELS[section.level] || section.level}
+                </span>
+                <h3 className={LABEL}>
+                  {section.label} <span className="normal-case text-zinc-600">({section.requirementCount})</span>
+                </h3>
+              </div>
+              {section.categories.map(([cat, reqs]) => renderCategoryRow(cat, reqs, `${section.id}::`))}
+            </div>
+          ))}
         </div>
       ) : (
         <div className="overflow-hidden rounded-xl border border-white/[0.06] bg-zinc-950">
@@ -449,106 +533,7 @@ export function ComplianceRequirementsTab({ requirements, loading, onPin, checkM
                   {section.label} <span className="normal-case text-zinc-600">({section.requirementCount})</span>
                 </h3>
               </div>
-              {section.categories.map(([cat, reqs]) => (
-                <div key={cat} className="border-b border-white/[0.06] last:border-0">
-                  <button type="button" onClick={() => toggle(cat)}
-                    className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-white/[0.02] transition-colors">
-                    <div className="flex items-center gap-3">
-                      <span className="text-xs font-medium text-zinc-200 uppercase tracking-wide">
-                        {CATEGORY_LABELS[cat] || cat}
-                      </span>
-                      <span className="text-[11px] text-zinc-600">{reqs.length} active</span>
-                      {missingCoverage.has(cat) && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-900/20 text-amber-400 border border-amber-800/40">Missing Coverage</span>
-                      )}
-                    </div>
-                    <span className="text-xs text-zinc-600">{expanded.has(cat) ? '−' : '+'}</span>
-                  </button>
-                  {expanded.has(cat) && (
-                    <div className="divide-y divide-white/[0.04]">
-                      {reqs.length === 0 ? (
-                        <p className="px-4 py-4 text-xs text-zinc-600">
-                          {missingCoverage.has(cat)
-                            ? 'Coverage pending. Run a compliance check or admin refresh.'
-                            : 'No active requirements detected yet.'}
-                        </p>
-                      ) : (
-                        reqs.map((req) => (
-                          <div key={req.id} className="px-4 py-3 hover:bg-white/[0.02] transition-colors">
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="flex-1 min-w-0">
-                                <p className="text-sm font-medium text-zinc-200">{req.title}</p>
-                                <div className="flex flex-wrap items-center gap-2 mt-1">
-                                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/[0.04] text-zinc-400 border border-white/[0.08]">
-                                    {JURISDICTION_LEVEL_LABELS[req.jurisdiction_level] || req.jurisdiction_level}
-                                  </span>
-                                  <span className="text-[11px] text-zinc-500">{req.jurisdiction_name}</span>
-                                  {req.rate_type && (
-                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/[0.04] text-zinc-500 border border-white/[0.08]">
-                                      {RATE_TYPE_LABELS[req.rate_type] || req.rate_type}
-                                    </span>
-                                  )}
-                                  {req.applicable_industries?.includes('healthcare') && (
-                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/[0.04] text-zinc-400 border border-white/[0.08]">Medical</span>
-                                  )}
-                                  {(req.affected_employee_count ?? 0) > 0 && (
-                                    <EmployeesTooltip names={req.affected_employee_names} count={req.affected_employee_count!}>
-                                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/[0.04] text-zinc-400 border border-white/[0.08] cursor-default">
-                                        {req.affected_employee_count} employee{req.affected_employee_count !== 1 ? 's' : ''}
-                                      </span>
-                                    </EmployeesTooltip>
-                                  )}
-                                  {(req.min_wage_violation_count ?? 0) > 0 && (
-                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-900/20 text-red-400 border border-red-800/40">
-                                      {req.min_wage_violation_count} below threshold
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-                              {req.current_value && (
-                                <span className="text-sm font-mono text-zinc-200 bg-white/[0.06] border border-white/[0.08] px-2.5 py-1 rounded shrink-0">
-                                  {req.current_value}
-                                </span>
-                              )}
-                            </div>
-                            {req.description && (
-                              <p className="text-xs text-zinc-500 mt-2 leading-relaxed">{req.description}</p>
-                            )}
-                            <div className="flex items-center justify-between mt-2">
-                              <div className="flex items-center gap-3">
-                                {req.effective_date && (
-                                  <span className="text-[11px] text-zinc-600">Eff. {new Date(req.effective_date).toLocaleDateString()}</span>
-                                )}
-                                {!readOnly && (
-                                  <button type="button" onClick={() => onPin(req.id, !req.is_pinned)}
-                                    className={`text-[11px] transition-colors ${req.is_pinned ? 'text-amber-400' : 'text-zinc-600 hover:text-amber-400'}`}>
-                                    {req.is_pinned ? 'Pinned' : 'Pin'}
-                                  </button>
-                                )}
-                              </div>
-                              {req.source_url && (
-                                <span className="flex items-center gap-1.5">
-                                  {req.source_url_status === 'dead' && (
-                                    <span
-                                      className="rounded border border-red-500/30 bg-red-500/15 px-1 py-px text-[10px] text-red-400"
-                                      title="This source link failed its last liveness check. The citation is kept so it can be re-verified once the authority fixes or moves the page.">
-                                      link broken
-                                    </span>
-                                  )}
-                                  <a href={req.source_url} target="_blank" rel="noopener noreferrer"
-                                    className="text-[11px] text-zinc-500 hover:text-zinc-300 transition-colors">
-                                    Source &rarr;
-                                  </a>
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  )}
-                </div>
-              ))}
+              {section.categories.map(([cat, reqs]) => renderCategoryRow(cat, reqs))}
             </div>
           ))}
         </div>

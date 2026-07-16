@@ -132,16 +132,32 @@ class TestUnreadableTriggerFailsOpenNotCrash:
 
     `_decode_jsonb` returns an unparseable value as-is (and jsonfix01 deliberately
     leaves such rows in the DB rather than guessing), so a garbage string is
-    truthy. Passing it to the evaluator dies on `cond.get("type")`. One bad
-    catalog row would break the compliance tab of every tenant whose chain
-    contains it.
+    truthy. The evaluator used to die on `cond.get("type")` — one bad catalog row
+    broke the compliance tab of every tenant whose chain contained it. It now
+    absorbs a str itself: valid JSON is decoded, garbage is fail-CLOSED (the
+    convention `_eval_condition` already uses for an unknown op — a trigger we
+    can't read is not a trigger we can assert is met).
     """
 
-    def test_evaluator_would_crash_on_a_string(self):
+    def test_evaluator_absorbs_a_string(self):
         from app.core.services.compliance_service import evaluate_trigger_conditions
 
-        with pytest.raises(AttributeError):
-            evaluate_trigger_conditions("not-a-dict", {})
+        # Garbage → not matched, and crucially NOT an exception.
+        assert evaluate_trigger_conditions("not-a-dict", {}) is False
+        # A JSON-encoded trigger is the real case: no JSONB codec is registered
+        # on the pool, so asyncpg hands these back as str on some read paths.
+        assert evaluate_trigger_conditions(
+            '{"type": "entity_type", "value": "behavioral_health"}',
+            {"entity_type": "behavioral_health"},
+        )
+        assert not evaluate_trigger_conditions(
+            '{"type": "entity_type", "value": "behavioral_health"}',
+            {"entity_type": "dental"},
+        )
+        # A JSON scalar decodes cleanly but still isn't a condition.
+        assert evaluate_trigger_conditions("42", {}) is False
+        # ...except a literal null, which means "no trigger" — applies to all.
+        assert evaluate_trigger_conditions("null", {}) is True
 
     def test_projection_guards_with_isinstance(self):
         # The guard is `isinstance(trigger, dict)` in _project_chain_to_location.

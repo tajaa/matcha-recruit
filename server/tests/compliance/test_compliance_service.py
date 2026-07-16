@@ -635,3 +635,23 @@ def test_an_empty_not_does_not_universalize_a_conditional():
         {"op": "not", "conditions": [psm]}, {"psm_covered_chemicals": True}) is False
     assert cs.evaluate_trigger_conditions(
         {"op": "not", "conditions": [psm]}, {}) is True
+
+
+def test_authority_label_normalizes_display_names():
+    """`jurisdictions.display_name` is authored inconsistently — the city of Los
+    Angeles is stored "los angeles, CA" while the county containing it is stored
+    "Los Angeles, CA". The label has to re-case the first and disambiguate the
+    second, or the two authorities render identically."""
+    assert cs._authority_label("city", "los angeles, CA") == "Los Angeles, CA"
+    assert cs._authority_label("county", "Los Angeles, CA") == "Los Angeles County, CA"
+    assert cs._authority_label("state", "California") == "California"
+    assert cs._authority_label("federal", "Federal") == "Federal"
+    # A county that already says so isn't doubled up.
+    assert cs._authority_label("county", "Cook County, IL") == "Cook County, IL"
+    # A lowercase state code is a code, not a place.
+    assert cs._authority_label("city", "austin, tx") == "Austin, TX"
+    # Mixed case is left alone — .title() would mangle names it can't know about.
+    assert cs._authority_label("city", "City of West Hollywood") == "City of West Hollywood"
+    # No catalog link → nothing to label with.
+    assert cs._authority_label("state", None) is None
+    assert cs._authority_label("state", "   ") is None

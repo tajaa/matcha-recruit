@@ -269,6 +269,15 @@ class RequirementResponse(BaseModel):
     # The SSOT catalog row id (jurisdiction_requirements.id). Lets the RAG "ask"
     # sources deep-link a chip straight to this row in the Requirements tab.
     jurisdiction_requirement_id: Optional[str] = None
+    # The authority that actually issued this rule, resolved through the catalog
+    # FK to the `jurisdictions` row. `jurisdiction_level`/`jurisdiction_name`
+    # above are free text written at materialization time and are demonstrably
+    # unreliable — one live tenant carries a city ordinance labelled
+    # "state / _county_san francisco, CA" and 50 federal rows labelled level
+    # "national". Prefer these when present; they are None only for rows with no
+    # catalog link.
+    authority_level: Optional[str] = None
+    authority_name: Optional[str] = None
 
 
 class PinRequirementRequest(BaseModel):

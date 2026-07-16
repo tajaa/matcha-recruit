@@ -173,8 +173,16 @@ export interface ComplianceRequirement {
   category: string
   rate_type: string | null
   applicable_industries: string[]
-  jurisdiction_level: 'federal' | 'state' | 'county' | 'city' | 'special_district' | 'regulatory_body'
+  /** Free text written at materialization time — unreliable (the API also
+   *  returns 'national' here, and names like '_county_san francisco, CA').
+   *  Read `authority_level`/`authority_name` via `requirementAuthority()`
+   *  instead; these are only its fallback. */
+  jurisdiction_level: string
   jurisdiction_name: string
+  /** The issuing authority, resolved server-side through the catalog FK.
+   *  Null only for rows with no catalog link. */
+  authority_level?: string | null
+  authority_name?: string | null
   title: string
   description: string | null
   current_value: string | null
