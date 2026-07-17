@@ -304,7 +304,13 @@ async def bind_penalties(conn, *, agency: Optional[str] = None) -> Dict[str, Any
     for agency_key, source in sources.items():
         item = await conn.fetchrow(
             """
-            SELECT i.id, i.body_text, i.body_source_url
+            SELECT i.id, i.body_text,
+                   -- The READABLE page, not body_source_url. The latter is the
+                   -- versioner API endpoint we fetch XML from
+                   -- (…/api/versioner/v1/full/2026-07-06/title-29.xml?part=1903)
+                   -- — a person following the citation to check our figure needs
+                   -- the eCFR page, not a snapshot-dated XML dump.
+                   COALESCE(i.source_url, i.body_source_url) AS source_url
             FROM authority_index_items i
             JOIN authority_indexes ai ON ai.id = i.authority_index_id
             WHERE ai.slug = $1 AND i.citation = $2
@@ -321,7 +327,7 @@ async def bind_penalties(conn, *, agency: Optional[str] = None) -> Dict[str, Any
         if cache_key not in seen_slugs:
             seen_slugs[cache_key] = parse_schedule(
                 source.parser, item["body_text"],
-                citation=source.section, source_url=item["body_source_url"],
+                citation=source.section, source_url=item["source_url"],
             )
         schedule = seen_slugs[cache_key]
         if schedule is None:

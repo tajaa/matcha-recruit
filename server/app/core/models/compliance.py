@@ -417,6 +417,15 @@ class RiskPenalty(BaseModel):
     annual_cap: Optional[float] = None
     enforcing_agency: Optional[str] = None
     summary: Optional[str] = None
+    # Provenance. A dollar figure with no answer to "says who?" is an assertion;
+    # these turn it into a citation the reader can follow and check. Present only
+    # on GROUNDED blocks — a figure parsed from the statute that states it
+    # (`grounding == 'grounded'`). Ungrounded rows leave these null rather than
+    # dressing model recall in a source.
+    citation: Optional[str] = None          # "29 CFR 1903.15(d)"
+    source_url: Optional[str] = None        # the readable eCFR page
+    effective_date: Optional[str] = None    # what the statute itself says, ISO
+    grounded: bool = False
 
 
 class RiskIssue(BaseModel):

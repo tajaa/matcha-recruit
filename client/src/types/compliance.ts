@@ -47,6 +47,12 @@ export interface RiskPenalty {
   annual_cap?: number | null
   enforcing_agency?: string | null
   summary?: string | null
+  // Provenance — present only when `grounded`, i.e. the figure was parsed from
+  // the statute that states it rather than recalled by a model.
+  citation?: string | null        // "29 CFR 1903.15(d)"
+  source_url?: string | null      // the readable eCFR page
+  effective_date?: string | null  // what the statute itself says, ISO
+  grounded?: boolean
 }
 
 export interface RiskIssue {

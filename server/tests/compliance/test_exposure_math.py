@@ -250,3 +250,64 @@ def test_the_ceiling_never_multiplies_by_headcount():
 
 def test_nothing_unproven_is_a_zero_ceiling():
     assert compute_conditional_ceiling([]) == (0, 0)
+
+
+# ── provenance: a figure must be able to answer "says who?" ─────────────────
+
+def test_a_grounded_block_carries_its_citation_and_link():
+    """The UI shows the citation only when `grounded`. If the builder drops these
+    the figure silently becomes an unsourced assertion again — which is the whole
+    condition this work exists to end."""
+    from app.core.services.compliance_risk import _risk_penalty
+
+    p = _risk_penalty({
+        "civil_penalty_max": 16_550.0,
+        "per_violation": True,
+        "enforcing_agency": "OSHA",
+        "citation": "29 CFR 1903.15(d)",
+        "source_url": "https://www.ecfr.gov/current/title-29/section-1903.15",
+        "effective_date": "2025-01-15",
+        "grounding": "grounded",
+    })
+    assert p.grounded is True
+    assert p.citation == "29 CFR 1903.15(d)"
+    assert p.source_url.startswith("https://www.ecfr.gov/current/")
+    assert p.effective_date == "2025-01-15"
+    assert p.civil_max == 16_550.0
+
+
+def test_a_model_recalled_block_is_not_dressed_as_grounded():
+    """1,023 rows look exactly like this — figures with no source. They must
+    report grounded=False so the UI shows no citation rather than implying one."""
+    from app.core.services.compliance_risk import _risk_penalty
+
+    p = _risk_penalty({
+        "civil_penalty_max": 16_131.0,
+        "enforcing_agency": "OSHA",
+        "summary": "OSHA penalties apply.",
+    })
+    assert p.grounded is False
+    assert p.citation is None
+    assert p.source_url is None
+
+
+def test_the_source_url_is_never_the_xml_api_endpoint():
+    """A person following the citation needs the eCFR page. body_source_url is
+    the versioner API we fetch XML from — a snapshot-dated machine endpoint that
+    renders as a wall of markup."""
+    from app.core.services.compliance_risk import _risk_penalty
+
+    p = _risk_penalty({
+        "civil_penalty_max": 16_550.0,
+        "citation": "29 CFR 1903.15(d)",
+        "source_url": "https://www.ecfr.gov/current/title-29/section-1903.15",
+        "grounding": "grounded",
+    })
+    assert "api/versioner" not in (p.source_url or "")
+    assert ".xml" not in (p.source_url or "")
+
+
+def test_no_penalty_block_yields_no_penalty():
+    from app.core.services.compliance_risk import _risk_penalty
+    assert _risk_penalty(None) is None
+    assert _risk_penalty({}) is None

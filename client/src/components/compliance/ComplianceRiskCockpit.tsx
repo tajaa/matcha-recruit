@@ -441,8 +441,12 @@ function IssueRow({
   const isAlert = issue.source === 'alert'
   const pen = issue.penalty
 
+  // A single figure is shown once, not as "$16,550–$16,550": most statutes set a
+  // ceiling ("shall not exceed $X") with no floor, so min borrows max upstream.
   const penaltyLine = pen && (pen.civil_min != null || pen.civil_max != null)
-    ? `${pen.civil_min != null ? money(pen.civil_min) : '?'}–${pen.civil_max != null ? money(pen.civil_max) : '?'}${pen.per_violation ? '/violation' : ''}${pen.enforcing_agency ? ` · ${pen.enforcing_agency}` : ''}`
+    ? `${pen.civil_min != null && pen.civil_max != null && pen.civil_min !== pen.civil_max
+        ? `${money(pen.civil_min)}–${money(pen.civil_max)}`
+        : money((pen.civil_max ?? pen.civil_min) as number)}${pen.per_violation ? '/violation' : ''}${pen.enforcing_agency ? ` · ${pen.enforcing_agency}` : ''}`
     : null
 
   return (
@@ -461,7 +465,35 @@ function IssueRow({
           <p className="text-sm text-zinc-100 mt-1">{issue.title}</p>
           {issue.detail && <p className="text-xs text-zinc-400 mt-0.5">{issue.detail}</p>}
           {penaltyLine && (
-            <p className="text-[11px] font-mono text-zinc-500 mt-1">{penaltyLine}</p>
+            <p className="text-[11px] font-mono text-zinc-500 mt-1">
+              {penaltyLine}
+              {/* Provenance, when the figure was parsed from the statute that
+                  states it. "$16,550" is an assertion; "$16,550 — 29 CFR
+                  1903.15(d), eff. 2025-01-15" with a link is a citation the
+                  reader can check. Ungrounded figures show nothing rather than
+                  implying a source they don't have. */}
+              {pen?.grounded && pen.citation && (
+                <>
+                  <span className="text-zinc-700"> · </span>
+                  {pen.source_url ? (
+                    <a
+                      href={pen.source_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-zinc-400 underline decoration-dotted underline-offset-2 hover:text-zinc-200"
+                      title={`${pen.citation}${pen.effective_date ? ` — effective ${pen.effective_date}` : ''} · opens eCFR`}
+                    >
+                      {pen.citation}
+                    </a>
+                  ) : (
+                    <span className="text-zinc-400">{pen.citation}</span>
+                  )}
+                  {pen.effective_date && (
+                    <span className="text-zinc-600"> eff. {pen.effective_date}</span>
+                  )}
+                </>
+              )}
+            </p>
           )}
           {issue.recommendation && (
             <p className="text-xs text-emerald-300/80 mt-1.5">→ {issue.recommendation}</p>

@@ -64,6 +64,34 @@ def _loc_label(row) -> str:
     return city or state or "Company-wide"
 
 
+def _risk_penalty(pen: dict | None) -> RiskPenalty | None:
+    """Build a RiskPenalty from a stored `metadata->'penalties'` block.
+
+    One builder for every caller so provenance can't reach one surface and not
+    another — the citation is the difference between "$16,550" and "$16,550,
+    29 CFR 1903.15(d)(3), and here is the page".
+
+    `grounded` is asserted only by the writer that parsed the figure out of the
+    statute (`penalty_schedules.penalties_payload`). A model-recalled block has
+    no grounding key, so it reports False and its citation fields stay null
+    rather than lending it borrowed authority.
+    """
+    if not pen:
+        return None
+    return RiskPenalty(
+        civil_min=pen.get("civil_penalty_min"),
+        civil_max=pen.get("civil_penalty_max"),
+        per_violation=pen.get("per_violation"),
+        annual_cap=pen.get("annual_cap"),
+        enforcing_agency=pen.get("enforcing_agency"),
+        summary=pen.get("summary"),
+        citation=pen.get("citation"),
+        source_url=pen.get("source_url"),
+        effective_date=pen.get("effective_date"),
+        grounded=pen.get("grounding") == "grounded",
+    )
+
+
 def _parse_penalties(raw) -> dict | None:
     """metadata->'penalties' may arrive as a dict (jsonb) or a JSON string."""
     if raw is None:
@@ -106,17 +134,7 @@ async def _wage_penalty_for_location(conn, jurisdiction_id, rate_type: str) -> t
     )
     if not row:
         return None, None
-    pen = _parse_penalties(row["penalties"])
-    penalty = None
-    if pen:
-        penalty = RiskPenalty(
-            civil_min=pen.get("civil_penalty_min"),
-            civil_max=pen.get("civil_penalty_max"),
-            per_violation=pen.get("per_violation"),
-            annual_cap=pen.get("annual_cap"),
-            enforcing_agency=pen.get("enforcing_agency"),
-            summary=pen.get("summary"),
-        )
+    penalty = _risk_penalty(_parse_penalties(row["penalties"]))
     return penalty, row["statute_citation"]
 
 
@@ -463,17 +481,7 @@ async def get_compliance_risk_summary(company_id: UUID) -> ComplianceRiskSummary
                 loc = loc_by_id.get(r["location_id"])
                 key = f"requirement:{r['location_id']}:{r['jurisdiction_requirement_id']}"
                 ev = _parse_penalties(r["evidence"]) or {}
-                pen_raw = _parse_penalties(r["penalties"])
-                penalty = None
-                if pen_raw:
-                    penalty = RiskPenalty(
-                        civil_min=pen_raw.get("civil_penalty_min"),
-                        civil_max=pen_raw.get("civil_penalty_max"),
-                        per_violation=pen_raw.get("per_violation"),
-                        annual_cap=pen_raw.get("annual_cap"),
-                        enforcing_agency=pen_raw.get("enforcing_agency"),
-                        summary=pen_raw.get("summary"),
-                    )
+                penalty = _risk_penalty(_parse_penalties(r["penalties"]))
                 basis_by_key[key] = {
                     "status": "non_compliant",
                     "basis": r["basis"],
