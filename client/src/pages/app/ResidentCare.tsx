@@ -99,6 +99,7 @@ function SafetyProgramsSection({ programs, reload }: { programs: SafetyProgram[]
         <div className="flex items-center gap-2"><ShieldPlus className="h-4 w-4 text-zinc-500" /><h3 className="text-sm font-medium text-zinc-200 tracking-wide">Safety &amp; risk-management programs</h3></div>
         <div className="flex items-center gap-2">
           <AiSuggest
+            label="Suggest programs"
             fetchSuggestions={suggestSafetyPrograms}
             itemLabel={(s) => `${PROGRAM_LABELS[s.program_type]} — ${s.name}`}
             createItem={(s) => createSafetyProgram({ program_type: s.program_type, name: s.name })}

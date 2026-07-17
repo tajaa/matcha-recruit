@@ -86,10 +86,10 @@ export default function WorkforceCompliance() {
         ))}
       </div>
 
+      <PayEquitySection reviews={payEquity} reload={load} />
       <PayTransparencySection rows={pt} onChange={setPt} />
       <AiAuditSection audits={audits} reload={load} />
       <BiometricSection points={points} reload={load} />
-      <PayEquitySection reviews={payEquity} reload={load} />
     </div>
   )
 }
@@ -157,6 +157,7 @@ function AiAuditSection({ audits, reload }: { audits: AiAudit[]; reload: () => v
         <div className="flex items-center gap-2"><Bot className="h-4 w-4 text-zinc-500" /><h3 className="text-sm font-medium text-zinc-200 tracking-wide">AI hiring-tool audits</h3></div>
         <div className="flex items-center gap-2">
           <AiSuggest
+            label="Suggest tools"
             fetchSuggestions={suggestAiAudits}
             itemLabel={(s) => `${s.tool_name}${s.vendor ? ` · ${s.vendor}` : ''}${s.purpose ? ` — ${s.purpose}` : ''}`}
             createItem={(s) => createAiAudit({ tool_name: s.tool_name, vendor: s.vendor, purpose: s.purpose })}
@@ -212,6 +213,7 @@ function BiometricSection({ points, reload }: { points: BiometricPoint[]; reload
         <div className="flex items-center gap-2"><Fingerprint className="h-4 w-4 text-zinc-500" /><h3 className="text-sm font-medium text-zinc-200 tracking-wide">Biometric consent (BIPA)</h3></div>
         <div className="flex items-center gap-2">
           <AiSuggest
+            label="Suggest points"
             fetchSuggestions={suggestBiometricPoints}
             itemLabel={(s) => `${s.collection_type.replace('_', ' ')}${s.purpose ? ` — ${s.purpose}` : ''}`}
             createItem={(s) => createBiometricPoint({ collection_type: s.collection_type, purpose: s.purpose })}
