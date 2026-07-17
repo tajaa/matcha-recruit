@@ -137,43 +137,152 @@ def _fixture_establishment() -> dict:
 def test_ita_size_category_bands():
     from app.matcha.services.ir_ita_submission import ita_size_category as _ita_size_category
 
+    # Bands are OSHA's, not a 1..n sequence: the data dictionary says enter 1
+    # (<20), 21 (20-99), 22 (100-249), 3 (250+).
     assert _ita_size_category(0) == 1
     assert _ita_size_category(19) == 1
-    assert _ita_size_category(20) == 2
-    assert _ita_size_category(249) == 2
+    assert _ita_size_category(20) == 21
+    assert _ita_size_category(99) == 21
+    assert _ita_size_category(100) == 22
+    assert _ita_size_category(249) == 22
     assert _ita_size_category(250) == 3
     assert _ita_size_category(None) == 1
 
 
-def test_build_ita_payload_matches_aggregate_numbers():
+def test_build_ita_establishment_payload_shape():
     from app.matcha.services.ir_ita_submission import build_ita_establishment_payload
 
-    payload = build_ita_establishment_payload(_fixture_establishment(), 2025)
-    est = payload["establishment"]
-    summ = payload["summary"]
+    payload = build_ita_establishment_payload(_fixture_establishment())
 
-    assert est["ein"] == "12-3456789"
-    assert est["establishment_name"] == "North Plant"
-    assert est["year_filing_for"] == 2025
-    assert est["size"] == 2  # 120 employees → band 2
-    assert est["establishment_type"] == 1
-
-    # Summary must mirror the 300A aggregate exactly (byte-identical to the CSV).
-    assert summ["no_injuries_illnesses"] == 0  # 3 cases → not "no injuries"
-    assert summ["total_dafw_cases"] == 1
-    assert summ["total_djtr_cases"] == 1
-    assert summ["total_other_cases"] == 1
-    assert summ["total_dafw_days"] == 10
-    assert summ["total_djtr_days"] == 5
+    assert payload["establishment_name"] == "North Plant"
+    assert payload["company"]["company_name"] == "Acme Manufacturing"
+    assert payload["address"] == {
+        "street": "1 Industrial Way", "city": "Springfield", "state": "IL", "zip": "62704",
+    }
+    assert payload["naics"]["naics_code"] == "311111"
+    assert payload["size"] == 22  # 120 employees → band 22
+    assert payload["establishment_type"] == 1
 
 
-def test_build_ita_payload_zero_cases_flags_no_injuries():
+def test_ita_normalizers_strip_to_digits():
+    """The CSV export and the API payload both send these, and the pre-flight
+    validator judges the same digits — they must not drift."""
+    from app.matcha.services.ir_ita_submission import _normalize_ein, _normalize_zip
+
+    assert _normalize_ein("12-3456789") == "123456789"
+    assert _normalize_ein(" 12 3456789 ") == "123456789"
+    assert _normalize_ein(123456789) == "123456789"
+    assert _normalize_ein(None) == ""
+    assert _normalize_ein("") == ""
+    # Wrong length is left wrong — never padded; the validator/OSHA rejects it.
+    assert _normalize_ein("12-345") == "12345"
+
+    assert _normalize_zip("62704") == "62704"
+    assert _normalize_zip("62704-1234") == "627041234"
+    assert _normalize_zip("9411") == "9411"
+    assert _normalize_zip(None) == ""
+
+
+def test_build_ita_establishment_payload_strips_ein_punctuation():
+    """OSHA rejects the canonical hyphenated IRS form with "EIN can only contain
+    numbers" — a 403 wrapping an upstream 400 that fails the whole batch."""
+    from app.matcha.services.ir_ita_submission import build_ita_establishment_payload
+
+    payload = build_ita_establishment_payload(_fixture_establishment())
+    assert payload["ein"] == {"ein": "123456789"}
+
+
+def test_build_ita_establishment_payload_omits_absent_ein():
     from app.matcha.services.ir_ita_submission import build_ita_establishment_payload
 
     est = _fixture_establishment()
+    est["ein"] = None
+    assert "ein" not in build_ita_establishment_payload(est)
+
+    est["ein"] = "   "
+    assert "ein" not in build_ita_establishment_payload(est)
+
+
+def test_build_ita_form300a_payload_matches_aggregate_numbers():
+    from app.matcha.services.ir_ita_submission import build_ita_form300a_payload
+
+    payload = build_ita_form300a_payload(_fixture_establishment(), "1182988", 2025)
+
+    assert payload["establishment"] == {"id": "1182988"}
+    assert payload["year_filing_for"] == 2025
+    assert payload["annual_average_employees"] == 120
+    assert payload["total_hours_worked"] == 240000
+
+    # Must mirror the 300A aggregate exactly (byte-identical to the CSV).
+    assert payload["no_injuries_illnesses"] == 1  # 3 cases → 1 = "had recordables"
+    assert payload["total_dafw_cases"] == 1
+    assert payload["total_djtr_cases"] == 1
+    assert payload["total_other_cases"] == 1
+    assert payload["total_dafw_days"] == 10
+    assert payload["total_djtr_days"] == 5
+
+
+def test_build_ita_form300a_payload_zero_cases_flags_no_injuries():
+    from app.matcha.services.ir_ita_submission import build_ita_form300a_payload
+
+    est = _fixture_establishment()
     est["agg"]["total_cases"] = 0
-    payload = build_ita_establishment_payload(est, 2025)
-    assert payload["summary"]["no_injuries_illnesses"] == 1
+    # 2 = "no recordable injuries/illnesses" (1 = had them).
+    assert build_ita_form300a_payload(est, "1182988", 2025)["no_injuries_illnesses"] == 2
+
+
+def test_extract_message_reads_osha_string_error_body():
+    """OSHA answers a field-validation failure with HTTP 403 whose body is a bare
+    JSON *string* wrapping the upstream 400, and truncates it mid-JSON. Reading
+    only dict bodies rendered every rejection as "returned HTTP 403", which reads
+    as an auth failure."""
+    from app.matcha.services.ir_ita_submission import _extract_message
+
+    truncated = (
+        "Client error: `POST http://ita:8080/v1/users/280156/establishments` resulted in a "
+        "`400 Bad Request` response:\n"
+        '{"results":[{"establishment_name":"SAn Fran","errors":["Zip code must contain 5 or 9 '
+        'digits"],"ein":{"ein":"99999999 (truncated...)'
+    )
+    assert _extract_message(truncated) == "Zip code must contain 5 or 9 digits"
+
+    parseable = (
+        "Client error: resulted in a `400 Bad Request` response:\n"
+        '{"results":[{"errors":["EIN can only contain numbers","EIN must be 9 digits long"]}]}'
+    )
+    assert _extract_message(parseable) == "EIN can only contain numbers; EIN must be 9 digits long"
+
+    # Object bodies keep working; unknown shapes degrade rather than raise.
+    assert _extract_message({"message": "nope"}) == "nope"
+    assert _extract_message(None) is None
+    assert _extract_message("") is None
+
+
+def test_missing_ita_fields_flags_present_but_malformed_values():
+    """Presence alone passed a hyphenated EIN and a 4-digit zip straight through
+    to OSHA, which rejects the whole batch on either."""
+    from app.matcha.routes.ir_incidents.osha import _missing_ita_fields
+
+    # The hyphenated fixture EIN is valid — the payload builder strips to 9 digits.
+    assert _missing_ita_fields(_fixture_establishment()) == []
+
+    short_zip = _fixture_establishment()
+    short_zip["zip_code"] = "9411"
+    assert _missing_ita_fields(short_zip) == ["zip_code_invalid"]
+
+    # ZIP+4 is 9 digits once punctuation is stripped — still valid.
+    plus_four = _fixture_establishment()
+    plus_four["zip_code"] = "62704-1234"
+    assert _missing_ita_fields(plus_four) == []
+
+    short_ein = _fixture_establishment()
+    short_ein["ein"] = "12-345"
+    assert _missing_ita_fields(short_ein) == ["ein_invalid"]
+
+    # An absent value reports as missing, not invalid — one code per field.
+    absent = _fixture_establishment()
+    absent["ein"] = None
+    assert _missing_ita_fields(absent) == ["ein"]
 
 
 # ── ITA deadline math (deadline worker) ────────────────────────────────────────

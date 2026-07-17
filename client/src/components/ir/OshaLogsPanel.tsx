@@ -133,6 +133,10 @@ const missingLabel: Record<string, string> = {
   street_address: 'Street address',
   total_hours_worked: 'Total hours worked',
   unassigned_location: 'a location (excluded from the filing until assigned)',
+  // Present-but-malformed values. OSHA rejects the batch on these, so they read
+  // as blocking problems alongside the genuinely-absent fields above.
+  ein_invalid: 'a valid EIN (must be 9 digits)',
+  zip_code_invalid: 'a valid ZIP code (must be 5 or 9 digits)',
 }
 
 export function OshaLogsPanel() {

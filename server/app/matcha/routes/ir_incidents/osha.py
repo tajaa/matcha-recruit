@@ -77,7 +77,13 @@ ITA_CSV_COLUMNS = [
 
 # Single definition of the OSHA size bands, shared with the direct-filing path —
 # the CSV export and the API submission must never disagree on the size code.
-from app.matcha.services.ir_ita_submission import ita_size_category as _ita_size_category  # noqa: E402
+# Same reason for the EIN/zip normalizers: the pre-flight validator must judge
+# the exact digits the API payload will carry, not the raw stored string.
+from app.matcha.services.ir_ita_submission import (  # noqa: E402
+    ita_size_category as _ita_size_category,
+    _normalize_ein,
+    _normalize_zip,
+)
 
 
 # Mandatory ITA fields that can realistically be missing (city/state/zipcode are
@@ -91,6 +97,12 @@ def _missing_ita_fields(est: dict) -> list[str]:
     dictionary), so a filer sees the gap in the pre-flight checklist rather than
     as an OSHA rejection mid-submission. `ein` is kept required here for hygiene
     even though the API itself treats it as optional.
+
+    Presence alone is not enough: OSHA field-validates EIN ("must be 9 digits")
+    and zip ("must contain 5 or 9 digits") and rejects the whole batch when either
+    is malformed. A present-but-invalid value passed this check silently and
+    surfaced only as an opaque OSHA rejection at submit time, so the two are
+    length-checked here on the same digits the payload builder sends.
     """
     missing = []
     # Required to create the establishment (address parts + naics + ein).
@@ -98,6 +110,11 @@ def _missing_ita_fields(est: dict) -> list[str]:
         val = est.get(field)
         if val is None or (isinstance(val, str) and not val.strip()):
             missing.append(field)
+    # Present but malformed — OSHA rejects these, so they block the filing too.
+    if "ein" not in missing and len(_normalize_ein(est.get("ein"))) != 9:
+        missing.append("ein_invalid")
+    if "zip_code" not in missing and len(_normalize_zip(est.get("zip_code"))) not in (5, 9):
+        missing.append("zip_code_invalid")
     # Required on the 300A summary: both must be present AND > 0 (API validation).
     if not (est.get("total_hours_worked") or 0) > 0:
         missing.append("total_hours_worked")
@@ -1195,13 +1212,17 @@ async def export_ita_csv(
     for est in establishments:
         agg = est["agg"]
         writer.writerow({
-            "ein": est["ein"] or "",
+            # Normalized to digits for the same reason the API payload is: the ITA
+            # portal enforces "EIN can only contain numbers" and a 5-or-9-digit zip
+            # on the uploaded file too, so a hyphenated EIN is rejected at the
+            # portal instead of at submit. CSV and API must carry identical bytes.
+            "ein": _normalize_ein(est["ein"]),
             "company_name": est["company_name"],
             "establishment_name": est["establishment_name"],
             "street_address": est["street_address"] or "",
             "city": est["city"] or "",
             "state": est["state"] or "",
-            "zip_code": est["zip_code"] or "",
+            "zip_code": _normalize_zip(est["zip_code"]),
             "naics_code": est["naics"] or "",
             "industry_description": naics_industry_description(est["naics"]) or "",
             "size": _ita_size_category(est["annual_average_employees"]),

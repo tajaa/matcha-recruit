@@ -27,6 +27,7 @@ the point of use and never logged or returned.
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -77,6 +78,16 @@ def _normalize_zip(value) -> str:
     return digits
 
 
+def _normalize_ein(value) -> str:
+    """ITA `ein` must be 9 digits, digits only — OSHA rejects the canonical
+    hyphenated IRS form (`12-3456789`) with "EIN can only contain numbers".
+    Strip to digits exactly as `_normalize_zip` does; a wrong-length result is
+    left for the pre-flight validator / OSHA to reject rather than padded."""
+    if not value:
+        return ""
+    return re.sub(r"[^0-9]", "", str(value))
+
+
 def build_ita_establishment_payload(est: dict) -> dict[str, Any]:
     """Map one gathered establishment dict (from `_gather_ita_establishments`)
     to the ITA API *establishment* JSON object (identity/address/naics/size only
@@ -102,7 +113,7 @@ def build_ita_establishment_payload(est: dict) -> dict[str, Any]:
     }
     # EIN is optional on the API (Required-to-CREATE: No) — only send it when we
     # actually have one rather than an empty nested object.
-    ein = (est.get("ein") or "").strip()
+    ein = _normalize_ein(est.get("ein"))
     if ein:
         payload["ein"] = {"ein": ein}
     return payload
@@ -171,8 +182,48 @@ class _ITAError(Exception):
 
 
 def _extract_message(body: Any) -> Optional[str]:
+    """Best-effort user-safe message out of an ITA error body.
+
+    OSHA's edge does NOT always answer with an object. A field-validation failure
+    on POST /establishments comes back as HTTP 403 whose body is a bare JSON
+    *string* wrapping the upstream 400 — e.g.
+
+        "Client error: `POST http://ita:8080/v1/users/280156/establishments`
+         resulted in a `400 Bad Request` response:
+         {\"results\":[{\"errors\":[\"EIN can only contain numbers\"]}]}"
+
+    Reading only `dict` bodies turned every such rejection into a bare
+    "OSHA ITA API returned HTTP 403.", which reads as an auth failure and sent us
+    hunting for a bad token when the real fault was our own payload. Dig the
+    per-establishment `errors` out of the embedded JSON when it's there, and fall
+    back to the raw string.
+    """
     if isinstance(body, dict):
         return body.get("message") or body.get("error") or body.get("detail")
+    if isinstance(body, str):
+        text = body.strip()
+        if not text:
+            return None
+        start = text.find("{")
+        if start != -1:
+            try:
+                inner = json.loads(text[start:])
+            except ValueError:
+                inner = None
+            errors: list[str] = []
+            for r in _results_list(inner):
+                errors.extend(_result_errors(r))
+            if errors:
+                return "; ".join(dict.fromkeys(errors))
+            # OSHA truncates its own error string mid-JSON ("(truncated...)"),
+            # so the embedded body often can't be parsed at all. Lift the
+            # `errors` array out textually rather than dumping the raw wrapper —
+            # the field messages are the only part a filer can act on.
+            for match in re.finditer(r'"errors"\s*:\s*\[(.*?)\]', text, re.DOTALL):
+                errors.extend(re.findall(r'"((?:[^"\\]|\\.)*)"', match.group(1)))
+            if errors:
+                return "; ".join(dict.fromkeys(errors))
+        return text[:500]
     return None
 
 
