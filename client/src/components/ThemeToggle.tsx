@@ -1,11 +1,11 @@
 import { useState } from 'react'
 import { Sun, Moon } from 'lucide-react'
-import { useLayoutContext } from '../layouts/LayoutContext'
 import { getTheme, setTheme, type AppTheme } from '../utils/theme'
 
-/** Dark ⇄ light switch. Lives in every sidebar footer (SidebarShell default). */
+/** Dark ⇄ light switch. Lives in every sidebar footer (SidebarShell default),
+ *  where it sits in a row of icon controls alongside settings and log out —
+ *  hence icon-only, with the label carried by the tooltip. */
 export default function ThemeToggle() {
-  const { sidebarCollapsed } = useLayoutContext()
   const [theme, setThemeState] = useState<AppTheme>(getTheme())
 
   function toggle() {
@@ -22,12 +22,10 @@ export default function ThemeToggle() {
       type="button"
       onClick={toggle}
       title={label}
-      className={`flex items-center w-full py-1.5 text-[12px] text-zinc-600 hover:text-zinc-200 transition-colors duration-100 group ${
-        sidebarCollapsed ? 'justify-center px-0' : 'gap-2.5 px-3'
-      }`}
+      aria-label={label}
+      className="rounded-md p-1.5 text-zinc-600 transition-colors hover:bg-zinc-800/60 hover:text-zinc-300"
     >
-      <Icon className="h-[14px] w-[14px] text-zinc-600 group-hover:text-zinc-300" strokeWidth={1.4} />
-      {!sidebarCollapsed && <span className="font-light tracking-wide">{label}</span>}
+      <Icon className="h-4 w-4" strokeWidth={1.5} />
     </button>
   )
 }

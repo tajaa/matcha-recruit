@@ -1,8 +1,7 @@
 import type { LucideIcon } from 'lucide-react'
-import { NavLink, useNavigate, useLocation } from 'react-router-dom'
-import { LogOut, Settings, ChevronDown, Lock } from 'lucide-react'
+import { NavLink, useNavigate, useLocation, Link } from 'react-router-dom'
+import { LogOut, Settings, ChevronDown, Lock, PanelLeftClose } from 'lucide-react'
 import { useState, useEffect, useRef } from 'react'
-import { Logo } from './ui'
 import Avatar from './Avatar'
 import { useMe } from '../hooks/useMe'
 import { resetAuthCaches } from '../api/authReset'
@@ -39,6 +38,9 @@ type SidebarShellProps = {
   logoTo: string
   logoLabel: string
   nav: (NavItem | NavGroup)[]
+  /** The org this session is scoped to — set as the masthead's second line.
+   *  (Personal accounts pass the person's own name; deduped against the footer
+   *  identity so it isn't printed twice.) */
   user?: { name: string; avatarUrl?: string | null; settingsTo?: string }
   /** Renders above the user/logout footer — e.g. an upgrade panel. */
   upgradeFooter?: React.ReactNode
@@ -50,6 +52,33 @@ type SidebarShellProps = {
 function isGroup(item: NavItem | NavGroup): item is NavGroup {
   return 'items' in item
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The rail reads as the index of a register, not a nav bar — this product is a
+// system of record, and the pages it fronts are editorial (a light sans
+// headline over a Fraunces italic line; see IRList.tsx). Three rules hold it
+// together:
+//
+//   1. The active row is a TAB CUT INTO THE PAGE. It takes the canvas colour
+//      (vsc-bg) and bleeds past the rail's right edge, so the page appears to
+//      reach into the index. The rail has no right border — the colour step
+//      between rail and canvas *is* the edge, which is what lets the tab punch
+//      through it.
+//   2. EMERALD IS DATA, NOT NAVIGATION. Selection is carried by the tab and by
+//      weight, never by the accent. The accent is spent only on counts that
+//      want attention, so the one green mark in the rail actually means
+//      something.
+//   3. TYPE CARRIES HIERARCHY. Serif masthead, spaced-caps org and group
+//      labels, light sans rows that shift to normal weight when selected.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const FRAUNCES = "'Fraunces', Georgia, serif"
+
+/** Row geometry shared by every line in the index, so icons sit on one optical
+ *  axis expanded or collapsed. `-mr-2.5` cancels the nav's own padding so a
+ *  selected row can run all the way to the rail's edge and become a tab. */
+const ROW = 'group relative flex h-[34px] items-center rounded-l-md -mr-2.5 transition-colors duration-100'
+const ROW_PAD = (collapsed: boolean) => (collapsed ? 'justify-center pl-0 pr-2.5' : 'gap-3 pl-2.5 pr-3')
 
 function NavItemLink({ item, location, collapsed }: { item: NavItem; location: ReturnType<typeof useLocation>; collapsed: boolean }) {
   const isExact = item.to === '/app' || item.to === '/admin' || item.to === '/broker'
@@ -74,10 +103,15 @@ function NavItemLink({ item, location, collapsed }: { item: NavItem; location: R
         type="button"
         onClick={item.onLockedClick}
         title={item.label}
-        className={`group flex items-center py-1.5 text-[12px] w-full text-zinc-700 hover:text-zinc-500 transition-colors cursor-pointer ${collapsed ? 'justify-center px-0' : 'gap-2.5 pl-3 pr-2 text-left'}`}
+        className={`w-full text-left text-[13px] font-light text-zinc-600 hover:bg-zinc-900 hover:text-zinc-400 ${ROW} ${ROW_PAD(collapsed)}`}
       >
-        <item.icon className="h-[14px] w-[14px] flex-shrink-0" strokeWidth={1.4} />
-        {!collapsed && <><span className="flex-1 tracking-wide font-light">{item.label}</span><Lock className="h-3 w-3 text-zinc-700 group-hover:text-emerald-400 flex-shrink-0" strokeWidth={1.6} /></>}
+        <item.icon className="h-[15px] w-[15px] shrink-0" strokeWidth={1.5} />
+        {!collapsed && (
+          <>
+            <span className="flex-1 truncate">{item.label}</span>
+            <Lock className="h-3 w-3 shrink-0 text-zinc-700 group-hover:text-emerald-400" strokeWidth={1.6} />
+          </>
+        )}
       </button>
     )
   }
@@ -86,37 +120,34 @@ function NavItemLink({ item, location, collapsed }: { item: NavItem; location: R
     <NavLink
       to={item.to}
       title={collapsed ? item.label : undefined}
-      className={`group relative flex items-center py-2 text-[12px] transition-colors duration-100 ${collapsed ? 'justify-center px-0' : 'gap-2.5 pl-3 pr-2'} ${
+      className={`text-[13px] ${ROW} ${ROW_PAD(collapsed)} ${
         isActive
-          ? 'text-zinc-50 font-normal'
-          : 'text-zinc-500 hover:text-zinc-200 font-light'
+          // The tab: canvas colour, running off the rail's right edge.
+          ? 'bg-vsc-bg font-normal text-zinc-50'
+          : 'font-light text-zinc-500 hover:bg-zinc-900 hover:text-zinc-200'
       }`}
     >
-      {/* Subtle accent strip on active */}
-      {isActive && !collapsed && (
-        <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[2px] h-4 bg-emerald-400 rounded-r" />
-      )}
       <item.icon
-        className={`h-[14px] w-[14px] flex-shrink-0 ${isActive ? 'text-zinc-100' : 'text-zinc-600 group-hover:text-zinc-300'}`}
-        strokeWidth={1.4}
+        className={`h-[15px] w-[15px] shrink-0 ${isActive ? 'text-zinc-300' : 'text-zinc-600 group-hover:text-zinc-400'}`}
+        strokeWidth={1.5}
       />
       {!collapsed && (
         <>
-          <span className="flex-1 tracking-wide">{item.label}</span>
+          <span className="flex-1 truncate">{item.label}</span>
           {item.tag && (
-            <span className="text-[8.5px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/20 leading-none">
+            <span className="shrink-0 text-[8.5px] font-medium uppercase tracking-[0.14em] text-amber-500/80">
               {item.tag}
             </span>
           )}
           {!!item.badge && item.badge > 0 && (
-            <span className="min-w-[18px] h-[16px] flex items-center justify-center rounded bg-emerald-500/10 text-[9px] font-mono text-emerald-400 px-1.5 leading-none">
+            <span className="shrink-0 font-mono text-[10px] leading-none text-emerald-400">
               {item.badge > 99 ? '99+' : item.badge}
             </span>
           )}
         </>
       )}
       {collapsed && !!item.badge && item.badge > 0 && (
-        <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-emerald-400" />
+        <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-emerald-400" />
       )}
     </NavLink>
   )
@@ -133,9 +164,11 @@ function NavGroupSection({ group, location, collapsed }: { group: NavGroup; loca
     if (hasActiveChild) setOpen(true)
   }, [hasActiveChild])
 
+  // Collapsed rail has no room for labels; a hairline keeps the grouping as
+  // rhythm rather than dropping it.
   if (collapsed) {
     return (
-      <div className="space-y-0.5">
+      <div className="space-y-px border-t border-zinc-900 py-2 first:border-t-0 first:pt-0">
         {group.items.map((item) => (
           <NavItemLink key={item.to} item={item} location={location} collapsed={collapsed} />
         ))}
@@ -144,16 +177,20 @@ function NavGroupSection({ group, location, collapsed }: { group: NavGroup; loca
   }
 
   return (
-    <div className="mt-3 first:mt-0">
+    <div className="mt-5 first:mt-0">
       <button
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center justify-between w-full px-3 pt-2 pb-1 text-[9px] font-light uppercase tracking-[0.18em] text-zinc-700 hover:text-zinc-500 transition-colors"
+        className="group mb-1 flex w-full items-center gap-1.5 pl-2.5 pr-3 text-[9px] font-medium uppercase tracking-[0.2em] text-zinc-600 transition-colors hover:text-zinc-400"
       >
-        {group.label}
-        <ChevronDown className={`h-2.5 w-2.5 transition-transform duration-150 ${open ? '' : '-rotate-90'}`} strokeWidth={1.6} />
+        <span className="truncate">{group.label}</span>
+        <span className="h-px flex-1 bg-zinc-900" />
+        <ChevronDown
+          className={`h-2.5 w-2.5 shrink-0 transition-all duration-150 ${open ? 'opacity-0 group-hover:opacity-100' : '-rotate-90 opacity-100'}`}
+          strokeWidth={2}
+        />
       </button>
       {open && (
-        <div className="space-y-1">
+        <div className="space-y-px">
           {group.items.map((item) => (
             <NavItemLink key={item.to} item={item} location={location} collapsed={collapsed} />
           ))}
@@ -166,8 +203,8 @@ function NavGroupSection({ group, location, collapsed }: { group: NavGroup; loca
 export default function SidebarShell({ logoTo, logoLabel, nav, user, upgradeFooter, footerSlot = <ThemeToggle /> }: SidebarShellProps) {
   const navigate = useNavigate()
   const location = useLocation()
-  const { hasTopNav, sidebarCollapsed } = useLayoutContext()
-  const { hasFeature } = useMe()
+  const { sidebarCollapsed, setSidebarCollapsed } = useLayoutContext()
+  const { hasFeature, me } = useMe()
 
   // Enforce the `feature` contract declared on NavItem/NavGroup for every
   // sidebar that renders through this shell. Locked upsell entries carry no
@@ -194,19 +231,60 @@ export default function SidebarShell({ logoTo, logoLabel, nav, user, upgradeFoot
     navigate('/login')
   }
 
-  const navPx = sidebarCollapsed ? 'px-1' : 'px-2.5'
+  // Who is signed in, as distinct from which org the session is scoped to. The
+  // old top bar showed the person and the rail showed the org; with the bar
+  // gone the rail carries both — org in the masthead, person in the footer.
+  const personName = me?.profile?.name || me?.user?.email || ''
+  const orgName = user?.name
+  const showOrg = !!orgName && orgName !== personName
 
   return (
-    <aside className="h-full w-full bg-zinc-950 border-r border-white/5 flex flex-col overflow-hidden">
-      {/* Logo area — hidden when AppLayout's top navbar is present */}
-      {!hasTopNav && (
-        <div className="h-14 flex items-center justify-center px-4 bg-zinc-950">
-          <Logo to={logoTo} label={logoLabel} />
-        </div>
-      )}
+    <aside className="flex h-full w-full flex-col overflow-hidden bg-zinc-950">
+      {/* Masthead — serif wordmark over spaced-caps org, the same editorial
+          voice the pages themselves use. */}
+      <div className={`group flex h-16 shrink-0 items-center ${sidebarCollapsed ? 'justify-center px-2' : 'gap-2.5 pl-4 pr-2.5'}`}>
+        {sidebarCollapsed ? (
+          // The mark doubles as the expander: a 56px rail has no room for both,
+          // and an expand control is worth more here than a home link.
+          <button
+            type="button"
+            onClick={() => setSidebarCollapsed(false)}
+            title="Expand sidebar"
+            aria-label="Expand sidebar"
+            className="rounded-md p-1.5 transition-opacity hover:opacity-70"
+          >
+            <img src="/logo.svg" alt="" className="h-6 w-6" />
+          </button>
+        ) : (
+          <>
+            <Link to={logoTo} className="flex min-w-0 flex-1 flex-col justify-center" title={logoLabel}>
+              <span
+                className="truncate text-[17px] font-light leading-none tracking-tight text-zinc-100"
+                style={{ fontFamily: FRAUNCES }}
+              >
+                {logoLabel}
+              </span>
+              {showOrg && (
+                <span className="mt-1.5 truncate text-[9px] font-medium uppercase leading-none tracking-[0.22em] text-zinc-600">
+                  {orgName}
+                </span>
+              )}
+            </Link>
+            <button
+              type="button"
+              onClick={() => setSidebarCollapsed(true)}
+              title="Collapse sidebar"
+              aria-label="Collapse sidebar"
+              className="shrink-0 rounded-md p-1.5 text-zinc-700 opacity-0 transition-all hover:text-zinc-300 focus-visible:opacity-100 group-hover:opacity-100"
+            >
+              <PanelLeftClose className="h-4 w-4" strokeWidth={1.5} />
+            </button>
+          </>
+        )}
+      </div>
 
-      {/* Navigation */}
-      <nav className={`flex-1 ${navPx} pt-2 space-y-1 overflow-y-auto overflow-x-hidden`}>
+      {/* Index */}
+      <nav className="flex-1 overflow-y-auto overflow-x-hidden pb-3 pl-2.5 pr-2.5 pt-1">
         {visibleNav.map((item) =>
           isGroup(item) ? (
             <NavGroupSection key={item.label} group={item} location={location} collapsed={sidebarCollapsed} />
@@ -216,42 +294,46 @@ export default function SidebarShell({ logoTo, logoLabel, nav, user, upgradeFoot
         )}
       </nav>
 
-      {upgradeFooter && !sidebarCollapsed && (
-        <div className="px-2.5 pt-3 pb-2">{upgradeFooter}</div>
-      )}
+      {upgradeFooter && !sidebarCollapsed && <div className="px-2.5 pb-2 pt-3">{upgradeFooter}</div>}
 
-      {/* Footer */}
-      <div className={`${navPx} py-3 border-t border-white/[0.04] space-y-1 bg-zinc-950`}>
-        {footerSlot}
-        {user && !sidebarCollapsed && (
-          <div className="flex items-center gap-2.5 px-3 py-2">
-            <Avatar name={user.name} avatarUrl={user.avatarUrl} size="sm" />
-            <span className="text-[12px] text-zinc-300 truncate flex-1 font-light tracking-wide">{user.name}</span>
-            {user.settingsTo && (
-              <NavLink to={user.settingsTo} className="text-zinc-600 hover:text-zinc-200 transition-colors">
-                <Settings className="h-3.5 w-3.5" strokeWidth={1.4} />
-              </NavLink>
-            )}
+      {/* Colophon — who's signed in, plus session controls. */}
+      <div className="shrink-0 border-t border-zinc-900 px-2.5 py-2.5">
+        {personName && !sidebarCollapsed && (
+          <div className="flex items-center gap-2.5 px-1 pb-2">
+            <Avatar name={personName} avatarUrl={me?.user?.avatar_url} size="sm" />
+            <span className="min-w-0 flex-1 truncate text-[12px] font-light tracking-wide text-zinc-400">
+              {personName}
+            </span>
           </div>
         )}
-        {user && sidebarCollapsed && user.settingsTo && (
-          <NavLink
-            to={user.settingsTo}
-            title="Settings"
-            className="flex justify-center w-full py-2 text-zinc-600 hover:text-zinc-300 transition-colors"
-          >
-            <Settings className="h-[14px] w-[14px]" strokeWidth={1.4} />
-          </NavLink>
+        {personName && sidebarCollapsed && (
+          <div className="flex justify-center pb-2" title={personName}>
+            <Avatar name={personName} avatarUrl={me?.user?.avatar_url} size="sm" />
+          </div>
         )}
-        <button
-          type="button"
-          onClick={handleLogout}
-          title="Log out"
-          className={`flex items-center w-full py-1.5 text-[12px] text-zinc-600 hover:text-zinc-200 transition-colors duration-100 group ${sidebarCollapsed ? 'justify-center px-0' : 'gap-2.5 px-3'}`}
-        >
-          <LogOut className="h-[14px] w-[14px] text-zinc-600 group-hover:text-zinc-300" strokeWidth={1.4} />
-          {!sidebarCollapsed && <span className="font-light tracking-wide">Log out</span>}
-        </button>
+
+        <div className={`flex items-center ${sidebarCollapsed ? 'flex-col gap-1' : 'gap-0.5'}`}>
+          {footerSlot}
+          {user?.settingsTo && (
+            <NavLink
+              to={user.settingsTo}
+              title="Settings"
+              aria-label="Settings"
+              className="rounded-md p-1.5 text-zinc-700 transition-colors hover:text-zinc-300"
+            >
+              <Settings className="h-4 w-4" strokeWidth={1.5} />
+            </NavLink>
+          )}
+          <button
+            type="button"
+            onClick={handleLogout}
+            title="Log out"
+            aria-label="Log out"
+            className="rounded-md p-1.5 text-zinc-700 transition-colors hover:text-zinc-300"
+          >
+            <LogOut className="h-4 w-4" strokeWidth={1.5} />
+          </button>
+        </div>
       </div>
     </aside>
   )
