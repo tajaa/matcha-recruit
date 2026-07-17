@@ -662,3 +662,37 @@ async def update_notification_settings(
             request.auto_send_invitation,
         )
         return dict(row)
+
+
+# ── New-hire jurisdiction packet ─────────────────────────────────────────
+# Derived at read time from employees.work_state (every ingress path — Finch
+# sync, CSV import, manual add — gets it for free). Rides this router's existing
+# gating; no new feature flag, no migration.
+
+@router.get("/jurisdiction-packet/{employee_id}")
+async def get_jurisdiction_packet(
+    employee_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Codified new-hire notices (I-9, wage/paystub, sick-leave, background-check,
+    workers'-comp) owed for this employee's work state + federal."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=403, detail="No company associated with this account")
+    from ..services import new_hire_packet
+    async with get_connection() as conn:
+        return await new_hire_packet.build_packet(conn, company_id, employee_id)
+
+
+@router.get("/new-states")
+async def get_new_states(
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """States where the company has active employees but no business location —
+    jurisdictions with obligations that have never been set up."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=403, detail="No company associated with this account")
+    from ..services import new_hire_packet
+    async with get_connection() as conn:
+        return await new_hire_packet.new_state_summary(conn, company_id)
