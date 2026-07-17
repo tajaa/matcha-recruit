@@ -118,13 +118,13 @@ export default function Onboarding() {
   if (loading) return <p className="text-sm text-zinc-500">Loading...</p>
 
   return (
-    <div>
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 sm:gap-0">
+    <div className="overflow-hidden rounded-xl border border-white/[0.06] bg-zinc-950">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 sm:gap-0 border-b border-white/[0.06] px-5 py-4">
         <div>
-          <h1 className="text-2xl font-semibold text-zinc-100">
+          <h1 className="text-2xl font-light tracking-tight text-zinc-50">
             Onboarding
           </h1>
-          <p className="mt-2 text-sm text-zinc-500">
+          <p className="mt-1 text-sm italic text-zinc-500" style={{ fontFamily: 'Fraunces, Georgia, serif' }}>
             Task templates and onboarding analytics.
           </p>
         </div>
@@ -153,163 +153,165 @@ export default function Onboarding() {
         onSuccess={refreshDepartments}
       />
 
-      {/* Analytics funnel */}
-      {analytics && (
-        <div className="mt-6 grid gap-3 sm:grid-cols-1 md:grid-cols-3 lg:grid-cols-5">
-          {Object.entries(analytics.funnel).map(([key, val]) => (
-            <div key={key} className="border border-zinc-800 rounded-lg px-3 py-3 text-center">
-              <p className="text-xl font-semibold text-zinc-100">{val}</p>
-              <p className="text-[11px] text-zinc-500 mt-0.5 uppercase tracking-wide">
-                {key.replace(/_/g, ' ')}
-              </p>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* KPIs */}
-      {analytics?.kpis.time_to_ready_p50_days != null && (
-        <div className="mt-3 flex gap-3">
-          <div className="flex-1 border border-zinc-800 rounded-lg px-3 py-3">
-            <p className="text-[11px] text-zinc-500 uppercase tracking-wide">Median time to ready</p>
-            <p className="text-lg font-semibold text-zinc-100 mt-0.5">
-              {analytics.kpis.time_to_ready_p50_days.toFixed(1)} days
-            </p>
-          </div>
-          {analytics.kpis.completion_before_start_rate != null && (
-            <div className="flex-1 border border-zinc-800 rounded-lg px-3 py-3">
-              <p className="text-[11px] text-zinc-500 uppercase tracking-wide">Completed before start</p>
-              <p className="text-lg font-semibold text-zinc-100 mt-0.5">
-                {analytics.kpis.completion_before_start_rate.toFixed(0)}%
-              </p>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Bottlenecks */}
-      {analytics && analytics.bottlenecks.length > 0 && (
-        <div className="mt-4">
-          <h2 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-2">Bottlenecks</h2>
-          <div className="border border-zinc-800 rounded-lg divide-y divide-zinc-800/60">
-            {analytics.bottlenecks.map((b) => (
-              <div key={b.task_title} className="flex items-center justify-between px-4 py-2.5">
-                <p className="text-sm text-zinc-200">{b.task_title}</p>
-                <span className="text-xs text-zinc-500">
-                  {b.overdue_count} overdue · {b.avg_days_overdue.toFixed(0)}d avg
-                </span>
+      <div className="p-5">
+        {/* Analytics funnel */}
+        {analytics && (
+          <div className="grid gap-3 sm:grid-cols-1 md:grid-cols-3 lg:grid-cols-5">
+            {Object.entries(analytics.funnel).map(([key, val]) => (
+              <div key={key} className="rounded-lg border border-white/[0.06] bg-zinc-900/40 px-3 py-3 text-center">
+                <p className="text-xl font-semibold font-mono tabular-nums text-zinc-100">{val}</p>
+                <p className="text-[11px] text-zinc-500 mt-0.5 uppercase tracking-wide">
+                  {key.replace(/_/g, ' ')}
+                </p>
               </div>
             ))}
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Create form */}
-      {showForm && (
-        <div className="mt-5 border border-zinc-800 rounded-lg p-4">
-          <form onSubmit={handleCreate} className="grid gap-3 grid-cols-1 sm:grid-cols-2">
-            <Input
-              id="title"
-              label="Task title"
-              required
-              value={form.title}
-              onChange={(e) => setForm({ ...form, title: e.target.value })}
-              placeholder="e.g. Complete I-9 Form"
-            />
-            <Input
-              id="description"
-              label="Description"
-              value={form.description}
-              onChange={(e) => setForm({ ...form, description: e.target.value })}
-              placeholder="Optional details"
-            />
-            <div>
-              <label htmlFor="category" className="block text-xs font-medium text-zinc-400 mb-1">
-                Category
-              </label>
-              <select
-                id="category"
-                value={form.category}
-                onChange={(e) => setForm({ ...form, category: e.target.value })}
-                className="w-full rounded border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-zinc-500 focus:ring-1 focus:ring-zinc-500 transition-colors"
-              >
-                {CATEGORIES.map((c) => (
-                  <option key={c} value={c}>{categoryLabel[c]}</option>
-                ))}
-              </select>
+        {/* KPIs */}
+        {analytics?.kpis.time_to_ready_p50_days != null && (
+          <div className="mt-3 flex gap-3">
+            <div className="flex-1 rounded-lg border border-white/[0.06] bg-zinc-900/40 px-3 py-3">
+              <p className="text-[11px] text-zinc-500 uppercase tracking-wide">Median time to ready</p>
+              <p className="text-lg font-semibold text-zinc-100 mt-0.5">
+                {analytics.kpis.time_to_ready_p50_days.toFixed(1)} days
+              </p>
             </div>
-            <Input
-              id="due_days"
-              label="Due (days after start)"
-              type="number"
-              required
-              value={form.due_days}
-              onChange={(e) => setForm({ ...form, due_days: e.target.value })}
-            />
-            <div className="flex items-center gap-2 sm:col-span-2">
-              <input
-                id="is_employee"
-                type="checkbox"
-                checked={form.is_employee_task}
-                onChange={(e) => setForm({ ...form, is_employee_task: e.target.checked })}
-                className="rounded border-zinc-700 bg-zinc-900 text-zinc-400 focus:ring-zinc-500"
-              />
-              <label htmlFor="is_employee" className="text-sm text-zinc-400">
-                Employee is responsible (vs. HR/admin)
-              </label>
-            </div>
-            <div className="sm:col-span-2">
-              <Button type="submit" disabled={saving}>
-                {saving ? 'Creating...' : 'Create Task'}
-              </Button>
-            </div>
-          </form>
-        </div>
-      )}
+            {analytics.kpis.completion_before_start_rate != null && (
+              <div className="flex-1 rounded-lg border border-white/[0.06] bg-zinc-900/40 px-3 py-3">
+                <p className="text-[11px] text-zinc-500 uppercase tracking-wide">Completed before start</p>
+                <p className="text-lg font-semibold text-zinc-100 mt-0.5">
+                  {analytics.kpis.completion_before_start_rate.toFixed(0)}%
+                </p>
+              </div>
+            )}
+          </div>
+        )}
 
-      {/* Task templates by category */}
-      <div className="mt-6 space-y-5">
-        {Object.entries(grouped).map(([cat, items]) => (
-          <div key={cat}>
-            <h2 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-1.5">{categoryLabel[cat]}</h2>
-            <div className="border border-zinc-800 rounded-lg divide-y divide-zinc-800/60">
-              {items.map((t) => (
-                <div key={t.id} className="flex items-center gap-3 px-4 py-2.5">
-                  <div className="flex-1 min-w-0">
-                    <p className={`text-sm ${t.is_active ? 'text-zinc-200' : 'text-zinc-600 line-through'}`}>
-                      {t.title}
-                    </p>
-                    {t.description && (
-                      <p className="text-xs text-zinc-600 truncate">{t.description}</p>
-                    )}
-                  </div>
-                  <span className="text-[11px] text-zinc-500">
-                    {t.is_employee_task ? 'Employee' : 'HR'}
+        {/* Bottlenecks */}
+        {analytics && analytics.bottlenecks.length > 0 && (
+          <div className="mt-4">
+            <h2 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-2">Bottlenecks</h2>
+            <div className="rounded-lg border border-white/[0.06] bg-zinc-900/40 divide-y divide-white/[0.06]">
+              {analytics.bottlenecks.map((b) => (
+                <div key={b.task_title} className="flex items-center justify-between px-4 py-2.5">
+                  <p className="text-sm text-zinc-200">{b.task_title}</p>
+                  <span className="text-xs text-zinc-500">
+                    {b.overdue_count} overdue · {b.avg_days_overdue.toFixed(0)}d avg
                   </span>
-                  <span className="text-xs text-zinc-600 w-10 text-right">
-                    {t.due_days}d
-                  </span>
-                  <div className="flex gap-0.5">
-                    <button
-                      type="button"
-                      className="text-xs text-zinc-600 hover:text-zinc-300 px-2 py-1 transition-colors"
-                      onClick={() => toggleActive(t)}
-                    >
-                      {t.is_active ? 'Disable' : 'Enable'}
-                    </button>
-                    <button
-                      type="button"
-                      className="text-xs text-zinc-600 hover:text-zinc-300 px-2 py-1 transition-colors"
-                      onClick={() => deleteTemplate(t.id)}
-                    >
-                      Delete
-                    </button>
-                  </div>
                 </div>
               ))}
             </div>
           </div>
-        ))}
+        )}
+
+        {/* Create form */}
+        {showForm && (
+          <div className="mt-5 rounded-lg border border-white/[0.06] bg-zinc-900/40 p-4">
+            <form onSubmit={handleCreate} className="grid gap-3 grid-cols-1 sm:grid-cols-2">
+              <Input
+                id="title"
+                label="Task title"
+                required
+                value={form.title}
+                onChange={(e) => setForm({ ...form, title: e.target.value })}
+                placeholder="e.g. Complete I-9 Form"
+              />
+              <Input
+                id="description"
+                label="Description"
+                value={form.description}
+                onChange={(e) => setForm({ ...form, description: e.target.value })}
+                placeholder="Optional details"
+              />
+              <div>
+                <label htmlFor="category" className="block text-xs font-medium text-zinc-400 mb-1">
+                  Category
+                </label>
+                <select
+                  id="category"
+                  value={form.category}
+                  onChange={(e) => setForm({ ...form, category: e.target.value })}
+                  className="w-full rounded border border-white/[0.08] bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-zinc-500 focus:ring-1 focus:ring-zinc-500 transition-colors"
+                >
+                  {CATEGORIES.map((c) => (
+                    <option key={c} value={c}>{categoryLabel[c]}</option>
+                  ))}
+                </select>
+              </div>
+              <Input
+                id="due_days"
+                label="Due (days after start)"
+                type="number"
+                required
+                value={form.due_days}
+                onChange={(e) => setForm({ ...form, due_days: e.target.value })}
+              />
+              <div className="flex items-center gap-2 sm:col-span-2">
+                <input
+                  id="is_employee"
+                  type="checkbox"
+                  checked={form.is_employee_task}
+                  onChange={(e) => setForm({ ...form, is_employee_task: e.target.checked })}
+                  className="rounded border-zinc-700 bg-zinc-900 text-zinc-400 focus:ring-zinc-500"
+                />
+                <label htmlFor="is_employee" className="text-sm text-zinc-400">
+                  Employee is responsible (vs. HR/admin)
+                </label>
+              </div>
+              <div className="sm:col-span-2">
+                <Button type="submit" disabled={saving}>
+                  {saving ? 'Creating...' : 'Create Task'}
+                </Button>
+              </div>
+            </form>
+          </div>
+        )}
+
+        {/* Task templates by category */}
+        <div className="mt-6 space-y-5">
+          {Object.entries(grouped).map(([cat, items]) => (
+            <div key={cat}>
+              <h2 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-1.5">{categoryLabel[cat]}</h2>
+              <div className="rounded-lg border border-white/[0.06] bg-zinc-900/40 divide-y divide-white/[0.06]">
+                {items.map((t) => (
+                  <div key={t.id} className="flex items-center gap-3 px-4 py-2.5">
+                    <div className="flex-1 min-w-0">
+                      <p className={`text-sm ${t.is_active ? 'text-zinc-200' : 'text-zinc-600 line-through'}`}>
+                        {t.title}
+                      </p>
+                      {t.description && (
+                        <p className="text-xs text-zinc-600 truncate">{t.description}</p>
+                      )}
+                    </div>
+                    <span className="text-[11px] text-zinc-500">
+                      {t.is_employee_task ? 'Employee' : 'HR'}
+                    </span>
+                    <span className="text-xs text-zinc-600 w-10 text-right">
+                      {t.due_days}d
+                    </span>
+                    <div className="flex gap-0.5">
+                      <button
+                        type="button"
+                        className="text-xs text-zinc-600 hover:text-zinc-300 px-2 py-1 transition-colors"
+                        onClick={() => toggleActive(t)}
+                      >
+                        {t.is_active ? 'Disable' : 'Enable'}
+                      </button>
+                      <button
+                        type="button"
+                        className="text-xs text-zinc-600 hover:text-zinc-300 px-2 py-1 transition-colors"
+                        onClick={() => deleteTemplate(t.id)}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   )

@@ -68,18 +68,3 @@ export function isMatchaCompliancePending(profile: MeClientProfile | null | unde
   if (!profile) return false
   return profile.signup_source === 'matcha_compliance' && !profile.enabled_features?.compliance
 }
-
-/**
- * True for the free Resources-tier signup. They get access to the marketing
- * resource hub (templates, calculators, audit) but no paid features. Sidebar
- * surfaces the upgrade-to-IR + contact-for-full-platform CTAs for them.
- */
-export function isResourcesFreeTier(profile: MeClientProfile | null | undefined): boolean {
-  if (!profile) return false
-  if (profile.signup_source !== 'resources_free') return false
-  // Defensive: if an admin has manually upgraded a resources_free tenant
-  // by enabling a feature, fall back to the standard sidebar.
-  const features = profile.enabled_features ?? {}
-  const anyEnabled = Object.values(features).some(Boolean)
-  return !anyEnabled
-}

@@ -225,13 +225,13 @@ export default function PtoAccrual({ embedded }: { embedded?: boolean }) {
           </p>
           <div className="flex flex-wrap gap-3">
             <Link
-              to="/auth/resources-signup"
+              to="/login"
               className={embedded
                 ? 'inline-flex items-center h-9 px-4 rounded-lg text-xs font-medium bg-zinc-700 hover:bg-zinc-600 text-white transition-colors'
                 : 'inline-flex items-center px-5 h-10 rounded-full text-sm font-medium'}
               style={embedded ? undefined : t.btnPrimary}
             >
-              Create free account →
+              Sign in →
             </Link>
             <button
               onClick={() => setShowPricing(true)}

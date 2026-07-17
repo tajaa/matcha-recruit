@@ -219,11 +219,11 @@ export default function StateGuide() {
           </p>
           <div className="flex flex-wrap gap-3">
             <Link
-              to="/auth/resources-signup"
+              to="/login"
               className="inline-flex items-center px-5 h-10 rounded-full text-sm font-medium"
               style={{ backgroundColor: INK, color: BG }}
             >
-              Create free account →
+              Sign in →
             </Link>
             <Link
               to="/resources/audit"

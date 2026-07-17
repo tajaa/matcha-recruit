@@ -2,7 +2,13 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { Button, Input, Select, Badge, useToast } from '../../components/ui'
 import { LABEL } from '../../components/ui/typography'
 
-const PANEL = 'rounded-lg border border-white/[0.06] bg-zinc-950 p-5'
+// This page already carried the Legal-Pilot frame classes on its Locations
+// tab, same half-framed state Compliance was in: one tab framed, the other
+// bare on the app canvas. PANEL was bg-zinc-950 — correct on the bare canvas,
+// wrong once the whole page frame (below) is itself zinc-950 and PANEL would
+// dissolve into it. Lifted to zinc-900/40, same as Compliance/Dashboard/
+// Onboarding.
+const PANEL = 'rounded-lg border border-white/[0.06] bg-zinc-900/40 p-5'
 import { INDUSTRY_OPTIONS } from '../../data/industryConstants'
 import { api } from '../../api/client'
 import { fetchLocations, createLocation, updateLocation, deleteLocation, fetchJurisdictions } from '../../api/compliance'
@@ -324,32 +330,37 @@ export default function CompanySettings() {
   const selectedLoc = locations.find((l) => l.id === selectedId)
 
   return (
-    <div className="space-y-8">
-      {/* Header */}
-      <div>
-        <h1 className="text-2xl font-semibold text-zinc-100">Company</h1>
-        <p className={`mt-1 ${LABEL}`}>
-          Manage your company profile and locations
+    // Same page frame as Compliance/Dashboard/Onboarding: one bg-zinc-950
+    // shell, masthead + tab bands, padded content below.
+    <div className="overflow-hidden rounded-xl border border-white/[0.06] bg-zinc-950">
+      <div className="border-b border-white/[0.06] px-5 py-4">
+        <h1 className="text-2xl font-light tracking-tight text-zinc-50">Company</h1>
+        <p className="mt-1 text-sm italic text-zinc-500" style={{ fontFamily: 'Fraunces, Georgia, serif' }}>
+          Manage your company profile and locations.
         </p>
       </div>
 
-      {/* Tabs — pill style */}
-      <div className="flex gap-0 border border-white/[0.08] rounded-xl overflow-hidden w-fit">
+      {/* Tabs — was a bordered pill group floating below the header; now the
+          same mono tab-band treatment as Compliance/Legal Pilot, since this
+          page sits in the same kind of frame now. */}
+      <div className="flex items-center gap-1 border-b border-white/[0.06] px-5 py-1.5">
         {(['profile', 'locations'] as const).map((t) => (
           <button
             key={t}
             type="button"
             onClick={() => setTab(t)}
-            className={`px-5 py-2 text-[11px] uppercase tracking-widest font-bold transition-colors ${
+            className={`rounded px-2 py-1 font-mono text-[10px] uppercase tracking-[0.15em] transition-colors ${
               tab === t
-                ? 'bg-white/[0.08] text-zinc-50'
-                : 'bg-zinc-950 text-zinc-500 hover:text-zinc-300'
+                ? 'bg-white/[0.06] text-zinc-100'
+                : 'text-zinc-500 hover:text-zinc-300'
             }`}
           >
             {t === 'profile' ? 'Profile' : `Locations${locations.length > 0 ? ` (${locations.length})` : ''}`}
           </button>
         ))}
       </div>
+
+      <div className="p-5 space-y-5">
 
       {/* Profile Tab */}
       {tab === 'profile' && (
@@ -474,9 +485,11 @@ export default function CompanySettings() {
         </div>
       )}
 
-      {/* Locations Tab */}
+      {/* Locations Tab. This used to carry its own frame — a second
+          bg-zinc-950 border-white/[0.06] shell nested inside the page's new
+          one. Reduced to the split + divider it actually needs. */}
       {tab === 'locations' && (
-        <div className="overflow-hidden rounded-xl border border-white/[0.06] bg-zinc-950 md:grid md:grid-cols-3">
+        <div className="-m-5 md:grid md:grid-cols-3">
           <div className="border-b border-white/[0.06] p-4 md:col-span-1 md:border-b-0 md:border-r">
             <ComplianceLocationList
               locations={locations}
@@ -585,6 +598,8 @@ export default function CompanySettings() {
           </div>
         </div>
       )}
+
+      </div>
 
       <ComplianceLocationModal
         open={showModal}

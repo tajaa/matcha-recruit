@@ -85,29 +85,34 @@ export default function EmployeeSchedule() {
   const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i))
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-start justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold text-zinc-100 tracking-tight flex items-center gap-2">
-            <CalendarDays className="h-5 w-5 text-zinc-400" /> Employee Schedule
-          </h1>
-          <p className="text-sm text-zinc-500 mt-1 max-w-2xl">Build weekly shifts over your roster, assign employees, and publish. Generate recurring weeks from reusable templates. Employees see published shifts and can request swaps or time off.</p>
-        </div>
+    // Same page frame as Compliance/Dashboard/Onboarding/Company/OSHA Logs.
+    // Tab STYLE kept as-is (icon + label, underline) rather than switched to
+    // the compact mono tabs those pages use — it's already a deliberate,
+    // working motif here, not a chunky-button substitute like Compliance's
+    // Button-pills were. Only the shell + tab band placement change.
+    <div className="overflow-hidden rounded-xl border border-white/[0.06] bg-zinc-950">
+      <div className="border-b border-white/[0.06] px-5 py-4">
+        <h1 className="text-2xl font-light tracking-tight text-zinc-50 flex items-center gap-2">
+          <CalendarDays className="h-5 w-5 text-zinc-500" /> Employee Schedule
+        </h1>
+        <p className="text-sm text-zinc-500 mt-1 max-w-2xl">Build weekly shifts over your roster, assign employees, and publish. Generate recurring weeks from reusable templates. Employees see published shifts and can request swaps or time off.</p>
       </div>
 
-      <div className="flex items-center gap-1 border-b border-zinc-800">
+      <div className="flex items-center gap-1 border-b border-white/[0.06] px-5">
         <TabButton active={tab === 'schedule'} onClick={() => setTab('schedule')} icon={<CalendarDays className="h-4 w-4" />}>Schedule</TabButton>
         <TabButton active={tab === 'templates'} onClick={() => setTab('templates')} icon={<LayoutTemplate className="h-4 w-4" />}>Templates</TabButton>
         <TabButton active={tab === 'requests'} onClick={() => setTab('requests')} icon={<Inbox className="h-4 w-4" />}>Requests</TabButton>
       </div>
 
+      <div className="p-5 space-y-6">
+
       {tab === 'schedule' && (
         <>
           <div className="flex items-center justify-between flex-wrap gap-3">
             <div className="flex items-center gap-2">
-              <button onClick={() => setWeekStart((w) => addDays(w, -7))} className="text-zinc-400 hover:text-zinc-100 p-1.5 rounded-lg border border-zinc-700"><ChevronLeft className="h-4 w-4" /></button>
-              <button onClick={() => setWeekStart(toISODate(startOfWeekSunday(new Date())))} className="text-sm text-zinc-300 hover:text-zinc-100 px-3 py-1.5 rounded-lg border border-zinc-700">This week</button>
-              <button onClick={() => setWeekStart((w) => addDays(w, 7))} className="text-zinc-400 hover:text-zinc-100 p-1.5 rounded-lg border border-zinc-700"><ChevronRight className="h-4 w-4" /></button>
+              <button onClick={() => setWeekStart((w) => addDays(w, -7))} className="text-zinc-400 hover:text-zinc-100 p-1.5 rounded-lg border border-white/[0.08]"><ChevronLeft className="h-4 w-4" /></button>
+              <button onClick={() => setWeekStart(toISODate(startOfWeekSunday(new Date())))} className="text-sm text-zinc-300 hover:text-zinc-100 px-3 py-1.5 rounded-lg border border-white/[0.08]">This week</button>
+              <button onClick={() => setWeekStart((w) => addDays(w, 7))} className="text-zinc-400 hover:text-zinc-100 p-1.5 rounded-lg border border-white/[0.08]"><ChevronRight className="h-4 w-4" /></button>
               <span className="text-sm text-zinc-500 ml-1">Week of {fmtDayLabel(weekStart)}</span>
             </div>
             <button onClick={publishWeek} disabled={publishing || !summary?.draft} className="inline-flex items-center gap-1.5 text-sm text-zinc-900 bg-zinc-100 hover:bg-white rounded-lg px-3 py-2 font-medium disabled:opacity-40">
@@ -116,7 +121,7 @@ export default function EmployeeSchedule() {
           </div>
 
           {summary && (
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-px bg-white/10 border border-white/10 rounded-2xl overflow-hidden">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-px bg-white/[0.06] border border-white/[0.06] rounded-lg overflow-hidden">
               <Stat label="Shifts" value={summary.total_shifts} tone="text-zinc-200" />
               <Stat label="Published" value={summary.published} tone="text-emerald-400" />
               <Stat label="Draft" value={summary.draft} tone={summary.draft ? 'text-amber-400' : 'text-zinc-200'} />
@@ -146,6 +151,7 @@ export default function EmployeeSchedule() {
 
       {tab === 'templates' && <TemplatesTab onGenerated={() => { setTab('schedule'); reload() }} />}
       {tab === 'requests' && <RequestsTab onReviewed={reload} />}
+      </div>
     </div>
   )
 }

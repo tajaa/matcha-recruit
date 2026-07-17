@@ -44,7 +44,7 @@ export default function JobDescriptions({ embedded }: { embedded?: boolean }) {
     if (!jd.downloadUrl) return
     if (!isLoggedIn) {
       const next = encodeURIComponent(`${root}/templates/job-descriptions/${jd.slug}`)
-      window.location.href = `/auth/resources-signup?next=${next}`
+      window.location.href = `/login?next=${next}`
       return
     }
     window.open(jd.downloadUrl, '_blank', 'noopener,noreferrer')

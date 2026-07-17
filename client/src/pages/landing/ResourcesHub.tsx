@@ -99,9 +99,9 @@ export default function ResourcesHub() {
             to the questions HR teams Google a hundred times a year.
             {!loading && !isSignedIn && (
               <>
-                {' '}A free business account unlocks templates, calculators,
-                state guides, and the compliance audit —{' '}
-                <Link to="/auth/resources-signup" className="underline" style={{ color: INK }}>sign up</Link>.
+                {' '}Templates, calculators, state guides, and the compliance
+                audit unlock once you're{' '}
+                <Link to="/login" className="underline" style={{ color: INK }}>signed in</Link>.
               </>
             )}
           </p>
@@ -161,7 +161,7 @@ export default function ResourcesHub() {
 
           {!loading && !isSignedIn && (
             <Link
-              to="/auth/resources-signup"
+              to="/login"
               className="block hover:opacity-80 transition-opacity"
             >
               <article
@@ -185,7 +185,7 @@ export default function ResourcesHub() {
                 </h3>
                 <p className="text-sm" style={{ color: MUTED }}>
                   Templates, calculators, state guides, and the compliance
-                  audit are gated to free business accounts. Takes 30 seconds.
+                  audit are gated to signed-in business accounts.
                 </p>
               </article>
             </Link>

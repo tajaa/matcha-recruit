@@ -2,11 +2,9 @@ import { Routes, Route } from 'react-router-dom'
 import AppLayout from '../layouts/AppLayout'
 import TenantSidebar from '../components/TenantSidebar'
 import { FeatureGate } from '../components/FeatureGate'
-import RequireBusinessAccount from '../components/auth/RequireBusinessAccount'
 import Dashboard from '../pages/app/Dashboard'
 import Employees from '../pages/app/Employees'
 import LiteUpgradeComplete from '../pages/app/LiteUpgradeComplete'
-import WhatsNew from '../pages/app/WhatsNew'
 import Onboarding from '../pages/app/Onboarding'
 import ERCopilot from '../pages/app/ERCopilot'
 import ERCaseDetail from '../pages/app/ERCaseDetail'
@@ -57,20 +55,6 @@ import CBADetail from '../pages/app/CBADetail'
 import GrievanceDetail from '../pages/app/GrievanceDetail'
 import Training from '../pages/app/Training'
 import TrainingDetail from '../pages/app/TrainingDetail'
-import AppResources from '../pages/app/AppResources'
-import ResourcesTemplates from '../pages/landing/resources/Templates'
-import ResourcesJobDescriptions from '../pages/landing/resources/JobDescriptions'
-import JobDescriptionDetail from '../pages/landing/resources/JobDescriptionDetail'
-import ResourcesGlossary from '../pages/landing/resources/Glossary'
-import ResourcesGlossaryTerm from '../pages/landing/resources/GlossaryTerm'
-import ResourcesCalculators from '../pages/landing/resources/Calculators'
-import CalcPtoAccrual from '../pages/landing/resources/calculators/PtoAccrual'
-import CalcTurnoverCost from '../pages/landing/resources/calculators/TurnoverCost'
-import CalcOvertime from '../pages/landing/resources/calculators/Overtime'
-import CalcTotalComp from '../pages/landing/resources/calculators/TotalComp'
-import ResourcesComplianceAudit from '../pages/landing/resources/ComplianceAudit'
-import HandbookGapAnalyzer from '../pages/landing/HandbookGapAnalyzer'
-import HandbookGapResult from '../pages/landing/HandbookGapResult'
 
 export default function AppRoutes() {
   return (
@@ -79,7 +63,6 @@ export default function AppRoutes() {
         <Route index element={<Dashboard />} />
         <Route path="company" element={<CompanySettings />} />
         <Route path="upgrade/complete" element={<LiteUpgradeComplete />} />
-        <Route path="whats-new" element={<WhatsNew />} />
         <Route path="employees" element={<FeatureGate feature="employees" label="Employees"><Employees /></FeatureGate>} />
         <Route path="employees/:employeeId" element={<FeatureGate feature="employees" label="Employees"><EmployeeDetail /></FeatureGate>} />
         <Route path="onboarding" element={<Onboarding />} />
@@ -131,20 +114,6 @@ export default function AppRoutes() {
         <Route path="legal-pilot" element={<FeatureGate feature="legal_defense" label="Legal Pilot"><LegalDefense /></FeatureGate>} />
         <Route path="handbook-pilot" element={<FeatureGate feature="handbook_pilot" label="Handbook Pilot"><HandbookPilot /></FeatureGate>} />
         <Route path="analysis-pilot" element={<FeatureGate feature="analysis_pilot" label="Analysis Pilot"><AnalysisPilot /></FeatureGate>} />
-        <Route path="resources" element={<AppResources />} />
-        <Route path="resources/templates" element={<RequireBusinessAccount><ResourcesTemplates embedded /></RequireBusinessAccount>} />
-        <Route path="resources/templates/job-descriptions" element={<ResourcesJobDescriptions embedded />} />
-        <Route path="resources/templates/job-descriptions/:slug" element={<JobDescriptionDetail embedded />} />
-        <Route path="resources/calculators" element={<RequireBusinessAccount><ResourcesCalculators embedded /></RequireBusinessAccount>} />
-        <Route path="resources/calculators/pto-accrual" element={<RequireBusinessAccount><CalcPtoAccrual embedded /></RequireBusinessAccount>} />
-        <Route path="resources/calculators/turnover-cost" element={<RequireBusinessAccount><CalcTurnoverCost embedded /></RequireBusinessAccount>} />
-        <Route path="resources/calculators/overtime" element={<RequireBusinessAccount><CalcOvertime embedded /></RequireBusinessAccount>} />
-        <Route path="resources/calculators/total-comp" element={<RequireBusinessAccount><CalcTotalComp embedded /></RequireBusinessAccount>} />
-        <Route path="resources/audit" element={<RequireBusinessAccount><ResourcesComplianceAudit embedded /></RequireBusinessAccount>} />
-        <Route path="resources/handbook-audit" element={<FeatureGate feature="handbook_audit" label="Handbook Audit"><RequireBusinessAccount><HandbookGapAnalyzer embedded /></RequireBusinessAccount></FeatureGate>} />
-        <Route path="resources/handbook-audit/result/:reportId" element={<FeatureGate feature="handbook_audit" label="Handbook Audit"><RequireBusinessAccount><HandbookGapResult embedded /></RequireBusinessAccount></FeatureGate>} />
-        <Route path="resources/glossary" element={<ResourcesGlossary embedded />} />
-        <Route path="resources/glossary/:slug" element={<ResourcesGlossaryTerm embedded />} />
         <Route path="inbox" element={<Inbox />} />
         <Route path="notifications" element={<Notifications />} />
         <Route path="settings" element={<UserSettings />} />

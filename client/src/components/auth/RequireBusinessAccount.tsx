@@ -28,7 +28,7 @@ export default function RequireBusinessAccount({ children }: Props) {
 
   if (!me) {
     const next = encodeURIComponent(location.pathname + location.search)
-    return <Navigate to={`/auth/resources-signup?next=${next}`} replace />
+    return <Navigate to={`/login?next=${next}`} replace />
   }
 
   if (me.user.role !== 'client') {
@@ -50,15 +50,15 @@ export default function RequireBusinessAccount({ children }: Props) {
           <p className="text-sm mb-6" style={{ color: MUTED }}>
             HR resources are reserved for business accounts. You're signed in
             as <strong style={{ color: INK }}>{me.user.role}</strong>.
-            Sign in with a business account or create one to access templates,
+            Sign in with a business account to access templates,
             calculators, and the compliance audit.
           </p>
           <a
-            href="/auth/resources-signup"
+            href="/login"
             className="inline-block px-5 h-10 rounded-full text-sm font-medium leading-10"
             style={{ backgroundColor: INK, color: BG }}
           >
-            Create business account
+            Sign in
           </a>
         </div>
       </div>

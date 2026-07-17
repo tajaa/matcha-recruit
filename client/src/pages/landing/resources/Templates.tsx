@@ -18,7 +18,7 @@ const DISPLAY = 'var(--font-display)'
 type Asset = { slug: string; path: string | null; name: string; available: boolean; is_free?: boolean }
 type AssetList = { assets: Asset[] }
 
-const SIGNUP_PATH = '/auth/resources-signup?next=%2Fresources%2Ftemplates'
+const SIGNUP_PATH = '/login?next=%2Fresources%2Ftemplates'
 
 const TEMPLATE_DESCRIPTIONS: Record<string, string> = {
   'offer-letter':

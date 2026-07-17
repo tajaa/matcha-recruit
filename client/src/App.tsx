@@ -74,8 +74,6 @@ const ResourcesComplianceAudit = lazy(
   () => import("./pages/landing/resources/ComplianceAudit"),
 );
 const SignupPicker = lazy(() => import("./pages/auth/SignupPicker"));
-const ResourcesSignup = lazy(() => import("./pages/auth/ResourcesSignup"));
-const VerifyEmail = lazy(() => import("./pages/auth/VerifyEmail"));
 const SSOCallback = lazy(() => import("./pages/SSOCallback"));
 const BetaRegister = lazy(() => import("./pages/BetaRegister"));
 const ChannelInviteLanding = lazy(
@@ -200,8 +198,6 @@ export default function App() {
           }
         />
         <Route path="/signup" element={<SignupPicker />} />
-        <Route path="/auth/resources-signup" element={<ResourcesSignup />} />
-        <Route path="/auth/verify-email" element={<VerifyEmail />} />
         <Route path="/login" element={<Login />} />
         <Route path="/sso/callback" element={<SSOCallback />} />
         <Route path="/register/beta" element={<BetaRegister />} />

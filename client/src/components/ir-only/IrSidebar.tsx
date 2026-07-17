@@ -1,10 +1,9 @@
 import { useState } from 'react'
-import { AlertTriangle, BookOpen, Building2, ClipboardList, FileText, Link2, Sparkles, TrendingUp, Users } from 'lucide-react'
+import { AlertTriangle, Building2, ClipboardList, FileText, Link2, TrendingUp, Users } from 'lucide-react'
 import SidebarShell from '../SidebarShell'
 import type { NavItem, NavGroup } from '../SidebarShell'
 import { useMe } from '../../hooks/useMe'
 import { useSidebarBadges } from '../../hooks/useSidebarBadges'
-import { useWhatsNewBadge } from '../../hooks/useWhatsNewBadge'
 import EssentialsUpgradePanel from './EssentialsUpgradePanel'
 
 const nav: (NavItem | NavGroup)[] = [
@@ -13,8 +12,6 @@ const nav: (NavItem | NavGroup)[] = [
   { to: '/app/ir/magic-links', icon: Link2, label: 'Magic Links' },
   { to: '/app/ir/osha', icon: ClipboardList, label: 'OSHA Logs', feature: 'osha_logs' },
   { to: '/app/handbooks', icon: FileText, label: 'Handbooks' },
-  { to: '/app/resources', icon: BookOpen, label: 'Resources' },
-  { to: '/app/whats-new', icon: Sparkles, label: "What's New" },
   { to: '/app/company', icon: Building2, label: 'Company' },
   { to: '/app/employees', icon: Users, label: 'Employees', feature: 'employees' },
   // { to: '/app', icon: LayoutDashboard, label: 'Command Center' },
@@ -32,7 +29,6 @@ const ESSENTIALS_LOCKED = new Set(['/app/ir/osha', '/app/employees'])
 export default function IrSidebar() {
   const { me, loading } = useMe()
   const { badges, markSeen } = useSidebarBadges()
-  const whatsNew = useWhatsNewBadge()
   const isEssentials = me?.profile?.signup_source === 'matcha_lite_essentials'
   // Bumped when a locked carrot is clicked — pulses the upgrade panel below.
   const [upgradeNudge, setUpgradeNudge] = useState(0)
@@ -41,9 +37,6 @@ export default function IrSidebar() {
     if ('items' in item) return item
     if (item.to === '/app/ir') {
       return { ...item, badge: badges.ir || undefined, onSeen: () => markSeen('ir') }
-    }
-    if (item.to === '/app/whats-new') {
-      return { ...item, badge: whatsNew.count || undefined, onSeen: whatsNew.markSeen }
     }
     if (isEssentials && ESSENTIALS_LOCKED.has(item.to)) {
       const { feature: _feature, ...rest } = item

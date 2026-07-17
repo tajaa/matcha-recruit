@@ -4,15 +4,13 @@ import ClientSidebar from './ClientSidebar'
 import IrSidebar from './ir-only/IrSidebar'
 import MatchaXSidebar from './ir-only/MatchaXSidebar'
 import ComplianceSidebar from './ir-only/ComplianceSidebar'
-import ResourcesFreeSidebar from './resources-free/ResourcesFreeSidebar'
 import { useMe } from '../hooks/useMe'
-import { isIrOnlyTier, isResourcesFreeTier, isMatchaLitePending, isMatchaX, isMatchaXPending, isMatchaCompliance, isMatchaCompliancePending } from '../utils/tier'
+import { isIrOnlyTier, isMatchaLitePending, isMatchaX, isMatchaXPending, isMatchaCompliance, isMatchaCompliancePending } from '../utils/tier'
 import { useMatchaLitePricing, computeLitePriceDollars } from '../api/matchaLitePricing'
 import { api, ApiError } from '../api/client'
 
 /**
  * Routes the tenant to the right sidebar based on signup tier:
- *  - resources_free → slim Resources nav + upgrade panel
  *  - ir_only_self_serve / matcha_lite (paid) → slim IR nav
  *  - matcha_lite (pending payment) → complete-subscription prompt
  *  - else → full ClientSidebar (bespoke, personal, etc.)
@@ -40,7 +38,6 @@ export default function TenantSidebar() {
       isEssentials={me?.profile?.signup_source === 'matcha_lite_essentials'}
     />
   )
-  if (isResourcesFreeTier(me?.profile)) return <ResourcesFreeSidebar />
   if (isIrOnlyTier(me?.profile)) return <IrSidebar />
   return <ClientSidebar />
 }

@@ -1,13 +1,12 @@
 import {
   IconBook, IconCompany, IconDraft, IconIncident, IconLedger,
-  IconPeople, IconResources, IconSeal, IconSetup, IconShield, IconSpark,
+  IconPeople, IconSeal, IconSetup, IconShield,
   IconSteps, IconTraining, IconTrend,
 } from '../nav-icons'
 import SidebarShell from '../SidebarShell'
 import type { NavItem, NavGroup } from '../SidebarShell'
 import { useMe } from '../../hooks/useMe'
 import { useSidebarBadges } from '../../hooks/useSidebarBadges'
-import { useWhatsNewBadge } from '../../hooks/useWhatsNewBadge'
 
 // Matcha-X (mid tier) sidebar. Lite (IR + employees + handbook generation)
 // PLUS the mid-tier modules: handbook audit, training, progressive discipline,
@@ -58,8 +57,6 @@ const nav: (NavItem | NavGroup)[] = [
     items: [
       { to: '/app/company', icon: IconCompany, label: 'Company' },
       { to: '/matcha-x/onboarding', icon: IconSetup, label: 'Compliance Setup' },
-      { to: '/app/resources', icon: IconResources, label: 'Resources' },
-      { to: '/app/whats-new', icon: IconSpark, label: "What's New" },
     ],
   },
 ]
@@ -67,17 +64,13 @@ const nav: (NavItem | NavGroup)[] = [
 export default function MatchaXSidebar() {
   const { me, loading } = useMe()
   const { badges, markSeen } = useSidebarBadges()
-  const whatsNew = useWhatsNewBadge()
 
   // Badges attach by route, and every entry now lives inside a group — so this
   // has to walk into groups. Returning the group untouched (as this did while
-  // the nav was flat) would silently drop the Incidents / What's New counts.
+  // the nav was flat) would silently drop the Incidents count.
   const withBadge = (item: NavItem): NavItem => {
     if (item.to === '/app/ir') {
       return { ...item, badge: badges.ir || undefined, onSeen: () => markSeen('ir') }
-    }
-    if (item.to === '/app/whats-new') {
-      return { ...item, badge: whatsNew.count || undefined, onSeen: whatsNew.markSeen }
     }
     return item
   }
