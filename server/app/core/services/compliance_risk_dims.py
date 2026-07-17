@@ -236,6 +236,96 @@ _DIMS: Dict[str, RiskDims] = {
             "Burlington Indus. v. Ellerth, 524 U.S. 742 (1998)",
         ],
     ),
+
+    # ---- employment practices (workforce-compliance trackers) --------------
+    "pay_transparency": RiskDims(
+        insurability="uninsurable_fine",
+        insurability_note=(
+            "Pay-scale posting penalties are civil fines imposed by the labor "
+            "agency, not an insurable loss; back-pay a related pay-equity claim "
+            "produces is restitution."
+        ),
+        private_right_of_action=True,
+        private_right_note=(
+            "Enforcement varies: CA Lab. Code 432.3 is enforced by the Labor "
+            "Commissioner with civil penalties ($100-$10,000 per violation); "
+            "Colorado's Equal Pay for Equal Work Act and NY Lab. Law 194-b run "
+            "through the state agency but feed private equal-pay suits."
+        ),
+        detection_mode="automatic",
+        detection_note="A job posting is public — a missing range is visible to any applicant or regulator.",
+        cure_period=True,
+        cure_note="Several statutes (incl. CA 432.3(d)) allow a first-violation cure before a penalty attaches.",
+        citations=[
+            "Cal. Lab. Code 432.3",
+            "Colo. Rev. Stat. 8-5-101",
+            "N.Y. Lab. Law 194-b",
+        ],
+    ),
+    "federal_equal_pay": RiskDims(
+        insurability="uninsurable_fine",
+        insurability_note=(
+            "An equal-pay award is unpaid wages plus liquidated damages — "
+            "restitution of money owed, inside the customary EPLI wage-and-hour "
+            "exclusion, not an insurable loss."
+        ),
+        private_right_of_action=True,
+        private_right_note=(
+            "The Equal Pay Act is enforced through FLSA 216(b): the employee "
+            "sues for the wage differential plus an equal amount as liquidated "
+            "damages. State fair-pay acts (e.g. Cal. Lab. Code 1197.5) add their "
+            "own penalties and longer lookbacks."
+        ),
+        detection_mode="automatic",
+        detection_note="A pay-equity study over payroll surfaces the gap directly; no complaint needed.",
+        cure_period=False,
+        cure_note="Raising pay prospectively does not extinguish the back-pay period already accrued.",
+        citations=[
+            "29 U.S.C. 206(d)",
+            "29 U.S.C. 216(b)",
+            "Cal. Lab. Code 1197.5",
+        ],
+    ),
+    # Alias key: some catalog rows use `pay_equity` for the same obligation.
+    "pay_equity": RiskDims(
+        insurability="uninsurable_fine",
+        insurability_note="Same as federal_equal_pay — a differential award is restitution of owed wages.",
+        private_right_of_action=True,
+        private_right_note="Equal Pay Act / state fair-pay acts; enforced via FLSA 216(b) plus state penalties.",
+        detection_mode="automatic",
+        detection_note="Derived from a payroll pay-equity study.",
+        cure_period=False,
+        citations=["29 U.S.C. 206(d)", "29 U.S.C. 216(b)", "Cal. Lab. Code 1197.5"],
+    ),
+    "state_biometric_privacy_laws": RiskDims(
+        insurability="partial",
+        insurability_note=(
+            "Contested and carrier-specific: BIPA statutory damages ($1,000 "
+            "negligent / $5,000 intentional PER violation) have been held to "
+            "accrue per scan (Cothron v. White Castle, 2023 IL 128004), and many "
+            "EPLI/cyber forms now carry an explicit BIPA/biometric exclusion. "
+            "Coverage cannot be assumed — it is a policy-by-policy question."
+        ),
+        private_right_of_action=True,
+        private_right_note=(
+            "BIPA 740 ILCS 14/20 is the paradigm private right of action: no "
+            "actual injury is required (Rosenbach v. Six Flags, 2019 IL 123186), "
+            "which is what drives the class exposure."
+        ),
+        detection_mode="litigation",
+        detection_note=(
+            "Consent is a records question that rarely surfaces on audit; it is "
+            "typically litigated as a class action once a plaintiff appears."
+        ),
+        cure_period=False,
+        cure_note="Obtaining consent after collection does not cure the prior unconsented captures.",
+        citations=[
+            "740 ILCS 14/15",
+            "740 ILCS 14/20",
+            "Rosenbach v. Six Flags Ent. Corp., 2019 IL 123186",
+            "Cothron v. White Castle Sys., 2023 IL 128004",
+        ],
+    ),
 }
 
 

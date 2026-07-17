@@ -134,6 +134,26 @@ export interface PayEquityAnalysisResult {
   priority_actions: PayEquityPriorityAction[]
 }
 
+// One jurisdiction requirement that applies to the company, cross-referenced
+// against the tracker data (the "backstop").
+export type RequirementStatus = 'compliant' | 'non_compliant' | 'in_progress' | 'unknown'
+export interface GateRequirement {
+  jurisdiction: string
+  jurisdiction_level: string
+  title: string
+  status: RequirementStatus
+  reason: string
+  effective_date: string | null
+  source_url: string | null
+}
+export interface GateDomain {
+  status: RequirementStatus
+  requirements: GateRequirement[]
+}
+// Keyed by domain: 'pay_transparency' | 'pay_equity' | 'biometrics'. Domains with
+// no applicable requirement are absent.
+export type RequirementGate = Record<string, GateDomain>
+
 export interface WorkforceSummary {
   ai_audits: { total: number; overdue: number }
   biometric: { active: number; missing_consent: number }

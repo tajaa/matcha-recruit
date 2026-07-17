@@ -1,12 +1,17 @@
 import { api } from './client'
 import type {
   AiAudit, BiometricPoint, PayTransparencyRow, PayTransparencyStatus, WorkforceSummary,
-  CollectionType, ConsentMethod, PayEquityReview, PayEquityAnalysisResult,
+  CollectionType, ConsentMethod, PayEquityReview, PayEquityAnalysisResult, RequirementGate,
 } from '../types/workforceCompliance'
 
 // --- summary ---
 export function fetchWorkforceSummary() {
   return api.get<WorkforceSummary>('/workforce-compliance/summary')
+}
+
+// --- requirements gate (applicable jurisdiction requirements ↔ tracker data) ---
+export function fetchRequirementGate() {
+  return api.get<RequirementGate>('/workforce-compliance/requirement-gate')
 }
 
 // --- AI hiring-tool audits ---

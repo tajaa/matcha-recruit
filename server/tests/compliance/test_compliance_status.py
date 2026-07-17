@@ -15,7 +15,10 @@ from app.core.services.compliance_status import (
     _derive_harassment_training,
     _derive_injury_recordkeeping,
     _derive_minimum_wage,
+    biometrics_verdict,
     derivable_keys,
+    pay_equity_verdict,
+    pay_transparency_verdict,
     resolve_status,
     rollup,
 )
@@ -239,3 +242,45 @@ def test_derivable_keys_are_real_registry_keys():
 def test_status_vocabulary_matches_the_migration_check(status):
     """If these drift the INSERT throws at runtime, not at import."""
     assert status in ("compliant", "non_compliant", "in_progress", "unknown")
+
+
+# ── workforce verdicts (shared by DERIVATIONS + the workforce requirement gate) ──
+
+def test_workforce_domains_are_registered_and_feature_gated():
+    for key in ("pay_transparency", "federal_equal_pay", "pay_equity", "state_biometric_privacy_laws"):
+        assert key in DERIVATIONS, f"{key} missing from DERIVATIONS"
+        assert DERIVATIONS[key].required_feature == "workforce_compliance"
+
+
+def test_pay_transparency_verdict():
+    assert pay_transparency_verdict("compliant")[0] == "compliant"
+    assert pay_transparency_verdict("action_needed")[0] == "non_compliant"
+    # No tracker row for the state → unknown, never a silent pass.
+    assert pay_transparency_verdict(None)[0] == "unknown"
+    assert pay_transparency_verdict("na")[0] == "unknown"
+
+
+def test_pay_equity_verdict():
+    assert pay_equity_verdict(None)[0] == "unknown"  # no study on file
+    assert pay_equity_verdict({"overdue": True})[0] == "in_progress"
+    # Material unremediated gap is a live finding, not compliance.
+    assert pay_equity_verdict({"overdue": False, "gap_pct": 10.0, "remediation": None})[0] == "non_compliant"
+    # Same gap with remediation underway is not thrown as non-compliant.
+    assert pay_equity_verdict({"overdue": False, "gap_pct": 10.0, "remediation": "bands rolling out"})[0] == "compliant"
+    # A small gap is within noise.
+    assert pay_equity_verdict({"overdue": False, "gap_pct": 2.0, "remediation": None})[0] == "compliant"
+    assert pay_equity_verdict({"overdue": False, "gap_pct": None, "remediation": None})[0] == "compliant"
+
+
+def test_biometrics_verdict():
+    assert biometrics_verdict(0, 0)[0] == "unknown"     # nothing registered → blind
+    assert biometrics_verdict(3, 1)[0] == "non_compliant"  # a point missing consent
+    assert biometrics_verdict(3, 0)[0] == "compliant"
+
+
+def test_verdict_unknown_maps_to_none_in_derivations():
+    """The gate shows 'unknown'; the per-requirement engine must instead go blind
+    (None), so a tenant is never told they violate a law we couldn't evaluate."""
+    from app.core.services.compliance_status import _verdict_to_derivation
+    assert _verdict_to_derivation("unknown", "no data") is None
+    assert _verdict_to_derivation("compliant", "ok") == ("compliant", {"rule": "ok"})

@@ -6,12 +6,14 @@ import {
   fetchBiometricPoints, createBiometricPoint, updateBiometricPoint, deleteBiometricPoint,
   fetchPayTransparency, setPayTransparency,
   fetchPayEquityReviews, createPayEquityReview, deletePayEquityReview, analyzePayEquity, fetchPayEquityAnalysis,
-  suggestAiAudits, suggestBiometricPoints,
+  suggestAiAudits, suggestBiometricPoints, fetchRequirementGate,
 } from '../../api/workforceCompliance'
 import { AiSuggest } from '../../components/AiSuggest'
+import { RequirementBanner } from '../../components/workforce/RequirementBanner'
+import { PayEquityGapChart } from '../../components/workforce/PayEquityGapChart'
 import type {
   AiAudit, BiometricPoint, PayTransparencyRow, PayTransparencyStatus, CollectionType, PayEquityReview,
-  PayEquityAnalysisResult, PayEquityRole, PayEquityPriorityAction,
+  PayEquityAnalysisResult, PayEquityRole, PayEquityPriorityAction, RequirementGate, GateDomain,
 } from '../../types/workforceCompliance'
 
 const today = () => new Date().toISOString().slice(0, 10)
@@ -39,6 +41,7 @@ export default function WorkforceCompliance() {
   const [points, setPoints] = useState<BiometricPoint[]>([])
   const [pt, setPt] = useState<PayTransparencyRow[]>([])
   const [payEquity, setPayEquity] = useState<PayEquityReview[]>([])
+  const [gate, setGate] = useState<RequirementGate>({})
   const [loading, setLoading] = useState(true)
 
   function load() {
@@ -48,6 +51,7 @@ export default function WorkforceCompliance() {
       fetchBiometricPoints().then(setPoints),
       fetchPayTransparency().then(setPt),
       fetchPayEquityReviews().then(setPayEquity),
+      fetchRequirementGate().then(setGate).catch(() => setGate({})),
     ]).finally(() => setLoading(false))
   }
   useEffect(load, [])
@@ -86,16 +90,16 @@ export default function WorkforceCompliance() {
         ))}
       </div>
 
-      <PayEquitySection reviews={payEquity} reload={load} />
-      <PayTransparencySection rows={pt} onChange={setPt} />
+      <PayEquitySection reviews={payEquity} reload={load} gate={gate.pay_equity} />
+      <PayTransparencySection rows={pt} onChange={setPt} gate={gate.pay_transparency} />
       <AiAuditSection audits={audits} reload={load} />
-      <BiometricSection points={points} reload={load} />
+      <BiometricSection points={points} reload={load} gate={gate.biometrics} />
     </div>
   )
 }
 
 /* ── Pay transparency ── */
-function PayTransparencySection({ rows, onChange }: { rows: PayTransparencyRow[]; onChange: (r: PayTransparencyRow[]) => void }) {
+function PayTransparencySection({ rows, onChange, gate }: { rows: PayTransparencyRow[]; onChange: (r: PayTransparencyRow[]) => void; gate?: GateDomain }) {
   const [saving, setSaving] = useState<string | null>(null)
   async function set(state: string, status: PayTransparencyStatus, postings: boolean) {
     setSaving(state)
@@ -107,6 +111,7 @@ function PayTransparencySection({ rows, onChange }: { rows: PayTransparencyRow[]
     <Card className="p-5">
       <div className="flex items-center gap-2 mb-1"><ShieldCheck className="h-4 w-4 text-zinc-500" /><h3 className="text-sm font-medium text-zinc-200 tracking-wide">Pay transparency</h3></div>
       <p className="text-[11px] text-zinc-500 mb-3">States in your footprint that require salary ranges in job postings. Mark each compliant once your postings include ranges.</p>
+      <RequirementBanner gate={gate} />
       {required.length === 0 ? (
         <p className="text-sm text-zinc-500">No pay-transparency states in your locations.</p>
       ) : (
@@ -167,6 +172,7 @@ function AiAuditSection({ audits, reload }: { audits: AiAudit[]; reload: () => v
         </div>
       </div>
       <p className="text-[11px] text-zinc-500 mb-3">Register every automated hiring tool + its last bias-audit date (NYC LL144 / IL / CO require regular audits).</p>
+      <p className="text-[10px] text-zinc-600 mb-3 italic">Automated-hiring audit laws aren't in the jurisdiction requirements catalog yet, so this section is self-tracked — no requirement backstop below.</p>
       {show && (
         <form onSubmit={add} className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4 p-3 rounded-xl bg-zinc-900/60 border border-zinc-800">
           <input className={inputCls} placeholder="Tool name" value={form.tool_name} onChange={(e) => setForm({ ...form, tool_name: e.target.value })} />
@@ -195,7 +201,7 @@ function AiAuditSection({ audits, reload }: { audits: AiAudit[]; reload: () => v
 }
 
 /* ── Biometric consent ── */
-function BiometricSection({ points, reload }: { points: BiometricPoint[]; reload: () => void }) {
+function BiometricSection({ points, reload, gate }: { points: BiometricPoint[]; reload: () => void; gate?: GateDomain }) {
   const [show, setShow] = useState(false)
   const [form, setForm] = useState<{ collection_type: CollectionType; purpose: string; consent_obtained: boolean }>({ collection_type: 'fingerprint', purpose: '', consent_obtained: false })
   const [busy, setBusy] = useState(false)
@@ -223,6 +229,7 @@ function BiometricSection({ points, reload }: { points: BiometricPoint[]; reload
         </div>
       </div>
       <p className="text-[11px] text-zinc-500 mb-3">Every biometric collection point (time clocks, access control) + whether written consent is on file. BIPA carries $1–5k statutory damages per violation.</p>
+      <RequirementBanner gate={gate} />
       {show && (
         <form onSubmit={add} className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4 p-3 rounded-xl bg-zinc-900/60 border border-zinc-800 items-end">
           <div><label className="block text-[10px] text-zinc-500 uppercase mb-1">Type</label>
@@ -346,6 +353,7 @@ function PayEquityReport({ a }: { a: PayEquityAnalysisResult }) {
         ))}
       </div>
       <ClassGapPanel a={a} />
+      <PayEquityGapChart a={a} />
       {a.priority_actions.length > 0 && (
         <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.04] px-3 py-2.5 mb-3">
           <div className="text-[9px] text-amber-400/80 uppercase tracking-widest font-bold mb-1.5">Priority fixes</div>
@@ -399,7 +407,7 @@ function PayEquityReport({ a }: { a: PayEquityAnalysisResult }) {
 }
 
 /* ── pay-equity study register ── */
-function PayEquitySection({ reviews, reload }: { reviews: PayEquityReview[]; reload: () => void }) {
+function PayEquitySection({ reviews, reload, gate }: { reviews: PayEquityReview[]; reload: () => void; gate?: GateDomain }) {
   const [show, setShow] = useState(false)
   const [form, setForm] = useState({ review_date: today(), scope: '', gap_pct: '', remediation: '' })
   const [busy, setBusy] = useState(false)
@@ -441,6 +449,7 @@ function PayEquitySection({ reviews, reload }: { reviews: PayEquityReview[]; rel
         </div>
       </div>
       <p className="text-[11px] text-zinc-500 mb-3">Run a pay-dispersion analysis from your payroll, or log an external audit. A current study (within cadence) is a named EPL underwriting control; default cadence is annual.</p>
+      <RequirementBanner gate={gate} />
       {analyzeNote && <p className="text-[11px] text-emerald-400/90 mb-3">{analyzeNote}</p>}
       {analysis && <PayEquityReport a={analysis} />}
       {show && (
