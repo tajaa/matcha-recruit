@@ -41,6 +41,95 @@ ER_MAJOR_POLICY_POINTS = 10
 ER_HIGH_DISCREPANCY_POINTS = 5
 
 
+# Where each exposure line's DOLLAR FIGURES come from.
+#
+# `sourced` means one thing only: the amounts trace to a statute we ingested and
+# can link (see core/services/penalty_facts.py — bound via penalty_item_id to an
+# authority_index_items row). Today NOTHING on this page clears that bar, and
+# saying so is the point: the compliance cockpit can now cite 29 CFR 1903.15(d)(3)
+# for its $16,550, while these figures are constants someone typed. That gap was
+# invisible, which is how "$43,888" sat two years stale in a string a customer
+# was asked to act on.
+#
+# A line flips to sourced when its authority is ingested and parsed — HIPAA's is
+# 45 CFR 102.3, reachable today, blocked only on a <TABLE> parser.
+_UNSOURCED_REASONS: dict[str, str] = {
+    "hourly_wage_shortfall":
+        "Shortfall is measured against this location's actual minimum-wage row; the "
+        "lookback and liquidated-damages multipliers are FLSA § 216(b) structure, "
+        "not adjusted figures. The statute is not yet ingested, so nothing links.",
+    "exempt_misclassification":
+        "Salary threshold comes from this location's catalog row; the OT and "
+        "damages multipliers are FLSA § 207 structure. The statute is not yet "
+        "ingested, so nothing links.",
+    "hipaa_breach_exposure":
+        "Per-record amounts and the tier figures are hand-entered. Authority is "
+        "45 CFR 102.3 (Table 1), reachable but not yet parsed.",
+    "lapsed_credential_risk":
+        "Per-credential range is a hand-entered estimate spanning many state boards; "
+        "no single authority states it.",
+    "pending_determination": "EEOC merit rate and settlement range are hand-entered estimates.",
+    "in_review": "EEOC merit rate and settlement range are hand-entered estimates.",
+    "open_cases": "EEOC merit rate and settlement range are hand-entered estimates.",
+    "critical_incidents": "Per-incident range is a hand-entered estimate.",
+    "high_incidents": "Per-incident range is a hand-entered estimate.",
+    "medium_incidents": "Per-incident range is a hand-entered estimate.",
+}
+
+
+def _stamp_sourcing(line_items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Label every exposure line with whether its figures trace to a statute.
+
+    Applied at each return rather than in each dict so a new line item cannot
+    ship silently unlabelled — an unknown key defaults to unsourced with a
+    generic reason, which is the safe direction: a figure is guilty until it can
+    show its authority.
+
+    Mutates in place and returns for chaining.
+    """
+    for item in line_items:
+        item.setdefault("sourced", False)
+        if not item["sourced"]:
+            item.setdefault(
+                "unsourced_reason",
+                _UNSOURCED_REASONS.get(
+                    item.get("key", ""),
+                    "Figures are hand-entered estimates; no statute is bound.",
+                ),
+            )
+    return line_items
+
+
+def _exempt_threshold_sentence(exempt: list[dict[str, Any]]) -> str:
+    """Name the exemption thresholds these violations were measured against.
+
+    Pure, so it is testable without a DB. Reads the `threshold` already carried
+    on each violation (compliance_service resolved it from the catalog row for
+    that employee's work location) rather than restating a literal that drifts:
+    the copy this replaced still said $43,888 while the catalog it was
+    implicitly describing said $70,304 for California.
+
+    Silent when no threshold is present — better to say nothing than to name a
+    number we did not actually compare against.
+    """
+    by_state: dict[str, float] = {}
+    for v in exempt:
+        threshold = v.get("threshold")
+        if not threshold:
+            continue
+        state = (v.get("location_state") or "").strip() or "applicable jurisdiction"
+        # Keep the highest per state: a state with several rows (city overlays)
+        # is best described by the bar these employees actually had to clear.
+        by_state[state] = max(by_state.get(state, 0.0), float(threshold))
+    if not by_state:
+        return "Each employee is measured against the salary threshold for their work location."
+    named = ", ".join(f"{s}: ${t:,.0f}" for s, t in sorted(by_state.items()))
+    return (
+        "Measured against the salary threshold in force for each employee's work "
+        f"location ({named})."
+    )
+
+
 def _band(score: int) -> str:
     if score <= 25:
         return "low"
@@ -249,11 +338,18 @@ def compute_compliance_cost_of_risk(
                 f"{len(exempt)} employees \u00d7 avg salary ${avg_salary:,.0f} \u00f7 2,080 hrs "
                 f"\u00d7 1.5x OT rate \u00d7 5\u201310 OT hrs/wk \u00d7 52 wks \u00d7 2\u20133yr \u00d7 2x damages"
             ),
+            # The thresholds are stated from the rows the violation was actually
+            # DETECTED against, not from a literal. The old copy read "The 2024
+            # DOL salary threshold is $43,888 ($58,656 effective Jan 2025). State
+            # thresholds may be higher (CA: $66,560, NY: $58,500)" \u2014 hardcoded,
+            # two years stale, and contradicted by our own catalog (CA reads
+            # $70,304), on a page a customer is asked to act on. A figure that
+            # can go stale in a string literal will.
             "statute": (
                 "FLSA \u00a7 207 requires overtime pay for non-exempt employees. Enforced by DOL WHD. "
                 "Employees misclassified as exempt are owed 1.5x their effective hourly rate for all "
-                "overtime worked. The 2024 DOL salary threshold is $43,888 ($58,656 effective Jan 2025). "
-                "State thresholds may be higher (CA: $66,560, NY: $58,500)."
+                "overtime worked. "
+                + _exempt_threshold_sentence(exempt)
             ),
             "risk_context": (
                 "Misclassification claims are the #1 FLSA litigation category. A single employee's "
@@ -273,6 +369,13 @@ def compute_compliance_cost_of_risk(
         line_items.append({
             "key": "hipaa_breach_exposure",
             "label": "HIPAA Breach Exposure",
+            # UNSOURCED — see `sourced` below. These per-record figures and the
+            # tier amounts in `statute` are hand-entered literals. The authority
+            # is 45 CFR 102.3 ("Table 1 to § 102.3"), which we can reach and
+            # which carries a "2025 Maximum adjusted penalty ($)" column, but its
+            # <TABLE> shape needs a parser the prose-shaped OSHA one doesn't
+            # cover. Until that lands these stay literals and say so, rather than
+            # borrowing the credibility of the figures that ARE sourced.
             "low": employee_count * 145,
             "high": employee_count * 1452,
             "affected_count": employee_count,
@@ -336,7 +439,8 @@ def compute_compliance_cost_of_risk(
 
     total_low = sum(item["low"] for item in line_items)
     total_high = sum(item["high"] for item in line_items)
-    return {"line_items": line_items, "total_low": total_low, "total_high": total_high}
+    return {"line_items": _stamp_sourcing(line_items),
+            "total_low": total_low, "total_high": total_high}
 
 
 def compute_er_cost_of_risk(
@@ -463,7 +567,8 @@ def compute_er_cost_of_risk(
 
     total_low = sum(item["low"] for item in line_items)
     total_high = sum(item["high"] for item in line_items)
-    return {"line_items": line_items, "total_low": total_low, "total_high": total_high}
+    return {"line_items": _stamp_sourcing(line_items),
+            "total_low": total_low, "total_high": total_high}
 
 
 def compute_incident_cost_of_risk(
@@ -567,7 +672,8 @@ def compute_incident_cost_of_risk(
 
     total_low = sum(item["low"] for item in line_items)
     total_high = sum(item["high"] for item in line_items)
-    return {"line_items": line_items, "total_low": total_low, "total_high": total_high}
+    return {"line_items": _stamp_sourcing(line_items),
+            "total_low": total_low, "total_high": total_high}
 
 
 async def compute_compliance_dimension(company_id: UUID, conn) -> DimensionResult:
