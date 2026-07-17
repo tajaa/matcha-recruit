@@ -249,6 +249,12 @@ def bucket_fit(
             "jurisdiction_name": row.get("jurisdiction_name"),
             "jurisdiction_level": row.get("jurisdiction_level"),
             "statute_citation": row.get("statute_citation"),
+            # Carried for the codify modal's citation pre-fill — see the SELECT.
+            "description": row.get("catalog_description"),
+            "current_value": row.get("catalog_current_value"),
+            "source_url": row.get("catalog_source_url"),
+            "source_name": row.get("catalog_source_name"),
+            "auto_reconcilable": bool(row.get("auto_reconcilable")),
         }
         (visible if is_codified(row) else gated).append(entry)
 
@@ -268,6 +274,13 @@ def bucket_fit(
             })
 
     gaps = [m for m in missing if m["reason"] not in BENIGN_REASONS]
+    # Deduped to the catalog row, like the `gated` list the UI walks: one row
+    # projected to five locations is one thing to reconcile, not five. Counting
+    # projections here would promise "Reconcile 45" and deliver 9.
+    codifiable_now = len({
+        g["catalog_id"] for g in gated
+        if g.get("catalog_id") and g.get("auto_reconcilable")
+    })
     return {
         "visible": visible,
         "gated": gated,
@@ -281,6 +294,11 @@ def bucket_fit(
             # first includes preempted rules that are working as designed.
             "missing": len(missing),
             "gaps": len(gaps),
+            # Of the withheld rows, how many ONE reconcile click would release.
+            # The rest need a statute ingested (or a citation typed), which is a
+            # different job — saying "Codify 302" when 7 can finish is the lie
+            # this splits apart.
+            "codifiable_now": codifiable_now,
             "covered_by_stricter": len(missing) - len(gaps),
             "beyond_core": len(beyond_core),
             "expected": sum(len(v) for v in expected.values()),
@@ -304,9 +322,28 @@ _PROJECTED_SQL = """
            -- keys on jurisdiction_requirements.id. Seeding it with a projection
            -- id would 404 on a row that plainly exists.
            cat.id AS catalog_id,
+           -- The catalog row's prose. The codify modal pre-fills its citation
+           -- box by scraping these (utils.extractCitation over current_value +
+           -- description + title), so omitting them hands the admin an empty
+           -- box on every row — a worse door than the Command Center's.
+           cat.description AS catalog_description,
+           cat.current_value AS catalog_current_value,
+           cat.source_url AS catalog_source_url,
+           cat.source_name AS catalog_source_name,
            cat.regulation_key, cat.statute_citation,
            cat.citation_verified_at, cat.citation_item_id,
-           j.country_code
+           j.country_code,
+           -- Can ONE global reconcile codify this row? True iff a confirmed,
+           -- non-excluded classification already covers its key — the same
+           -- predicate reconcile_codifications matches on, and the same EXISTS
+           -- the Command Center worklist uses to split auto from manual.
+           -- Everything else needs either a hand-typed citation or, more
+           -- honestly, an authority ingest first.
+           EXISTS (
+               SELECT 1 FROM authority_item_classifications c
+               WHERE c.status = 'confirmed' AND c.disposition <> 'excluded'
+                 AND c.regulation_key = cat.regulation_key
+           ) AS auto_reconcilable
     FROM compliance_requirements r
     JOIN business_locations bl ON bl.id = r.location_id
                               AND COALESCE(bl.is_active, true) = true

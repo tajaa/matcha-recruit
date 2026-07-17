@@ -177,6 +177,22 @@ export default function StatutoryFitPanel({ companyId, onCodifyGated, refreshKey
     } finally { setBusy(null) }
   }, [companyId, load])
 
+  /** Bind every gated row whose key a confirmed classification already covers.
+   *  No typing, no per-row modal — this is what the registry is FOR. Global by
+   *  design (the endpoint takes no scope): a statute confirmed for one tenant
+   *  codifies it for every tenant holding the same key, which is the leverage
+   *  the catalog exists to give. */
+  const reconcile = useCallback(async () => {
+    setBusy('stale_projection'); setNote(null)
+    try {
+      await api.post('/admin/scope-registry/reconcile', {})
+      setNote('Reconciled — rows bound to statutes already in the registry.')
+      await load()
+    } catch {
+      setNote('Reconcile failed.')
+    } finally { setBusy(null) }
+  }, [load])
+
   /** Research these categories, for every location that resolved to a place.
    *  Reuses the same selective-fill stream the dossier's gap list uses, so this
    *  never triggers an all-jurisdictions sweep. */
@@ -252,23 +268,36 @@ export default function StatutoryFitPanel({ companyId, onCodifyGated, refreshKey
               sub="codified — on their tab today" />
         <div className="relative">
           <Tile icon={EyeOff} label="Gated" value={fit.counts.gated} tone="text-amber-400"
-                sub="researched but withheld until codified" />
-          {/* The dominant number, and the only bucket whose fix lives in a
-              modal. When the host owns that chain (Fill Gaps), hand it these
-              rows and stay put. When it doesn't (GapDashboard), link out —
-              better an honest jump than a button that can't finish. */}
+                sub={fit.gated.length > fit.counts.codifiable_now
+                  ? `${fit.counts.codifiable_now} reconcilable · ${fit.gated.length - fit.counts.codifiable_now} have no statute in the registry yet`
+                  : 'researched but withheld until codified'} />
+          {/* "Codify 302" was a lie: only the rows whose key already carries a
+              confirmed classification can be reconciled. The rest need a statute
+              INGESTED into the registry before anything can bind them — or a
+              citation typed by hand, one at a time. Three different jobs, so
+              three different controls. */}
           {fit.counts.gated > 0 && (
-            onCodifyGated ? (
-              <button type="button" onClick={() => onCodifyGated(fit.gated)}
-                      className="absolute right-2 top-2 inline-flex items-center gap-0.5 rounded border border-amber-800/50 bg-amber-900/30 px-1.5 py-0.5 text-[10px] font-medium text-amber-300 hover:bg-amber-900/50">
-                Codify {fit.gated.length}
-              </button>
-            ) : (
-              <Link to={`/admin/studio?view=pipeline&company=${companyId}`}
-                    className="absolute right-2 top-2 inline-flex items-center gap-0.5 text-[10px] text-amber-400 hover:text-amber-300">
-                Codify <ExternalLink className="h-2.5 w-2.5" />
-              </Link>
-            )
+            <div className="absolute right-2 top-2 flex items-center gap-1.5">
+              {fit.counts.codifiable_now > 0 && (
+                <button type="button" onClick={() => void reconcile()} disabled={busy === 'stale_projection'}
+                        title="One reconcile binds these to statutes already confirmed in the registry — no typing"
+                        className="inline-flex items-center gap-0.5 rounded border border-cyan-800/50 bg-cyan-900/30 px-1.5 py-0.5 text-[10px] font-medium text-cyan-300 hover:bg-cyan-900/50 disabled:opacity-40">
+                  Reconcile {fit.counts.codifiable_now}
+                </button>
+              )}
+              {onCodifyGated ? (
+                <button type="button" onClick={() => onCodifyGated(fit.gated)}
+                        title="Walks the rows one at a time — you supply each statute citation"
+                        className="inline-flex items-center gap-0.5 rounded border border-amber-800/50 bg-amber-900/30 px-1.5 py-0.5 text-[10px] font-medium text-amber-300 hover:bg-amber-900/50">
+                  By hand
+                </button>
+              ) : (
+                <Link to={`/admin/studio?view=pipeline&company=${companyId}`}
+                      className="inline-flex items-center gap-0.5 text-[10px] text-amber-400 hover:text-amber-300">
+                  Codify <ExternalLink className="h-2.5 w-2.5" />
+                </Link>
+              )}
+            </div>
           )}
         </div>
         <Tile icon={AlertTriangle} label="Real gaps" value={fit.counts.gaps} tone="text-rose-400"
@@ -309,6 +338,21 @@ export default function StatutoryFitPanel({ companyId, onCodifyGated, refreshKey
             ))}
           </div>
         </div>
+      )}
+
+      {/* The ceiling, named. Codification binds a row to a statute in the
+          registry; when the registry has nothing for a key, no amount of
+          clicking here helps — the fix is upstream, in Authority. Saying so
+          beats letting an admin grind a modal that can't finish. */}
+      {fit.gated.length - fit.counts.codifiable_now > 0 && (
+        <p className="mt-2 text-[11px] text-zinc-500">
+          {fit.gated.length - fit.counts.codifiable_now} withheld row
+          {fit.gated.length - fit.counts.codifiable_now === 1 ? ' has' : 's have'} no statute in the
+          registry to bind to — codification needs the authority ingested first.{' '}
+          <Link to="/admin/studio?view=authority" className="text-cyan-400 hover:text-cyan-300">
+            Ingest authority →
+          </Link>
+        </p>
       )}
 
       {byReason.length === 0 ? (

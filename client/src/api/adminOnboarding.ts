@@ -357,6 +357,16 @@ export type FitGatedRow = {
   jurisdiction_name: string | null
   jurisdiction_level: string | null
   statute_citation: string | null
+  // The codify modal scrapes a citation guess out of these to pre-fill its box
+  // (utils.extractCitation). Without them the admin retypes every citation from
+  // scratch.
+  description: string | null
+  current_value: string | null
+  source_url: string | null
+  source_name: string | null
+  // A confirmed classification already covers this row's key, so reconcile can
+  // codify it with no typing. False = no statute in the registry to bind to yet.
+  auto_reconcilable: boolean
 }
 
 export type FitCounts = {
@@ -364,6 +374,10 @@ export type FitCounts = {
   gated: number            // projected, uncodified — tenant is waiting on us
   missing: number          // every expected key off the tab (incl. benign)
   gaps: number             // the subset that is actually somebody's problem
+  // Of the withheld rows, how many ONE reconcile click releases. The rest need
+  // a statute ingested into the registry (or a citation typed by hand) — a
+  // different job, so the tile must not fold them into one number.
+  codifiable_now: number
   covered_by_stricter: number
   beyond_core: number      // projected beyond the checklist — breadth, not excess
   expected: number
