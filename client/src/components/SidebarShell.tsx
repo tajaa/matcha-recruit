@@ -56,6 +56,33 @@ function isGroup(item: NavItem | NavGroup): item is NavGroup {
   return 'items' in item
 }
 
+// How well `to` accounts for the current path — used to pick a single active
+// row rather than letting each item decide independently. '/app/ir' is a
+// literal string-prefix of '/app/ir/risk-insights', so two rows checking
+// "does the path start with mine" in isolation both said yes on the Risk
+// Insights page and lit up together. Longest match wins instead: 22 chars for
+// Risk Insights' own route beats the 7 chars Incidents' route also happens to
+// match, so only Risk Insights is active there — Incidents still wins on its
+// own sub-routes (e.g. an incident detail page) since nothing else matches.
+function matchLength(pathname: string, to: string): number {
+  const isExact = to === '/app' || to === '/admin' || to === '/broker'
+  if (isExact) return pathname === to ? to.length : -1
+  return pathname === to || pathname.startsWith(`${to}/`) ? to.length : -1
+}
+
+function findActiveTo(pathname: string, items: NavItem[]): string | null {
+  let best: string | null = null
+  let bestLen = -1
+  for (const item of items) {
+    const len = matchLength(pathname, item.to)
+    if (len > bestLen) {
+      bestLen = len
+      best = item.to
+    }
+  }
+  return best
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // The rail reads as the index of a register, not a nav bar — this product is a
 // system of record, and the pages it fronts are editorial (a light sans
@@ -89,11 +116,8 @@ const FRAUNCES = "'Fraunces', Georgia, serif"
 const ROW = 'group relative flex h-[34px] items-center rounded-l-md -mr-2.5 transition-colors duration-100'
 const ROW_PAD = (collapsed: boolean) => (collapsed ? 'justify-center pl-0 pr-2.5' : 'gap-3 pl-2.5 pr-3')
 
-function NavItemLink({ item, location, collapsed }: { item: NavItem; location: ReturnType<typeof useLocation>; collapsed: boolean }) {
-  const isExact = item.to === '/app' || item.to === '/admin' || item.to === '/broker'
-  const isActive = isExact
-    ? location.pathname === item.to
-    : location.pathname.startsWith(item.to)
+function NavItemLink({ item, activeTo, collapsed }: { item: NavItem; activeTo: string | null; collapsed: boolean }) {
+  const isActive = item.to === activeTo
 
   const seenRef = useRef(false)
   const onSeenRef = useRef(item.onSeen)
@@ -162,11 +186,8 @@ function NavItemLink({ item, location, collapsed }: { item: NavItem; location: R
   )
 }
 
-function NavGroupSection({ group, location, collapsed }: { group: NavGroup; location: ReturnType<typeof useLocation>; collapsed: boolean }) {
-  const hasActiveChild = group.items.some((item) => {
-    const isExact = item.to === '/app' || item.to === '/admin' || item.to === '/broker'
-    return isExact ? location.pathname === item.to : location.pathname.startsWith(item.to)
-  })
+function NavGroupSection({ group, activeTo, collapsed }: { group: NavGroup; activeTo: string | null; collapsed: boolean }) {
+  const hasActiveChild = group.items.some((item) => item.to === activeTo)
   const [open, setOpen] = useState(group.defaultOpen || hasActiveChild)
 
   useEffect(() => {
@@ -179,7 +200,7 @@ function NavGroupSection({ group, location, collapsed }: { group: NavGroup; loca
     return (
       <div className="space-y-px border-t border-zinc-900 py-2 first:border-t-0 first:pt-0">
         {group.items.map((item) => (
-          <NavItemLink key={item.to} item={item} location={location} collapsed={collapsed} />
+          <NavItemLink key={item.to} item={item} activeTo={activeTo} collapsed={collapsed} />
         ))}
       </div>
     )
@@ -201,7 +222,7 @@ function NavGroupSection({ group, location, collapsed }: { group: NavGroup; loca
       {open && (
         <div className="space-y-px">
           {group.items.map((item) => (
-            <NavItemLink key={item.to} item={item} location={location} collapsed={collapsed} />
+            <NavItemLink key={item.to} item={item} activeTo={activeTo} collapsed={collapsed} />
           ))}
         </div>
       )}
@@ -228,6 +249,9 @@ export default function SidebarShell({ logoTo, logoLabel, nav, user, upgradeFoot
     }
     return out
   }, [])
+
+  const flatItems = visibleNav.flatMap((item) => (isGroup(item) ? item.items : [item]))
+  const activeTo = findActiveTo(location.pathname, flatItems)
 
   function handleLogout() {
     localStorage.removeItem('matcha_access_token')
@@ -296,9 +320,9 @@ export default function SidebarShell({ logoTo, logoLabel, nav, user, upgradeFoot
       <nav className="flex-1 overflow-y-auto overflow-x-hidden pb-3 pl-2.5 pr-2.5 pt-1">
         {visibleNav.map((item) =>
           isGroup(item) ? (
-            <NavGroupSection key={item.label} group={item} location={location} collapsed={sidebarCollapsed} />
+            <NavGroupSection key={item.label} group={item} activeTo={activeTo} collapsed={sidebarCollapsed} />
           ) : (
-            <NavItemLink key={item.to} item={item} location={location} collapsed={sidebarCollapsed} />
+            <NavItemLink key={item.to} item={item} activeTo={activeTo} collapsed={sidebarCollapsed} />
           )
         )}
       </nav>
