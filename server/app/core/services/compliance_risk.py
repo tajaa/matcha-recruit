@@ -34,8 +34,9 @@ from ..models.compliance import (
     RiskPenalty,
     RiskPosture,
 )
-from .compliance_service import get_employee_impact_for_location
+from .compliance_service import codified_gate_sql, get_employee_impact_for_location
 from .compliance_remediation import fetch_recent_remediations, reconcile_issue_state
+from .compliance_status import reconcile_requirement_status
 
 logger = logging.getLogger(__name__)
 
@@ -119,6 +120,120 @@ async def _wage_penalty_for_location(conn, jurisdiction_id, rate_type: str) -> t
     return penalty, row["statute_citation"]
 
 
+# Keys whose violations the WAGE lane (section 1) already emits, per employee.
+#
+# The requirement lane still DERIVES status for these — coverage and the rollup
+# need to know we checked — but it must not emit an issue for them, or Ada
+# Lovelace appears twice: once as `wage:{employee}:{rate_type}` and again as
+# `requirement:{loc}:{catalog}`, both carrying the same penalty block, so the
+# exposure sum double-counts the moment those blocks carry figures.
+#
+# The wage lane wins because it is strictly richer: per-employee rather than
+# per-requirement, with the deep link, the remediation recommendation, and the
+# pay_rate/threshold basis that decides when a dismissed issue re-surfaces.
+WAGE_LANE_OWNED_KEYS = frozenset({
+    "state_minimum_wage",
+    "local_minimum_wage",
+    "national_minimum_wage",
+    "exempt_salary_threshold",
+})
+
+
+def compute_exposure(issues: list[RiskIssue]) -> tuple[float, float, int, float]:
+    """(min, max, unquantified_count, uninsurable_max) over OPEN issues. Pure.
+
+    Three things this gets right that a flat sum did not:
+
+    * **`per_violation` is honoured.** The penalty blocks have carried
+      `per_violation` since they were seeded and nothing ever read it, so a
+      $1,190-per-employee fine at a 120-person plant was counted once. Where the
+      issue knows how many times it is instantiated (`violation_count`), a
+      per-violation penalty multiplies.
+    * **`annual_cap` clamps.** Also carried and never read. HIPAA's per-violation
+      tier runs to $2.07M but the annual cap for a category is $2.07M — without
+      the clamp the multiplied figure runs away into numbers no regulator could
+      impose.
+    * **`uninsurable_max`** is tracked alongside, because the subset of exposure
+      no policy absorbs is the number that actually matters to a broker. Only
+      SOURCED uninsurable verdicts count (`is_uninsurable`); an unsourced key is
+      `review` and must not inflate it.
+
+    A $0 statutory floor stays a real bound ("up to $X"), never borrowing the max.
+    """
+    from .compliance_risk_dims import is_uninsurable
+
+    exposure_min = exposure_max = uninsurable_max = 0.0
+    unquantified = 0
+
+    for i in issues:
+        if not i.penalty:
+            continue
+        cmin, cmax = i.penalty.civil_min, i.penalty.civil_max
+        if cmin is None and cmax is None:
+            unquantified += 1
+            continue
+        # A statute may set a $0 floor ("up to $X") — treat 0 as a real bound,
+        # never as "missing" (a falsy 0 would borrow the max).
+        lo = cmin if cmin is not None else cmax
+        hi = cmax if cmax is not None else cmin
+        lo = float(lo or 0)
+        hi = float(hi or 0)
+
+        # Multiply only when the statute says per-violation AND we can count the
+        # violations. A per-violation penalty with an unknown count stays at 1x —
+        # inventing a multiplier would be worse than under-counting.
+        n = i.violation_count if (i.penalty.per_violation and i.violation_count) else 1
+        n = max(1, int(n))
+        lo *= n
+        hi *= n
+
+        cap = i.penalty.annual_cap
+        if cap is not None:
+            lo = min(lo, float(cap))
+            hi = min(hi, float(cap))
+
+        exposure_min += lo
+        exposure_max += hi
+        if is_uninsurable(i.regulation_key):
+            uninsurable_max += hi
+
+    return round(exposure_min, 2), round(exposure_max, 2), unquantified, round(uninsurable_max, 2)
+
+
+def compute_conditional_ceiling(rows: list[dict]) -> tuple[float, int]:
+    """(ceiling_max, count) over requirements whose compliance is UNPROVEN. Pure.
+
+    This is the "what it would cost IF you were violating this" number, and it is
+    deliberately kept apart from confirmed exposure — the whole reason the status
+    layer exists is that summing the two would present a hypothetical as a
+    liability.
+
+    Two rules follow from that:
+
+    * **1x, never multiplied.** `per_violation` needs a violation count, and we
+      have not established a violation at all — inventing a headcount multiplier
+      on an unproven obligation would produce a scary number out of nothing.
+    * **max only, no floor.** A ceiling has one bound worth stating.
+
+    ``rows``: dicts with ``status`` (may be None = never evaluated) and
+    ``civil_penalty_max``.
+    """
+    ceiling = 0.0
+    count = 0
+    for r in rows:
+        # Confirmed violations are priced as CONFIRMED exposure, not here.
+        if r.get("status") == "non_compliant":
+            continue
+        # Proven compliant carries no exposure to bound.
+        if r.get("status") == "compliant":
+            continue
+        count += 1
+        cmax = r.get("civil_penalty_max")
+        if cmax is not None:
+            ceiling += float(cmax)
+    return round(ceiling, 2), count
+
+
 async def get_compliance_risk_summary(company_id: UUID) -> ComplianceRiskSummary:
     issues: list[RiskIssue] = []
     get_ahead: list[RiskGetAhead] = []
@@ -126,6 +241,10 @@ async def get_compliance_risk_summary(company_id: UUID) -> ComplianceRiskSummary
     # dismissed-issue re-surface rule + the "before" value in the trail.
     basis_by_key: dict = {}
     today = date.today()
+    # Defined up front: the sections below are each wrapped in their own try, so
+    # a failure downstream must still find these bound.
+    conditional_ceiling: float = 0.0
+    conditional_unknown: int = 0
 
     features = {}
     try:
@@ -317,6 +436,97 @@ async def get_compliance_risk_summary(company_id: UUID) -> ComplianceRiskSummary
         except Exception:
             logger.exception("risk-summary: alert section failed for %s", company_id)
 
+        # 4b. REQUIREMENTS the tenant is confirmed to be violating.
+        #     Everything above infers a breach from a symptom (a pay rate, an
+        #     expiry, an unclassified incident). This lane is the obligation
+        #     itself: `requirement_compliance_status` says non_compliant, so the
+        #     catalog row's own penalty prices it and its own statute cites it.
+        #     Only `non_compliant` becomes an issue — `unknown` is priced
+        #     separately as a conditional ceiling and must never appear in the
+        #     action queue as though we'd found something.
+        try:
+            await reconcile_requirement_status(conn, company_id, features=features)
+            rows = await conn.fetch(
+                """
+                SELECT rcs.location_id, rcs.jurisdiction_requirement_id, rcs.regulation_key,
+                       rcs.evidence, rcs.basis,
+                       cat.title, cat.statute_citation, cat.metadata -> 'penalties' AS penalties
+                FROM requirement_compliance_status rcs
+                JOIN jurisdiction_requirements cat
+                  ON cat.id = rcs.jurisdiction_requirement_id
+                WHERE rcs.company_id = $1 AND rcs.status = 'non_compliant'
+                  AND NOT (rcs.regulation_key = ANY($2::text[]))
+                """,
+                company_id, sorted(WAGE_LANE_OWNED_KEYS),
+            )
+            for r in rows:
+                loc = loc_by_id.get(r["location_id"])
+                key = f"requirement:{r['location_id']}:{r['jurisdiction_requirement_id']}"
+                ev = _parse_penalties(r["evidence"]) or {}
+                pen_raw = _parse_penalties(r["penalties"])
+                penalty = None
+                if pen_raw:
+                    penalty = RiskPenalty(
+                        civil_min=pen_raw.get("civil_penalty_min"),
+                        civil_max=pen_raw.get("civil_penalty_max"),
+                        per_violation=pen_raw.get("per_violation"),
+                        annual_cap=pen_raw.get("annual_cap"),
+                        enforcing_agency=pen_raw.get("enforcing_agency"),
+                        summary=pen_raw.get("summary"),
+                    )
+                basis_by_key[key] = {
+                    "status": "non_compliant",
+                    "basis": r["basis"],
+                    "evidence": ev,
+                }
+                issues.append(RiskIssue(
+                    id=key,
+                    source="requirement",
+                    severity="high",
+                    title=r["title"] or "Requirement not met",
+                    detail=ev.get("rule"),
+                    employee_names=[e.get("name") for e in (ev.get("examples") or []) if e.get("name")],
+                    location_label=_loc_label(loc) if loc else None,
+                    penalty=penalty,
+                    statute_citation=r["statute_citation"],
+                    recommendation=None,
+                    link="/app/compliance?tab=requirements",
+                    violation_count=ev.get("violations"),
+                    regulation_key=r["regulation_key"],
+                ))
+        except Exception:
+            logger.exception("risk-summary: requirement section failed for %s", company_id)
+
+        # 4c. CONDITIONAL CEILING — the price of what we have NOT established.
+        #     Every codified obligation projected to this tenant whose compliance
+        #     is unproven, at its statutory maximum. Reported beside confirmed
+        #     exposure and never added to it.
+        try:
+            ceiling_rows = await conn.fetch(
+                f"""
+                SELECT rcs.status,
+                       (cat.metadata -> 'penalties' ->> 'civil_penalty_max')::numeric
+                         AS civil_penalty_max
+                FROM compliance_requirements cr
+                JOIN business_locations bl ON bl.id = cr.location_id
+                JOIN jurisdiction_requirements cat
+                  ON cat.id = cr.jurisdiction_requirement_id
+                LEFT JOIN requirement_compliance_status rcs
+                  ON rcs.location_id = cr.location_id
+                 AND rcs.jurisdiction_requirement_id = cat.id
+                WHERE bl.company_id = $1 AND COALESCE(bl.is_active, true) = true
+                  AND cat.metadata ? 'penalties'
+                  {await codified_gate_sql("cat", conn=conn)}
+                """,
+                company_id,
+            )
+            conditional_ceiling, conditional_unknown = compute_conditional_ceiling(
+                [dict(r) for r in ceiling_rows]
+            )
+        except Exception:
+            logger.exception("risk-summary: conditional ceiling failed for %s", company_id)
+            conditional_ceiling, conditional_unknown = 0.0, 0
+
         # 5. GET-AHEAD — upcoming legislation + alert deadlines with lead time.
         try:
             leg_rows = await conn.fetch(
@@ -397,22 +607,7 @@ async def get_compliance_risk_summary(company_id: UUID) -> ComplianceRiskSummary
     open_high = sum(1 for i in issues if i.severity == "high")
     open_moderate = sum(1 for i in issues if i.severity == "moderate")
 
-    exposure_min = 0.0
-    exposure_max = 0.0
-    unquantified = 0
-    for i in issues:
-        if not i.penalty:
-            continue
-        cmin, cmax = i.penalty.civil_min, i.penalty.civil_max
-        if cmin is None and cmax is None:
-            unquantified += 1
-        else:
-            # A statute may set a $0 floor ("up to $X") — treat 0 as a real
-            # bound, never as "missing" (a falsy 0 would borrow the max).
-            lo = cmin if cmin is not None else cmax
-            hi = cmax if cmax is not None else cmin
-            exposure_min += lo or 0
-            exposure_max += hi or 0
+    exposure_min, exposure_max, unquantified, uninsurable_max = compute_exposure(issues)
 
     # Next deadline = the soonest UPCOMING date across everything that carries
     # one — credential/incident/alert issues AND the get-ahead lane — not just
@@ -446,11 +641,14 @@ async def get_compliance_risk_summary(company_id: UUID) -> ComplianceRiskSummary
         open_high=open_high,
         open_moderate=open_moderate,
         employees_affected=len(affected_ids),
-        exposure_min_usd=round(exposure_min, 2),
-        exposure_max_usd=round(exposure_max, 2),
+        exposure_min_usd=exposure_min,
+        exposure_max_usd=exposure_max,
         exposure_unquantified_count=unquantified,
         next_deadline_days=next_days,
         next_deadline_label=next_label,
+        uninsurable_exposure_max_usd=uninsurable_max,
+        conditional_ceiling_max_usd=conditional_ceiling,
+        conditional_unknown_count=conditional_unknown,
     )
 
     return ComplianceRiskSummary(

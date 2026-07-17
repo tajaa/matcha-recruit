@@ -422,7 +422,7 @@ class RiskPenalty(BaseModel):
 class RiskIssue(BaseModel):
     """One open compliance issue in the action queue."""
     id: str
-    source: str  # wage | credential | incident | alert
+    source: str  # wage | credential | incident | alert | requirement
     severity: str  # critical | high | moderate
     title: str
     detail: Optional[str] = None
@@ -435,6 +435,15 @@ class RiskIssue(BaseModel):
     deadline: Optional[str] = None  # ISO date
     alert_id: Optional[str] = None  # only for source='alert' — action-plan target
     first_seen_at: Optional[str] = None  # when the issue was first observed (age)
+    # How many times the violation is instantiated (e.g. underpaid employees).
+    # A per_violation penalty multiplies by this; without it a $1,190-per-employee
+    # fine at a 120-person plant is counted once.
+    violation_count: Optional[int] = None
+    # The obligation this issue is a breach of. Keys the risk dimensions
+    # (insurability / private right of action / detection / escalation), so an
+    # issue with no regulation_key simply carries no dimensions rather than
+    # borrowing another obligation's.
+    regulation_key: Optional[str] = None
 
 
 class RemediationRecord(BaseModel):
@@ -454,7 +463,17 @@ class RemediationRecord(BaseModel):
 
 
 class RiskPosture(BaseModel):
-    """The top-line measured posture."""
+    """The top-line measured posture.
+
+    ``exposure_min_usd``/``exposure_max_usd`` are CONFIRMED exposure: the
+    statutory range on issues we can actually show the tenant is exposed to.
+    They are deliberately NOT the same number as ``conditional_ceiling_max_usd``,
+    which prices requirements whose compliance status is unknown ("what this
+    would cost IF you were violating it"). Summing the two would present a
+    hypothetical as a liability — the distinction is the whole point of the
+    status layer, so the wire format keeps them apart and the UI labels them
+    differently.
+    """
     open_critical: int = 0
     open_high: int = 0
     open_moderate: int = 0
@@ -464,6 +483,31 @@ class RiskPosture(BaseModel):
     exposure_unquantified_count: int = 0  # issues with a penalty but no numbers
     next_deadline_days: Optional[int] = None
     next_deadline_label: Optional[str] = None
+    # Requirements we have NOT established compliance with, priced at the
+    # statutory ceiling. Not a liability — a bound on the unknown.
+    conditional_ceiling_max_usd: float = 0
+    conditional_unknown_count: int = 0
+    # Confirmed exposure that no insurance policy absorbs (statutory fines are
+    # generally uninsurable as a matter of public policy) — the number a broker
+    # cares about, because it sits on the client's balance sheet untransferred.
+    uninsurable_exposure_max_usd: float = 0
+
+
+class RequirementStatusSummary(BaseModel):
+    """How much of the obligation surface we have actually measured.
+
+    ``coverage_pct`` counts only requirements with a known status; unknown is
+    reported, never scored as compliant.
+    """
+    total: int = 0
+    known: int = 0
+    coverage_pct: Optional[int] = None
+    derived: int = 0
+    attested: int = 0
+    count_compliant: int = 0
+    count_non_compliant: int = 0
+    count_in_progress: int = 0
+    count_unknown: int = 0
 
 
 class RiskGetAhead(BaseModel):

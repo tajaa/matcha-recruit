@@ -41,6 +41,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 from uuid import UUID
 
@@ -328,8 +329,14 @@ async def reconcile_requirement_status(
         from ..feature_flags import get_company_features  # local: avoids a cycle
         features = await get_company_features(company_id)
 
+    # The codified gate, same as every tenant-facing read. Without it a status —
+    # and the issue it raises — could attach to a catalog row the tenant cannot
+    # see anywhere in their requirements tab: told they are non-compliant with a
+    # law the product refuses to show them.
+    from .compliance_service import codified_gate_sql
+
     rows = await conn.fetch(
-        """
+        f"""
         SELECT cr.location_id, cat.id AS catalog_id, cat.regulation_key,
                cat.numeric_value, cat.category, cat.rate_type
         FROM compliance_requirements cr
@@ -337,6 +344,7 @@ async def reconcile_requirement_status(
         JOIN jurisdiction_requirements cat ON cat.id = cr.jurisdiction_requirement_id
         WHERE bl.company_id = $1 AND COALESCE(bl.is_active, true) = true
           AND cat.regulation_key = ANY($2::text[])
+          {await codified_gate_sql("cat", conn=conn)}
         """,
         company_id, derivable_keys(),
     )
@@ -392,18 +400,24 @@ async def reconcile_requirement_status(
             INSERT INTO requirement_compliance_status
                 (company_id, location_id, jurisdiction_requirement_id, regulation_key,
                  status, basis, evidence, derived_at, updated_at)
-            VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,
-                    CASE WHEN $6 = 'derived' THEN NOW() END, NOW())
+            VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,NOW())
             ON CONFLICT (location_id, jurisdiction_requirement_id) DO UPDATE SET
                 status = EXCLUDED.status,
                 basis = EXCLUDED.basis,
                 evidence = EXCLUDED.evidence,
+                -- Keep the first derivation's timestamp when this pass was an
+                -- attestation: derived_at means "when we last checked the data",
+                -- and an attestation checked nothing.
                 derived_at = COALESCE(EXCLUDED.derived_at,
                                       requirement_compliance_status.derived_at),
                 updated_at = NOW()
             """,
             company_id, row["location_id"], row["catalog_id"], row["regulation_key"],
             status, basis, json.dumps(evidence),
+            # Decided here rather than with a CASE on $6: that placeholder also
+            # feeds the `basis` varchar column, and asyncpg's prepare then fails
+            # with "inconsistent types deduced for parameter $6".
+            datetime.now(timezone.utc) if basis == "derived" else None,
         )
         await conn.execute(
             """
