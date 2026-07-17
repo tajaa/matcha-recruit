@@ -201,6 +201,36 @@ def classify_authority_index(index_slug: str, triggered_by: Optional[str] = None
     return result
 
 
+@celery_app.task(name="scope_registry.propose_keys", max_retries=0, time_limit=1800)
+def propose_index_keys(index_slug: str, triggered_by: Optional[str] = None):
+    """Map one index's classified items to registry obligation keys.
+
+    The pass that lets AI-classified authority codify at all: the disposition
+    pass answers "who does this apply to" and inherits down from the subpart,
+    but a key is per-obligation and cannot inherit, so sections were left
+    keyless — and a NULL-key classification can never be matched to a catalog
+    row. Admin-triggered only; proposals stay provisional.
+    """
+    from app.workers.utils import get_db_connection
+    from app.core.services.scope_registry.classify import propose_keys_for_index
+
+    async def _run():
+        conn = await get_db_connection()
+        try:
+            return await propose_keys_for_index(conn, index_slug)
+        finally:
+            await conn.close()
+
+    try:
+        result = asyncio.run(_run())
+    except Exception as exc:
+        publish_task_error(CHANNEL, "scope_registry_propose_keys", index_slug, str(exc))
+        raise
+
+    publish_task_complete(CHANNEL, "scope_registry_propose_keys", index_slug, result)
+    return result
+
+
 @celery_app.task(name="scope_registry.research_cycle", max_retries=0, time_limit=1800)
 def run_scheduled_research_cycle():
     """Headless growth loop: for each configured chain, drive its keyed

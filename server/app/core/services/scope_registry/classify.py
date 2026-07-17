@@ -133,6 +133,42 @@ def _normalize_jurisdiction_scope(node: Dict[str, Any]) -> Dict[str, Any]:
     return {"level": level, "names": [seen[k] for k in sorted(seen)]}
 
 
+def resolve_regulation_key(
+    raw_key: Any,
+    raw_category: Any,
+    rkd_keys_by_category: Dict[str, Set[str]],
+) -> Tuple[Optional[str], List[str]]:
+    """Gate one proposed regulation_key against the RKD. Never invents.
+
+    An unknown key is a non-fatal DOWNGRADE to NULL (applicable-but-uncodified,
+    which is the fetch queue's whole purpose), not a rejection — the rest of the
+    proposal may be perfectly good.
+
+    Shared by :func:`validate_proposal` (the disposition pass) and
+    :func:`propose_keys_for_index` (the key pass) so the two cannot drift into
+    disagreeing about what counts as a real key.
+    """
+    warnings: List[str] = []
+    regulation_key = (str(raw_key).strip() if raw_key else "") or None
+    if regulation_key is None:
+        return None, warnings
+
+    category_slug = (str(raw_category).strip() if raw_category else "") or None
+    known = (
+        regulation_key in rkd_keys_by_category.get(category_slug, set())
+        if category_slug
+        else any(regulation_key in keys for keys in rkd_keys_by_category.values())
+    )
+    if not known:
+        warnings.append(
+            f"regulation_key {regulation_key!r} not in regulation_key_definitions"
+            + (f" for category {category_slug!r}" if category_slug else "")
+            + " — stored uncodified (NULL)"
+        )
+        return None, warnings
+    return regulation_key, warnings
+
+
 def validate_proposal(
     proposal: Dict[str, Any],
     rkd_keys_by_category: Dict[str, Set[str]],
@@ -205,21 +241,12 @@ def validate_proposal(
             else:
                 jurisdiction_scope = _normalize_jurisdiction_scope(jurisdiction_scope)
 
-    regulation_key = (proposal.get("regulation_key") or "").strip() or None
-    if regulation_key is not None:
-        category_slug = (proposal.get("category_slug") or "").strip() or None
-        known = (
-            regulation_key in rkd_keys_by_category.get(category_slug, set())
-            if category_slug
-            else any(regulation_key in keys for keys in rkd_keys_by_category.values())
-        )
-        if not known:
-            warnings.append(
-                f"regulation_key {regulation_key!r} not in regulation_key_definitions"
-                + (f" for category {category_slug!r}" if category_slug else "")
-                + " — stored uncodified (NULL)"
-            )
-            regulation_key = None
+    regulation_key, key_warnings = resolve_regulation_key(
+        proposal.get("regulation_key"),
+        proposal.get("category_slug"),
+        rkd_keys_by_category,
+    )
+    warnings.extend(key_warnings)
 
     return (
         {
@@ -544,6 +571,283 @@ async def classify_index(conn, slug: str, *, proposed_by: str = "gemini") -> Dic
         "inherited": inherited,
         "warnings": warnings,
         "unclassified_count": unclassified,
+    }
+
+
+async def fetch_rkd_catalog(conn) -> List[Dict[str, Any]]:
+    """The RKD vocabulary as prompt material: key, category, human name."""
+    rows = await conn.fetch(
+        "SELECT key, category_slug, name FROM regulation_key_definitions "
+        "ORDER BY category_slug, key"
+    )
+    return [dict(r) for r in rows]
+
+
+def _build_key_prompt(
+    index_row: Dict[str, Any],
+    items: List[Dict[str, Any]],
+    rkd_rows: List[Dict[str, Any]],
+) -> str:
+    """Prompt for the key pass: map each authority section to ONE registry key.
+
+    Deliberately a different question from `_build_classify_prompt`, which asks
+    *who* an item applies to. This asks *which obligation it is* — and that is a
+    per-section fact, so unlike disposition it cannot be inherited from a
+    subpart (29 CFR 1910 Subpart J holds both lockout/tagout and confined
+    spaces; one key across both would be a lie).
+    """
+    by_cat: Dict[str, List[str]] = {}
+    for r in rkd_rows:
+        by_cat.setdefault(r["category_slug"], []).append(f'{r["key"]} ({r["name"]})')
+    vocab = "\n".join(
+        f"  {cat}:\n" + "\n".join(f"    - {k}" for k in keys)
+        for cat, keys in sorted(by_cat.items())
+    )
+    items_block = "\n".join(
+        f'- "{i["citation"]}": {i.get("heading") or "(no heading)"}' for i in items
+    )
+    return f"""You are mapping legal authority sections to a compliance registry's obligation keys.
+
+AUTHORITY INDEX: {index_row['name']}
+
+REGISTRY VOCABULARY — the ONLY keys that exist, grouped by category_slug:
+{vocab}
+
+For EACH authority section below, decide which SINGLE registry key it is the legal authority for.
+
+Rules:
+- The key must be copied EXACTLY from the vocabulary above, together with the category_slug it is listed under.
+- Most sections map to NOTHING. Definitions, scope/purpose text, appendices, recordkeeping minutiae and
+  administrative provisions have no key — return null. A wrong mapping cites the wrong statute at a
+  business, which is worse than no mapping at all.
+- Map a section only when it is the PRIMARY authority for that obligation, not merely related to it.
+  Example: 29 CFR 1910.147 is the primary authority for lockout_tagout; 29 CFR 1910.333 mentions
+  the same practice but is not its primary authority — return null for the latter.
+- AT MOST ONE section per key. Where several sections elaborate the same obligation, give the key to the
+  single most authoritative one and null to the rest. Example: for injury_illness_recordkeeping across
+  29 CFR 1904, the key belongs on the general recording-criteria section, NOT on each narrow
+  case-type section (hearing loss, needlesticks, tuberculosis) that merely applies it.
+- Never invent a key. If nothing in the vocabulary fits, return null.
+
+SECTIONS:
+{items_block}
+
+Return ONLY a JSON object:
+{{"keys": [{{"citation": "...", "regulation_key": "..." or null, "category_slug": "..." or null, "confidence": "high"|"medium"|"low", "rationale": "one short sentence"}}]}}
+Every citation above must appear exactly once."""
+
+
+def dedupe_key_claims(
+    accepted: List[Dict[str, Any]],
+    already: Set[str],
+) -> Tuple[List[Dict[str, Any]], List[str]]:
+    """One key, one section. Pick the single winner per key. Pure.
+
+    The prompt asks the model for this, but a model that ignores it would hand
+    :func:`select_primary_citation` a pile of same-key candidates and let a
+    lexicographic tie-break choose the citation a business reads — which is how
+    "29 CFR 1904.10" (hearing-loss recording) ends up cited as the authority for
+    all injury recordkeeping.
+
+    Precedence:
+      1. confidence (the model's own judgement first)
+      2. **section over subpart** — the obligation-bearing unit is the section
+         (29 CFR 1910.212), not the subpart that contains it (Subpart O).
+         Citation order alone gets this exactly backwards: a space sorts before
+         a period, so ``"29 CFR 1910 Subpart O" < "29 CFR 1910.212"`` and the
+         coarser item wins — the opposite of `select_primary_citation`'s
+         deepest-hierarchy rule.
+      3. citation, so the outcome is deterministic across runs.
+
+    ``already`` is the set of keys this index carries from an EARLIER run. It
+    makes the pass idempotent: without it a second run hands the same key to a
+    second section (29 CFR 1904.4 *and* 1904.7 both claiming
+    injury_illness_recordkeeping), the very pile-up the dedupe exists to stop.
+    Note this is one-way — a key already parked on a subpart is not re-opened
+    by a later run, so fixing a bad winner means clearing the key first.
+    """
+    rank = {"high": 0, "medium": 1, "low": 2}
+    warnings: List[str] = []
+    best_by_key: Dict[str, Dict[str, Any]] = {}
+
+    for a in sorted(
+        accepted,
+        key=lambda x: (rank.get(x["confidence"], 3), not x.get("is_section"), x["citation"]),
+    ):
+        if a["key"] in already:
+            warnings.append(
+                f"{a['citation']}: {a['key']!r} already held by another section "
+                f"in this index — skipped"
+            )
+            continue
+        if a["key"] in best_by_key:
+            warnings.append(
+                f"{a['citation']}: {a['key']!r} already claimed by "
+                f"{best_by_key[a['key']]['citation']} — skipped"
+            )
+            continue
+        best_by_key[a["key"]] = a
+
+    return list(best_by_key.values()), warnings
+
+
+async def propose_keys_for_index(
+    conn,
+    slug: str,
+    *,
+    batch_size: int = 40,
+    min_confidence: str = "medium",
+) -> Dict[str, Any]:
+    """Second classification pass: fill ``regulation_key`` on an index's items.
+
+    Why this exists: the disposition pass classifies **subparts** and lets
+    sections inherit, but `child_classification_of` deliberately drops the key
+    on inheritance (keys are per-obligation). The result was that no
+    Gemini-classified section ever carried a key — 353 classifications, zero
+    keys — and `match_codifications` skips NULL-key rows, so nothing the AI
+    touched could ever codify. Every key in the database had been hand-seeded.
+
+    Runs over targets AND children, since the obligation-bearing unit is
+    usually the section (29 CFR 1910.147), not the subpart that contains it.
+    Skips ``excluded`` items — an item with no employer obligation has no key
+    by definition.
+
+    Lands keys on rows that stay ``provisional``: this proposes, a human still
+    confirms. Unknown keys are downgraded to NULL by the shared RKD gate.
+    """
+    from app.core.services.gemini_compliance import get_gemini_compliance_service
+
+    index_row = await conn.fetchrow(
+        "SELECT id, slug, name FROM authority_indexes WHERE slug = $1", slug
+    )
+    if index_row is None:
+        raise ValueError(f"unknown authority index slug: {slug!r}")
+    index = dict(index_row)
+
+    items = [
+        dict(r)
+        for r in await conn.fetch(
+            """
+            SELECT i.id, i.citation, i.heading,
+                   i.parent_item_id IS NOT NULL AS is_section
+            FROM authority_index_items i
+            JOIN authority_item_classifications c ON c.item_id = i.id
+            WHERE i.authority_index_id = $1
+              AND c.regulation_key IS NULL
+              AND c.disposition <> 'excluded'
+            ORDER BY i.citation
+            """,
+            index["id"],
+        )
+    ]
+    if not items:
+        return {"slug": slug, "considered": 0, "proposed": 0, "keyed": 0, "warnings": []}
+
+    rkd_rows = await fetch_rkd_catalog(conn)
+    rkd = await fetch_rkd_keys_by_category(conn)
+    service = get_gemini_compliance_service()
+
+    def _validate(data: Any) -> Optional[str]:
+        if not isinstance(data, dict) or not isinstance(data.get("keys"), list):
+            return 'response must be {"keys": [...]}'
+        return None
+
+    allowed_confidence = {
+        "high": {"high"},
+        "medium": {"high", "medium"},
+        "low": {"high", "medium", "low"},
+    }.get(min_confidence, {"high", "medium"})
+    warnings: List[str] = []
+    accepted: List[Dict[str, Any]] = []
+
+    # Collect every batch BEFORE writing: the one-section-per-key rule can only
+    # be enforced with the whole index in hand, and batching splits it.
+    for start in range(0, len(items), batch_size):
+        batch = items[start:start + batch_size]
+        by_citation = {i["citation"]: i for i in batch}
+        try:
+            data = await service._call_with_retry(
+                _build_key_prompt(index, batch, rkd_rows),
+                response_key=None,
+                max_retries=1,
+                validate_fn=_validate,
+                label=f"scope-registry keys {slug} [{start}:{start + len(batch)}]",
+            )
+        except Exception as exc:  # noqa: BLE001 — one bad batch must not lose the rest
+            warnings.append(f"batch {start}: {type(exc).__name__}: {exc}")
+            continue
+
+        for prop in data.get("keys", []):
+            if not isinstance(prop, dict):
+                continue
+            citation = str(prop.get("citation", "")).strip()
+            item = by_citation.get(citation)
+            if item is None:
+                # A citation we did not send. Never trust a model-authored
+                # citation onto a row — that is how a key lands on the wrong law.
+                warnings.append(f"{citation!r}: not in this batch — ignored")
+                continue
+            if prop.get("regulation_key") is None:
+                continue
+            confidence = str(prop.get("confidence", "")).lower()
+            if confidence not in allowed_confidence:
+                warnings.append(
+                    f"{citation}: {prop.get('regulation_key')!r} dropped "
+                    f"(confidence {prop.get('confidence')!r})"
+                )
+                continue
+            key, key_warnings = resolve_regulation_key(
+                prop.get("regulation_key"), prop.get("category_slug"), rkd
+            )
+            warnings.extend(f"{citation}: {w}" for w in key_warnings)
+            if key is None:
+                continue
+            accepted.append({
+                "item_id": item["id"], "citation": citation, "key": key,
+                "category_slug": (prop.get("category_slug") or "").strip() or None,
+                "confidence": confidence,
+                "is_section": item["is_section"],
+            })
+
+    already: Set[str] = {
+        r["regulation_key"]
+        for r in await conn.fetch(
+            """
+            SELECT DISTINCT c.regulation_key
+            FROM authority_item_classifications c
+            JOIN authority_index_items i ON i.id = c.item_id
+            WHERE i.authority_index_id = $1 AND c.regulation_key IS NOT NULL
+            """,
+            index["id"],
+        )
+    }
+    winners, dedupe_warnings = dedupe_key_claims(accepted, already)
+    warnings.extend(dedupe_warnings)
+
+    keyed = 0
+    for a in winners:
+        # key_definition_id resolves from (key, category) so the category guard
+        # in match_codifications has something live to check.
+        updated = await conn.fetchval(
+            """
+            UPDATE authority_item_classifications
+            SET regulation_key = $2,
+                key_definition_id = (
+                    SELECT id FROM regulation_key_definitions
+                    WHERE key = $2 AND ($3::text IS NULL OR category_slug = $3)
+                    ORDER BY category_slug LIMIT 1
+                )
+            WHERE item_id = $1 AND regulation_key IS NULL
+            RETURNING id
+            """,
+            a["item_id"], a["key"], a["category_slug"],
+        )
+        if updated:
+            keyed += 1
+
+    return {
+        "slug": slug, "considered": len(items), "proposed": len(accepted),
+        "keyed": keyed, "warnings": warnings,
     }
 
 

@@ -332,6 +332,24 @@ async def trigger_classify(slug: str, current_user=Depends(require_admin)) -> Di
     return await _dispatch("running", slug)
 
 
+@router.post("/authority/{slug}/propose-keys", dependencies=[Depends(require_admin)])
+async def trigger_propose_keys(slug: str, current_user=Depends(require_admin)) -> DispatchResponse:
+    """Map this index's classified items to registry obligation keys.
+
+    Runs AFTER classify: the disposition pass decides who an item applies to,
+    this decides which obligation it IS. Separate because a key is per-section
+    and cannot be inherited from a subpart the way a disposition is — without
+    this pass, AI-classified sections keep NULL keys and can never codify.
+    """
+    from app.core.services.scope_registry.authority_sources import all_index_slugs
+    if slug not in all_index_slugs():
+        raise HTTPException(status_code=404, detail=f"Unknown authority index: {slug}")
+
+    from app.workers.tasks.scope_registry import propose_index_keys
+    propose_index_keys.delay(index_slug=slug, triggered_by=str(current_user.id))
+    return await _dispatch("running", slug)
+
+
 @router.post("/seed", dependencies=[Depends(require_admin)])
 async def apply_seed_classifications():
     """Apply the citation-anchored Phase-1 seed (provisional, no network)."""
