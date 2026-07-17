@@ -506,6 +506,22 @@ class PolicyViolationMatch(BaseModel):
     relevant_excerpt: Optional[str] = None
 
 
+class StatuteMatch(BaseModel):
+    """A safety statute the incident implicates, from the jurisdiction catalog.
+
+    Additive to policy mapping; the codified corpus is thin, so `statute_citation`
+    is optional and `state` carries whatever jurisdiction label the catalog row
+    resolved to. Rendered as an "Implicated statutes" subsection, hidden when the
+    list is empty."""
+    requirement_id: str
+    state: str = ""
+    category: str = ""
+    title: str = "Requirement"
+    statute_citation: Optional[str] = None
+    source_url: Optional[str] = None
+    relevance_reason: str = ""
+
+
 class PolicyMappingAnalysis(BaseModel):
     """AI policy mapping analysis result."""
     matches: list[PolicyViolationMatch]
@@ -514,6 +530,11 @@ class PolicyMappingAnalysis(BaseModel):
     generated_at: str
     from_cache: bool = False
     cache_reason: Optional[str] = None
+    # Jurisdiction-statute grounding (default empty → legacy cached rows, which
+    # lack these keys, parse cleanly and render no statute section).
+    statute_matches: list[StatuteMatch] = []
+    statute_summary: Optional[str] = None
+    statute_states: list[str] = []
 
 
 class ConsistencyAnalytics(BaseModel):

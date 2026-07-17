@@ -418,6 +418,25 @@ Apply these rules to the outcome ranking. The most severe clinically-appropriate
 """
 
 
+def _grounding_block(requirements_text: str) -> str:
+    """Appended AFTER a prompt's .format() (plain concat, no .format on this text
+    — braces stay literal, so it can never break the template's kwarg contract).
+
+    Injects the codified state-law corpus + the instruction to emit a cited
+    ``evidence_map``. The route runs ``legal_defense.validate_citations`` over the
+    result, so any invented ``jur:`` id is dropped before it reaches the user."""
+    return (
+        "\n\nSTATE EMPLOYMENT LAW REQUIREMENTS (grounding — cite ONLY these IDs):\n"
+        + requirements_text
+        + "\n\nWhen a recommendation or outcome is materially informed by one of the "
+          "requirements above, add an entry to an \"evidence_map\" array in your JSON "
+          "output — a list of objects like "
+          "{\"point\": \"<one-sentence claim>\", \"cited_ids\": [\"jur:<id>\"]}. "
+          "Use ONLY the jur: IDs listed above; never invent one. "
+          "If no requirement applies, set \"evidence_map\": []."
+    )
+
+
 SUGGESTED_GUIDANCE_PROMPT = """You are an Employee Relations investigation assistant generating interactive next-step guidance for an active case.
 
 CASE INFORMATION:
@@ -910,6 +929,7 @@ class ERAnalyzer:
         evidence_overview: dict[str, Any],
         analysis_results: dict[str, Any],
         document_excerpts: str = "",
+        jurisdiction_requirements: str = "",
     ) -> dict[str, Any]:
         """
         Generate structured interactive suggested guidance cards.
@@ -933,6 +953,8 @@ class ERAnalyzer:
             document_excerpts=document_excerpts or "(No document text available yet)",
             analyses_completed=json.dumps(analyses_completed, indent=2),
         )
+        if jurisdiction_requirements:
+            prompt += _grounding_block(jurisdiction_requirements)
 
         text = await self._generate_content_async(prompt)
         result = self._parse_json_response(text)
@@ -947,6 +969,7 @@ class ERAnalyzer:
         precedent_stats: dict,
         healthcare_context: dict | None = None,
         determination_confidence: float | None = None,
+        jurisdiction_requirements: str = "",
     ) -> dict[str, Any]:
         """Generate AI-analyzed outcome recommendations for case determination.
 
@@ -967,6 +990,8 @@ class ERAnalyzer:
                 policy_findings=policy_findings or "No policy findings available.",
                 precedent_stats=json.dumps(precedent_stats, indent=2, default=str) if precedent_stats else "No prior case data available.",
             )
+            if jurisdiction_requirements:
+                prompt += _grounding_block(jurisdiction_requirements)
             if healthcare_context:
                 specialties = healthcare_context.get("specialties")
                 specialties_str = ", ".join(specialties) if specialties else "general healthcare"
@@ -1023,6 +1048,7 @@ class ERAnalyzer:
         on_status: Callable[[str], Any] | None = None,
         healthcare_context: dict | None = None,
         determination_confidence: float | None = None,
+        jurisdiction_requirements: str = "",
     ) -> dict[str, Any]:
         """Generate outcome analysis with streaming status callbacks.
 
@@ -1036,6 +1062,8 @@ class ERAnalyzer:
                 policy_findings=policy_findings or "No policy findings available.",
                 precedent_stats=json.dumps(precedent_stats, indent=2, default=str) if precedent_stats else "No prior case data available.",
             )
+            if jurisdiction_requirements:
+                prompt += _grounding_block(jurisdiction_requirements)
             if healthcare_context:
                 specialties = healthcare_context.get("specialties")
                 specialties_str = ", ".join(specialties) if specialties else "general healthcare"

@@ -260,6 +260,27 @@ class SuggestedGuidanceAction(BaseModel):
     search_query: Optional[str] = None
 
 
+class ComplianceCitation(BaseModel):
+    """A jurisdiction-requirement grounded into ER guidance/outcome AI.
+
+    cid ``jur:<requirement_id>``; surfaced as a citation chip in the UI. All
+    fields except cid/state/category/title are optional — the codified corpus is
+    thin and an uncited row is still valid grounding context."""
+    cid: str
+    requirement_id: str
+    state: str
+    category: str
+    title: str
+    statute_citation: Optional[str] = None
+    source_url: Optional[str] = None
+
+
+class EvidencePoint(BaseModel):
+    """One grounded claim → the requirement cids it cites (already gated)."""
+    point: str
+    cited_ids: list[str] = []
+
+
 class SuggestedGuidanceCard(BaseModel):
     """A single suggested guidance recommendation."""
     id: str
@@ -285,6 +306,12 @@ class SuggestedGuidanceResponse(BaseModel):
     determination_suggested: bool = False
     determination_confidence: float = 0.0
     determination_signals: list[str] = []
+    # Compliance grounding (default empty → legacy payloads + empty-corpus paths
+    # unaffected). evidence_map is post-`validate_citations`; citations render as
+    # chips only when non-empty.
+    evidence_map: list[EvidencePoint] = []
+    compliance_citations: list[ComplianceCitation] = []
+    grounding_available: bool = False
 
 
 # ===========================================
@@ -351,6 +378,10 @@ class OutcomeAnalysisResponse(BaseModel):
     case_summary: str
     generated_at: datetime
     model: str
+    # Compliance grounding — see SuggestedGuidanceResponse. Empty by default.
+    evidence_map: list[EvidencePoint] = []
+    compliance_citations: list[ComplianceCitation] = []
+    grounding_available: bool = False
 
 
 class ReportGenerateRequest(BaseModel):
