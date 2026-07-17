@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { api, authStreamHeaders } from '../../api/client'
 import { Badge, Button, LABEL, type BadgeVariant } from '../ui'
 import type { SuggestedGuidanceResponse, SuggestedGuidanceCard, ERCaseOutcome, OutcomeOption, OutcomeAnalysisResponse, ERDocument } from '../../types/er'
+import { ComplianceGrounding } from './ComplianceGrounding'
 
 const BASE = import.meta.env.VITE_API_URL ?? '/api'
 
@@ -289,6 +290,8 @@ export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, onGuidance
       <div className="rounded-lg bg-zinc-900/50 border border-white/[0.08] px-4 py-3">
         <p className="text-sm text-zinc-300">{guidance.summary}</p>
       </div>
+
+      <ComplianceGrounding citations={guidance.compliance_citations} />
 
       {/* Preponderance of evidence threshold banner */}
       {guidance.determination_suggested && !determinationDismissed && !showDetermination && !isClosed && (

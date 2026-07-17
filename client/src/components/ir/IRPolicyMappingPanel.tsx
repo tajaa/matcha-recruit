@@ -32,7 +32,7 @@ export function IRPolicyMappingPanel({ incidentId }: { incidentId: string }) {
           {loading ? '...' : 'Refresh'}
         </Button>
       </div>
-      <div className="px-5 py-4">
+      <div className="px-5 py-4 space-y-4">
         {loading && !mapping ? (
           <p className="text-xs text-zinc-500">Analyzing policies...</p>
         ) : !mapping || mapping.no_matching_policies ? (
@@ -53,6 +53,30 @@ export function IRPolicyMappingPanel({ incidentId }: { incidentId: string }) {
                   <span className="font-mono text-[11px] tabular-nums text-zinc-500">{Math.round(m.confidence * 100)}%</span>
                 </div>
                 <p className="text-xs text-zinc-500">{m.reasoning}</p>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Implicated statutes — codified safety/workers-comp requirements for
+            the incident's location. Present even when no company policy matched. */}
+        {mapping?.statute_matches && mapping.statute_matches.length > 0 && (
+          <div className="space-y-2 border-t border-white/[0.06] pt-3">
+            <div className="flex items-center justify-between gap-2">
+              <h4 className="text-[11px] uppercase tracking-wide text-emerald-400/80">Implicated statutes</h4>
+              {mapping.statute_states && mapping.statute_states.length > 0 && (
+                <span className="text-[10px] text-zinc-500">{mapping.statute_states.join(', ')}</span>
+              )}
+            </div>
+            {mapping.statute_matches.map((s) => (
+              <div key={s.requirement_id} className="rounded-md border border-emerald-500/20 bg-emerald-500/[0.04] px-3 py-2 space-y-1">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm text-zinc-200">{s.title}</span>
+                  <span className="text-[10px] text-emerald-300/80 shrink-0">
+                    {s.state}{s.statute_citation ? ` · ${s.statute_citation}` : ''}
+                  </span>
+                </div>
+                <p className="text-xs text-zinc-500">{s.relevance_reason}</p>
               </div>
             ))}
           </div>

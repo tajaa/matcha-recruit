@@ -2,6 +2,7 @@ import { useState, useRef } from 'react'
 import { api, authStreamHeaders } from '../../api/client'
 import { Badge, Button, type BadgeVariant } from '../ui'
 import type { OutcomeAnalysisResponse, OutcomeOption, ERCaseOutcome } from '../../types/er'
+import { ComplianceGrounding } from './ComplianceGrounding'
 
 const BASE = import.meta.env.VITE_API_URL ?? '/api'
 
@@ -140,6 +141,8 @@ export function EROutcomePanel({ caseId, onApplyOutcome }: Props) {
           <p className="text-sm text-zinc-300">{data.case_summary}</p>
         </div>
       )}
+
+      <ComplianceGrounding citations={data.compliance_citations} />
 
       {/* Outcome option cards */}
       {data.outcomes.map((opt: OutcomeOption, i: number) => (

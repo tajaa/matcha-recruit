@@ -251,12 +251,25 @@ export type IRPolicyMatch = {
   relevant_excerpt?: string | null
 }
 
+export type IRStatuteMatch = {
+  requirement_id: string
+  state: string
+  category: string
+  title: string
+  statute_citation?: string | null
+  source_url?: string | null
+  relevance_reason: string
+}
+
 export type IRPolicyMappingAnalysis = {
   matches: IRPolicyMatch[]
   summary: string
   no_matching_policies?: boolean
   generated_at: string
   from_cache?: boolean
+  statute_matches?: IRStatuteMatch[]
+  statute_summary?: string | null
+  statute_states?: string[]
 }
 
 // ── Consistency guidance ──

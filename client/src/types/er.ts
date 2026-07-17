@@ -77,6 +77,19 @@ export type SuggestedGuidanceCard = {
   interview_questions?: string[] | null
 }
 
+// Compliance grounding (shared by guidance + outcome). Present only when the
+// case resolved to a codified jurisdiction corpus; empty/absent otherwise.
+export type ComplianceCitation = {
+  cid: string
+  requirement_id: string
+  state: string
+  category: string
+  title: string
+  statute_citation?: string | null
+  source_url?: string | null
+}
+export type EvidencePoint = { point: string; cited_ids: string[] }
+
 export type SuggestedGuidanceResponse = {
   summary: string
   cards: SuggestedGuidanceCard[]
@@ -86,6 +99,9 @@ export type SuggestedGuidanceResponse = {
   determination_suggested: boolean
   determination_confidence: number
   determination_signals: string[]
+  evidence_map?: EvidencePoint[]
+  compliance_citations?: ComplianceCitation[]
+  grounding_available?: boolean
 }
 
 export type CaseListResponse = {
@@ -146,7 +162,7 @@ export interface EvidenceSearchResponse { results: EvidenceSearchResult[]; query
 // Outcome Analysis
 export interface PartyAction { name: string; role: string; action: string; detail: string }
 export interface OutcomeOption { determination: 'substantiated' | 'unsubstantiated' | 'inconclusive'; recommended_action: ERCaseOutcome; action_label: string; reasoning: string; policy_basis: string; hr_considerations: string; precedent_note: string; confidence: 'high' | 'medium' | 'low'; party_actions?: PartyAction[] }
-export interface OutcomeAnalysisResponse { outcomes: OutcomeOption[]; case_summary: string; generated_at: string; model: string }
+export interface OutcomeAnalysisResponse { outcomes: OutcomeOption[]; case_summary: string; generated_at: string; model: string; evidence_map?: EvidencePoint[]; compliance_citations?: ComplianceCitation[]; grounding_available?: boolean }
 
 // Export
 export interface ShareLink { id: string; token: string; created_at: string; expires_at: string | null; revoked_at: string | null; download_count: number; last_downloaded_at: string | null; filename: string }
