@@ -68,7 +68,10 @@ export function deleteTemplate(id: string) {
 }
 
 export function generateFromTemplate(id: string, startDate: string, endDate: string) {
-  return api.post<{ created: number; series_id: string; shifts: Shift[] }>(
+  return api.post<{
+    created: number; series_id: string; shifts: Shift[]
+    compliance_warnings?: { check: string; severity: string; message: string; statute?: string | null }[]
+  }>(
     `/employee-schedule/templates/${id}/generate`, { start_date: startDate, end_date: endDate },
   )
 }

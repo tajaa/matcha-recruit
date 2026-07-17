@@ -22,10 +22,18 @@ const inputCls = 'bg-zinc-900 border border-zinc-700 rounded-lg px-2.5 py-1.5 te
 
 const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
+interface ComplianceViolation {
+  check: string
+  severity: string
+  message: string
+  statute?: string | null
+}
+
 interface ForceableDetail {
   code?: string
   message?: string
   conflicts?: { starts_at: string; ends_at: string; role: string | null }[]
+  violations?: ComplianceViolation[]
 }
 
 /** A 409 the admin can override → confirm() text. Anything else → null (it gets
@@ -41,6 +49,15 @@ function conflictPrompt(err: unknown): string | null {
   }
   if (detail?.code === 'shift_full') {
     return `${detail.message ?? 'This shift is already fully staffed.'}\n\nAssign anyway?`
+  }
+  if (detail?.code === 'schedule_compliance') {
+    // Advisory scheduling-law flags (meal break, overtime, min rest). A hard
+    // minor-hour limit comes back as a 422 (schedule_compliance_block) instead
+    // and is surfaced as a non-overridable error by errorMessage().
+    const lines = (detail.violations ?? []).map(
+      (v) => `• ${v.message}${v.statute ? ` [${v.statute}]` : ''}`,
+    )
+    return `This shift may not comply with scheduling law:\n${lines.join('\n')}\n\nSchedule anyway?`
   }
   return null
 }
@@ -348,6 +365,7 @@ function TemplatesTab({ onGenerated }: { onGenerated: () => void }) {
 }
 
 function TemplateRow({ tpl, onChanged, onGenerated }: { tpl: ShiftTemplate; onChanged: () => void; onGenerated: () => void }) {
+  const { toast } = useToast()
   const [busy, setBusy] = useState(false)
   const [genOpen, setGenOpen] = useState(false)
   const today = toISODate(new Date())
@@ -361,7 +379,14 @@ function TemplateRow({ tpl, onChanged, onGenerated }: { tpl: ShiftTemplate; onCh
   }
   async function generate() {
     setGenBusy(true)
-    try { await generateFromTemplate(tpl.id, from, to); onGenerated() } finally { setGenBusy(false) }
+    try {
+      const res = await generateFromTemplate(tpl.id, from, to)
+      onGenerated()
+      const warnings = res.compliance_warnings ?? []
+      if (warnings.length) {
+        toast(`Generated ${res.created} shift(s) — scheduling-law note: ${warnings.map((w) => w.message).join('; ')}`, 'error')
+      }
+    } finally { setGenBusy(false) }
   }
 
   return (
