@@ -365,19 +365,26 @@ function ExposureFigure({ posture: p, issues }: { posture: ComplianceRiskSummary
   // and captioned it "City of Los Angeles Office of Wage Standards" — naming the
   // authority behind 3% of it. Sum by authority and take the largest.
   const authority = useMemo(() => {
-    const byAuthority = new Map<string, number>()
+    const byAuthority = new Map<string, { usd: number; href: string | null }>()
     for (const i of issues) {
       const name = i.penalty?.enforcing_agency || i.statute_citation
       const usd = i.penalty?.civil_max ?? i.penalty?.civil_min
       if (!name || usd == null) continue
       const n = i.penalty?.per_violation && i.violation_count ? Math.max(1, i.violation_count) : 1
-      byAuthority.set(name, (byAuthority.get(name) ?? 0) + usd * n)
+      const prev = byAuthority.get(name)
+      byAuthority.set(name, {
+        usd: (prev?.usd ?? 0) + usd * n,
+        // Any grounded issue from this authority can vouch for it. The total is
+        // a sum and has no single source, but the CAPTION names one authority —
+        // and that authority's schedule is a real page.
+        href: prev?.href ?? (i.penalty?.grounded ? i.penalty.source_url ?? null : null),
+      })
     }
-    let top: string | null = null
+    let top: { name: string; href: string | null } | null = null
     let best = -1
     // Ties break on name so the caption doesn't flicker between equal authorities.
-    for (const [name, usd] of [...byAuthority].sort((a, b) => a[0].localeCompare(b[0]))) {
-      if (usd > best) { best = usd; top = name }
+    for (const [name, v] of [...byAuthority].sort((a, b) => a[0].localeCompare(b[0]))) {
+      if (v.usd > best) { best = v.usd; top = { name, href: v.href } }
     }
     return top
   }, [issues])
@@ -402,7 +409,28 @@ function ExposureFigure({ posture: p, issues }: { posture: ComplianceRiskSummary
       {p.exposure_unquantified_count > 0 && (
         <p className="text-[11px] text-zinc-500 mt-1">+ {p.exposure_unquantified_count} unquantified</p>
       )}
-      {authority && <p className="text-[11px] font-mono text-zinc-500 mt-0.5 line-clamp-2">{authority}</p>}
+      {/* The total is a SUM across authorities, so it carries no single link and
+          stays plain. The caption names ONE authority though, and when that
+          authority's figures were parsed from its own schedule, the caption goes
+          to it. */}
+      {authority && (
+        <p className="text-[11px] font-mono text-zinc-500 mt-0.5 line-clamp-2">
+          {authority.href ? (
+            <a
+              href={authority.href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-zinc-400 underline decoration-dotted decoration-zinc-700 underline-offset-2 hover:text-zinc-200 hover:decoration-zinc-500"
+              title={`${authority.name} — opens the penalty schedule these figures were read from`}
+            >
+              {authority.name}
+              <ExternalLink className="h-2.5 w-2.5 opacity-60" />
+            </a>
+          ) : (
+            authority.name
+          )}
+        </p>
+      )}
     </>
   )
 }
