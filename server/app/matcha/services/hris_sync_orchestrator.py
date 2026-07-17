@@ -151,6 +151,46 @@ async def _sync_company_locations(conn, company_id, locations) -> int:
     return created
 
 
+async def _upsert_demographics(conn, *, company_id, employee_id, demographics, source):
+    """Store protected-class demographics in their own restricted table.
+
+    Deliberately NOT columns on `employees`: gender/ethnicity/DOB are protected-class
+    data, and on the roster row they would be carried by every existing SELECT, every
+    export, and every broker-facing serializer by default — safe only for as long as
+    everyone remembers to strip them. A separate table can only leak through a JOIN
+    someone had to write on purpose; the sole reader is pay_equity_analysis.analyze.
+
+    Per-field COALESCE, mirroring the employee upsert: a provider that returns gender
+    but not ethnicity must not blank an ethnicity another sync already established.
+    A falsy `demographics` writes nothing at all — no row, no blanking.
+    """
+    if not demographics:
+        return
+    values = {k: demographics.get(k) for k in ("date_of_birth", "gender", "ethnicity")}
+    if not any(values.values()):
+        return
+    await conn.execute(
+        """
+        INSERT INTO employee_demographics (
+            employee_id, org_id, date_of_birth, gender, ethnicity, source, updated_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, NOW())
+        ON CONFLICT (employee_id) DO UPDATE
+        SET date_of_birth = COALESCE(EXCLUDED.date_of_birth, employee_demographics.date_of_birth),
+            gender        = COALESCE(EXCLUDED.gender, employee_demographics.gender),
+            ethnicity     = COALESCE(EXCLUDED.ethnicity, employee_demographics.ethnicity),
+            source        = EXCLUDED.source,
+            updated_at    = NOW()
+        """,
+        employee_id,
+        company_id,
+        _parse_date(values["date_of_birth"]),
+        values["gender"],
+        values["ethnicity"],
+        source,
+    )
+
+
 async def _resolve_work_location_id(conn, company_id, work_city, work_state):
     """Map an HRIS work city/state to a business_locations.id (the OSHA establishment FK).
 
@@ -417,6 +457,9 @@ async def start_hris_sync(
     # {employee_hris_id: manager_hris_id} — collected during import, resolved to
     # manager_id (employee.id) in a second pass once every row exists.
     manager_links: dict[str, str] = {}
+    # Every hris_id this run actually wrote. The manager pass needs to know the
+    # roster is complete before it can conclude someone manages nobody.
+    synced_hris_ids: list[str] = []
 
     # ── Phase 3: Import workers (new connection) ───────────────────
     async with get_connection() as conn:
@@ -458,6 +501,7 @@ async def start_hris_sync(
                         normalized=normalized,
                         raw_worker=raw_worker,
                         triggered_by=triggered_by,
+                        source=config.get("mode", "adp"),
                     )
                 if action_label == "created":
                     created_count += 1
@@ -468,6 +512,8 @@ async def start_hris_sync(
                 # Record manager edge for the post-import resolution pass.
                 emp_hid = normalized.get("hris_id")
                 mgr_hid = normalized.get("manager_hris_id")
+                if emp_hid:
+                    synced_hris_ids.append(emp_hid)
                 if emp_hid and mgr_hid:
                     manager_links[emp_hid] = mgr_hid
             except Exception as exc:
@@ -490,6 +536,7 @@ async def start_hris_sync(
             )
             hid_to_id = {r["hris_id"]: r["id"] for r in id_rows}
             resolved = 0
+            manager_ids: set = set()
             for emp_hid, mgr_hid in manager_links.items():
                 emp_id = hid_to_id.get(emp_hid)
                 mgr_id = hid_to_id.get(mgr_hid)
@@ -500,8 +547,45 @@ async def start_hris_sync(
                     "UPDATE employees SET manager_id = $1, updated_at = NOW() WHERE id = $2 AND org_id = $3",
                     mgr_id, emp_id, company_id,
                 )
+                manager_ids.add(mgr_id)
                 resolved += 1
             logger.info("[HRIS] Resolved %d/%d manager edges", resolved, len(manager_links))
+
+            # Derive is_manager from the edges. Finch — our primary provider — has no
+            # "is a manager" flag at all; it only names each worker's manager, so the
+            # fact exists only in aggregate, and this pass is the one place the whole
+            # org graph is known. Set-based (ANY), not a loop: per server/CLAUDE.md a
+            # row-by-row pass here is thousands of sequential round-trips against prod.
+            if manager_ids:
+                await conn.execute(
+                    "UPDATE employees SET is_manager = TRUE, updated_at = NOW() "
+                    "WHERE org_id = $1 AND id = ANY($2::uuid[]) "
+                    "AND COALESCE(is_manager, FALSE) IS DISTINCT FROM TRUE",
+                    company_id, list(manager_ids),
+                )
+                logger.info("[HRIS] Marked %d employees as managers from org edges", len(manager_ids))
+
+            # Demote whoever no longer appears as anyone's manager. Promotion alone
+            # would leave is_manager TRUE forever after someone's last report moves
+            # away — stale in exactly the silent way this column was added to fix.
+            #
+            # Only safe when this run saw the WHOLE roster: "nobody reports to X" is a
+            # conclusion about absence, so a partial sync (any worker errored) could
+            # demote a real manager whose only report failed to import. fetch_workers
+            # pulls the full directory, so a clean run is complete by construction.
+            # Scoped to rows this run wrote — never touches non-HRIS/manual employees.
+            #
+            # `manager_ids` must be non-empty too: edges existed but none resolved means
+            # the graph is broken (manager ids outside the roster), not that the company
+            # has no managers — and with an empty exclusion set this demotes everyone.
+            if error_count == 0 and synced_hris_ids and manager_ids:
+                demoted = await conn.execute(
+                    "UPDATE employees SET is_manager = FALSE, updated_at = NOW() "
+                    "WHERE org_id = $1 AND hris_id = ANY($2::text[]) "
+                    "AND NOT (id = ANY($3::uuid[])) AND is_manager IS DISTINCT FROM FALSE",
+                    company_id, synced_hris_ids, list(manager_ids),
+                )
+                logger.info("[HRIS] is_manager demotion pass: %s", demoted)
 
         # ── Finalize sync run ──────────────────────────────────────
         final_status = "completed" if error_count == 0 else "partial"
@@ -589,10 +673,35 @@ async def _sync_single_employee(
     normalized: dict,
     raw_worker: dict,
     triggered_by: UUID,
+    source: Optional[str] = None,
 ) -> str:
     """Create or update a single employee from normalized HRIS data.
 
     Must be called inside a transaction. Returns 'created' or 'updated'.
+
+    ── Adding a field the HRIS provides ───────────────────────────────────────
+    `normalized` is a plain dict and every read below is an explicit
+    `normalized.get("x")`. There is no splat and no unknown-key warning, so a key
+    the normalizer emits but this function never reads is silently discarded —
+    the code looks complete and the column stays empty forever. `is_manager` sat
+    that way from the day the sync was written. The chain is:
+
+      1. Emit the key from ALL THREE normalizers — FinchHRISService (the
+         reference contract), GustoHRISService, and the ADP base HRISService.
+         The orchestrator dispatches polymorphically, so a key only Finch emits
+         is missing (→ None → COALESCE no-op) for every other provider.
+      2. Add the column via an Alembic migration (nullable; NULL = never synced,
+         which the COALESCEs below read as "no new fact").
+      3. Add it HERE, to BOTH the UPDATE SET list and the INSERT column list —
+         each with its arg in matching positional order. Both are hand-maintained
+         parallel lists; an off-by-one silently writes the wrong value into the
+         wrong column instead of raising.
+      4. Cover it in tests/hris/test_sync_orchestrator.py, which asserts every
+         normalizer key reaches a SQL param — that test is what makes step 3
+         impossible to forget.
+
+    Nested keys (e.g. `demographics`) are the exception: they route to their own
+    table below rather than onto `employees`, and stay out of both lists.
     """
     email = normalized["email"].strip().lower()
     hris_id = normalized.get("hris_id")
@@ -655,6 +764,10 @@ async def _sync_single_employee(
                 -- COALESCE: a confident match sets/updates the establishment FK; an
                 -- ambiguous feed (None) keeps any existing (incl. manual) assignment.
                 work_location_id = COALESCE($15, work_location_id),
+                -- Only ADP reports a management flag; Finch/Gusto send None, which
+                -- COALESCE reads as "no new fact". The manager-edge pass promotes
+                -- to TRUE afterwards, so this must not clobber it with False.
+                is_manager = COALESCE($16, is_manager),
                 updated_at = NOW()
             WHERE id = $1 AND org_id = $2
             """,
@@ -673,6 +786,7 @@ async def _sync_single_employee(
             normalized.get("address"),
             _parse_date(normalized.get("termination_date")),
             resolved_location_id,
+            normalized.get("is_manager"),
         )
         action_label = "updated"
     else:
@@ -683,9 +797,9 @@ async def _sync_single_employee(
                 org_id, email, personal_email, first_name, last_name,
                 work_state, employment_type, start_date, phone, job_title, department, hris_id,
                 employment_status, work_city, pay_rate, pay_classification,
-                address, termination_date, work_location_id
+                address, termination_date, work_location_id, is_manager
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
             RETURNING id
             """,
             company_id,
@@ -707,9 +821,21 @@ async def _sync_single_employee(
             normalized.get("address"),
             _parse_date(normalized.get("termination_date")),
             resolved_location_id,
+            normalized.get("is_manager"),
         )
         employee_id = row["id"]
         action_label = "created"
+
+    # Protected-class demographics land in their own restricted table — never on
+    # `employees`, where they would ride along in every roster read and export.
+    # Same transaction as the row above, so the two can't diverge.
+    await _upsert_demographics(
+        conn,
+        company_id=company_id,
+        employee_id=employee_id,
+        demographics=normalized.get("demographics"),
+        source=source,
+    )
 
     # Upsert credentials
     credentials = normalized.get("credentials")

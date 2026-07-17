@@ -245,8 +245,20 @@ class HRISService:
             "work_state": work_state,
             "work_city": work_city,
             "start_date": assignment.get("hireDate"),
-            "is_manager": assignment.get("managementPosition", False),
+            # ADP is the one provider with a real management flag. It seeds the
+            # column; the orchestrator's manager-edge pass can still promote someone
+            # to TRUE, but never demotes — see _sync_single_employee.
+            "is_manager": assignment.get("managementPosition"),
             "employment_status": "active" if status_code == "Active" else "terminated",
+            # Carried for key-set parity with FinchHRISService (the reference
+            # contract). ADP's payload has no equivalent here; explicit None means
+            # "no new fact" to the orchestrator's COALESCE, not "clear it".
+            "pay_rate": None,
+            "pay_classification": None,
+            "termination_date": None,
+            "address": None,
+            "manager_hris_id": None,
+            "demographics": None,
             "credentials": credentials if credentials else None,
         }
 
@@ -482,7 +494,16 @@ class GustoHRISService:
             "pay_rate": pay_rate,
             "pay_classification": pay_classification,
             "start_date": primary_job.get("hire_date"),
-            "is_manager": False,
+            # Keys below are carried so this output matches FinchHRISService's key
+            # set exactly (Finch is the reference contract — see the parity test in
+            # tests/hris/test_sync_orchestrator.py). Gusto's payload has no
+            # equivalent, so they are explicit Nones: the orchestrator COALESCEs
+            # them, meaning "no new fact" rather than "clear this value".
+            "termination_date": None,
+            "address": None,
+            "manager_hris_id": None,
+            "is_manager": None,
+            "demographics": None,
             "employment_status": "terminated" if terminated else "active",
             "credentials": None,
         }

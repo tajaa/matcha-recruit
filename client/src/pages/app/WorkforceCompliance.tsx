@@ -260,6 +260,59 @@ function SpreadBar({ r }: { r: PayEquityRole }) {
   )
 }
 
+/* Protected-class gap — the real measurement, shown only where HRIS demographics
+   reach far enough to make one. Absent demographics this says so plainly rather than
+   showing a reassuring 0%: the dispersion screen above is NOT a gap finding, and the
+   whole point of separating them is that a broker can tell which one they're reading. */
+function ClassGapPanel({ a }: { a: PayEquityAnalysisResult }) {
+  const material = a.class_gap_pct !== null && a.class_gap_pct >= 5
+  if (!a.class_gap_measurable) {
+    return (
+      <div className="rounded-xl border border-white/10 bg-white/[0.02] px-3 py-2.5 mb-3">
+        <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold mb-1">Protected-class gap</div>
+        <p className="text-[11px] text-zinc-500">
+          Not measured — {a.demographics_coverage_pct > 0
+            ? `demographics on file for only ${a.demographics_coverage_pct}% of the roster`
+            : 'no demographics on file'}. The figures above screen pay spread within a
+          role, which seniority can explain; measuring a gap between protected classes
+          needs gender data from a connected HRIS.
+        </p>
+      </div>
+    )
+  }
+  return (
+    <div className={`rounded-xl border px-3 py-2.5 mb-3 ${material ? 'border-amber-500/20 bg-amber-500/[0.04]' : 'border-white/10 bg-white/[0.02]'}`}>
+      <div className="flex items-center justify-between mb-1.5">
+        <span className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold">Protected-class gap (gender)</span>
+        <span className="text-[10px] text-zinc-600">{a.demographics_coverage_pct}% roster coverage</span>
+      </div>
+      <div className={`text-2xl font-light font-mono ${material ? 'text-amber-400' : 'text-zinc-200'}`}>
+        {a.class_gap_pct}%
+      </div>
+      {a.class_gaps.length > 0 && (
+        <ul className="mt-2 space-y-1">
+          {a.class_gaps.slice(0, 5).map((g) => (
+            <li key={g.title} className="flex items-center gap-2 text-[12px] text-zinc-300">
+              <span className="flex-1 truncate">{g.title}</span>
+              <span className="text-zinc-600 text-[10px]">
+                {g.classes.map((c) => `${c.class} ${c.n}`).join(' · ')}
+              </span>
+              <span className={`font-mono w-14 text-right ${g.gap_pct >= 5 ? 'text-amber-400' : 'text-zinc-400'}`}>
+                {g.gap_pct}%
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="text-[10px] text-zinc-600 mt-2">
+        Median pay difference between the highest- and lowest-paid gender in each role.
+        Groups smaller than {a.min_class_cell} people in a role are excluded — too few to
+        compare, and small enough to identify someone.
+      </p>
+    </div>
+  )
+}
+
 /* deep within-role dispersion report (rollups + per-role table) */
 function PayEquityReport({ a }: { a: PayEquityAnalysisResult }) {
   if (!a.analyzed_roles) {
@@ -290,6 +343,7 @@ function PayEquityReport({ a }: { a: PayEquityAnalysisResult }) {
           </div>
         ))}
       </div>
+      <ClassGapPanel a={a} />
       {a.priority_actions.length > 0 && (
         <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.04] px-3 py-2.5 mb-3">
           <div className="text-[9px] text-amber-400/80 uppercase tracking-widest font-bold mb-1.5">Priority fixes</div>
@@ -401,7 +455,15 @@ function PayEquitySection({ reviews, reload }: { reviews: PayEquityReview[]; rel
           {reviews.map((r) => (
             <div key={r.id} className="flex items-center gap-3 py-1.5 border-b border-zinc-800/30 last:border-0">
               <span className="text-sm text-zinc-200 w-28 shrink-0">{r.review_date ?? '—'}</span>
-              <span className="text-sm text-zinc-400 flex-1 min-w-0 truncate">{r.scope || 'Pay-equity study'}{r.gap_pct != null && <span className="text-[11px] text-zinc-600 ml-2">{r.gap_pct}% gap</span>}</span>
+              <span className="text-sm text-zinc-400 flex-1 min-w-0 truncate">
+                {r.scope || 'Pay-equity study'}
+                {/* Only a measured protected-class gap earns the word "gap"; a study with
+                    only the dispersion screen shows that instead of borrowing the label. */}
+                {r.gap_pct != null && <span className="text-[11px] text-zinc-600 ml-2">{r.gap_pct}% gap</span>}
+                {r.gap_pct == null && r.dispersion_pct != null && (
+                  <span className="text-[11px] text-zinc-600 ml-2">{r.dispersion_pct}% of roles show spread</span>
+                )}
+              </span>
               <span className="text-[11px] text-zinc-500">due {r.next_due_date ?? '—'}</span>
               {r.is_overdue && <span className="inline-flex items-center gap-1 text-[11px] text-red-400"><AlertTriangle className="h-3 w-3" /> overdue</span>}
               {!r.is_overdue && <span className="inline-flex items-center gap-1 text-[11px] text-emerald-400"><Check className="h-3 w-3" /> current</span>}
