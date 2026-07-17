@@ -96,7 +96,10 @@ export default function StatutoryFitPanel({ companyId, onCodifyGated, refreshKey
 }) {
   const [fit, setFit] = useState<FitMapResponse | null>(null)
   const [loading, setLoading] = useState(true)
-  const [busy, setBusy] = useState<FitReason | null>(null)
+  // Keyed by ACTION, not by reason. Reconcile and the compliance check are two
+  // different jobs that happened to share the 'stale_projection' reason key —
+  // so running one greyed out the other and neither said which was going.
+  const [busy, setBusy] = useState<'approve' | 'check' | 'reconcile' | null>(null)
   const [note, setNote] = useState<string | null>(null)
   // Deselected keys, per reason. Absent = all selected — "act on everything you
   // showed me" is the common case, and nothing fires until a button is clicked
@@ -129,16 +132,22 @@ export default function StatutoryFitPanel({ companyId, onCodifyGated, refreshKey
   useEffect(() => { if (refreshKey) void load() }, [refreshKey, load])
 
   /** Approve the staged rows behind these keys, then re-measure.
-   *  They go active — NOT codified (`will_codify` is false for them), so they
-   *  land in `gated`, not `visible`. The button says so; promising the tenant
-   *  would see them is the lie this panel exists to avoid. */
+   *
+   *  Approve is only the FIRST of three steps, and the note has to say so or it
+   *  reads as done. The endpoint's publish loop runs off request_ids /
+   *  company_ids, which the panel doesn't send — so the row goes active but is
+   *  not projected to this tenant. It self-heals rather than stranding:
+   *  approve_staged bumps `updated_at`, so on re-measure the key reappears
+   *  under "Not synced yet" (the GREATEST(created, updated) test exists for
+   *  exactly this), where the panel's own compliance-check button projects it.
+   *  Then it's gated, and codify releases it. approve → check → codify. */
   const approveStaged = useCallback(async (items: FitMissing[]) => {
     const ids = items.flatMap((m) => m.requirement_ids ?? [])
     if (!ids.length) return
-    setBusy('staged'); setNote(null)
+    setBusy('approve'); setNote(null)
     try {
       await api.post('/admin/research-review/approve', { ids })
-      setNote(`Approved ${ids.length} — now live but still uncodified; codify to release them.`)
+      setNote(`Approved ${ids.length} — now live, but not yet on this tenant's tab. They move to "Not synced yet": run the compliance check to project them, then codify to release.`)
       await load()
     } catch {
       setNote('Approve failed.')
@@ -154,7 +163,7 @@ export default function StatutoryFitPanel({ companyId, onCodifyGated, refreshKey
   const runCheck = useCallback(async (items: FitMissing[]) => {
     const locs = [...new Set(items.flatMap((m) => m.location_ids ?? []))]
     if (!locs.length) return
-    setBusy('stale_projection'); setNote(null)
+    setBusy('check'); setNote(null)
     try {
       const token = await ensureFreshToken()
       for (const id of locs) {
@@ -183,7 +192,7 @@ export default function StatutoryFitPanel({ companyId, onCodifyGated, refreshKey
    *  codifies it for every tenant holding the same key, which is the leverage
    *  the catalog exists to give. */
   const reconcile = useCallback(async () => {
-    setBusy('stale_projection'); setNote(null)
+    setBusy('reconcile'); setNote(null)
     try {
       await api.post('/admin/scope-registry/reconcile', {})
       setNote('Reconciled — rows bound to statutes already in the registry.')
@@ -279,7 +288,7 @@ export default function StatutoryFitPanel({ companyId, onCodifyGated, refreshKey
           {fit.counts.gated > 0 && (
             <div className="absolute right-2 top-2 flex items-center gap-1.5">
               {fit.counts.codifiable_now > 0 && (
-                <button type="button" onClick={() => void reconcile()} disabled={busy === 'stale_projection'}
+                <button type="button" onClick={() => void reconcile()} disabled={busy === 'reconcile'}
                         title="One reconcile binds these to statutes already confirmed in the registry — no typing"
                         className="inline-flex items-center gap-0.5 rounded border border-cyan-800/50 bg-cyan-900/30 px-1.5 py-0.5 text-[10px] font-medium text-cyan-300 hover:bg-cyan-900/50 disabled:opacity-40">
                   Reconcile {fit.counts.codifiable_now}
@@ -375,13 +384,13 @@ export default function StatutoryFitPanel({ companyId, onCodifyGated, refreshKey
                       here says nothing rather than offering a dead control. */}
                   {reason === 'staged' && (
                     <ActionButton onClick={() => void approveStaged(selectedIn(reason, items))}
-                                  busy={busy === 'staged'} icon={Check}
+                                  busy={busy === 'approve'} icon={Check}
                                   disabled={!selectedIn(reason, items).length}
                                   label={`Approve ${selectedIn(reason, items).reduce((n, m) => n + (m.requirement_ids?.length ?? 0), 0)}`} />
                   )}
                   {reason === 'stale_projection' && (
                     <ActionButton onClick={() => void runCheck(items)}
-                                  busy={busy === 'stale_projection'} icon={RefreshCw}
+                                  busy={busy === 'check'} icon={RefreshCw}
                                   label="Run compliance check" />
                   )}
                   {(reason === 'never_researched' || reason === 'researched_elsewhere') && (

@@ -35,6 +35,9 @@ CODIFIED = {
 def row(**kw):
     base = {
         "id": "22222222-2222-2222-2222-222222222222",
+        # The catalog row behind the projection — what codify/reconcile act on.
+        "catalog_id": "33333333-3333-3333-3333-333333333333",
+        "auto_reconcilable": False,
         "category": "overtime",
         "regulation_key": "daily_weekly_overtime",
         "requirement_key": None,
@@ -213,6 +216,30 @@ class TestCountsAndBuckets:
         fit = bucket_fit([r], {"leave": {"fmla"}})
         assert fit["counts"]["gated"] == 1
         assert fit["missing"] == []
+
+    def test_codifiable_now_counts_only_reconcilable_gated_rows(self):
+        # The Gated tile splits its claim on this: "Reconcile N" must promise
+        # only rows a confirmed classification already covers. Everything else
+        # needs a statute ingested (or a citation typed) — a different job.
+        fit = bucket_fit([
+            row(catalog_id="c1", auto_reconcilable=True),
+            row(catalog_id="c2", auto_reconcilable=False),
+            row(catalog_id="c3", auto_reconcilable=True, **CODIFIED),  # visible, not gated
+        ], {})
+        assert fit["counts"]["gated"] == 2
+        assert fit["counts"]["codifiable_now"] == 1
+
+    def test_codifiable_now_dedupes_to_the_catalog_row(self):
+        # One catalog row projected to five locations is ONE thing to reconcile.
+        # Counting projections would promise "Reconcile 5" and deliver 1 — the
+        # same dedupe the `gated` list the UI walks applies.
+        fit = bucket_fit([
+            row(id="p1", catalog_id="same", auto_reconcilable=True),
+            row(id="p2", catalog_id="same", auto_reconcilable=True),
+            row(id="p3", catalog_id="same", auto_reconcilable=True),
+        ], {})
+        assert fit["counts"]["gated"] == 3          # per-projection
+        assert fit["counts"]["codifiable_now"] == 1  # per-catalog-row
 
     def test_beyond_core_is_counted_not_flagged(self):
         # Core is a floor, not a cap: a real obligation off the checklist is
