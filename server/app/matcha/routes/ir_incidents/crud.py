@@ -974,6 +974,37 @@ async def update_incident(
             param_idx += 1
 
         if incident.location_id is not None:
+            # Mirror the create-path guard (see create_incident): a location
+            # assigned via update must be an active business_location owned by
+            # the incident's company. Without this, the "assign a valid
+            # location" remediation for an orphaned (NULL location_id) incident
+            # could silently repoint it at a foreign, inactive, or nonexistent
+            # location. Resolve the effective company: an admin may be
+            # reassigning company_id in the same request; otherwise it's the
+            # incident's existing company (== the caller's for a client).
+            if incident.company_id is not None:
+                loc_company_id = str(incident.company_id)
+            elif current_user.role == "admin":
+                loc_company_id = await conn.fetchval(
+                    "SELECT company_id FROM ir_incidents WHERE id = $1",
+                    str(incident_id),
+                )
+            else:
+                loc_company_id = str(company_id)
+            if loc_company_id:
+                owns_location = await conn.fetchval(
+                    """
+                    SELECT 1 FROM business_locations
+                     WHERE id = $1 AND company_id = $2 AND is_active = true
+                    """,
+                    str(incident.location_id),
+                    str(loc_company_id),
+                )
+                if not owns_location:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Selected location does not belong to your company",
+                    )
             updates.append(f"location_id = ${param_idx}")
             params.append(str(incident.location_id))
             changes["location_id"] = str(incident.location_id)
