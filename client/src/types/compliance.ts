@@ -51,7 +51,10 @@ export interface RiskPenalty {
 
 export interface RiskIssue {
   id: string
-  source: 'wage' | 'credential' | 'incident' | 'alert'
+  // 'requirement' = a codified obligation the tenant is derived/attested to be
+  // out of compliance with. The other four infer a breach from a symptom (a pay
+  // rate, an expiry, an unclassified incident); this one IS the obligation.
+  source: 'wage' | 'credential' | 'incident' | 'alert' | 'requirement'
   severity: 'critical' | 'high' | 'moderate'
   title: string
   detail?: string | null

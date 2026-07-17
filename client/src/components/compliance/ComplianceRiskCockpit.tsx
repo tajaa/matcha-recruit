@@ -29,10 +29,12 @@ const SOURCE_LABEL: Record<RiskIssue['source'], string> = {
   credential: 'Credentialing',
   incident: 'Safety / OSHA',
   alert: 'Regulatory',
+  requirement: 'Requirement',
 }
 
 const FIX_VERB: Record<RiskIssue['source'], string> = {
   wage: 'Fix pay', credential: 'Renew', incident: 'Open incident', alert: 'Assign owner',
+  requirement: 'Review',
 }
 
 // Plain-language help for the manager, matched to what each element controls.
