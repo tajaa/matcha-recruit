@@ -4,6 +4,7 @@ import { Button, Input } from '../../components/ui'
 import { api } from '../../api/client'
 import { MultiBatchModal } from '../../components/employees/MultiBatchModal'
 import { BulkUploadModal } from '../../components/employees/BulkUploadModal'
+import { NewStatesBanner } from '../../components/employees/NewStatesBanner'
 
 // --- Types ---
 
@@ -139,6 +140,10 @@ export default function Onboarding() {
             {showForm ? 'Cancel' : 'Add Task'}
           </Button>
         </div>
+      </div>
+
+      <div className="px-5 pt-4">
+        <NewStatesBanner />
       </div>
 
       <MultiBatchModal

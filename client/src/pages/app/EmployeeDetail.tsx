@@ -4,6 +4,7 @@ import { Badge, Button, Card, Input, Select } from '../../components/ui'
 import { EmployeeStatusBadge } from '../../components/employees/EmployeeStatusBadge'
 import { OnboardingTaskList } from '../../components/employees/OnboardingTaskList'
 import { CredentialManager } from '../../components/employees/CredentialManager'
+import { NewHirePacket } from '../../components/employees/NewHirePacket'
 import { LeaveEligibilityPanel } from '../../components/employees/LeaveEligibilityPanel'
 import SupervisorToggle from '../../components/employees/SupervisorToggle'
 import { useEmployeeDetail } from '../../hooks/employees/useEmployeeDetail'
@@ -207,7 +208,10 @@ export default function EmployeeDetail() {
               </>
             )}
             {tab === 'onboarding' && (
-              <OnboardingTaskList employeeId={employeeId!} />
+              <div className="space-y-4">
+                <NewHirePacket employeeId={employeeId!} />
+                <OnboardingTaskList employeeId={employeeId!} />
+              </div>
             )}
             {tab === 'credentials' && (
               <CredentialManager employeeId={employeeId!} />
