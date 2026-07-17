@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Navigate, useNavigate } from 'react-router-dom'
 import { Zap } from 'lucide-react'
 import { Button } from '../../components/ui'
 
 import { useMe } from '../../hooks/useMe'
+import { isIrOnlyTier } from '../../utils/tier'
 import { fetchDashboardStats, fetchDashboardFlags, analyzeDashboardFlags } from '../../api/dashboard'
 
 import {
@@ -18,6 +19,8 @@ export default function Dashboard() {
   const { me, loading: meLoading } = useMe()
   const navigate = useNavigate()
 
+  const irOnly = isIrOnlyTier(me?.profile)
+
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [flagsData, setFlagsData] = useState<DashboardFlagsResponse | null>(null)
   const [flagsRefreshing, setFlagsRefreshing] = useState(false)
@@ -25,15 +28,25 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (meLoading) return
+    if (irOnly) {
+      // Matcha Lite has no dashboard nav entry (IrSidebar's logo already
+      // points at /app/ir) — skip the fetch and let the redirect below fire.
+      setLoading(false)
+      return
+    }
 
     Promise.allSettled([
       fetchDashboardStats().then(setStats).catch(() => setStats(null)),
       fetchDashboardFlags().then(setFlagsData).catch(() => setFlagsData(null)),
     ]).finally(() => setLoading(false))
-  }, [meLoading])
+  }, [meLoading, irOnly])
 
   if (meLoading || loading) {
     return <p className="text-sm text-zinc-500">Loading...</p>
+  }
+
+  if (irOnly) {
+    return <Navigate to="/app/ir" replace />
   }
 
   const onboarding = me?.onboarding_needed ?? {}
