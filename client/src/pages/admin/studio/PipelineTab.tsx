@@ -1,10 +1,26 @@
-import { useEffect, useRef, useState } from 'react'
-import { Check, ChevronDown, Circle, ExternalLink, Loader2, Sparkles } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { Building2, Check, ChevronDown, Circle, ExternalLink, Loader2, Sparkles, X } from 'lucide-react'
 import { api, authStreamHeaders } from '../../../api/client'
 import { Button, Modal, Input } from '../../../components/ui'
 import { LABEL } from '../../../components/ui/typography'
 import { extractCitation, coverageLink, libraryLink } from './utils'
 import type { PendingItem, ReviewGroup, ApproveResult, UncodifiedItem } from './types'
+import { CompanyPicker } from '../AdminOnboarding'
+import StatutoryFitPanel from '../../../features/admin-onboarding/StatutoryFitPanel'
+import type { FitGatedRow } from '../../../api/adminOnboarding'
+
+/** A withheld row from the fit map → the codify chain's shape.
+ *  `catalog_id`, not `id`: codification acts on the catalog row, while `id` is
+ *  the per-location projection. Seeding with the latter 404s on a row that
+ *  plainly exists. */
+function fromGated(g: FitGatedRow): ApproveResult {
+  return {
+    id: g.catalog_id, title: g.title ?? '(untitled)', description: null, current_value: null,
+    source_url: null, source_name: null, regulation_key: g.regulation_key,
+    codified: false, statute_citation: null, citation_url: null, citation_item_id: null,
+    state: null, city: null,
+  }
+}
 
 function fromUncodified(it: UncodifiedItem): ApproveResult {
   return {
@@ -24,11 +40,17 @@ function fromUncodified(it: UncodifiedItem): ApproveResult {
 // session, not from a fresh approve just now) — reuses the exact same
 // outcome-panel + modal UI built for the post-approve flow.
 export default function PipelineTab({
-  initialSection, initialUncodifiedItems,
+  initialSection, initialUncodifiedItems, companyId, onCompanyChange,
 }: {
   initialSection?: string | null
   initialUncodifiedItems?: UncodifiedItem[]
+  /** Focus the tab on one tenant: the per-company job ("make THIS business
+   *  whole") on the same funnel the queue below serves. Null = fleet view. */
+  companyId?: string | null
+  onCompanyChange?: (id: string | null) => void
 }) {
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [fitRefresh, setFitRefresh] = useState(0)
   // Coverage requests — one date-sorted list, category gaps + industry-specialty to-dos merged server-side
   const [pending, setPending] = useState<PendingItem[]>([])
   const [loadingRequests, setLoadingRequests] = useState(false)
@@ -200,6 +222,10 @@ export default function PipelineTab({
       setApproveResults((prev) => prev.map((r) => r.id === doneId ? {
         ...r, codified: res.codified, statute_citation: res.statute_citation, citation_url: res.citation_url,
       } : r))
+      // A codified row leaves `gated` and joins `visible` — re-measure so the
+      // focused company's tiles move as you work, which is the whole feedback
+      // loop this lens exists to give.
+      if (res.codified) setFitRefresh((n) => n + 1)
       const next = nextUncodified(doneId)
       if (next) openCodify(next)
       else setCodifyRow(null)
@@ -215,8 +241,45 @@ export default function PipelineTab({
     fetchReview(); fetchRequests()
   }
 
+  /** Hand this company's withheld rows to the codify chain that already lives
+   *  here — the same outcome-panel + modal walk the post-approve flow uses. No
+   *  navigation: the whole reason the company lens belongs on this tab. */
+  const codifyGated = useCallback((rows: FitGatedRow[]) => {
+    if (!rows.length) return
+    const results = rows.map(fromGated)
+    setApproveResults(results)
+    setReviewResult(`${results.length} withheld row${results.length === 1 ? '' : 's'} for this company — codify to release them.`)
+    openCodify(results[0])
+  }, [])
+
   return (
     <div className="space-y-6">
+      {/* ── §0 Company focus ──
+          The per-company job on the same funnel: pick a tenant, see what it
+          still needs, and finish every step here — research, approve, codify —
+          instead of the work being spread across Compliance Mgmt, Gap Analysis
+          and this tab with no thread between them. */}
+      <div className="flex items-center justify-between gap-3">
+        <h2 className={LABEL}>{companyId ? 'Filling gaps for one company' : 'Fleet queue'}</h2>
+        {companyId ? (
+          <button type="button" onClick={() => onCompanyChange?.(null)}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/[0.08] px-2.5 h-8 text-xs text-emerald-300 hover:bg-emerald-500/[0.14]">
+            <Building2 className="h-3.5 w-3.5" /> Focused — clear <X className="h-3 w-3" />
+          </button>
+        ) : (
+          <Button variant="secondary" size="sm" onClick={() => setPickerOpen(true)}>
+            <Building2 className="h-3.5 w-3.5" /> Focus a company
+          </Button>
+        )}
+      </div>
+      {pickerOpen && (
+        <CompanyPicker onClose={() => setPickerOpen(false)}
+                       onPick={(id) => { setPickerOpen(false); onCompanyChange?.(id) }} />
+      )}
+      {companyId && (
+        <StatutoryFitPanel companyId={companyId} onCodifyGated={codifyGated} refreshKey={fitRefresh} />
+      )}
+
       {/* ── §1 Queued coverage requests ── */}
       <div ref={queueRef}>
         <div className="flex items-center justify-between mb-2">

@@ -3,7 +3,7 @@ import { Loader2, ShieldCheck, EyeOff, AlertTriangle, Layers, Check, Search, Ref
 import { Link } from 'react-router-dom'
 import { api, ensureFreshToken } from '../../api/client'
 import { adminOnboarding, getLocationCheckUrl } from '../../api/adminOnboarding'
-import type { FitMapResponse, FitMissing, FitReason } from '../../api/adminOnboarding'
+import type { FitGatedRow, FitMapResponse, FitMissing, FitReason } from '../../api/adminOnboarding'
 import { useResearchGaps } from '../../hooks/useResearchGaps'
 
 // Each reason is a different fix. Collapsing them into one "missing" number is
@@ -82,13 +82,37 @@ function Tile({ icon: Icon, label, value, sub, tone }: {
 
 /** What this business HAS vs what it NEEDS, measured against the curated
  *  statutory checklist rather than a Gemini scope run. Sits alongside the AI
- *  dossier on purpose — the two answer different questions and will disagree. */
-export default function StatutoryFitPanel({ companyId }: { companyId: string }) {
+ *  dossier on purpose — the two answer different questions and will disagree.
+ *
+ *  `onCodifyGated`: when the host owns a codify chain (the Fill Gaps tab does),
+ *  the Gated tile hands it this company's withheld rows and the work happens in
+ *  place. Without it (GapDashboard) the tile links out to Studio instead —
+ *  the panel never pretends to an action its host can't finish.
+ *  `refreshKey`: bump to re-measure after the host codifies something. */
+export default function StatutoryFitPanel({ companyId, onCodifyGated, refreshKey }: {
+  companyId: string
+  onCodifyGated?: (items: FitGatedRow[]) => void
+  refreshKey?: number
+}) {
   const [fit, setFit] = useState<FitMapResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState<FitReason | null>(null)
   const [note, setNote] = useState<string | null>(null)
+  // Deselected keys, per reason. Absent = all selected — "act on everything you
+  // showed me" is the common case, and nothing fires until a button is clicked
+  // anyway.
+  const [off, setOff] = useState<Record<string, Set<string>>>({})
   const research = useResearchGaps()
+
+  const keyOf = (m: FitMissing) => `${m.category}:${m.regulation_key}`
+  const isOn = (reason: string, m: FitMissing) => !off[reason]?.has(keyOf(m))
+  const toggle = (reason: string, m: FitMissing) => setOff((prev) => {
+    const next = new Set(prev[reason] ?? [])
+    const k = keyOf(m)
+    if (next.has(k)) next.delete(k); else next.add(k)
+    return { ...prev, [reason]: next }
+  })
+  const selectedIn = (reason: string, items: FitMissing[]) => items.filter((m) => isOn(reason, m))
 
   const load = useCallback(() => {
     return adminOnboarding.getFitMap(companyId)
@@ -101,6 +125,8 @@ export default function StatutoryFitPanel({ companyId }: { companyId: string }) 
   // A research run rewrites the catalog + re-syncs the location, so every bucket
   // can move. Re-measure rather than patching counts client-side.
   useEffect(() => { if (research.done) void load() }, [research.done, load])
+  // The host codified something — same reasoning, re-measure.
+  useEffect(() => { if (refreshKey) void load() }, [refreshKey, load])
 
   /** Approve the staged rows behind these keys, then re-measure.
    *  They go active — NOT codified (`will_codify` is false for them), so they
@@ -182,9 +208,19 @@ export default function StatutoryFitPanel({ companyId }: { companyId: string }) 
         <h2 className="flex items-center gap-2 text-sm font-semibold text-zinc-100">
           <ShieldCheck className="h-4 w-4 text-emerald-400" /> Statutory fit — core checklist
         </h2>
-        <span className="font-mono text-[10px] text-zinc-600">
-          {fit.keyset === 'labor_floor_only' ? 'labor floor only' : fit.keyset}
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="font-mono text-[10px] text-zinc-600">
+            {fit.keyset === 'labor_floor_only' ? 'labor floor only' : fit.keyset}
+          </span>
+          {/* Where the whole chain can be finished. Only shown when this host
+              can't finish it itself. */}
+          {!onCodifyGated && (
+            <Link to={`/admin/studio?view=pipeline&company=${companyId}`}
+                  className="inline-flex items-center gap-0.5 text-[10px] text-emerald-400 hover:text-emerald-300">
+              Work this in Studio <ExternalLink className="h-2.5 w-2.5" />
+            </Link>
+          )}
+        </div>
       </div>
       <p className="mb-3 text-[11px] leading-relaxed text-zinc-600">
         Deterministic: the curated must-have checklist for a{' '}
@@ -217,15 +253,22 @@ export default function StatutoryFitPanel({ companyId }: { companyId: string }) 
         <div className="relative">
           <Tile icon={EyeOff} label="Gated" value={fit.counts.gated} tone="text-amber-400"
                 sub="researched but withheld until codified" />
-          {/* The dominant number on this page, and the only bucket whose fix
-              isn't here: codification runs through the Studio's queue + modal.
-              Link out rather than pretend, and rank by demand so the rows
-              blocking the most tenants (these among them) come first. */}
+          {/* The dominant number, and the only bucket whose fix lives in a
+              modal. When the host owns that chain (Fill Gaps), hand it these
+              rows and stay put. When it doesn't (GapDashboard), link out —
+              better an honest jump than a button that can't finish. */}
           {fit.counts.gated > 0 && (
-            <Link to="/admin/studio?view=home"
-                  className="absolute right-2 top-2 inline-flex items-center gap-0.5 text-[10px] text-amber-400 hover:text-amber-300">
-              Codify <ExternalLink className="h-2.5 w-2.5" />
-            </Link>
+            onCodifyGated ? (
+              <button type="button" onClick={() => onCodifyGated(fit.gated)}
+                      className="absolute right-2 top-2 inline-flex items-center gap-0.5 rounded border border-amber-800/50 bg-amber-900/30 px-1.5 py-0.5 text-[10px] font-medium text-amber-300 hover:bg-amber-900/50">
+                Codify {fit.gated.length}
+              </button>
+            ) : (
+              <Link to={`/admin/studio?view=pipeline&company=${companyId}`}
+                    className="absolute right-2 top-2 inline-flex items-center gap-0.5 text-[10px] text-amber-400 hover:text-amber-300">
+                Codify <ExternalLink className="h-2.5 w-2.5" />
+              </Link>
+            )
           )}
         </div>
         <Tile icon={AlertTriangle} label="Real gaps" value={fit.counts.gaps} tone="text-rose-400"
@@ -287,9 +330,10 @@ export default function StatutoryFitPanel({ companyId }: { companyId: string }) 
                   {/* The fix, as a button. A bucket that can't be actioned from
                       here says nothing rather than offering a dead control. */}
                   {reason === 'staged' && (
-                    <ActionButton onClick={() => void approveStaged(items)}
+                    <ActionButton onClick={() => void approveStaged(selectedIn(reason, items))}
                                   busy={busy === 'staged'} icon={Check}
-                                  label={`Approve ${items.reduce((n, m) => n + (m.requirement_ids?.length ?? 0), 0)}`} />
+                                  disabled={!selectedIn(reason, items).length}
+                                  label={`Approve ${selectedIn(reason, items).reduce((n, m) => n + (m.requirement_ids?.length ?? 0), 0)}`} />
                   )}
                   {reason === 'stale_projection' && (
                     <ActionButton onClick={() => void runCheck(items)}
@@ -297,21 +341,36 @@ export default function StatutoryFitPanel({ companyId }: { companyId: string }) 
                                   label="Run compliance check" />
                   )}
                   {(reason === 'never_researched' || reason === 'researched_elsewhere') && (
-                    <ActionButton onClick={() => researchGaps(items)}
+                    <ActionButton onClick={() => researchGaps(selectedIn(reason, items))}
                                   busy={research.running} icon={Search}
-                                  label={`Research ${items.length}`}
-                                  disabled={!fit.research_targets.length} />
+                                  label={`Research ${selectedIn(reason, items).length}`}
+                                  disabled={!fit.research_targets.length || !selectedIn(reason, items).length} />
                   )}
                 </div>
                 <p className="mt-0.5 text-[10px] leading-tight text-zinc-500">{meta.fix}</p>
                 <div className="mt-1.5 flex flex-wrap gap-1">
-                  {items.map((m: FitMissing) => (
-                    <span key={`${m.category}:${m.regulation_key}`}
-                          className="rounded border border-white/[0.08] bg-black/20 px-1.5 py-0.5 font-mono text-[10px] text-zinc-400"
-                          title={m.category}>
-                      {m.regulation_key}
-                    </span>
-                  ))}
+                  {items.map((m: FitMissing) => {
+                    // Only buckets with an action are selectable — toggling a
+                    // preempted rule or an unmapped location changes nothing,
+                    // so a checkbox there would be a control that lies.
+                    const selectable = meta.gap && reason !== 'no_jurisdiction'
+                    const on = isOn(reason, m)
+                    return selectable ? (
+                      <button key={keyOf(m)} type="button" onClick={() => toggle(reason, m)}
+                              title={`${m.category} — click to ${on ? 'exclude from' : 'include in'} the action`}
+                              className={`rounded border px-1.5 py-0.5 font-mono text-[10px] transition-colors ${
+                                on ? 'border-white/[0.14] bg-black/30 text-zinc-300'
+                                   : 'border-white/[0.05] bg-transparent text-zinc-600 line-through'}`}>
+                        {m.regulation_key}
+                      </button>
+                    ) : (
+                      <span key={keyOf(m)}
+                            className="rounded border border-white/[0.08] bg-black/20 px-1.5 py-0.5 font-mono text-[10px] text-zinc-400"
+                            title={m.category}>
+                        {m.regulation_key}
+                      </span>
+                    )
+                  })}
                 </div>
               </div>
             )

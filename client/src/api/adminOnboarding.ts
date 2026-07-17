@@ -343,6 +343,22 @@ export type FitMissing = {
 
 export type FitResearchTarget = { location_id: string; state: string | null; city: string | null }
 
+// A withheld row. `catalog_id` is the jurisdiction_requirements row — what
+// codification acts on; `id` is the per-location projection row. Seeding the
+// codify chain with `id` would 404 on a row that plainly exists. Deduped
+// server-side to the catalog: one row projected to five locations is one thing
+// to codify, not five.
+export type FitGatedRow = {
+  id: string | null
+  catalog_id: string
+  category: string
+  regulation_key: string | null
+  title: string | null
+  jurisdiction_name: string | null
+  jurisdiction_level: string | null
+  statute_citation: string | null
+}
+
 export type FitCounts = {
   visible: number          // projected + codified — what the tenant sees today
   gated: number            // projected, uncodified — tenant is waiting on us
@@ -376,6 +392,9 @@ export type FitMapResponse = {
   keyset_note: string | null
   counts: FitCounts
   missing: FitMissing[]
+  // The withheld rows themselves, deduped to the catalog — what the codify
+  // chain walks. counts.gated is per-projection and will be larger.
+  gated: FitGatedRow[]
   // Locations that resolved to a jurisdiction — where a "research this" action
   // aims. An unresolved location isn't a target: there's no chain to research.
   research_targets: FitResearchTarget[]

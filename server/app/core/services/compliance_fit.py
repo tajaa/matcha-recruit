@@ -238,6 +238,11 @@ def bucket_fit(
 
         entry = {
             "id": str(row["id"]) if row.get("id") else None,
+            # The catalog row behind this projection — what codify acts on.
+            # NULL for the ~6% of projection rows with no
+            # jurisdiction_requirement_id; those can't be codified from here and
+            # the FE must not offer to.
+            "catalog_id": str(row["catalog_id"]) if row.get("catalog_id") else None,
             "category": cat,
             "regulation_key": key,
             "title": row.get("title"),
@@ -294,6 +299,11 @@ _PROJECTED_SQL = """
            bl.city AS location_city, bl.state AS location_state,
            r.category, r.requirement_key, r.jurisdiction_name, r.jurisdiction_level,
            r.title,
+           -- The CATALOG row's id. `r.id` is the per-location projection row;
+           -- codification happens on the catalog, and the Studio codify chain
+           -- keys on jurisdiction_requirements.id. Seeding it with a projection
+           -- id would 404 on a row that plainly exists.
+           cat.id AS catalog_id,
            cat.regulation_key, cat.statute_citation,
            cat.citation_verified_at, cat.citation_item_id,
            j.country_code
@@ -499,6 +509,12 @@ async def company_fit_map(conn, company_id: UUID) -> Dict[str, Any]:
         ),
         "counts": rollup["counts"],
         "missing": rollup["missing"],
+        # The withheld rows themselves, deduped to the CATALOG row: one catalog
+        # row projected to five locations is one thing to codify, not five. The
+        # Studio codify chain walks this list directly.
+        "gated": list({
+            g["catalog_id"]: g for g in rollup["gated"] if g.get("catalog_id")
+        }.values()),
         # Where a "research this gap" action should aim: the company's locations
         # that actually resolved to a jurisdiction. An unresolved location is not
         # a research target — there is no chain to research against, which is the

@@ -14,7 +14,10 @@ import type { GotoParams, StudioView, UncodifiedItem, Worklist } from './types'
 
 const TABS: { id: StudioView; label: string; icon: typeof Compass }[] = [
   { id: 'home', label: 'Home', icon: Compass },
-  { id: 'pipeline', label: 'Pipeline', icon: Workflow },
+  // Label only — the `pipeline` id stays. It's in bookmarks, Command Center
+  // deep links, gotoUncodified and StudioRedirect; renaming the value churns
+  // all of them to say the same thing.
+  { id: 'pipeline', label: 'Fill Gaps', icon: Workflow },
   { id: 'coverage', label: 'Coverage', icon: Sparkles },
   { id: 'authority', label: 'Authority', icon: Layers },
   { id: 'library', label: 'Library', icon: Library },
@@ -57,6 +60,7 @@ export default function ComplianceStudio() {
     if (params?.city) p.set('city', params.city)
     if (params?.industry) p.set('industry', params.industry)
     if (params?.section) p.set('section', params.section)
+    if (params?.company) p.set('company', params.company)
     setSearchParams(p)
   }, [setSearchParams])
 
@@ -154,6 +158,8 @@ export default function ComplianceStudio() {
             <PipelineTab
               initialSection={searchParams.get('section')}
               initialUncodifiedItems={seedUncodified ?? undefined}
+              companyId={searchParams.get('company')}
+              onCompanyChange={(id) => goto('pipeline', { company: id ?? undefined })}
             />
           )}
           {view === 'coverage' && (

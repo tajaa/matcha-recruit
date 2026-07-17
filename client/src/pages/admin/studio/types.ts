@@ -313,4 +313,6 @@ export type VerticalCoverageResponse = {
 
 export type StudioView = 'home' | 'pipeline' | 'coverage' | 'authority' | 'library' | 'codified' | 'pilot'
 
-export type GotoParams = { state?: string; city?: string; industry?: string }
+// `company` focuses the Fill Gaps tab on one tenant — the per-company job
+// ("make THIS business whole") on the same funnel the queue serves.
+export type GotoParams = { state?: string; city?: string; industry?: string; section?: string; company?: string }
