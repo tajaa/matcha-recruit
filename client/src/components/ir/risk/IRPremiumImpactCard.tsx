@@ -1,5 +1,16 @@
 import { DollarSign, TrendingDown, TrendingUp } from 'lucide-react'
-import type { WcMetrics } from './IRWcMetricsCard'
+import type { WcPremiumImpact } from './IRWcMetricsCard'
+
+// Only the fields this card actually reads. Both the client-side WcMetrics
+// (IRWcMetricsCard.tsx) and the broker-side WcMetrics (types/broker.ts) are
+// structurally assignable to this, so the same card renders on the IR Risk
+// Insights page and the broker Book-of-Business client drill-down.
+export type PremiumImpactMetrics = {
+  premium_impact: WcPremiumImpact | null
+  benchmark: { trir: number } | null
+  trir: number | null
+  headcount: number | null
+}
 
 function fmtMoney(n: number): string {
   const abs = Math.abs(n)
@@ -8,7 +19,7 @@ function fmtMoney(n: number): string {
   return `$${Math.round(n).toLocaleString()}`
 }
 
-export function IRPremiumImpactCard({ metrics }: { metrics: WcMetrics }) {
+export function IRPremiumImpactCard({ metrics }: { metrics: PremiumImpactMetrics }) {
   const impact = metrics.premium_impact
   if (!impact) return null
 

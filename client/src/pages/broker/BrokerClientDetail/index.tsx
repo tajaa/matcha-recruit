@@ -5,10 +5,11 @@ import { StatCard } from '../../../components/dashboard'
 import {
   fetchBrokerClientDetail, downloadTenantSubmission, fetchTenantCoverageGap,
   fetchTenantSubmissionPreview, fetchTenantSubmissionNotes, saveTenantSubmissionNotes,
-  fetchClientLossRatio, recordClientLossPremium,
+  fetchClientLossRatio, recordClientLossPremium, fetchWcClientDetail,
 } from '../../../api/broker'
 import { SubmissionPanel } from '../../../components/broker/SubmissionPanel'
-import type { BrokerClientDetailResponse } from '../../../types/broker'
+import { IRPremiumImpactCard } from '../../../components/ir/risk/IRPremiumImpactCard'
+import type { BrokerClientDetailResponse, WcClientDetailResponse } from '../../../types/broker'
 import { riskColors, riskLabels } from './shared'
 import { OverviewTab } from './OverviewTab'
 import { ComplianceTab } from './ComplianceTab'
@@ -50,6 +51,7 @@ const tabs: { key: Tab; label: string }[] = [
 export default function BrokerClientDetail() {
   const { companyId } = useParams<{ companyId: string }>()
   const [data, setData] = useState<BrokerClientDetailResponse | null>(null)
+  const [wcDetail, setWcDetail] = useState<WcClientDetailResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
   const [activeTab, setActiveTab] = useState<Tab>('overview')
@@ -61,6 +63,13 @@ export default function BrokerClientDetail() {
       .then(setData)
       .catch(() => setError(true))
       .finally(() => setLoading(false))
+    // WC metrics carry the premium-impact estimate (same shape as the client-side
+    // Risk Insights page). Best-effort: a failure or an absent estimate just hides
+    // the card, so it never blocks the rest of the drill-down.
+    setWcDetail(null)
+    fetchWcClientDetail(companyId)
+      .then(setWcDetail)
+      .catch(() => setWcDetail(null))
   }, [companyId])
 
   if (loading) {
@@ -119,6 +128,12 @@ export default function BrokerClientDetail() {
         />
         <StatCard label="Active Policies" value={policies.total_active} icon={FileText} />
       </div>
+
+      {/* Premium impact estimate — headline WC renewal-premium signal, mirrored
+          from the client-side Risk Insights page. Hidden when there's no estimate. */}
+      {wcDetail?.metrics.premium_impact && (
+        <IRPremiumImpactCard metrics={wcDetail.metrics} />
+      )}
 
       {/* Tab bar */}
       <div className="flex gap-1 border-b border-zinc-800">
