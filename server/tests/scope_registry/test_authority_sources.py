@@ -9,6 +9,7 @@ from app.core.services.scope_registry.authority_sources import (
     all_index_slugs,
     curated_index_by_slug,
     federal_part_by_slug,
+    is_penalty_schedule,
 )
 from app.core.services.scope_registry.curated_ca import CURATED_ROWS as _CA_ROWS
 from app.core.services.scope_registry.curated_us import CURATED_US_ROWS
@@ -28,7 +29,24 @@ def test_federal_parts_cover_the_plan_scope():
     assert slugs == {
         "ecfr-29-1910", "ecfr-29-1904", "ecfr-29-825",
         "ecfr-40-260", "ecfr-40-261", "ecfr-40-262",
+        # Not an obligation part: 1903.15(d) is OSHA's civil-monetary-penalty
+        # schedule — the authority for what breaching any 1910 standard COSTS.
+        "ecfr-29-1903",
     }
+
+
+def test_only_1903_is_a_penalty_schedule():
+    """The flag decides whether an index gets classified and keyed. Marking an
+    obligation part as a schedule would silently drop it out of both passes;
+    leaving a schedule unmarked parks it in the unclassified queue forever with
+    every section disposed 'excluded'."""
+    flagged = {p.slug for p in FEDERAL_ECFR_PARTS if p.penalty_schedule}
+    assert flagged == {"ecfr-29-1903"}
+    assert is_penalty_schedule("ecfr-29-1903") is True
+    assert is_penalty_schedule("ecfr-29-1910") is False
+    # A curated (non-federal) slug isn't a federal part at all.
+    assert is_penalty_schedule("ca-labor-code") is False
+    assert is_penalty_schedule("nonexistent-slug") is False
 
 
 def test_federal_parts_have_domain_and_federal_level():

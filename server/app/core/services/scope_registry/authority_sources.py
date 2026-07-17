@@ -28,6 +28,12 @@ class FederalPart:
     domain_categories: List[str] = field(default_factory=list)
     domain_excludes: List[str] = field(default_factory=list)
     level: str = "federal"
+    # This part PRICES other parts' obligations instead of imposing its own —
+    # a civil-monetary-penalty schedule (29 CFR 1903.15(d) says what breaking
+    # 1910.147 costs). It carries no employer duty, so it is not classifiable
+    # and holds no regulation_key: the disposition and key passes skip it, and
+    # it must not sit in the admin's "needs classification" queue forever.
+    penalty_schedule: bool = False
 
 
 @dataclass(frozen=True)
@@ -66,6 +72,18 @@ FEDERAL_ECFR_PARTS: List[FederalPart] = [
         name="29 CFR Part 825 — The Family and Medical Leave Act of 1993",
         domain_categories=["all_industry"],
         # Applies only at ≥50 employees — a conditional stratum, not an exclude.
+    ),
+    FederalPart(
+        title=29, part=1903, slug="ecfr-29-1903",
+        name="29 CFR Part 1903 — Inspections, Citations, and Proposed Penalties (OSHA)",
+        domain_categories=["all_industry"],
+        # § 1903.15(d) is the OSHA civil-monetary-penalty schedule — the
+        # authority for what a violation of ANY 1910 standard costs. Adjusted
+        # for inflation every January under 28 U.S.C. 2461 note, which is why
+        # binding to it (and letting drift catch the re-issue) beats copying
+        # the figures: the catalog currently holds four vintages of the OSHA
+        # serious-violation maximum at once.
+        penalty_schedule=True,
     ),
     FederalPart(
         title=40, part=260, slug="ecfr-40-260",
@@ -137,3 +155,16 @@ def curated_index_by_slug(slug: str) -> Optional[CuratedIndexSpec]:
 
 def all_index_slugs() -> List[str]:
     return [p.slug for p in FEDERAL_ECFR_PARTS] + [c.slug for c in CURATED_INDEXES]
+
+
+def is_penalty_schedule(slug: str) -> bool:
+    """Does this index price other parts' obligations rather than impose its own?
+
+    Such an index is ingested and body-fetched like any other — the schedule text
+    is the point — but it is never classified and never keyed: there is no
+    employer duty in it to give a disposition to, and no obligation for it to be
+    the authority FOR. Classifying it would dispose every section ``excluded``
+    and then park the index in the admin's unclassified queue permanently.
+    """
+    part = federal_part_by_slug(slug)
+    return bool(part and part.penalty_schedule)

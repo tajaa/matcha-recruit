@@ -463,6 +463,16 @@ async def classify_index(conn, slug: str, *, proposed_by: str = "gemini") -> Dic
     """
     from app.core.services.gemini_compliance import get_gemini_compliance_service
 
+    from .authority_sources import is_penalty_schedule
+
+    if is_penalty_schedule(slug):
+        # A penalty schedule imposes no employer duty — there is nothing to give
+        # a disposition to. Every section would land `excluded`, and the index
+        # would then sit in the unclassified queue forever.
+        return {"slug": slug, "classified": 0, "inherited": 0,
+                "warnings": ["penalty-schedule index — not classifiable"],
+                "unclassified_count": 0}
+
     index_row = await conn.fetchrow(
         "SELECT id, slug, name, domain_categories, domain_excludes "
         "FROM authority_indexes WHERE slug = $1",
@@ -716,6 +726,15 @@ async def propose_keys_for_index(
     confirms. Unknown keys are downgraded to NULL by the shared RKD gate.
     """
     from app.core.services.gemini_compliance import get_gemini_compliance_service
+
+    from .authority_sources import is_penalty_schedule
+
+    if is_penalty_schedule(slug):
+        # Keys name obligations. A penalty schedule is the authority for what a
+        # breach COSTS, never for the obligation itself — it binds via
+        # penalty_item_id, not regulation_key.
+        return {"slug": slug, "considered": 0, "proposed": 0, "keyed": 0,
+                "warnings": ["penalty-schedule index — carries no obligation keys"]}
 
     index_row = await conn.fetchrow(
         "SELECT id, slug, name FROM authority_indexes WHERE slug = $1", slug
