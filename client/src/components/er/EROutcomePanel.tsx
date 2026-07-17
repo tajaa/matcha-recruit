@@ -69,8 +69,9 @@ export function EROutcomePanel({ caseId, onApplyOutcome }: Props) {
             if (raw === '[DONE]') { setLoading(false); return }
             try {
               const msg = JSON.parse(raw)
-              if (msg.type === 'phase') setPhase(msg.message ?? '')
-              if (msg.type === 'complete') { setData(msg.data); setLoading(false); return }
+              // Backend emits 'status'/'result'; older paths used 'phase'/'complete' — accept both.
+              if (msg.type === 'phase' || msg.type === 'status') setPhase(msg.message ?? '')
+              if (msg.type === 'complete' || msg.type === 'result') { setData(msg.data); setLoading(false); return }
             } catch { /* skip malformed */ }
           }
         }

@@ -122,7 +122,10 @@ async def get_incident_statutes(incident: dict, company_id) -> list[dict[str, An
 
     try:
         from app.database import get_connection
-        from app.core.services.compliance_service import codified_gate_sql
+        from app.core.services.compliance_service import (
+            codified_gate_sql,
+            _filter_requirements_for_company,
+        )
 
         async with get_connection() as conn:
             loc = await conn.fetchrow(
@@ -137,7 +140,7 @@ async def get_incident_statutes(incident: dict, company_id) -> list[dict[str, An
             rows = await conn.fetch(
                 f"""
                 SELECT jr.id, j.state, jr.category, jr.title, jr.description,
-                       jr.statute_citation, jr.source_url,
+                       jr.statute_citation, jr.source_url, jr.applicable_industries,
                        j.display_name AS authority_name, j.level::text AS authority_level
                 FROM jurisdiction_requirements jr
                 JOIN jurisdictions j ON j.id = jr.jurisdiction_id
@@ -152,20 +155,28 @@ async def get_incident_statutes(incident: dict, company_id) -> list[dict[str, An
                 sorted({state, "US"}),
                 list(IR_SAFETY_CATEGORIES),
             )
+            # Drop industry-tagged rows that don't apply to this company — the
+            # raw catalog query bypasses the tenant projection, so without this a
+            # manufacturing-tagged process_safety/machine_safety row leaks onto a
+            # non-manufacturing tenant's incident. Same guard get_location_
+            # requirements applies at compliance_service.py.
+            row_dicts = await _filter_requirements_for_company(
+                conn, company_uuid, [dict(r) for r in rows]
+            )
     except Exception:
         logger.exception("ir_statute_grounding: requirement fetch failed")
         return []
 
     out: list[dict[str, Any]] = []
-    for r in rows:
+    for r in row_dicts:
         out.append({
             "requirement_id": str(r["id"]),
-            "state": r["authority_name"] or r["state"] or "",
-            "category": (r["category"] or "").strip().lower(),
-            "title": r["title"] or "Requirement",
-            "description": r["description"] or "",
-            "statute_citation": r["statute_citation"],
-            "source_url": r["source_url"],
+            "state": r.get("authority_name") or r.get("state") or "",
+            "category": (r.get("category") or "").strip().lower(),
+            "title": r.get("title") or "Requirement",
+            "description": r.get("description") or "",
+            "statute_citation": r.get("statute_citation"),
+            "source_url": r.get("source_url"),
         })
     return out
 

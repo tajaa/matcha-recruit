@@ -988,7 +988,7 @@ async def get_policy_mapping(
     from app.matcha.services.ir_analysis import get_ir_analyzer
 
     async with get_connection() as conn:
-        inc = await _get_incident_with_company_check(conn, incident_id, current_user, columns="id, title, description, incident_type, severity, category_data, company_id")
+        inc = await _get_incident_with_company_check(conn, incident_id, current_user, columns="id, title, description, incident_type, severity, category_data, company_id, location_id")
 
         # Check cache (<24h)
         cached = await conn.fetchrow(
@@ -1015,6 +1015,11 @@ async def get_policy_mapping(
                 no_matching_policies=True, generated_at=_utc_now_naive().isoformat(),
             )
 
+        # Statute grounding is merged in EVERY recompute path here — not only the
+        # background auto-map task — so a Refresh or a >24h cache-expiry recompute
+        # can't overwrite the cached row with statute-less data.
+        statute_fields = await _incident_statute_fields(inc, company_id)
+
         policies = await conn.fetch(
             "SELECT id, title, description, content FROM policies WHERE company_id = $1 AND status = 'active'",
             company_id,
@@ -1029,6 +1034,7 @@ async def get_policy_mapping(
             empty = PolicyMappingAnalysis(
                 matches=[], summary="No active policies or handbook found for this company.",
                 no_matching_policies=True, generated_at=_utc_now_naive().isoformat(),
+                **statute_fields,
             )
             # Cache
             await conn.execute(
@@ -1061,6 +1067,9 @@ async def get_policy_mapping(
         except Exception as e:
             logger.warning(f"Policy mapping failed: {e}")
             raise HTTPException(status_code=502, detail="Policy mapping analysis failed")
+
+        if isinstance(result, dict):
+            result.update(statute_fields)
 
         # Cache result
         await conn.execute(

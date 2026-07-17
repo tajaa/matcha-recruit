@@ -540,8 +540,18 @@ async def generate_guidance(
     try:
         from .ir_statute_grounding import get_incident_statutes, map_incident_to_statutes, serialize_statute_context
 
-        _statutes = await get_incident_statutes(incident, incident.get("company_id"))
-        _statute_context = serialize_statute_context(map_incident_to_statutes(incident, _statutes))
+        # asyncpg returns JSONB as a raw string here; the incident-type heuristic
+        # only scans category_data when it's a dict, so parse it before grounding
+        # or the copilot narrows differently from the policy-mapping panel.
+        _cd = incident.get("category_data")
+        if isinstance(_cd, str):
+            try:
+                _cd = json.loads(_cd)
+            except (ValueError, TypeError):
+                _cd = {}
+        _grounding_incident = {**incident, "category_data": _cd}
+        _statutes = await get_incident_statutes(_grounding_incident, incident.get("company_id"))
+        _statute_context = serialize_statute_context(map_incident_to_statutes(_grounding_incident, _statutes))
     except Exception:
         logger.exception("ir copilot: statute grounding failed for incident %s", (incident or {}).get("id"))
         _statute_context = ""
