@@ -404,7 +404,7 @@ export function ComplianceRequirementsTab({ requirements, loading, onPin, checkM
 
     return (
       <div className="space-y-4">
-        <div className="overflow-hidden rounded-xl border border-white/[0.06] bg-zinc-950">
+        <div className="overflow-hidden rounded-xl border border-white/[0.06] bg-zinc-900/40">
           {visibleSections.map((section) => (
             <div key={section.id}>
               <div className="border-t border-white/[0.06] first:border-t-0 bg-white/[0.02] px-4 py-2">
@@ -426,7 +426,7 @@ export function ComplianceRequirementsTab({ requirements, loading, onPin, checkM
             <div className="relative">
               {/* Dense blurred wall of real requirements — conveys the volume
                   behind the paywall. Tall but height-capped; fades out. */}
-              <div className="border border-white/[0.06] bg-zinc-950 rounded-lg overflow-hidden max-h-[640px]">
+              <div className="border border-white/[0.06] bg-zinc-900/40 rounded-lg overflow-hidden max-h-[640px]">
                 <div className="blur-[3px] select-none pointer-events-none" aria-hidden="true">
                   {cappedBlurRows.map((r) =>
                     r.kind === 'header' ? (
@@ -486,7 +486,7 @@ export function ComplianceRequirementsTab({ requirements, loading, onPin, checkM
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search requirements..."
-            className="w-full bg-zinc-950 border border-white/[0.08] rounded-lg pl-9 pr-8 py-2.5 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-colors"
+            className="w-full bg-zinc-900/40 border border-white/[0.08] rounded-lg pl-9 pr-8 py-2.5 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-colors"
           />
           {searchQuery && (
             <button type="button" onClick={() => setSearchQuery('')}
@@ -505,7 +505,7 @@ export function ComplianceRequirementsTab({ requirements, loading, onPin, checkM
         )}
         {/* Same requirements, two questions: "what subject is this?" (topic) vs
             "who is imposing it?" (jurisdiction). */}
-        <div className="flex shrink-0 rounded-lg border border-white/[0.08] bg-zinc-950 p-0.5">
+        <div className="flex shrink-0 rounded-lg border border-white/[0.08] bg-zinc-900/40 p-0.5">
           {([['topic', 'By topic'], ['jurisdiction', 'By jurisdiction']] as const).map(([value, label]) => (
             <button key={value} type="button" onClick={() => changeGroupBy(value)}
               aria-pressed={groupBy === value}
@@ -539,17 +539,17 @@ export function ComplianceRequirementsTab({ requirements, loading, onPin, checkM
       )}
 
       {sectionCount === 0 && searchQuery ? (
-        <div className="border border-white/[0.06] bg-zinc-950 rounded-lg px-4 py-6 text-center">
+        <div className="border border-white/[0.06] bg-zinc-900/40 rounded-lg px-4 py-6 text-center">
           <p className="text-sm text-zinc-500">No requirements matching &ldquo;{searchQuery}&rdquo;</p>
           <button type="button" onClick={() => setSearchQuery('')}
             className="text-xs text-emerald-500 hover:text-emerald-400 mt-1 transition-colors">Clear search</button>
         </div>
       ) : sectionCount === 0 ? (
-        <div className="border border-white/[0.06] bg-zinc-950 rounded-lg px-4 py-6 text-center">
+        <div className="border border-white/[0.06] bg-zinc-900/40 rounded-lg px-4 py-6 text-center">
           <p className="text-sm text-zinc-600">No requirements found. Run a compliance check to populate.</p>
         </div>
       ) : groupBy === 'jurisdiction' ? (
-        <div className="overflow-hidden rounded-xl border border-white/[0.06] bg-zinc-950">
+        <div className="overflow-hidden rounded-xl border border-white/[0.06] bg-zinc-900/40">
           {jurisdictionSections.map((section) => (
             <div key={section.id}>
               <div className="flex items-center gap-2 border-t border-white/[0.06] first:border-t-0 bg-white/[0.02] px-4 py-2">
@@ -565,7 +565,7 @@ export function ComplianceRequirementsTab({ requirements, loading, onPin, checkM
           ))}
         </div>
       ) : (
-        <div className="overflow-hidden rounded-xl border border-white/[0.06] bg-zinc-950">
+        <div className="overflow-hidden rounded-xl border border-white/[0.06] bg-zinc-900/40">
           {filteredSections.map((section) => (
             <div key={section.id}>
               <div className="border-t border-white/[0.06] first:border-t-0 bg-white/[0.02] px-4 py-2">

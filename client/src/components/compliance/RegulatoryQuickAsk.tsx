@@ -54,7 +54,7 @@ export function RegulatoryQuickAsk({ locationId, onOpenSource }: Props) {
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleAsk()}
           placeholder="Ask a regulatory question..."
-          className="w-full bg-zinc-950 border border-white/[0.06] rounded-lg px-4 py-2.5 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-700 focus:ring-1 focus:ring-indigo-700"
+          className="w-full bg-zinc-900/40 border border-white/[0.06] rounded-lg px-4 py-2.5 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-700 focus:ring-1 focus:ring-indigo-700"
           disabled={loading}
         />
         {loading && (
@@ -69,7 +69,7 @@ export function RegulatoryQuickAsk({ locationId, onOpenSource }: Props) {
       )}
 
       {answer && (
-        <div className="mt-3 bg-zinc-950 border border-white/[0.06] rounded-lg p-4">
+        <div className="mt-3 bg-zinc-900/40 border border-white/[0.06] rounded-lg p-4">
           <div className="flex items-center justify-between mb-2">
             <span className="text-[10px] text-indigo-400 uppercase tracking-wide font-medium">Regulatory Answer</span>
             <button

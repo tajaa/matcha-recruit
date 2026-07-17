@@ -1,7 +1,6 @@
 import { useState, useCallback, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Button } from '../../components/ui'
-import { LABEL } from '../../components/ui/typography'
 import { useComplianceData } from '../../hooks/compliance/useComplianceData'
 import { useLocationDetail } from '../../hooks/compliance/useLocationDetail'
 import { useComplianceCheck } from '../../hooks/compliance/useComplianceCheck'
@@ -186,27 +185,60 @@ function ComplianceFull() {
   if (data.loading) return <p className="text-sm text-zinc-500">Loading...</p>
 
   return (
-    <div>
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 sm:gap-0">
-        <div>
-          <h1 className="text-2xl font-semibold text-zinc-100">Compliance</h1>
-          <p className={`mt-1 ${LABEL}`}>Jurisdictional requirements, alerts, and location management.</p>
-        </div>
+    // One frame around the whole surface, matching Legal Pilot
+    // (LegalDefense/index.tsx:80). Before this, only the location tabs were
+    // framed (see the grid below) while the header, ask box and the entire
+    // overview cockpit sat bare on AppLayout's canvas — so #1e1e1e showed
+    // through every gap between the near-black cards, which is what read as a
+    // brown page. The canvas is now zinc-950 and #1e1e1e survives only as the
+    // gutter outside the frame. Height is left to the content: the action
+    // queue runs long, and a viewport-locked console would trap it in a
+    // cramped scroller.
+    <div className="overflow-hidden rounded-xl border border-white/[0.06] bg-zinc-950">
+      {/* Masthead. The subtitle was set in LABEL — uppercase and letter-spaced,
+          which is right for a two-word field label and wrong for a sentence:
+          sixty characters of tracked caps is slow to read and shouts. It now
+          uses the editorial voice the rest of the app headers already speak
+          (see IRList.tsx) — light sans headline, Fraunces italic beneath. */}
+      <div className="border-b border-white/[0.06] px-5 py-4">
+        <h1 className="text-2xl font-light tracking-tight text-zinc-50">Compliance</h1>
+        <p
+          className="mt-1 text-sm italic text-zinc-500"
+          style={{ fontFamily: 'Fraunces, Georgia, serif' }}
+        >
+          Jurisdictional requirements, alerts, and location management.
+        </p>
       </div>
 
       {/* Regulatory Q&A */}
-      <RegulatoryQuickAsk locationId={selectedId} onOpenSource={openSourceRequirement} />
+      <div className="border-b border-white/[0.06] px-5 py-4">
+        <RegulatoryQuickAsk locationId={selectedId} onOpenSource={openSourceRequirement} />
+      </div>
 
-      {/* Tab nav */}
-      <div className="flex items-center gap-1 mt-4 mb-5">
+      {/* Tab nav. These were <Button variant=secondary|ghost> — chunky pills
+          standing in for tabs, which is what made the head of the page feel
+          heavy. Same treatment Legal Pilot uses for its inner tabs. */}
+      <div className="flex items-center gap-1 overflow-x-auto border-b border-white/[0.06] px-5 py-1.5">
         {visibleTabs.map((t) => (
-          <Button key={t.value} variant={tab === t.value ? 'secondary' : 'ghost'} size="sm" onClick={() => setTab(t.value)}>
-            {t.label}{t.value === 'alerts' && data.alerts.length > 0 ? ` (${data.alerts.length})` : ''}
-          </Button>
+          <button
+            key={t.value}
+            type="button"
+            onClick={() => setTab(t.value)}
+            className={`shrink-0 rounded px-2 py-1 font-mono text-[10px] uppercase tracking-[0.15em] transition-colors ${
+              tab === t.value
+                ? 'bg-white/[0.06] text-zinc-100'
+                : 'text-zinc-500 hover:text-zinc-300'
+            }`}
+          >
+            {t.label}
+            {t.value === 'alerts' && data.alerts.length > 0 && (
+              <span className="ml-1.5 tabular-nums text-zinc-500">{data.alerts.length}</span>
+            )}
+          </button>
         ))}
       </div>
 
+      <div className="p-5">
       {/* Overview tab — the manager risk cockpit (no location context needed) */}
       {tab === 'overview' && (
         <ComplianceRiskCockpit
@@ -224,9 +256,11 @@ function ComplianceFull() {
         <ComplianceCredentialsTab companyId={searchParams.get('company_id') || undefined} />
       )}
 
-      {/* Location-contextual tabs */}
+      {/* Location-contextual tabs. This grid used to carry the page's only
+          frame; the page frame now provides it, so it keeps the split and its
+          divider but drops the border/bg that would nest a frame in a frame. */}
       {tab !== 'overview' && tab !== 'credentials' && (
-        <div className="overflow-hidden rounded-xl border border-white/[0.06] bg-zinc-950 md:grid md:grid-cols-3">
+        <div className="-m-5 md:grid md:grid-cols-3">
           {/* Left: location list */}
           <div className="border-b border-white/[0.06] p-4 md:col-span-1 md:border-b-0 md:border-r">
             <ComplianceLocationList
@@ -333,6 +367,8 @@ function ComplianceFull() {
           </div>
         </div>
       )}
+
+      </div>
 
       {/* Location modal */}
       <ComplianceLocationModal

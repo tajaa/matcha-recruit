@@ -15,7 +15,12 @@ import type {
 } from '../../types/compliance'
 import { CATEGORY_LABELS } from '../../types/compliance'
 
-const PANEL = 'rounded-lg border border-white/[0.06] bg-zinc-950'
+// The cockpit now sits inside the page frame, which is itself bg-zinc-950 —
+// so panels can no longer BE zinc-950 or they'd dissolve into their own
+// canvas. zinc-900/40 lifts them off it and survives the light theme, where
+// the neutral ramp inverts (zinc-900 → #ffffff) and a white/x overlay would
+// vanish instead. Matches the surfaces already used further down this file.
+const PANEL = 'rounded-lg border border-white/[0.06] bg-zinc-900/40'
 
 // Severity semantics — the spine of the whole surface.
 const SEV = {
@@ -97,8 +102,17 @@ export function ComplianceRiskCockpit({
 
   return (
     <div className="space-y-4">
+      {/* Collapsed, this is a single "How this page works" link; the manual is
+          behind it rather than in front of the queue. */}
       <GuideBanner />
-      <VerdictBanner critical={p.open_critical} totalOpen={totalOpen} clear={clear} />
+
+      {/* The alarm banner only earns its place when there's nothing to alarm
+          about. With issues open it restated the strip directly beneath it —
+          "6 critical … 17 total open" above a cell reading 6 critical / 6 high
+          / 5 moderate — and the queue below already ranks them worst-first. An
+          empty strip, on the other hand, can't tell "clear" from "not loaded",
+          so the clear verdict is the one that says something. */}
+      {clear && <VerdictBanner critical={p.open_critical} totalOpen={totalOpen} clear />}
 
       {/* Posture strip — one panel, four cells, hairline dividers. */}
       <div className={`${PANEL} grid grid-cols-2 divide-x divide-y divide-white/[0.06] md:grid-cols-4 md:divide-y-0`}>
@@ -265,17 +279,23 @@ function RemediationTrail({
 const GUIDE_KEY = 'compliance_cockpit_guide_dismissed'
 
 function GuideBanner() {
+  // Collapsed by default. This is a four-bullet manual, and it was opening
+  // itself above the fold on a page people work in every day — pushing the
+  // action queue, the thing they came for, off the screen. Every element it
+  // describes already carries its own (?) hint, so the explanation is here for
+  // whoever wants it rather than in front of everyone who doesn't.
   const [open, setOpen] = useState(() => {
-    try { return localStorage.getItem(GUIDE_KEY) !== '1' } catch { return true }
+    try { return localStorage.getItem(GUIDE_KEY) === '1' } catch { return false }
   })
-  function close() {
-    setOpen(false)
-    try { localStorage.setItem(GUIDE_KEY, '1') } catch { /* ignore */ }
+  function set(next: boolean) {
+    setOpen(next)
+    try { localStorage.setItem(GUIDE_KEY, next ? '1' : '0') } catch { /* ignore */ }
   }
+  const close = () => set(false)
 
   if (!open) {
     return (
-      <button type="button" onClick={() => setOpen(true)}
+      <button type="button" onClick={() => set(true)}
         className="inline-flex items-center gap-1.5 text-[11px] text-zinc-500 hover:text-zinc-300 transition-colors">
         <Info className="h-3.5 w-3.5" /> How this page works
       </button>
@@ -403,8 +423,15 @@ function ExposureFigure({ posture: p, issues }: { posture: ComplianceRiskSummary
   }
   return (
     <>
-      <p className="font-mono text-2xl font-semibold tabular-nums text-zinc-100 mt-0.5 leading-none">
-        {money(p.exposure_min_usd)}<span className="text-zinc-600"> – </span>{money(p.exposure_max_usd)}
+      {/* Sized to survive its own cell. At 2xl with spaces around the dash this
+          needs ~245px to set "$16,650 – $17,050"; the cell is a quarter of the
+          strip (~200px at a normal window), so the range broke across two lines
+          and read as a rendering fault rather than a figure. */}
+      {/* The dash needs air or it reads as a strikethrough through the figures,
+          but not so much that the range wraps again — hence a margin rather
+          than the spaces this had before. */}
+      <p className="mt-0.5 whitespace-nowrap font-mono text-xl font-semibold leading-none tabular-nums text-zinc-100">
+        {money(p.exposure_min_usd)}<span className="mx-1 font-normal text-zinc-600">–</span>{money(p.exposure_max_usd)}
       </p>
       {p.exposure_unquantified_count > 0 && (
         <p className="text-[11px] text-zinc-500 mt-1">+ {p.exposure_unquantified_count} unquantified</p>
@@ -486,9 +513,13 @@ function IssueRow({
     <div className={`${PANEL} border-l-2 ${sev.rail} px-3.5 py-3`}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
+          {/* Three chips rode every row — CREDENTIALING · CRITICAL · flagged
+              today — on a row whose left rail is already coloured by severity
+              and inside a queue that is sorted by it. The severity word was
+              saying a third time what the rail says once, so the rail keeps
+              the job and the chips are down to what actually varies. */}
           <div className="flex items-center gap-2">
-            <span className={`text-[10px] font-mono uppercase tracking-wide ${sev.chip}`}>{SOURCE_LABEL[issue.source]}</span>
-            <span className={`text-[10px] uppercase tracking-wide ${sev.text}`}>{issue.severity}</span>
+            <span className={`font-mono text-[10px] uppercase tracking-wide ${sev.chip}`}>{SOURCE_LABEL[issue.source]}</span>
             {ageLabel(issue.first_seen_at) && (
               <span className="inline-flex items-center gap-0.5 text-[10px] text-zinc-600">
                 <Clock className="h-2.5 w-2.5" /> {ageLabel(issue.first_seen_at)}
@@ -531,9 +562,15 @@ function IssueRow({
               )}
             </p>
           )}
-          {issue.recommendation && (
-            <p className="text-xs text-emerald-300/80 mt-1.5">→ {issue.recommendation}</p>
-          )}
+          {/* The recommendation is gone from the row. On a credentialing issue
+              it read "Renew Maria Reyes's Medical License immediately — it
+              lapsed and must be restored before their next shift", under a
+              title reading "Maria Reyes — Medical License expired", beside a
+              button reading "Renew" — the fourth telling of one fact, and the
+              only one costing two wrapped lines on every row in the queue. It
+              still reaches the user: it's the Renew button's tooltip, which is
+              where an instruction belongs once the control itself names the
+              action. */}
         </div>
         <div className="shrink-0 flex items-center gap-1.5">
           {isAlert ? (
@@ -543,7 +580,7 @@ function IssueRow({
             </button>
           ) : (
             <>
-              <button type="button" onClick={onFix} title={HELP.fix}
+              <button type="button" onClick={onFix} title={issue.recommendation || HELP.fix}
                 className="inline-flex items-center gap-1 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-xs text-emerald-300 hover:bg-emerald-500/20 transition-colors">
                 {FIX_VERB[issue.source]} <ArrowRight className="h-3 w-3" />
               </button>
