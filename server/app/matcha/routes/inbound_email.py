@@ -13,6 +13,10 @@ from typing import Optional
 from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, Field, ValidationError, field_validator
+# request.form() constructs starlette's UploadFile, and fastapi.UploadFile is a
+# SUBCLASS of it — so isinstance(<what form() gave us>, fastapi.UploadFile) is
+# False and silently discards every attachment. Match on the base class.
+from starlette.datastructures import UploadFile as StarletteUploadFile
 
 from ...database import get_connection
 from app.core.services.redis_cache import check_rate_limit, client_ip
@@ -378,7 +382,9 @@ async def validate_location_intake_token(token: str):
     }
 
 
-async def _parse_intake_body(request: Request) -> tuple[LocationReportRequest, list[UploadFile]]:
+async def _parse_intake_body(
+    request: Request,
+) -> tuple[LocationReportRequest, list[StarletteUploadFile]]:
     """Read POST /intake/{token} as either JSON or multipart.
 
     Multipart is the current shape: a `payload` JSON field plus optional `files`.
@@ -413,7 +419,7 @@ async def _parse_intake_body(request: Request) -> tuple[LocationReportRequest, l
     except Exception:
         raise HTTPException(status_code=422, detail="Malformed report payload")
 
-    files = [f for f in form.getlist("files") if isinstance(f, UploadFile) and f.filename]
+    files = [f for f in form.getlist("files") if isinstance(f, StarletteUploadFile) and f.filename]
     if len(files) > MAX_INTAKE_FILES:
         raise HTTPException(
             status_code=422,
@@ -423,7 +429,7 @@ async def _parse_intake_body(request: Request) -> tuple[LocationReportRequest, l
 
 
 async def _stage_intake_attachments(
-    files: list[UploadFile], company_id: str
+    files: list[StarletteUploadFile], company_id: str
 ) -> list[dict]:
     """Validate + upload intake attachments to the private bucket.
 
