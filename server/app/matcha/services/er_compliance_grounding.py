@@ -95,6 +95,27 @@ async def _resolve_states(conn, company_id, involved_employee_ids: list[str]) ->
         except Exception:
             logger.exception("er_grounding: company-scope fallback failed")
 
+    if not states:
+        # Final fallback: the company's own business locations — the SAME signal
+        # the /compliance page keys off. A tenant with no employee roster (or
+        # employees lacking work_state) still operates in known states; without
+        # this, ER grounding reads empty while /compliance is rich for the exact
+        # same company.
+        try:
+            rows = await conn.fetch(
+                """
+                SELECT DISTINCT state
+                FROM business_locations
+                WHERE company_id::text = $1::text
+                  AND COALESCE(is_active, true) = true
+                  AND state IS NOT NULL
+                """,
+                str(company_id),
+            )
+            states = {(r["state"] or "").strip().upper() for r in rows if r["state"]}
+        except Exception:
+            logger.exception("er_grounding: business-location fallback failed")
+
     return sorted(s for s in states if s)
 
 
