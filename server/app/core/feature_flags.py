@@ -284,6 +284,12 @@ TIER_REQUIRED_FEATURES: dict[str, dict[str, bool]] = {
         # build wrote (requirements + jurisdiction stack + summary + upcoming
         # legislation). Full `compliance` (power tools) stays Pro-only.
         "compliance_lite": True,
+        # Employment-practices risk trackers (pay-transparency, AI hiring-audit,
+        # biometrics/BIPA, and the pay-equity study register that computes a real
+        # protected-class gap from HRIS demographics). Bundled into X: it's the
+        # tier that already carries the employee roster + HRIS import those
+        # trackers read from.
+        "workforce_compliance": True,
     },
     # matcha_compliance (paid, standalone self-serve product) — the full
     # Compliance system sold on its own, bundling four pillars assembled from
