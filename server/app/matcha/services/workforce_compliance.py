@@ -144,6 +144,14 @@ async def derive_pay_equity(conn, company_id: UUID) -> Optional[tuple[int, str]]
     reaches an underwriter, so it names which one we actually measured — it previously
     reported the dispersion share as "{x}% gap" because both quantities were stored in
     gap_pct (see the payequity02 migration).
+
+    Deliberate: a measured gap silences the dispersion branch entirely, so a tenant with
+    a 2% gap and loud spread scores 100. Dispersion is a proxy for "is pay here
+    defensible"; once the real thing is measured, the proxy has nothing to add, and
+    scoring someone down for spread we've since explained would double-count. The cost
+    is that broad spread with a narrow class gap now reads clean — acceptable, because
+    that IS the EPL question. Revisit only if measured-gap tenants start hiding real
+    exposure behind it.
     """
     row = await conn.fetchrow(
         "SELECT review_date, gap_pct, dispersion_pct, remediation, "
