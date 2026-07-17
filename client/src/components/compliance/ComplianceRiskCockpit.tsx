@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  AlertTriangle, ArrowRight, CheckCircle2, ChevronRight, Clock,
+  AlertTriangle, ArrowRight, CheckCircle2, ChevronRight, Clock, ExternalLink,
   History, Info, Loader2, RotateCcw, ShieldCheck, UserPlus, X,
 } from 'lucide-react'
 import { LABEL } from '../ui/typography'
@@ -443,11 +443,16 @@ function IssueRow({
 
   // A single figure is shown once, not as "$16,550–$16,550": most statutes set a
   // ceiling ("shall not exceed $X") with no floor, so min borrows max upstream.
-  const penaltyLine = pen && (pen.civil_min != null || pen.civil_max != null)
+  const hasFigure = pen && (pen.civil_min != null || pen.civil_max != null)
+  const figure = hasFigure
     ? `${pen.civil_min != null && pen.civil_max != null && pen.civil_min !== pen.civil_max
         ? `${money(pen.civil_min)}–${money(pen.civil_max)}`
-        : money((pen.civil_max ?? pen.civil_min) as number)}${pen.per_violation ? '/violation' : ''}${pen.enforcing_agency ? ` · ${pen.enforcing_agency}` : ''}`
+        : money((pen.civil_max ?? pen.civil_min) as number)}${pen.per_violation ? '/violation' : ''}`
     : null
+  // The FIGURE is the claim, so the figure is what you click to check it — not a
+  // citation parked next to it. A grounded number was parsed out of the statute
+  // at `source_url`, so following it lands on the sentence it came from.
+  const proofHref = pen?.grounded && pen.source_url ? pen.source_url : null
 
   return (
     <div className={`${PANEL} border-l-2 ${sev.rail} px-3.5 py-3`}>
@@ -464,34 +469,37 @@ function IssueRow({
           </div>
           <p className="text-sm text-zinc-100 mt-1">{issue.title}</p>
           {issue.detail && <p className="text-xs text-zinc-400 mt-0.5">{issue.detail}</p>}
-          {penaltyLine && (
+          {figure && (
             <p className="text-[11px] font-mono text-zinc-500 mt-1">
-              {penaltyLine}
-              {/* Provenance, when the figure was parsed from the statute that
-                  states it. "$16,550" is an assertion; "$16,550 — 29 CFR
-                  1903.15(d), eff. 2025-01-15" with a link is a citation the
-                  reader can check. Ungrounded figures show nothing rather than
-                  implying a source they don't have. */}
+              {proofHref ? (
+                <a
+                  href={proofHref}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-zinc-300 underline decoration-dotted decoration-zinc-600 underline-offset-2 hover:text-zinc-100 hover:decoration-zinc-400"
+                  title={
+                    `${pen?.citation ?? 'Statute'}` +
+                    `${pen?.effective_date ? ` — effective ${pen.effective_date}` : ''}` +
+                    ' · opens the eCFR section this figure was read from'
+                  }
+                >
+                  {figure}
+                  <ExternalLink className="h-2.5 w-2.5 opacity-60" />
+                </a>
+              ) : (
+                figure
+              )}
+              {pen?.enforcing_agency && <span className="text-zinc-600"> · {pen.enforcing_agency}</span>}
+              {/* The citation rides along as the human-readable proof, but the
+                  figure is the thing you click — it is the claim being made.
+                  Shown only when grounded: an ungrounded number is model recall
+                  and must not borrow the authority of a citation it doesn't
+                  have. */}
               {pen?.grounded && pen.citation && (
-                <>
-                  <span className="text-zinc-700"> · </span>
-                  {pen.source_url ? (
-                    <a
-                      href={pen.source_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-zinc-400 underline decoration-dotted underline-offset-2 hover:text-zinc-200"
-                      title={`${pen.citation}${pen.effective_date ? ` — effective ${pen.effective_date}` : ''} · opens eCFR`}
-                    >
-                      {pen.citation}
-                    </a>
-                  ) : (
-                    <span className="text-zinc-400">{pen.citation}</span>
-                  )}
-                  {pen.effective_date && (
-                    <span className="text-zinc-600"> eff. {pen.effective_date}</span>
-                  )}
-                </>
+                <span className="text-zinc-600">
+                  {' · '}{pen.citation}
+                  {pen.effective_date && ` eff. ${pen.effective_date}`}
+                </span>
               )}
             </p>
           )}
