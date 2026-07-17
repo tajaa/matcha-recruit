@@ -105,7 +105,12 @@ html[data-theme="light"] {
 
   /* inverted neutral ramp (pivot at 500) — dark bg tokens become light, light
      text tokens become dark; tuned so white cards (zinc-900) pop on the gray
-     app base (vsc-bg) */
+     app base (zinc-950/vsc-bg). 700/800/950 were originally within 5 units of
+     900 (d4d4d8/e8e8eb/fafafa vs ffffff) — near-white-on-near-white, which is
+     exactly why cards, borders and the page canvas all read as one flat
+     surface. Widened so a card visibly lifts off the page and a hairline
+     border visibly separates two panels, instead of relying on values that
+     only differed by 1-2% of lightness. */
   --color-zinc-50:  #09090b;
   --color-zinc-100: #18181b;
   --color-zinc-200: #27272a;
@@ -113,15 +118,17 @@ html[data-theme="light"] {
   --color-zinc-400: #52525b;
   --color-zinc-500: #71717a;
   --color-zinc-600: #a1a1aa;
-  --color-zinc-700: #d4d4d8;
-  --color-zinc-800: #e8e8eb;
+  --color-zinc-700: #c6c6cc;
+  --color-zinc-800: #d9d9de;
   --color-zinc-900: #ffffff;
-  --color-zinc-950: #fafafa;
+  --color-zinc-950: #e5e7ea;
 
-  /* app chrome tokens (root bg, panels, borders) */
-  --color-vsc-bg:     #f4f4f5;
+  /* app chrome tokens (root bg, panels, borders) — aligned to the zinc-950/
+     zinc-800 values above so AppLayout's outer shell doesn't sit at a
+     different near-white shade than a page's own bg-zinc-950 frame. */
+  --color-vsc-bg:     #e5e7ea;
   --color-vsc-panel:  #ffffff;
-  --color-vsc-border: #e8e8eb;
+  --color-vsc-border: #d9d9de;
   --color-vsc-text:   #18181b;
 
   /* darken accent text/dots for contrast on light surfaces */
@@ -137,4 +144,64 @@ html[data-theme="light"] {
 /* navbar uses a literal arbitrary value, not a palette var → flip explicitly */
 html[data-theme="light"] .bg-\[\#141416\] {
   background-color: #ffffff;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   white/[alpha] hairlines in light mode.
+   The whole app's dark-mode chrome (frames, dividers, "lifted" panels) is
+   built on border-white/[0.06]-style utilities: a few percent of light
+   painted onto a near-black canvas, which reads as a crisp line because
+   going from near-black toward white moves a lot of *relative* luminance for
+   very little alpha. The identical class in light mode paints a few percent
+   of --color-white (ink) onto a near-white canvas — moving very little
+   relative luminance, because you're already near the white end of the
+   scale. Same class, same alpha, opposite direction — one of them is always
+   going to be too faint. Rather than rewrite every one of the ~500 call
+   sites (this is used across the whole app, not just the pages redesigned
+   this pass), the exact utility classes are overridden here with a flat,
+   visible ink color per weight-tier, same escape hatch as the navbar rule
+   above. Grouped by the alpha actually used, not a 1:1 alpha translation —
+   light mode doesn't need dark mode's fine-grained subtlety, it needs these
+   to actually be visible. */
+html[data-theme="light"] :is(
+  [class~="bg-white/[0.01]"], [class~="bg-white/[0.015]"], [class~="bg-white/[0.02]"],
+  [class~="bg-white/[0.03]"], [class~="bg-white/[0.04]"], [class~="bg-white/[0.05]"],
+  [class~="bg-white/[0.06]"], [class~="bg-white/5"]
+) {
+  background-color: rgba(31, 29, 26, 0.12) !important;
+}
+html[data-theme="light"] :is(
+  [class~="border-white/[0.04]"], [class~="border-white/[0.05]"], [class~="border-white/[0.06]"],
+  [class~="border-white/5"]
+) {
+  border-color: rgba(31, 29, 26, 0.12) !important;
+}
+html[data-theme="light"] :is([class~="divide-white/[0.04]"], [class~="divide-white/[0.06]"], [class~="divide-white/5"]) > :not(:last-child) {
+  border-color: rgba(31, 29, 26, 0.12) !important;
+}
+
+html[data-theme="light"] :is([class~="bg-white/[0.08]"], [class~="bg-white/[0.10]"], [class~="bg-white/10"]) {
+  background-color: rgba(31, 29, 26, 0.18) !important;
+}
+html[data-theme="light"] :is(
+  [class~="border-white/[0.08]"], [class~="border-white/[0.1]"],
+  [class~="border-white/10"], [class~="border-white/15"]
+) {
+  border-color: rgba(31, 29, 26, 0.18) !important;
+}
+html[data-theme="light"] [class~="divide-white/10"] > :not(:last-child) {
+  border-color: rgba(31, 29, 26, 0.18) !important;
+}
+html[data-theme="light"] [class~="ring-white/10"] {
+  --tw-ring-color: rgba(31, 29, 26, 0.18) !important;
+}
+
+html[data-theme="light"] :is([class~="bg-white/[0.12]"], [class~="bg-white/15"]) {
+  background-color: rgba(31, 29, 26, 0.26) !important;
+}
+html[data-theme="light"] :is(
+  [class~="border-white/[0.12]"], [class~="border-white/[0.14]"], [class~="border-white/[0.16]"],
+  [class~="border-white/20"], [class~="border-white/25"], [class~="border-white/30"]
+) {
+  border-color: rgba(31, 29, 26, 0.26) !important;
 }

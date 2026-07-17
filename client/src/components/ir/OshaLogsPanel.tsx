@@ -493,7 +493,7 @@ export function OshaLogsPanel() {
 
   if (locations.length === 0) {
     return (
-      <div className="bg-zinc-900 border border-white/10 rounded-2xl p-12 text-center">
+      <div className="bg-zinc-900/40 border border-white/[0.06] rounded-lg p-8 text-center">
         <p className="text-sm text-zinc-300">No business locations defined.</p>
         <p className="text-[11px] text-zinc-600 mt-1">
           OSHA 300A summaries and ITA filings are per establishment. Add a location under Compliance to begin.
@@ -503,7 +503,7 @@ export function OshaLogsPanel() {
   }
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       {/* Toolbar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-3">
@@ -567,7 +567,7 @@ export function OshaLogsPanel() {
       </div>
 
       {/* ITA electronic filing status + credentials + history */}
-      <div className="bg-zinc-900 border border-white/10 rounded-2xl p-4 space-y-3">
+      <div className="bg-zinc-900/40 border border-white/[0.06] rounded-lg p-4 space-y-3">
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 text-[10px] text-zinc-500 uppercase tracking-widest font-bold">
             <Send size={13} /> OSHA ITA Electronic Filing
@@ -635,7 +635,7 @@ export function OshaLogsPanel() {
 
       {/* ITA validation errors */}
       {itaProblems !== null && (
-        <div className="bg-amber-950/30 border border-amber-500/30 rounded-2xl p-5">
+        <div className="bg-amber-500/[0.06] border border-amber-500/20 rounded-lg p-4">
           <div className="flex items-center gap-2 text-amber-300 text-sm font-semibold">
             <AlertTriangle size={15} />
             {itaProblems.length === 0
@@ -661,7 +661,7 @@ export function OshaLogsPanel() {
       {/* 300A data-quality warnings — recordables missing a classification or a
           location won't foot / file correctly. Non-blocking. */}
       {summary && summary.data_quality_warnings && summary.data_quality_warnings.length > 0 && (
-        <div className="bg-amber-950/30 border border-amber-500/30 rounded-2xl p-5">
+        <div className="bg-amber-500/[0.06] border border-amber-500/20 rounded-lg p-4">
           <div className="flex items-center gap-2 text-amber-300 text-sm font-semibold">
             <AlertTriangle size={15} />
             Data quality — review before filing
@@ -676,23 +676,23 @@ export function OshaLogsPanel() {
 
       {/* 300A Summary */}
       {summary && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-px bg-white/10 border border-white/10 rounded-2xl overflow-hidden">
-          <div className="bg-zinc-900 px-5 py-5">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-px bg-white/[0.06] border border-white/[0.06] rounded-lg overflow-hidden">
+          <div className="bg-zinc-900/60 px-4 py-4">
             <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold">Total Cases</div>
-            <div className="text-3xl font-light font-mono mt-2 text-zinc-100">{summary.total_cases}</div>
+            <div className="text-2xl font-light font-mono mt-1.5 text-zinc-100">{summary.total_cases}</div>
           </div>
-          <div className="bg-zinc-900 px-5 py-5">
+          <div className="bg-zinc-900/60 px-4 py-4">
             <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold">Deaths</div>
-            <div className={`text-3xl font-light font-mono mt-2 ${summary.total_deaths > 0 ? 'text-red-400' : 'text-zinc-700'}`}>{summary.total_deaths}</div>
+            <div className={`text-2xl font-light font-mono mt-1.5 ${summary.total_deaths > 0 ? 'text-red-400' : 'text-zinc-700'}`}>{summary.total_deaths}</div>
           </div>
-          <div className="bg-zinc-900 px-5 py-5">
+          <div className="bg-zinc-900/60 px-4 py-4">
             <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold">Days Away</div>
-            <div className="text-3xl font-light font-mono mt-2 text-amber-400">{summary.total_days_away}</div>
+            <div className="text-2xl font-light font-mono mt-1.5 text-amber-400">{summary.total_days_away}</div>
             <div className="text-[9px] text-zinc-600 uppercase tracking-widest mt-1 font-mono">{summary.total_days_away_cases} cases</div>
           </div>
-          <div className="bg-zinc-900 px-5 py-5">
+          <div className="bg-zinc-900/60 px-4 py-4">
             <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold">Restricted Duty</div>
-            <div className="text-3xl font-light font-mono mt-2 text-orange-400">{summary.total_days_restricted}</div>
+            <div className="text-2xl font-light font-mono mt-1.5 text-orange-400">{summary.total_days_restricted}</div>
             <div className="text-[9px] text-zinc-600 uppercase tracking-widest mt-1 font-mono">{summary.total_restricted_cases} cases</div>
           </div>
         </div>
@@ -700,7 +700,7 @@ export function OshaLogsPanel() {
 
       {/* 300A establishment / hours / certification */}
       {summary && (
-        <div className="bg-zinc-900 border border-white/10 rounded-2xl p-5 space-y-4">
+        <div className="bg-zinc-900/40 border border-white/[0.06] rounded-lg p-4 space-y-4">
           <div className="flex items-center justify-between">
             <div className="flex flex-col">
               <span className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">
@@ -789,7 +789,7 @@ export function OshaLogsPanel() {
           masks the name on the public log; this resolves case # → real name
           (29 CFR 1904.29(b)(9)). Every reveal is audit-logged server-side. */}
       {canRevealNames && entries.some((e) => e.is_privacy_case) && (
-        <div className="bg-zinc-900 border border-amber-500/20 rounded-2xl p-5">
+        <div className="bg-zinc-900/40 border border-amber-500/20 rounded-lg p-4">
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-2">
               <Lock size={14} className="text-amber-400" />
@@ -838,9 +838,9 @@ export function OshaLogsPanel() {
       )}
 
       {/* 300 Log Table */}
-      <div className="bg-zinc-900 border border-white/10 rounded-2xl overflow-hidden">
+      <div className="bg-zinc-900/40 border border-white/[0.06] rounded-lg overflow-hidden">
         {entries.length === 0 ? (
-          <div className="p-12 text-center">
+          <div className="p-8 text-center">
             <p className="text-sm text-zinc-400">No OSHA-recordable incidents for {year}.</p>
             <p className="text-[11px] text-zinc-600 mt-1">Mark an incident OSHA recordable from its detail page.</p>
           </div>

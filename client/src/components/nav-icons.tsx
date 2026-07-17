@@ -158,3 +158,12 @@ export const IconSpark = (p: IconProps) => (
     <path d="m12 3.4 1.9 5.9 5.9 1.9-5.9 1.9L12 19l-1.9-5.9-5.9-1.9 5.9-1.9z" />
   </svg>
 )
+
+/** Guide — a compass, not a question mark. The floating help widget answers
+ *  "where am I / what do I do here", which is wayfinding, not an unknown. */
+export const IconGuide = (p: IconProps) => (
+  <svg {...base(p)}>
+    <circle cx="12" cy="12" r="8.4" />
+    <path d="M15.4 8.6 13 13l-4.4 2.4L11 11z" />
+  </svg>
+)

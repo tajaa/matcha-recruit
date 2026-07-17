@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import { HelpCircle, Loader2, Send, X } from 'lucide-react'
+import { Loader2, Send, X } from 'lucide-react'
 import { authStreamHeaders } from '../../api/client'
+import { IconGuide } from '../nav-icons'
 import type { PageHelp } from '../../data/pageHelp'
 
 type Message = { role: 'user' | 'assistant'; text: string }
@@ -83,9 +84,9 @@ export default function HelpAssistant({ pageHelp }: { pageHelp: PageHelp }) {
           type="button"
           onClick={() => setOpen(true)}
           aria-label="Open page help"
-          className="fixed bottom-6 right-6 z-40 flex h-11 w-11 items-center justify-center rounded-full border border-zinc-700 bg-zinc-900 text-zinc-300 shadow-lg transition-colors hover:border-emerald-600/60 hover:text-emerald-400"
+          className="fixed bottom-6 right-6 z-40 flex h-11 w-11 items-center justify-center rounded-full border border-amber-400/40 bg-zinc-950 text-amber-400 shadow-[0_0_16px_rgba(251,191,36,0.35)] transition-all hover:border-amber-300/70 hover:text-amber-300 hover:shadow-[0_0_24px_rgba(251,191,36,0.55)]"
         >
-          <HelpCircle className="h-5 w-5" strokeWidth={1.8} />
+          <IconGuide className="h-5 w-5" strokeWidth={1.6} />
         </button>
       )}
 
