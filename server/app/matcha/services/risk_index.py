@@ -31,7 +31,10 @@ _WEIGHTS = {"wc": 40, "epl": 35, "compliance": 25, "property": 30}
 _COMPONENT_META = {
     "wc": ("Workers' Comp", _WEIGHTS["wc"]),
     "epl": ("EPL readiness", _WEIGHTS["epl"]),
-    "compliance": ("Compliance coverage", _WEIGHTS["compliance"]),
+    # "Compliance coverage" was accurate about the old behavior (share of
+    # locations we'd researched). Now that the score reflects posture, the old
+    # name would be the lie.
+    "compliance": ("Compliance", _WEIGHTS["compliance"]),
     "property": ("Commercial Property", _WEIGHTS["property"]),
 }
 
@@ -132,31 +135,142 @@ async def _wc_reserve_confidence(conn, company_id: UUID) -> str:
         return "low"
 
 
+# A proven violation caps the score here — below 100 and below the "strong"
+# band (>=80), so good coverage elsewhere can never outweigh proof of a breach.
+_NON_COMPLIANT_CAP = 70
+# Charged per ADDITIONAL violation past the first (the cap already prices that
+# one).
+_NON_COMPLIANT_PENALTY = 12
+
+
+def compliance_posture_score(
+    covered: int, locs: int, known: int, surface: int, non_compliant: int,
+) -> tuple[int, str, str]:
+    """(score, detail, confidence) for a company's compliance POSTURE. Pure.
+
+    Replaces a score that measured whether WE had researched the company's law
+    and reported it as whether the company obeyed it. Coverage cannot fall, so a
+    business violating all 500 of its obligations scored 100/100 — identical to
+    one obeying all 500 — and that number is 25% of the composite a broker reads.
+
+    Three inputs, in order of how much they earn:
+
+    * **coverage** (`covered/locs`) — the old signal, kept. Not compliance, but
+      real: with no requirements tracked for a location we cannot speak at all.
+    * **known share** (`known/surface`) — how much of the codified obligation
+      surface actually carries a compliance status. An unmeasured surface must
+      not read as a pass; the evals' rule (unmeasured is null, never 100) with
+      an underwriter attached.
+    * **confirmed violations** — obligations we can PROVE they are breaching.
+
+    The floor at half: a fully-covered company with no status lands at 50, not 0.
+    We have not measured them, which is not the same as guilt — but it can no
+    longer read as a clean bill of health either.
+
+    A confirmed violation caps the score at 70, putting both 100 and the "strong"
+    band (>=80) out of reach. That cap is the whole point: proof of a breach must
+    be un-outweighable by good coverage elsewhere.
+    """
+    if locs <= 0:
+        return 0, "no active locations", "low"
+
+    coverage_share = covered / locs
+    known_share = (known / surface) if surface > 0 else 0.0
+
+    score = round(coverage_share * (0.5 + 0.5 * known_share) * 100)
+    if non_compliant > 0:
+        # Cap FIRST, then charge for the rest. Subtracting before capping made
+        # the cap swallow the early violations — 1 and 2 both landed on 70, so a
+        # company with one problem read identical to one with two.
+        score = min(score, _NON_COMPLIANT_CAP) - _NON_COMPLIANT_PENALTY * (non_compliant - 1)
+    score = max(5, score)
+
+    bits = [f"{covered}/{locs} locations tracked"]
+    if surface > 0:
+        bits.append(f"{known}/{surface} requirements assessed")
+    if non_compliant > 0:
+        bits.append(f"{non_compliant} confirmed violation{'' if non_compliant == 1 else 's'}")
+    detail = " · ".join(bits)
+
+    # Feeds _assemble's band via _component_sigma: thin status coverage widens
+    # the composite's ± rather than silently claiming precision we don't have.
+    confidence = "low" if known_share < 1 / 3 else "medium" if known_share < 2 / 3 else "high"
+    return score, detail, confidence
+
+
 async def _compliance_component(conn, company_id: UUID):
-    """(score, detail) = share of the company's active locations with CURRENT
-    (non-expired) compliance requirements tracked, or None when there are no
-    locations. A location whose only requirements have lapsed doesn't count as
-    covered — mirrors the expiration-filter idiom in epl_readiness's wage_hour
-    factor, generalized to all categories."""
+    """(score, detail, confidence) for compliance posture, or None with no locations.
+
+    Reads `requirement_compliance_status`; never reconciles it. The broker
+    portfolio loops `compute_risk_index` over the whole book
+    (broker_portfolio.py:438/535/595), so deriving here would fan writes across
+    every client on every portfolio view. Status freshens on the tenant's own
+    risk-summary read (compliance_risk.py already reconciles there); a company
+    whose cockpit has never been opened reads all-unknown, scaled down and
+    low-confidence — which is the honest thing to say about them.
+
+    KNOWN GAP: a wage violation may not appear as a status row when employees
+    carry no `work_location_id` (compliance_status._build_context filters on it,
+    while the wage lane's own `get_employee_impact_for_location` has a city/state
+    fallback for those legacy rows). A company whose ONLY violations are
+    wage-lane ones on unlinked employees therefore reads cleaner here than its
+    cockpit shows. Fix is to reuse that fallback in _build_context.
+    """
+    # Local import: app.core.services.compliance_service is a heavy module and
+    # this is the only place the broker stack needs the tenant gate.
+    from app.core.services.compliance_service import codified_gate_sql
     row = await conn.fetchrow(
-        """
-        SELECT COUNT(DISTINCT bl.id) AS locs,
-               COUNT(DISTINCT bl.id) FILTER (WHERE cr.cnt > 0) AS covered
-        FROM business_locations bl
-        LEFT JOIN LATERAL (
-            SELECT COUNT(*) AS cnt FROM compliance_requirements cr
-            WHERE cr.location_id = bl.id
-              AND (cr.expiration_date IS NULL OR cr.expiration_date > CURRENT_DATE)
-        ) cr ON true
-        WHERE bl.company_id = $1 AND COALESCE(bl.is_active, true) = true
+        f"""
+        WITH locs AS (
+            SELECT bl.id
+            FROM business_locations bl
+            WHERE bl.company_id = $1 AND COALESCE(bl.is_active, true) = true
+        ),
+        covered AS (
+            SELECT DISTINCT cr.location_id
+            FROM compliance_requirements cr
+            JOIN locs ON locs.id = cr.location_id
+            WHERE cr.expiration_date IS NULL OR cr.expiration_date > CURRENT_DATE
+        ),
+        -- The obligation surface: every CODIFIED requirement projected to this
+        -- company, gated exactly as the tenant's own reads are — the status
+        -- universe and the surface must be the same set, or "known share" is
+        -- measured against a denominator the tenant never sees.
+        surface AS (
+            SELECT cr.location_id, cat.id AS catalog_id
+            FROM compliance_requirements cr
+            JOIN locs ON locs.id = cr.location_id
+            JOIN jurisdiction_requirements cat ON cat.id = cr.jurisdiction_requirement_id
+            WHERE (cr.expiration_date IS NULL OR cr.expiration_date > CURRENT_DATE)
+              {await codified_gate_sql("cat", conn=conn)}
+        )
+        SELECT
+            (SELECT count(*) FROM locs)     AS locs,
+            (SELECT count(*) FROM covered)  AS covered,
+            (SELECT count(*) FROM surface)  AS surface,
+            -- A projected requirement with NO status row is unknown, not clean.
+            (SELECT count(*) FROM surface s
+               JOIN requirement_compliance_status rcs
+                 ON rcs.location_id = s.location_id
+                AND rcs.jurisdiction_requirement_id = s.catalog_id
+              WHERE rcs.status <> 'unknown')  AS known,
+            (SELECT count(*) FROM surface s
+               JOIN requirement_compliance_status rcs
+                 ON rcs.location_id = s.location_id
+                AND rcs.jurisdiction_requirement_id = s.catalog_id
+              WHERE rcs.status = 'non_compliant') AS non_compliant
         """,
         company_id,
     )
-    locs = int(row["locs"] or 0)
-    if locs == 0:
+    if int(row["locs"] or 0) == 0:
         return None
-    covered = int(row["covered"] or 0)
-    return round(100 * covered / locs), f"{covered}/{locs} locations with compliance tracked"
+    return compliance_posture_score(
+        covered=int(row["covered"] or 0),
+        locs=int(row["locs"] or 0),
+        known=int(row["known"] or 0),
+        surface=int(row["surface"] or 0),
+        non_compliant=int(row["non_compliant"] or 0),
+    )
 
 
 def _top_fixes(components: list[dict], epl: dict) -> list[str]:
@@ -361,8 +475,12 @@ async def compute_risk_index(conn, company_id: UUID) -> dict:
 
     comp = await _compliance_component(conn, company_id)
     if comp is not None:
-        components.append({"key": "compliance", "label": "Compliance coverage", "weight": _WEIGHTS["compliance"],
-                           "score": comp[0], "detail": comp[1], "confidence": "high"})
+        # confidence was hardcoded "high" while the score measured coverage —
+        # the one component that never fed the band. Thin status coverage now
+        # widens the composite's ± instead of claiming precision.
+        components.append({"key": "compliance", "label": _COMPONENT_META["compliance"][0],
+                           "weight": _WEIGHTS["compliance"],
+                           "score": comp[0], "detail": comp[1], "confidence": comp[2]})
 
     if property_enabled:
         prop = await _property_component(conn, company_id)
