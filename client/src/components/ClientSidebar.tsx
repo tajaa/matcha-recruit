@@ -33,7 +33,11 @@ const nav: (NavItem | NavGroup)[] = [
       { to: '/app/compliance-calendar', icon: CalendarDays, label: 'Calendar' },
       { to: '/app/policies', icon: FileText, label: 'Policies' },
       { to: '/app/handbooks', icon: BookOpen, label: 'Handbooks' },
-      { to: '/app/resources/handbook-audit', icon: ShieldAlert, label: 'Handbook Audit', feature: 'handbook_audit' },
+      // Handbook Audit dropped from this tier's nav: Pro stores handbook_pilot
+      // alongside handbook_audit at signup, and Pilot supersedes the gap-
+      // analyzer-in-app-shell audit for the tiers that have both. The route
+      // and flag stay live — Compliance and Free still use it, and neither
+      // has handbook_pilot to fall back to.
       { to: '/app/handbook-pilot', icon: Sparkles, label: 'Handbook Pilot', feature: 'handbook_pilot' },
       { to: '/app/training', icon: GraduationCap, label: 'Training', feature: 'training' },
       { to: '/app/credential-templates', icon: BadgeCheck, label: 'Credentialing', feature: 'credential_templates' },

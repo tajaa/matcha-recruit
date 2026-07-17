@@ -1,5 +1,5 @@
 import {
-  IconAudit, IconBook, IconCompany, IconDraft, IconIncident, IconLedger,
+  IconBook, IconCompany, IconDraft, IconIncident, IconLedger,
   IconPeople, IconResources, IconSeal, IconSetup, IconShield, IconSpark,
   IconSteps, IconTraining, IconTrend,
 } from '../nav-icons'
@@ -34,7 +34,10 @@ const nav: (NavItem | NavGroup)[] = [
     defaultOpen: true,
     items: [
       { to: '/app/handbooks', icon: IconBook, label: 'Handbooks' },
-      { to: '/app/resources/handbook-audit', icon: IconAudit, label: 'Handbook Audit', feature: 'handbook_audit' },
+      // Handbook Audit dropped: the matcha_x overlay grants handbook_pilot
+      // alongside handbook_audit, and Pilot supersedes the gap-analyzer-in-
+      // app-shell audit here. Route/flag stay live for Compliance + Free,
+      // which have handbook_audit without handbook_pilot.
       { to: '/app/handbook-pilot', icon: IconDraft, label: 'Handbook Pilot', feature: 'handbook_pilot' },
       { to: '/app/matcha-x/compliance', icon: IconShield, label: 'Compliance', feature: 'compliance_lite', tag: 'Pro' },
     ],
