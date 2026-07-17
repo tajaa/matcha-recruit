@@ -22,6 +22,7 @@ from ._shared import (
     require_company_id, log_audit, serialize_template, fetch_shifts,
     assert_location_in_company,
 )
+from ._compliance import check_shift_compliance
 
 router = APIRouter()
 
@@ -157,6 +158,20 @@ async def generate_from_template(template_id: UUID, body: GenerateFromTemplate,
         )
         created = len(starts)
 
+        # Every generated shift shares this template's duration/break/location, so
+        # the shift-intrinsic advisories (meal break, daily OT) are identical for
+        # all of them — check once. Unassigned drafts, so no per-employee (minor)
+        # checks and nothing to BLOCK; surfaced as warnings, not a 409 (a bulk
+        # 409 would make generation unusable).
+        compliance_warnings = (
+            await check_shift_compliance(
+                conn, company_id, location_id=tpl["location_id"],
+                starts_at=starts[0], ends_at=ends[0],
+                break_minutes=tpl["break_minutes"] or 0,
+            )
+            if created else []
+        )
+
         # One set-based INSERT: a 6-month daily template is ~180 rows, and one
         # awaited round trip per row held the transaction (and its pooled
         # connection) open for all of them.
@@ -183,4 +198,5 @@ async def generate_from_template(template_id: UUID, body: GenerateFromTemplate,
         lo = datetime.combine(body.start_date, time.min, tzinfo=timezone.utc)
         hi = datetime.combine(body.end_date + timedelta(days=1), time.min, tzinfo=timezone.utc)
         shifts = await fetch_shifts(conn, company_id, lo, hi)
-    return {"created": created, "series_id": str(series_id), "shifts": shifts}
+    return {"created": created, "series_id": str(series_id), "shifts": shifts,
+            "compliance_warnings": compliance_warnings}

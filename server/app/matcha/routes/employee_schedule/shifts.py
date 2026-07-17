@@ -17,11 +17,13 @@ from ...models.employee_schedule import (
 from ...services.schedule_rules import (
     build_patch, summarize_shifts as _summarize, week_bounds as _week_bounds,
 )
+from ...services import schedule_compliance
 from ._shared import (
     require_company_id, log_audit, fetch_shifts, fetch_roster, fetch_shift_by_id,
     assert_employee_in_company, assert_location_in_company,
     find_conflicts, raise_conflict,
 )
+from ._compliance import check_shift_compliance, raise_for_violations
 
 router = APIRouter()
 
@@ -71,6 +73,30 @@ async def get_week(
     }
 
 
+@router.get("/compliance/location/{location_id}")
+async def location_scheduling_compliance(
+    location_id: UUID, current_user=Depends(require_admin_or_client),
+):
+    """Passive "scheduling law for this location" panel: the curated thresholds
+    we deterministically check + the codified catalog statutes behind them."""
+    company_id = await require_company_id(current_user)
+    async with get_connection() as conn:
+        await assert_location_in_company(conn, company_id, location_id)
+        loc = await conn.fetchrow(
+            "SELECT state FROM business_locations WHERE id = $1 AND company_id = $2",
+            location_id, company_id,
+        )
+        state = loc["state"] if loc else None
+        statutes = await schedule_compliance.get_schedule_statutes(
+            location_id, company_id, conn=conn,
+        )
+    return {
+        "state": state,
+        "rules": schedule_compliance.rules_for_state(state),
+        "statutes": statutes,
+    }
+
+
 @router.post("/shifts")
 async def create_shift(body: ShiftCreate,
                        force: bool = Query(False, description="Assign despite overlapping shifts"),
@@ -78,6 +104,7 @@ async def create_shift(body: ShiftCreate,
     company_id = await require_company_id(current_user)
     async with get_connection() as conn:
         await assert_location_in_company(conn, company_id, body.location_id)
+        forced: dict[str, list[dict]] = {}
         for emp_id in body.employee_ids:
             await assert_employee_in_company(conn, company_id, emp_id)
             if not force:
@@ -86,6 +113,24 @@ async def create_shift(body: ShiftCreate,
                 )
                 if conflicts:
                     raise_conflict(emp_id, conflicts)
+            violations = await check_shift_compliance(
+                conn, company_id, location_id=body.location_id,
+                starts_at=body.starts_at, ends_at=body.ends_at,
+                break_minutes=body.break_minutes or 0, employee_id=emp_id,
+            )
+            raise_for_violations(violations, force=force)
+            if violations:
+                forced[str(emp_id)] = violations
+        if not body.employee_ids:
+            # Open shift (no assignee yet): only shift-intrinsic checks run.
+            raise_for_violations(
+                await check_shift_compliance(
+                    conn, company_id, location_id=body.location_id,
+                    starts_at=body.starts_at, ends_at=body.ends_at,
+                    break_minutes=body.break_minutes or 0,
+                ),
+                force=force,
+            )
         async with conn.transaction():
             shift_id = await conn.fetchval(
                 """
@@ -111,6 +156,9 @@ async def create_shift(body: ShiftCreate,
                 )
             await log_audit(conn, company_id, "shift", shift_id, current_user.id,
                             "shift.create", {"starts_at": body.starts_at.isoformat()})
+            if forced:
+                await log_audit(conn, company_id, "shift", shift_id, current_user.id,
+                                "shift.compliance_override", {"forced": forced})
         return await fetch_shift_by_id(conn, company_id, shift_id)
 
 
@@ -126,7 +174,7 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
     async with get_connection() as conn:
         existing = await conn.fetchrow(
             """
-            SELECT starts_at, ends_at, status, published_at
+            SELECT starts_at, ends_at, status, published_at, break_minutes, location_id
             FROM schedule_shifts WHERE id = $1 AND company_id = $2
             """,
             shift_id, company_id,
@@ -155,19 +203,35 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
 
         # Retiming a staffed shift is an assignment path like any other: it can
         # double-book everyone already on it, so it takes the same guard + force.
+        # A break/location edit is compliance-relevant too (meal-break, jurisdiction).
         retimed = new_start != existing["starts_at"] or new_end != existing["ends_at"]
-        if retimed and not force and new_status != "cancelled":
+        compliance_relevant = retimed or "break_minutes" in patch or "location_id" in patch
+        forced: dict[str, list[dict]] = {}
+        if compliance_relevant and new_status != "cancelled":
+            new_break = patch.get("break_minutes", existing["break_minutes"])
+            new_location = patch.get("location_id", existing["location_id"])
             assignees = await conn.fetch(
                 "SELECT employee_id FROM schedule_shift_assignments WHERE shift_id = $1",
                 shift_id,
             )
             for row in assignees:
-                conflicts = await find_conflicts(
-                    conn, company_id, row["employee_id"], new_start, new_end,
+                emp = row["employee_id"]
+                if retimed and not force:
+                    conflicts = await find_conflicts(
+                        conn, company_id, emp, new_start, new_end,
+                        exclude_shift_id=shift_id,
+                    )
+                    if conflicts:
+                        raise_conflict(emp, conflicts)
+                violations = await check_shift_compliance(
+                    conn, company_id, location_id=new_location,
+                    starts_at=new_start, ends_at=new_end,
+                    break_minutes=new_break or 0, employee_id=emp,
                     exclude_shift_id=shift_id,
                 )
-                if conflicts:
-                    raise_conflict(row["employee_id"], conflicts)
+                raise_for_violations(violations, force=force)
+                if violations:
+                    forced[str(emp)] = violations
 
         # published_at rides along as a patched column — no spliced CASE clause
         # whose hardcoded $10 silently rebinds when a column is added above it.
@@ -189,6 +253,9 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
             )
             await log_audit(conn, company_id, "shift", shift_id, current_user.id,
                             "shift.update", {"fields": sorted(patch)})
+            if forced:
+                await log_audit(conn, company_id, "shift", shift_id, current_user.id,
+                                "shift.compliance_override", {"forced": forced})
         return await fetch_shift_by_id(conn, company_id, shift_id)
 
 

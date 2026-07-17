@@ -251,6 +251,7 @@ async def fetch_shift_for_write(conn, company_id: UUID, shift_id: UUID):
     row = await conn.fetchrow(
         """
         SELECT s.starts_at, s.ends_at, s.status, s.required_staff,
+               s.location_id, s.break_minutes,
                (SELECT COUNT(*) FROM schedule_shift_assignments a
                 WHERE a.shift_id = s.id) AS assigned_count
         FROM schedule_shifts s

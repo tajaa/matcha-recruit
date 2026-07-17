@@ -119,3 +119,25 @@ def shift_full_detail(assigned: int, required_staff: int) -> dict:
         "assigned": assigned,
         "required_staff": required_staff,
     }
+
+
+def compliance_warning_detail(violations: list[dict]) -> dict:
+    """409 body for advisory scheduling-compliance flags — forceable, same shape
+    family as conflict/shift_full. The frontend keys on `code` to offer the
+    'Schedule anyway' override; `violations` carries the cited advisories."""
+    return {
+        "code": "schedule_compliance",
+        "message": "This shift may not comply with scheduling law — review before proceeding",
+        "violations": violations,
+    }
+
+
+def compliance_block_detail(violations: list[dict]) -> dict:
+    """422 body for a bright-line scheduling-compliance BLOCK (minor-hour caps).
+    Distinct code so the frontend renders a hard error with NO override — there
+    is no force path (mirrors the discipline_compliance non-overridable block)."""
+    return {
+        "code": "schedule_compliance_block",
+        "message": "This shift violates a hard scheduling-law limit and cannot be scheduled",
+        "violations": [v for v in violations if v.get("severity") == "block"],
+    }

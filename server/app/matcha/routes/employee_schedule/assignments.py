@@ -12,6 +12,7 @@ from ._shared import (
     assert_employee_in_company, assert_shift_open_for_assignment,
     find_conflicts, raise_conflict, raise_shift_full,
 )
+from ._compliance import check_shift_compliance, raise_for_violations
 
 router = APIRouter()
 
@@ -35,6 +36,15 @@ async def assign_employee(shift_id: UUID, body: AssignmentCreate,
                 raise_conflict(body.employee_id, conflicts)
             if shift["assigned_count"] >= shift["required_staff"]:
                 raise_shift_full(shift["assigned_count"], shift["required_staff"])
+        # Compliance runs regardless of force — a minor-hour BLOCK (422) can't be
+        # overridden, advisories (409) can.
+        violations = await check_shift_compliance(
+            conn, company_id, location_id=shift["location_id"],
+            starts_at=shift["starts_at"], ends_at=shift["ends_at"],
+            break_minutes=shift["break_minutes"] or 0,
+            employee_id=body.employee_id, exclude_shift_id=shift_id,
+        )
+        raise_for_violations(violations, force=force)
         async with conn.transaction():
             await conn.execute(
                 """
@@ -47,6 +57,10 @@ async def assign_employee(shift_id: UUID, body: AssignmentCreate,
             )
             await log_audit(conn, company_id, "assignment", shift_id, current_user.id,
                             "assignment.create", {"employee_id": str(body.employee_id)})
+            if violations:  # forced advisories — record the override on the log
+                await log_audit(conn, company_id, "assignment", shift_id, current_user.id,
+                                "assignment.compliance_override",
+                                {"employee_id": str(body.employee_id), "violations": violations})
         return await fetch_shift_by_id(conn, company_id, shift_id)
 
 
