@@ -67,6 +67,11 @@ export interface RiskIssue {
   deadline?: string | null
   alert_id?: string | null
   first_seen_at?: string | null
+  // How many times the violation is instantiated (e.g. underpaid employees).
+  // A per_violation penalty multiplies by this.
+  violation_count?: number | null
+  // The obligation this is a breach of — keys the risk dimensions.
+  regulation_key?: string | null
 }
 
 export interface RemediationRecord {
@@ -89,9 +94,19 @@ export interface RiskPosture {
   open_high: number
   open_moderate: number
   employees_affected: number
+  // CONFIRMED exposure: the statutory range on issues we can show the tenant is
+  // actually exposed to. Deliberately NOT summable with the conditional ceiling
+  // below — that would present a hypothetical as a liability.
   exposure_min_usd: number
   exposure_max_usd: number
   exposure_unquantified_count: number
+  // Obligations whose compliance we have not established, priced at the
+  // statutory maximum. A bound on the unknown, not a liability.
+  conditional_ceiling_max_usd?: number
+  conditional_unknown_count?: number
+  // The slice of confirmed exposure no policy absorbs — statutory fines are
+  // generally uninsurable, so this sits on the balance sheet untransferred.
+  uninsurable_exposure_max_usd?: number
   next_deadline_days?: number | null
   next_deadline_label?: string | null
 }

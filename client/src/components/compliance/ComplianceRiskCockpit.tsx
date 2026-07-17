@@ -356,11 +356,30 @@ function SevLine({ dot, n, word, active }: { dot: string; n: number; word: strin
 
 function ExposureFigure({ posture: p, issues }: { posture: ComplianceRiskSummary['posture']; issues: RiskIssue[] }) {
   const has = p.exposure_max_usd > 0
-  // The single most-cited enforcing authority behind the exposure — the
-  // signature detail that reads as a legal instrument, not a to-do list.
+  // The authority behind the most DOLLARS — the signature detail that reads as a
+  // legal instrument, not a to-do list.
+  //
+  // This used to take the first issue carrying any penalty, which is not the
+  // same thing and read as a lie the moment the figures were grounded: a $500
+  // wage issue sorted ahead of a $16,550 OSHA one, so the tile totalled $17,050
+  // and captioned it "City of Los Angeles Office of Wage Standards" — naming the
+  // authority behind 3% of it. Sum by authority and take the largest.
   const authority = useMemo(() => {
-    const withPenalty = issues.find((i) => i.penalty && (i.penalty.civil_min != null || i.penalty.civil_max != null))
-    return withPenalty?.penalty?.enforcing_agency || withPenalty?.statute_citation || null
+    const byAuthority = new Map<string, number>()
+    for (const i of issues) {
+      const name = i.penalty?.enforcing_agency || i.statute_citation
+      const usd = i.penalty?.civil_max ?? i.penalty?.civil_min
+      if (!name || usd == null) continue
+      const n = i.penalty?.per_violation && i.violation_count ? Math.max(1, i.violation_count) : 1
+      byAuthority.set(name, (byAuthority.get(name) ?? 0) + usd * n)
+    }
+    let top: string | null = null
+    let best = -1
+    // Ties break on name so the caption doesn't flicker between equal authorities.
+    for (const [name, usd] of [...byAuthority].sort((a, b) => a[0].localeCompare(b[0]))) {
+      if (usd > best) { best = usd; top = name }
+    }
+    return top
   }, [issues])
 
   if (!has) {
