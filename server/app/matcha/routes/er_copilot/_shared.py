@@ -310,6 +310,20 @@ async def _resolve_involved_parties(conn, raw_employees: Any) -> list[dict]:
     ]
 
 
+def _involved_employee_ids(raw_employees: Any) -> list[str]:
+    """Validated employee ids from the involved_employees JSONB, for jurisdiction
+    grounding. Kept separate from _resolve_involved_parties (which returns only
+    name+role) so employee UUIDs never leak into the prompt-facing party dicts."""
+    out: list[str] = []
+    for e in _normalize_json_list(raw_employees):
+        if isinstance(e, dict) and e.get("employee_id"):
+            try:
+                out.append(str(UUID(str(e["employee_id"]))))
+            except (ValueError, TypeError):
+                continue
+    return out
+
+
 async def _load_guidance_context(conn, case_id: UUID, case_row) -> dict[str, Any]:
     """Single-round-trip context load shared by the suggested-guidance endpoints.
 

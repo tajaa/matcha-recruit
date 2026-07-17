@@ -16,6 +16,7 @@ from ...services.er_guidance import (
     _normalize_analysis_payload,
     _normalize_suggested_guidance_payload,
 )
+from ...services import er_compliance_grounding, legal_defense
 from ...models.er_case import (
     SuggestedGuidanceResponse,
     OutcomeAnalysisResponse,
@@ -31,9 +32,23 @@ from ._shared import (
     _collect_raw_evidence_context,
     _fetch_company_policy_context,
     _resolve_involved_parties,
+    _involved_employee_ids,
     _load_guidance_context,
     _build_er_analyzer,
 )
+
+
+async def _attach_grounding(payload: dict, raw_map, corpus_index: dict, *, case_id) -> None:
+    """Gate the model's evidence_map against the corpus and stamp the 3 grounding
+    fields onto a response payload dict. Central so every ER AI surface (the
+    normalizers/constructors otherwise whitelist these keys away) enforces
+    validate_citations identically — a hallucinated jur: id can never reach the UI."""
+    clean_map, dropped = legal_defense.validate_citations(raw_map, corpus_index)
+    payload["evidence_map"] = clean_map if corpus_index else []
+    payload["compliance_citations"] = er_compliance_grounding.build_citation_records(clean_map, corpus_index)
+    payload["grounding_available"] = bool(corpus_index)
+    if dropped:
+        logger.info("er grounding: dropped %d hallucinated citation(s) for case %s", len(dropped), case_id)
 
 router = APIRouter()
 
@@ -110,6 +125,14 @@ async def generate_suggested_guidance(
         all_doc_text_rows = ctx["all_doc_text_rows"]
         linked_incident = ctx["linked_incident"]
         completed_investigation_transcript_count = ctx["completed_investigation_transcript_count"]
+
+        try:
+            corpus_text, corpus_index = await er_compliance_grounding.build_jurisdiction_corpus(
+                conn, company_id, _involved_employee_ids(case_row["involved_employees"])
+            )
+        except Exception:
+            logger.exception("er guidance: grounding build failed for case %s", case_id)
+            corpus_text, corpus_index = "", {}
 
     analysis_map: dict[str, dict[str, Any]] = {}
     for row in analysis_rows:
@@ -214,6 +237,7 @@ async def generate_suggested_guidance(
             evidence_overview=evidence_overview,
             analysis_results=analysis_results,
             document_excerpts=transcript_excerpts,
+            jurisdiction_requirements=corpus_text,
         )
         confidence_task = analyzer.evaluate_determination_confidence(
             case_info=case_info,
@@ -260,6 +284,9 @@ async def generate_suggested_guidance(
         payload["determination_suggested"] = confidence >= 0.80
         payload["determination_confidence"] = round(confidence, 2)
         payload["determination_signals"] = determination_signals
+
+        raw_map = raw_payload.get("evidence_map") if isinstance(raw_payload, dict) else None
+        await _attach_grounding(payload, raw_map, corpus_index, case_id=case_id)
 
         result = SuggestedGuidanceResponse(**payload)
 
@@ -330,6 +357,14 @@ async def generate_suggested_guidance_stream(
         evidence_rows = ctx["evidence_rows"]
         transcript_rows = ctx["transcript_rows"]
         all_doc_text_rows_s = ctx["all_doc_text_rows"]
+
+        try:
+            corpus_text, corpus_index = await er_compliance_grounding.build_jurisdiction_corpus(
+                conn, company_id, _involved_employee_ids(case_row["involved_employees"])
+            )
+        except Exception:
+            logger.exception("er guidance stream: grounding build failed for case %s", case_id)
+            corpus_text, corpus_index = "", {}
 
     async def event_stream():
         def sse(event: dict) -> str:
@@ -426,6 +461,8 @@ async def generate_suggested_guidance_stream(
         try:
             analyzer = _build_er_analyzer(model_override=model)
 
+            if corpus_text:
+                yield sse({"type": "status", "message": "Checking state employment requirements..."})
             yield sse({"type": "status", "message": "Generating investigative guidance..."})
 
             guidance_task = analyzer.generate_suggested_guidance(
@@ -434,6 +471,7 @@ async def generate_suggested_guidance_stream(
                 evidence_overview=ev_overview,
                 analysis_results=a_results,
                 document_excerpts=t_excerpts,
+                jurisdiction_requirements=corpus_text,
             )
 
             yield sse({"type": "status", "message": "Scoring evidence confidence..."})
@@ -484,6 +522,9 @@ async def generate_suggested_guidance_stream(
             payload["determination_suggested"] = conf >= 0.80
             payload["determination_confidence"] = round(conf, 2)
             payload["determination_signals"] = det_signals
+
+            raw_map = raw_result.get("evidence_map") if isinstance(raw_result, dict) else None
+            await _attach_grounding(payload, raw_map, corpus_index, case_id=case_id)
 
             response_obj = SuggestedGuidanceResponse(**payload)
             yield sse({"type": "result", "data": response_obj.model_dump(mode="json")})
@@ -537,6 +578,13 @@ async def generate_outcome_analysis_stream(
             raise HTTPException(status_code=404, detail="Case not found")
 
         involved_parties = await _resolve_involved_parties(conn, case_row.get("involved_employees"))
+        try:
+            corpus_text, corpus_index = await er_compliance_grounding.build_jurisdiction_corpus(
+                conn, company_id, _involved_employee_ids(case_row.get("involved_employees"))
+            )
+        except Exception:
+            logger.exception("er outcome stream: grounding build failed for case %s", case_id)
+            corpus_text, corpus_index = "", {}
 
         analysis_rows = await conn.fetch(
             """
@@ -693,6 +741,7 @@ async def generate_outcome_analysis_stream(
                     on_status=on_status,
                     healthcare_context=healthcare_context,
                     determination_confidence=cached_determination_confidence,
+                    jurisdiction_requirements=corpus_text,
                 )
             )
 
@@ -755,11 +804,17 @@ async def generate_outcome_analysis_stream(
             _CONF_ORDER = {"high": 0, "medium": 1, "low": 2}
             outcomes.sort(key=lambda o: _CONF_ORDER.get(o.confidence, 99))
 
+            grounding: dict[str, Any] = {}
+            await _attach_grounding(grounding, raw_result.get("evidence_map"), corpus_index, case_id=case_id)
+
             response_obj = OutcomeAnalysisResponse(
                 outcomes=outcomes,
                 case_summary=raw_result.get("case_summary", ""),
                 generated_at=datetime.now(timezone.utc),
                 model=raw_result.get("model", analyzer.model),
+                evidence_map=grounding["evidence_map"],
+                compliance_citations=grounding["compliance_citations"],
+                grounding_available=grounding["grounding_available"],
             )
             yield sse({"type": "result", "data": response_obj.model_dump(mode="json")})
 
@@ -810,6 +865,13 @@ async def generate_outcome_analysis(
             raise HTTPException(status_code=404, detail="Case not found")
 
         involved_parties_ns = await _resolve_involved_parties(conn, case_row.get("involved_employees"))
+        try:
+            corpus_text, corpus_index = await er_compliance_grounding.build_jurisdiction_corpus(
+                conn, company_id, _involved_employee_ids(case_row.get("involved_employees"))
+            )
+        except Exception:
+            logger.exception("er outcome: grounding build failed for case %s", case_id)
+            corpus_text, corpus_index = "", {}
 
         analysis_rows = await conn.fetch(
             """
@@ -929,6 +991,7 @@ async def generate_outcome_analysis(
         precedent_stats={"total_closed_cases": total_closed, "outcome_distribution": precedent_stats},
         healthcare_context=healthcare_context,
         determination_confidence=cached_determination_confidence,
+        jurisdiction_requirements=corpus_text,
     )
 
     outcomes = []
@@ -971,11 +1034,17 @@ async def generate_outcome_analysis(
     _CONF_ORDER = {"high": 0, "medium": 1, "low": 2}
     outcomes.sort(key=lambda o: _CONF_ORDER.get(o.confidence, 99))
 
+    grounding: dict[str, Any] = {}
+    await _attach_grounding(grounding, raw_result.get("evidence_map"), corpus_index, case_id=case_id)
+
     return OutcomeAnalysisResponse(
         outcomes=outcomes,
         case_summary=raw_result.get("case_summary", ""),
         generated_at=datetime.now(timezone.utc),
         model=raw_result.get("model", analyzer.model),
+        evidence_map=grounding["evidence_map"],
+        compliance_citations=grounding["compliance_citations"],
+        grounding_available=grounding["grounding_available"],
     )
 
 

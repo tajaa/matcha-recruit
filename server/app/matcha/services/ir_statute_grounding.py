@@ -26,10 +26,17 @@ matters while the codified corpus is thin (federal + CA mostly).
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
+from typing import Any
 from uuid import UUID
 
 logger = logging.getLogger(__name__)
+
+# incident_type vocabulary is IRIncidentType = Literal["safety", "behavioral",
+# "property", "near_miss", "other"] (models/ir_incident.py). Only these two are
+# workplace-safety events; a behavioral/harassment incident implicates ER law,
+# not OSHA. So a keyword-less incident defaults to "all safety categories" ONLY
+# when it is genuinely a safety-typed report — otherwise it grounds on nothing.
+_SAFETY_INCIDENT_TYPES: frozenset[str] = frozenset({"safety", "near_miss"})
 
 # Safety / workers-comp category slugs that exist in the catalog taxonomy
 # (core labor + manufacturing industry keysets). Everything else is out of scope
@@ -67,19 +74,40 @@ _MAX_CONTEXT_ITEMS = 15
 
 
 def _implicated_categories(incident: dict) -> frozenset[str]:
-    haystack = " ".join(
-        str(incident.get(k) or "").lower()
-        for k in ("incident_type", "category", "type", "title", "description")
-    )
+    """Which safety categories this incident implicates.
+
+    Keyword hints are scanned over the incident's free text AND the structured
+    `category_data` values (incident_type is a coarse 5-value enum the keywords
+    can't match, so it only gates the no-hit fallback). No keyword hit → all
+    safety categories for a safety/near-miss incident, nothing for anything else.
+    """
+    parts = [str(incident.get(k) or "").lower() for k in ("title", "description")]
+    cd = incident.get("category_data")
+    if isinstance(cd, dict):
+        parts.extend(str(v).lower() for v in cd.values())
+    haystack = " ".join(parts)
+
     hit: set[str] = set()
     for keyword, cats in _INCIDENT_CATEGORY_HINTS.items():
         if keyword in haystack:
             hit |= set(cats)
-    return frozenset(hit) if hit else IR_SAFETY_CATEGORIES
+    if hit:
+        return frozenset(hit)
+
+    itype = str(incident.get("incident_type") or "").strip().lower()
+    return IR_SAFETY_CATEGORIES if itype in _SAFETY_INCIDENT_TYPES else frozenset()
 
 
 async def get_incident_statutes(incident: dict, company_id) -> list[dict[str, Any]]:
     """Codified safety requirements for the incident's establishment.
+
+    A dedicated codified-gated read over the catalog — deliberately NOT
+    `get_location_requirements`, which runs the full tenant projection
+    (employee-impact aggregation, preemption, min-wage counts) only to have all
+    but the 6 safety categories discarded here, on the hot path of incident
+    analysis. Resolves state from the incident's establishment, adds federal
+    ('US'), and labels each row from the FK-resolved `authority_name` — never the
+    documented-corrupt denormalized `jurisdiction_name`.
 
     Returns ``[]`` when the incident has no ``location_id`` or nothing resolves —
     callers hide the statute surface entirely in that case."""
@@ -93,28 +121,51 @@ async def get_incident_statutes(incident: dict, company_id) -> list[dict[str, An
         return []
 
     try:
-        from app.core.services import compliance_service
+        from app.database import get_connection
+        from app.core.services.compliance_service import codified_gate_sql
 
-        reqs = await compliance_service.get_location_requirements(
-            location_id, company_uuid, category=None
-        )
+        async with get_connection() as conn:
+            loc = await conn.fetchrow(
+                "SELECT state FROM business_locations WHERE id = $1 AND company_id = $2",
+                location_id,
+                company_uuid,
+            )
+            if not loc or not loc["state"]:
+                return []
+            state = (loc["state"] or "").strip().upper()
+            gate = await codified_gate_sql("jr", conn=conn)
+            rows = await conn.fetch(
+                f"""
+                SELECT jr.id, j.state, jr.category, jr.title, jr.description,
+                       jr.statute_citation, jr.source_url,
+                       j.display_name AS authority_name, j.level::text AS authority_level
+                FROM jurisdiction_requirements jr
+                JOIN jurisdictions j ON j.id = jr.jurisdiction_id
+                WHERE j.state = ANY($1::varchar[])
+                  AND jr.status = 'active'
+                  AND (jr.expiration_date IS NULL OR jr.expiration_date >= CURRENT_DATE)
+                  AND jr.category = ANY($2::varchar[])
+                  {gate}
+                ORDER BY (j.state = 'US') ASC, jr.category
+                LIMIT 40
+                """,
+                sorted({state, "US"}),
+                list(IR_SAFETY_CATEGORIES),
+            )
     except Exception:
         logger.exception("ir_statute_grounding: requirement fetch failed")
         return []
 
     out: list[dict[str, Any]] = []
-    for r in reqs:
-        category = (getattr(r, "category", "") or "").strip().lower()
-        if category not in IR_SAFETY_CATEGORIES:
-            continue
+    for r in rows:
         out.append({
-            "requirement_id": str(getattr(r, "id", "") or ""),
-            "state": getattr(r, "jurisdiction_name", None) or "",
-            "category": category,
-            "title": getattr(r, "title", None) or "Requirement",
-            "description": getattr(r, "description", None) or "",
-            "statute_citation": getattr(r, "statute_citation", None),
-            "source_url": getattr(r, "source_url", None),
+            "requirement_id": str(r["id"]),
+            "state": r["authority_name"] or r["state"] or "",
+            "category": (r["category"] or "").strip().lower(),
+            "title": r["title"] or "Requirement",
+            "description": r["description"] or "",
+            "statute_citation": r["statute_citation"],
+            "source_url": r["source_url"],
         })
     return out
 
@@ -127,19 +178,18 @@ def map_incident_to_statutes(
     if not statutes:
         return []
     cats = _implicated_categories(incident)
-    itype = str(incident.get("incident_type") or incident.get("category") or "this incident").strip()
+    if not cats:
+        return []
+    itype = str(incident.get("incident_type") or "this incident").strip()
     out: list[dict[str, Any]] = []
     for s in statutes:
         if s.get("category") not in cats:
             continue
         cat_label = str(s.get("category") or "").replace("_", " ")
+        # Spread the source row and add the reason — one shape, not a hand-copied
+        # field list. StatuteMatch ignores the extra `description` key on parse.
         out.append({
-            "requirement_id": s.get("requirement_id"),
-            "state": s.get("state") or "",
-            "category": s.get("category") or "",
-            "title": s.get("title") or "Requirement",
-            "statute_citation": s.get("statute_citation"),
-            "source_url": s.get("source_url"),
+            **s,
             "relevance_reason": f"Incident type “{itype}” implicates {cat_label} requirements at this location.",
         })
     return out

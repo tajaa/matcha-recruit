@@ -534,6 +534,26 @@ async def generate_guidance(
         latest_user_message=latest_user_message,
     )
 
+    # Location-resolved safety-statute grounding, appended AFTER .format() (plain
+    # concat — no new template slot, no brace risk). Advisory context only; the
+    # deterministic OSHA gates above own anything deadline-related.
+    try:
+        from .ir_statute_grounding import get_incident_statutes, map_incident_to_statutes, serialize_statute_context
+
+        _statutes = await get_incident_statutes(incident, incident.get("company_id"))
+        _statute_context = serialize_statute_context(map_incident_to_statutes(incident, _statutes))
+    except Exception:
+        logger.exception("ir copilot: statute grounding failed for incident %s", (incident or {}).get("id"))
+        _statute_context = ""
+    if _statute_context:
+        prompt += (
+            "\n\nAPPLICABLE SAFETY / WORKERS-COMP REQUIREMENTS FOR THIS LOCATION "
+            "(informational — may be empty):\n" + _statute_context +
+            "\n\nUse these to inform guidance where relevant. Do not invent statutes "
+            "not listed, and do not compute reporting deadlines yourself — the "
+            "deterministic OSHA gates handle those."
+        )
+
     analyzer = get_ir_analyzer()
     try:
         response = await asyncio.wait_for(

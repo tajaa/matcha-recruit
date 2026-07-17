@@ -32,25 +32,20 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# Employment-relations categories worth pulling for an ER matter. Kept small to
-# protect the prompt budget. If a tenant's catalog happens to use none of these
-# category slugs, `build_jurisdiction_corpus` keeps whatever it found rather than
-# filtering to zero — the codified corpus is thin and any grounding beats none.
+# Employment-relations categories worth pulling for an ER matter. Every slug here
+# is a REAL catalog category key (`compliance_registry.py:CATEGORY_KEYS`) — an
+# invented slug (e.g. "termination", "retaliation", "harassment_prevention") is a
+# regulation key or nothing at all and would silently match zero rows while
+# hiding the real ones. Kept small to protect the prompt budget; filtered in SQL.
 ER_RELEVANT_CATEGORIES: frozenset[str] = frozenset({
     "final_pay",
-    "termination",
-    "wrongful_termination",
+    "pay_frequency",
+    "equal_pay",
+    "pay_transparency",
     "anti_discrimination",
-    "discrimination",
-    "harassment_prevention",
-    "retaliation",
     "whistleblower",
     "leave",
-    "paid_sick_leave",
-    "family_leave",
-    "accommodations",
-    "wage_theft",
-    "pay_frequency",
+    "sick_leave",
     "background_checks",
 })
 
@@ -116,6 +111,10 @@ async def build_jurisdiction_corpus(
     states = await _resolve_states(conn, company_id, involved_employee_ids)
     if not states:
         return "", {}
+    # Federal employment law lives on the jurisdiction keyed state='US' (never a
+    # value of employees.work_state), so it must be added explicitly or the whole
+    # federal slice — the bulk of the codified corpus — is excluded.
+    states_with_federal = sorted(set(states) | {"US"})
 
     try:
         from app.core.services.compliance_service import codified_gate_sql
@@ -131,21 +130,23 @@ async def build_jurisdiction_corpus(
             WHERE j.state = ANY($1::varchar[])
               AND jr.status = 'active'
               AND (jr.expiration_date IS NULL OR jr.expiration_date >= CURRENT_DATE)
+              AND jr.category = ANY($2::varchar[])
               {gate}
-            ORDER BY j.state,
+            ORDER BY (j.state = 'US') ASC,  -- state-specific first, federal after
+                     j.state,
                      COALESCE(jr.effective_date, CURRENT_DATE) DESC,
                      COALESCE(jr.updated_at, jr.created_at) DESC
+            LIMIT $3
             """,
-            states,
+            states_with_federal,
+            list(ER_RELEVANT_CATEGORIES),
+            _MAX_ROWS,
         )
     except Exception:
         logger.exception("er_grounding: requirement fetch failed")
         return "", {}
 
-    records = [dict(r) for r in rows]
-    # Prefer ER-relevant categories; keep all only if the filter would empty it.
-    filtered = [r for r in records if (r.get("category") or "").strip().lower() in ER_RELEVANT_CATEGORIES]
-    chosen = (filtered or records)[:_MAX_ROWS]
+    chosen = [dict(r) for r in rows]
     if not chosen:
         return "", {}
 

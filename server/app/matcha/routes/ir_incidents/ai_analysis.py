@@ -872,6 +872,36 @@ async def _get_handbook_policy_entries(conn, company_id) -> list[dict]:
     ]
 
 
+async def _incident_statute_fields(row, company_id: str) -> dict:
+    """Jurisdiction-statute keys merged into the policy_mapping analysis_data.
+
+    Resolves the incident's establishment to codified safety statutes and narrows
+    them to those the incident type implicates. Never raises — statute grounding
+    is additive and must not break the existing policy mapping."""
+    try:
+        from app.matcha.services import ir_statute_grounding
+
+        incident = {
+            "location_id": row.get("location_id"),
+            "incident_type": row.get("incident_type"),
+            "title": row.get("title"),
+            "description": row.get("description") or "",
+            "category_data": _safe_json_loads(row.get("category_data"), {}),
+        }
+        statutes = await ir_statute_grounding.get_incident_statutes(incident, company_id)
+        matches = ir_statute_grounding.map_incident_to_statutes(incident, statutes)
+        if not matches:
+            return {}
+        return {
+            "statute_matches": matches,
+            "statute_states": sorted({m["state"] for m in matches if m.get("state")}),
+            "statute_summary": f"{len(matches)} state/federal safety requirement(s) implicated by this incident.",
+        }
+    except Exception:
+        logger.warning("IR statute grounding failed for incident %s", row.get("id"), exc_info=True)
+        return {}
+
+
 async def _auto_map_policy_violations(incident_id: str, company_id: str):
     """Background task: auto-map incident to company policies."""
     try:
@@ -880,11 +910,13 @@ async def _auto_map_policy_violations(incident_id: str, company_id: str):
         async with get_connection() as conn:
             # Fetch incident
             row = await conn.fetchrow(
-                "SELECT title, description, incident_type, severity, category_data FROM ir_incidents WHERE id = $1",
+                "SELECT id, title, description, incident_type, severity, category_data, location_id FROM ir_incidents WHERE id = $1",
                 incident_id,
             )
             if not row:
                 return
+
+            statute_fields = await _incident_statute_fields(row, company_id)
 
             # Fetch active policies + handbook sections
             policies = await conn.fetch(
@@ -900,6 +932,7 @@ async def _auto_map_policy_violations(incident_id: str, company_id: str):
                     "summary": "No active policies or handbook found for this company.",
                     "no_matching_policies": True,
                     "generated_at": _utc_now_naive().isoformat(),
+                    **statute_fields,
                 }
                 await conn.execute(
                     """
@@ -927,6 +960,9 @@ async def _auto_map_policy_violations(incident_id: str, company_id: str):
                 category_data=_safe_json_loads(row.get("category_data"), {}),
                 policies=policies_list,
             )
+
+            if isinstance(result, dict):
+                result.update(statute_fields)
 
             await conn.execute(
                 """
