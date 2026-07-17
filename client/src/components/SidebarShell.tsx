@@ -1,7 +1,6 @@
-import type { LucideIcon } from 'lucide-react'
 import { NavLink, useNavigate, useLocation, Link } from 'react-router-dom'
 import { LogOut, Settings, ChevronDown, Lock, PanelLeftClose } from 'lucide-react'
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, type ComponentType } from 'react'
 import Avatar from './Avatar'
 import { useMe } from '../hooks/useMe'
 import { resetAuthCaches } from '../api/authReset'
@@ -9,9 +8,13 @@ import { disconnectSharedChannelSocket } from '../api/channelSocket'
 import { useLayoutContext } from '../layouts/LayoutContext'
 import ThemeToggle from './ThemeToggle'
 
+/** Any glyph the rail can render: the hand-drawn set in nav-icons.tsx, or a
+ *  lucide icon (whose props are a superset of these). */
+export type NavIcon = ComponentType<{ className?: string; strokeWidth?: number }>
+
 export type NavItem = {
   to: string
-  icon: LucideIcon
+  icon: NavIcon
   label: string
   badge?: number
   onSeen?: () => void
@@ -70,6 +73,12 @@ function isGroup(item: NavItem | NavGroup): item is NavGroup {
 //      something.
 //   3. TYPE CARRIES HIERARCHY. Serif masthead, spaced-caps org and group
 //      labels, light sans rows that shift to normal weight when selected.
+//
+// On the neutral ramp: rows sit at zinc-300 and labels at zinc-400. The old
+// rail ran rows at zinc-500 (4.1:1 on zinc-950) and labels at zinc-600
+// (2.6:1) — both under WCAG AA for text, which is why it read as murky rather
+// than restrained. Because selection is a tab and a weight shift rather than a
+// colour, idle rows can be bright without stealing from the selected one.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const FRAUNCES = "'Fraunces', Georgia, serif"
@@ -103,13 +112,13 @@ function NavItemLink({ item, location, collapsed }: { item: NavItem; location: R
         type="button"
         onClick={item.onLockedClick}
         title={item.label}
-        className={`w-full text-left text-[13px] font-light text-zinc-600 hover:bg-zinc-900 hover:text-zinc-400 ${ROW} ${ROW_PAD(collapsed)}`}
+        className={`w-full text-left text-[13px] font-light text-zinc-500 hover:bg-zinc-900 hover:text-zinc-300 ${ROW} ${ROW_PAD(collapsed)}`}
       >
         <item.icon className="h-[15px] w-[15px] shrink-0" strokeWidth={1.5} />
         {!collapsed && (
           <>
             <span className="flex-1 truncate">{item.label}</span>
-            <Lock className="h-3 w-3 shrink-0 text-zinc-700 group-hover:text-emerald-400" strokeWidth={1.6} />
+            <Lock className="h-3 w-3 shrink-0 text-zinc-500 group-hover:text-emerald-400" strokeWidth={1.6} />
           </>
         )}
       </button>
@@ -124,11 +133,11 @@ function NavItemLink({ item, location, collapsed }: { item: NavItem; location: R
         isActive
           // The tab: canvas colour, running off the rail's right edge.
           ? 'bg-vsc-bg font-normal text-zinc-50'
-          : 'font-light text-zinc-500 hover:bg-zinc-900 hover:text-zinc-200'
+          : 'font-light text-zinc-300 hover:bg-zinc-900 hover:text-zinc-50'
       }`}
     >
       <item.icon
-        className={`h-[15px] w-[15px] shrink-0 ${isActive ? 'text-zinc-300' : 'text-zinc-600 group-hover:text-zinc-400'}`}
+        className={`h-[15px] w-[15px] shrink-0 ${isActive ? 'text-zinc-100' : 'text-zinc-500 group-hover:text-zinc-300'}`}
         strokeWidth={1.5}
       />
       {!collapsed && (
@@ -180,7 +189,7 @@ function NavGroupSection({ group, location, collapsed }: { group: NavGroup; loca
     <div className="mt-5 first:mt-0">
       <button
         onClick={() => setOpen((v) => !v)}
-        className="group mb-1 flex w-full items-center gap-1.5 pl-2.5 pr-3 text-[9px] font-medium uppercase tracking-[0.2em] text-zinc-600 transition-colors hover:text-zinc-400"
+        className="group mb-1 flex w-full items-center gap-1.5 pl-2.5 pr-3 text-[9px] font-medium uppercase tracking-[0.2em] text-zinc-400 transition-colors hover:text-zinc-200"
       >
         <span className="truncate">{group.label}</span>
         <span className="h-px flex-1 bg-zinc-900" />
@@ -265,7 +274,7 @@ export default function SidebarShell({ logoTo, logoLabel, nav, user, upgradeFoot
                 {logoLabel}
               </span>
               {showOrg && (
-                <span className="mt-1.5 truncate text-[9px] font-medium uppercase leading-none tracking-[0.22em] text-zinc-600">
+                <span className="mt-1.5 truncate text-[9px] font-medium uppercase leading-none tracking-[0.22em] text-zinc-400">
                   {orgName}
                 </span>
               )}
@@ -275,7 +284,7 @@ export default function SidebarShell({ logoTo, logoLabel, nav, user, upgradeFoot
               onClick={() => setSidebarCollapsed(true)}
               title="Collapse sidebar"
               aria-label="Collapse sidebar"
-              className="shrink-0 rounded-md p-1.5 text-zinc-700 opacity-0 transition-all hover:text-zinc-300 focus-visible:opacity-100 group-hover:opacity-100"
+              className="shrink-0 rounded-md p-1.5 text-zinc-500 opacity-0 transition-all hover:text-zinc-100 focus-visible:opacity-100 group-hover:opacity-100"
             >
               <PanelLeftClose className="h-4 w-4" strokeWidth={1.5} />
             </button>
@@ -301,7 +310,7 @@ export default function SidebarShell({ logoTo, logoLabel, nav, user, upgradeFoot
         {personName && !sidebarCollapsed && (
           <div className="flex items-center gap-2.5 px-1 pb-2">
             <Avatar name={personName} avatarUrl={me?.user?.avatar_url} size="sm" />
-            <span className="min-w-0 flex-1 truncate text-[12px] font-light tracking-wide text-zinc-400">
+            <span className="min-w-0 flex-1 truncate text-[12px] font-light tracking-wide text-zinc-300">
               {personName}
             </span>
           </div>
@@ -319,7 +328,7 @@ export default function SidebarShell({ logoTo, logoLabel, nav, user, upgradeFoot
               to={user.settingsTo}
               title="Settings"
               aria-label="Settings"
-              className="rounded-md p-1.5 text-zinc-700 transition-colors hover:text-zinc-300"
+              className="rounded-md p-1.5 text-zinc-500 transition-colors hover:text-zinc-100"
             >
               <Settings className="h-4 w-4" strokeWidth={1.5} />
             </NavLink>
@@ -329,7 +338,7 @@ export default function SidebarShell({ logoTo, logoLabel, nav, user, upgradeFoot
             onClick={handleLogout}
             title="Log out"
             aria-label="Log out"
-            className="rounded-md p-1.5 text-zinc-700 transition-colors hover:text-zinc-300"
+            className="rounded-md p-1.5 text-zinc-500 transition-colors hover:text-zinc-100"
           >
             <LogOut className="h-4 w-4" strokeWidth={1.5} />
           </button>

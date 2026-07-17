@@ -1,4 +1,8 @@
-import { AlertTriangle, BadgeCheck, BookOpen, Building2, ClipboardList, FileText, Gavel, GraduationCap, Shield, ShieldAlert, Sparkles, TrendingUp, Users, Zap } from 'lucide-react'
+import {
+  IconAudit, IconBook, IconCompany, IconDraft, IconIncident, IconLedger,
+  IconPeople, IconResources, IconSeal, IconSetup, IconShield, IconSpark,
+  IconSteps, IconTraining, IconTrend,
+} from '../nav-icons'
 import SidebarShell from '../SidebarShell'
 import type { NavItem, NavGroup } from '../SidebarShell'
 import { useMe } from '../../hooks/useMe'
@@ -20,39 +24,39 @@ const nav: (NavItem | NavGroup)[] = [
     label: 'Safety',
     defaultOpen: true,
     items: [
-      { to: '/app/ir', icon: AlertTriangle, label: 'Incidents' },
-      { to: '/app/ir/risk-insights', icon: TrendingUp, label: 'Risk Insights' },
-      { to: '/app/ir/osha', icon: ClipboardList, label: 'OSHA Logs' },
+      { to: '/app/ir', icon: IconIncident, label: 'Incidents' },
+      { to: '/app/ir/risk-insights', icon: IconTrend, label: 'Risk Insights' },
+      { to: '/app/ir/osha', icon: IconLedger, label: 'OSHA Logs' },
     ],
   },
   {
     label: 'Policy',
     defaultOpen: true,
     items: [
-      { to: '/app/handbooks', icon: FileText, label: 'Handbooks' },
-      { to: '/app/resources/handbook-audit', icon: ShieldAlert, label: 'Handbook Audit', feature: 'handbook_audit' },
-      { to: '/app/handbook-pilot', icon: Sparkles, label: 'Handbook Pilot', feature: 'handbook_pilot' },
-      { to: '/app/matcha-x/compliance', icon: Shield, label: 'Compliance', feature: 'compliance_lite', tag: 'Pro' },
+      { to: '/app/handbooks', icon: IconBook, label: 'Handbooks' },
+      { to: '/app/resources/handbook-audit', icon: IconAudit, label: 'Handbook Audit', feature: 'handbook_audit' },
+      { to: '/app/handbook-pilot', icon: IconDraft, label: 'Handbook Pilot', feature: 'handbook_pilot' },
+      { to: '/app/matcha-x/compliance', icon: IconShield, label: 'Compliance', feature: 'compliance_lite', tag: 'Pro' },
     ],
   },
   {
     label: 'People',
     defaultOpen: true,
     items: [
-      { to: '/app/employees', icon: Users, label: 'Employees', feature: 'employees' },
-      { to: '/app/training', icon: GraduationCap, label: 'Training', feature: 'training' },
-      { to: '/app/discipline', icon: Gavel, label: 'Performance Action', feature: 'discipline' },
-      { to: '/app/credential-templates', icon: BadgeCheck, label: 'Credentialing', feature: 'credential_templates' },
+      { to: '/app/employees', icon: IconPeople, label: 'Employees', feature: 'employees' },
+      { to: '/app/training', icon: IconTraining, label: 'Training', feature: 'training' },
+      { to: '/app/discipline', icon: IconSteps, label: 'Performance Action', feature: 'discipline' },
+      { to: '/app/credential-templates', icon: IconSeal, label: 'Credentialing', feature: 'credential_templates' },
     ],
   },
   {
     label: 'Workspace',
     defaultOpen: true,
     items: [
-      { to: '/app/company', icon: Building2, label: 'Company' },
-      { to: '/matcha-x/onboarding', icon: Zap, label: 'Compliance Setup' },
-      { to: '/app/resources', icon: BookOpen, label: 'Resources' },
-      { to: '/app/whats-new', icon: Sparkles, label: "What's New" },
+      { to: '/app/company', icon: IconCompany, label: 'Company' },
+      { to: '/matcha-x/onboarding', icon: IconSetup, label: 'Compliance Setup' },
+      { to: '/app/resources', icon: IconResources, label: 'Resources' },
+      { to: '/app/whats-new', icon: IconSpark, label: "What's New" },
     ],
   },
 ]
