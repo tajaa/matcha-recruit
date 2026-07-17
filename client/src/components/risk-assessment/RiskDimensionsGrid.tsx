@@ -5,6 +5,7 @@ import {
   formatCurrency,
   type Band, type DimensionResult, type CostOfRisk, type CostLineItem,
 } from '../../types/risk-assessment'
+import { HoverTip } from './InfoTip'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -77,13 +78,12 @@ function getCostOfRisk(dim: DimensionResult): CostOfRisk | null {
 // ─── Sub-components ──────────────────────────────────────────────────────────
 
 function HelpTooltip({ text }: { text: string }) {
+  // Bubble is portalled (see HoverTip) — the dimension cards are
+  // `rounded-2xl overflow-hidden`, which clipped the old absolute bubble.
   return (
-    <span className="relative group/help inline-flex">
+    <HoverTip text={text}>
       <span className="text-[8px] text-zinc-600 opacity-0 group-hover:opacity-100 transition-opacity cursor-help">?</span>
-      <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-56 px-3 py-2 text-[10px] leading-relaxed text-zinc-300 bg-zinc-900 border border-white/10 shadow-xl opacity-0 group-hover/help:opacity-100 transition-opacity z-50">
-        {text}
-      </span>
-    </span>
+    </HoverTip>
   )
 }
 

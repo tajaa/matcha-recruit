@@ -3,15 +3,15 @@ import {
   BAND_COLOR, BAND_LABEL, DIMENSION_ORDER, DIMENSION_LABELS, DIMENSION_HELP,
   type Band, type DimensionResult,
 } from '../../types/risk-assessment'
+import { HoverTip } from './InfoTip'
 
 function HelpTooltip({ text }: { text: string }) {
+  // The bubble itself is portalled (see HoverTip) — the grid below is
+  // `rounded-2xl overflow-hidden`, which clipped the old absolute bubble.
   return (
-    <span className="relative group/help inline-flex">
+    <HoverTip text={text}>
       <HelpCircle className="w-3 h-3 text-zinc-600 opacity-0 group-hover:opacity-100 transition-opacity cursor-help" />
-      <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-56 px-3 py-2 text-[10px] leading-relaxed text-zinc-300 bg-zinc-900 border border-white/10 shadow-xl opacity-0 group-hover/help:opacity-100 transition-opacity z-50">
-        {text}
-      </span>
-    </span>
+    </HoverTip>
   )
 }
 
