@@ -64,17 +64,35 @@ def _loc_label(row) -> str:
     return city or state or "Company-wide"
 
 
-def _risk_penalty(pen: dict | None) -> RiskPenalty | None:
-    """Build a RiskPenalty from a stored `metadata->'penalties'` block.
+def _risk_penalty(
+    pen: dict | None,
+    *,
+    authority_url: str | None = None,
+    authority_citation: str | None = None,
+    effective_date=None,
+) -> RiskPenalty | None:
+    """Build a RiskPenalty from a stored penalty block + its AUTHORITY ROW.
 
     One builder for every caller so provenance can't reach one surface and not
     another — the citation is the difference between "$16,550" and "$16,550,
-    29 CFR 1903.15(d)(3), and here is the page".
+    29 CFR 1903.15(d), and here is the page".
 
-    `grounded` is asserted only by the writer that parsed the figure out of the
-    statute (`penalty_schedules.penalties_payload`). A model-recalled block has
-    no grounding key, so it reports False and its citation fields stay null
-    rather than lending it borrowed authority.
+    **Provenance is read through the FK, never out of the JSONB.**
+    `metadata->'penalties'` is a blob the research path lets a MODEL author —
+    `gemini_compliance` literally prompts for "source_url" — so a figure's own
+    block cannot be trusted to say where it came from, and a `source_url` from it
+    must never reach an `href` (that is a `javascript:` XSS waiting for one bad
+    generation). `authority_index_items.source_url` is built by f-string from
+    integers parsed out of the eCFR structure API, so its scheme is a literal in
+    our source.
+
+    Same reason `grounded` is the FK's existence rather than a JSONB flag: a
+    model can emit `"grounding": "grounded"` into the blob; it cannot fabricate a
+    foreign key to a real ingested statute. The unforgeable fact is the join.
+
+    (Same lesson the catalog already learned once: resolve authority through
+    `jurisdiction_requirement_id`, not the denormalized free-text columns beside
+    it.)
     """
     if not pen:
         return None
@@ -85,10 +103,11 @@ def _risk_penalty(pen: dict | None) -> RiskPenalty | None:
         annual_cap=pen.get("annual_cap"),
         enforcing_agency=pen.get("enforcing_agency"),
         summary=pen.get("summary"),
-        citation=pen.get("citation"),
-        source_url=pen.get("source_url"),
-        effective_date=pen.get("effective_date"),
-        grounded=pen.get("grounding") == "grounded",
+        # All three come from the bound authority row or not at all.
+        citation=authority_citation,
+        source_url=authority_url,
+        effective_date=effective_date.isoformat() if hasattr(effective_date, "isoformat") else effective_date,
+        grounded=bool(authority_url and authority_citation),
     )
 
 
@@ -121,9 +140,14 @@ async def _wage_penalty_for_location(conn, jurisdiction_id, rate_type: str) -> t
             FROM jurisdictions j JOIN chain c ON j.id = c.parent_id
             WHERE c.depth < 10  -- cycle guard: chain is federal→…→city, never deep
         )
-        SELECT jr.statute_citation, jr.metadata->'penalties' AS penalties
+        SELECT jr.statute_citation, jr.metadata->'penalties' AS penalties,
+               jr.penalty_effective_date,
+               -- Provenance from the bound authority row, not the blob.
+               pai.source_url AS penalty_source_url,
+               pai.citation   AS penalty_citation
         FROM chain c
         JOIN jurisdiction_requirements jr ON jr.jurisdiction_id = c.id
+        LEFT JOIN authority_index_items pai ON pai.id = jr.penalty_item_id
         WHERE jr.category = 'minimum_wage'
           AND COALESCE(jr.rate_type, 'general') = $2
           AND jr.status = 'active'
@@ -134,7 +158,12 @@ async def _wage_penalty_for_location(conn, jurisdiction_id, rate_type: str) -> t
     )
     if not row:
         return None, None
-    penalty = _risk_penalty(_parse_penalties(row["penalties"]))
+    penalty = _risk_penalty(
+        _parse_penalties(row["penalties"]),
+        authority_url=row["penalty_source_url"],
+        authority_citation=row["penalty_citation"],
+        effective_date=row["penalty_effective_date"],
+    )
     return penalty, row["statute_citation"]
 
 
@@ -468,10 +497,16 @@ async def get_compliance_risk_summary(company_id: UUID) -> ComplianceRiskSummary
                 """
                 SELECT rcs.location_id, rcs.jurisdiction_requirement_id, rcs.regulation_key,
                        rcs.evidence, rcs.basis,
-                       cat.title, cat.statute_citation, cat.metadata -> 'penalties' AS penalties
+                       cat.title, cat.statute_citation, cat.metadata -> 'penalties' AS penalties,
+                       cat.penalty_effective_date,
+                       -- Provenance comes from the BOUND authority row, never
+                       -- from the model-writable penalties blob.
+                       pai.source_url AS penalty_source_url,
+                       pai.citation   AS penalty_citation
                 FROM requirement_compliance_status rcs
                 JOIN jurisdiction_requirements cat
                   ON cat.id = rcs.jurisdiction_requirement_id
+                LEFT JOIN authority_index_items pai ON pai.id = cat.penalty_item_id
                 WHERE rcs.company_id = $1 AND rcs.status = 'non_compliant'
                   AND NOT (rcs.regulation_key = ANY($2::text[]))
                 """,
@@ -481,7 +516,12 @@ async def get_compliance_risk_summary(company_id: UUID) -> ComplianceRiskSummary
                 loc = loc_by_id.get(r["location_id"])
                 key = f"requirement:{r['location_id']}:{r['jurisdiction_requirement_id']}"
                 ev = _parse_penalties(r["evidence"]) or {}
-                penalty = _risk_penalty(_parse_penalties(r["penalties"]))
+                penalty = _risk_penalty(
+                    _parse_penalties(r["penalties"]),
+                    authority_url=r["penalty_source_url"],
+                    authority_citation=r["penalty_citation"],
+                    effective_date=r["penalty_effective_date"],
+                )
                 basis_by_key[key] = {
                     "status": "non_compliant",
                     "basis": r["basis"],

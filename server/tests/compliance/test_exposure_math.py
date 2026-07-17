@@ -254,31 +254,31 @@ def test_nothing_unproven_is_a_zero_ceiling():
 
 # ── provenance: a figure must be able to answer "says who?" ─────────────────
 
-def test_a_grounded_block_carries_its_citation_and_link():
-    """The UI shows the citation only when `grounded`. If the builder drops these
-    the figure silently becomes an unsourced assertion again — which is the whole
+ECFR_URL = "https://www.ecfr.gov/current/title-29/section-1903.15"
+
+
+def test_a_bound_figure_carries_its_citation_and_link():
+    """The UI shows the citation only when `grounded`. If the builder drops
+    these the figure silently becomes an unsourced assertion again — the whole
     condition this work exists to end."""
     from app.core.services.compliance_risk import _risk_penalty
 
-    p = _risk_penalty({
-        "civil_penalty_max": 16_550.0,
-        "per_violation": True,
-        "enforcing_agency": "OSHA",
-        "citation": "29 CFR 1903.15(d)",
-        "source_url": "https://www.ecfr.gov/current/title-29/section-1903.15",
-        "effective_date": "2025-01-15",
-        "grounding": "grounded",
-    })
+    p = _risk_penalty(
+        {"civil_penalty_max": 16_550.0, "per_violation": True, "enforcing_agency": "OSHA"},
+        authority_url=ECFR_URL,
+        authority_citation="29 CFR 1903.15",
+        effective_date="2025-01-15",
+    )
     assert p.grounded is True
-    assert p.citation == "29 CFR 1903.15(d)"
-    assert p.source_url.startswith("https://www.ecfr.gov/current/")
+    assert p.citation == "29 CFR 1903.15"
+    assert p.source_url == ECFR_URL
     assert p.effective_date == "2025-01-15"
     assert p.civil_max == 16_550.0
 
 
-def test_a_model_recalled_block_is_not_dressed_as_grounded():
-    """1,023 rows look exactly like this — figures with no source. They must
-    report grounded=False so the UI shows no citation rather than implying one."""
+def test_an_unbound_block_is_not_dressed_as_grounded():
+    """1,023 rows look exactly like this — figures with no bound authority. They
+    must report grounded=False so the UI renders plain text, not a link."""
     from app.core.services.compliance_risk import _risk_penalty
 
     p = _risk_penalty({
@@ -291,20 +291,57 @@ def test_a_model_recalled_block_is_not_dressed_as_grounded():
     assert p.source_url is None
 
 
-def test_the_source_url_is_never_the_xml_api_endpoint():
-    """A person following the citation needs the eCFR page. body_source_url is
-    the versioner API we fetch XML from — a snapshot-dated machine endpoint that
-    renders as a wall of markup."""
+def test_the_blob_can_never_supply_the_link_or_forge_grounding():
+    """THE security property. `metadata->'penalties'` is authored by a MODEL on
+    the research path (gemini_compliance prompts for "source_url"), so a block
+    claiming its own provenance is exactly what an injected `javascript:` URL
+    would look like. Provenance comes from the FK'd authority row or not at all;
+    a blob asserting grounding without a bound row must be ignored."""
     from app.core.services.compliance_risk import _risk_penalty
 
-    p = _risk_penalty({
-        "civil_penalty_max": 16_550.0,
+    hostile = {
+        "civil_penalty_max": 999_999.0,
+        "source_url": "javascript:alert(document.cookie)",
         "citation": "29 CFR 1903.15(d)",
-        "source_url": "https://www.ecfr.gov/current/title-29/section-1903.15",
         "grounding": "grounded",
-    })
-    assert "api/versioner" not in (p.source_url or "")
-    assert ".xml" not in (p.source_url or "")
+    }
+    p = _risk_penalty(hostile)  # no authority row bound
+    assert p.grounded is False
+    assert p.source_url is None
+    assert p.citation is None
+
+
+def test_the_authority_row_wins_over_a_conflicting_blob():
+    from app.core.services.compliance_risk import _risk_penalty
+
+    p = _risk_penalty(
+        {"civil_penalty_max": 16_550.0, "source_url": "javascript:alert(1)",
+         "citation": "totally made up"},
+        authority_url=ECFR_URL,
+        authority_citation="29 CFR 1903.15",
+    )
+    assert p.source_url == ECFR_URL
+    assert p.citation == "29 CFR 1903.15"
+
+
+def test_a_partial_binding_does_not_count_as_grounded():
+    """Half a provenance is not a provenance — don't render a link with no
+    citation, or a citation with nothing to follow."""
+    from app.core.services.compliance_risk import _risk_penalty
+
+    assert _risk_penalty({"civil_penalty_max": 1.0}, authority_url=ECFR_URL).grounded is False
+    assert _risk_penalty({"civil_penalty_max": 1.0},
+                         authority_citation="29 CFR 1903.15").grounded is False
+
+
+def test_a_date_object_is_serialized_for_the_wire():
+    from datetime import date
+
+    from app.core.services.compliance_risk import _risk_penalty
+
+    p = _risk_penalty({"civil_penalty_max": 1.0}, authority_url=ECFR_URL,
+                      authority_citation="c", effective_date=date(2025, 1, 15))
+    assert p.effective_date == "2025-01-15"
 
 
 def test_no_penalty_block_yields_no_penalty():

@@ -242,6 +242,14 @@ def penalties_payload(
     `keep` carries the model's prose (`summary`, `criminal`) forward — it is
     genuinely useful where the statute states no figure — but it can never
     override a parsed number.
+
+    Deliberately writes NO `source_url`. The link belongs to the bound authority
+    row (`penalty_item_id → authority_index_items.source_url`), and the reader
+    joins to it. Copying it in here would put a URL a reader might follow inside
+    the one blob the research path lets a MODEL author, where it is
+    indistinguishable from a fabricated one — the `citation`/`effective_date`
+    below are kept only as a denormalized convenience for admin surfaces and are
+    never the source of a rendered link.
     """
     default = schedule.tier(source.default_tier) or schedule.tiers[0]
     out = {
@@ -263,7 +271,6 @@ def penalties_payload(
         ],
         "citation": schedule.citation,
         "effective_date": schedule.effective_date.isoformat() if schedule.effective_date else None,
-        "source_url": schedule.source_url,
         "grounding": "grounded",
     }
     for prose in ("summary", "criminal"):
