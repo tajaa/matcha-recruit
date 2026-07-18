@@ -134,13 +134,11 @@ final class ProjectWebSocket: NSObject {
             print("[ProjectWS] connect skipped — no access token")
             return
         }
-        let base = APIClient.shared.baseURL
-        let wsBase = base
-            .replacingOccurrences(of: "http://", with: "ws://")
-            .replacingOccurrences(of: "https://", with: "wss://")
-            .replacingOccurrences(of: "/api", with: "")
+        // Suffix-anchored derivation (APIClient.wsBase) — the old global
+        // "/api" replace corrupted api.* hosts, silently killing realtime.
+        let wsBase = APIClient.shared.wsBase
         guard let url = URL(string: "\(wsBase)/ws/projects") else {
-            print("[ProjectWS] connect skipped — invalid URL base=\(base)")
+            print("[ProjectWS] connect skipped — invalid URL base=\(wsBase)")
             return
         }
         print("[ProjectWS] connect initiated → \(wsBase)/ws/projects")

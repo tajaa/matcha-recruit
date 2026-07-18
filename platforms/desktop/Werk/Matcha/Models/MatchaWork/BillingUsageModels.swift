@@ -92,6 +92,13 @@ struct MWCheckoutResponse: Codable {
 enum MWPlan: String, Codable, Comparable {
     case free, lite, pro, business
 
+    // NOTE: deliberately a strict raw-value decode — do NOT add an
+    // unknown → .free fallback. AppState.refreshEntitlements' catch keeps
+    // the LAST-KNOWN entitlements when the decode throws, so a subscriber
+    // migrated to a future server-side tier keeps their paid gates until an
+    // app update ships the new case. A .free fallback would decode
+    // "successfully" and actively overwrite their paid plan with free.
+
     private var rank: Int {
         switch self {
         case .free: return 0

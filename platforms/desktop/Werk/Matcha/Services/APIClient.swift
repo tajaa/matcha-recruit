@@ -63,6 +63,29 @@ private func _isTransientNetworkError(_ error: Error) -> URLError? {
     return _transientNetworkCodes.contains(urlError.code) ? urlError : nil
 }
 
+/// The single statement of which HTTP methods are safe to auto-retry after a
+/// transient connection drop. A non-idempotent verb can have been received and
+/// applied by the server before the connection died — replaying it duplicates
+/// the side effect (e.g. a second Stripe checkout session).
+private func _isIdempotentMethod(_ method: String) -> Bool {
+    let m = method.uppercased()
+    return m == "GET" || m == "HEAD"
+}
+
+/// True only when the server DEFINITIVELY rejected the session during a
+/// token-refresh attempt: a 401/403 from /auth/refresh, or no stored refresh
+/// token (both surface as `APIError.unauthorized` / `httpError` 401/403).
+/// Everything else — network blips, 5xx deploy windows (including a plain
+/// 500 with a JSON body that `_isTransientMaintenance` doesn't match), and
+/// decode errors (a captive portal or proxy answering 200 with garbage) — is
+/// environmental: logging out on those deletes a still-valid keychain
+/// refresh token and forces a needless full re-login.
+private func _isAuthRejection(_ error: Error) -> Bool {
+    if case APIError.unauthorized = error { return true }
+    if case APIError.httpError(let code, _) = error { return code == 401 || code == 403 }
+    return false
+}
+
 class APIClient {
     static let shared = APIClient()
 
@@ -84,10 +107,69 @@ class APIClient {
         return "https://hey-matcha.com/api"
         #endif
     }()
-    var accessToken: String?
+
+    /// `baseURL` with any trailing slashes and a trailing "/api" path segment
+    /// stripped — suffix-anchored, because a global string replace corrupts
+    /// api-subdomain hosts (e.g. "https://api.example.com/api" →
+    /// "https:/.example.com"). Shared by `webOrigin` and `wsBase`.
+    private var apiOrigin: String {
+        var origin = baseURL
+        while origin.hasSuffix("/") { origin = String(origin.dropLast()) }
+        if origin.hasSuffix("/api") { origin = String(origin.dropLast("/api".count)) }
+        return origin
+    }
+
+    /// Web-app origin for browser redirects (Stripe success/cancel URLs).
+    /// A localhost base is the FastAPI backend, which serves no /work SPA
+    /// route, so dev builds fall back to the prod web app (the
+    /// pre-derivation behavior).
+    var webOrigin: String {
+        let origin = apiOrigin
+        if !origin.contains("127.0.0.1") && !origin.contains("localhost") {
+            return origin
+        }
+        return "https://hey-matcha.com"
+    }
+
+    /// WebSocket base for the /ws/* endpoints: `apiOrigin` with http(s)
+    /// swapped to ws(s). Unlike `webOrigin` there is NO prod fallback —
+    /// sockets must reach the same host as the API, including localhost in
+    /// DEBUG.
+    var wsBase: String {
+        let origin = apiOrigin
+        if origin.hasPrefix("https://") { return "wss://" + origin.dropFirst("https://".count) }
+        if origin.hasPrefix("http://") { return "ws://" + origin.dropFirst("http://".count) }
+        return origin
+    }
+    /// Bearer token. Read on every request from background executors and
+    /// written from @MainActor (login / logout / refresh). `APIClient` is a
+    /// plain shared singleton, so guard the non-atomic `Optional<String>`
+    /// behind a lock — the previous bare `var` was an unsynchronized read/write
+    /// data race (a logout clearing it could tear a concurrent request's read).
+    private let _tokenLock = NSLock()
+    private var _accessToken: String?
+    var accessToken: String? {
+        get { _tokenLock.lock(); defer { _tokenLock.unlock() }; return _accessToken }
+        set { _tokenLock.lock(); defer { _tokenLock.unlock() }; _accessToken = newValue }
+    }
 
     // Will be set by AppState to handle logout on 401
     var onUnauthorized: (() -> Void)?
+
+    /// Shared failure policy for the 401 → refresh → retry path, stated ONCE
+    /// so `request` and `requestData` cannot drift (a fix applied to one and
+    /// not the other would reintroduce destructive logout on exactly half the
+    /// call surface). Only a definitive rejection (`_isAuthRejection`) ends
+    /// the session; every other failure rethrows untouched. Note: a genuine
+    /// refresh-POST 401 also fires onUnauthorized inside that nested request
+    /// call — `didLogout` is idempotence-guarded, so the double signal is safe.
+    private func failAfterRefreshFailure(_ error: Error) async throws -> Never {
+        if _isAuthRejection(error) {
+            await MainActor.run { onUnauthorized?() }
+            throw APIError.unauthorized
+        }
+        throw error
+    }
 
     private init() {
         // Restore cached token from keychain on launch
@@ -167,7 +249,9 @@ class APIClient {
             // short delay, then surface a friendlier APIError so the UI shows
             // "Couldn't reach the server" instead of raw Foundation text.
             if let urlError = _isTransientNetworkError(error) {
-                if retryOnMaintenance {
+                // Only auto-retry idempotent methods (see _isIdempotentMethod);
+                // the maintenance path below is GET-gated for the same reason.
+                if retryOnMaintenance && _isIdempotentMethod(method) {
                     try? await Task.sleep(nanoseconds: 1_500_000_000)
                     return try await request(method: method, path: path, body: body, retryOnUnauthorized: retryOnUnauthorized, retryOnMaintenance: false)
                 }
@@ -188,8 +272,7 @@ class APIClient {
                     // Retry with new token
                     return try await request(method: method, path: path, body: body, retryOnUnauthorized: false)
                 } catch {
-                    await MainActor.run { onUnauthorized?() }
-                    throw APIError.unauthorized
+                    try await failAfterRefreshFailure(error)
                 }
             } else {
                 await MainActor.run { onUnauthorized?() }
@@ -258,7 +341,9 @@ class APIClient {
             (data, response) = try await URLSession.shared.data(for: urlRequest)
         } catch {
             if let urlError = _isTransientNetworkError(error) {
-                if retryOnMaintenance {
+                // Idempotent-only retry — see _isIdempotentMethod; never replay
+                // a mutating verb that may have already been applied.
+                if retryOnMaintenance && _isIdempotentMethod(method) {
                     try? await Task.sleep(nanoseconds: 1_500_000_000)
                     return try await requestData(method: method, path: path, body: body, retryOnUnauthorized: retryOnUnauthorized, retryOnMaintenance: false)
                 }
@@ -279,8 +364,7 @@ class APIClient {
                     _ = try await AuthService.shared.refresh()
                     return try await requestData(method: method, path: path, body: body, retryOnUnauthorized: false)
                 } catch {
-                    await MainActor.run { onUnauthorized?() }
-                    throw APIError.unauthorized
+                    try await failAfterRefreshFailure(error)
                 }
             } else {
                 await MainActor.run { onUnauthorized?() }
@@ -314,5 +398,15 @@ class APIClient {
         }
         let raw = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
         return raw?.isEmpty == false ? raw : nil
+    }
+}
+
+extension Error {
+    /// True for task/URLSession cancellation — navigation away or a
+    /// superseding load, never a failure the user should see. One shared
+    /// definition so catch sites can't drift between the two shapes
+    /// (`is CancellationError` alone misses URLSession-level cancels).
+    var isCancellation: Bool {
+        self is CancellationError || (self as? URLError)?.code == .cancelled
     }
 }

@@ -9,6 +9,20 @@ final class ChannelChatViewModel {
     var typingUsers: [String: String] = [:]
     var isLoading = true
     var errorMessage: String?
+    /// History pagination. The channel-detail endpoint only embeds the newest
+    /// page, so older history is fetched on demand via `getMessages(before:)`.
+    var hasMoreHistory = false
+    var isLoadingOlder = false
+    /// Bumped when a silent refresh merge changes the list — the view watches
+    /// this to scroll to the latest message. Needed because the scroll trigger
+    /// keys on the LAST message's identity (so history prepends don't yank the
+    /// view down), which misses merges that add messages above a pending/
+    /// failed row stuck at the tail.
+    var scrollToLatestTick = 0
+    /// Mirrors the server's page size: both `getMessages`' default limit and
+    /// the newest-page embed in the channel-detail endpoint (channels.py) are
+    /// 50. The full-page heuristic below assumes these agree.
+    private let historyPageSize = 50
 
     private(set) var channelId: String?
     private var typingClearTask: Task<Void, Never>?
@@ -98,6 +112,102 @@ final class ChannelChatViewModel {
         pendingFailureTasks.removeAll()
     }
 
+    /// Outcome of folding a freshly-fetched newest page into the on-screen
+    /// list. Pure data so `refreshMerge` can be unit-tested without a socket,
+    /// a service, or a live channel.
+    struct RefreshMerge: Equatable {
+        /// The list to display. Only meaningful when `changed` is true —
+        /// reassigning an identical list rebuilds the view (visible flash).
+        var messages: [ChannelMessage]
+        var hasMoreHistory: Bool
+        /// Whether the merge changed the id sequence, i.e. whether to assign.
+        var changed: Bool
+        /// Whether to bump `scrollToLatestTick`.
+        var scrollToLatest: Bool
+    }
+
+    /// Fold a refreshed newest page into the current list.
+    ///
+    /// Keeps local optimistic rows the server echo hasn't replaced yet, and
+    /// preserves history paged in via `loadOlder()` — the chronological prefix
+    /// of the current list that predates the newest page. Replacing the array
+    /// with just the newest page would yank paged-in messages out from under
+    /// the reader and strand `hasMoreHistory`.
+    ///
+    /// If nothing overlaps the newest page, more than a full page arrived while
+    /// away — the gap between the kept history and the newest page would be
+    /// unknowable, so it falls back to the newest page alone and recomputes the
+    /// flag.
+    ///
+    /// Known cosmetic edge: a pending/failed row that drifted mid-list (WS rows
+    /// appended after it) re-sorts to the tail here — positional preservation
+    /// would need timestamp interleaving, deliberately not attempted.
+    ///
+    /// `nonisolated` so tests can call it off the main actor; it touches no
+    /// instance state.
+    nonisolated static func refreshMerge(
+        existing: [ChannelMessage],
+        newest: [ChannelMessage],
+        hasMoreHistory: Bool,
+        pageSize: Int
+    ) -> RefreshMerge {
+        let serverIds = Set(newest.map(\.id))
+        let pendingExtras = existing.filter { m in
+            (m.pending || m.failed) && !serverIds.contains(m.id)
+        }
+        let overlaps = existing.contains { serverIds.contains($0.id) }
+        let olderPrefix = overlaps
+            ? Array(existing.prefix { !serverIds.contains($0.id) && !$0.pending && !$0.failed })
+            : []
+        let resolvedHasMore = overlaps ? hasMoreHistory : newest.count >= pageSize
+
+        let oldIds = Set(existing.map(\.id))
+        let hasNewMessages = newest.contains { !oldIds.contains($0.id) }
+        let merged = olderPrefix + newest + pendingExtras
+        let changed = merged.map(\.id) != existing.map(\.id)
+
+        // The tail may be an unchanged pending/failed row, so the view's
+        // last-identity scroll trigger can't see newly arrived messages —
+        // signal it explicitly. ONLY when new messages actually arrived AND the
+        // tail is pinned: a deletion-only or reorder-only merge must not yank a
+        // reader out of the history they're reading, and a changed tail is
+        // already handled by the identity trigger.
+        let tailUnchanged = merged.last?.stableKey == existing.last?.stableKey
+
+        return RefreshMerge(
+            messages: merged,
+            hasMoreHistory: resolvedHasMore,
+            changed: changed,
+            scrollToLatest: changed && tailUnchanged && hasNewMessages
+        )
+    }
+
+    /// Outcome of folding a fetched older page into the head of the list.
+    struct OlderPageMerge: Equatable {
+        /// Messages to prepend, with anything already on screen filtered out.
+        var fresh: [ChannelMessage]
+        var hasMoreHistory: Bool
+    }
+
+    /// Dedup a fetched older page against what's already on screen and restate
+    /// the end-of-history policy: a short page or an all-duplicates page means
+    /// the end was reached.
+    ///
+    /// `nonisolated` so tests can call it off the main actor; it touches no
+    /// instance state.
+    nonisolated static func olderPageMerge(
+        existing: [ChannelMessage],
+        older: [ChannelMessage],
+        pageSize: Int
+    ) -> OlderPageMerge {
+        let existingIds = Set(existing.map(\.id))
+        let fresh = older.filter { !existingIds.contains($0.id) }
+        return OlderPageMerge(
+            fresh: fresh,
+            hasMoreHistory: older.count >= pageSize && !fresh.isEmpty
+        )
+    }
+
     func loadChannel(channelId: String, isRefresh: Bool = false) async {
         if !isRefresh { isLoading = true }   // refresh stays silent — no loading flash
         errorMessage = nil
@@ -106,21 +216,75 @@ final class ChannelChatViewModel {
             channel = detail
             ws.setCurrentRoomName(detail.name)
             if isRefresh {
-                // Silent merge: keep local optimistic rows the server echo hasn't
-                // replaced yet, and only reassign when the id list actually
-                // changed (identical reassignment would rebuild the list = flash).
-                let pendingExtras = messages.filter { m in
-                    (m.pending || m.failed) && !detail.messages.contains(where: { $0.id == m.id })
+                let merge = Self.refreshMerge(
+                    existing: messages,
+                    newest: detail.messages,
+                    hasMoreHistory: hasMoreHistory,
+                    pageSize: historyPageSize
+                )
+                hasMoreHistory = merge.hasMoreHistory
+                if merge.changed {
+                    messages = merge.messages
+                    if merge.scrollToLatest { scrollToLatestTick &+= 1 }
                 }
-                let merged = detail.messages + pendingExtras
-                if merged.map(\.id) != messages.map(\.id) { messages = merged }
             } else {
                 messages = detail.messages
+                // A full page back means there may be older history to page in.
+                hasMoreHistory = detail.messages.count >= historyPageSize
                 isLoading = false
             }
         } catch {
-            errorMessage = error.localizedDescription
+            // Always clear the cold-load spinner, even on cancellation —
+            // an early return that leaves isLoading stuck true would show a
+            // phantom loading state on a warm cached VM.
             if !isRefresh { isLoading = false }
+            if error.isCancellation { return }
+            if isRefresh {
+                // A PERMANENT failure on a silent refresh means the channel
+                // is gone for this user (deleted server-side / kicked) —
+                // there is no WS event for either, so this is the only
+                // signal. Surface it: the full-pane error state is correct
+                // for a dead channel. Transient failures stay silent — they
+                // must not blank a healthy, already-loaded chat.
+                if case APIError.httpError(let code, _) = error, code == 403 || code == 404 {
+                    errorMessage = error.localizedDescription
+                }
+                return
+            }
+            // Cold loads always surface the failure (nothing else on screen).
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Fetch the page of messages immediately older than the current oldest and
+    /// prepend them. No-op while already loading or once a short page confirms
+    /// there is no more history. Without this, `getMessages(before:)` had zero
+    /// callers and channels with >50 messages silently truncated to the newest
+    /// page with no way to reach older history.
+    func loadOlder() async {
+        guard hasMoreHistory, !isLoadingOlder,
+              let channelId, let oldest = messages.first else { return }
+        isLoadingOlder = true
+        defer { isLoadingOlder = false }
+        do {
+            let older = try await service.getMessages(channelId: channelId, before: oldest.createdAt, limit: historyPageSize)
+            // The list may have been REPLACED while the fetch was in flight —
+            // a silent refresh merge on refocus can take its no-overlap
+            // fallback and reset to the newest page. If the anchor row this
+            // page was fetched against is no longer the head, splicing the
+            // stale page in would leave an unfillable mid-list gap; drop it.
+            // The button remains and re-pages consistently off the new head.
+            guard messages.first?.id == oldest.id else { return }
+            let page = Self.olderPageMerge(existing: messages, older: older, pageSize: historyPageSize)
+            hasMoreHistory = page.hasMoreHistory
+            messages.insert(contentsOf: page.fresh, at: 0)
+        } catch {
+            if error.isCancellation { return }
+            // Deliberately NOT errorMessage: the view treats that as a fatal
+            // whole-pane error state, which would replace a healthy loaded
+            // chat because one history page failed. hasMoreHistory stays true,
+            // so the button itself remains as the retry affordance.
+            print("[ChannelChat] loadOlder failed: \(error)")
         }
     }
 

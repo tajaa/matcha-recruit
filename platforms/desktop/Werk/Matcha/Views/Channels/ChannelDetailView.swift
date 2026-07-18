@@ -9,13 +9,13 @@ struct ChannelDetailView: View {
     /// enclosing project owns it (otherwise the collab project can't be pinned).
     var isEmbedded: Bool = false
 
-    @Environment(AppState.self) private var appState
-    @State private var vm = ChannelChatViewModel()
+    @Environment(AppState.self) var appState
+    @State var vm = ChannelChatViewModel()
     /// Composer draft seed. The composer owns the live text locally (so typing
     /// doesn't re-render this view + the message list); we push values in by
     /// bumping the nonce — to prefill on "edit message" or clear after send.
-    @State private var composerSeed = ""
-    @State private var composerSeedNonce = 0
+    @State var composerSeed = ""
+    @State var composerSeedNonce = 0
 
     @MainActor
     init(channelId: String, isEmbedded: Bool = false) {
@@ -28,55 +28,55 @@ struct ChannelDetailView: View {
             ? ChannelChatViewModel()
             : WorkDetailVMStore.shared.channelVM(channelId))
     }
-    @State private var pendingAttachments: [PendingChannelAttachment] = []
-    @State private var isUploading = false
-    @State private var isDragOver = false
-    @State private var replyingTo: ChannelMessage? = nil
-    @State private var hoveredMessageId: String? = nil
-    @State private var lastTypingSentAt: Date = .distantPast
-    @State private var showInviteSheet = false
-    @State private var showManageMembers = false
-    @State private var pendingMessageDelete: ChannelMessage? = nil
+    @State var pendingAttachments: [PendingChannelAttachment] = []
+    @State var isUploading = false
+    @State var isDragOver = false
+    @State var replyingTo: ChannelMessage? = nil
+    @State var hoveredMessageId: String? = nil
+    @State var lastTypingSentAt: Date = .distantPast
+    @State var showInviteSheet = false
+    @State var showManageMembers = false
+    @State var pendingMessageDelete: ChannelMessage? = nil
     /// When set, the composer is editing this message instead of sending new.
-    @State private var editingMessage: ChannelMessage? = nil
-    @State private var inviteToast: String?
+    @State var editingMessage: ChannelMessage? = nil
+    @State var inviteToast: String?
     /// Single hoisted attachment-preview target. Lives here (not per-row) so a
     /// streaming message / hover re-render or LazyVStack recycle can't drop the
     /// binding mid-present — that was the flaky-open bug.
-    @State private var previewFile: MWProjectFile?
+    @State var previewFile: MWProjectFile?
     // "Create ticket" from a message → AI draft → review sheet (project chats only).
-    @State private var ticketDraft: MWTaskDraft?
-    @State private var showTicketReview = false
-    @State private var draftingTicket = false
-    @State private var ticketDraftError: String?
+    @State var ticketDraft: MWTaskDraft?
+    @State var showTicketReview = false
+    @State var draftingTicket = false
+    @State var ticketDraftError: String?
     /// True while the bottom sentinel is on screen — gates message auto-scroll.
-    @State private var isAtBottom = true
+    @State var isAtBottom = true
     /// Bumped whenever WE send a message, to force the viewport to the newest
     /// message regardless of scroll position — sending a reply should always
     /// reveal your own message without a manual scroll.
-    @State private var selfSendScroll = 0
+    @State var selfSendScroll = 0
     // Chat → ticket always drafts with Flash Lite (cheap/fast for this
     // lightweight action), regardless of the header model selector.
-    private var ticketDraftModel: String? {
+    var ticketDraftModel: String? {
         mwModelOptions.first { $0.id == "flash-lite" }?.value
     }
 
-    @Environment(BroadcastService.self) private var broadcast: BroadcastService
-    @Environment(CallService.self) private var call: CallService
+    @Environment(BroadcastService.self) var broadcast: BroadcastService
+    @Environment(CallService.self) var call: CallService
 
-    private var isAdmin: Bool {
+    var isAdmin: Bool {
         let role = vm.channel?.myRole ?? ""
         let global = appState.currentUser?.role ?? ""
         return role == "owner" || role == "moderator" || global == "admin"
     }
 
-    private let ws = ChannelsWebSocket.shared
-    private let senderColumnWidth: CGFloat = 160
-    private let maxAttachments = 10
-    private let maxAttachmentBytes = 50 * 1024 * 1024
+    let ws = ChannelsWebSocket.shared
+    let senderColumnWidth: CGFloat = 160
+    let maxAttachments = 10
+    let maxAttachmentBytes = 50 * 1024 * 1024
     /// Permissive: block only executable / installer types; everything else
     /// (docs, markdown, code, images, video, audio, archives, …) is allowed.
-    private let blockedExtensions: Set<String> = [
+    let blockedExtensions: Set<String> = [
         "exe", "msi", "bat", "cmd", "com", "scr", "vbs", "ps1",
         "app", "dmg", "pkg", "deb", "rpm", "apk", "jar", "bin",
         "command", "scpt", "action", "workflow",
@@ -248,7 +248,7 @@ struct ChannelDetailView: View {
 
     // MARK: - Header
 
-    private var header: some View {
+    var header: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 0) {
                 Text("# ")
@@ -509,589 +509,5 @@ struct ChannelDetailView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
         .background(.regularMaterial)
-    }
-
-    // MARK: - Watch-feed banner
-    //
-    // Shown above the messages list whenever an active broadcast exists in
-    // this channel AND we're not currently connected to its LiveKit feed.
-    // Replaces the silent auto-join — viewer always sees a "Live now" prompt
-    // and clicks Watch to connect (covers the case where auto-join would have
-    // failed token fetch / LiveKit connect with no UI feedback).
-
-    private var watchFeedBanner: some View {
-        let info = broadcast.activeBroadcasts[channelId]
-        let starterName = info.flatMap { id in
-            vm.onlineUsers.first(where: { $0.id == id.startedBy })?.name
-        } ?? info?.title
-        let title: String = {
-            if let n = starterName { return "\(n) is live" }
-            return "Live now in this channel"
-        }()
-        let hasErr = broadcast.errorMessage != nil
-            && broadcast.channelId == channelId
-            && !broadcast.isConnected
-
-        return HStack(spacing: 10) {
-            Circle().fill(Color.red).frame(width: 8, height: 8)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(title)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(appState.themeText.opacity(0.95))
-                if hasErr, let msg = broadcast.errorMessage {
-                    Text("Couldn't connect: \(msg)")
-                        .font(.system(size: 10))
-                        .foregroundColor(.red.opacity(0.85))
-                        .lineLimit(2)
-                }
-            }
-            Spacer()
-            Button {
-                Task { await broadcast.joinAsViewer(channelId: channelId) }
-            } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "play.circle.fill").font(.system(size: 11))
-                    Text(hasErr ? "Retry" : "Watch feed").font(.system(size: 11, weight: .semibold))
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(Color.red.opacity(0.85))
-                .foregroundColor(.white)
-                .cornerRadius(5)
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
-        .background(Color.red.opacity(0.12))
-    }
-
-    // MARK: - Call join banner
-    //
-    // Shown above the messages list when an active audio call exists in this
-    // channel and we're not connected to it. Join is gated by the call's
-    // policy: members-mode admits anyone, invite-only needs an invite (the
-    // owner always may). Disabled with a "full" label at 4/4.
-
-    private var callJoinBanner: some View {
-        let info = call.activeCalls[channelId]
-        let myId = appState.currentUser?.id ?? ""
-        let starterName = info.flatMap { i in
-            vm.channel?.members.first(where: { $0.userId == i.startedBy })?.name
-        }
-        let title = starterName.map { "\($0) started an audio call" } ?? "Audio call in progress"
-        let count = info?.participantIds.count ?? 0
-        let isFull = count >= call.maxParticipants
-        let mayJoin: Bool = {
-            guard let i = info else { return false }
-            if i.startedBy == myId { return true }
-            if i.mode == .members { return true }
-            return i.invitedUserIds.contains(myId)
-        }()
-        let hasErr = call.errorMessage != nil
-            && call.channelId == channelId
-            && !call.isConnected
-
-        return HStack(spacing: 10) {
-            Image(systemName: "waveform")
-                .font(.system(size: 11, weight: .bold))
-                .foregroundColor(Color.matcha500)
-            VStack(alignment: .leading, spacing: 1) {
-                Text("\(title) · \(count)/\(call.maxParticipants)")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(appState.themeText.opacity(0.95))
-                if hasErr, let msg = call.errorMessage {
-                    Text("Couldn't connect: \(msg)")
-                        .font(.system(size: 10))
-                        .foregroundColor(.red.opacity(0.85))
-                        .lineLimit(2)
-                } else if !mayJoin {
-                    Text("Invite only — ask the channel owner for an invite")
-                        .font(.system(size: 10))
-                        .foregroundColor(appState.themeText.opacity(0.45))
-                }
-            }
-            Spacer()
-            if mayJoin {
-                Button {
-                    Task { await call.joinCall(channelId: channelId) }
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "phone.fill").font(.system(size: 11))
-                        Text(hasErr ? "Retry" : (isFull ? "Full" : "Join"))
-                            .font(.system(size: 11, weight: .semibold))
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(isFull ? Color.zinc800 : Color.matcha600)
-                    .foregroundColor(.white)
-                    .cornerRadius(5)
-                }
-                .buttonStyle(.plain)
-                .disabled(isFull && !hasErr)
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
-        .background(Color.matcha600.opacity(0.12))
-    }
-
-    // MARK: - Messages
-
-    private var messagesList: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 10) {
-                    ForEach(vm.messages, id: \.stableKey) { msg in
-                        ChannelMessageRowView(
-                            msg: msg,
-                            members: vm.channel?.members ?? [],
-                            currentUserId: appState.currentUser?.id ?? "",
-                            isAdmin: isAdmin,
-                            hoveredMessageId: $hoveredMessageId,
-                            onReply: { replyingTo = $0 },
-                            onToggleReaction: toggleReaction,
-                            onRequestDelete: { pendingMessageDelete = $0 },
-                            onRequestEdit: { editingMessage = $0; seedComposer($0.content); replyingTo = nil },
-                            onOpenAttachment: { previewFile = previewModel($0) },
-                            onCreateTicket: vm.channel?.projectId != nil ? { startTicketDraft(from: $0) } : nil
-                        )
-                        .opacity((msg.pending || msg.failed) ? 0.55 : 1.0)
-                        .id(msg.stableKey)
-                    }
-                    if !vm.typingUsers.isEmpty {
-                        HStack(alignment: .center, spacing: 6) {
-                            Spacer().frame(width: senderColumnWidth + 16)
-                            TypingBubbleView()
-                            Text(vm.typingUsers.values.sorted().joined(separator: ", "))
-                                .font(.system(size: 10))
-                                .foregroundColor(appState.themeText.opacity(0.35))
-                        }
-                        .transition(.opacity)
-                    }
-                    // Bottom sentinel — visible only when scrolled to the end.
-                    // Gates auto-scroll so inbound messages don't yank the view
-                    // down while the user reads history (macOS 14: no
-                    // onScrollGeometryChange).
-                    Color.clear
-                        .frame(height: 1)
-                        .id("__bottom_anchor")
-                        .onAppear { isAtBottom = true }
-                        .onDisappear { isAtBottom = false }
-                }
-                .padding(.vertical, 14)
-                .padding(.horizontal, 16)
-                .frame(maxWidth: .infinity, alignment: .topLeading)
-            }
-            // Always follow new messages to the bottom. The previous isAtBottom
-            // gate was unreliable (the lazy bottom sentinel's appear/disappear
-            // mis-fires), so inbound messages often didn't reposition the view
-            // and the newest message sat off-screen. Chat-standard behavior:
-            // a new message always reveals itself.
-            .onChange(of: vm.messages.count) {
-                guard let last = vm.messages.last else { return }
-                withAnimation { proxy.scrollTo(last.stableKey, anchor: .bottom) }
-            }
-            // Belt-and-suspenders for our own send (the count may not change at
-            // the exact commit the optimistic row lands).
-            .onChange(of: selfSendScroll) {
-                guard let last = vm.messages.last else { return }
-                withAnimation { proxy.scrollTo(last.stableKey, anchor: .bottom) }
-            }
-            // Initial render scroll-to-bottom. .onChange above fires when
-            // the REST load flips messages.count 0→N, but proxy.scrollTo
-            // runs in the same SwiftUI commit as the LazyVStack's cell
-            // build — the target id isn't tracked yet so the scroll
-            // silently no-ops. A 50ms yield lets the cells materialise
-            // first. Re-fires when the user switches channels.
-            .task(id: vm.channel?.id) {
-                try? await Task.sleep(for: .milliseconds(50))
-                if let last = vm.messages.last {
-                    proxy.scrollTo(last.stableKey, anchor: .bottom)
-                }
-            }
-        }
-        .overlay(
-            Group {
-                if isDragOver {
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(appState.themeAccent, style: StrokeStyle(lineWidth: 2, dash: [6]))
-                        .padding(8)
-                        .overlay(
-                            Text("drop files to attach")
-                                .font(.system(size: 12))
-                                .foregroundColor(appState.themeAccent)
-                        )
-                        .allowsHitTesting(false)
-                }
-            }
-        )
-        .onDrop(of: [UTType.fileURL], isTargeted: $isDragOver) { providers in
-            handleFileDrop(providers)
-            return true
-        }
-        .sheet(item: $previewFile) { file in
-            AttachmentPreviewSheet(file: file)
-        }
-        .sheet(isPresented: $showTicketReview) {
-            if let draft = ticketDraft, let pid = vm.channel?.projectId {
-                AIDraftReviewSheet(
-                    draft: draft,
-                    collaborators: [],
-                    elements: [],
-                    onCreate: { title, column, priority, assignedTo, description, category, elementId, subtasks in
-                        _ = try? await MatchaWorkService.shared.createProjectTask(
-                            projectId: pid, title: title, boardColumn: column,
-                            description: description, priority: priority,
-                            assignedTo: assignedTo, category: category,
-                            elementId: elementId, subtasks: subtasks
-                        )
-                    },
-                    onClose: { showTicketReview = false; ticketDraft = nil }
-                )
-            }
-        }
-        .overlay(alignment: .top) {
-            if draftingTicket {
-                Label("Drafting ticket…", systemImage: "sparkles")
-                    .font(.system(size: 11, weight: .medium))
-                    .padding(.horizontal, 12).padding(.vertical, 6)
-                    .background(.ultraThinMaterial, in: Capsule())
-                    .padding(.top, 8)
-            } else if let err = ticketDraftError {
-                Text(err)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 12).padding(.vertical, 6)
-                    .background(Color.red.opacity(0.85), in: Capsule())
-                    .padding(.top, 8)
-                    .onTapGesture { ticketDraftError = nil }
-                    .task {
-                        try? await Task.sleep(for: .seconds(4))
-                        await MainActor.run { ticketDraftError = nil }
-                    }
-            }
-        }
-    }
-
-    /// Turn a chat message into a kanban ticket: AI-draft it against the linked
-    /// project, then open the review sheet. Project chats only (guarded by the
-    /// caller passing onCreateTicket).
-    private func startTicketDraft(from msg: ChannelMessage) {
-        guard let pid = vm.channel?.projectId, !draftingTicket else { return }
-        let text = msg.content.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
-        draftingTicket = true
-        ticketDraftError = nil
-        Task {
-            do {
-                let draft = try await MatchaWorkService.shared.draftTaskFromPrompt(
-                    projectId: pid, prompt: text, model: ticketDraftModel
-                )
-                await MainActor.run {
-                    draftingTicket = false
-                    ticketDraft = draft
-                    showTicketReview = true
-                }
-            } catch {
-                await MainActor.run {
-                    draftingTicket = false
-                    if case APIError.httpError(let code, _) = error, code == 429 {
-                        ticketDraftError = "Daily AI limit reached — try again later."
-                    } else {
-                        ticketDraftError = "Couldn't draft a ticket from that message."
-                    }
-                }
-            }
-        }
-    }
-
-    /// Adapt a channel attachment to the shared in-app preview model. Lives at
-    /// this level (not per-row) so the single hoisted sheet owns presentation.
-    private func previewModel(_ att: ChannelAttachment) -> MWProjectFile {
-        MWProjectFile(
-            id: att.url, projectId: nil, taskId: nil, uploadedBy: nil,
-            filename: att.filename, storageUrl: att.url,
-            contentType: att.contentType, fileSize: att.size, createdAt: nil
-        )
-    }
-
-    private func deleteMessage(_ msg: ChannelMessage) {
-        Task {
-            do {
-                try await ChannelsService.shared.deleteMessage(channelId: channelId, messageId: msg.id)
-                await MainActor.run {
-                    if let idx = vm.messages.firstIndex(where: { $0.id == msg.id }) {
-                        vm.messages[idx].deletedAt = ISO8601DateFormatter().string(from: Date())
-                        vm.messages[idx].deletedBy = appState.currentUser?.id ?? ""
-                    }
-                }
-            } catch {
-                vm.errorMessage = "Delete failed: \(error.localizedDescription)"
-            }
-        }
-    }
-
-    private func toggleReaction(messageId: String, emoji: String) {
-        Task {
-            do {
-                _ = try await ChannelsService.shared.toggleReaction(
-                    channelId: channelId, messageId: messageId, emoji: emoji
-                )
-            } catch {
-                vm.errorMessage = "Reaction failed: \(error.localizedDescription)"
-            }
-        }
-    }
-
-    // MARK: - Derived
-
-    private var userHandle: String {
-        let email = appState.currentUser?.email ?? "you"
-        return email.split(separator: "@").first.map(String.init) ?? "you"
-    }
-
-    private var channelSlug: String {
-        vm.channel?.slug ?? vm.channel?.name.lowercased().replacingOccurrences(of: " ", with: "-") ?? "channel"
-    }
-
-    // MARK: - Actions
-
-    /// Push a value into the composer's local draft (prefill on edit, clear
-    /// after send) by bumping the seed nonce the composer watches.
-    private func seedComposer(_ s: String) {
-        composerSeed = s
-        composerSeedNonce += 1
-    }
-
-    private func send(_ draft: String) {
-        let trimmed = draft.trimmingCharacters(in: .whitespaces)
-        // Edit mode: commit the edit instead of sending a new message.
-        if let editing = editingMessage {
-            editingMessage = nil
-            seedComposer("")
-            guard !trimmed.isEmpty else { return }
-            Task { await vm.editMessage(editing, newContent: trimmed) }
-            return
-        }
-        // Weave in a referenced kanban ticket (from "Chat about this ticket")
-        // as a reply-style prefix so the channel message carries the ticket
-        // context. Captured + cleared on send.
-        var content = trimmed
-        if let ref = appState.pendingTicketRef {
-            let colLabel = ref.column.replacingOccurrences(of: "_", with: " ").capitalized
-            // Machine-readable marker the message row renders as a clickable
-            // ticket chip. Sanitize the title of the delimiter chars so it
-            // round-trips; clients that don't parse it just see the raw text.
-            let safeTitle = ref.title
-                .replacingOccurrences(of: "⟦", with: "")
-                .replacingOccurrences(of: "⟧", with: "")
-                .replacingOccurrences(of: "|", with: "/")
-            let token = "⟦ticket:\(ref.id)|\(safeTitle)|\(colLabel)⟧"
-            content = trimmed.isEmpty ? token : "\(token)\n\(trimmed)"
-            appState.pendingTicketRef = nil
-        }
-        let attachmentsToSend = pendingAttachments
-        guard !content.isEmpty || !attachmentsToSend.isEmpty else { return }
-        guard !isUploading else { return }
-
-        let replyId = replyingTo?.id
-        let replyPreviewForOptimistic = replyingTo.map { ReplyPreview(
-            id: $0.id,
-            senderName: $0.senderName,
-            content: $0.content,
-            attachments: $0.attachments,
-        ) }
-
-        if attachmentsToSend.isEmpty {
-            let cmid = UUID().uuidString
-            appendOptimisticMessage(
-                clientMessageId: cmid,
-                content: content,
-                attachments: [],
-                replyToId: replyId,
-                replyPreview: replyPreviewForOptimistic,
-            )
-            ws.sendMessage(channelId: channelId, content: content, replyToId: replyId, clientMessageId: cmid)
-            seedComposer("")
-            replyingTo = nil
-            selfSendScroll += 1
-            return
-        }
-
-        isUploading = true
-        Task {
-            do {
-                let files = attachmentsToSend.map { (data: $0.data, filename: $0.filename, mimeType: $0.mimeType) }
-                let uploaded = try await ChannelsService.shared.uploadAttachments(
-                    channelId: channelId, files: files
-                )
-                await MainActor.run {
-                    let cmid = UUID().uuidString
-                    appendOptimisticMessage(
-                        clientMessageId: cmid,
-                        content: content,
-                        attachments: uploaded,
-                        replyToId: replyId,
-                        replyPreview: replyPreviewForOptimistic,
-                    )
-                    ws.sendMessage(channelId: channelId, content: content, attachments: uploaded, replyToId: replyId, clientMessageId: cmid)
-                    seedComposer("")
-                    replyingTo = nil
-                    pendingAttachments.removeAll()
-                    isUploading = false
-                    selfSendScroll += 1
-                }
-            } catch {
-                await MainActor.run {
-                    vm.errorMessage = "Upload failed: \(error.localizedDescription)"
-                    isUploading = false
-                }
-            }
-        }
-    }
-
-    private func appendOptimisticMessage(
-        clientMessageId: String,
-        content: String,
-        attachments: [ChannelAttachment],
-        replyToId: String?,
-        replyPreview: ReplyPreview?,
-    ) {
-        guard let me = appState.currentUser else { return }
-        let pending = ChannelMessage(
-            id: clientMessageId,
-            channelId: channelId,
-            senderId: me.id,
-            senderName: me.name ?? me.email,
-            senderAvatarUrl: me.avatarUrl,
-            content: content,
-            attachments: attachments,
-            replyToId: replyToId,
-            replyPreview: replyPreview,
-            reactions: [],
-            createdAt: ISO8601DateFormatter().string(from: Date()),
-            editedAt: nil,
-            mentionedUserIds: nil,
-            clientMessageId: clientMessageId,
-            pending: true,
-        )
-        vm.messages.append(pending)
-        vm.schedulePendingTimeout(clientMessageId: clientMessageId)
-    }
-
-    // MARK: - File picker + drop
-
-    private func openFilePicker() {
-        let panel = NSOpenPanel()
-        panel.allowsMultipleSelection = true
-        panel.canChooseDirectories = false
-        panel.canChooseFiles = true
-        panel.allowsOtherFileTypes = true   // allow any type; validated on ingest
-        if panel.runModal() == .OK {
-            for url in panel.urls {
-                ingestFile(at: url)
-            }
-        }
-    }
-
-    private func handleFileDrop(_ providers: [NSItemProvider]) {
-        for provider in providers {
-            provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier) { item, _ in
-                guard let data = item as? Data,
-                      let url = URL(dataRepresentation: data, relativeTo: nil) else { return }
-                Task { @MainActor in ingestFile(at: url) }
-            }
-        }
-    }
-
-    private func ingestFile(at url: URL) {
-        let ext = url.pathExtension.lowercased()
-        guard !blockedExtensions.contains(ext) else {
-            vm.errorMessage = "File type .\(ext) isn't allowed"
-            return
-        }
-        guard pendingAttachments.count < maxAttachments else {
-            vm.errorMessage = "Max \(maxAttachments) attachments per message"
-            return
-        }
-        guard let data = try? Data(contentsOf: url) else {
-            vm.errorMessage = "Could not read \(url.lastPathComponent)"
-            return
-        }
-        guard data.count <= maxAttachmentBytes else {
-            vm.errorMessage = "\(url.lastPathComponent) is too large (max 50 MB)"
-            return
-        }
-        let mime = UTType(filenameExtension: ext)?.preferredMIMEType ?? "application/octet-stream"
-        pendingAttachments.append(
-            PendingChannelAttachment(data: data, filename: url.lastPathComponent, mimeType: mime)
-        )
-    }
-
-    /// Pull an image off the system clipboard and stage it as an attachment.
-    /// Lets the user screenshot to clipboard (⌃⌘⇧4) and paste straight into the
-    /// composer — no desktop-file roundtrip. Sandbox-safe (no permission).
-    private func pasteImageFromClipboard() {
-        let pb = NSPasteboard.general
-        // Prefer PNG; fall back to TIFF (the format screenshots land in) and
-        // transcode to PNG so the upload is consistently image/png.
-        let data: Data
-        if let png = pb.data(forType: .png) {
-            data = png
-        } else if let tiff = pb.data(forType: .tiff),
-                  let rep = NSBitmapImageRep(data: tiff),
-                  let png = rep.representation(using: .png, properties: [:]) {
-            data = png
-        } else {
-            vm.errorMessage = "No image on the clipboard — screenshot with ⌃⌘⇧4 first"
-            return
-        }
-        guard pendingAttachments.count < maxAttachments else {
-            vm.errorMessage = "Max \(maxAttachments) attachments per message"
-            return
-        }
-        guard data.count <= maxAttachmentBytes else {
-            vm.errorMessage = "Pasted image is too large (max 10 MB)"
-            return
-        }
-        let stamp = Int(Date().timeIntervalSince1970)
-        pendingAttachments.append(
-            PendingChannelAttachment(data: data, filename: "pasted-\(stamp).png", mimeType: "image/png")
-        )
-    }
-}
-
-// MARK: - Typing bubble
-
-private struct TypingBubbleView: View {
-    @State private var phase: Int = 0
-
-    private let dotSize: CGFloat = 5
-    private let dotColor = Color.borderColor
-
-    var body: some View {
-        HStack(spacing: 3) {
-            ForEach(0..<3, id: \.self) { i in
-                Circle()
-                    .fill(dotColor)
-                    .frame(width: dotSize, height: dotSize)
-                    .scaleEffect(phase == i ? 1.4 : 0.8)
-                    .animation(
-                        .easeInOut(duration: 0.4)
-                            .repeatForever(autoreverses: true)
-                            .delay(Double(i) * 0.15),
-                        value: phase
-                    )
-            }
-        }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 4)
-        .background(Color.cardBackground)
-        .cornerRadius(10)
-        .onAppear {
-            phase = 0
-            withAnimation { phase = 2 }
-        }
     }
 }

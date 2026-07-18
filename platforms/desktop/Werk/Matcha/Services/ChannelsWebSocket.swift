@@ -133,12 +133,9 @@ final class ChannelsWebSocket: NSObject {
         guard !isConnecting && !isConnected else { return }
         guard let token = APIClient.shared.accessToken else { return }
 
-        let base = APIClient.shared.baseURL
-        let wsBase = base
-            .replacingOccurrences(of: "http://", with: "ws://")
-            .replacingOccurrences(of: "https://", with: "wss://")
-            .replacingOccurrences(of: "/api", with: "")
-        guard let url = URL(string: "\(wsBase)/ws/channels") else { return }
+        // Suffix-anchored derivation (APIClient.wsBase) — the old global
+        // "/api" replace corrupted api.* hosts, silently killing realtime.
+        guard let url = URL(string: "\(APIClient.shared.wsBase)/ws/channels") else { return }
 
         isConnecting = true
         var request = URLRequest(url: url)

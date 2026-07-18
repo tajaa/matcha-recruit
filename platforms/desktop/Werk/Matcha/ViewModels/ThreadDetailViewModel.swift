@@ -9,6 +9,9 @@ class ThreadDetailViewModel {
     var pdfData: Data?
     var isLoadingThread = false
     var isLoadingPDF = false
+    /// Monotonic token for loadPDF: only the newest in-flight load may write
+    /// pdfData/isLoadingPDF (read+bumped on the MainActor).
+    private var pdfLoadGeneration = 0
     var isUploadingImages = false
     var isStreaming = false
     var streamingContent = ""
@@ -423,7 +426,13 @@ class ThreadDetailViewModel {
         do {
             let v = try await service.getVersions(threadId: threadId, forceRefresh: forceRefresh)
             await MainActor.run { versions = v }
-        } catch { }
+        } catch {
+            // Was an empty catch — a failed load left the revert UI silently
+            // empty, indistinguishable from "no versions". Cancellation
+            // (navigation away mid-load) is not a failure worth a banner.
+            if error.isCancellation { return }
+            await MainActor.run { errorMessage = "Couldn't load version history. \(error.localizedDescription)" }
+        }
     }
 
     func revert(to version: Int) async {
@@ -560,7 +569,15 @@ class ThreadDetailViewModel {
             }
             return
         }
-        await MainActor.run { isLoadingPDF = true }
+        // Generation token: concurrent loads race on the same reused VM
+        // (thread switch cancels the old load; the stream-complete
+        // forceRefresh Task is never cancelled). Without this, a stale
+        // load's completion clobbers the newer one's spinner/pdfData.
+        let gen = await MainActor.run { () -> Int in
+            pdfLoadGeneration &+= 1
+            isLoadingPDF = true
+            return pdfLoadGeneration
+        }
         do {
             let data = try await service.getPDFData(
                 threadId: threadId,
@@ -568,11 +585,22 @@ class ThreadDetailViewModel {
                 forceRefresh: forceRefresh
             )
             await MainActor.run {
+                guard gen == pdfLoadGeneration else { return }
                 pdfData = data
                 isLoadingPDF = false
             }
         } catch {
-            await MainActor.run { isLoadingPDF = false }
+            // Previously swallowed — the preview just went blank with no
+            // indication anything failed. Cancellation (navigation away /
+            // superseded load) is not a failure the user should see.
+            let cancelled = error.isCancellation
+            await MainActor.run {
+                guard gen == pdfLoadGeneration else { return }
+                isLoadingPDF = false
+                if !cancelled {
+                    errorMessage = "Couldn't load the PDF preview. \(error.localizedDescription)"
+                }
+            }
         }
     }
 }

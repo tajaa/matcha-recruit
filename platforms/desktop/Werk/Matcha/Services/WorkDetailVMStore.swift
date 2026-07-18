@@ -77,6 +77,21 @@ final class WorkDetailVMStore {
     func evictThread(_ id: String) { evict("t:\(id)") }
     func evictChannel(_ id: String) { evict("c:\(id)") }
 
+    /// Drop every cached VM. Must be called on logout: these VMs retain the
+    /// previous user's loaded data (keyed only by entity id), so without this a
+    /// notification deep-link — or any re-open of the same id — after a user
+    /// switch on a shared Mac would repaint user A's data for user B before any
+    /// (server-rejected) revalidation. The MatchaWorkService/JournalService
+    /// data caches are already scope-cleared on logout; this closes the VM tier.
+    func clearAll() {
+        #if os(macOS)
+        projectVMs.removeAll()
+        threadVMs.removeAll()
+        #endif
+        channelVMs.removeAll()
+        lru.removeAll()
+    }
+
     // MARK: - LRU bookkeeping
 
     private func touch(_ key: String) {

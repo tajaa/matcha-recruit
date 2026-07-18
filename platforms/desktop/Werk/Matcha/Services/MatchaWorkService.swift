@@ -6,23 +6,28 @@ class MatchaWorkService {
     let basePath = "/matcha-work"
     let cacheTTL: TimeInterval = 60
     var cacheScope: String?
-    var threadListCache: [String: MWCacheEntry<[MWThread]>] = [:]
-    var threadDetailCache: [String: MWCacheEntry<MWThreadDetail>] = [:]
-    var versionsCache: [String: MWCacheEntry<[MWDocumentVersion]>] = [:]
-    var pdfCache: [String: MWCacheEntry<Data>] = [:]
-    var projectListCache: [String: MWCacheEntry<[MWProject]>] = [:]
-    var projectDetailCache: [String: MWCacheEntry<MWProject>] = [:]
+    // Caches are lock-guarded (LockedCache) rather than bare dictionaries:
+    // these are read/written from concurrent background `async` methods on the
+    // shared singleton, and concurrent mutation of a raw Dictionary is UB.
+    // Same subscript / removeAll / removeValue surface, so call sites are
+    // unchanged.
+    let threadListCache = LockedCache<[MWThread]>()
+    let threadDetailCache = LockedCache<MWThreadDetail>()
+    let versionsCache = LockedCache<[MWDocumentVersion]>()
+    let pdfCache = LockedCache<Data>()
+    let projectListCache = LockedCache<[MWProject]>()
+    let projectDetailCache = LockedCache<MWProject>()
     // Per-project sub-resource caches (keyed by projectId), so tab- and
     // project-switches paint instantly from cache (stale-while-revalidate)
     // instead of re-fetching 6 endpoints cold every time. Same MWCacheEntry +
     // 60s TTL pattern as projectDetailCache. Populated by the list getters and
     // wholesale by getProjectBundle; invalidated by the matching mutations.
-    var projectTasksCache: [String: MWCacheEntry<[MWProjectTask]>] = [:]
-    var projectFilesCache: [String: MWCacheEntry<[MWProjectFile]>] = [:]
-    var projectFoldersCache: [String: MWCacheEntry<[MWProjectFolder]>] = [:]
-    var projectLinksCache: [String: MWCacheEntry<[MWProjectLink]>] = [:]
-    var projectCollaboratorsCache: [String: MWCacheEntry<[MWProjectCollaborator]>] = [:]
-    var projectElementsCache: [String: MWCacheEntry<[MWProjectElement]>] = [:]
+    let projectTasksCache = LockedCache<[MWProjectTask]>()
+    let projectFilesCache = LockedCache<[MWProjectFile]>()
+    let projectFoldersCache = LockedCache<[MWProjectFolder]>()
+    let projectLinksCache = LockedCache<[MWProjectLink]>()
+    let projectCollaboratorsCache = LockedCache<[MWProjectCollaborator]>()
+    let projectElementsCache = LockedCache<[MWProjectElement]>()
     private init() {}
 
     func cachedValue<Value>(_ entry: MWCacheEntry<Value>?) -> Value? {
@@ -70,7 +75,7 @@ class MatchaWorkService {
     func invalidateThread(threadId: String) {
         threadDetailCache.removeValue(forKey: threadId)
         versionsCache.removeValue(forKey: threadId)
-        pdfCache = pdfCache.filter { !$0.key.hasPrefix("\(threadId):") }
+        pdfCache.removeAll(where: { $0.hasPrefix("\(threadId):") })
         // Don't wipe threadListCache here — sidebar still has accurate data in
         // its own ViewModel state. Stale cache entries expire on TTL (60s).
         // Listings only need a hard refresh on create/delete/archive/pin/title,

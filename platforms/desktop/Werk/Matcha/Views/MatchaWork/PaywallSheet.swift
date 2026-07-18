@@ -185,9 +185,13 @@ struct PaywallSheet: View {
         Task { @MainActor in
             defer { isOpeningCheckout = false }
             do {
+                // Suffix-anchored web origin (see APIClient.webOrigin) — a
+                // MATCHA_API_URL override moves the redirect too, without the
+                // global-replace corruption of api.* hosts.
+                let webOrigin = APIClient.shared.webOrigin
                 let urlString = try await MatchaWorkService.shared.startPersonalCheckout(
-                    successUrl: "https://hey-matcha.com/work?upgraded=1",
-                    cancelUrl: "https://hey-matcha.com/work?canceled=1",
+                    successUrl: "\(webOrigin)/work?upgraded=1",
+                    cancelUrl: "\(webOrigin)/work?canceled=1",
                     plan: plan.rawValue
                 )
                 guard let checkoutURL = URL(string: urlString) else {
