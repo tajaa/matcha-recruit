@@ -2,7 +2,8 @@ import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
 
-extension ChannelDetailView {    /// Turn a chat message into a kanban ticket: AI-draft it against the linked
+extension ChannelDetailView {
+    /// Turn a chat message into a kanban ticket: AI-draft it against the linked
     /// project, then open the review sheet. Project chats only (guarded by the
     /// caller passing onCreateTicket).
     func startTicketDraft(from msg: ChannelMessage) {

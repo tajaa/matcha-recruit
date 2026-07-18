@@ -30,9 +30,9 @@ struct ProjectDetailView: View {
     @State var threadLoadTask: Task<Void, Never>?
     @State var refreshTask: Task<Void, Never>?
     @State var ensureChannelTask: Task<Void, Never>?
-    @AppStorage("mw-chat-theme") private var lightMode = false
-    @AppStorage("mw-model") private var selectedModelId = "flash"
-    @AppStorage("mw-preview-collapsed") private var previewCollapsed = false
+    @AppStorage("mw-chat-theme") var lightMode = false
+    @AppStorage("mw-model") var selectedModelId = "flash"
+    @AppStorage("mw-preview-collapsed") var previewCollapsed = false
 
     @MainActor
     init(projectId: String, isEmbedded: Bool = false) {

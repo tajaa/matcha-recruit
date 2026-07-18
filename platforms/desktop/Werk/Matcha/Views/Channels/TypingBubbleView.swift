@@ -1,9 +1,8 @@
 import SwiftUI
 
-
 // MARK: - Typing bubble
 
-private struct TypingBubbleView: View {
+struct TypingBubbleView: View {
     @State private var phase: Int = 0
 
     private let dotSize: CGFloat = 5

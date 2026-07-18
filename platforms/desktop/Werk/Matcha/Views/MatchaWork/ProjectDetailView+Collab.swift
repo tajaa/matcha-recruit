@@ -2,7 +2,8 @@ import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
 
-extension ProjectDetailView {    @ViewBuilder
+extension ProjectDetailView {
+    @ViewBuilder
     var collabPanelAction: some View {
         switch collabPanel {
         case .sections:

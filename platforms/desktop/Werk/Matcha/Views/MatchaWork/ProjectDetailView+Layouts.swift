@@ -2,7 +2,8 @@ import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
 
-extension ProjectDetailView {    var recruitingLayout: some View {
+extension ProjectDetailView {
+    var recruitingLayout: some View {
         HSplitView {
             // Left: Chat panel — drives the recruiting workflow
             if viewModel.activeChatId != nil {

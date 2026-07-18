@@ -2,7 +2,8 @@ import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
 
-extension ChannelDetailView {    // MARK: - Watch-feed banner
+extension ChannelDetailView {
+    // MARK: - Watch-feed banner
     //
     // Shown above the messages list whenever an active broadcast exists in
     // this channel AND we're not currently connected to its LiveKit feed.

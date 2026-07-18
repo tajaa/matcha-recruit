@@ -77,5 +77,4 @@ extension AppState {
         }
     }
 
-    /// Navigate to the object a notification points at. Most notifications
 }
