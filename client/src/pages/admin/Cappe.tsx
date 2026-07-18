@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useState } from 'react'
 import { ChevronDown, ChevronRight, ExternalLink } from 'lucide-react'
 import { Input } from '../../components/ui'
 import { api } from '../../api/client'
-import { cappeSiteHost } from '../../utils/cappeHost'
+import { cappeSiteHost } from '../../cappe/host'
 
 type CappeSite = {
   id: string

@@ -13,7 +13,7 @@ const WorkRoutes = lazy(() => import("./routes/WorkRoutes"));
 const WerkRoutes = lazy(() => import("./routes/WerkRoutes"));
 const WerkLiteRoutes = lazy(() => import("./routes/WerkLiteRoutes"));
 const PortalRoutes = lazy(() => import("./routes/PortalRoutes"));
-const CappeRoutes = lazy(() => import("./routes/CappeRoutes")); // Cappe — website builder (separate product)
+const CappeRoutes = lazy(() => import("./cappe/routes")); // Cappe — website builder (separate product)
 
 // Public / marketing / auth-funnel pages — lazy so marketing visitors only
 // pull what they land on (Home + Login stay eager: first paint + funnel).
@@ -106,7 +106,7 @@ const SignPolicy = lazy(() => import("./pages/shared/SignPolicy"));
 
 // On the dedicated Cappe domain the Cappe route tree also mounts at "/" so
 // the bare apex shows the Gummfit landing instead of the Matcha landing.
-import { isCappeHost } from "./utils/cappeHost";
+import { isCappeHost } from "./cappe/host";
 
 function RouteFallback() {
   return (
