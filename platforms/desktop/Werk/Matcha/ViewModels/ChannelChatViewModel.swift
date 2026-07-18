@@ -9,6 +9,11 @@ final class ChannelChatViewModel {
     var typingUsers: [String: String] = [:]
     var isLoading = true
     var errorMessage: String?
+    /// History pagination. The channel-detail endpoint only embeds the newest
+    /// page, so older history is fetched on demand via `getMessages(before:)`.
+    var hasMoreHistory = false
+    var isLoadingOlder = false
+    private let historyPageSize = 50
 
     private(set) var channelId: String?
     private var typingClearTask: Task<Void, Never>?
@@ -116,11 +121,38 @@ final class ChannelChatViewModel {
                 if merged.map(\.id) != messages.map(\.id) { messages = merged }
             } else {
                 messages = detail.messages
+                // A full page back means there may be older history to page in.
+                hasMoreHistory = detail.messages.count >= historyPageSize
                 isLoading = false
             }
         } catch {
             errorMessage = error.localizedDescription
             if !isRefresh { isLoading = false }
+        }
+    }
+
+    /// Fetch the page of messages immediately older than the current oldest and
+    /// prepend them. No-op while already loading or once a short page confirms
+    /// there is no more history. Without this, `getMessages(before:)` had zero
+    /// callers and channels with >50 messages silently truncated to the newest
+    /// page with no way to reach older history.
+    func loadOlder() async {
+        guard hasMoreHistory, !isLoadingOlder,
+              let channelId, let oldest = messages.first else { return }
+        isLoadingOlder = true
+        defer { isLoadingOlder = false }
+        do {
+            let older = try await service.getMessages(channelId: channelId, before: oldest.createdAt, limit: historyPageSize)
+            if older.count < historyPageSize { hasMoreHistory = false }
+            let existingIds = Set(messages.map(\.id))
+            let fresh = older.filter { !existingIds.contains($0.id) }
+            if fresh.isEmpty {
+                hasMoreHistory = false
+            } else {
+                messages.insert(contentsOf: fresh, at: 0)
+            }
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 

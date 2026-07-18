@@ -642,6 +642,34 @@ struct ChannelDetailView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 10) {
+                    if vm.hasMoreHistory {
+                        Button {
+                            guard let anchor = vm.messages.first?.stableKey else { return }
+                            Task {
+                                await vm.loadOlder()
+                                // Pin the previously-oldest row to the top so the
+                                // reader's position is preserved after older rows
+                                // prepend (50ms yield lets the cells materialise,
+                                // same pattern as the initial-load scroll below).
+                                try? await Task.sleep(for: .milliseconds(50))
+                                proxy.scrollTo(anchor, anchor: .top)
+                            }
+                        } label: {
+                            Group {
+                                if vm.isLoadingOlder {
+                                    ProgressView().controlSize(.small)
+                                } else {
+                                    Text("Load earlier messages")
+                                        .font(.system(size: 11, weight: .medium))
+                                        .foregroundColor(appState.themeAccent)
+                                }
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 6)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(vm.isLoadingOlder)
+                    }
                     ForEach(vm.messages, id: \.stableKey) { msg in
                         ChannelMessageRowView(
                             msg: msg,
@@ -688,7 +716,11 @@ struct ChannelDetailView: View {
             // mis-fires), so inbound messages often didn't reposition the view
             // and the newest message sat off-screen. Chat-standard behavior:
             // a new message always reveals itself.
-            .onChange(of: vm.messages.count) {
+            // Follow new messages to the bottom, but key on the LAST message's
+            // identity rather than messages.count — otherwise paging in older
+            // history (which grows the count from the top) would yank the view
+            // to the bottom. A prepend leaves `last` unchanged, so it won't fire.
+            .onChange(of: vm.messages.last?.stableKey) {
                 guard let last = vm.messages.last else { return }
                 withAnimation { proxy.scrollTo(last.stableKey, anchor: .bottom) }
             }
