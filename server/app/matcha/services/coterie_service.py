@@ -26,8 +26,6 @@ from uuid import UUID
 
 import httpx
 
-from . import limit_adequacy as la
-
 logger = logging.getLogger(__name__)
 
 # --- Partner config (env, module scope — like the Finch OAuth config) ----------
@@ -36,6 +34,39 @@ COTERIE_API_KEY = os.getenv("COTERIE_API_KEY", "")
 # 'mock' (default) returns canned quotes; 'live' calls the real API. Unset key in
 # live mode raises at call time (never silently returns a fake quote in live mode).
 COTERIE_MODE = os.getenv("COTERIE_MODE", "mock").strip().lower()
+
+# --- Carrier capability tiering ------------------------------------------------
+# Only quote/bind/policy_docs/webhooks are confirmed-available from Coterie's
+# public docs; loss-runs, FNOL, and premium-credit feeds are unconfirmed until a
+# partner sandbox appointment. Features that depend on them (Claims Bridge,
+# Risk-to-Rate) call ``has_capability`` and 501 when the capability is off — the
+# same shape as Finch's ``_require_finch_oauth_config`` 503 guard.
+#   COTERIE_CAPS      — comma-list of confirmed-live capabilities (live mode).
+#   COTERIE_MOCK_CAPS — capabilities to expose in mock mode ("all" = every known
+#                       capability, so the whole product is demoable pre-sandbox).
+_ALL_CAPABILITIES = {"quote", "bind", "policy_docs", "webhooks", "loss_runs", "fnol", "credits"}
+_CONFIRMED_CAPABILITIES = {"quote", "bind", "policy_docs", "webhooks"}
+
+
+def _parse_caps(raw: str, default: set) -> set:
+    raw = (raw or "").strip()
+    if not raw:
+        return set(default)
+    if raw.lower() == "all":
+        return set(_ALL_CAPABILITIES)
+    return {c.strip().lower() for c in raw.split(",") if c.strip()} & _ALL_CAPABILITIES
+
+
+COTERIE_CAPS = _parse_caps(os.getenv("COTERIE_CAPS", ""), _CONFIRMED_CAPABILITIES)
+COTERIE_MOCK_CAPS = _parse_caps(os.getenv("COTERIE_MOCK_CAPS", "all"), _ALL_CAPABILITIES)
+
+
+def has_capability(name: str) -> bool:
+    """True if the carrier connection exposes ``name`` in the current mode. In
+    mock mode the mock-cap set applies (default: all), so the full flow is
+    exercisable before live partner credentials exist."""
+    caps = set(COTERIE_MOCK_CAPS) if is_mock_mode() else set(COTERIE_CAPS)
+    return name in caps
 
 # Our line keys → Coterie product codes. Kept here so the mapping is one place.
 _LINE_TO_PRODUCT = {"bop": "BOP", "gl": "GL", "wc": "WC", "professional": "PL"}
@@ -248,9 +279,44 @@ def _mock_bind(quote_ref: str, payload: dict) -> dict:
     }
 
 
+# --- Claims Bridge helpers (capability-gated at the route) ----------------------
+
+def mock_loss_runs() -> list[dict]:
+    """Representative loss-run rows so the Claims Bridge is demoable pre-sandbox.
+    Never live figures — deterministic sample history."""
+    this_year = date.today().year
+    return [
+        {"policy_year": this_year - 2, "claims": 3, "incurred_cents": 4_200_00,
+         "paid_cents": 3_900_00, "open": 0},
+        {"policy_year": this_year - 1, "claims": 1, "incurred_cents": 1_100_00,
+         "paid_cents": 600_00, "open": 1},
+        {"policy_year": this_year, "claims": 0, "incurred_cents": 0, "paid_cents": 0, "open": 0},
+    ]
+
+
+def file_fnol(incident_id: str, incident_number=None) -> str:
+    """File a First Notice of Loss and return the carrier claim reference. Mock mode
+    derives a deterministic ref from the incident; live FNOL awaits the carrier
+    endpoint (the route already capability-gates on 'fnol')."""
+    if is_mock_mode():
+        tag = str(incident_number or incident_id).replace(" ", "")[:16].upper()
+        return f"FNOL-MOCK-{tag}"
+    # Live FNOL endpoint not yet available from the carrier partner API.
+    raise CoterieError("fnol_not_available_live")
+
+
 # --- Persistence over insurance_quotes -----------------------------------------
 
 def _serialize(row) -> dict:
+    # broker-placement columns (brokerquote01) may be absent on a row that
+    # predates the migration in a mixed-schema window — read defensively.
+    def _opt(key):
+        try:
+            return row[key]
+        except (KeyError, IndexError):
+            return None
+
+    presented_at = _opt("presented_at")
     return {
         "id": str(row["id"]),
         "line": row["line"],
@@ -262,6 +328,11 @@ def _serialize(row) -> dict:
         "error_message": row["error_message"],
         "certificate_id": str(row["certificate_id"]) if row["certificate_id"] else None,
         "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+        "placement": _opt("placement") or "client",
+        "presented_at": presented_at.isoformat() if presented_at else None,
+        "commission_bps": _opt("commission_bps"),
+        "broker_note": _opt("broker_note"),
+        "external_client_id": str(_opt("external_client_id")) if _opt("external_client_id") else None,
     }
 
 
@@ -309,7 +380,9 @@ async def bind_quote(conn, company_id: UUID, quote_id: UUID, uploaded_by: Option
         raise CoterieError("quote_not_found")
     if q["status"] == "bound":
         raise CoterieError("already_bound")
-    if q["status"] != "quoted" or not q["quote_ref"]:
+    # 'quoted' = fresh quote; 'presented' = a broker presented it to the client
+    # for acceptance (the present->accept path). Both are bindable.
+    if q["status"] not in ("quoted", "presented") or not q["quote_ref"]:
         raise CoterieError("not_quotable")
 
     payload = q["request_payload"]
@@ -342,6 +415,9 @@ async def bind_quote(conn, company_id: UUID, quote_id: UUID, uploaded_by: Option
         )
         # Reflect the bound policy on company_coverage_lines so limit_adequacy /
         # broker submission (which read carried coverage from there) see it.
+        # Lazy import keeps this module's pure mappers/config free of the
+        # limit_adequacy -> PDF import chain (so they're unit-testable standalone).
+        from . import limit_adequacy as la
         if line_key in la.LINE_KEYS:
             await conn.execute(
                 """
@@ -363,7 +439,10 @@ async def bind_quote(conn, company_id: UUID, quote_id: UUID, uploaded_by: Option
              WHERE id = $1 AND company_id = $2
             RETURNING *
             """,
-            quote_id, company_id, cert["id"], json.dumps({"bind": bind.get("raw") or {}}),
+            quote_id, company_id, cert["id"],
+            json.dumps({"bind": bind.get("raw") or {}, "policy_number": bind.get("policy_number"),
+                        "policy_effective": bind.get("effective_date"),
+                        "policy_expiry": bind.get("expiry_date")}),
         )
     return _serialize(row)
 
@@ -377,3 +456,150 @@ def _parse_date(v) -> Optional[date]:
         return date.fromisoformat(str(v)[:10])
     except ValueError:
         return None
+
+
+# --- Broker-placed quoting (Broker Quoting Desk) -------------------------------
+# A broker quotes/presents/binds on behalf of a client in their book. On-platform
+# clients reuse build_quote_request (rich company data). Off-platform clients have
+# only a broker_external_clients snapshot, so we synthesize the row and reuse the
+# same pure build_payload mapper.
+
+async def build_quote_request_external(conn, external_client_id: UUID, req, *, broker_id: UUID) -> dict:
+    """Build a Coterie payload for an off-platform (Broker Pro) client from its
+    ``broker_external_clients`` snapshot. Ownership is enforced by the route; the
+    ``broker_id`` filter here is defense-in-depth."""
+    row = await conn.fetchrow(
+        "SELECT name, industry, headcount, primary_state FROM broker_external_clients "
+        "WHERE id = $1 AND broker_id = $2",
+        external_client_id, broker_id,
+    )
+    if not row:
+        raise CoterieError("external_client_not_found")
+    company_row = {
+        "name": row["name"], "legal_name": row["name"], "naics": None,
+        "industry": row["industry"], "headquarters_state": row["primary_state"],
+    }
+    emp_agg = {"headcount": row["headcount"], "annual_payroll": None}
+    overrides = req.model_dump(exclude_unset=True, exclude={"line", "commission_bps", "broker_note"})
+    return build_payload(req.line, company_row, None, emp_agg, overrides)
+
+
+async def create_broker_quote(conn, *, broker_id: UUID, req, created_by: Optional[UUID],
+                              company_id: Optional[UUID] = None,
+                              external_client_id: Optional[UUID] = None) -> dict:
+    """Broker requests a quote for one client (tenant XOR external) and persists it
+    as a broker-placed row. Returns the quote (status 'error' on carrier decline —
+    never raises for a decline)."""
+    if bool(company_id) == bool(external_client_id):
+        raise CoterieError("exactly one of company_id / external_client_id required")
+    if company_id is not None:
+        payload = await build_quote_request(conn, company_id, req)
+    else:
+        payload = await build_quote_request_external(conn, external_client_id, req, broker_id=broker_id)
+
+    svc = get_coterie_service()
+    try:
+        result = await svc.get_quote(payload)
+        status, err = "quoted", None
+    except CoterieError as e:
+        result, status, err = {"quote_ref": None, "premium_cents": None, "expires_at": None, "raw": {}}, "error", str(e)
+
+    row = await conn.fetchrow(
+        """
+        INSERT INTO insurance_quotes
+            (company_id, external_client_id, broker_id, carrier, line, quote_ref, status,
+             premium_cents, request_payload, quote_payload, error_message, expires_at,
+             created_by, placement, commission_bps, broker_note)
+        VALUES ($1, $2, $3, 'coterie', $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10, $11, $12,
+                'broker', $13, $14)
+        RETURNING *
+        """,
+        company_id, external_client_id, broker_id, req.line, result.get("quote_ref"), status,
+        result.get("premium_cents"), json.dumps(payload), json.dumps(result.get("raw") or {}), err,
+        _parse_date(result.get("expires_at")), created_by,
+        getattr(req, "commission_bps", None), getattr(req, "broker_note", None),
+    )
+    return _serialize(row)
+
+
+async def list_broker_quotes(conn, *, company_id: Optional[UUID] = None,
+                             external_client_id: Optional[UUID] = None) -> list[dict]:
+    if company_id is not None:
+        rows = await conn.fetch(
+            "SELECT * FROM insurance_quotes WHERE company_id = $1 ORDER BY created_at DESC",
+            company_id,
+        )
+    else:
+        rows = await conn.fetch(
+            "SELECT * FROM insurance_quotes WHERE external_client_id = $1 ORDER BY created_at DESC",
+            external_client_id,
+        )
+    return [_serialize(r) for r in rows]
+
+
+async def present_quote(conn, *, company_id: UUID, quote_id: UUID,
+                        commission_bps: Optional[int] = None,
+                        broker_note: Optional[str] = None) -> dict:
+    """Flip a quoted (on-platform) row to 'presented' so the client can accept and
+    bind it on their own Insurance page. Tenant-only — off-platform clients have no
+    self-serve surface to accept on."""
+    q = await conn.fetchrow(
+        "SELECT status FROM insurance_quotes WHERE id = $1 AND company_id = $2", quote_id, company_id,
+    )
+    if not q:
+        raise CoterieError("quote_not_found")
+    if q["status"] == "bound":
+        raise CoterieError("already_bound")
+    if q["status"] not in ("quoted", "presented"):
+        raise CoterieError("not_quotable")
+    row = await conn.fetchrow(
+        """
+        UPDATE insurance_quotes
+           SET status = 'presented', presented_at = NOW(),
+               commission_bps = COALESCE($3, commission_bps),
+               broker_note = COALESCE($4, broker_note),
+               updated_at = NOW()
+         WHERE id = $1 AND company_id = $2
+        RETURNING *
+        """,
+        quote_id, company_id, commission_bps, broker_note,
+    )
+    return _serialize(row)
+
+
+async def bind_external_quote(conn, *, broker_id: UUID, external_client_id: UUID,
+                              quote_id: UUID, bound_by: Optional[UUID]) -> dict:
+    """Bind a quote for an off-platform client. No companies row exists, so this
+    does NOT write a certificate or coverage line (those are tenant-scoped) — it
+    calls the carrier, records the policy on the quote row, and flips status."""
+    q = await conn.fetchrow(
+        "SELECT * FROM insurance_quotes WHERE id = $1 AND external_client_id = $2 AND broker_id = $3",
+        quote_id, external_client_id, broker_id,
+    )
+    if not q:
+        raise CoterieError("quote_not_found")
+    if q["status"] == "bound":
+        raise CoterieError("already_bound")
+    if q["status"] not in ("quoted", "presented") or not q["quote_ref"]:
+        raise CoterieError("not_quotable")
+
+    payload = q["request_payload"]
+    if isinstance(payload, str):
+        payload = json.loads(payload)
+    svc = get_coterie_service()
+    bind = await svc.bind_quote(q["quote_ref"], payload)
+
+    row = await conn.fetchrow(
+        """
+        UPDATE insurance_quotes
+           SET status = 'bound',
+               quote_payload = quote_payload || $3::jsonb, updated_at = NOW()
+         WHERE id = $1 AND external_client_id = $2
+        RETURNING *
+        """,
+        quote_id, external_client_id,
+        json.dumps({"bind": bind.get("raw") or {}, "policy_number": bind.get("policy_number"),
+                    "policy_effective": bind.get("effective_date"),
+                    "policy_expiry": bind.get("expiry_date")}),
+    )
+    return _serialize(row)

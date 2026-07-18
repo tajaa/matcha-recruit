@@ -1,7 +1,8 @@
 import { api } from '../client'
 
 export type QuotableLine = 'bop' | 'gl' | 'wc' | 'professional'
-export type QuoteStatus = 'draft' | 'quoted' | 'bound' | 'expired' | 'error'
+// 'presented' = a broker placed this quote and presented it for the client to accept.
+export type QuoteStatus = 'draft' | 'quoted' | 'presented' | 'bound' | 'expired' | 'error'
 
 export type QuotePayload = {
   product: string
@@ -23,6 +24,11 @@ export type Quote = {
   error_message: string | null
   certificate_id: string | null
   created_at: string | null
+  // present when a broker placed the quote (broker-in-the-middle path)
+  placement?: string
+  presented_at?: string | null
+  commission_bps?: number | null
+  broker_note?: string | null
 }
 
 export type QuoteInput = {

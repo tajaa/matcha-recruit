@@ -1,10 +1,8 @@
 import { useEffect, useState } from 'react'
-import { ShieldCheck, Loader2, Sparkles, CheckCircle2 } from 'lucide-react'
-import { Card, useToast } from '../../components/ui'
-import {
-  getPrefill, listQuotes, createQuote, bindQuote,
-  type Quote, type QuotableLine, type QuotePayload,
-} from '../../api/risk/insurance'
+import { Sparkles, Loader2, CheckCircle2, Send } from 'lucide-react'
+import { Card, useToast } from '../ui'
+import type { QuotableLine, QuotePayload } from '../../api/risk/insurance'
+import type { BrokerQuote, BrokerPrefill, BrokerQuoteInput } from '../../api/broker/brokerInsurance'
 
 const LINES: { key: QuotableLine; label: string }[] = [
   { key: 'bop', label: "Business Owner's Policy" },
@@ -13,7 +11,7 @@ const LINES: { key: QuotableLine; label: string }[] = [
   { key: 'professional', label: 'Professional Liability' },
 ]
 
-const STATUS_TONE: Record<Quote['status'], string> = {
+const STATUS_TONE: Record<string, string> = {
   draft: 'text-zinc-500', quoted: 'text-sky-400', presented: 'text-amber-400',
   bound: 'text-emerald-400', expired: 'text-zinc-500', error: 'text-rose-400',
 }
@@ -21,23 +19,39 @@ const STATUS_TONE: Record<Quote['status'], string> = {
 function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : 'Something went wrong'
 }
-function dollars(cents: number | null): string {
+function dollars(cents: number | null | undefined): string {
   return cents == null ? '—' : `$${(cents / 100).toLocaleString(undefined, { maximumFractionDigits: 0 })}`
 }
 
-export default function Insurance() {
+/**
+ * Broker quoting desk — request a Coterie quote for a client from data on file,
+ * then either bind directly (when the client-link permits) or present it for the
+ * client to accept. Reused for on-platform and off-platform clients by swapping
+ * the injected API fns; `presentQuote` omitted (off-platform has no accept surface).
+ */
+export function QuotingDeskPanel({
+  loadPrefill, loadQuotes, createQuote, presentQuote, bindQuote,
+}: {
+  loadPrefill: (line: QuotableLine) => Promise<BrokerPrefill>
+  loadQuotes: () => Promise<{ quotes: BrokerQuote[] }>
+  createQuote: (input: BrokerQuoteInput) => Promise<BrokerQuote>
+  presentQuote?: (quoteId: string, body: { commission_bps?: number | null; broker_note?: string | null }) => Promise<BrokerQuote>
+  bindQuote?: (quoteId: string) => Promise<BrokerQuote>
+}) {
   const { toast } = useToast()
   const [line, setLine] = useState<QuotableLine>('bop')
   const [payload, setPayload] = useState<QuotePayload | null>(null)
   const [mock, setMock] = useState(false)
-  const [quotes, setQuotes] = useState<Quote[]>([])
+  const [canBind, setCanBind] = useState(false)
+  const [commissionBps, setCommissionBps] = useState<number | null>(null)
+  const [quotes, setQuotes] = useState<BrokerQuote[]>([])
   const [loading, setLoading] = useState(true)
   const [quoting, setQuoting] = useState(false)
-  const [bindingId, setBindingId] = useState<string | null>(null)
+  const [busyId, setBusyId] = useState<string | null>(null)
 
   useEffect(() => {
-    Promise.all([getPrefill(line), listQuotes()])
-      .then(([pf, q]) => { setPayload(pf.payload); setMock(pf.mock_mode); setQuotes(q.quotes) })
+    Promise.all([loadPrefill('bop'), loadQuotes()])
+      .then(([pf, q]) => { setPayload(pf.payload); setMock(pf.mock_mode); setCanBind(pf.can_bind); setQuotes(q.quotes) })
       .catch((e) => toast(errMsg(e), 'error'))
       .finally(() => setLoading(false))
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -45,7 +59,7 @@ export default function Insurance() {
 
   async function reloadPrefill(next: QuotableLine) {
     setLine(next)
-    try { const pf = await getPrefill(next); setPayload(pf.payload); setMock(pf.mock_mode) }
+    try { const pf = await loadPrefill(next); setPayload(pf.payload); setMock(pf.mock_mode); setCanBind(pf.can_bind) }
     catch (e) { toast(errMsg(e), 'error') }
   }
 
@@ -55,26 +69,35 @@ export default function Insurance() {
     try {
       const q = await createQuote({
         line,
-        legal_name: payload.business.legal_name,
-        naics: payload.business.naics,
-        state: payload.business.state,
-        zip_code: payload.business.zip,
-        headcount: payload.exposure.headcount,
-        annual_payroll: payload.exposure.annual_payroll,
+        legal_name: payload.business.legal_name, naics: payload.business.naics,
+        state: payload.business.state, zip_code: payload.business.zip,
+        headcount: payload.exposure.headcount, annual_payroll: payload.exposure.annual_payroll,
         annual_revenue: payload.exposure.annual_revenue,
+        commission_bps: commissionBps,
       })
       setQuotes((prev) => [q, ...prev])
       if (q.status === 'error') toast(q.error_message || 'Carrier could not quote', 'error')
     } catch (e) { toast(errMsg(e), 'error') } finally { setQuoting(false) }
   }
 
+  async function onPresent(id: string) {
+    if (!presentQuote) return
+    setBusyId(id)
+    try {
+      const updated = await presentQuote(id, { commission_bps: commissionBps })
+      setQuotes((prev) => prev.map((q) => (q.id === id ? updated : q)))
+      toast('Quote presented to the client for acceptance', 'success')
+    } catch (e) { toast(errMsg(e), 'error') } finally { setBusyId(null) }
+  }
+
   async function onBind(id: string) {
-    setBindingId(id)
+    if (!bindQuote) return
+    setBusyId(id)
     try {
       const bound = await bindQuote(id)
       setQuotes((prev) => prev.map((q) => (q.id === id ? bound : q)))
-      toast('Policy bound — added to your certificates', 'success')
-    } catch (e) { toast(errMsg(e), 'error') } finally { setBindingId(null) }
+      toast('Policy bound', 'success')
+    } catch (e) { toast(errMsg(e), 'error') } finally { setBusyId(null) }
   }
 
   function setBiz<K extends keyof QuotePayload['business']>(k: K, v: QuotePayload['business'][K]) {
@@ -84,25 +107,19 @@ export default function Insurance() {
     setPayload((p) => (p ? { ...p, exposure: { ...p.exposure, [k]: v } } : p))
   }
 
-  if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="h-6 w-6 text-zinc-500 animate-spin" /></div>
+  if (loading) return <div className="flex items-center justify-center h-40"><Loader2 className="h-6 w-6 text-zinc-500 animate-spin" /></div>
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold text-zinc-100 tracking-tight flex items-center gap-2">
-          <ShieldCheck className="h-5 w-5 text-zinc-400" /> Insurance
-        </h1>
-        <p className="text-sm text-zinc-500 mt-1 max-w-2xl">
-          Get a small-commercial quote from Coterie built from your company data, then bind a policy — it lands in your certificate tracker automatically.
-        </p>
-        {mock && (
-          <p className="text-xs text-amber-400/80 mt-2">
-            Sandbox mode — quotes are representative, not live carrier pricing.
-          </p>
-        )}
-      </div>
-
+    <div className="space-y-5">
       <Card className="p-4 space-y-4">
+        <div>
+          <h3 className="text-sm font-medium text-zinc-200">Get a carrier quote</h3>
+          <p className="text-[11px] text-zinc-500 mt-0.5">
+            Built from this client's data on file. Review, then bind{presentQuote ? ' or present for the client to accept' : ''}.
+          </p>
+          {mock && <p className="text-[11px] text-amber-400/80 mt-1">Sandbox mode — representative pricing, not live carrier numbers.</p>}
+        </div>
+
         <div>
           <div className="text-xs text-zinc-500 mb-1.5">Coverage line</div>
           <div className="flex flex-wrap gap-2">
@@ -126,6 +143,7 @@ export default function Insurance() {
             {(line === 'gl' || line === 'bop' || line === 'professional') && (
               <NumField label="Annual revenue" value={payload.exposure.annual_revenue} onChange={(v) => setExp('annual_revenue', v)} />
             )}
+            <NumField label="Commission (bps)" value={commissionBps} onChange={setCommissionBps} />
           </div>
         )}
 
@@ -140,30 +158,32 @@ export default function Insurance() {
       <Card className="p-0 overflow-hidden">
         <table className="w-full text-sm">
           <thead><tr className="text-left text-xs text-zinc-500 border-b border-zinc-800">
-            <th className="py-2.5 px-4">Line</th><th>Carrier</th><th>Premium</th><th>Status</th><th>Expires</th><th></th>
+            <th className="py-2.5 px-4">Line</th><th>Premium</th><th>Status</th><th>Expires</th><th></th>
           </tr></thead>
           <tbody>
-            {quotes.length === 0 && <tr><td colSpan={6} className="px-4 py-6 text-zinc-600">No quotes yet — request one above.</td></tr>}
+            {quotes.length === 0 && <tr><td colSpan={5} className="px-4 py-6 text-zinc-600">No quotes yet — request one above.</td></tr>}
             {quotes.map((q) => (
               <tr key={q.id} className="border-b border-zinc-900">
                 <td className="px-4 py-2.5 text-zinc-200">{LINES.find((l) => l.key === q.line)?.label ?? q.line}</td>
-                <td className="text-zinc-400 capitalize">{q.carrier}</td>
                 <td className="text-zinc-200">{dollars(q.premium_cents)}<span className="text-xs text-zinc-500">/yr</span></td>
-                <td className={STATUS_TONE[q.status]}>{q.status}</td>
+                <td className={STATUS_TONE[q.status] ?? 'text-zinc-400'}>{q.status}</td>
                 <td className="text-zinc-400">{q.expires_at || '—'}</td>
-                <td className="pr-4 text-right">
-                  {q.status === 'quoted' && (
-                    <button onClick={() => onBind(q.id)} disabled={bindingId === q.id}
-                      className="inline-flex items-center gap-1 text-xs text-emerald-300 hover:text-emerald-200 disabled:opacity-50">
-                      {bindingId === q.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />} Bind
-                    </button>
-                  )}
-                  {q.status === 'presented' && (
-                    <button onClick={() => onBind(q.id)} disabled={bindingId === q.id}
-                      title={q.broker_note || 'Presented by your broker'}
-                      className="inline-flex items-center gap-1 text-xs text-emerald-300 hover:text-emerald-200 disabled:opacity-50">
-                      {bindingId === q.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />} Accept &amp; bind
-                    </button>
+                <td className="pr-4 text-right whitespace-nowrap">
+                  {(q.status === 'quoted' || q.status === 'presented') && (
+                    <span className="inline-flex items-center gap-3">
+                      {presentQuote && q.status === 'quoted' && (
+                        <button onClick={() => onPresent(q.id)} disabled={busyId === q.id}
+                          className="inline-flex items-center gap-1 text-xs text-sky-300 hover:text-sky-200 disabled:opacity-50">
+                          {busyId === q.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />} Present
+                        </button>
+                      )}
+                      {bindQuote && canBind && (
+                        <button onClick={() => onBind(q.id)} disabled={busyId === q.id}
+                          className="inline-flex items-center gap-1 text-xs text-emerald-300 hover:text-emerald-200 disabled:opacity-50">
+                          {busyId === q.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />} Bind
+                        </button>
+                      )}
+                    </span>
                   )}
                   {q.status === 'bound' && <span className="text-xs text-emerald-400">bound</span>}
                 </td>
@@ -172,6 +192,11 @@ export default function Insurance() {
           </tbody>
         </table>
       </Card>
+      {presentQuote && !canBind && (
+        <p className="text-[11px] text-zinc-600">
+          Direct bind is off for this client — present a quote and the client accepts &amp; binds it on their own Insurance page.
+        </p>
+      )}
     </div>
   )
 }

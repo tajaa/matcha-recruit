@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { LayoutDashboard, Building2, Settings, Zap, Globe, Activity, Warehouse, Sparkles } from 'lucide-react'
+import { LayoutDashboard, Building2, Settings, Zap, Globe, Activity, Warehouse, Sparkles, ShieldCheck } from 'lucide-react'
 import SidebarShell, { type NavItem } from './SidebarShell'
 import ThemeToggle from '../shared/ThemeToggle'
 import { fetchBrokerRiskAlerts } from '../../api/broker/broker'
@@ -19,6 +19,8 @@ export default function BrokerSidebar() {
     { to: '/broker/action-center', icon: Zap, label: 'Action Center', badge: actionCount },
     { to: '/broker/risk-curve', icon: Activity, label: 'Risk Curve' },
     { to: '/broker/property', icon: Warehouse, label: 'Property Book' },
+    // Carrier hub: placed-policy book + renewals (quoting lives on each client's Insurance tab).
+    { to: '/broker/insurance', icon: ShieldCheck, label: 'Insurance' },
     // Broker Pro: off-platform clients (not Matcha tenants). Admin-toggled entitlement.
     ...(isPro ? [{ to: '/broker/external', icon: Globe, label: 'External Book' } as NavItem] : []),
     // Broker Pro: grounded per-client analysis chat (uploaded docs + platform data).

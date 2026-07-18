@@ -12,6 +12,7 @@ import BrokerPropertyPortfolio from '../pages/broker/BrokerPropertyPortfolio'
 import BrokerExternalClients from '../pages/broker/BrokerExternalClients'
 import BrokerExternalClientDetail from '../pages/broker/BrokerExternalClientDetail'
 import BrokerPilot from '../pages/broker/pilot'
+import BrokerInsurance from '../pages/broker/insurance'
 
 export default function BrokerRoutes() {
   return (
@@ -29,6 +30,9 @@ export default function BrokerRoutes() {
 
         {/* Commercial-property book — per-client TIV / COPE / cat */}
         <Route path="property" element={<BrokerPropertyPortfolio />} />
+
+        {/* Carrier hub — placed policies book + renewals (quoting is per-client) */}
+        <Route path="insurance" element={<BrokerInsurance />} />
 
         {/* Module 3 — Clients hub (tabbed: onboarding / pipeline / seats / referrals) */}
         <Route path="clients" element={<BrokerClientsHub />} />

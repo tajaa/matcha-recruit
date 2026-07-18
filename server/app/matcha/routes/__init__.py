@@ -17,6 +17,7 @@ from .broker_external import router as broker_external_router
 from .broker_submission import router as broker_submission_router
 from .broker_loss_runs import router as broker_loss_runs_router
 from .broker_pilot import router as broker_pilot_router
+from .broker_insurance import router as broker_insurance_router
 from .workforce_compliance import router as workforce_compliance_router
 from .risk_profile import router as risk_profile_router
 from .resident_care import router as resident_care_router
@@ -126,6 +127,9 @@ matcha_router.include_router(broker_submission_router, prefix="/broker", tags=["
 matcha_router.include_router(broker_loss_runs_router, prefix="/broker", tags=["broker-loss-runs"])
 # Broker Pilot — grounded per-client analysis chat (every endpoint require_broker_pro).
 matcha_router.include_router(broker_pilot_router, prefix="/broker", tags=["broker-pilot"])
+# Broker carrier hub — quote/present/bind + claims bridge + risk-to-rate (per-endpoint
+# require_broker / _pro; carrier data features capability-gated in coterie_service).
+matcha_router.include_router(broker_insurance_router, prefix="/broker", tags=["broker-insurance"])
 # Workforce Compliance — business-first EPL risk trackers (pay transparency, AI-audit, biometric).
 matcha_router.include_router(workforce_compliance_router, prefix="/workforce-compliance",
                              tags=["workforce-compliance"],

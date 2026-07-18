@@ -1,9 +1,10 @@
 import { useState, useEffect, type FormEvent, type ChangeEvent, type ReactNode } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Loader2, AlertCircle, Gauge, Shield, Upload, Link2 as LinkIcon, CheckCircle2, Clock, CircleDashed, Building2, Sparkles } from 'lucide-react'
+import { ArrowLeft, Loader2, AlertCircle, Gauge, Shield, Upload, Link2 as LinkIcon, CheckCircle2, Clock, CircleDashed, Building2, Sparkles, ShieldCheck } from 'lucide-react'
 import { Card } from '../../components/ui'
 import { HelpHint } from '../../components/broker/HelpHint'
 import { SubmissionPanel } from '../../components/broker/SubmissionPanel'
+import { QuotingDeskPanel } from '../../components/broker/QuotingDeskPanel'
 import {
   fetchExternalClientDetail, saveExternalWc, saveExternalEplAttestation,
   downloadExternalSubmission, fetchExternalCoverageGap, parseExternalLossRun,
@@ -13,6 +14,9 @@ import {
   fetchExternalLossDevelopment, parseExternalLossRunDevelopment, commitExternalLossRun,
   deleteExternalLossRunSnapshot, downloadExternalLossDevelopment,
 } from '../../api/broker/broker'
+import {
+  brokerExternalPrefill, brokerExternalListQuotes, brokerExternalCreateQuote, brokerExternalBindQuote,
+} from '../../api/broker/brokerInsurance'
 import { LossRatioTab, LossTriangleTab, type LossDevApi } from './client-detail'
 import type { ExternalClientDetail, ExternalEplFactor, EplAttestationStatus, ExternalProperty, ExternalPropertyPayload } from '../../types/broker'
 import { RISK_BAND_TONE, RISK_CONFIDENCE_TONE } from '../../types/riskIndex'
@@ -366,6 +370,20 @@ export default function BrokerExternalClientDetail() {
         loadNotes={() => fetchExternalSubmissionNotes(clientId!)}
         saveNotes={(n) => saveExternalSubmissionNotes(clientId!, n)}
       />
+
+      <div>
+        <div className="flex items-center gap-2 mb-3">
+          <ShieldCheck className="h-4 w-4 text-zinc-500" />
+          <h3 className="text-sm font-medium text-zinc-200 tracking-wide">Carrier quoting</h3>
+          <HelpHint text="Request a Coterie quote for this off-platform client from the data on file, then bind a policy. Bound policies roll up into your Insurance book." />
+        </div>
+        <QuotingDeskPanel
+          loadPrefill={(line) => brokerExternalPrefill(clientId!, line)}
+          loadQuotes={() => brokerExternalListQuotes(clientId!)}
+          createQuote={(input) => brokerExternalCreateQuote(clientId!, input)}
+          bindQuote={(id) => brokerExternalBindQuote(clientId!, id)}
+        />
+      </div>
     </div>
   )
 }

@@ -23,13 +23,14 @@ import { EplTab } from './EplTab'
 import { ControlsTab } from './ControlsTab'
 import { LimitsTab } from './LimitsTab'
 import { DefenseTab } from './DefenseTab'
+import { InsuranceTab } from './InsuranceTab'
 import { PilotTab } from '../pilot/PilotTab'
 
 export { LossRatioTab } from './LossRatioTab'
 export { LossTriangleTab } from './LossTriangleTab'
 export type { LossDevApi } from './LossTriangleTab'
 
-type Tab = 'overview' | 'compliance' | 'policies' | 'ir_er' | 'wc' | 'loss_dev' | 'loss_ratio' | 'epl' | 'controls' | 'limits' | 'defense' | 'submission' | 'pilot' | 'activity'
+type Tab = 'overview' | 'compliance' | 'policies' | 'ir_er' | 'wc' | 'loss_dev' | 'loss_ratio' | 'epl' | 'controls' | 'limits' | 'defense' | 'submission' | 'insurance' | 'pilot' | 'activity'
 
 const tabs: { key: Tab; label: string }[] = [
   { key: 'overview', label: 'Overview' },
@@ -44,6 +45,7 @@ const tabs: { key: Tab; label: string }[] = [
   { key: 'limits', label: 'Limits' },
   { key: 'defense', label: 'Defense Files' },
   { key: 'submission', label: 'Submission' },
+  { key: 'insurance', label: 'Insurance' },
   { key: 'pilot', label: 'Pilot' },
   { key: 'activity', label: 'Activity' },
 ]
@@ -187,6 +189,7 @@ export default function BrokerClientDetail() {
           saveNotes={(n) => saveTenantSubmissionNotes(companyId, n)}
         />
       )}
+      {activeTab === 'insurance' && companyId && <InsuranceTab companyId={companyId} />}
       {activeTab === 'pilot' && companyId && <PilotTab subjectKind="company" subjectId={companyId} />}
       {activeTab === 'activity' && <ActivityTab activity={recent_activity} />}
     </div>
