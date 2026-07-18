@@ -2,7 +2,9 @@
 
 29 routers, ~39,000 lines. Aggregated in `__init__.py` and mounted onto `matcha_router`. Each router corresponds to one product surface or sub-feature.
 
-Loose single-file routers sit at top level; related ones are collected into **grouping folders** (`employee_lifecycle/`, `work/`, `integrations/` — see below). Grouping folders differ from the split-router packages (`employees/`, `ir_incidents/`, `er_copilot/`, `matcha_work/`, `employee_schedule/`, `labor_relations/`): a split-router package is **one** router carved into submodules; a grouping folder namespaces **several independent** routers, each still self-mounted + self-gated in `__init__.py`. Its `folder/__init__.py` only re-exports the sub-routers under their historical `*_router` names, so the top aggregator's mount block is unchanged by the grouping.
+Loose single-file routers sit at top level; related ones are collected into **grouping folders** (`broker/`, `insurance/`, `pilots/`, `onboarding/`, `intake/`, `employee_lifecycle/`, `work/`, `integrations/` — see below).
+
+**Naming trap:** a grouping folder must not share a name with a top-level module in the same directory — in Python the package shadows the module, so the module silently becomes unimportable. This is why the Coterie carrier router lives at `insurance/carrier.py` rather than staying `insurance.py` beside the `insurance/` package, and why `broker_insurance.py` became `broker/insurance.py`. Check for a same-named `.py` before adding a grouping folder. Grouping folders differ from the split-router packages (`employees/`, `ir_incidents/`, `er_copilot/`, `matcha_work/`, `employee_schedule/`, `labor_relations/`): a split-router package is **one** router carved into submodules; a grouping folder namespaces **several independent** routers, each still self-mounted + self-gated in `__init__.py`. Its `folder/__init__.py` only re-exports the sub-routers under their historical `*_router` names, so the top aggregator's mount block is unchanged by the grouping.
 
 ## Router map (by domain)
 
@@ -12,19 +14,19 @@ Loose single-file routers sit at top level; related ones are collected into **gr
 | `employees/` | `/employees` (+ `/employees/pto`, `/employees/leave`) | Employee CRUD, bulk upload, invitations, onboarding, offboarding, credentials, OIG, leave, incidents, pto/leave admin — **package** (split 2026-05-16; see `employees/CLAUDE.md`) |
 | `employee_portal.py` | `/v1/portal` | Employee-facing self-service portal (incl. `/me/schedule*` — view published shifts + file swap/drop/unavailability requests, gated `employee_schedule`) |
 | `employee_schedule/` | `/employee-schedule` | Employee shift scheduling — shift CRUD + publish + weekly view (`shifts.py`), assignment (`assignments.py`), templates + recurrence generation (`templates.py`), admin request review (`requests.py`). **Package**; `require_feature("employee_schedule")` |
-| `onboarding.py` | `/onboarding` | New-hire onboarding tasks + notification settings |
-| `invitations.py` | `/invitations` | Token-based invite acceptance |
+| `onboarding/new_hire.py` | `/onboarding` | New-hire onboarding tasks + notification settings |
+| `onboarding/invitations.py` | `/invitations` | Token-based invite acceptance |
 | `employee_lifecycle/offer_letters.py` | `/offer-letters` | Offer letter creation, signing, candidate portal (1,288 lines) |
 | `interviews.py` | — | Live interview WS + transcript handling (1,522 lines) |
 | `er_copilot/` | `/er/cases` (+ `/shared/er-export`) | Employee Relations case mgmt + AI — **package** (split 2026-07-06, 43 routes; see `er_copilot/CLAUDE.md`) |
 | `ir_incidents/` | `/ir/incidents` | Incident reporting (matcha-lite) — **already a package** (50 routes incl. no-roster people index), see `ir_incidents/CLAUDE.md` |
-| `ir_onboarding.py` | `/ir-onboarding` | IR-only onboarding wizard backend |
+| `onboarding/ir.py` | `/ir-onboarding` | IR-only onboarding wizard backend |
 | `ir_surveys.py` | `/ir/surveys` | Security survey CRUD (matcha-lite) |
-| `inbound_email.py` | (none) | Public intake: anonymous `/report/:token` + per-location magic-link `/intake/:token` forms |
+| `intake/inbound_email.py` | (none) | Public intake: anonymous `/report/:token` + per-location magic-link `/intake/:token` forms |
 | `employee_lifecycle/accommodations.py` | `/accommodations` | ADA accommodation cases (1,175 lines) |
 | `employee_lifecycle/discipline.py` | `/discipline` | Progressive discipline workflow + signatures |
 | `risk_assessment.py` | `/risk-assessment` | Risk-assessment dashboard data (849 lines) |
-| `analysis_pilot.py` | `/analysis-pilot` | Analysis Pilot — general-purpose bring-your-own-data analysis in a chat UI (upload CSV/XLSX/PDF → deterministic `services/analysis_packs` metrics incl. volatility/risk, financial, insurance, inventory, general stats → grounded SSE chat with highlight-to-chat + proposed extraction corrections → analyst PDF). Company-scoped; `require_feature("analysis_pilot")` |
+| `pilots/analysis.py` | `/analysis-pilot` | Analysis Pilot — general-purpose bring-your-own-data analysis in a chat UI (upload CSV/XLSX/PDF → deterministic `services/analysis_packs` metrics incl. volatility/risk, financial, insurance, inventory, general stats → grounded SSE chat with highlight-to-chat + proposed extraction corrections → analyst PDF). Company-scoped; `require_feature("analysis_pilot")` |
 | `employee_lifecycle/pre_termination.py` | `/pre-termination` | Pre-term review packets (985 lines) |
 | `employee_lifecycle/separation.py` | `/separation` | Separation agreement workflow |
 | `employee_lifecycle/flight_risk.py` | `/flight-risk` | Flight-risk scoring per employee |
@@ -32,8 +34,8 @@ Loose single-file routers sit at top level; related ones are collected into **gr
 | `employee_lifecycle/i9.py` | `/i9` | I-9 verification |
 | `employee_lifecycle/cobra.py` | `/cobra` | COBRA admin |
 | `dashboard.py` | `/dashboard` | Cross-feature dashboard aggregation (2,141 lines) |
-| `brokers.py` | `/brokers` | HR broker admin (1,605 lines) |
-| `broker_portfolio.py` | `/broker-portfolio` | Per-broker client roster + cross-client metrics |
+| `broker/brokers.py` | `/brokers` | HR broker admin (1,605 lines) |
+| `broker/portfolio.py` | `/broker-portfolio` | Per-broker client roster + cross-client metrics |
 | `fractional_hr.py` | `/fractional-hr` | Fractional HR engagement tooling — internal master-admin only (`require_admin` at mount, **not** feature-gated). Clients/scope/tasks/time + aggregate book-of-business overview. `fractional_*` tables; `company_id` nullable (client may have no tenant) |
 | `integrations/provisioning.py` | `/provisioning` | Google Workspace + Slack auto-provision (1,606 lines) |
 | `matcha_work/` | (multiple: `/matcha-work`, `/matcha-work/public`, `/matcha-work/presence`) | Matcha-work projects/threads/tasks/recruiting/AI turns — **package** (split 2026-07-03, 204 routes; see `matcha_work/CLAUDE.md`) |
