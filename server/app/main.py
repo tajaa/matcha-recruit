@@ -161,7 +161,7 @@ async def lifespan(app: FastAPI):
     # Same pattern for the matcha-work project presence WS — without this,
     # collaborators on different uvicorn workers don't see each other in the
     # project header pill (in-process ProjectConnectionManager dicts).
-    from .matcha.routes.project_ws import (
+    from .matcha.routes.work.project_ws import (
         start_project_fanout_subscriber, stop_project_fanout_subscriber,
     )
     start_project_fanout_subscriber()
@@ -545,10 +545,10 @@ app.include_router(stripe_webhook_router, prefix="/api")
 app.include_router(chat_ws_router, prefix="/ws/chat", tags=["chat-websocket"])
 app.include_router(channels_ws_router, prefix="/ws/channels", tags=["channels-websocket"])
 
-from .matcha.routes.thread_ws import router as thread_ws_router
+from .matcha.routes.work.thread_ws import router as thread_ws_router
 app.include_router(thread_ws_router, prefix="/ws/threads", tags=["threads-websocket"])
 
-from .matcha.routes.project_ws import router as project_ws_router
+from .matcha.routes.work.project_ws import router as project_ws_router
 app.include_router(project_ws_router, prefix="/ws/projects", tags=["projects-websocket"])
 
 # SEO routes — served at root, no /api prefix (crawlers expect /sitemap.xml + /robots.txt)

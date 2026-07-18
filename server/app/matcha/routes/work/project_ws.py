@@ -21,9 +21,9 @@ from uuid import UUID
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
 from pydantic import BaseModel
 
-from ...database import get_connection
-from ...core.services.auth import decode_token
-from ...core.services.redis_cache import get_redis_cache
+from app.database import get_connection
+from app.core.services.auth import decode_token
+from app.core.services.redis_cache import get_redis_cache
 
 logger = logging.getLogger(__name__)
 

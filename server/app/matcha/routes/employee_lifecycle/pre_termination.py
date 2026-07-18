@@ -13,10 +13,10 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from ...database import get_connection
-from ...core.dependencies import get_current_user
-from ..dependencies import require_admin_or_client, get_client_company_id
-from ...core.models.auth import CurrentUser
+from app.database import get_connection
+from app.core.dependencies import get_current_user
+from app.matcha.dependencies import require_admin_or_client, get_client_company_id
+from app.core.models.auth import CurrentUser
 
 logger = logging.getLogger(__name__)
 
@@ -265,7 +265,7 @@ async def create_discipline_record(
         if not employee:
             raise HTTPException(status_code=404, detail="Employee not found")
 
-    from ..services import discipline_engine
+    from app.matcha.services import discipline_engine
     try:
         record = await discipline_engine.issue_discipline_with_supersede(
             actor_user_id=current_user.id,
@@ -429,7 +429,7 @@ async def update_discipline_record(
         )
 
         if request.status is not None and request.status != existing["status"]:
-            from ..services import discipline_engine
+            from app.matcha.services import discipline_engine
             await discipline_engine.write_audit(
                 conn, record_id, current_user.id,
                 "status_changed",

@@ -13,8 +13,8 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, Depends, File, UploadFile, Request
 from fastapi.responses import StreamingResponse
 
-from ...database import get_connection
-from ..models.offer_letter import (
+from app.database import get_connection
+from app.matcha.models.offer_letter import (
     OfferGuidanceRequest,
     OfferGuidanceResponse,
     OfferLetter,
@@ -26,12 +26,12 @@ from ..models.offer_letter import (
     RangeNegotiateResult,
     ReNegotiateRequest,
 )
-from ..dependencies import require_admin_or_client, get_client_company_id, require_feature
-from ...core.models.auth import CurrentUser
-from ...core.services.storage import get_storage
-from ...core.services.email import EmailService
-from ...config import get_settings
-from ...core.services.redis_cache import get_redis_cache, cache_get, cache_set, cache_delete, offer_letters_key
+from app.matcha.dependencies import require_admin_or_client, get_client_company_id, require_feature
+from app.core.models.auth import CurrentUser
+from app.core.services.storage import get_storage
+from app.core.services.email import EmailService
+from app.config import get_settings
+from app.core.services.redis_cache import get_redis_cache, cache_get, cache_set, cache_delete, offer_letters_key
 
 logger = logging.getLogger(__name__)
 
@@ -1206,7 +1206,7 @@ async def download_offer_letter_pdf(
     # Try to use weasyprint for PDF generation
     try:
         from weasyprint import HTML
-        from ...core.services.pdf import safe_url_fetcher
+        from app.core.services.pdf import safe_url_fetcher
         pdf_bytes = HTML(string=html_content, url_fetcher=safe_url_fetcher).write_pdf()
         return StreamingResponse(
             BytesIO(pdf_bytes),

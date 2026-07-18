@@ -9,8 +9,8 @@ from uuid import UUID
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
 from pydantic import BaseModel
 
-from ...database import get_connection
-from ...core.services.auth import decode_token
+from app.database import get_connection
+from app.core.services.auth import decode_token
 
 logger = logging.getLogger(__name__)
 

@@ -9,10 +9,10 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from ..dependencies import require_admin_or_client, get_client_company_id
-from ...core.dependencies import get_current_user
-from ...core.models.auth import CurrentUser
-from ..services import notification_service as notif_svc
+from app.matcha.dependencies import require_admin_or_client, get_client_company_id
+from app.core.dependencies import get_current_user
+from app.core.models.auth import CurrentUser
+from app.matcha.services import notification_service as notif_svc
 
 logger = logging.getLogger(__name__)
 

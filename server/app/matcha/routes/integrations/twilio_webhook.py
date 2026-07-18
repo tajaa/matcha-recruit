@@ -12,10 +12,10 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect
 from starlette.responses import Response
 
-from ...config import get_settings
-from ...core.services.audio_convert import mulaw_8k_to_pcm_16k, pcm_16k_to_mulaw_8k
-from ...core.services.gemini_session import GeminiLiveSession
-from ...core.services.twilio_call_service import CallResult, get_twilio_call_service
+from app.config import get_settings
+from app.core.services.audio_convert import mulaw_8k_to_pcm_16k, pcm_16k_to_mulaw_8k
+from app.core.services.gemini_session import GeminiLiveSession
+from app.core.services.twilio_call_service import CallResult, get_twilio_call_service
 
 logger = logging.getLogger(__name__)
 

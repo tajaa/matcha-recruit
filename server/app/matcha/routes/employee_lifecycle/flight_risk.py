@@ -15,9 +15,9 @@ import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
-from ...core.models.auth import CurrentUser
-from ..dependencies import get_client_company_id, require_admin_or_client
-from ..services.flight_risk_service import (
+from app.core.models.auth import CurrentUser
+from app.matcha.dependencies import get_client_company_id, require_admin_or_client
+from app.matcha.services.flight_risk_service import (
     compute_company_summary,
     compute_for_company,
     get_employee_history,

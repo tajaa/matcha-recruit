@@ -14,18 +14,18 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
-from ...database import get_connection
-from ..dependencies import (
+from app.database import get_connection
+from app.matcha.dependencies import (
     require_admin_or_client,
     get_client_company_id,
     require_employee_record,
 )
-from ..services.training_grading import (
+from app.matcha.services.training_grading import (
     grade_quiz as _grade_quiz_pure,
     parse_jsonb as _parse_jsonb,
     sanitize_lesson_template as _sanitize_lesson_template,
 )
-from ...core.models.auth import CurrentUser
+from app.core.models.auth import CurrentUser
 
 logger = logging.getLogger(__name__)
 
@@ -957,7 +957,7 @@ async def attest_completion(
 ):
     """Finalize training: requires a passed quiz attempt. Generates PDF cert,
     uploads to S3, sets completion fields, returns presigned cert URL."""
-    from ..services.training_pdf import (
+    from app.matcha.services.training_pdf import (
         new_certificate_id,
         render_certificate_pdf,
         upload_certificate,
@@ -1083,7 +1083,7 @@ async def attest_completion(
 
     # Email completion notice with cert attachment (best-effort, non-blocking failure)
     try:
-        from ...core.services.email import get_email_service
+        from app.core.services.email import get_email_service
         email_svc = get_email_service()
         if email_svc.is_configured() and employee.get("email"):
             await email_svc.send_training_completion_email(
@@ -1129,7 +1129,7 @@ async def get_certificate_url(
         if not row or not row["certificate_url"]:
             raise HTTPException(status_code=404, detail="Certificate not found")
 
-    from ...core.services.storage import get_storage
+    from app.core.services.storage import get_storage
     storage = get_storage()
     presigned = storage.get_presigned_download_url(row["certificate_url"], expires_in=900)
     if not presigned:
@@ -1151,7 +1151,7 @@ async def get_my_certificate_url(
         if not row or not row["certificate_url"]:
             raise HTTPException(status_code=404, detail="Certificate not found")
 
-    from ...core.services.storage import get_storage
+    from app.core.services.storage import get_storage
     storage = get_storage()
     presigned = storage.get_presigned_download_url(row["certificate_url"], expires_in=900)
     if not presigned:

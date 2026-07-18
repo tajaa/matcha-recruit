@@ -130,7 +130,7 @@ async def _broadcast_task_event_safe(project_id: UUID, event: str, payload: dict
     Lazy import dodges the routes→services circular at module load time.
     """
     try:
-        from ..routes.project_ws import broadcast_task_event
+        from ..routes.work.project_ws import broadcast_task_event
         logger.info("dispatching %s for project=%s", event, project_id)
         await broadcast_task_event(project_id, event, payload)
     except Exception as e:

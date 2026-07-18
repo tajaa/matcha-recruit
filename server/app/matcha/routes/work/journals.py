@@ -9,11 +9,11 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 
-from ...core.models.auth import CurrentUser
-from ...core.services.storage import get_storage
-from ..dependencies import require_admin_or_client, get_client_company_id
-from ..services import entitlements_service
-from ..services import journal_service
+from app.core.models.auth import CurrentUser
+from app.core.services.storage import get_storage
+from app.matcha.dependencies import require_admin_or_client, get_client_company_id
+from app.matcha.services import entitlements_service
+from app.matcha.services import journal_service
 
 router = APIRouter()
 

@@ -20,27 +20,27 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, R
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, EmailStr, Field
 
-from ...config import get_settings
-from ...core.models.auth import CurrentUser
-from ...core.dependencies import require_admin
-from ...core.services.secret_crypto import decrypt_secret, encrypt_secret
-from ...database import get_connection
-from ..dependencies import (
+from app.config import get_settings
+from app.core.models.auth import CurrentUser
+from app.core.dependencies import require_admin
+from app.core.services.secret_crypto import decrypt_secret, encrypt_secret
+from app.database import get_connection
+from app.matcha.dependencies import (
     get_client_company_id,
     require_admin_or_client,
     require_any_feature,
     require_feature,
     require_feature,
 )
-from ..services.google_workspace_service import GoogleWorkspaceService
-from ..services.onboarding_orchestrator import (
+from app.matcha.services.google_workspace_service import GoogleWorkspaceService
+from app.matcha.services.onboarding_orchestrator import (
     PROVIDER_GOOGLE_WORKSPACE,
     PROVIDER_SLACK,
     retry_google_workspace_onboarding,
     start_google_workspace_onboarding,
     start_slack_onboarding,
 )
-from ..services.hris_service import PROVIDER_HRIS, HRISProvisioningError
+from app.matcha.services.hris_service import PROVIDER_HRIS, HRISProvisioningError
 
 # Several handlers below already call logger.error(...) on their failure paths
 # (Gusto company fetch; Finch Connect-session / sandbox / token exchange) but
@@ -1488,7 +1488,7 @@ async def connect_hris(
     test_status = "connected"
     test_error = None
     if request.test_connection and request.mode != "mock":
-        from ..services.hris_service import get_hris_service, GustoHRISService
+        from app.matcha.services.hris_service import get_hris_service, GustoHRISService
         service = get_hris_service(request.mode)
         test_secrets = {
             "client_id": request.client_id or "",
@@ -1561,7 +1561,7 @@ async def trigger_hris_sync(
     """Trigger a manual HRIS sync — fetches all employees from the HRIS and imports them."""
     company_id = await get_client_company_id(current_user)
 
-    from ..services.hris_sync_orchestrator import start_hris_sync
+    from app.matcha.services.hris_sync_orchestrator import start_hris_sync
     try:
         result = await start_hris_sync(
             company_id=company_id,
@@ -1716,7 +1716,7 @@ async def authorize_gusto_oauth(
         )
         if not company:
             raise HTTPException(status_code=404, detail="Company not found")
-        from ...core.feature_flags import merge_company_features
+        from app.core.feature_flags import merge_company_features
         features = merge_company_features(company["enabled_features"])
         # Gusto-direct path: gated by hris_gusto (or the legacy hris_import umbrella).
         if not (features.get("hris_gusto") or features.get("hris_import")):
@@ -1876,7 +1876,7 @@ async def get_gusto_verification_token(
 @router.post("/hris/webhook/gusto")
 async def gusto_webhook(request: Request, background_tasks: BackgroundTasks):
     """Receive Gusto webhook events and sync changes to Matcha."""
-    from ..services.hris_sync_orchestrator import start_hris_sync
+    from app.matcha.services.hris_sync_orchestrator import start_hris_sync
     body = await request.body()
 
     try:
@@ -2010,7 +2010,7 @@ async def _finch_products_for_company(company_id) -> list[str]:
     benefits-scoped token while everyone else connects unchanged. Never request
     benefits globally: an unsupported provider (e.g. Square) rejects it at connect.
     """
-    from ...core.feature_flags import merge_company_features
+    from app.core.feature_flags import merge_company_features
     products = [p for p in FINCH_PRODUCTS.split() if p]
     async with get_connection() as conn:
         row = await conn.fetchrow(
@@ -2234,7 +2234,7 @@ async def _load_finch_for_benefits(company_id):
         except Exception:
             secrets[key] = value
 
-    from ..services.finch_service import FinchHRISService
+    from app.matcha.services.finch_service import FinchHRISService
     return config, secrets, FinchHRISService()
 
 
