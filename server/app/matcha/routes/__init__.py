@@ -30,6 +30,7 @@ from .driver_risk import router as driver_risk_router
 from .employee_schedule import router as employee_schedule_router
 from .tcor import router as tcor_router
 from .coi import router as coi_router
+from .insurance import router as insurance_router
 from .management_liability import router as management_liability_router
 from .acord import router as acord_router
 from .ir_onboarding import router as ir_onboarding_router
@@ -155,6 +156,8 @@ matcha_router.include_router(tcor_router, prefix="/tcor", tags=["tcor"],
                              dependencies=[Depends(require_feature("tcor"))])
 matcha_router.include_router(coi_router, prefix="/coi", tags=["coi"],
                              dependencies=[Depends(require_feature("coi_tracking"))])
+matcha_router.include_router(insurance_router, prefix="/insurance", tags=["insurance"],
+                             dependencies=[Depends(require_feature("carrier_quotes"))])
 matcha_router.include_router(management_liability_router, prefix="/management-liability",
                              tags=["management-liability"],
                              dependencies=[Depends(require_feature("do_readiness"))])
