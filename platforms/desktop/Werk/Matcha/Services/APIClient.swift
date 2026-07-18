@@ -167,7 +167,13 @@ class APIClient {
             // short delay, then surface a friendlier APIError so the UI shows
             // "Couldn't reach the server" instead of raw Foundation text.
             if let urlError = _isTransientNetworkError(error) {
-                if retryOnMaintenance {
+                // Only auto-retry safe (idempotent) methods. A POST/PUT/DELETE
+                // can drop its connection AFTER the server received and applied
+                // it; replaying that duplicates the side effect (e.g. a second
+                // Stripe checkout session). The maintenance path below is
+                // already GET-gated for the same reason.
+                let isRetryable = ["GET", "HEAD"].contains(method.uppercased())
+                if retryOnMaintenance && isRetryable {
                     try? await Task.sleep(nanoseconds: 1_500_000_000)
                     return try await request(method: method, path: path, body: body, retryOnUnauthorized: retryOnUnauthorized, retryOnMaintenance: false)
                 }
@@ -258,7 +264,10 @@ class APIClient {
             (data, response) = try await URLSession.shared.data(for: urlRequest)
         } catch {
             if let urlError = _isTransientNetworkError(error) {
-                if retryOnMaintenance {
+                // Idempotent-only retry — see the note in `request(...)`; never
+                // replay a mutating verb that may have already been applied.
+                let isRetryable = ["GET", "HEAD"].contains(method.uppercased())
+                if retryOnMaintenance && isRetryable {
                     try? await Task.sleep(nanoseconds: 1_500_000_000)
                     return try await requestData(method: method, path: path, body: body, retryOnUnauthorized: retryOnUnauthorized, retryOnMaintenance: false)
                 }

@@ -774,6 +774,10 @@ class AppState {
         ChannelsWebSocket.shared.onCallParticipantsChanged = nil
         Task { await CallService.shared.leave() }
         MatchaWorkService.shared.updateCacheScope(nil)
+        // Drop the detail-VM tier too: these retain the previous user's loaded
+        // data keyed only by entity id, so leaving them would let a deep-link
+        // (or same-id re-open) after a user switch repaint the prior user's data.
+        WorkDetailVMStore.shared.clearAll()
         APIClient.shared.accessToken = nil
         KeychainHelper.delete(key: KeychainHelper.Keys.accessToken)
         KeychainHelper.delete(key: KeychainHelper.Keys.refreshToken)
@@ -1019,6 +1023,12 @@ class AppState {
     /// Mirrors the surface-clearing the sidebar / home buttons do.
     @MainActor
     func handleNotificationLink(_ link: String?, metadata: [String: String]? = nil) {
+        // Never navigate from a notification while signed out. macOS keeps
+        // banners across logout, so a banner posted in user A's session could
+        // otherwise be tapped after user B signs in on the same Mac and drive
+        // B to A's entity id. Ownership of the id is still enforced server-side
+        // on fetch; this stops the cross-session navigation at the door.
+        guard isAuthenticated else { return }
         // Link query params (if any).
         let items = link.flatMap { URLComponents(string: $0)?.queryItems } ?? []
         func query(_ key: String) -> String? {

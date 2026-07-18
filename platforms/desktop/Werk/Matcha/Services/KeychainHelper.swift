@@ -26,8 +26,18 @@ enum KeychainHelper {
     // grant. Data-protection items are scoped to the app's access group
     // (TEAMID.bundleid), trusted by entitlement, so reads never prompt across
     // rebuilds or cert changes. Added 2026-05-21.
-    static func save(key: String, value: String) {
-        guard let data = value.data(using: .utf8) else { return }
+    /// Persist a value. Returns whether the write actually landed in the
+    /// keychain — previously the `SecItemAdd` status was discarded, so a
+    /// failed write (e.g. a keychain error, or an add attempted before first
+    /// unlock under `AfterFirstUnlock`) looked identical to success. Because
+    /// we delete-then-add, a swallowed add failure could even wipe a
+    /// previously-good token and leave the caller believing it persisted,
+    /// silently logging the user out on the next cold launch. Callers that
+    /// care (token persistence) can now check the result; `@discardableResult`
+    /// keeps best-effort callers (legacy migration) unchanged.
+    @discardableResult
+    static func save(key: String, value: String) -> Bool {
+        guard let data = value.data(using: .utf8) else { return false }
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrAccount as String: key,
@@ -36,7 +46,11 @@ enum KeychainHelper {
             kSecUseDataProtectionKeychain as String: true
         ]
         SecItemDelete(query as CFDictionary)
-        SecItemAdd(query as CFDictionary, nil)
+        let status = SecItemAdd(query as CFDictionary, nil)
+        if status != errSecSuccess {
+            NSLog("[Keychain] save failed for \(key): OSStatus \(status)")
+        }
+        return status == errSecSuccess
     }
 
     static func load(key: String) -> String? {

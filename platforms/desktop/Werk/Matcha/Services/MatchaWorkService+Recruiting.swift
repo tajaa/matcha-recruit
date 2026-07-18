@@ -11,7 +11,14 @@ extension MatchaWorkService {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if let token = client.accessToken { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         request.httpBody = json
-        let (data, _) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        // Previously the response was discarded, so a 4xx/5xx save looked
+        // identical to success and the UI reported the posting as saved.
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            let code = (response as? HTTPURLResponse)?.statusCode ?? -1
+            let message = String(data: data, encoding: .utf8) ?? "Unknown error"
+            throw APIError.httpError(code, message)
+        }
         return data
     }
 

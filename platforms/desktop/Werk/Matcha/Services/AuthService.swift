@@ -136,8 +136,14 @@ class AuthService {
     }
 
     private func saveTokens(_ response: TokenResponse) {
-        KeychainHelper.save(key: KeychainHelper.Keys.accessToken, value: response.access_token)
-        KeychainHelper.save(key: KeychainHelper.Keys.refreshToken, value: response.refresh_token)
+        let accessOK = KeychainHelper.save(key: KeychainHelper.Keys.accessToken, value: response.access_token)
+        let refreshOK = KeychainHelper.save(key: KeychainHelper.Keys.refreshToken, value: response.refresh_token)
+        if !accessOK || !refreshOK {
+            // The in-memory token below keeps THIS session working, but the
+            // keychain write failed — the next cold launch will find nothing
+            // and log the user out. Surface it rather than failing silently.
+            NSLog("[Auth] token keychain persist failed (access=\(accessOK) refresh=\(refreshOK)); session will not survive relaunch")
+        }
         client.accessToken = response.access_token
     }
 }
