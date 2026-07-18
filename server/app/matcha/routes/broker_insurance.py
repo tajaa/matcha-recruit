@@ -194,21 +194,14 @@ def _serialize_claim(row) -> dict:
 
 @router.get("/clients/{company_id}/insurance/loss-runs")
 async def tenant_loss_runs(company_id: UUID, current_user=Depends(require_broker)):
-    """Pull loss runs from the carrier. Mock returns representative rows and records
-    the pull as provenance; live-wiring into loss-development is a follow-up."""
+    """Pull loss runs from the carrier. Read-only — the frontend fetches this on
+    every Insurance-tab mount, so it must not write. Recording an import as
+    provenance belongs on the live-wiring path (an explicit import action), not
+    here; a GET that INSERTs grew one `loss_run_import` claim row per page view."""
     _require_capability("loss_runs")
     async with get_connection() as conn:
         await _assert_broker_owns_company(conn, current_user.id, company_id)
-        broker_id = await _broker_id(conn, current_user.id)
         loss_runs = coterie_service.mock_loss_runs() if coterie_service.is_mock_mode() else []
-        await conn.execute(
-            """
-            INSERT INTO insurance_claims
-                (company_id, broker_id, carrier, kind, status, payload, created_by)
-            VALUES ($1, $2, 'coterie', 'loss_run_import', 'imported', $3::jsonb, $4)
-            """,
-            company_id, broker_id, json.dumps({"loss_runs": loss_runs}), current_user.id,
-        )
     return {"loss_runs": loss_runs, "mock_mode": coterie_service.is_mock_mode()}
 
 
@@ -225,18 +218,45 @@ async def tenant_fnol(company_id: UUID, body: FnolRequest, current_user=Depends(
         )
         if not inc:
             raise HTTPException(status_code=404, detail="Incident not found")
-        claim_ref = coterie_service.file_fnol(str(body.incident_id), inc["incident_number"])
+        # One incident is one loss — a second FNOL is a duplicate claim at the
+        # carrier, not a second event. Check BEFORE calling the carrier: once
+        # live FNOL wiring lands, filing first and rejecting after would leave a
+        # duplicate claim open at Coterie that no row of ours references.
+        prior = await conn.fetchval(
+            "SELECT claim_ref FROM insurance_claims "
+            "WHERE incident_id = $1 AND company_id = $2 AND kind = 'fnol'",
+            body.incident_id, company_id,
+        )
+        if prior:
+            raise HTTPException(
+                status_code=409,
+                detail=f"An FNOL was already filed for this incident ({prior}).")
+        try:
+            claim_ref = coterie_service.file_fnol(str(body.incident_id), inc["incident_number"])
+        except CoterieError as e:
+            _raise_coterie(e)
+        # The pre-check loses to a concurrent post; the partial unique index
+        # `uq_insurance_claims_fnol_incident` is the backstop that turns that
+        # race into the same 409. Scoped to fnol so loss-run imports (which
+        # carry a NULL incident_id) are unaffected.
         row = await conn.fetchrow(
             """
             INSERT INTO insurance_claims
                 (company_id, broker_id, incident_id, carrier, kind, claim_ref, status, payload, created_by)
             VALUES ($1, $2, $3, 'coterie', 'fnol', $4, 'open', $5::jsonb, $6)
+            ON CONFLICT (incident_id) WHERE kind = 'fnol' DO NOTHING
             RETURNING *
             """,
             company_id, broker_id, body.incident_id, claim_ref,
             json.dumps({"description": body.description, "incident_number": inc["incident_number"]}),
             current_user.id,
         )
+        if row is None:
+            # Lost the race. claim_ref is derived deterministically from the
+            # incident, so the winner's ref is the one we just computed.
+            raise HTTPException(
+                status_code=409,
+                detail=f"An FNOL was already filed for this incident ({claim_ref}).")
     return _serialize_claim(row)
 
 
