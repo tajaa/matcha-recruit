@@ -423,7 +423,11 @@ class ThreadDetailViewModel {
         do {
             let v = try await service.getVersions(threadId: threadId, forceRefresh: forceRefresh)
             await MainActor.run { versions = v }
-        } catch { }
+        } catch {
+            // Was an empty catch — a failed load left the revert UI silently
+            // empty, indistinguishable from "no versions".
+            await MainActor.run { errorMessage = "Couldn't load version history. \(error.localizedDescription)" }
+        }
     }
 
     func revert(to version: Int) async {
@@ -572,7 +576,12 @@ class ThreadDetailViewModel {
                 isLoadingPDF = false
             }
         } catch {
-            await MainActor.run { isLoadingPDF = false }
+            // Previously swallowed — the preview just went blank with no
+            // indication anything failed.
+            await MainActor.run {
+                isLoadingPDF = false
+                errorMessage = "Couldn't load the PDF preview. \(error.localizedDescription)"
+            }
         }
     }
 }

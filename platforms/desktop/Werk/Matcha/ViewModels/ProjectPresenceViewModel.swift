@@ -202,6 +202,9 @@ enum UserColor {
 
     static func forUserId(_ id: String) -> Color {
         let hash = id.unicodeScalars.reduce(0) { ($0 &* 31) &+ Int($1.value) }
-        return palette[abs(hash) % palette.count]
+        // `abs(hash)` traps when hash == Int.min (the overflow operators above
+        // can produce it). Take a wrap-safe non-negative index instead.
+        let idx = ((hash % palette.count) + palette.count) % palette.count
+        return palette[idx]
     }
 }

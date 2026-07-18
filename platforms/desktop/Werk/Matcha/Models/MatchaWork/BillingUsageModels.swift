@@ -92,6 +92,14 @@ struct MWCheckoutResponse: Codable {
 enum MWPlan: String, Codable, Comparable {
     case free, lite, pro, business
 
+    // Degrade an unknown/future plan string to `.free` rather than throwing —
+    // a raw-value enum would otherwise fail the entire entitlements decode and
+    // leave the client unable to read the tier at all.
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = MWPlan(rawValue: raw) ?? .free
+    }
+
     private var rank: Int {
         switch self {
         case .free: return 0

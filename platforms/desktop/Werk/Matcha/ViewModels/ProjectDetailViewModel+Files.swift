@@ -234,7 +234,17 @@ func presentExportSavePanel(data: Data, format: String, title: String) {
         do {
             try data.write(to: url)
         } catch {
+            // Previously print-only — the user got no signal the export failed.
             print("[Export] write failed: \(error)")
+            let alert = NSAlert()
+            alert.messageText = "Export failed"
+            alert.informativeText = "Couldn't write \(url.lastPathComponent). \(error.localizedDescription)"
+            alert.alertStyle = .warning
+            if let window = NSApp.keyWindow ?? NSApp.mainWindow {
+                alert.beginSheetModal(for: window, completionHandler: nil)
+            } else {
+                alert.runModal()
+            }
         }
     }
 }
