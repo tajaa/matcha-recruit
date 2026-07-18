@@ -92,13 +92,12 @@ struct MWCheckoutResponse: Codable {
 enum MWPlan: String, Codable, Comparable {
     case free, lite, pro, business
 
-    // Degrade an unknown/future plan string to `.free` rather than throwing —
-    // a raw-value enum would otherwise fail the entire entitlements decode and
-    // leave the client unable to read the tier at all.
-    init(from decoder: Decoder) throws {
-        let raw = try decoder.singleValueContainer().decode(String.self)
-        self = MWPlan(rawValue: raw) ?? .free
-    }
+    // NOTE: deliberately a strict raw-value decode — do NOT add an
+    // unknown → .free fallback. AppState.refreshEntitlements' catch keeps
+    // the LAST-KNOWN entitlements when the decode throws, so a subscriber
+    // migrated to a future server-side tier keeps their paid gates until an
+    // app update ships the new case. A .free fallback would decode
+    // "successfully" and actively overwrite their paid plan with free.
 
     private var rank: Int {
         switch self {

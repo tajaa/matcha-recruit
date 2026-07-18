@@ -9,7 +9,10 @@ final class JournalService {
     private let client = APIClient.shared
     private let basePath = "/matcha-work"
     private let cacheTTL: TimeInterval = 60
-    private var listCache: [String: MWCacheEntry<[MWJournal]>] = [:]
+    // Lock-guarded for the same reason as MatchaWorkService's caches: read/
+    // written from background async fetches while the MainActor logout path
+    // (clearCaches() → invalidateLists()) calls removeAll() concurrently.
+    private let listCache = LockedCache<[MWJournal]>()
 
     private init() {}
 

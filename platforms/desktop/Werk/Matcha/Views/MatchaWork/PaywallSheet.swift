@@ -185,10 +185,10 @@ struct PaywallSheet: View {
         Task { @MainActor in
             defer { isOpeningCheckout = false }
             do {
-                // Derive the web origin from the same base-URL config as every
-                // other request (the API base ends in `/api`) instead of pinning
-                // prod, so a MATCHA_API_URL override moves the redirect too.
-                let webOrigin = APIClient.shared.baseURL.replacingOccurrences(of: "/api", with: "")
+                // Suffix-anchored web origin (see APIClient.webOrigin) — a
+                // MATCHA_API_URL override moves the redirect too, without the
+                // global-replace corruption of api.* hosts.
+                let webOrigin = APIClient.shared.webOrigin
                 let urlString = try await MatchaWorkService.shared.startPersonalCheckout(
                     successUrl: "\(webOrigin)/work?upgraded=1",
                     cancelUrl: "\(webOrigin)/work?canceled=1",

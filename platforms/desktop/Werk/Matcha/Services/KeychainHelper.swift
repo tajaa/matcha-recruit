@@ -29,24 +29,32 @@ enum KeychainHelper {
     /// Persist a value. Returns whether the write actually landed in the
     /// keychain — previously the `SecItemAdd` status was discarded, so a
     /// failed write (e.g. a keychain error, or an add attempted before first
-    /// unlock under `AfterFirstUnlock`) looked identical to success. Because
-    /// we delete-then-add, a swallowed add failure could even wipe a
-    /// previously-good token and leave the caller believing it persisted,
-    /// silently logging the user out on the next cold launch. Callers that
-    /// care (token persistence) can now check the result; `@discardableResult`
-    /// keeps best-effort callers (legacy migration) unchanged.
+    /// unlock under `AfterFirstUnlock`) looked identical to success. Uses
+    /// add-then-update rather than the old delete-then-add: with
+    /// delete-then-add, a failed add AFTER a successful delete destroyed the
+    /// previously-good token — the exact silent-logout-on-next-launch bug
+    /// this return value exists to surface. Add-or-update never removes an
+    /// item without a replacement in hand. `@discardableResult` keeps
+    /// best-effort callers unchanged.
     @discardableResult
     static func save(key: String, value: String) -> Bool {
         guard let data = value.data(using: .utf8) else { return false }
-        let query: [String: Any] = [
+        let base: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrAccount as String: key,
-            kSecValueData as String: data,
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
             kSecUseDataProtectionKeychain as String: true
         ]
-        SecItemDelete(query as CFDictionary)
-        let status = SecItemAdd(query as CFDictionary, nil)
+        var addQuery = base
+        addQuery[kSecValueData as String] = data
+        addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        var status = SecItemAdd(addQuery as CFDictionary, nil)
+        if status == errSecDuplicateItem {
+            let update: [String: Any] = [
+                kSecValueData as String: data,
+                kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+            ]
+            status = SecItemUpdate(base as CFDictionary, update as CFDictionary)
+        }
         if status != errSecSuccess {
             NSLog("[Keychain] save failed for \(key): OSStatus \(status)")
         }
@@ -101,8 +109,11 @@ enum KeychainHelper {
               let string = String(data: data, encoding: .utf8) else {
             return nil
         }
-        save(key: key, value: string)
-        deleteLegacy(key: key)
+        // Only drop the legacy copy once the data-protection write actually
+        // succeeded — otherwise a failed migration destroys the only copy.
+        if save(key: key, value: string) {
+            deleteLegacy(key: key)
+        }
         return string
     }
 

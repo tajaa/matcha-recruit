@@ -364,10 +364,14 @@ class AppState {
             guard let legacy = defaults.string(forKey: key), !legacy.isEmpty else {
                 continue
             }
-            if KeychainHelper.load(key: key) == nil {
-                KeychainHelper.save(key: key, value: legacy)
+            // Only clear the UserDefaults copy once the token verifiably
+            // lives in the keychain — an unconditional removeObject after a
+            // failed save would destroy the only remaining copy.
+            let inKeychain = KeychainHelper.load(key: key) != nil
+                || KeychainHelper.save(key: key, value: legacy)
+            if inKeychain {
+                defaults.removeObject(forKey: key)
             }
-            defaults.removeObject(forKey: key)
         }
     }
 

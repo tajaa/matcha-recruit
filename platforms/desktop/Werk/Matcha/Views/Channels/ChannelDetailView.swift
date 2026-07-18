@@ -647,6 +647,9 @@ struct ChannelDetailView: View {
                             guard let anchor = vm.messages.first?.stableKey else { return }
                             Task {
                                 await vm.loadOlder()
+                                // Nothing prepended (failure or end of history)
+                                // → don't jump the viewport.
+                                guard vm.messages.first?.stableKey != anchor else { return }
                                 // Pin the previously-oldest row to the top so the
                                 // reader's position is preserved after older rows
                                 // prepend (50ms yield lets the cells materialise,
@@ -721,6 +724,14 @@ struct ChannelDetailView: View {
             // history (which grows the count from the top) would yank the view
             // to the bottom. A prepend leaves `last` unchanged, so it won't fire.
             .onChange(of: vm.messages.last?.stableKey) {
+                guard let last = vm.messages.last else { return }
+                withAnimation { proxy.scrollTo(last.stableKey, anchor: .bottom) }
+            }
+            // Refresh-merge case the trigger above can't see: messages arrived
+            // while away but a pending/failed row is stuck at the tail, so the
+            // last identity is unchanged. The VM bumps this tick whenever a
+            // silent merge changes the list.
+            .onChange(of: vm.scrollToLatestTick) {
                 guard let last = vm.messages.last else { return }
                 withAnimation { proxy.scrollTo(last.stableKey, anchor: .bottom) }
             }

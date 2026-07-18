@@ -425,7 +425,10 @@ class ThreadDetailViewModel {
             await MainActor.run { versions = v }
         } catch {
             // Was an empty catch — a failed load left the revert UI silently
-            // empty, indistinguishable from "no versions".
+            // empty, indistinguishable from "no versions". Cancellation
+            // (navigation away mid-load) is not a failure worth a banner.
+            if error is CancellationError { return }
+            if let urlError = error as? URLError, urlError.code == .cancelled { return }
             await MainActor.run { errorMessage = "Couldn't load version history. \(error.localizedDescription)" }
         }
     }
@@ -577,10 +580,14 @@ class ThreadDetailViewModel {
             }
         } catch {
             // Previously swallowed — the preview just went blank with no
-            // indication anything failed.
+            // indication anything failed. Cancellation (navigation away /
+            // superseded load) is not a failure the user should see.
+            let cancelled = error is CancellationError || (error as? URLError)?.code == .cancelled
             await MainActor.run {
                 isLoadingPDF = false
-                errorMessage = "Couldn't load the PDF preview. \(error.localizedDescription)"
+                if !cancelled {
+                    errorMessage = "Couldn't load the PDF preview. \(error.localizedDescription)"
+                }
             }
         }
     }

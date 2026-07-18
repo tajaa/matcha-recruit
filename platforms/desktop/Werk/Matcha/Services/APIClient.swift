@@ -63,6 +63,27 @@ private func _isTransientNetworkError(_ error: Error) -> URLError? {
     return _transientNetworkCodes.contains(urlError.code) ? urlError : nil
 }
 
+/// The single statement of which HTTP methods are safe to auto-retry after a
+/// transient connection drop. A non-idempotent verb can have been received and
+/// applied by the server before the connection died — replaying it duplicates
+/// the side effect (e.g. a second Stripe checkout session).
+private func _isIdempotentMethod(_ method: String) -> Bool {
+    let m = method.uppercased()
+    return m == "GET" || m == "HEAD"
+}
+
+/// True when a token-refresh attempt failed for environmental reasons
+/// (network blip, 502/503 maintenance window) rather than the server
+/// rejecting the session. These must not trigger logout: `didLogout` deletes
+/// the keychain refresh token, so treating a VPN flap as a dead session
+/// destroys a still-valid credential and forces a full re-login.
+private func _isTransientRefreshFailure(_ error: Error) -> Bool {
+    if error is URLError { return true }
+    if case APIError.networkUnavailable = error { return true }
+    if case APIError.serviceUnavailable = error { return true }
+    return false
+}
+
 class APIClient {
     static let shared = APIClient()
 
@@ -84,6 +105,22 @@ class APIClient {
         return "https://hey-matcha.com/api"
         #endif
     }()
+
+    /// Web-app origin for browser redirects (Stripe success/cancel URLs).
+    /// Strips ONLY a trailing "/api" path segment from `baseURL` — a global
+    /// string replace would corrupt api-subdomain hosts (e.g.
+    /// "https://api.example.com/api" → "https:/.example.com"). A localhost
+    /// base is the FastAPI backend, which serves no /work SPA route, so dev
+    /// builds fall back to the prod web app (the pre-derivation behavior).
+    var webOrigin: String {
+        if baseURL.hasSuffix("/api") {
+            let origin = String(baseURL.dropLast("/api".count))
+            if !origin.contains("127.0.0.1") && !origin.contains("localhost") {
+                return origin
+            }
+        }
+        return "https://hey-matcha.com"
+    }
     /// Bearer token. Read on every request from background executors and
     /// written from @MainActor (login / logout / refresh). `APIClient` is a
     /// plain shared singleton, so guard the non-atomic `Optional<String>`
@@ -177,13 +214,9 @@ class APIClient {
             // short delay, then surface a friendlier APIError so the UI shows
             // "Couldn't reach the server" instead of raw Foundation text.
             if let urlError = _isTransientNetworkError(error) {
-                // Only auto-retry safe (idempotent) methods. A POST/PUT/DELETE
-                // can drop its connection AFTER the server received and applied
-                // it; replaying that duplicates the side effect (e.g. a second
-                // Stripe checkout session). The maintenance path below is
-                // already GET-gated for the same reason.
-                let isRetryable = ["GET", "HEAD"].contains(method.uppercased())
-                if retryOnMaintenance && isRetryable {
+                // Only auto-retry idempotent methods (see _isIdempotentMethod);
+                // the maintenance path below is GET-gated for the same reason.
+                if retryOnMaintenance && _isIdempotentMethod(method) {
                     try? await Task.sleep(nanoseconds: 1_500_000_000)
                     return try await request(method: method, path: path, body: body, retryOnUnauthorized: retryOnUnauthorized, retryOnMaintenance: false)
                 }
@@ -204,6 +237,14 @@ class APIClient {
                     // Retry with new token
                     return try await request(method: method, path: path, body: body, retryOnUnauthorized: false)
                 } catch {
+                    // A transient failure during the refresh round-trip (VPN
+                    // flap, wake-from-sleep, deploy window) is NOT a dead
+                    // session — logging out here destroys a still-valid
+                    // refresh token over a network blip. Rethrow and let the
+                    // caller surface the network error; a genuine 401
+                    // rejection of /auth/refresh already fires onUnauthorized
+                    // inside that nested call.
+                    if _isTransientRefreshFailure(error) { throw error }
                     await MainActor.run { onUnauthorized?() }
                     throw APIError.unauthorized
                 }
@@ -274,10 +315,9 @@ class APIClient {
             (data, response) = try await URLSession.shared.data(for: urlRequest)
         } catch {
             if let urlError = _isTransientNetworkError(error) {
-                // Idempotent-only retry — see the note in `request(...)`; never
-                // replay a mutating verb that may have already been applied.
-                let isRetryable = ["GET", "HEAD"].contains(method.uppercased())
-                if retryOnMaintenance && isRetryable {
+                // Idempotent-only retry — see _isIdempotentMethod; never replay
+                // a mutating verb that may have already been applied.
+                if retryOnMaintenance && _isIdempotentMethod(method) {
                     try? await Task.sleep(nanoseconds: 1_500_000_000)
                     return try await requestData(method: method, path: path, body: body, retryOnUnauthorized: retryOnUnauthorized, retryOnMaintenance: false)
                 }
@@ -298,6 +338,9 @@ class APIClient {
                     _ = try await AuthService.shared.refresh()
                     return try await requestData(method: method, path: path, body: body, retryOnUnauthorized: false)
                 } catch {
+                    // Same as request<T>: don't destroy the session over a
+                    // transient failure of the refresh round-trip.
+                    if _isTransientRefreshFailure(error) { throw error }
                     await MainActor.run { onUnauthorized?() }
                     throw APIError.unauthorized
                 }
