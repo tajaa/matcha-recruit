@@ -5,13 +5,13 @@ import BrokerSidebar from '../components/sidebars/BrokerSidebar'
 import BrokerDashboard from '../pages/broker/BrokerDashboard'
 import BrokerClientsHub from '../pages/broker/BrokerClientsHub'
 import BrokerAccount from '../pages/broker/BrokerAccount'
-import BrokerClientDetail from '../pages/broker/BrokerClientDetail'
+import BrokerClientDetail from '../pages/broker/client-detail'
 import BrokerActionCenter from '../pages/broker/BrokerActionCenter'
 import BrokerRiskCurve from '../pages/broker/BrokerRiskCurve'
 import BrokerPropertyPortfolio from '../pages/broker/BrokerPropertyPortfolio'
 import BrokerExternalClients from '../pages/broker/BrokerExternalClients'
 import BrokerExternalClientDetail from '../pages/broker/BrokerExternalClientDetail'
-import BrokerPilot from '../pages/broker/BrokerPilot'
+import BrokerPilot from '../pages/broker/pilot'
 
 export default function BrokerRoutes() {
   return (

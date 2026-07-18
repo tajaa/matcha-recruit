@@ -23,7 +23,7 @@ import { EplTab } from './EplTab'
 import { ControlsTab } from './ControlsTab'
 import { LimitsTab } from './LimitsTab'
 import { DefenseTab } from './DefenseTab'
-import { PilotTab } from '../BrokerPilot/PilotTab'
+import { PilotTab } from '../pilot/PilotTab'
 
 export { LossRatioTab } from './LossRatioTab'
 export { LossTriangleTab } from './LossTriangleTab'

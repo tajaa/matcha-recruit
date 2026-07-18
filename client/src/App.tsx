@@ -1,6 +1,6 @@
 import { Routes, Route } from "react-router-dom";
 import { lazy, Suspense } from "react";
-import Home from "./pages/Home";
+import Home from "./pages/home";
 import Login from "./pages/Login";
 import RequireBusinessAccount from "./components/auth/RequireBusinessAccount";
 import RouteTracker from "./components/shared/RouteTracker";

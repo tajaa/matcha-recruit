@@ -3,15 +3,15 @@ import { Link, useLocation } from "react-router-dom";
 import { ArrowLeft, ArrowRight, Check, Loader2 } from "lucide-react";
 import MarketingFooter from "./MarketingFooter";
 import { useSEO } from "../../hooks/useSEO";
-import { ASH, BONE, DISPLAY, LINE_D, NOIR } from "../Home/theme";
-import { GrainOverlay, PageStyle } from "../Home/PageChrome";
+import { ASH, BONE, DISPLAY, LINE_D, NOIR } from "../home/theme";
+import { GrainOverlay, PageStyle } from "../home/PageChrome";
 import {
   HEADCOUNT_OPTIONS,
   LOCATION_OPTIONS,
   NEED_OPTIONS,
   QUALIFY_EMAIL_KEY,
   validateWorkEmail,
-} from "../Home/qualify";
+} from "../home/qualify";
 
 const BASE = import.meta.env.VITE_API_URL ?? "/api";
 
