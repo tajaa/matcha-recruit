@@ -44,16 +44,19 @@ enum KeychainHelper {
             kSecAttrAccount as String: key,
             kSecUseDataProtectionKeychain as String: true
         ]
-        var addQuery = base
-        addQuery[kSecValueData as String] = data
-        addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-        var status = SecItemAdd(addQuery as CFDictionary, nil)
-        if status == errSecDuplicateItem {
-            let update: [String: Any] = [
-                kSecValueData as String: data,
-                kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-            ]
-            status = SecItemUpdate(base as CFDictionary, update as CFDictionary)
+        // Update-first: after first login the item always exists, so the
+        // steady-state token refresh is a single keychain round-trip (the
+        // add path only runs on first save / after delete).
+        let update: [String: Any] = [
+            kSecValueData as String: data,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        ]
+        var status = SecItemUpdate(base as CFDictionary, update as CFDictionary)
+        if status == errSecItemNotFound {
+            var addQuery = base
+            addQuery[kSecValueData as String] = data
+            addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+            status = SecItemAdd(addQuery as CFDictionary, nil)
         }
         if status != errSecSuccess {
             NSLog("[Keychain] save failed for \(key): OSStatus \(status)")

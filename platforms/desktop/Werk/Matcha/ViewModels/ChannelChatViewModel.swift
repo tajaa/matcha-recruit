@@ -136,19 +136,29 @@ final class ChannelChatViewModel {
                 // than a full page arrived while away — the gap between the
                 // kept history and the newest page would be unknowable, so
                 // fall back to the newest page alone and recompute the flag.
+                // Known cosmetic edge: a pending/failed row that drifted
+                // mid-list (WS rows appended after it) re-sorts to the tail
+                // here — positional preservation would need timestamp
+                // interleaving, deliberately not attempted.
                 let overlaps = messages.contains { serverIds.contains($0.id) }
                 let olderPrefix = overlaps
                     ? Array(messages.prefix { !serverIds.contains($0.id) && !$0.pending && !$0.failed })
                     : []
                 if !overlaps { hasMoreHistory = newest.count >= historyPageSize }
+                let oldIds = Set(messages.map(\.id))
+                let hasNewMessages = newest.contains { !oldIds.contains($0.id) }
                 let merged = olderPrefix + newest + pendingExtras
                 if merged.map(\.id) != messages.map(\.id) {
+                    let tailUnchanged = merged.last?.stableKey == messages.last?.stableKey
                     messages = merged
                     // The tail may be an unchanged pending/failed row, so the
-                    // view's last-identity scroll trigger won't fire — signal
-                    // it explicitly (chat-standard: new messages reveal
-                    // themselves).
-                    scrollToLatestTick &+= 1
+                    // view's last-identity scroll trigger can't see newly
+                    // arrived messages — signal it explicitly. ONLY when new
+                    // messages actually arrived AND the tail is pinned:
+                    // a deletion-only or reorder-only merge must not yank a
+                    // reader out of the history they're reading, and a
+                    // changed tail is already handled by the identity trigger.
+                    if tailUnchanged && hasNewMessages { scrollToLatestTick &+= 1 }
                 }
             } else {
                 messages = detail.messages
@@ -157,16 +167,25 @@ final class ChannelChatViewModel {
                 isLoading = false
             }
         } catch {
-            if error is CancellationError { return }
-            if let urlError = error as? URLError, urlError.code == .cancelled { return }
-            // Only cold loads surface the failure: the view swaps the WHOLE
-            // pane for an error screen when errorMessage is set, so a failed
-            // silent background refresh (Cmd-Tab refocus while briefly
-            // offline) must not blank a healthy, already-loaded chat.
-            if !isRefresh {
-                errorMessage = error.localizedDescription
-                isLoading = false
+            // Always clear the cold-load spinner, even on cancellation —
+            // an early return that leaves isLoading stuck true would show a
+            // phantom loading state on a warm cached VM.
+            if !isRefresh { isLoading = false }
+            if error.isCancellation { return }
+            if isRefresh {
+                // A PERMANENT failure on a silent refresh means the channel
+                // is gone for this user (deleted server-side / kicked) —
+                // there is no WS event for either, so this is the only
+                // signal. Surface it: the full-pane error state is correct
+                // for a dead channel. Transient failures stay silent — they
+                // must not blank a healthy, already-loaded chat.
+                if case APIError.httpError(let code, _) = error, code == 403 || code == 404 {
+                    errorMessage = error.localizedDescription
+                }
+                return
             }
+            // Cold loads always surface the failure (nothing else on screen).
+            errorMessage = error.localizedDescription
         }
     }
 
@@ -182,6 +201,13 @@ final class ChannelChatViewModel {
         defer { isLoadingOlder = false }
         do {
             let older = try await service.getMessages(channelId: channelId, before: oldest.createdAt, limit: historyPageSize)
+            // The list may have been REPLACED while the fetch was in flight —
+            // a silent refresh merge on refocus can take its no-overlap
+            // fallback and reset to the newest page. If the anchor row this
+            // page was fetched against is no longer the head, splicing the
+            // stale page in would leave an unfillable mid-list gap; drop it.
+            // The button remains and re-pages consistently off the new head.
+            guard messages.first?.id == oldest.id else { return }
             let existingIds = Set(messages.map(\.id))
             let fresh = older.filter { !existingIds.contains($0.id) }
             // One statement of the whole policy: a short page or an
@@ -189,8 +215,7 @@ final class ChannelChatViewModel {
             hasMoreHistory = older.count >= historyPageSize && !fresh.isEmpty
             messages.insert(contentsOf: fresh, at: 0)
         } catch {
-            if error is CancellationError { return }
-            if let urlError = error as? URLError, urlError.code == .cancelled { return }
+            if error.isCancellation { return }
             // Deliberately NOT errorMessage: the view treats that as a fatal
             // whole-pane error state, which would replace a healthy loaded
             // chat because one history page failed. hasMoreHistory stays true,

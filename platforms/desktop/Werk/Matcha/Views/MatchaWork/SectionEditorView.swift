@@ -912,7 +912,6 @@ struct SectionEditorView: View {
     }
 }
 
-
 /// Small reply field for the inline thread popover (own state so typing doesn't
 /// disturb the editor).
 private struct ThreadReplyField: View {

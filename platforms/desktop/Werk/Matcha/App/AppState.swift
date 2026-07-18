@@ -217,6 +217,12 @@ class AppState {
     /// values, copies them into Keychain (the only path the post-2026-05-18
     /// `KeychainHelper` reads from), then clears the UserDefaults keys so
     /// the plaintext copy stops sitting on disk.
+    ///
+    /// Known tradeoff: if the keychain write fails PERSISTENTLY, the
+    /// plaintext copy is retained on disk indefinitely (vs. destroying the
+    /// user's only credential). Acceptable because this re-runs every launch
+    /// — a transient failure (keychain locked at first-unlock) self-heals on
+    /// the next launch, which is exactly why the copy must survive a failure.
     private static func migrateLegacyKeychainTokens() {
         let defaults = UserDefaults.standard
         let keys = [KeychainHelper.Keys.accessToken, KeychainHelper.Keys.refreshToken]
@@ -589,6 +595,14 @@ class AppState {
 
     @MainActor
     func didLogout() {
+        // Idempotence guard: the 401→refresh failure path can signal
+        // onUnauthorized twice (once inside the nested refresh request, once
+        // in the outer catch). Re-running this teardown is harmless today,
+        // but any future non-idempotent side effect (analytics event,
+        // server-side revoke) would silently double — bail if already out.
+        // Every real caller (onUnauthorized, Settings sign-out, ContentView)
+        // fires from an authenticated session, so this never skips a first run.
+        guard isAuthenticated || currentUser != nil else { return }
         currentUser = nil
         isAuthenticated = false
         selectedThreadId = nil
