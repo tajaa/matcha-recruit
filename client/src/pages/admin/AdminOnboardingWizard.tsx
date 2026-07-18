@@ -19,7 +19,7 @@ import {
   Step4Scope,
   Step5GapAnalysis,
   Step6Review,
-} from '../../features/admin-onboarding/Steps'
+} from '../../components/admin/onboarding/Steps'
 
 const STEP_ORDER: OnboardingStep[] = [
   'basics',

@@ -8,8 +8,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { ArrowLeft, Download, FileText, Loader2 } from 'lucide-react'
 
-import { adminOnboarding } from '../../api/admin/adminOnboarding'
-import type { GapAnalysisDossier } from '../../api/admin/adminOnboarding'
+import { adminOnboarding } from '../../../api/admin/adminOnboarding'
+import type { GapAnalysisDossier } from '../../../api/admin/adminOnboarding'
 
 function Count({ label, value, alert }: { label: string; value: number; alert?: boolean }) {
   return (

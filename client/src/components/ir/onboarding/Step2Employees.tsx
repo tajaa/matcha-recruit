@@ -1,17 +1,15 @@
 import { useRef, useState } from 'react'
-import { Link2, Loader2, Upload } from 'lucide-react'
-import { api } from '../../api/client'
+import { Loader2, Upload } from 'lucide-react'
+import { api } from '../../../api/client'
 
-// CSV bulk-add (send_invitations=false during onboarding) OR connect an HRIS via
-// Finch. Both reuse existing endpoints unchanged.
-export default function Step3People({ onDone }: { onDone: () => void }) {
+export default function Step2Employees({ onDone }: { onDone: () => void }) {
   const fileRef = useRef<HTMLInputElement>(null)
   const [firstName, setFirstName] = useState('')
   const [lastName, setLastName] = useState('')
   const [email, setEmail] = useState('')
+  const [uid, setUid] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [uploading, setUploading] = useState(false)
-  const [connecting, setConnecting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<string | null>(null)
 
@@ -25,12 +23,14 @@ export default function Step3People({ onDone }: { onDone: () => void }) {
         first_name: firstName.trim(),
         last_name: lastName.trim(),
         email: email.trim().toLowerCase(),
+        uid: uid.trim() || null,
         skip_invitation: true,
         skip_google_workspace_provisioning: true,
       })
       setFirstName('')
       setLastName('')
       setEmail('')
+      setUid('')
       setResult('Employee added.')
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to add employee')
@@ -60,51 +60,13 @@ export default function Step3People({ onDone }: { onDone: () => void }) {
     }
   }
 
-  async function connectHris() {
-    setConnecting(true)
-    setError(null)
-    try {
-      const res = await api.get<{ oauth_url: string }>('/provisioning/hris/finch/authorize')
-      if (res.oauth_url) {
-        window.location.href = res.oauth_url
-        return
-      }
-      setError('Could not start HRIS connection.')
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to start HRIS connection')
-    } finally {
-      setConnecting(false)
-    }
-  }
-
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-lg font-semibold text-zinc-100 mb-1">Add your team</h2>
+        <h2 className="text-lg font-semibold text-zinc-100 mb-1">Add employees</h2>
         <p className="text-sm text-zinc-400">
-          Drop a CSV, add someone manually, or connect your HRIS to build your roster.
-          Compliance coverage is scoped from the locations you entered in the last step,
-          plus any work state your roster reports that isn't covered yet — the build
-          adds those automatically. No invitations are sent during setup.
+          Add at least one to continue. UIDs (badge or employee numbers) are optional but make incident filing faster.
         </p>
-      </div>
-
-      {/* HRIS connect — pulls the roster automatically */}
-      <button
-        type="button"
-        onClick={connectHris}
-        disabled={connecting}
-        className="w-full flex items-center justify-between gap-3 bg-zinc-900 border border-zinc-800 hover:border-emerald-800 rounded-lg px-4 py-3 transition-colors disabled:opacity-50"
-      >
-        <span className="flex items-center gap-2.5 text-sm text-zinc-200">
-          <Link2 className="w-4 h-4 text-emerald-400" />
-          Connect your HRIS (Rippling, BambooHR, ADP, Gusto…)
-        </span>
-        {connecting ? <Loader2 className="w-4 h-4 animate-spin text-zinc-400" /> : <span className="text-xs text-zinc-500">via Finch →</span>}
-      </button>
-
-      <div className="flex items-center gap-3 text-xs text-zinc-600">
-        <div className="h-px flex-1 bg-zinc-800" /> or add manually <div className="h-px flex-1 bg-zinc-800" />
       </div>
 
       <form onSubmit={handleAdd} className="space-y-3 bg-zinc-900/40 border border-zinc-800 rounded p-4">
@@ -113,6 +75,7 @@ export default function Step3People({ onDone }: { onDone: () => void }) {
           <Field label="Last name" value={lastName} onChange={setLastName} />
         </div>
         <Field label="Email" type="email" value={email} onChange={setEmail} />
+        <Field label="UID" value={uid} onChange={setUid} optional placeholder="e.g. EMP-001" />
         <button
           type="submit"
           disabled={submitting || !firstName || !lastName || !email}
@@ -125,7 +88,7 @@ export default function Step3People({ onDone }: { onDone: () => void }) {
       <div className="bg-zinc-900/40 border border-zinc-800 rounded p-4">
         <h3 className="text-sm font-semibold text-zinc-200 mb-2">Or upload a CSV</h3>
         <p className="text-xs text-zinc-500 mb-3">
-          Required columns: email, first_name, last_name. Optional: work_state, job_title, department.
+          Required columns: email, first_name, last_name. Optional: uid, work_state, job_title, department.
         </p>
         <div className="flex items-center gap-3">
           <a href="/api/employees/bulk-upload/template" className="text-xs text-emerald-500 hover:text-emerald-400 underline">
@@ -133,7 +96,7 @@ export default function Step3People({ onDone }: { onDone: () => void }) {
           </a>
           <label className="flex items-center gap-2 text-sm text-zinc-300 hover:text-zinc-100 cursor-pointer">
             <Upload className="w-4 h-4" />
-            <span>{uploading ? 'Uploading…' : 'Upload CSV'}</span>
+            <span>{uploading ? 'Uploading...' : 'Upload CSV'}</span>
             <input ref={fileRef} type="file" accept=".csv" onChange={handleCsv} className="hidden" />
           </label>
         </div>
@@ -144,9 +107,9 @@ export default function Step3People({ onDone }: { onDone: () => void }) {
 
       <button
         onClick={onDone}
-        className="bg-emerald-700 hover:bg-emerald-600 text-white font-medium px-5 py-2 rounded transition-colors"
+        className="text-sm text-zinc-300 hover:text-zinc-100 underline"
       >
-        Continue to the build →
+        Continue →
       </button>
     </div>
   )
@@ -157,18 +120,26 @@ function Field({
   value,
   onChange,
   type = 'text',
+  optional,
+  placeholder,
 }: {
   label: string
   value: string
   onChange: (v: string) => void
   type?: string
+  optional?: boolean
+  placeholder?: string
 }) {
   return (
     <label className="block">
-      <span className="text-xs text-zinc-400 uppercase tracking-wide">{label}</span>
+      <span className="text-xs text-zinc-400 uppercase tracking-wide">
+        {label}
+        {optional && <span className="text-zinc-600 normal-case ml-1">(optional)</span>}
+      </span>
       <input
         type={type}
         value={value}
+        placeholder={placeholder}
         onChange={(e) => onChange(e.target.value)}
         className="mt-1 w-full bg-zinc-900 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-emerald-700"
       />

@@ -1,9 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { AlertCircle, Loader2, MapPin, X } from 'lucide-react'
-import { api } from '../../api/client'
+import { AlertCircle, Loader2, X } from 'lucide-react'
+import { api } from '../../../api/client'
 
-// Uses /matcha-x-onboarding/locations (handbook_audit-gated, so it works for
-// every X tenant regardless of payment state) — same business_locations table.
 type LocationRow = {
   id: string
   name: string | null
@@ -13,10 +11,10 @@ type LocationRow = {
   is_active: boolean
 }
 
-export default function Step1Locations({ onDone }: { onDone: () => void }) {
+export default function Step1CompanyInfo({ onDone }: { onDone: () => void }) {
   const [locations, setLocations] = useState<LocationRow[]>([])
   const [loading, setLoading] = useState(true)
-  const [name, setName] = useState('')
+  const [name, setName] = useState('Main Office')
   const [address, setAddress] = useState('')
   const [city, setCity] = useState('')
   const [state, setState] = useState('')
@@ -24,14 +22,17 @@ export default function Step1Locations({ onDone }: { onDone: () => void }) {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [removing, setRemoving] = useState<string | null>(null)
+  // Brief lockout after a successful add to prevent double-submits
+  // (a likely cause of "second one not saved" reports — fast double-click
+  // on Add fired two POSTs but only one persisted before the form reset).
   const submitLockRef = useRef(false)
 
   async function refresh() {
     try {
-      const rows = await api.get<LocationRow[]>('/matcha-x-onboarding/locations')
+      const rows = await api.get<LocationRow[]>('/ir-onboarding/locations')
       setLocations((rows || []).filter((r) => r.is_active))
     } catch {
-      /* ignore — first-load failure surfaced on next action */
+      /* ignore — first-load failure handled below */
     } finally {
       setLoading(false)
     }
@@ -49,13 +50,15 @@ export default function Step1Locations({ onDone }: { onDone: () => void }) {
     setSubmitting(true)
     setError(null)
     try {
-      await api.post('/matcha-x-onboarding/locations', {
+      await api.post('/ir-onboarding/locations', {
         name: name.trim() || null,
         address: address.trim() || null,
         city: city.trim(),
         state: state.trim().toUpperCase(),
         zipcode: zipcode.trim(),
       })
+      // Reset address-specific fields; keep `name` as a sensible default
+      // for the next entry (most companies have one of each named site).
       setAddress('')
       setCity('')
       setState('')
@@ -66,6 +69,7 @@ export default function Step1Locations({ onDone }: { onDone: () => void }) {
       setError(err instanceof Error ? err.message : 'Failed to save location')
     } finally {
       setSubmitting(false)
+      // Brief debounce so a fast second click doesn't reach the network.
       setTimeout(() => { submitLockRef.current = false }, 500)
     }
   }
@@ -73,7 +77,7 @@ export default function Step1Locations({ onDone }: { onDone: () => void }) {
   async function handleRemove(id: string) {
     setRemoving(id)
     try {
-      await api.delete<void>(`/matcha-x-onboarding/locations/${id}`)
+      await api.delete<void>(`/ir-onboarding/locations/${id}`)
       await refresh()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to remove location')
@@ -93,11 +97,10 @@ export default function Step1Locations({ onDone }: { onDone: () => void }) {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-lg font-semibold text-zinc-100 mb-1">Where do you operate?</h2>
+        <h2 className="text-lg font-semibold text-zinc-100 mb-1">Add your locations</h2>
         <p className="text-sm text-zinc-400">
-          Each office gets its own local compliance — your Denver and Los Angeles teams
-          won't see the same rules. Add every site you operate; we'll map each to its
-          federal, state, county and city law.
+          Incidents are submitted per-location and notifications fan out to your business admins.
+          Add every site, store, or facility you operate.
         </p>
       </div>
 
@@ -105,7 +108,12 @@ export default function Step1Locations({ onDone }: { onDone: () => void }) {
         <div className="flex items-start gap-2 bg-red-950/40 border border-red-900 text-red-300 rounded px-3 py-2.5">
           <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
           <div className="flex-1 text-sm">{error}</div>
-          <button type="button" onClick={() => setError(null)} className="text-red-400 hover:text-red-200" aria-label="Dismiss">
+          <button
+            type="button"
+            onClick={() => setError(null)}
+            className="text-red-400 hover:text-red-200"
+            aria-label="Dismiss"
+          >
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -114,14 +122,14 @@ export default function Step1Locations({ onDone }: { onDone: () => void }) {
       {locations.length > 0 && (
         <ul className="space-y-2">
           {locations.map((l) => (
-            <li key={l.id} className="flex items-center justify-between gap-3 bg-zinc-900 border border-zinc-800 rounded px-3 py-2">
-              <div className="flex items-center gap-2.5 text-sm text-zinc-200">
-                <MapPin className="w-4 h-4 text-emerald-500 shrink-0" />
-                <div>
-                  <div className="font-medium">{l.name || `${l.city}, ${l.state}`}</div>
-                  <div className="text-xs text-zinc-500">
-                    {[l.city, l.state, l.zipcode].filter(Boolean).join(', ')}
-                  </div>
+            <li
+              key={l.id}
+              className="flex items-center justify-between gap-3 bg-zinc-900 border border-zinc-800 rounded px-3 py-2"
+            >
+              <div className="text-sm text-zinc-200">
+                <div className="font-medium">{l.name || `${l.city}, ${l.state}`}</div>
+                <div className="text-xs text-zinc-500">
+                  {[l.city, l.state, l.zipcode].filter(Boolean).join(', ')}
                 </div>
               </div>
               <button
@@ -165,7 +173,7 @@ export default function Step1Locations({ onDone }: { onDone: () => void }) {
           Continue
         </button>
         <p className="text-xs text-zinc-500">
-          One location is enough to start — add more later from Company settings.
+          One location is enough to get started — you can add more later from Company Settings.
         </p>
       </div>
     </div>

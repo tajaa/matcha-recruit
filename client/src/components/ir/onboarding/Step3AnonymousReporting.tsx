@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Loader2, Copy, Check } from 'lucide-react'
-import { api } from '../../api/client'
+import { api } from '../../../api/client'
 
 interface AnonymousStatus {
   token: string | null

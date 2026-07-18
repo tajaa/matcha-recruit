@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Loader2, ShieldCheck, EyeOff, AlertTriangle, Layers, Check, Search, RefreshCw, ExternalLink } from 'lucide-react'
 import { Link } from 'react-router-dom'
-import { api, ensureFreshToken } from '../../api/client'
-import { adminOnboarding, getLocationCheckUrl } from '../../api/admin/adminOnboarding'
-import type { FitGatedRow, FitMapResponse, FitMissing, FitReason } from '../../api/admin/adminOnboarding'
-import { useResearchGaps } from '../../hooks/admin/useResearchGaps'
+import { api, ensureFreshToken } from '../../../api/client'
+import { adminOnboarding, getLocationCheckUrl } from '../../../api/admin/adminOnboarding'
+import type { FitGatedRow, FitMapResponse, FitMissing, FitReason } from '../../../api/admin/adminOnboarding'
+import { useResearchGaps } from '../../../hooks/admin/useResearchGaps'
 
 // Each reason is a different fix. Collapsing them into one "missing" number is
 // what makes a gap list unusable: a preempted rule needs nothing done, a staged

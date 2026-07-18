@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 import { CheckCircle2, FileText, Loader2, Upload } from 'lucide-react'
-import { matchaXOnboarding } from '../../api/billing/matchaXOnboarding'
+import { matchaXOnboarding } from '../../../api/billing/matchaXOnboarding'
 
 // Skippable. On a successful PDF upload we hand the storage URL up to the wizard
 // (`onUploaded`) so the build finale can overlay handbook coverage. PDF only —

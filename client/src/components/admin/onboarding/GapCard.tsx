@@ -12,7 +12,7 @@
  */
 import { Loader2, Search, Square, CheckSquare, MapPin, ChevronRight } from 'lucide-react'
 import { useState } from 'react'
-import type { ResolvedScopeMissing } from '../../api/admin/adminOnboarding'
+import type { ResolvedScopeMissing } from '../../../api/admin/adminOnboarding'
 
 export function humanizeCategory(slug: string): string {
   return slug

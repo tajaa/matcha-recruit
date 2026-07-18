@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { getMatchaXBuildStreamUrl } from '../../api/billing/matchaXOnboarding'
-import { ensureFreshToken } from '../../api/client'
+import { getMatchaXBuildStreamUrl } from '../../../api/billing/matchaXOnboarding'
+import { ensureFreshToken } from '../../../api/client'
 
 /**
  * Consumes the Matcha-X onboarding build SSE stream

@@ -6,7 +6,7 @@ import { LABEL } from '../../../components/ui/typography'
 import { extractCitation, coverageLink, libraryLink } from './utils'
 import type { PendingItem, ReviewGroup, ApproveResult, UncodifiedItem } from './types'
 import { CompanyPicker } from '../AdminOnboarding'
-import StatutoryFitPanel from '../../../features/admin-onboarding/StatutoryFitPanel'
+import StatutoryFitPanel from '../../../components/admin/onboarding/StatutoryFitPanel'
 import type { FitGatedRow } from '../../../api/admin/adminOnboarding'
 
 /** A withheld row from the fit map → the codify chain's shape.

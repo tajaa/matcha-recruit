@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { Badge, Button, Card } from '../../components/ui'
 import { ArrowLeft, Loader2, FileText } from 'lucide-react'
 import { useDisciplineRecord } from '../../hooks/discipline/useDiscipline'
-import SignatureWorkflow from '../../features/discipline/SignatureWorkflow'
+import SignatureWorkflow from '../../components/discipline/SignatureWorkflow'
 import { api } from '../../api/client'
 import type {
   DisciplineLevel,

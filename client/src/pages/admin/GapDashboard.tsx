@@ -24,8 +24,8 @@ import type {
 } from '../../api/admin/adminOnboarding'
 import { useEnrichStream, type EnrichEvent } from '../../hooks/admin/useEnrichStream'
 import { useResearchGaps, type ResearchGapItem } from '../../hooks/admin/useResearchGaps'
-import StatutoryFitPanel from '../../features/admin-onboarding/StatutoryFitPanel'
-import GapCard, { humanizeCategory, jurisdictionLabel } from '../../features/admin-onboarding/GapCard'
+import StatutoryFitPanel from '../../components/admin/onboarding/StatutoryFitPanel'
+import GapCard, { humanizeCategory, jurisdictionLabel } from '../../components/admin/onboarding/GapCard'
 import { complexityBandClass } from './GapOverview'
 
 // Provenance chip for the Coverage stat card — engine = scope-registry grounded,

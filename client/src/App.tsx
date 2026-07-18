@@ -93,10 +93,10 @@ const BusinessInviteRegister = lazy(
   () => import("./pages/auth/BusinessInviteRegister"),
 );
 const IrOnboardingWizard = lazy(
-  () => import("./features/ir-onboarding/IrOnboardingWizard"),
+  () => import("./components/ir/onboarding/IrOnboardingWizard"),
 );
 const MatchaXOnboardingWizard = lazy(
-  () => import("./features/matcha-x-onboarding/MatchaXOnboardingWizard"),
+  () => import("./components/matcha-x/onboarding/MatchaXOnboardingWizard"),
 );
 const AnonymousReport = lazy(() => import("./pages/shared/AnonymousReport"));
 const LocationIntake = lazy(() => import("./pages/shared/LocationIntake"));

@@ -3,8 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import { Badge, Button, Input, Select } from '../../components/ui'
 import { Plus, Loader2, Gavel, Settings, HelpCircle } from 'lucide-react'
 import { useDisciplineList } from '../../hooks/discipline/useDiscipline'
-import IssueDisciplineModal from '../../features/discipline/IssueDisciplineModal'
-import DisciplineGuideModal, { DISCIPLINE_GUIDE_KEY } from '../../features/discipline/DisciplineGuideModal'
+import IssueDisciplineModal from '../../components/discipline/IssueDisciplineModal'
+import DisciplineGuideModal, { DISCIPLINE_GUIDE_KEY } from '../../components/discipline/DisciplineGuideModal'
 import { api } from '../../api/client'
 import type {
   DisciplineLevel,
