@@ -45,15 +45,26 @@ logger = logging.getLogger(__name__)
 # ── Curated threshold table ──────────────────────────────────────────────
 # Keyed on business_locations.state (2-letter). 'US' = federal baseline that
 # applies everywhere. Only bright-line, nationally-or-state-settled thresholds
-# with a real citation. `None` = "explicitly no such rule here — do not invent".
+# with a real citation. `None` = "explicitly no such rule here — do not invent";
+# NO_CAP = "the law affirmatively imposes no limit" (distinct from an absent key,
+# which means "not researched" and yields a verify-manually advisory).
+#
+# School-day caps (3h for under-16s, 29 C.F.R. § 570.35 / Cal. Lab. Code § 1391)
+# are deliberately NOT modeled: no school-calendar signal exists, and a dead key
+# pretending coverage is worse than a documented gap. Future work.
+NO_CAP = object()
+
 _SCHEDULING_RULES: dict[str, dict[str, Any]] = {
     "US": {
         "weekly_ot_hours": 40,                 # FLSA 29 U.S.C. § 207(a)
-        # FLSA child-labor hour limits apply to 14-15 year-olds; 16-17 have no
-        # federal hour cap (hazardous-occupation rules aside, out of scope here).
         "minor_u16_day_hours": 8,              # 29 C.F.R. § 570.35 (non-school day)
-        "minor_u16_school_day_hours": 3,
         "minor_u16_week_hours": 40,            # (non-school week)
+        # FLSA affirmatively imposes NO hour cap on 16-17 year-olds (hazardous-
+        # occupation rules aside, out of scope) — encode that so a 16-17 hire
+        # outside a state with its own cap doesn't get a bogus "not researched"
+        # advisory on every shift.
+        "minor_16_17_day_hours": NO_CAP,
+        "minor_16_17_week_hours": NO_CAP,
         "citations": {
             "weekly_overtime": "FLSA, 29 U.S.C. § 207(a)",
             "minor_hours": "FLSA child labor, 29 C.F.R. § 570.35",
@@ -68,7 +79,6 @@ _SCHEDULING_RULES: dict[str, dict[str, Any]] = {
         "weekly_ot_hours": 40,
         "min_rest_between_shifts_hours": None,  # no general CA right-to-rest statute
         "minor_u16_day_hours": 8,              # Cal. Lab. Code § 1391 (non-school day)
-        "minor_u16_school_day_hours": 3,
         "minor_16_17_day_hours": 8,            # Cal. Lab. Code § 1391 (school in session)
         "citations": {
             "meal_break": "Cal. Lab. Code § 512",
@@ -100,6 +110,15 @@ def rules_for_state(state: Optional[str]) -> dict[str, Any]:
             else:
                 merged[k] = v
     return merged
+
+
+def rules_summary(state: Optional[str]) -> dict[str, Any]:
+    """JSON-safe view of rules_for_state: the NO_CAP sentinel (a bare object(),
+    unserializable) renders as the string 'no_cap'."""
+    return {
+        k: ("no_cap" if v is NO_CAP else v)
+        for k, v in rules_for_state(state).items()
+    }
 
 
 def _violation(check: str, severity: str, message: str, statute: Optional[str], state: str) -> dict:
@@ -189,8 +208,21 @@ def check_minor_hours(age: Optional[int], shift_hours: float, week_hours: Option
         day_cap = rules.get("minor_16_17_day_hours")
         week_cap = rules.get("minor_16_17_week_hours")
 
-    if day_cap is None and week_cap is None:
-        # Minor scheduled but this state has no researched cap for the bracket —
+    # NO_CAP = the law affirmatively imposes no limit for this bracket (e.g.
+    # FLSA for 16-17) — a determination, not a gap. Treat as "no cap to check".
+    if day_cap is NO_CAP:
+        day_cap = None
+        determined = True
+    else:
+        determined = day_cap is not None
+    if week_cap is NO_CAP:
+        week_cap = None
+        determined = True
+    else:
+        determined = determined or week_cap is not None
+
+    if not determined:
+        # Minor scheduled but this bracket genuinely has no researched rule —
         # advisory, never a silent pass (unmapped-state invariant).
         return [_violation(
             "minor_hours", "advisory",

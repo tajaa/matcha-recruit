@@ -384,7 +384,9 @@ function TemplateRow({ tpl, onChanged, onGenerated }: { tpl: ShiftTemplate; onCh
       onGenerated()
       const warnings = res.compliance_warnings ?? []
       if (warnings.length) {
-        toast(`Generated ${res.created} shift(s) — scheduling-law note: ${warnings.map((w) => w.message).join('; ')}`, 'error')
+        // 'info', not 'error': generation SUCCEEDED — a red toast here reads as
+        // failure and invites a retry that duplicates the whole shift series.
+        toast(`Generated ${res.created} shift(s) — scheduling-law note: ${warnings.map((w) => w.message).join('; ')}`, 'info')
       }
     } finally { setGenBusy(false) }
   }

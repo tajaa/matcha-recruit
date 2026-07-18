@@ -92,7 +92,7 @@ async def location_scheduling_compliance(
         )
     return {
         "state": state,
-        "rules": schedule_compliance.rules_for_state(state),
+        "rules": schedule_compliance.rules_summary(state),
         "statutes": statutes,
     }
 
@@ -232,6 +232,19 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
                 raise_for_violations(violations, force=force)
                 if violations:
                     forced[str(emp)] = violations
+            if not assignees:
+                # Open (unassigned) shift: run the shift-intrinsic checks the
+                # create path runs — otherwise retiming a 6h open shift to 14h
+                # escapes the meal-break/daily-OT advisories entirely.
+                raise_for_violations(
+                    await check_shift_compliance(
+                        conn, company_id, location_id=new_location,
+                        starts_at=new_start, ends_at=new_end,
+                        break_minutes=new_break or 0,
+                        exclude_shift_id=shift_id,
+                    ),
+                    force=force,
+                )
 
         # published_at rides along as a patched column — no spliced CASE clause
         # whose hardcoded $10 silently rebinds when a column is added above it.

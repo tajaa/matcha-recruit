@@ -50,11 +50,34 @@ def test_minor_hours_blocks():
     assert sc.check_minor_hours(None, 12.0, None, r, "CA") == []  # unknown age → skip
 
 
-def test_minor_unmapped_bracket_is_advisory_not_clear():
-    # 16-17 in a state with no researched 16-17 cap → advisory, never silent pass.
+def test_minor_16_17_federal_no_cap_is_silent():
+    # FLSA affirmatively imposes no 16-17 hour cap (NO_CAP sentinel) — a
+    # determination, not a gap: no violation AND no bogus "not researched"
+    # advisory on every shift.
     r = sc.rules_for_state("TX")
-    v = sc.check_minor_hours(17, 10.0, None, r, "TX")
+    assert r["minor_16_17_day_hours"] is sc.NO_CAP
+    assert sc.check_minor_hours(17, 10.0, 50.0, r, "TX") == []
+
+
+def test_minor_16_17_state_cap_overrides_federal_no_cap():
+    # CA's own 8h cap for 16-17 wins over the federal NO_CAP.
+    r = sc.rules_for_state("CA")
+    v = sc.check_minor_hours(17, 9.0, None, r, "CA")
+    assert len(v) == 1 and v[0]["severity"] == "block"
+
+
+def test_minor_truly_unresearched_bracket_is_advisory():
+    # Simulate a bracket with NO determination at all (neither cap nor NO_CAP):
+    # advisory, never a silent pass.
+    bare = {"citations": {}}
+    v = sc.check_minor_hours(17, 10.0, None, bare, "ZZ")
     assert len(v) == 1 and v[0]["severity"] == "advisory"
+
+
+def test_rules_summary_is_json_safe():
+    import json
+    json.dumps(sc.rules_summary("TX"))  # NO_CAP sentinel must serialize
+    assert sc.rules_summary("TX")["minor_16_17_day_hours"] == "no_cap"
 
 
 def test_min_rest_only_fires_when_threshold_mapped():

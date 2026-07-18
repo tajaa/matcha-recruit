@@ -13,14 +13,17 @@ template path can collect warnings instead of raising per shift.
 
 from __future__ import annotations
 
+import logging
 from datetime import date, datetime, timedelta, timezone
-from typing import Any, Optional
+from typing import Optional
 from uuid import UUID
 
 from fastapi import HTTPException
 
 from ...services import schedule_compliance
 from ...services.schedule_rules import compliance_warning_detail, compliance_block_detail
+
+logger = logging.getLogger(__name__)
 
 
 def _hours(starts_at: datetime, ends_at: datetime, break_minutes: int = 0) -> float:
@@ -29,12 +32,15 @@ def _hours(starts_at: datetime, ends_at: datetime, break_minutes: int = 0) -> fl
 
 
 def _week_window(d: datetime) -> tuple[datetime, datetime]:
-    """Monday-anchored 7-day window containing `d` (UTC). An approximation of the
-    employer workweek for the weekly-overtime advisory — no per-company workweek
-    config exists to key off."""
+    """SUNDAY-anchored 7-day window containing `d` (UTC) — matching the schedule
+    grid (FE startOfWeekSunday / schedule_rules.sunday_indexed_weekday), so the
+    weekly-overtime advisory aggregates the same week the admin is looking at.
+    FLSA permits any fixed 7-day workweek; anchoring elsewhere than the rendered
+    week silently defeats the advisory (48h on the grid can split into two
+    sub-40h windows). No per-company workweek config exists to key off."""
     day = d.astimezone(timezone.utc).date()
-    monday = day - timedelta(days=day.weekday())
-    lo = datetime.combine(monday, datetime.min.time(), tzinfo=timezone.utc)
+    sunday = day - timedelta(days=(day.weekday() + 1) % 7)
+    lo = datetime.combine(sunday, datetime.min.time(), tzinfo=timezone.utc)
     return lo, lo + timedelta(days=7)
 
 
@@ -55,10 +61,14 @@ async def _location_state(conn, company_id: UUID, location_id: Optional[UUID]) -
     return (row["state"] if row else None)
 
 
-async def _employee_age(conn, company_id: UUID, employee_id: UUID, on: date) -> Optional[int]:
-    """Age from the PII-segregated employee_demographics table. None when no DOB
-    on file — the minor check then can't assert a violation (it skips, never
-    blocks on unknown age)."""
+async def _employee_age(conn, company_id: UUID, employee_id: UUID, on: date) -> tuple[Optional[int], bool]:
+    """(age, lookup_failed) from the PII-segregated employee_demographics table.
+
+    age None + lookup_failed False = DOB legitimately not on file (minor check
+    skips — never block on unknown age). lookup_failed True = the query itself
+    errored; the caller surfaces an 'age unverifiable' advisory instead of
+    silently green-lighting, because a DB error must not invisibly disable the
+    one non-overridable protection."""
     try:
         dob = await conn.fetchval(
             """
@@ -70,8 +80,9 @@ async def _employee_age(conn, company_id: UUID, employee_id: UUID, on: date) -> 
             employee_id, company_id,
         )
     except Exception:
-        return None
-    return _age_on(dob, on)
+        logger.exception("schedule compliance: DOB lookup failed for employee %s", employee_id)
+        return None, True
+    return _age_on(dob, on), False
 
 
 async def _week_hours(conn, company_id: UUID, employee_id: UUID,
@@ -141,12 +152,15 @@ async def check_shift_compliance(
     week_hours: Optional[float] = None
     min_rest: Optional[float] = None
     age: Optional[int] = None
+    age_lookup_failed = False
     if employee_id is not None:
         week_hours = await _week_hours(conn, company_id, employee_id, starts_at, worked, exclude_shift_id)
         min_rest = await _min_rest_gap(conn, company_id, employee_id, starts_at, ends_at, exclude_shift_id)
-        age = await _employee_age(conn, company_id, employee_id, starts_at.astimezone(timezone.utc).date())
+        age, age_lookup_failed = await _employee_age(
+            conn, company_id, employee_id, starts_at.astimezone(timezone.utc).date()
+        )
 
-    return schedule_compliance.evaluate_shift_for_employee(
+    violations = schedule_compliance.evaluate_shift_for_employee(
         state=state,
         shift_hours=worked,
         break_minutes=break_minutes or 0,
@@ -154,6 +168,15 @@ async def check_shift_compliance(
         min_rest_gap_hours=min_rest,
         age=age,
     )
+    if age_lookup_failed:
+        # Fail visible, not open: the minor check couldn't run at all.
+        violations.append({
+            "check": "minor_hours", "severity": "advisory",
+            "message": "Could not verify this employee's age — minor work-hour "
+                       "limits were not checked. Verify manually.",
+            "statute": None, "state": (state or "").strip().upper(),
+        })
+    return violations
 
 
 def raise_for_violations(violations: list[dict], *, force: bool) -> None:

@@ -18,6 +18,7 @@ from ._shared import (
     require_company_id, log_audit, serialize_request, REQUEST_SELECT,
     INACTIVE_EMPLOYMENT_STATUSES, find_conflicts, raise_conflict,
 )
+from ._compliance import check_shift_compliance, raise_for_violations
 
 router = APIRouter()
 
@@ -83,6 +84,7 @@ async def review_request(request_id: UUID, body: RequestReview,
                 and req["shift_id"] is not None
                 and req["target_employee_id"] is not None
             )
+            swap_violations: list[dict] = []
             if new_status == "approved" and is_swap_with_target:
                 # The target has to still be employable AND free, or approving
                 # would unassign the requester and silently staff nobody.
@@ -105,8 +107,8 @@ async def review_request(request_id: UUID, body: RequestReview,
                         detail=f"Swap target is {target['employment_status']} and cannot be scheduled",
                     )
                 window = await conn.fetchrow(
-                    "SELECT starts_at, ends_at FROM schedule_shifts "
-                    "WHERE id = $1 AND company_id = $2",
+                    "SELECT starts_at, ends_at, location_id, break_minutes "
+                    "FROM schedule_shifts WHERE id = $1 AND company_id = $2",
                     req["shift_id"], company_id,
                 )
                 if window and not body.force:
@@ -117,6 +119,18 @@ async def review_request(request_id: UUID, body: RequestReview,
                     )
                     if conflicts:
                         raise_conflict(req["target_employee_id"], conflicts)
+                if window:
+                    # Approving a swap is an assignment write like any other —
+                    # without this, a swap was the one path that bypassed the
+                    # compliance gate (incl. the non-overridable minor BLOCK).
+                    swap_violations = await check_shift_compliance(
+                        conn, company_id, location_id=window["location_id"],
+                        starts_at=window["starts_at"], ends_at=window["ends_at"],
+                        break_minutes=window["break_minutes"] or 0,
+                        employee_id=req["target_employee_id"],
+                        exclude_shift_id=req["shift_id"],
+                    )
+                    raise_for_violations(swap_violations, force=body.force)
 
             await conn.execute(
                 """
@@ -147,8 +161,11 @@ async def review_request(request_id: UUID, body: RequestReview,
                         current_user.id,
                     )
 
+            audit_details: dict = {"request_type": req["request_type"]}
+            if new_status == "approved" and is_swap_with_target and swap_violations:
+                audit_details["compliance_override"] = swap_violations
             await log_audit(conn, company_id, "request", request_id, current_user.id,
-                            f"request.{new_status}", {"request_type": req["request_type"]})
+                            f"request.{new_status}", audit_details)
 
         row = await conn.fetchrow(
             f"{REQUEST_SELECT} WHERE r.id = $1 AND r.company_id = $2",
