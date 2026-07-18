@@ -1,82 +1,21 @@
 import { useEffect, useState } from 'react'
-import { Badge, Button, Input, Modal } from '../../components/ui'
+import { Button, Input } from '../../components/ui'
 import { api } from '../../api/client'
-import { Link2 } from 'lucide-react'
-
-type BrokerContract = {
-  id: string | null
-  currency: string | null
-  base_platform_fee: number | null
-  pepm_rate: number | null
-  minimum_monthly_commit: number | null
-}
-
-type Broker = {
-  id: string
-  name: string
-  slug: string
-  status: string
-  support_routing: string
-  billing_mode: string
-  invoice_owner: string
-  branding_mode: string
-  active_member_count: number
-  active_company_count: number
-  allocated_seats?: number
-  seats_used?: number
-  plan?: string
-  active_contract: BrokerContract | null
-  created_at: string
-}
-
-type BrokerListResponse = {
-  brokers: Broker[]
-}
-
-type CreateForm = {
-  broker_name: string
-  owner_email: string
-  owner_name: string
-  owner_password: string
-  slug: string
-  support_routing: string
-  billing_mode: string
-  invoice_owner: string
-  allocated_seats: string
-}
-
-const EMPTY_FORM: CreateForm = {
-  broker_name: '',
-  owner_email: '',
-  owner_name: '',
-  owner_password: '',
-  slug: '',
-  support_routing: 'shared',
-  billing_mode: 'direct',
-  invoice_owner: 'matcha',
-  allocated_seats: '',
-}
-
-type EditForm = {
-  status: string
-  support_routing: string
-  allocated_seats: string
-  plan: string
-}
-
-type CreateResult = {
-  broker: { name: string; slug: string }
-  owner: { email: string; password?: string; generated_password: boolean; email_sent: boolean }
-}
-
-type CompanyOption = { id: string; name: string; status: string; industry: string | null }
-
-const statusBadge = (status: string) => {
-  if (status === 'active') return <Badge variant="success">Active</Badge>
-  if (status === 'suspended') return <Badge variant="warning">Suspended</Badge>
-  if (status === 'terminated') return <Badge variant="danger">Terminated</Badge>
-  return <Badge variant="warning">{status}</Badge>
-}
+import {
+  EMPTY_FORM,
+  type Broker,
+  type BrokerListResponse,
+  type CompanyOption,
+  type CreateForm,
+  type CreateResult,
+  type EditForm,
+} from './Brokers/types'
+import { BrokerTable } from './Brokers/BrokerTable'
+import { AddBrokerModal } from './Brokers/AddBrokerModal'
+import { EditBrokerModal } from './Brokers/EditBrokerModal'
+import { BookOfBusinessModal } from './Brokers/BookOfBusinessModal'
+import { LinkCompanyModal } from './Brokers/LinkCompanyModal'
+import { BrokerCreatedModal } from './Brokers/BrokerCreatedModal'
 
 export default function Brokers() {
   const [brokers, setBrokers] = useState<Broker[]>([])
@@ -263,391 +202,56 @@ export default function Brokers() {
       </div>
 
       <div className="mt-6">
-        {loading ? (
-          <p className="text-sm text-zinc-500">Loading...</p>
-        ) : filtered.length === 0 ? (
-          <p className="text-sm text-zinc-500">No brokers found.</p>
-        ) : (
-          <div className="overflow-hidden rounded-xl border border-zinc-800">
-            <table className="w-full text-sm text-left">
-              <thead className="bg-zinc-900/50 text-zinc-400">
-                <tr>
-                  <th className="px-4 py-3 font-medium">Broker</th>
-                  <th className="px-4 py-3 font-medium">Status</th>
-                  <th className="px-4 py-3 font-medium">Members</th>
-                  <th className="px-4 py-3 font-medium">Companies</th>
-                  <th className="px-4 py-3 font-medium">Seats</th>
-                  <th className="px-4 py-3 font-medium">Billing</th>
-                  <th className="px-4 py-3 font-medium text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-zinc-800">
-                {filtered.map((b) => (
-                  <tr key={b.id} className="text-zinc-300">
-                    <td className="px-4 py-3">
-                      <p className="font-medium text-zinc-100">{b.name}</p>
-                      <p className="text-xs text-zinc-500">/{b.slug}</p>
-                    </td>
-                    <td className="px-4 py-3">{statusBadge(b.status)}</td>
-                    <td className="px-4 py-3">{b.active_member_count}</td>
-                    <td className="px-4 py-3">{b.active_company_count}</td>
-                    <td className="px-4 py-3">
-                      <span className="text-xs text-zinc-400 tabular-nums">
-                        {b.seats_used ?? 0} / {b.allocated_seats ?? 0}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className="text-xs text-zinc-400 capitalize">{b.billing_mode}</span>
-                      {b.active_contract?.pepm_rate ? (
-                        <span className="ml-1 text-xs text-zinc-500">
-                          ${b.active_contract.pepm_rate}/pepm
-                        </span>
-                      ) : null}
-                    </td>
-                    <td className="px-4 py-3 text-right space-x-1">
-                      <Button size="sm" variant="ghost" onClick={() => viewBook(b)}>
-                        Book
-                      </Button>
-                      <Button size="sm" variant="ghost" onClick={() => openLinkCompany(b)}>
-                        <Link2 size={12} className="mr-1" />
-                        Link
-                      </Button>
-                      <Button size="sm" variant="ghost" onClick={() => openEdit(b)}>
-                        Edit
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+        <BrokerTable
+          loading={loading}
+          filtered={filtered}
+          onViewBook={viewBook}
+          onLinkCompany={openLinkCompany}
+          onEdit={openEdit}
+        />
       </div>
 
-      {/* Create Modal */}
-      <Modal open={showAdd} onClose={closeAdd} title="Add Broker" width="lg">
-        <form onSubmit={handleCreate} className="space-y-4">
-          <div>
-            <p className="text-[10px] text-zinc-500 uppercase tracking-wider font-medium mb-2">Broker Info</p>
-            <div className="grid grid-cols-2 gap-3">
-              <Input
-                label="Broker Name"
-                value={form.broker_name}
-                onChange={(e) => setForm({ ...form, broker_name: e.target.value })}
-                required
-              />
-              <Input
-                label="Slug (optional)"
-                placeholder="auto-generated"
-                value={form.slug}
-                onChange={(e) => setForm({ ...form, slug: e.target.value })}
-              />
-            </div>
-          </div>
+      <AddBrokerModal
+        open={showAdd}
+        form={form}
+        setForm={setForm}
+        saving={saving}
+        addError={addError}
+        onClose={closeAdd}
+        onSubmit={handleCreate}
+      />
 
-          <div>
-            <p className="text-[10px] text-zinc-500 uppercase tracking-wider font-medium mb-2">Owner Account</p>
-            <div className="grid grid-cols-2 gap-3">
-              <Input
-                label="Full Name"
-                value={form.owner_name}
-                onChange={(e) => setForm({ ...form, owner_name: e.target.value })}
-                required
-              />
-              <Input
-                label="Email"
-                type="email"
-                value={form.owner_email}
-                onChange={(e) => setForm({ ...form, owner_email: e.target.value })}
-                required
-              />
-              <Input
-                label="Password (optional)"
-                type="password"
-                placeholder="auto-generated if blank"
-                value={form.owner_password}
-                onChange={(e) => setForm({ ...form, owner_password: e.target.value })}
-              />
-            </div>
-          </div>
+      <EditBrokerModal
+        editBroker={editBroker}
+        editForm={editForm}
+        setEditForm={setEditForm}
+        editSaving={editSaving}
+        editError={editError}
+        onClose={() => setEditBroker(null)}
+        onSubmit={handleEdit}
+      />
 
-          <div>
-            <p className="text-[10px] text-zinc-500 uppercase tracking-wider font-medium mb-2">Configuration</p>
-            <div className="grid grid-cols-3 gap-3">
-              <div>
-                <label className="block text-sm font-medium text-zinc-300 mb-1">Support Routing</label>
-                <select
-                  value={form.support_routing}
-                  onChange={(e) => setForm({ ...form, support_routing: e.target.value })}
-                  className="w-full bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-300 text-sm px-3 py-2 focus:border-zinc-500"
-                >
-                  <option value="shared">Shared</option>
-                  <option value="broker_first">Broker First</option>
-                  <option value="matcha_first">Matcha First</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-zinc-300 mb-1">Billing Mode</label>
-                <select
-                  value={form.billing_mode}
-                  onChange={(e) => setForm({ ...form, billing_mode: e.target.value })}
-                  className="w-full bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-300 text-sm px-3 py-2 focus:border-zinc-500"
-                >
-                  <option value="direct">Direct</option>
-                  <option value="reseller">Reseller</option>
-                  <option value="hybrid">Hybrid</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-zinc-300 mb-1">Invoice Owner</label>
-                <select
-                  value={form.invoice_owner}
-                  onChange={(e) => setForm({ ...form, invoice_owner: e.target.value })}
-                  className="w-full bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-300 text-sm px-3 py-2 focus:border-zinc-500"
-                >
-                  <option value="matcha">Matcha</option>
-                  <option value="broker">Broker</option>
-                </select>
-              </div>
-            </div>
-          </div>
+      <BookOfBusinessModal
+        bookBroker={bookBroker}
+        bookSetups={bookSetups}
+        bookLoading={bookLoading}
+        onClose={() => setBookBroker(null)}
+      />
 
-          <div>
-            <label className="block text-sm font-medium text-zinc-300 mb-1">Allocated Seats</label>
-            <input
-              type="number"
-              min={0}
-              value={form.allocated_seats}
-              onChange={(e) => setForm({ ...form, allocated_seats: e.target.value })}
-              placeholder="0"
-              className="w-40 bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-300 text-sm px-3 py-2 focus:border-zinc-500"
-            />
-            <p className="mt-1 text-xs text-zinc-500">Seat pool the brokerage can apportion to its clients.</p>
-          </div>
+      <LinkCompanyModal
+        linkBroker={linkBroker}
+        companies={companies}
+        companiesLoading={companiesLoading}
+        selectedCompanyId={selectedCompanyId}
+        setSelectedCompanyId={setSelectedCompanyId}
+        linkSaving={linkSaving}
+        linkError={linkError}
+        linkSuccess={linkSuccess}
+        onClose={() => setLinkBroker(null)}
+        onLink={handleLinkCompany}
+      />
 
-          {addError && <p className="text-sm text-red-400">{addError}</p>}
-
-          <div className="flex items-center gap-2 pt-2 border-t border-zinc-800">
-            <Button
-              type="submit"
-              size="sm"
-              disabled={saving || !form.broker_name.trim() || !form.owner_email.trim() || !form.owner_name.trim()}
-            >
-              {saving ? 'Creating...' : 'Create Broker'}
-            </Button>
-            <Button type="button" variant="ghost" size="sm" onClick={closeAdd}>
-              Cancel
-            </Button>
-          </div>
-        </form>
-      </Modal>
-
-      {/* Edit Modal */}
-      <Modal open={!!editBroker} onClose={() => setEditBroker(null)} title={`Edit — ${editBroker?.name}`} width="md">
-        {editBroker && (
-          <form onSubmit={handleEdit} className="space-y-4">
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-sm font-medium text-zinc-300 mb-1">Status</label>
-                <select
-                  value={editForm.status}
-                  onChange={(e) => setEditForm({ ...editForm, status: e.target.value })}
-                  className="w-full bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-300 text-sm px-3 py-2 focus:border-zinc-500"
-                >
-                  <option value="active">Active</option>
-                  <option value="suspended">Suspended</option>
-                  <option value="terminated">Terminated</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-zinc-300 mb-1">Support Routing</label>
-                <select
-                  value={editForm.support_routing}
-                  onChange={(e) => setEditForm({ ...editForm, support_routing: e.target.value })}
-                  className="w-full bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-300 text-sm px-3 py-2 focus:border-zinc-500"
-                >
-                  <option value="shared">Shared</option>
-                  <option value="broker_first">Broker First</option>
-                  <option value="matcha_first">Matcha First</option>
-                </select>
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-zinc-300 mb-1">Allocated Seats</label>
-              <input
-                type="number"
-                min={0}
-                value={editForm.allocated_seats}
-                onChange={(e) => setEditForm({ ...editForm, allocated_seats: e.target.value })}
-                className="w-40 bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-300 text-sm px-3 py-2 focus:border-zinc-500"
-              />
-              {editBroker && (editBroker.seats_used ?? 0) > 0 && (
-                <p className="mt-1 text-xs text-zinc-500">{editBroker.seats_used} seats currently apportioned.</p>
-              )}
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-zinc-300 mb-1">Plan</label>
-              <select
-                value={editForm.plan}
-                onChange={(e) => setEditForm({ ...editForm, plan: e.target.value })}
-                className="w-40 bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-300 text-sm px-3 py-2 focus:border-zinc-500"
-              >
-                <option value="standard">Standard</option>
-                <option value="pro">Pro (off-platform clients)</option>
-              </select>
-              <p className="mt-1 text-xs text-zinc-500">Pro unlocks the off-platform "External Book" (non-tenant clients).</p>
-            </div>
-
-            {editForm.status === 'terminated' && (
-              <p className="text-xs text-red-400 bg-red-900/20 border border-red-800/30 rounded px-2 py-1.5">
-                Terminating a broker will prevent them from logging in and managing clients. Existing client links will remain but no new onboarding will be possible.
-              </p>
-            )}
-
-            {editError && <p className="text-sm text-red-400">{editError}</p>}
-
-            <div className="flex items-center gap-2 pt-2 border-t border-zinc-800">
-              <Button type="submit" size="sm" disabled={editSaving}>
-                {editSaving ? 'Saving...' : 'Save Changes'}
-              </Button>
-              <Button type="button" variant="ghost" size="sm" onClick={() => setEditBroker(null)}>
-                Cancel
-              </Button>
-            </div>
-          </form>
-        )}
-      </Modal>
-
-      {/* Book of Business Modal */}
-      <Modal open={!!bookBroker} onClose={() => setBookBroker(null)} title={`${bookBroker?.name ?? ''} — Book of Business`} width="lg">
-        {bookLoading ? (
-          <p className="text-sm text-zinc-500 py-4">Loading...</p>
-        ) : bookSetups.length === 0 ? (
-          <p className="text-sm text-zinc-500 py-4">No client setups submitted by this broker.</p>
-        ) : (
-          <div className="space-y-3 max-h-[60vh] overflow-y-auto">
-            {bookSetups.map((s: any) => (
-              <div key={s.id} className="border border-zinc-800 rounded-lg p-3 space-y-2">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-zinc-100">{s.company_name}</p>
-                    <p className="text-xs text-zinc-500">
-                      {s.industry ?? '—'} · {s.company_size ?? '—'} · {s.headcount ? `${s.headcount} employees` : '—'}
-                    </p>
-                  </div>
-                  <Badge variant={s.status === 'activated' ? 'success' : s.status === 'invited' ? 'warning' : 'neutral'}>
-                    {s.status}
-                  </Badge>
-                </div>
-                {s.contact_name && (
-                  <p className="text-xs text-zinc-400">Contact: {s.contact_name} {s.contact_email ? `· ${s.contact_email}` : ''} {s.contact_phone ? `· ${s.contact_phone}` : ''}</p>
-                )}
-                {s.locations && s.locations.length > 0 && (
-                  <div>
-                    <p className="text-[10px] text-zinc-500 uppercase tracking-wider mb-1">Locations / Jurisdictions</p>
-                    <div className="flex flex-wrap gap-1">
-                      {s.locations.map((loc: any, i: number) => (
-                        <span key={i} className="text-[11px] bg-zinc-800 text-zinc-300 px-2 py-0.5 rounded">
-                          {loc.city}{loc.state ? `, ${loc.state}` : ''} {loc.type ? `(${loc.type})` : ''}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                {s.specialties && (
-                  <div>
-                    <p className="text-[10px] text-zinc-500 uppercase tracking-wider mb-1">Specialties</p>
-                    <p className="text-xs text-zinc-300">{s.specialties}</p>
-                  </div>
-                )}
-                {s.notes && (
-                  <div>
-                    <p className="text-[10px] text-zinc-500 uppercase tracking-wider mb-1">Notes</p>
-                    <p className="text-xs text-zinc-400">{s.notes}</p>
-                  </div>
-                )}
-                <p className="text-[10px] text-zinc-600">Submitted {new Date(s.created_at).toLocaleDateString()}</p>
-              </div>
-            ))}
-          </div>
-        )}
-      </Modal>
-
-      {/* Link Company Modal */}
-      <Modal open={!!linkBroker} onClose={() => setLinkBroker(null)} title={`Link Company to ${linkBroker?.name ?? ''}`} width="md">
-        <div className="space-y-4">
-          {companiesLoading ? (
-            <p className="text-sm text-zinc-500">Loading companies...</p>
-          ) : (
-            <>
-              <div>
-                <label className="block text-sm font-medium text-zinc-300 mb-1">Select Company</label>
-                <select
-                  value={selectedCompanyId}
-                  onChange={(e) => setSelectedCompanyId(e.target.value)}
-                  className="w-full bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-300 text-sm px-3 py-2 focus:border-zinc-500"
-                >
-                  <option value="">Choose a company...</option>
-                  {companies.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name} — {c.status}{c.industry ? ` (${c.industry})` : ''}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {linkError && <p className="text-sm text-red-400">{linkError}</p>}
-              {linkSuccess && (
-                <div className="text-sm text-emerald-400 bg-emerald-900/20 border border-emerald-800/30 rounded px-3 py-2">
-                  {linkSuccess}
-                </div>
-              )}
-
-              <div className="flex items-center gap-2 pt-2 border-t border-zinc-800">
-                <Button size="sm" onClick={handleLinkCompany} disabled={linkSaving || !selectedCompanyId}>
-                  {linkSaving ? 'Linking...' : 'Link Company'}
-                </Button>
-                <Button size="sm" variant="ghost" onClick={() => setLinkBroker(null)}>
-                  {linkSuccess ? 'Done' : 'Cancel'}
-                </Button>
-              </div>
-            </>
-          )}
-        </div>
-      </Modal>
-
-      {/* Success Modal */}
-      <Modal open={!!result} onClose={closeResult} title="Broker Created" width="md">
-        {result && (
-          <div className="space-y-4">
-            <div className="bg-zinc-800/50 rounded-lg p-3 space-y-1">
-              <p className="text-xs text-zinc-500 uppercase tracking-wider font-medium">Broker</p>
-              <p className="text-zinc-100 font-medium">{result.broker.name}</p>
-              <p className="text-xs text-zinc-500">/{result.broker.slug}</p>
-            </div>
-            <div className="bg-zinc-800/50 rounded-lg p-3 space-y-1">
-              <p className="text-xs text-zinc-500 uppercase tracking-wider font-medium">Owner Account</p>
-              <p className="text-zinc-100">{result.owner.email}</p>
-              {result.owner.generated_password && result.owner.password && (
-                <div className="mt-2">
-                  <p className="text-xs text-zinc-500 mb-1">Generated password (share securely):</p>
-                  <code className="block bg-zinc-900 border border-zinc-700 rounded px-3 py-1.5 text-emerald-400 text-sm font-mono select-all">
-                    {result.owner.password}
-                  </code>
-                </div>
-              )}
-              {result.owner.email_sent && (
-                <p className="text-xs text-emerald-500 mt-1">Welcome email sent.</p>
-              )}
-            </div>
-            <div className="flex justify-end pt-2 border-t border-zinc-800">
-              <Button size="sm" onClick={closeResult}>Done</Button>
-            </div>
-          </div>
-        )}
-      </Modal>
+      <BrokerCreatedModal result={result} onClose={closeResult} />
     </div>
   )
 }

@@ -1,0 +1,5 @@
+export const INK = 'var(--color-ivory-ink)'
+export const BG = 'var(--color-ivory-bg)'
+export const MUTED = 'var(--color-ivory-muted)'
+export const LINE = 'var(--color-ivory-line)'
+export const DISPLAY = 'var(--font-display)'
