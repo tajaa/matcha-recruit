@@ -47,7 +47,7 @@ class AppState {
 
     // MARK: - Workspace tabs
     static let maxPinnedTabs = 4
-    private static let tabsKey = "mw-open-tabs-v1"
+    static let tabsKey = "mw-open-tabs-v1"
     /// Open tabs; Home is always element 0. Persisted across launches.
     var openTabs: [WorkTab] = AppState.loadTabs() {
         didSet { AppState.saveTabs(openTabs) }
@@ -168,120 +168,6 @@ class AppState {
             // (ChatPanel / MessageBubble / ThreadDetail read `mw-chat-theme`).
             UserDefaults.standard.set(appTheme == "light" || appTheme == "platinum", forKey: "mw-chat-theme")
         }
-    }
-
-    var themeBg: Color {
-        switch appTheme {
-        case "light": return Color.grayBg
-        case "platinum": return Color.platinumBg
-        case "cappuchin": return Color.cappuchinDark
-        case "graphite": return Color.graphiteBg
-        default: return Color.zinc950
-        }
-    }
-
-    var themeCard: Color {
-        switch appTheme {
-        case "light": return Color.grayCard
-        case "platinum": return Color.platinumCard
-        case "cappuchin": return Color.cappuchinCard
-        case "graphite": return Color.graphiteCard
-        default: return Color.zinc900
-        }
-    }
-
-    /// Sidebar background — deliberately CONTRASTS the body (`themeBg`): lighter
-    /// than the near-black dark bg, lighter than the espresso cappuchin bg, and
-    /// DARKER than the light-mode body, so the nav rail always separates from the
-    /// main content.
-    var themeSidebar: Color {
-        switch appTheme {
-        case "light": return Color.graySidebar
-        case "platinum": return Color.platinumSidebar
-        case "cappuchin": return Color.cappuchinCard
-        case "graphite": return Color.graphiteSidebar
-        default: return Color.zinc900
-        }
-    }
-
-    var themeBorder: Color {
-        switch appTheme {
-        case "light": return Color.grayBorder
-        case "platinum": return Color.platinumBorder
-        case "cappuchin": return Color.cappuchinBorder
-        case "graphite": return Color.graphiteBorder
-        default: return Color.white.opacity(0.1)
-        }
-    }
-
-    var themeAccent: Color {
-        switch appTheme {
-        case "light": return Color.grayAccent
-        case "platinum": return Color.platinumAccent
-        case "cappuchin": return Color.cappuchinAccent
-        case "graphite": return Color.graphiteAccent
-        default: return Color.matcha500
-        }
-    }
-
-    var themeAccentDark: Color {
-        switch appTheme {
-        case "light": return Color.grayAccentDark
-        case "platinum": return Color.platinumAccentDark
-        case "cappuchin": return Color.cappuchinAccentDark
-        case "graphite": return Color.graphiteAccentDark
-        default: return Color.matcha600
-        }
-    }
-
-    var themeText: Color {
-        switch appTheme {
-        case "light": return Color.grayText
-        case "platinum": return Color.platinumText
-        case "cappuchin": return Color.cappuchinText
-        case "graphite": return Color.graphiteText
-        default: return Color.white
-        }
-    }
-
-    /// Foreground for content sitting ON the accent color (e.g. button labels).
-    /// Caramel cappuchin accent is light, so it needs dark text; charcoal and
-    /// matcha green accents need white.
-    var themeOnAccent: Color {
-        switch appTheme {
-        case "cappuchin": return Color.cappuchinDark
-        case "graphite": return Color.graphiteOnAccent
-        default: return Color.white
-        }
-    }
-
-    var themeTextSecondary: Color {
-        switch appTheme {
-        case "light": return Color.grayTextSecondary
-        case "platinum": return Color.platinumSecondary
-        case "cappuchin": return Color.cappuchinSecondary
-        case "graphite": return Color.graphiteSecondary
-        default: return Color.secondary
-        }
-    }
-
-    var lightMode: Bool {
-        return isLightFamily
-    }
-
-    /// Light-family themes (`light` + `platinum`) share the light-mode render
-    /// path: light card shadows instead of dark borders, `.light` colorScheme,
-    /// light chat bubbles. New light themes MUST join this, or chrome that keys
-    /// off `appTheme == "light"` renders in the dark path on top of a light bg.
-    var isLightFamily: Bool {
-        return appTheme == "light" || appTheme == "platinum"
-    }
-
-    /// Graphite — the minimalist grayscale theme. Gates the stripped-down ASCII
-    /// chrome (rule headers, `[ ]` checkboxes, flat hero) so the other three
-    /// themes keep their normal SF-Symbol styling untouched.
-    var isGraphite: Bool {
-        return appTheme == "graphite"
     }
 
     var mwBetaLite: Bool {
@@ -914,82 +800,6 @@ class AppState {
             try? await MatchaWorkService.shared.markNotificationsReadBy(sectionId: sectionId)
             await self.refreshProjectUnseenCounts()
             await self.refreshNotificationsCount()
-        }
-    }
-
-    // MARK: - Workspace tabs
-
-    private static func loadTabs() -> [WorkTab] {
-        guard let data = UserDefaults.standard.data(forKey: tabsKey),
-              let tabs = try? JSONDecoder().decode([WorkTab].self, from: data),
-              !tabs.isEmpty
-        else { return [.home] }
-        // Home must always lead.
-        return tabs.first?.kind == .home ? tabs : [.home] + tabs.filter { $0.kind != .home }
-    }
-
-    private static func saveTabs(_ tabs: [WorkTab]) {
-        if let data = try? JSONEncoder().encode(tabs) {
-            UserDefaults.standard.set(data, forKey: tabsKey)
-        }
-    }
-
-    var pinnedTabCount: Int { openTabs.filter { $0.kind != .home }.count }
-    var canPinActiveTab: Bool {
-        activeTab.kind != .home
-            && !openTabs.contains(where: { $0.id == activeTab.id })
-            && pinnedTabCount < AppState.maxPinnedTabs
-    }
-
-    /// Switch the detail pane to a tab's destination.
-    @MainActor
-    func selectTab(_ tab: WorkTab) {
-        activeTab = tab
-        navigateToDestination(tab)
-    }
-
-    /// Pin the currently-open item as a tab (no-op for Home / duplicates / when full).
-    @MainActor
-    func pinActiveTab() {
-        guard canPinActiveTab else { return }
-        openTabs.append(activeTab)
-    }
-
-    @MainActor
-    func closeTab(_ tab: WorkTab) {
-        guard tab.kind != .home else { return }
-        openTabs.removeAll { $0.id == tab.id }
-        if activeTab.id == tab.id { selectTab(.home) }
-    }
-
-    /// Called by a detail view once its data loads: marks it active and
-    /// refreshes the cached title on any matching pinned tab.
-    @MainActor
-    func setActiveContext(_ tab: WorkTab) {
-        activeTab = tab
-        if let idx = openTabs.firstIndex(where: { $0.id == tab.id }), openTabs[idx].title != tab.title {
-            openTabs[idx].title = tab.title
-        }
-    }
-
-    @MainActor
-    private func navigateToDestination(_ tab: WorkTab) {
-        selectedProjectId = nil
-        selectedThreadId = nil
-        selectedChannelId = nil
-        selectedJournalId = nil
-        selectedEmailId = nil
-        showHome = false
-        showSkills = false
-        showInbox = false
-        showPeople = false
-        showChannelBrowse = false
-        switch tab.kind {
-        case .home: showHome = true
-        case .project: selectedProjectId = tab.entityId
-        case .channel: selectedChannelId = tab.entityId
-        case .thread: selectedThreadId = tab.entityId
-        case .journal: selectedJournalId = tab.entityId
         }
     }
 
