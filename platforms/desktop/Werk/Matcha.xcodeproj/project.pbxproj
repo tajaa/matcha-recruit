@@ -246,6 +246,7 @@
 		BC01DD22EE33FF44551100C1 /* WorkDetailVMStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC01DD22EE33FF44551100B1 /* WorkDetailVMStoreTests.swift */; };
 		BC01DD22EE33FF44551100C2 /* APIErrorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC01DD22EE33FF44551100B2 /* APIErrorTests.swift */; };
 		BC01DD22EE33FF44551100C3 /* CacheKeyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC01DD22EE33FF44551100B3 /* CacheKeyTests.swift */; };
+		BC01DD22EE33FF44551100C4 /* ChannelMergeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC01DD22EE33FF44551100B4 /* ChannelMergeTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -487,6 +488,7 @@
 		BC01DD22EE33FF44551100B2 /* APIErrorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIErrorTests.swift; sourceTree = "<group>"; };
 		BC01DD22EE33FF44551100B3 /* CacheKeyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CacheKeyTests.swift; sourceTree = "<group>"; };
 		BC01DD22EE33FF44551100A2 /* MatchaTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MatchaTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		BC01DD22EE33FF44551100B4 /* ChannelMergeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelMergeTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -1060,6 +1062,7 @@
 				BC01DD22EE33FF44551100B1 /* WorkDetailVMStoreTests.swift */,
 				BC01DD22EE33FF44551100B2 /* APIErrorTests.swift */,
 				BC01DD22EE33FF44551100B3 /* CacheKeyTests.swift */,
+				BC01DD22EE33FF44551100B4 /* ChannelMergeTests.swift */,
 			);
 			path = MatchaTests;
 			sourceTree = "<group>";
@@ -1456,6 +1459,7 @@
 				BC01DD22EE33FF44551100C1 /* WorkDetailVMStoreTests.swift in Sources */,
 				BC01DD22EE33FF44551100C2 /* APIErrorTests.swift in Sources */,
 				BC01DD22EE33FF44551100C3 /* CacheKeyTests.swift in Sources */,
+				BC01DD22EE33FF44551100C4 /* ChannelMergeTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

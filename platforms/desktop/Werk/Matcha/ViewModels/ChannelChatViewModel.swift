@@ -112,6 +112,102 @@ final class ChannelChatViewModel {
         pendingFailureTasks.removeAll()
     }
 
+    /// Outcome of folding a freshly-fetched newest page into the on-screen
+    /// list. Pure data so `refreshMerge` can be unit-tested without a socket,
+    /// a service, or a live channel.
+    struct RefreshMerge: Equatable {
+        /// The list to display. Only meaningful when `changed` is true —
+        /// reassigning an identical list rebuilds the view (visible flash).
+        var messages: [ChannelMessage]
+        var hasMoreHistory: Bool
+        /// Whether the merge changed the id sequence, i.e. whether to assign.
+        var changed: Bool
+        /// Whether to bump `scrollToLatestTick`.
+        var scrollToLatest: Bool
+    }
+
+    /// Fold a refreshed newest page into the current list.
+    ///
+    /// Keeps local optimistic rows the server echo hasn't replaced yet, and
+    /// preserves history paged in via `loadOlder()` — the chronological prefix
+    /// of the current list that predates the newest page. Replacing the array
+    /// with just the newest page would yank paged-in messages out from under
+    /// the reader and strand `hasMoreHistory`.
+    ///
+    /// If nothing overlaps the newest page, more than a full page arrived while
+    /// away — the gap between the kept history and the newest page would be
+    /// unknowable, so it falls back to the newest page alone and recomputes the
+    /// flag.
+    ///
+    /// Known cosmetic edge: a pending/failed row that drifted mid-list (WS rows
+    /// appended after it) re-sorts to the tail here — positional preservation
+    /// would need timestamp interleaving, deliberately not attempted.
+    ///
+    /// `nonisolated` so tests can call it off the main actor; it touches no
+    /// instance state.
+    nonisolated static func refreshMerge(
+        existing: [ChannelMessage],
+        newest: [ChannelMessage],
+        hasMoreHistory: Bool,
+        pageSize: Int
+    ) -> RefreshMerge {
+        let serverIds = Set(newest.map(\.id))
+        let pendingExtras = existing.filter { m in
+            (m.pending || m.failed) && !serverIds.contains(m.id)
+        }
+        let overlaps = existing.contains { serverIds.contains($0.id) }
+        let olderPrefix = overlaps
+            ? Array(existing.prefix { !serverIds.contains($0.id) && !$0.pending && !$0.failed })
+            : []
+        let resolvedHasMore = overlaps ? hasMoreHistory : newest.count >= pageSize
+
+        let oldIds = Set(existing.map(\.id))
+        let hasNewMessages = newest.contains { !oldIds.contains($0.id) }
+        let merged = olderPrefix + newest + pendingExtras
+        let changed = merged.map(\.id) != existing.map(\.id)
+
+        // The tail may be an unchanged pending/failed row, so the view's
+        // last-identity scroll trigger can't see newly arrived messages —
+        // signal it explicitly. ONLY when new messages actually arrived AND the
+        // tail is pinned: a deletion-only or reorder-only merge must not yank a
+        // reader out of the history they're reading, and a changed tail is
+        // already handled by the identity trigger.
+        let tailUnchanged = merged.last?.stableKey == existing.last?.stableKey
+
+        return RefreshMerge(
+            messages: merged,
+            hasMoreHistory: resolvedHasMore,
+            changed: changed,
+            scrollToLatest: changed && tailUnchanged && hasNewMessages
+        )
+    }
+
+    /// Outcome of folding a fetched older page into the head of the list.
+    struct OlderPageMerge: Equatable {
+        /// Messages to prepend, with anything already on screen filtered out.
+        var fresh: [ChannelMessage]
+        var hasMoreHistory: Bool
+    }
+
+    /// Dedup a fetched older page against what's already on screen and restate
+    /// the end-of-history policy: a short page or an all-duplicates page means
+    /// the end was reached.
+    ///
+    /// `nonisolated` so tests can call it off the main actor; it touches no
+    /// instance state.
+    nonisolated static func olderPageMerge(
+        existing: [ChannelMessage],
+        older: [ChannelMessage],
+        pageSize: Int
+    ) -> OlderPageMerge {
+        let existingIds = Set(existing.map(\.id))
+        let fresh = older.filter { !existingIds.contains($0.id) }
+        return OlderPageMerge(
+            fresh: fresh,
+            hasMoreHistory: older.count >= pageSize && !fresh.isEmpty
+        )
+    }
+
     func loadChannel(channelId: String, isRefresh: Bool = false) async {
         if !isRefresh { isLoading = true }   // refresh stays silent — no loading flash
         errorMessage = nil
@@ -120,45 +216,16 @@ final class ChannelChatViewModel {
             channel = detail
             ws.setCurrentRoomName(detail.name)
             if isRefresh {
-                // Silent merge: keep local optimistic rows the server echo hasn't
-                // replaced yet, and only reassign when the id list actually
-                // changed (identical reassignment would rebuild the list = flash).
-                let newest = detail.messages
-                let serverIds = Set(newest.map(\.id))
-                let pendingExtras = messages.filter { m in
-                    (m.pending || m.failed) && !serverIds.contains(m.id)
-                }
-                // Preserve history paged in via loadOlder(): the chronological
-                // prefix of the current list that predates the newest page.
-                // Replacing the array with just the newest page would yank
-                // paged-in messages out from under the reader and strand
-                // hasMoreHistory. If nothing overlaps the newest page, more
-                // than a full page arrived while away — the gap between the
-                // kept history and the newest page would be unknowable, so
-                // fall back to the newest page alone and recompute the flag.
-                // Known cosmetic edge: a pending/failed row that drifted
-                // mid-list (WS rows appended after it) re-sorts to the tail
-                // here — positional preservation would need timestamp
-                // interleaving, deliberately not attempted.
-                let overlaps = messages.contains { serverIds.contains($0.id) }
-                let olderPrefix = overlaps
-                    ? Array(messages.prefix { !serverIds.contains($0.id) && !$0.pending && !$0.failed })
-                    : []
-                if !overlaps { hasMoreHistory = newest.count >= historyPageSize }
-                let oldIds = Set(messages.map(\.id))
-                let hasNewMessages = newest.contains { !oldIds.contains($0.id) }
-                let merged = olderPrefix + newest + pendingExtras
-                if merged.map(\.id) != messages.map(\.id) {
-                    let tailUnchanged = merged.last?.stableKey == messages.last?.stableKey
-                    messages = merged
-                    // The tail may be an unchanged pending/failed row, so the
-                    // view's last-identity scroll trigger can't see newly
-                    // arrived messages — signal it explicitly. ONLY when new
-                    // messages actually arrived AND the tail is pinned:
-                    // a deletion-only or reorder-only merge must not yank a
-                    // reader out of the history they're reading, and a
-                    // changed tail is already handled by the identity trigger.
-                    if tailUnchanged && hasNewMessages { scrollToLatestTick &+= 1 }
+                let merge = Self.refreshMerge(
+                    existing: messages,
+                    newest: detail.messages,
+                    hasMoreHistory: hasMoreHistory,
+                    pageSize: historyPageSize
+                )
+                hasMoreHistory = merge.hasMoreHistory
+                if merge.changed {
+                    messages = merge.messages
+                    if merge.scrollToLatest { scrollToLatestTick &+= 1 }
                 }
             } else {
                 messages = detail.messages
@@ -208,12 +275,9 @@ final class ChannelChatViewModel {
             // stale page in would leave an unfillable mid-list gap; drop it.
             // The button remains and re-pages consistently off the new head.
             guard messages.first?.id == oldest.id else { return }
-            let existingIds = Set(messages.map(\.id))
-            let fresh = older.filter { !existingIds.contains($0.id) }
-            // One statement of the whole policy: a short page or an
-            // all-duplicates page means the end of history was reached.
-            hasMoreHistory = older.count >= historyPageSize && !fresh.isEmpty
-            messages.insert(contentsOf: fresh, at: 0)
+            let page = Self.olderPageMerge(existing: messages, older: older, pageSize: historyPageSize)
+            hasMoreHistory = page.hasMoreHistory
+            messages.insert(contentsOf: page.fresh, at: 0)
         } catch {
             if error.isCancellation { return }
             // Deliberately NOT errorMessage: the view treats that as a fatal
