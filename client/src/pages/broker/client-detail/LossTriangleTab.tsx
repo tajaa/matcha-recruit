@@ -4,7 +4,7 @@ import { Card } from '../../../components/ui'
 import {
   fetchClientLossDevelopment, parseClientLossRun, commitClientLossRun,
   deleteClientLossRunSnapshot, downloadClientLossDevelopment,
-} from '../../../api/broker'
+} from '../../../api/broker/broker'
 import type { LossDevelopment, LossRunDraft, LossRunCommit, LossRunDraftPeriod } from '../../../types/lossDevelopment'
 import { LOSS_LINES } from '../../../types/lossDevelopment'
 import { fmtMoney } from '../../../types/limitAdequacy'

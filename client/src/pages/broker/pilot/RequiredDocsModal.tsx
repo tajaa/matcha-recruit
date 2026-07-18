@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { CheckCircle2, Circle, ExternalLink, Loader2, X } from 'lucide-react'
 import { Link } from 'react-router-dom'
-import { uploadPilotDocument, type DocRequirement, type PilotSession } from '../../../api/brokerPilot'
+import { uploadPilotDocument, type DocRequirement, type PilotSession } from '../../../api/broker/brokerPilot'
 import { FileUpload } from '../../../components/ui'
 import { DOC_TYPE_LABEL, LABEL, requirementStatus } from './shared'
 

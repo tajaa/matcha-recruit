@@ -3,7 +3,7 @@ import type { BadgeVariant } from '../components/ui'
 import type {
   CBAStatus, ClauseCategory, GrievanceResolution, GrievanceStatus,
   GrievanceType, StepOutcome, StepStatus,
-} from '../api/laborClient'
+} from '../api/hr/laborClient'
 
 export const GRIEVANCE_STATUS_VARIANT: Record<GrievanceStatus, BadgeVariant> = {
   draft: 'neutral',

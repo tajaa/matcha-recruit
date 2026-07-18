@@ -3,7 +3,7 @@ import { Bot, Plus, Search, Wrench, Compass, MessageSquare } from 'lucide-react'
 import {
   listTemplates, listSessions, getSession, createSession,
   type PilotTemplate, type PilotSession, type PilotMode,
-} from '../../../../api/compliancePilot'
+} from '../../../../api/admin/compliancePilot'
 import { fmtRelative } from '../utils'
 import Console from './Console'
 

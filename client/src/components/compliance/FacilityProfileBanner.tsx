@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 import { Button } from '../ui'
-import { updateFacilityAttributes } from '../../api/compliance'
+import { updateFacilityAttributes } from '../../api/compliance/compliance'
 import type { FacilityAttributes } from '../../types/compliance'
 
 const ENTITY_TYPES = [

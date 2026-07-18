@@ -9,7 +9,7 @@ import {
   runResearch, listResearch, updateMatter,
   type Matter, type MatterMessage, type EvidencePreview, type Packet, type ChatResult, type ResearchRow,
   type MatterTheory, type SubjectTheory,
-} from '../../../api/legalDefense'
+} from '../../../api/hr/legalDefense'
 import { LABEL, seedRecap, startersFor, typeLabel } from './shared'
 import { Masthead } from './Masthead'
 import { Console } from './Console'

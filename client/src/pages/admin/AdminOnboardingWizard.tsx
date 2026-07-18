@@ -10,8 +10,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { ArrowLeft, Check, Loader2 } from 'lucide-react'
 
-import { adminOnboarding } from '../../api/adminOnboarding'
-import type { OnboardingSessionDetail, OnboardingStep } from '../../api/adminOnboarding'
+import { adminOnboarding } from '../../api/admin/adminOnboarding'
+import type { OnboardingSessionDetail, OnboardingStep } from '../../api/admin/adminOnboarding'
 import {
   Step1Basics,
   Step2Size,

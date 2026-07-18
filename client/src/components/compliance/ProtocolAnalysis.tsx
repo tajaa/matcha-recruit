@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { analyzeProtocol, type ProtocolAnalysisResult, type ProtocolAnalysisItem } from '../../api/compliance'
+import { analyzeProtocol, type ProtocolAnalysisResult, type ProtocolAnalysisItem } from '../../api/compliance/compliance'
 
 type Props = {
   locationId?: string | null

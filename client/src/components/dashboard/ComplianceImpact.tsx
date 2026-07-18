@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Card, Badge, Button, Modal } from '../ui'
 import { Shield, MapPin, Users, ExternalLink } from 'lucide-react'
-import { fetchComplianceDashboard, fetchAssignableUsers, updateAlertActionPlan, assignLegislation } from '../../api/compliance'
+import { fetchComplianceDashboard, fetchAssignableUsers, updateAlertActionPlan, assignLegislation } from '../../api/compliance/compliance'
 import type { ComplianceDashboard, ComplianceDashboardItem } from '../../types/dashboard'
 import type { AssignableUser } from '../../types/compliance'
 

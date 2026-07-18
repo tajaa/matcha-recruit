@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { ChevronRight } from 'lucide-react'
 import { HelpHint } from '../../../components/ui/HelpHint'
-import type { EvidencePreview } from '../../../api/legalDefense'
+import type { EvidencePreview } from '../../../api/hr/legalDefense'
 import { LABEL, SOURCE_META } from './shared'
 import { RecordViewer, type ViewerTarget } from './RecordViewer'
 

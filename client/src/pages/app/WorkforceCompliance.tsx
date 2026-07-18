@@ -7,7 +7,7 @@ import {
   fetchPayTransparency, setPayTransparency,
   fetchPayEquityReviews, createPayEquityReview, deletePayEquityReview, analyzePayEquity, fetchPayEquityAnalysis,
   suggestAiAudits, suggestBiometricPoints,
-} from '../../api/workforceCompliance'
+} from '../../api/compliance/workforceCompliance'
 import { AiSuggest } from '../../components/widgets/AiSuggest'
 import type {
   AiAudit, BiometricPoint, PayTransparencyRow, PayTransparencyStatus, CollectionType, PayEquityReview,

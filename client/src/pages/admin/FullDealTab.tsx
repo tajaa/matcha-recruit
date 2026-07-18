@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Loader2, Download, FileText, PencilLine } from 'lucide-react'
 import { Button, Input, Toggle } from '../../components/ui'
 import { api } from '../../api/client'
-import { getTemplate, saveTemplate } from '../../api/dealTemplates'
+import { getTemplate, saveTemplate } from '../../api/admin/dealTemplates'
 import SaveTemplateButton from './SaveTemplateButton'
 
 type BlockKind =

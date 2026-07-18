@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom'
 import { Check } from 'lucide-react'
-import { useMatchaLitePricing } from '../../api/matchaLitePricing'
+import { useMatchaLitePricing } from '../../api/billing/matchaLitePricing'
 
 const INK = 'var(--color-ivory-ink)'
 const BG = 'var(--color-ivory-bg)'

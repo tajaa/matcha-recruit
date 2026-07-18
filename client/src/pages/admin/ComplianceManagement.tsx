@@ -7,7 +7,7 @@ import {
   adminAddRequirement,
   adminRemoveRequirement,
   fetchRepositoryRequirements,
-} from '../../api/compliance'
+} from '../../api/compliance/compliance'
 import { Badge, Button, Input, Modal, Select } from '../../components/ui'
 import { Plus, Trash2, RefreshCw } from 'lucide-react'
 import type { BusinessLocation, ComplianceRequirement, LocationCreate } from '../../types/compliance'

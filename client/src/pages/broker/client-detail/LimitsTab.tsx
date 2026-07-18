@@ -1,11 +1,11 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { FileDown, Loader2 } from 'lucide-react'
 import { Card } from '../../../components/ui'
-import { fetchClientLimitAdequacy, downloadClientLimits } from '../../../api/broker'
+import { fetchClientLimitAdequacy, downloadClientLimits } from '../../../api/broker/broker'
 import {
   uploadBrokerContract, updateBrokerContract, confirmBrokerContract,
   fetchBrokerContractReview, downloadBrokerContractReviewPdf, fetchBrokerContractSourceUrl,
-} from '../../../api/limitAdequacy'
+} from '../../../api/risk/limitAdequacy'
 import type { LimitReview, CoverageCatalogEntry } from '../../../types/limitAdequacy'
 import { LIMIT_STATUS_LABEL, fmtMoney } from '../../../types/limitAdequacy'
 import { ContractsPanel } from '../../../components/limit-adequacy/ContractsPanel'

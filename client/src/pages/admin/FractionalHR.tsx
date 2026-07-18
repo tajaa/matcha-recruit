@@ -11,7 +11,7 @@ import {
   type FractionalClient,
   type Overview,
   type Pro,
-} from '../../api/fractionalHr'
+} from '../../api/admin/fractionalHr'
 
 const STATUS_VARIANT: Record<string, 'success' | 'warning' | 'neutral' | 'danger'> = {
   active: 'success',

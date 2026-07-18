@@ -11,7 +11,7 @@ import {
   fmtMoney, VERDICT_TONE, VERDICT_LABEL, CONTRACT_TYPE_LABEL,
   INDEMNITY_FORM_LABEL, INDEMNITY_DIRECTION_LABEL, EMPTY_INDEMNITY,
 } from '../../types/limitAdequacy'
-import type { ContractPayload } from '../../api/limitAdequacy'
+import type { ContractPayload } from '../../api/risk/limitAdequacy'
 
 /** The tenant page and the broker client tab drive the same contract review
  *  against different endpoints. Injecting the calls keeps one UI. `create` and

@@ -16,7 +16,7 @@ import {
   type Task,
   type TaskStatus,
   type TimeEntry,
-} from '../../api/fractionalHr'
+} from '../../api/admin/fractionalHr'
 
 const STATUS_VARIANT: Record<string, 'success' | 'warning' | 'neutral' | 'danger'> = {
   active: 'success', prospect: 'neutral', paused: 'warning', offboarded: 'danger',

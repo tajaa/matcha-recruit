@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
-import { fetchRequirements, fetchUpcomingLegislation, fetchCheckLog } from '../../api/compliance'
+import { fetchRequirements, fetchUpcomingLegislation, fetchCheckLog } from '../../api/compliance/compliance'
 import type { ComplianceRequirement, UpcomingLegislation, CheckLogEntry } from '../../types/compliance'
 
 // `lite` = Matcha-X read-only taste: skips the Pro-only check-log fetch

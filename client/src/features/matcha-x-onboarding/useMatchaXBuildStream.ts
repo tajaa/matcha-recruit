@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { getMatchaXBuildStreamUrl } from '../../api/matchaXOnboarding'
+import { getMatchaXBuildStreamUrl } from '../../api/billing/matchaXOnboarding'
 import { ensureFreshToken } from '../../api/client'
 
 /**

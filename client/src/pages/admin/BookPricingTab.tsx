@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Loader2, Download, FileText, PencilLine, Plus, X } from 'lucide-react'
 import { Button, Input } from '../../components/ui'
 import { api } from '../../api/client'
-import { getTemplate, saveTemplate } from '../../api/dealTemplates'
+import { getTemplate, saveTemplate } from '../../api/admin/dealTemplates'
 import SaveTemplateButton from './SaveTemplateButton'
 
 type Block = { id: string; kind: string; text: string; items: string[]; new_page: boolean; column: string }

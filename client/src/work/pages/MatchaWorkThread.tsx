@@ -6,7 +6,7 @@ import { getThread, sendMessageStream, uploadResumes, uploadInventory, sendCandi
 import type { UsageSummary } from '../api/matchaWork'
 import { ThreadSocket } from '../api/threadSocket'
 import ThreadCollaborators from '../components/panels/ThreadCollaborators'
-import { fetchLocations } from '../../api/compliance'
+import { fetchLocations } from '../../api/compliance/compliance'
 import type { BusinessLocation } from '../../types/compliance'
 import MessageBubble from '../components/panels/MessageBubble'
 import { useMe } from '../../hooks/useMe'

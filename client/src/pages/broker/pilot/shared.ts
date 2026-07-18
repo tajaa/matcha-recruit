@@ -6,7 +6,7 @@ import {
 } from 'lucide-react'
 import type {
   ContextPreview, CorpusRecord, DocRequirement, DocStatus, DocType, PilotSession,
-} from '../../../api/brokerPilot'
+} from '../../../api/broker/brokerPilot'
 
 /** Label voice — docket micro-caption, shared with the platform primitives. */
 export { LABEL } from '../../../components/ui'

@@ -8,7 +8,7 @@ import { LABEL } from '../ui/typography'
 import { HelpHint } from '../ui/HelpHint'
 import {
   dismissRemediation, fetchAssignableUsers, reopenRemediation,
-} from '../../api/compliance'
+} from '../../api/compliance/compliance'
 import type {
   AssignableUser, ComplianceActionPlanUpdate, ComplianceRiskSummary,
   PinnedRequirement, RemediationRecord, RiskIssue,

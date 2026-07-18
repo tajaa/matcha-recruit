@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { Building2, Loader2, AlertCircle } from 'lucide-react'
 import { Card } from '../../components/ui'
 import { HelpHint } from '../../components/broker/HelpHint'
-import { fetchPropertyPortfolio } from '../../api/broker'
+import { fetchPropertyPortfolio } from '../../api/broker/broker'
 import type { PropertyPortfolioRow, PropertyPortfolioResponse } from '../../types/broker'
 
 const COPE_TONE: Record<string, string> = { A: 'text-emerald-400', B: 'text-zinc-200', C: 'text-amber-400', D: 'text-red-400' }

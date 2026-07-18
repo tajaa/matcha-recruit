@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { Globe, Plus, Loader2, AlertCircle, CheckCircle2, Clock } from 'lucide-react'
 import { Card } from '../../components/ui'
 import { HelpHint } from '../../components/broker/HelpHint'
-import { fetchExternalClients, createExternalClient } from '../../api/broker'
+import { fetchExternalClients, createExternalClient } from '../../api/broker/broker'
 import type { ExternalClientRow } from '../../types/broker'
 import { RISK_BAND_TONE } from '../../types/riskIndex'
 

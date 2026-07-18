@@ -6,7 +6,7 @@ import type {
   RoleRollupItem,
   WageGapSummary,
 } from '../../types/dashboard'
-import { fetchWageGapDetails, downloadWageGapCsv } from '../../api/dashboard'
+import { fetchWageGapDetails, downloadWageGapCsv } from '../../api/hr/dashboard'
 
 interface Props {
   open: boolean

@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api/client'
-import { fetchLocations } from '../../api/compliance'
+import { fetchLocations } from '../../api/compliance/compliance'
 import type { BusinessLocation } from '../../types/compliance'
 import { Badge, Button, Modal } from '../ui'
 import { useMe } from '../../hooks/useMe'

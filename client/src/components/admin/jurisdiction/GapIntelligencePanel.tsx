@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
-import { fetchCoverageMatrix } from '../../../api/compliance'
-import type { CoverageMatrixResponse, CoverageCell } from '../../../api/compliance'
+import { fetchCoverageMatrix } from '../../../api/compliance/compliance'
+import type { CoverageMatrixResponse, CoverageCell } from '../../../api/compliance/compliance'
 import { CATEGORY_SHORT_LABELS } from '../../../generated/complianceCategories'
 
 interface Gap {

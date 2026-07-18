@@ -7,7 +7,7 @@ import {
   fetchWcClientDetail, recordWcMod, deleteWcMod, parseWcModWorksheet,
   fetchWcClassCodes, fetchWcClassExposures, recordWcClassExposure, deleteWcClassExposure,
   autoMapClassExposures, type ClassAutoMap,
-} from '../../../api/broker'
+} from '../../../api/broker/broker'
 import type {
   WcClientDetailResponse, WcClassCode, WcClassExposure,
 } from '../../../types/broker'

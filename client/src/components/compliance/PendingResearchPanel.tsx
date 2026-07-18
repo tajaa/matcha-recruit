@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Loader2, Sparkles } from 'lucide-react'
-import { fetchPendingResearch, type PendingResearch } from '../../api/compliance'
+import { fetchPendingResearch, type PendingResearch } from '../../api/compliance/compliance'
 
 /**
  * Tenant-facing "we're working on it" panel for the Compliance page.

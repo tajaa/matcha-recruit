@@ -3,7 +3,7 @@ import { CheckCircle2, Circle, ExternalLink, FileUp, Loader2, Trash2 } from 'luc
 import {
   uploadPilotDocument, deletePilotDocument, getPilotDocumentUrl,
   type DocRequirement, type PilotSession,
-} from '../../../api/brokerPilot'
+} from '../../../api/broker/brokerPilot'
 import { HelpHint } from '../../../components/broker/HelpHint'
 import {
   DOC_STATUS_CLASS, DOC_STATUS_LABEL, DOC_TYPE_LABEL, LABEL, fmtSize,

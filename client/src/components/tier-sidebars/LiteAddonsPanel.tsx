@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Loader2, Check } from 'lucide-react'
-import { cancelLiteAddon, createLiteAddonCheckout, fetchLiteAddons, type LiteAddonInfo } from '../../api/liteAddons'
+import { cancelLiteAddon, createLiteAddonCheckout, fetchLiteAddons, type LiteAddonInfo } from '../../api/billing/liteAddons'
 import { useToast } from '../ui/Toast'
 
 /** Add-ons section for Lite-family tenants on the Company page (`/app/company#addons`).

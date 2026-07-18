@@ -6,7 +6,7 @@ import MatchaXSidebar from '../tier-sidebars/MatchaXSidebar'
 import ComplianceSidebar from '../tier-sidebars/ComplianceSidebar'
 import { useMe } from '../../hooks/useMe'
 import { isIrOnlyTier, isMatchaLitePending, isMatchaX, isMatchaXPending, isMatchaCompliance, isMatchaCompliancePending } from '../../utils/tier'
-import { useMatchaLitePricing, computeLitePriceDollars } from '../../api/matchaLitePricing'
+import { useMatchaLitePricing, computeLitePriceDollars } from '../../api/billing/matchaLitePricing'
 import { api, ApiError } from '../../api/client'
 
 /**

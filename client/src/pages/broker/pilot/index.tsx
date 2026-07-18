@@ -4,7 +4,7 @@ import { HelpCircle, Loader2, Plus, Sparkles } from 'lucide-react'
 import {
   listPilotSessions, getPilotSession, getPilotContext,
   type PilotSession, type ContextPreview, type SubjectKind,
-} from '../../../api/brokerPilot'
+} from '../../../api/broker/brokerPilot'
 import { ApiError } from '../../../api/client'
 import { LABEL, missingRequired } from './shared'
 import { Masthead } from './Masthead'

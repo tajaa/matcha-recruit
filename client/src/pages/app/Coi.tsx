@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { FileText, Loader2, Upload, Trash2 } from 'lucide-react'
 import { Card } from '../../components/ui'
-import { listCois, uploadCoi, deleteCoi, type CoiList, type CoiStatus } from '../../api/coi'
+import { listCois, uploadCoi, deleteCoi, type CoiList, type CoiStatus } from '../../api/risk/coi'
 
 const STATUS_TONE: Record<CoiStatus, string> = {
   active: 'text-emerald-400', expiring: 'text-amber-400', expired: 'text-rose-400', unknown: 'text-zinc-500',

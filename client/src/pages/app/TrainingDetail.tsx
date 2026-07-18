@@ -6,7 +6,7 @@ import {
   trainingApi,
   type TrainingRecord,
   type TrainingRequirement,
-} from '../../api/training'
+} from '../../api/hr/training'
 
 export default function TrainingDetail() {
   const { requirementId } = useParams<{ requirementId: string }>()

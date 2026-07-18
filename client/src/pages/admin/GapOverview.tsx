@@ -9,8 +9,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Loader2, Search, Building2, AlertTriangle, CheckCircle2, ChevronDown } from 'lucide-react'
-import { adminOnboarding } from '../../api/adminOnboarding'
-import type { GapOverviewRow } from '../../api/adminOnboarding'
+import { adminOnboarding } from '../../api/admin/adminOnboarding'
+import type { GapOverviewRow } from '../../api/admin/adminOnboarding'
 import { CompanyPicker } from './AdminOnboarding'
 
 type SortKey = 'attention' | 'name' | 'coverage' | 'gaps' | 'complexity'

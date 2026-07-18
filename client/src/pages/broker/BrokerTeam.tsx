@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Users, Plus, Loader2, Trash2, Check, ShieldCheck } from 'lucide-react'
 import { HelpHint } from '../../components/broker/HelpHint'
-import { fetchBrokerMembers, createBrokerMember, deactivateBrokerMember } from '../../api/broker'
+import { fetchBrokerMembers, createBrokerMember, deactivateBrokerMember } from '../../api/broker/broker'
 import type { BrokerMember, BrokerMemberCreateResponse } from '../../types/broker'
 
 function fmtDate(iso: string | null) {

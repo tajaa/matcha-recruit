@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { AlertTriangle, Loader2, Check, CheckCircle2, Lightbulb, Sparkles } from 'lucide-react'
-import { fetchBrokerRiskAlerts, markBrokerRiskAlertRead, scanBrokerThemeAlerts } from '../../api/broker'
+import { fetchBrokerRiskAlerts, markBrokerRiskAlertRead, scanBrokerThemeAlerts } from '../../api/broker/broker'
 import TabHeader from '../../components/broker/action-center/TabHeader'
 import type { BrokerRiskAlert, BrokerRiskMetricKey } from '../../types/broker'
 

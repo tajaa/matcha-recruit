@@ -7,7 +7,7 @@ import { extractCitation, coverageLink, libraryLink } from './utils'
 import type { PendingItem, ReviewGroup, ApproveResult, UncodifiedItem } from './types'
 import { CompanyPicker } from '../AdminOnboarding'
 import StatutoryFitPanel from '../../../features/admin-onboarding/StatutoryFitPanel'
-import type { FitGatedRow } from '../../../api/adminOnboarding'
+import type { FitGatedRow } from '../../../api/admin/adminOnboarding'
 
 /** A withheld row from the fit map → the codify chain's shape.
  *  `catalog_id`, not `id`: codification acts on the catalog row, while `id` is

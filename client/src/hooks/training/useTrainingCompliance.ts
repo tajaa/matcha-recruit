@@ -4,7 +4,7 @@ import {
   type TrainingComplianceRow,
   type TrainingOverdueRow,
   type TrainingRequirement,
-} from '../../api/training'
+} from '../../api/hr/training'
 
 export function useTrainingCompliance() {
   const [compliance, setCompliance] = useState<TrainingComplianceRow[]>([])

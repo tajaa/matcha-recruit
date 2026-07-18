@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { Link2, Plus, Loader2, Copy, Check, Trash2 } from 'lucide-react'
 import { HelpHint } from '../../components/broker/HelpHint'
-import { fetchLiteReferralTokens, createLiteReferralToken, deactivateLiteReferralToken } from '../../api/broker'
+import { fetchLiteReferralTokens, createLiteReferralToken, deactivateLiteReferralToken } from '../../api/broker/broker'
 import type { BrokerLiteReferralToken } from '../../types/broker'
 
 function fmtDate(iso: string | null) {

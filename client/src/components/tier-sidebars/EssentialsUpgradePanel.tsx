@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Loader2, ArrowUpRight } from 'lucide-react'
-import { createLiteUpgradeCheckout } from '../../api/liteAddons'
-import { computeLitePriceDollars, useMatchaLitePricing } from '../../api/matchaLitePricing'
+import { createLiteUpgradeCheckout } from '../../api/billing/liteAddons'
+import { computeLitePriceDollars, useMatchaLitePricing } from '../../api/billing/matchaLitePricing'
 
 /** Sidebar-footer upgrade card for Essentials tenants (Essentials → standard
  *  Lite). Checkout-first: nothing changes until Stripe payment completes, at

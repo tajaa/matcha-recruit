@@ -8,7 +8,7 @@ import {
   Download,
   Loader2,
 } from 'lucide-react'
-import type { DisciplineRecord } from '../../api/discipline'
+import type { DisciplineRecord } from '../../api/hr/discipline'
 
 type Props = {
   record: DisciplineRecord

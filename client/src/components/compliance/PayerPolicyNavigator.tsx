@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react'
-import { askPayerPolicyQuestion, type PayerPolicySource } from '../../api/compliance'
+import { askPayerPolicyQuestion, type PayerPolicySource } from '../../api/compliance/compliance'
 
 const PAYER_LABELS: Record<string, string> = {
   medicare: 'Medicare',

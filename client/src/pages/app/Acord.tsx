@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { FileDown, Loader2, FileText } from 'lucide-react'
 import { Card } from '../../components/ui'
-import { listAcordForms, downloadAcord, type AcordForm } from '../../api/acord'
+import { listAcordForms, downloadAcord, type AcordForm } from '../../api/risk/acord'
 
 export default function Acord() {
   const [forms, setForms] = useState<AcordForm[] | null>(null)

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
-import { fetchKeyCoverage, runStalenessCheck } from '../../../api/compliance'
-import type { CategoryKeyCoverage, RegulationKeyCoverage } from '../../../api/compliance'
+import { fetchKeyCoverage, runStalenessCheck } from '../../../api/compliance/compliance'
+import type { CategoryKeyCoverage, RegulationKeyCoverage } from '../../../api/compliance/compliance'
 
 interface KeyCoverageDrawerProps {
   jurisdictionId?: string

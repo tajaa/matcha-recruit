@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { ShieldAlert, Loader2 } from 'lucide-react'
 import { Card } from '../../components/ui'
-import { getDoReadiness, upsertDoAttestation, type DoReadiness, type DoStatus } from '../../api/managementLiability'
+import { getDoReadiness, upsertDoAttestation, type DoReadiness, type DoStatus } from '../../api/risk/managementLiability'
 
 const STATUSES: DoStatus[] = ['in_place', 'partial', 'gap', 'unknown']
 const BAND_TONE: Record<string, string> = {

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Activity, ArrowUpRight, Calendar, DollarSign, Heart, Loader2, Lock, TrendingUp, Users } from 'lucide-react'
-import { createLiteUpgradeCheckout } from '../../../api/liteAddons'
+import { createLiteUpgradeCheckout } from '../../../api/billing/liteAddons'
 
 // Essentials replacement for the Workers' Comp metric cards. Those metrics
 // are computed from OSHA recordable data maintained through the OSHA log

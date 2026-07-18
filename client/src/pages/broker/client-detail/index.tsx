@@ -6,7 +6,7 @@ import {
   fetchBrokerClientDetail, downloadTenantSubmission, fetchTenantCoverageGap,
   fetchTenantSubmissionPreview, fetchTenantSubmissionNotes, saveTenantSubmissionNotes,
   fetchClientLossRatio, recordClientLossPremium, fetchWcClientDetail,
-} from '../../../api/broker'
+} from '../../../api/broker/broker'
 import { SubmissionPanel } from '../../../components/broker/SubmissionPanel'
 import { IRPremiumImpactCard } from '../../../components/ir/risk/IRPremiumImpactCard'
 import type { BrokerClientDetailResponse, WcClientDetailResponse } from '../../../types/broker'

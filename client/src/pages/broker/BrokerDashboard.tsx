@@ -5,8 +5,8 @@ import OutreachDrawer from '../../components/broker/action-center/OutreachDrawer
 import { PageHeader } from '../../components/broker/PageHeader'
 import { KpiTile } from '../../components/broker/KpiTile'
 import { RiskPosturePanel } from '../../components/broker/RiskPosturePanel'
-import { fetchBrokerPortfolio, fetchBrokerHandbookCoverage, fetchWcPortfolio, fetchEplPortfolio } from '../../api/broker'
-import { fetchRiskIndexPortfolio } from '../../api/riskIndex'
+import { fetchBrokerPortfolio, fetchBrokerHandbookCoverage, fetchWcPortfolio, fetchEplPortfolio } from '../../api/broker/broker'
+import { fetchRiskIndexPortfolio } from '../../api/risk/riskIndex'
 import type { RiskIndexPortfolio } from '../../types/riskIndex'
 import type {
   BrokerPortfolioResponse,

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { ChevronRight } from 'lucide-react'
-import type { ContextPreview } from '../../../api/brokerPilot'
+import type { ContextPreview } from '../../../api/broker/brokerPilot'
 import { HelpHint } from '../../../components/broker/HelpHint'
 import { LABEL, SOURCE_META, SYSTEM_LABEL, deriveSystems } from './shared'
 

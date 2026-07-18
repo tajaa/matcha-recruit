@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { getResearchGapsUrl } from '../../api/adminOnboarding'
+import { getResearchGapsUrl } from '../../api/admin/adminOnboarding'
 import { ensureFreshToken } from '../../api/client'
 import type { EnrichEvent } from './useEnrichStream'
 

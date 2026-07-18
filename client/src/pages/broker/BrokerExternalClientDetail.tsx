@@ -12,7 +12,7 @@ import {
   fetchExternalLossRatio, recordExternalLossPremium,
   fetchExternalLossDevelopment, parseExternalLossRunDevelopment, commitExternalLossRun,
   deleteExternalLossRunSnapshot, downloadExternalLossDevelopment,
-} from '../../api/broker'
+} from '../../api/broker/broker'
 import { LossRatioTab, LossTriangleTab, type LossDevApi } from './client-detail'
 import type { ExternalClientDetail, ExternalEplFactor, EplAttestationStatus, ExternalProperty, ExternalPropertyPayload } from '../../types/broker'
 import { RISK_BAND_TONE, RISK_CONFIDENCE_TONE } from '../../types/riskIndex'

@@ -3,8 +3,8 @@ import { Loader2, Award, BadgeCheck } from 'lucide-react'
 import {
   fetchCompanyCertifications,
   fetchCompanyLicenses,
-} from '../../api/compliance'
-import type { CompanyCredential } from '../../api/compliance'
+} from '../../api/compliance/compliance'
+import type { CompanyCredential } from '../../api/compliance/compliance'
 
 const SCOPE_LABELS: Record<string, string> = {
   federal: 'Federal',

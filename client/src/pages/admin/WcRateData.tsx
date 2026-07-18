@@ -5,7 +5,7 @@ import {
   fetchWcRateSummary, importWcStateRates, importWcClassCodes, downloadWcRateTemplate,
   fetchWcStateRatesList, fetchWcClassCodesList,
   type WcRateSummary, type ImportResult, type WcStateRateRow, type WcClassCodeRow,
-} from '../../api/wcRates'
+} from '../../api/admin/wcRates'
 
 // Admin tool to load a licensed NCCI / state-bureau WC rate feed via CSV,
 // replacing the illustrative demo seed used by the broker WC surfaces.

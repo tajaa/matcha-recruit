@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Button, Badge } from '../ui'
-import { fetchAvailablePosters, fetchPosterOrders, createPosterOrder } from '../../api/compliance'
+import { fetchAvailablePosters, fetchPosterOrders, createPosterOrder } from '../../api/compliance/compliance'
 import type { AvailablePoster, PosterOrder } from '../../types/compliance'
 
 type Props = { locationId: string }

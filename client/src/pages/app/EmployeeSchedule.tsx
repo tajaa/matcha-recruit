@@ -9,7 +9,7 @@ import {
   fetchWeek, createShift, deleteShift, publishShift, publishRange,
   assignEmployee, unassignEmployee, fetchTemplates, createTemplate, deleteTemplate,
   generateFromTemplate, fetchRequests, reviewRequest,
-} from '../../api/employeeSchedule'
+} from '../../api/hr/employeeSchedule'
 import type {
   Shift, RosterEmployee, ScheduleSummary, ShiftTemplate, ScheduleRequest, ShiftPayload,
 } from '../../types/employeeSchedule'

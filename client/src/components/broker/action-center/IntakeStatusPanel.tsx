@@ -4,7 +4,7 @@ import { ClipboardList, CheckCircle2, Clock, CircleDashed, Loader2 } from 'lucid
 import TabHeader from './TabHeader'
 
 const PANEL = 'rounded-lg border border-white/[0.06] bg-zinc-950 p-5'
-import { fetchExternalClients } from '../../../api/broker'
+import { fetchExternalClients } from '../../../api/broker/broker'
 import type { ExternalClientRow, ExternalIntakeState } from '../../../types/broker'
 
 /**

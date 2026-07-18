@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Coins, Loader2, Plus } from 'lucide-react'
 import { Card } from '../../components/ui'
-import { getTcor, upsertTcorInput, type TcorResult } from '../../api/tcor'
+import { getTcor, upsertTcorInput, type TcorResult } from '../../api/risk/tcor'
 
 const money = (n: number | null | undefined) =>
   n == null ? '—' : n >= 1_000_000 ? `$${(n / 1_000_000).toFixed(1)}M` : n >= 1_000 ? `$${Math.round(n / 1_000)}K` : `$${Math.round(n)}`

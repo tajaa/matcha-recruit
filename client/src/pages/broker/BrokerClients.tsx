@@ -4,7 +4,7 @@ import { Button, Input, Modal, Badge } from '../../components/ui'
 import { HelpHint } from '../../components/broker/HelpHint'
 import { LABEL } from '../../components/ui/typography'
 import { api } from '../../api/client'
-import { createBatchClientSetups } from '../../api/broker'
+import { createBatchClientSetups } from '../../api/broker/broker'
 import type { BrokerBatchCreateResponse } from '../../types/broker'
 
 type ClientSetup = {

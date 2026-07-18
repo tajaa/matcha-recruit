@@ -5,7 +5,7 @@ import {
   fetchClientDefenseIncidents, downloadDefenseIncident,
   fetchClientDefenseErCases, downloadDefenseErCase,
   type DefenseIncident, type DefenseErCase,
-} from '../../../api/broker'
+} from '../../../api/broker/broker'
 
 export function DefenseTab({ companyId }: { companyId: string }) {
   const [incidents, setIncidents] = useState<DefenseIncident[]>([])

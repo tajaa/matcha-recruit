@@ -6,7 +6,7 @@ import {
   streamPilotChat,
   type ContextPreview, type CorpusRecord, type EvidenceMapItem, type GapSeverity,
   type MissingDoc, type PilotMessage, type PilotSession,
-} from '../../../api/brokerPilot'
+} from '../../../api/broker/brokerPilot'
 import { DISCLAIMER, LABEL, missingRequired, startersFor } from './shared'
 
 interface ConsoleProps {

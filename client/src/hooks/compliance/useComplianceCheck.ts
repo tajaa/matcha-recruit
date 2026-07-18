@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { getComplianceCheckUrl } from '../../api/compliance'
+import { getComplianceCheckUrl } from '../../api/compliance/compliance'
 import { ensureFreshToken } from '../../api/client'
 
 export interface ComplianceCheckMessage {

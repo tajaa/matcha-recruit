@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { FileArchive, FileText, Loader2 } from 'lucide-react'
 import { Button, Toggle } from '../../../components/ui'
 import { HelpHint } from '../../../components/ui/HelpHint'
-import { SUBJECT_FILTERED_SOURCES, type EvidencePreview, type Matter, type ResearchRow } from '../../../api/legalDefense'
+import { SUBJECT_FILTERED_SOURCES, type EvidencePreview, type Matter, type ResearchRow } from '../../../api/hr/legalDefense'
 import { LABEL, SOURCE_META, typeLabel } from './shared'
 
 /** Docket header: matter caption + the systems strip (which internal systems

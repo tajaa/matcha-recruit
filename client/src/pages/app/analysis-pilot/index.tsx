@@ -14,7 +14,7 @@ import {
   deleteDataset, createComparison, generateReport, downloadPacket, streamChat, loadDemoDataset,
   type AnalysisSession, type AnalysisDataset, type AnalysisMessage, type MetricBlock,
   type Extraction, type ProposedEdit, type DemoDatasetKey,
-} from '../../../api/analysisPilot'
+} from '../../../api/risk/analysisPilot'
 
 // ---------------------------------------------------------------------------
 // Analysis Pilot — general-purpose bring-your-own-data analysis in a chat UI.

@@ -5,7 +5,7 @@ import {
 import {
   getPilotHandbook,
   type AssembledHandbook, type ComplianceGap, type ComplianceScanResult, type CoverageEntry,
-} from '../../../api/handbookPilot'
+} from '../../../api/hr/handbookPilot'
 import { HelpHint } from '../../../components/ui/HelpHint'
 
 // ---------------------------------------------------------------------------

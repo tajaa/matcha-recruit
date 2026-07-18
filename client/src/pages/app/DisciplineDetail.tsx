@@ -8,7 +8,7 @@ import { api } from '../../api/client'
 import type {
   DisciplineLevel,
   DisciplineStatus,
-} from '../../api/discipline'
+} from '../../api/hr/discipline'
 
 const LEVEL_LABEL: Record<DisciplineLevel, string> = {
   verbal_warning: 'Verbal Warning',

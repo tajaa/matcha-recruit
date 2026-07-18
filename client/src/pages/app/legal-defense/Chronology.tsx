@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { CalendarDays } from 'lucide-react'
 import { HelpHint } from '../../../components/ui/HelpHint'
-import type { EvidencePreview } from '../../../api/legalDefense'
+import type { EvidencePreview } from '../../../api/hr/legalDefense'
 import { LABEL } from './shared'
 import { RecordViewer, type ViewerTarget } from './RecordViewer'
 

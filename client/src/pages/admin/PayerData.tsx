@@ -6,8 +6,8 @@ import {
   fetchPayerPolicies,
   runPayerStalenessCheck,
   runCmsIngest,
-} from '../../api/compliance'
-import type { PayerOverviewResponse, PayerIntegrityResponse, PayerPolicy } from '../../api/compliance'
+} from '../../api/compliance/compliance'
+import type { PayerOverviewResponse, PayerIntegrityResponse, PayerPolicy } from '../../api/compliance/compliance'
 
 type Tab = 'overview' | 'policies' | 'integrity' | 'changelog'
 

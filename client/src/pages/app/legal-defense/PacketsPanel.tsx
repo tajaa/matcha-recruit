@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { ChevronDown, Download, FileArchive, FileText, Share2 } from 'lucide-react'
 import { useToast } from '../../../components/ui'
 import { HelpHint } from '../../../components/ui/HelpHint'
-import { downloadPacket, type Packet } from '../../../api/legalDefense'
+import { downloadPacket, type Packet } from '../../../api/hr/legalDefense'
 import { fmtSize } from './shared'
 
 function shareStatusText(share: Packet['share']): string | null {

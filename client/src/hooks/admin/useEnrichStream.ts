@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { getEnrichStreamUrl } from '../../api/adminOnboarding'
+import { getEnrichStreamUrl } from '../../api/admin/adminOnboarding'
 import { ensureFreshToken } from '../../api/client'
 
 /**

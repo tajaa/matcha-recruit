@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { X, RefreshCw, Sparkles, ExternalLink, Loader2 } from 'lucide-react'
-import { fetchActionCenterOutreach } from '../../../api/broker'
+import { fetchActionCenterOutreach } from '../../../api/broker/broker'
 import type { OutreachResponse, OutreachTone } from '../../../types/broker'
 
 const TONE_TONE: Record<OutreachTone, { bg: string; text: string; label: string }> = {

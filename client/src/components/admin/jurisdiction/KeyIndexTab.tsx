@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { Link } from 'react-router-dom'
-import { fetchKeyCoverage } from '../../../api/compliance'
-import type { CategoryKeyCoverage, RegulationKeyCoverage } from '../../../api/compliance'
+import { fetchKeyCoverage } from '../../../api/compliance/compliance'
+import type { CategoryKeyCoverage, RegulationKeyCoverage } from '../../../api/compliance/compliance'
 import { CATEGORY_LABELS } from '../../../generated/complianceCategories'
 
 type GroupFilter = 'all' | 'labor' | 'healthcare' | 'oncology' | 'medical_compliance' | 'supplementary'

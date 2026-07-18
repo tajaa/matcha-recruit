@@ -8,7 +8,7 @@ import {
   updatePilotDraft, deletePilotDraft, promotePilotDrafts, streamChat,
   type PilotSession, type PilotDraft, type PilotMessage, type ContextPreview,
   type PromoteResult, type CoverageEntry,
-} from '../../../api/handbookPilot'
+} from '../../../api/hr/handbookPilot'
 import { HowItWorksModal, type HowItWorksStep } from '../../../components/ui/HowItWorksModal'
 import { HelpHint } from '../../../components/ui/HelpHint'
 import { useShowOnce } from '../../../hooks/useShowOnce'

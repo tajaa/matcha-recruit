@@ -5,7 +5,7 @@ import { HelpHint } from '../../../components/broker/HelpHint'
 import {
   updatePilotSession, generatePilotMemo, downloadPilotPacket,
   type ContextPreview, type PilotSession,
-} from '../../../api/brokerPilot'
+} from '../../../api/broker/brokerPilot'
 import { LABEL, NATIVE_KEYS, SOURCE_META, deriveSystems, fmtWhen } from './shared'
 
 interface MastheadProps {

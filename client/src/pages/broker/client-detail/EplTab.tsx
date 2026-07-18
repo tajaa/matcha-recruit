@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Shield, AlertTriangle, Loader2 } from 'lucide-react'
 import { Card } from '../../../components/ui'
-import { fetchEplClientDetail, recordEplAttestation } from '../../../api/broker'
+import { fetchEplClientDetail, recordEplAttestation } from '../../../api/broker/broker'
 import type { EplReadiness, EplFactor, EplAttestationStatus } from '../../../types/broker'
 
 const EPL_BAND_TONE: Record<string, string> = {

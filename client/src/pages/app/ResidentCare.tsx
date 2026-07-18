@@ -4,7 +4,7 @@ import { Card } from '../../components/ui'
 import {
   fetchResidentCareSummary, fetchSafetyPrograms, createSafetyProgram, deleteSafetyProgram, suggestSafetyPrograms,
   fetchMvrReviews, createMvrReview, updateMvrReview, deleteMvrReview, downloadResidentCareAsset,
-} from '../../api/residentCare'
+} from '../../api/risk/residentCare'
 import type { SafetyProgram, MvrReview, ResidentCareSummary, ProgramType, MvrStatus } from '../../types/residentCare'
 import { PROGRAM_LABELS, PROGRAM_TYPES } from '../../types/residentCare'
 import { AiSuggest } from '../../components/widgets/AiSuggest'

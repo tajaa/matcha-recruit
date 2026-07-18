@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Gauge, Loader2, ArrowUpRight, Sparkles, ListChecks, Check, Circle, MapPin, Ban } from 'lucide-react'
 import { LABEL } from '../../components/ui/typography'
-import { fetchRiskProfile, fetchRiskNarrative, fetchSubmissionReadiness, fetchVenueExposure, fetchExclusionGap } from '../../api/riskIndex'
-import type { RiskNarrative } from '../../api/riskIndex'
+import { fetchRiskProfile, fetchRiskNarrative, fetchSubmissionReadiness, fetchVenueExposure, fetchExclusionGap } from '../../api/risk/riskIndex'
+import type { RiskNarrative } from '../../api/risk/riskIndex'
 import type { RiskIndex, SubmissionReadiness, VenueExposure, ExclusionGap } from '../../types/riskIndex'
 import { RISK_BAND_TONE, RISK_CONFIDENCE_TONE, READINESS_BAND_TONE, VENUE_TIER_TONE, EXCLUSION_TONE } from '../../types/riskIndex'
 

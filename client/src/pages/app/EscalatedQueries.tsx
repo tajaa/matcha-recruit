@@ -7,7 +7,7 @@ import {
   resolveEscalatedQuery,
   dismissEscalatedQuery,
   updateEscalatedQueryStatus,
-} from '../../api/dashboard'
+} from '../../api/hr/dashboard'
 import type { EscalatedQuery, EscalatedQueryDetail } from '../../types/dashboard'
 
 type StatusTab = 'all' | 'open' | 'in_review' | 'resolved' | 'dismissed'

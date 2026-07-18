@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { FileDown, Loader2 } from 'lucide-react'
 import { Card } from '../../../components/ui'
-import { fetchClientControls, downloadClientControls } from '../../../api/broker'
+import { fetchClientControls, downloadClientControls } from '../../../api/broker/broker'
 import type { ControlsRegister } from '../../../types/controlsEvidence'
 
 export function ControlsTab({ companyId }: { companyId: string }) {

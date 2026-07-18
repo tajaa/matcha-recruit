@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { fetchRiskSummary } from '../../api/compliance'
+import { fetchRiskSummary } from '../../api/compliance/compliance'
 import type { ComplianceRiskSummary } from '../../types/compliance'
 
 export function useRiskSummary() {

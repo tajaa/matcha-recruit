@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { GraduationCap, AlertTriangle, CheckCircle2, Loader2, Users } from 'lucide-react'
 import { Card, Button, Badge } from '../../components/ui'
 import { useTrainingCompliance } from '../../hooks/training/useTrainingCompliance'
-import { trainingApi, type TrainingRequirement } from '../../api/training'
+import { trainingApi, type TrainingRequirement } from '../../api/hr/training'
 
 function variantLabel(applies_to: TrainingRequirement['applies_to']): string {
   if (applies_to === 'supervisor') return 'Supervisors'

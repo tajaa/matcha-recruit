@@ -18,10 +18,10 @@ import {
   CheckCircle2, AlertTriangle, XCircle, Search, MapPin, Scale, Users,
   FileSearch, CalendarCheck, Lightbulb, ChevronRight, ExternalLink,
 } from 'lucide-react'
-import { adminOnboarding } from '../../api/adminOnboarding'
+import { adminOnboarding } from '../../api/admin/adminOnboarding'
 import type {
   GapDashboardResponse, ResolvedScopeMissing, GapRequirementDetail,
-} from '../../api/adminOnboarding'
+} from '../../api/admin/adminOnboarding'
 import { useEnrichStream, type EnrichEvent } from '../../hooks/admin/useEnrichStream'
 import { useResearchGaps, type ResearchGapItem } from '../../hooks/admin/useResearchGaps'
 import StatutoryFitPanel from '../../features/admin-onboarding/StatutoryFitPanel'

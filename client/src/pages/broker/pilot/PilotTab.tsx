@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Loader2, Sparkles } from 'lucide-react'
-import { listPilotSessions, type PilotSession } from '../../../api/brokerPilot'
+import { listPilotSessions, type PilotSession } from '../../../api/broker/brokerPilot'
 import { useMe } from '../../../hooks/useMe'
 import { fmtWhen } from './shared'
 

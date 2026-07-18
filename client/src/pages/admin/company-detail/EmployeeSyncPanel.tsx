@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { RefreshCw, MapPin, Loader2 } from 'lucide-react'
-import { adminOnboarding, type EnrichRosterResponse } from '../../../api/adminOnboarding'
+import { adminOnboarding, type EnrichRosterResponse } from '../../../api/admin/adminOnboarding'
 
 export function EmployeeSyncPanel({ companyId }: { companyId: string }) {
   const navigate = useNavigate()

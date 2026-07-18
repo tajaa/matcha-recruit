@@ -11,11 +11,11 @@ import { Link, useNavigate } from 'react-router-dom'
 import { Loader2, Plus, Sparkles, Building2, Search, X } from 'lucide-react'
 
 import { api } from '../../api/client'
-import { adminOnboarding } from '../../api/adminOnboarding'
+import { adminOnboarding } from '../../api/admin/adminOnboarding'
 import type {
   OnboardingSessionSummary,
   OnboardingStatus,
-} from '../../api/adminOnboarding'
+} from '../../api/admin/adminOnboarding'
 
 const STATUS_FILTERS: { value: OnboardingStatus | 'all'; label: string }[] = [
   { value: 'in_progress', label: 'In progress' },

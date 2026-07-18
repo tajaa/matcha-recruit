@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react'
-import { askRegulatoryQuestion, type RegulatoryQASource } from '../../api/compliance'
+import { askRegulatoryQuestion, type RegulatoryQASource } from '../../api/compliance/compliance'
 
 type Props = {
   locationId?: string | null

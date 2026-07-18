@@ -14,7 +14,7 @@ import {
 import type { ComplianceRequirement } from '../../types/compliance'
 import { CATEGORY_LABELS } from '../../types/compliance'
 import type { CategoryGroup } from '../../generated/complianceCategories'
-import { JURISDICTION_LEVEL_LABELS, RATE_TYPE_LABELS } from '../../api/compliance'
+import { JURISDICTION_LEVEL_LABELS, RATE_TYPE_LABELS } from '../../api/compliance/compliance'
 import type { FacilityAttributes } from '../../types/compliance'
 import type { ComplianceCheckMessage } from '../../hooks/compliance/useComplianceCheck'
 

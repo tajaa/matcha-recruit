@@ -5,7 +5,7 @@ import {
   saveMatchaLitePricingAdmin,
   type MatchaLiteProductCode,
   type MatchaLitePricingAdminConfig,
-} from '../../api/matchaLitePricing'
+} from '../../api/billing/matchaLitePricing'
 
 const PRODUCT_TABS: { code: MatchaLiteProductCode; label: string }[] = [
   { code: 'matcha_lite', label: 'Standard Lite' },

@@ -11,7 +11,7 @@ import {
   updateLocation as apiUpdateLocation,
   deleteLocation as apiDeleteLocation,
   pinRequirement as apiPinRequirement,
-} from '../../api/compliance'
+} from '../../api/compliance/compliance'
 import type {
   BusinessLocation,
   ComplianceSummary,

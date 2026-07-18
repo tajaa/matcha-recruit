@@ -2,8 +2,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { Loader2, ShieldCheck, EyeOff, AlertTriangle, Layers, Check, Search, RefreshCw, ExternalLink } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { api, ensureFreshToken } from '../../api/client'
-import { adminOnboarding, getLocationCheckUrl } from '../../api/adminOnboarding'
-import type { FitGatedRow, FitMapResponse, FitMissing, FitReason } from '../../api/adminOnboarding'
+import { adminOnboarding, getLocationCheckUrl } from '../../api/admin/adminOnboarding'
+import type { FitGatedRow, FitMapResponse, FitMissing, FitReason } from '../../api/admin/adminOnboarding'
 import { useResearchGaps } from '../../hooks/admin/useResearchGaps'
 
 // Each reason is a different fix. Collapsing them into one "missing" number is

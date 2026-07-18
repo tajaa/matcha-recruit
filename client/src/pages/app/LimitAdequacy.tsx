@@ -5,7 +5,7 @@ import {
   fetchLimitReview, fetchCoverage, upsertCoverage, deleteCoverage,
   uploadContract, createContract, updateContract, deleteContract, confirmContract,
   fetchContractReview, downloadContractReviewPdf, fetchContractSourceUrl, downloadReviewPdf,
-} from '../../api/limitAdequacy'
+} from '../../api/risk/limitAdequacy'
 import type {
   LimitReview, CoverageList, CoverageRow, ReviewLine, CoverageCatalogEntry,
 } from '../../types/limitAdequacy'

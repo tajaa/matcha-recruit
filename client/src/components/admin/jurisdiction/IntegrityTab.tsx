@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
-import { fetchIntegrityCheck, runStalenessCheck } from '../../../api/compliance'
-import type { IntegrityCheckResponse } from '../../../api/compliance'
+import { fetchIntegrityCheck, runStalenessCheck } from '../../../api/compliance/compliance'
+import type { IntegrityCheckResponse } from '../../../api/compliance/compliance'
 
 function Section({ title, count, children }: { title: string; count: number; children: React.ReactNode }) {
   const [open, setOpen] = useState(count > 0)

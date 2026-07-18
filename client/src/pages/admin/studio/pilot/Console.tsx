@@ -4,7 +4,7 @@ import {
   streamPilotChat, createAction, getAction, approveAction,
   type PilotSession, type PilotMessage, type PilotAction, type Proposal,
   type Citation, type ApproveRowResult, type StagedRow,
-} from '../../../../api/compliancePilot'
+} from '../../../../api/admin/compliancePilot'
 import { libraryLink, coverageLink } from '../utils'
 
 type Props = {

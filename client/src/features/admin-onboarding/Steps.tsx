@@ -19,7 +19,7 @@ import {
   type OnboardingSessionDetail,
   type ResolvedScopeMissing,
   type SizePayload,
-} from '../../api/adminOnboarding'
+} from '../../api/admin/adminOnboarding'
 
 // True when the AI scope expansion came back essentially blank — no
 // NAICS sector and no items in any of the four lists. Means Gemini

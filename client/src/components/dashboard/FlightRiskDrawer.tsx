@@ -5,7 +5,7 @@ import type {
   FlightRiskLevel,
   FlightRiskWidgetSummary,
 } from '../../types/dashboard'
-import { fetchFlightRiskEmployees } from '../../api/dashboard'
+import { fetchFlightRiskEmployees } from '../../api/hr/dashboard'
 
 interface Props {
   open: boolean

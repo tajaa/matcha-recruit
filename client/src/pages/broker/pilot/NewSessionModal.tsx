@@ -3,8 +3,8 @@ import { Building2, Globe, Loader2, X } from 'lucide-react'
 import {
   createPilotSession, listPilotTemplates,
   type PilotSession, type PilotTemplate, type SubjectKind,
-} from '../../../api/brokerPilot'
-import { fetchBrokerPortfolio, fetchExternalClients } from '../../../api/broker'
+} from '../../../api/broker/brokerPilot'
+import { fetchBrokerPortfolio, fetchExternalClients } from '../../../api/broker/broker'
 import { DOC_TYPE_LABEL } from './shared'
 
 type SubjectOption = { kind: SubjectKind; id: string; name: string }

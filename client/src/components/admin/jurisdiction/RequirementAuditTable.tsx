@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
-import { fetchQualityAudit } from '../../../api/compliance'
-import type { QualityRequirement, QualityAuditResponse } from '../../../api/compliance'
+import { fetchQualityAudit } from '../../../api/compliance/compliance'
+import type { QualityRequirement, QualityAuditResponse } from '../../../api/compliance/compliance'
 import { CATEGORY_SHORT_LABELS } from '../../../generated/complianceCategories'
 import { Button } from '../../ui'
 

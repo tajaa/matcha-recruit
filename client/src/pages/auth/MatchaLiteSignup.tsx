@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import { invalidateMeCache } from '../../hooks/useMe'
-import { useMatchaLitePricing, computeLitePriceDollars } from '../../api/matchaLitePricing'
+import { useMatchaLitePricing, computeLitePriceDollars } from '../../api/billing/matchaLitePricing'
 
 const BASE = import.meta.env.VITE_API_URL ?? '/api'
 

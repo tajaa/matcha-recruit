@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 import { ExternalLink, Landmark, Loader2, Search } from 'lucide-react'
 import { Button, Input, Select } from '../../../components/ui'
-import { fetchLocations } from '../../../api/compliance'
+import { fetchLocations } from '../../../api/compliance/compliance'
 import type { BusinessLocation } from '../../../types/compliance'
-import { updateMatter, type LegalContext, type ResearchRow } from '../../../api/legalDefense'
+import { updateMatter, type LegalContext, type ResearchRow } from '../../../api/hr/legalDefense'
 import { LABEL } from './shared'
 
 /** Jurisdiction chain + external legal research (CourtListener cases +

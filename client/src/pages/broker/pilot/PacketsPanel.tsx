@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Download, FileText, Loader2 } from 'lucide-react'
-import { downloadPilotPacket, type PilotPacket, type PilotSession } from '../../../api/brokerPilot'
+import { downloadPilotPacket, type PilotPacket, type PilotSession } from '../../../api/broker/brokerPilot'
 import { HelpHint } from '../../../components/broker/HelpHint'
 import { LABEL, fmtSize, fmtWhen } from './shared'
 

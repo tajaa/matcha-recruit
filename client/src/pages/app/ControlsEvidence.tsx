@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { ShieldCheck, FileDown, Loader2, Check, ChevronDown } from 'lucide-react'
 import { Card } from '../../components/ui'
-import { fetchControlsRegister, updateControl, downloadControlsPacket } from '../../api/controlsEvidence'
+import { fetchControlsRegister, updateControl, downloadControlsPacket } from '../../api/risk/controlsEvidence'
 import type { ControlsRegister, ControlEntry, ControlStatus } from '../../types/controlsEvidence'
 
 const STATUS_TONE: Record<ControlStatus, string> = {

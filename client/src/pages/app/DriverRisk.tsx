@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Car, FileDown, Loader2, Plus, Trash2, ChevronDown, Check, AlertTriangle } from 'lucide-react'
 import { Card } from '../../components/ui'
-import { fetchFleet, createDriver, updateDriver, deleteDriver, downloadFleetPdf } from '../../api/driverRisk'
+import { fetchFleet, createDriver, updateDriver, deleteDriver, downloadFleetPdf } from '../../api/risk/driverRisk'
 import type { Fleet, DriverRow, DriverPayload, DriverTier, LicenseStatus, ReviewType, MvrStatus } from '../../types/driverRisk'
 import { TIER_TONE, TIER_LABEL, GRADE_TONE } from '../../types/driverRisk'
 

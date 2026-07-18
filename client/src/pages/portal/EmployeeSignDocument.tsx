@@ -7,7 +7,7 @@ import { Button, Card, Input } from '../../components/ui'
 import {
   portalDocumentsApi, isHandbookDoc,
   type DocumentHandbookContent, type EmployeeDocument,
-} from '../../api/portalDocuments'
+} from '../../api/hr/portalDocuments'
 
 // ---------------------------------------------------------------------------
 // EmployeeSignDocument — read an assigned handbook, then acknowledge it.
