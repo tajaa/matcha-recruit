@@ -39,7 +39,7 @@ from app.matcha.services.pre_termination_service import (
     _generate_recommended_actions,
 )
 from app.matcha.services.risk_assessment_service import _band
-from app.matcha.routes.pre_termination import (
+from app.matcha.routes.employee_lifecycle.pre_termination import (
     _normalize_json,
     _to_discipline_response,
     _to_charge_response,

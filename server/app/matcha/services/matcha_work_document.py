@@ -1667,7 +1667,7 @@ async def generate_pdf(
         return cached
 
     # Lazy import to avoid circular imports at module load time
-    from ..routes.offer_letters import _generate_offer_letter_html
+    from ..routes.employee_lifecycle.offer_letters import _generate_offer_letter_html
 
     render_state = dict(state)
     render_state.setdefault("created_at", datetime.utcnow())

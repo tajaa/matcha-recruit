@@ -18,12 +18,12 @@ from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form, Query, Request, BackgroundTasks
 
-from ...database import get_connection
-from ..dependencies import require_admin_or_client, get_client_company_id
-from ...core.models.auth import CurrentUser
-from ...config import get_settings
-from ...core.services.storage import get_storage
-from ..models.accommodation import (
+from app.database import get_connection
+from app.matcha.dependencies import require_admin_or_client, get_client_company_id
+from app.core.models.auth import CurrentUser
+from app.config import get_settings
+from app.core.services.storage import get_storage
+from app.matcha.models.accommodation import (
     AccommodationCaseCreate,
     AccommodationCaseUpdate,
     AccommodationCaseResponse,
@@ -367,7 +367,7 @@ async def create_case(
             request.client.host if request.client else None,
         )
 
-        from ..services.leave_agent import get_leave_agent
+        from app.matcha.services.leave_agent import get_leave_agent
 
         background_tasks.add_task(get_leave_agent().on_accommodation_request_created, row["id"])
         return _case_response(row, document_count=0)
@@ -560,7 +560,7 @@ async def update_case(
         )
 
         if case.status is not None:
-            from ..services.leave_agent import get_leave_agent
+            from app.matcha.services.leave_agent import get_leave_agent
 
             background_tasks.add_task(
                 get_leave_agent().on_accommodation_status_changed,
@@ -802,7 +802,7 @@ async def delete_document(
 
 def _get_analyzer():
     """Create an AccommodationAnalyzer instance from settings."""
-    from ..services.accommodation_service import AccommodationAnalyzer
+    from app.matcha.services.accommodation_service import AccommodationAnalyzer
     settings = get_settings()
     return AccommodationAnalyzer(api_key=settings.gemini_api_key)
 

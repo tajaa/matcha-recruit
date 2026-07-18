@@ -14,10 +14,10 @@ from dateutil.relativedelta import relativedelta
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from ...database import get_connection
-from ...core.dependencies import get_current_user
-from ..dependencies import require_admin_or_client, get_client_company_id
-from ...core.models.auth import CurrentUser
+from app.database import get_connection
+from app.core.dependencies import get_current_user
+from app.matcha.dependencies import require_admin_or_client, get_client_company_id
+from app.core.models.auth import CurrentUser
 
 logger = logging.getLogger(__name__)
 

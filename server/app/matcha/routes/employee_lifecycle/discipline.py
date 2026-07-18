@@ -16,17 +16,17 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Body
 from pydantic import BaseModel, Field
 
-from ...database import get_connection
-from ...core.dependencies import get_current_user
-from ...core.models.auth import CurrentUser
-from ...core.services.storage import get_storage
-from ..dependencies import require_admin_or_client, get_client_company_id
-from ..services import discipline_ai
-from ..services import discipline_compliance
-from ..services import discipline_engine
-from ..services import discipline_notifications
-from ..services.discipline_pdf import render_discipline_letter
-from ..services.signature_provider import (
+from app.database import get_connection
+from app.core.dependencies import get_current_user
+from app.core.models.auth import CurrentUser
+from app.core.services.storage import get_storage
+from app.matcha.dependencies import require_admin_or_client, get_client_company_id
+from app.matcha.services import discipline_ai
+from app.matcha.services import discipline_compliance
+from app.matcha.services import discipline_engine
+from app.matcha.services import discipline_notifications
+from app.matcha.services.discipline_pdf import render_discipline_letter
+from app.matcha.services.signature_provider import (
     get_signature_provider,
     verify_webhook_signature,
 )

@@ -8,7 +8,30 @@ from .employees import router as employees_router, pto_admin_router, leave_admin
 from .employee_portal import router as employee_portal_router
 from .onboarding import router as onboarding_router
 from .invitations import router as invitations_router
-from .offer_letters import router as offer_letters_router, candidate_router as offer_letters_candidate_router
+from .employee_lifecycle import (
+    accommodations_router,
+    cobra_router,
+    discipline_router,
+    discipline_public_router,
+    flight_risk_router,
+    i9_router,
+    offer_letters_router,
+    offer_letters_candidate_router,
+    pre_termination_router,
+    separation_router,
+    training_router,
+)
+from .work import (
+    journals_router,
+    mw_notifications_router,
+    project_ws_router,
+    thread_ws_router,
+)
+from .integrations import (
+    fake_hris_router,
+    provisioning_router,
+    twilio_webhook_router,
+)
 from .er_copilot import router as er_copilot_router, public_router as er_copilot_public_router
 from .help_assistant import router as help_assistant_router
 from .ir_incidents import router as ir_incidents_router
@@ -37,30 +60,17 @@ from .acord import router as acord_router
 from .ir_onboarding import router as ir_onboarding_router
 from .matcha_x_onboarding import router as matcha_x_onboarding_router
 from .ir_surveys import router as ir_surveys_router
-from .accommodations import router as accommodations_router
 from .dashboard import router as dashboard_router
 from .brokers import router as brokers_router
 from .fractional_hr import router as fractional_hr_router
-from .provisioning import router as provisioning_router
 from .matcha_work import router as matcha_work_router, public_router as matcha_work_public_router, presence_router as matcha_work_presence_router
-from .journals import router as journals_router
 from .productivity import router as productivity_router
 from .billing import router as matcha_work_billing_router, admin_router as matcha_work_billing_admin_router
-from .notifications import router as mw_notifications_router
 from .risk_assessment import router as risk_assessment_router
-from .pre_termination import router as pre_termination_router
-from .discipline import router as discipline_router, public_router as discipline_public_router
-from .flight_risk import router as flight_risk_router
 from .inbound_email import router as anonymous_report_router
 from .external_intake import router as external_intake_router
 from .wc_rates_admin import router as wc_rates_admin_router
-from .training import router as training_router
-from .i9 import router as i9_router
-from .cobra import router as cobra_router
 from .benefits import router as benefits_router
-from .separation import router as separation_router
-from .fake_hris import router as fake_hris_router
-from .twilio_webhook import router as twilio_webhook_router
 from .labor_relations import router as labor_relations_router
 from ..dependencies import require_feature, require_any_feature
 from ...core.dependencies import require_admin
