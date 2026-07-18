@@ -5,11 +5,11 @@ import { handleFromEmail } from './mentions'
 interface MessageComposerProps {
   pendingFiles: File[]
   setPendingFiles: React.Dispatch<React.SetStateAction<File[]>>
-  fileInputRef: React.RefObject<HTMLInputElement>
+  fileInputRef: React.RefObject<HTMLInputElement | null>
   mentionQuery: string | null
   mentionMatches: ChannelMember[]
   applyMention: (member: ChannelMember) => void
-  inputTextareaRef: React.RefObject<HTMLTextAreaElement>
+  inputTextareaRef: React.RefObject<HTMLTextAreaElement | null>
   input: string
   onInputChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => void
   onKeyDown: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void

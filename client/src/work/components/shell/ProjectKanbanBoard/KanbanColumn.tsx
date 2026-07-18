@@ -23,7 +23,7 @@ interface KanbanColumnProps {
   creating: boolean
   menuColumn: BoardColumn | null
   setMenuColumn: Dispatch<SetStateAction<BoardColumn | null>>
-  menuRef: React.RefObject<HTMLDivElement>
+  menuRef: React.RefObject<HTMLDivElement | null>
   changedIds: Set<string>
   moveTask: (taskId: string, toColumn: BoardColumn) => void
   handleCreate: (column: BoardColumn) => void

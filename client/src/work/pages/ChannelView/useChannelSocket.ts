@@ -12,7 +12,7 @@ interface UseChannelSocketParams {
   userId: string | undefined
   scrollToBottom: () => void
   socketRef: React.MutableRefObject<ChannelSocket | null>
-  messagesContainerRef: React.RefObject<HTMLDivElement>
+  messagesContainerRef: React.RefObject<HTMLDivElement | null>
   setMessages: React.Dispatch<React.SetStateAction<ChannelMessage[]>>
   setTypingUsers: React.Dispatch<React.SetStateAction<Map<string, string>>>
   setOnlineUsers: React.Dispatch<React.SetStateAction<OnlineUser[]>>

@@ -3,7 +3,6 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { UserPlus, Settings, Heart, BarChart2, Briefcase, LogOut } from 'lucide-react'
 import {
   getChannel,
-  getChannelMessages,
   joinChannel,
   leaveChannel,
   uploadChannelFiles,

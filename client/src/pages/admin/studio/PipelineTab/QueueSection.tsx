@@ -9,7 +9,7 @@ export function QueueSection({
   queueRef, pending, loadingRequests, openIds, selected, runningId, runMessages,
   fetchRequests, toggleOpen, toggleSelectCategory, runResearch, dismissRequest,
 }: {
-  queueRef: RefObject<HTMLDivElement>
+  queueRef: RefObject<HTMLDivElement | null>
   pending: PendingItem[]
   loadingRequests: boolean
   openIds: Set<string>

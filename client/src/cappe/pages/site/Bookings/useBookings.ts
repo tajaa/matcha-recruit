@@ -6,6 +6,7 @@ import type {
   CappeBooking, CappeBookingType, CappeAvailabilitySlot,
   CappeRateRule, CappeRiderItem, CappeDiscount, CappeProduct,
   CappeStaff, CappeLocation, CappeSite,
+  CappePricingMode,
 } from '../../../types'
 import { hhmm } from './constants'
 import type { TypeForm, StaffForm, LocForm } from './types'

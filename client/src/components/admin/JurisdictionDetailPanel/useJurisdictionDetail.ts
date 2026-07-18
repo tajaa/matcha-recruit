@@ -4,7 +4,6 @@ import type { PreemptionRule, IndustryProfile } from '../jurisdiction/types'
 import { matchesSpecialty, matchesProfileRateTypes } from '../jurisdiction/utils'
 import type { SpecialtyFilter } from '../jurisdiction/types'
 import type { JurisdictionDetail, JurisdictionReq, ViewMode, EditForm } from './types'
-import { LEVEL_ORDER } from './constants'
 import { getCategoryLabel, reqAnchor, sectionAnchor, readSSEStream } from './helpers'
 
 type HookArgs = {

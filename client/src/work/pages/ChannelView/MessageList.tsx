@@ -4,8 +4,8 @@ import { renderMessageContent } from './mentions'
 
 interface MessageListProps {
   messages: ChannelMessage[]
-  messagesContainerRef: React.RefObject<HTMLDivElement>
-  messagesEndRef: React.RefObject<HTMLDivElement>
+  messagesContainerRef: React.RefObject<HTMLDivElement | null>
+  messagesEndRef: React.RefObject<HTMLDivElement | null>
   userId: string | undefined
   canModerate: boolean
   members: ChannelMember[]

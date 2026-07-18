@@ -10,7 +10,7 @@ import PostingTab from './RecruitingPipeline/PostingTab'
 import CandidateList from './RecruitingPipeline/CandidateList'
 
 export default function RecruitingPipeline(props: RecruitingPipelineProps) {
-  const { project, projectId, onSendInterviews, onSyncInterviews, onAnalyzeCandidates, offerPdfUrl } = props
+  const { project, onSendInterviews, onSyncInterviews, onAnalyzeCandidates, offerPdfUrl } = props
   const {
     candidates, shortlistIds, dismissedIds, sections,
     tab, setTab, search, setSearch, showDismissed, setShowDismissed,

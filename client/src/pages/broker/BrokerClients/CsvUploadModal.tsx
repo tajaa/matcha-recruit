@@ -10,7 +10,7 @@ type Props = {
   csvSubmitting: boolean
   csvResult: BrokerBatchCreateResponse | null
   csvError: string
-  fileInputRef: React.RefObject<HTMLInputElement>
+  fileInputRef: React.RefObject<HTMLInputElement | null>
   onClose: () => void
   onFile: (file: File) => void
   onDrop: (e: React.DragEvent) => void

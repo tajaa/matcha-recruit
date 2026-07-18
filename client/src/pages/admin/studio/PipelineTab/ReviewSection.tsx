@@ -11,7 +11,7 @@ export function ReviewSection({
   reviewRef, justStaged, reviewResult, approveResults, loadingReview, reviewGroups,
   fetchReview, openCodify, approveReview, rejectReview,
 }: {
-  reviewRef: RefObject<HTMLDivElement>
+  reviewRef: RefObject<HTMLDivElement | null>
   justStaged: boolean
   reviewResult: string | null
   approveResults: ApproveResult[]

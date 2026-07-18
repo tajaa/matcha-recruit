@@ -1,3 +1,12 @@
+// Job-description body content, split by category.
+// Public import path ('./jobDescriptionsContent') and exported symbols
+// (JDContent, EEO_STATEMENT, JD_CONTENT) are unchanged.
+//
+// NOTE: this directory must NOT be named `jobDescriptions` — that collides
+// with the sibling page `JobDescriptions.tsx` on case-insensitive
+// filesystems (macOS), where `./jobDescriptions` silently resolves to the
+// page component instead of this index. Distinct from `jobDescriptionsData.ts`,
+// which holds the listing metadata (JOB_DESCRIPTIONS / INDUSTRIES).
 import type { JDContent } from './types'
 import { hospitality } from './hospitality'
 import { healthcare } from './healthcare'

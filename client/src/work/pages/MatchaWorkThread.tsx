@@ -11,7 +11,7 @@ import RightPanels from './MatchaWorkThread/RightPanels'
 export default function MatchaWorkThread() {
   const c = useThreadController()
   const {
-    base, thread, threadId, streaming, loading, lightMode, error, pdfUrl, agentMode,
+    base, thread, streaming, loading, lightMode, error, pdfUrl, agentMode,
     showTutorSetup, tutorDismissed, mobileView, complianceMode, locations, locationsUnavailable,
   } = c
 

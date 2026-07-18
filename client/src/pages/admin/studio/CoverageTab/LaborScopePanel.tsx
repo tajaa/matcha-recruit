@@ -10,7 +10,7 @@ import type { GeneralCoverage, LaborScopeResponse, ResearchState } from './types
 export function LaborScopePanel({
   laborRef, laborScope, laborError, research, researchFetchQueue, generalCov, openReader,
 }: {
-  laborRef: React.RefObject<HTMLDivElement>
+  laborRef: React.RefObject<HTMLDivElement | null>
   laborScope: LaborScopeResponse | null
   laborError: string | null
   research: ResearchState | null

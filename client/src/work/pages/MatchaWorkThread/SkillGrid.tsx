@@ -7,7 +7,7 @@ interface SkillGridProps {
   lightMode: boolean
   th: ThreadTheme
   setInput: (v: string) => void
-  textareaRef: React.RefObject<HTMLTextAreaElement>
+  textareaRef: React.RefObject<HTMLTextAreaElement | null>
   setShowTutorSetup: (v: boolean) => void
   setTutorDismissed: (v: boolean) => void
 }
