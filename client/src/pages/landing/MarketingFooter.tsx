@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { NewsletterHeroSection } from '../../components/landing/NewsletterHeroSection'
-import { PricingContactModal } from '../../components/PricingContactModal'
+import { PricingContactModal } from '../../components/marketing/PricingContactModal'
 
 const INK = 'var(--color-ivory-ink)'
 const MUTED = 'var(--color-ivory-muted)'

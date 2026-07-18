@@ -4,9 +4,9 @@ import { ChevronRight, Search } from 'lucide-react'
 
 import MarketingNav from '../MarketingNav'
 import MarketingFooter from '../MarketingFooter'
-import NewsletterSignup from '../../../components/NewsletterSignup'
-import { PricingContactModal } from '../../../components/PricingContactModal'
-import { PinButton } from '../../../components/PinButton'
+import NewsletterSignup from '../../../components/marketing/NewsletterSignup'
+import { PricingContactModal } from '../../../components/marketing/PricingContactModal'
+import { PinButton } from '../../../components/widgets/PinButton'
 import { GLOSSARY, CATEGORIES_LABEL, type GlossaryTerm } from './glossaryData'
 
 const INK = 'var(--color-ivory-ink)'

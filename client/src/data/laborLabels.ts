@@ -1,9 +1,9 @@
 // Shared label + badge-variant maps for the Labor Relations surface.
-import type { BadgeVariant } from '../ui'
+import type { BadgeVariant } from '../components/ui'
 import type {
   CBAStatus, ClauseCategory, GrievanceResolution, GrievanceStatus,
   GrievanceType, StepOutcome, StepStatus,
-} from '../../api/laborClient'
+} from '../api/laborClient'
 
 export const GRIEVANCE_STATUS_VARIANT: Record<GrievanceStatus, BadgeVariant> = {
   draft: 'neutral',

@@ -4,9 +4,9 @@ import {
   LayoutGrid, LayoutTemplate, LogOut, Globe, ArrowLeft, FileText, ShoppingBag,
   Receipt, Calendar, MessageSquare, Users, Mail, Inbox, Newspaper, UserCircle, Star, MapPin,
 } from 'lucide-react'
-import { cappeApi, clearCappeTokens } from '../api/cappeClient'
-import { invalidateCappeMeCache } from '../hooks/useCappeMe'
-import type { CappeAccount, CappeThread } from '../types/cappe'
+import { cappeApi, clearCappeTokens } from '../../api/cappeClient'
+import { invalidateCappeMeCache } from '../../hooks/useCappeMe'
+import type { CappeAccount, CappeThread } from '../../types/cappe'
 
 const linkBase = 'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors'
 const linkIdle = 'text-zinc-400 hover:bg-zinc-800/70 hover:text-zinc-100'

@@ -2,9 +2,9 @@ import {
   IconBook, IconCompany, IconDraft, IconIncident, IconLedger,
   IconPeople, IconSeal, IconSetup, IconShield,
   IconSteps, IconTraining, IconTrend,
-} from '../nav-icons'
-import SidebarShell from '../SidebarShell'
-import type { NavItem, NavGroup } from '../SidebarShell'
+} from '../sidebars/nav-icons'
+import SidebarShell from '../sidebars/SidebarShell'
+import type { NavItem, NavGroup } from '../sidebars/SidebarShell'
 import { useMe } from '../../hooks/useMe'
 import { useSidebarBadges } from '../../hooks/useSidebarBadges'
 

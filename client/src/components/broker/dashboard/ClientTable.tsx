@@ -1,10 +1,10 @@
 import { useNavigate } from 'react-router-dom'
 import { Sparkles } from 'lucide-react'
-import { DeltaPill } from '../broker/DeltaPill'
-import { HelpHint } from '../broker/HelpHint'
-import { LABEL } from '../ui/typography'
-import { fmtMoney } from '../../utils/brokerFormat'
-import type { BrokerCompanyMetric, WcPortfolioRow } from '../../types/broker'
+import { DeltaPill } from '../DeltaPill'
+import { HelpHint } from '../HelpHint'
+import { LABEL } from '../../ui/typography'
+import { fmtMoney } from '../../../utils/brokerFormat'
+import type { BrokerCompanyMetric, WcPortfolioRow } from '../../../types/broker'
 
 const PANEL = 'rounded-2xl border border-white/[0.06] bg-zinc-950 p-5'
 

@@ -7,7 +7,7 @@ import { ComplianceLocationList } from './ComplianceLocationList'
 import { ComplianceRequirementsTab } from './ComplianceRequirementsTab'
 import PendingResearchPanel from './PendingResearchPanel'
 import { ComplianceUpcomingTab } from './ComplianceUpcomingTab'
-import { UpgradeUpsellCard } from '../UpgradeUpsellCard'
+import { UpgradeUpsellCard } from '../shared/UpgradeUpsellCard'
 
 /**
  * Matcha-X read-only "taste" of Compliance (`compliance_lite`).

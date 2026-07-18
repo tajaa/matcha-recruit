@@ -3,7 +3,7 @@ import { Outlet, useNavigate } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import { useCappeMe } from '../hooks/useCappeMe'
 import { getCappeToken } from '../api/cappeClient'
-import CappeSidebar from '../components/CappeSidebar'
+import CappeSidebar from '../components/sidebars/CappeSidebar'
 
 // Authenticated Cappe shell. Independent of TenantSidebar — Cappe is its own
 // product. Redirects to /cappe/login when there is no live Cappe session.

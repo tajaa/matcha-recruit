@@ -6,7 +6,7 @@ import {
 } from 'lucide-react'
 import { laborApi } from '../../api/laborClient'
 import type { CBADetail as CBADetailType, Clause, ClauseCategory } from '../../api/laborClient'
-import { CBA_STATUS_VARIANT, CLAUSE_CATEGORY_LABEL, CLAUSE_CATEGORY_OPTIONS } from '../../components/labor/labels'
+import { CBA_STATUS_VARIANT, CLAUSE_CATEGORY_LABEL, CLAUSE_CATEGORY_OPTIONS } from '../../data/laborLabels'
 
 export default function CBADetail() {
   const { cbaId } = useParams<{ cbaId: string }>()

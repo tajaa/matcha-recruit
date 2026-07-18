@@ -4,7 +4,7 @@ Four products share this codebase: **Free** (resources hub), **Matcha-lite** (pa
 
 ## Products
 
-Differentiated at signup via `companies.signup_source` and routed in the UI by `client/src/utils/tier.ts` + `client/src/components/TenantSidebar.tsx`.
+Differentiated at signup via `companies.signup_source` and routed in the UI by `client/src/utils/tier.ts` + `client/src/components/sidebars/TenantSidebar.tsx`.
 
 | Product | Signup page | `tier` sent | `signup_source` | Sidebar | Routes | Billing |
 |---|---|---|---|---|---|---|
@@ -14,7 +14,7 @@ Differentiated at signup via `companies.signup_source` and routed in the UI by `
 | **Matcha (platform)** | `pages/BetaRegister.tsx` (token) or admin-created post-sale | n/a | `bespoke` (default) / `invite` | `ClientSidebar` (full nav) | `/app/*` | Contract / invoice |
 | **Matcha-work** | `pages/BetaRegister.tsx` (personal token) → `/work`; or inside Matcha company | n/a | `bespoke` (personal: `is_personal=true`) | `ClientSidebar` AI group; macOS app | `/work/*` | Stripe `matcha_work_personal` $20/mo or business token packs |
 
-Sidebar dispatch in `client/src/components/TenantSidebar.tsx`. Tier-check helpers (`isIrOnlyTier`, `isMatchaLitePending`, `isResourcesFreeTier`) in `client/src/utils/tier.ts`.
+Sidebar dispatch in `client/src/components/sidebars/TenantSidebar.tsx`. Tier-check helpers (`isIrOnlyTier`, `isMatchaLitePending`, `isResourcesFreeTier`) in `client/src/utils/tier.ts`.
 
 ### Free — resources hub
 - Marketing/upgrade landing for self-serve signups. No paid features.
@@ -43,7 +43,7 @@ Sidebar dispatch in `client/src/components/TenantSidebar.tsx`. Tier-check helper
 - Sidebar: `ClientSidebar` (Dashboard, Company, HR Ops, Compliance, Communication, Safety, AI groups).
 - Routes: `/app/*` registered in `client/src/App.tsx`.
 - Backend: everything under `server/app/matcha/` plus `server/app/core/`.
-- Per-company access via `companies.enabled_features` JSONB. When a user URL-hops to a feature they don't have, `<FeatureGate>` (`client/src/components/FeatureGate.tsx`) renders `<UpgradeUpsellCard>` instead of a 403.
+- Per-company access via `companies.enabled_features` JSONB. When a user URL-hops to a feature they don't have, `<FeatureGate>` (`client/src/components/shared/FeatureGate.tsx`) renders `<UpgradeUpsellCard>` instead of a 403.
 
 ### Matcha-work — collaborative AI workspace
 **Naming convention**: the **web** workspace surface (this section) is referred to as **matcha-work**; the **macOS desktop** workspace is referred to as **werk** (`platforms/desktop/Werk/`). Both share the same backend (`server/app/matcha/routes/matcha_work/` package) and `mw_*` tables — only the client differs. When asked to ship a feature, confirm which surface is meant before editing files.
@@ -406,7 +406,7 @@ Quick lookup for frequently-touched code. Saves grepping the same things repeate
 - Backend auth deps → `server/app/core/dependencies.py` (`require_admin`, `require_candidate`) + `server/app/matcha/dependencies.py` (`require_client`, `require_employee`, `require_admin_or_client`, `get_client_company_id`)
 - Public-token interview WS auth → `server/app/core/services/auth.py:create_interview_ws_token`
 - Tier helpers → `client/src/utils/tier.ts` (`isIrOnlyTier`, `isMatchaLitePending`, `isResourcesFreeTier`)
-- Sidebar dispatch (the only place that picks shell) → `client/src/components/TenantSidebar.tsx`
+- Sidebar dispatch (the only place that picks shell) → `client/src/components/sidebars/TenantSidebar.tsx`
 
 ### Email + notifications
 
@@ -420,8 +420,8 @@ Quick lookup for frequently-touched code. Saves grepping the same things repeate
 
 - Backend default flags → `server/app/core/feature_flags.py:DEFAULT_COMPANY_FEATURES`
 - Backend feature dep → `server/app/matcha/dependencies.py:require_feature`
-- Frontend gate → `client/src/components/FeatureGate.tsx` (renders `<UpgradeUpsellCard>` instead of 403)
-- Upgrade upsell card → `client/src/components/UpgradeUpsellCard.tsx`
+- Frontend gate → `client/src/components/shared/FeatureGate.tsx` (renders `<UpgradeUpsellCard>` instead of 403)
+- Upgrade upsell card → `client/src/components/shared/UpgradeUpsellCard.tsx`
 
 ### IR (Incident Reporting)
 

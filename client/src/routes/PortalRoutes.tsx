@@ -1,5 +1,5 @@
 import { Routes, Route } from 'react-router-dom'
-import { FeatureGate } from '../components/FeatureGate'
+import { FeatureGate } from '../components/shared/FeatureGate'
 import PortalLayout from '../pages/portal/PortalLayout'
 import PortalDashboard from '../pages/portal/PortalDashboard'
 import PortalSchedule from '../pages/portal/PortalSchedule'

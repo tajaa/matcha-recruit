@@ -1,7 +1,7 @@
 import { Component, useEffect, useRef, type ErrorInfo, type ReactNode } from 'react'
 import { useLocation } from 'react-router-dom'
-import { reportReactError } from '../api/errorReporter'
-import { isStaleChunkError, reloadForStaleChunk } from '../utils/staleChunk'
+import { reportReactError } from '../../api/errorReporter'
+import { isStaleChunkError, reloadForStaleChunk } from '../../utils/staleChunk'
 
 interface Props {
   children: ReactNode

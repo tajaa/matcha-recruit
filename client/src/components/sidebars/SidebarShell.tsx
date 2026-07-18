@@ -1,12 +1,12 @@
 import { NavLink, useNavigate, useLocation, Link } from 'react-router-dom'
 import { LogOut, Settings, ChevronDown, Lock, PanelLeftClose } from 'lucide-react'
 import { useState, useEffect, useRef, type ComponentType } from 'react'
-import Avatar from './Avatar'
-import { useMe } from '../hooks/useMe'
-import { resetAuthCaches } from '../api/authReset'
-import { disconnectSharedChannelSocket } from '../api/channelSocket'
-import { useLayoutContext } from '../layouts/LayoutContext'
-import ThemeToggle from './ThemeToggle'
+import Avatar from '../shared/Avatar'
+import { useMe } from '../../hooks/useMe'
+import { resetAuthCaches } from '../../api/authReset'
+import { disconnectSharedChannelSocket } from '../../api/channelSocket'
+import { useLayoutContext } from '../../layouts/LayoutContext'
+import ThemeToggle from '../shared/ThemeToggle'
 
 /** Any glyph the rail can render: the hand-drawn set in nav-icons.tsx, or a
  *  lucide icon (whose props are a superset of these). */

@@ -3,7 +3,7 @@ import { Navigate, Outlet, useLocation } from 'react-router-dom'
 import { Menu, X } from 'lucide-react'
 import { useMe } from '../hooks/useMe'
 import { LayoutContext } from './LayoutContext'
-import HelpAssistant from '../components/help/HelpAssistant'
+import HelpAssistant from '../components/shared/HelpAssistant'
 import { resolvePageHelp } from '../data/pageHelp'
 
 const PERSONAL_ALLOWED = new Set(['/app/settings'])

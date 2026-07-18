@@ -7,7 +7,7 @@ import ChannelView from '../pages/work/ChannelView'
 import ChannelBrowse from '../pages/work/ChannelBrowse'
 import ChannelJoinByInvite from '../pages/work/ChannelJoinByInvite'
 import BoardView from '../pages/work/BoardView'
-import { FeatureGate } from '../components/FeatureGate'
+import { FeatureGate } from '../components/shared/FeatureGate'
 import { WorkSurfaceProvider } from './WorkSurfaceContext'
 import { useMe } from '../hooks/useMe'
 

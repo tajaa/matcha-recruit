@@ -6,7 +6,7 @@ import { Scale, Bell, FileText, Library, BadgeCheck, ListChecks } from 'lucide-r
 import MarketingNav from '../landing/MarketingNav'
 import MarketingFooter from '../landing/MarketingFooter'
 import { ComplianceTicker } from '../../components/landing/ComplianceTicker'
-import { PricingContactModal } from '../../components/PricingContactModal'
+import { PricingContactModal } from '../../components/marketing/PricingContactModal'
 import { ComplianceHeroAnimation } from '../landing/ComplianceHeroAnimation'
 
 const INK = 'var(--color-ivory-ink)'

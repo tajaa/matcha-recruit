@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Button, Input, Modal } from './ui'
-import { handbooks } from '../api/client'
-import type { HandbookDistributionRecipient } from '../types/handbook'
+import { Button, Input, Modal } from '../ui'
+import { handbooks } from '../../api/client'
+import type { HandbookDistributionRecipient } from '../../types/handbook'
 
 type Props = {
   open: boolean

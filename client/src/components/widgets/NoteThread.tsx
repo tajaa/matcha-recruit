@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { api } from '../api/client'
-import { Badge, Button, Textarea, Select, type BadgeVariant } from './ui'
+import { api } from '../../api/client'
+import { Badge, Button, Textarea, Select, type BadgeVariant } from '../ui'
 
 type Note = {
   id: string

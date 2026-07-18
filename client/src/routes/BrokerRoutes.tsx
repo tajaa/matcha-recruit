@@ -1,7 +1,7 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
 import RequireRole from '../components/auth/RequireRole'
 import AppLayout from '../layouts/AppLayout'
-import BrokerSidebar from '../components/BrokerSidebar'
+import BrokerSidebar from '../components/sidebars/BrokerSidebar'
 import BrokerDashboard from '../pages/broker/BrokerDashboard'
 import BrokerClientsHub from '../pages/broker/BrokerClientsHub'
 import BrokerAccount from '../pages/broker/BrokerAccount'

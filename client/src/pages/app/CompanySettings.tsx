@@ -15,7 +15,7 @@ import { fetchLocations, createLocation, updateLocation, deleteLocation, fetchJu
 import { ComplianceLocationList } from '../../components/compliance/ComplianceLocationList'
 import { ComplianceLocationModal } from '../../components/compliance/ComplianceLocationModal'
 import { FacilityProfileBanner } from '../../components/compliance/FacilityProfileBanner'
-import LiteAddonsPanel from '../../components/ir-only/LiteAddonsPanel'
+import LiteAddonsPanel from '../../components/tier-sidebars/LiteAddonsPanel'
 import { useMe } from '../../hooks/useMe'
 import type { BusinessLocation, LocationCreate, JurisdictionOption } from '../../types/compliance'
 

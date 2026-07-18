@@ -8,7 +8,7 @@ import type { CBA, Grievance, GrievanceDashboard, GrievanceType } from '../../ap
 import {
   CBA_STATUS_VARIANT, GRIEVANCE_STATUS_LABEL, GRIEVANCE_STATUS_VARIANT,
   GRIEVANCE_TYPE_OPTIONS, personName,
-} from '../../components/labor/labels'
+} from '../../data/laborLabels'
 
 type EmployeeRow = { id: string; first_name: string | null; last_name: string | null }
 type Tab = 'grievances' | 'cbas'

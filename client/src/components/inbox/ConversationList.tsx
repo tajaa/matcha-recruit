@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Search, Plus, Menu } from 'lucide-react'
 import type { ConversationSummary } from '../../api/inbox'
-import Avatar from '../Avatar'
+import Avatar from '../shared/Avatar'
 
 type Props = {
   conversations: ConversationSummary[]

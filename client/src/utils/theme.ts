@@ -1,7 +1,7 @@
 // App-wide light/dark theme. The inversion is pure CSS in index.css, scoped
 // to html[data-theme="light"]; this module just owns the attribute + the
 // persisted preference. Applied once at app boot (main.tsx) — every sidebar
-// shares the same toggle (components/ThemeToggle.tsx) and preference.
+// shares the same toggle (components/shared/ThemeToggle.tsx) and preference.
 
 const KEY = 'matcha_theme'
 

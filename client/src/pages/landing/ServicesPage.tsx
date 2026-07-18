@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom'
 import MarketingNav from './MarketingNav'
 import MarketingFooter from './MarketingFooter'
 import { ComplianceTicker } from '../../components/landing/ComplianceTicker'
-import { PricingContactModal } from '../../components/PricingContactModal'
+import { PricingContactModal } from '../../components/marketing/PricingContactModal'
 
 const INK = 'var(--color-ivory-ink)'
 const BG = 'var(--color-ivory-bg)'

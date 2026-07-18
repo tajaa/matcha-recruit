@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { api } from '../api/client'
+import { api } from '../../api/client'
 
 const INK = 'var(--color-ivory-ink)'
 const MUTED = 'var(--color-ivory-muted)'

@@ -1,7 +1,7 @@
 import { matchPath } from 'react-router-dom'
 
 // Authored per-page help cards for the floating HelpAssistant widget
-// (components/help/HelpAssistant.tsx, mounted in layouts/AppLayout.tsx).
+// (components/shared/HelpAssistant.tsx, mounted in layouts/AppLayout.tsx).
 // A page only shows the widget if it has an entry here — adding coverage for
 // a new tab means adding one entry, nothing else.
 //

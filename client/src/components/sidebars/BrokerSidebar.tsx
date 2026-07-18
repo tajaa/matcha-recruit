@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react'
 import { LayoutDashboard, Building2, Settings, Zap, Globe, Activity, Warehouse, Sparkles } from 'lucide-react'
 import SidebarShell, { type NavItem } from './SidebarShell'
-import ThemeToggle from './ThemeToggle'
-import { fetchBrokerRiskAlerts } from '../api/broker'
-import { useMe } from '../hooks/useMe'
+import ThemeToggle from '../shared/ThemeToggle'
+import { fetchBrokerRiskAlerts } from '../../api/broker'
+import { useMe } from '../../hooks/useMe'
 
 export default function BrokerSidebar() {
   const { me } = useMe()

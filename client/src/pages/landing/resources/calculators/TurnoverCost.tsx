@@ -4,7 +4,7 @@ import { ChevronRight } from 'lucide-react'
 
 import MarketingNav from '../../MarketingNav'
 import MarketingFooter from '../../MarketingFooter'
-import { PricingContactModal } from '../../../../components/PricingContactModal'
+import { PricingContactModal } from '../../../../components/marketing/PricingContactModal'
 
 const INK = 'var(--color-ivory-ink)'
 const BG = 'var(--color-ivory-bg)'

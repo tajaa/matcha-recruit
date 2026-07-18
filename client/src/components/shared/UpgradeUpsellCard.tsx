@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react'
-import { Button, Card, Textarea } from './ui'
+import { Button, Card, Textarea } from '../ui'
 import { CheckCircle2, Loader2, Sparkles } from 'lucide-react'
-import { api } from '../api/client'
+import { api } from '../../api/client'
 
 type Variant = 'sidebar' | 'page'
 

@@ -11,18 +11,26 @@ client/src/
 ├── index.css                Tailwind directives + global styles
 ├── api/                     API client layer
 │   ├── client.ts            api.get/post/put/delete + 401 refresh
-│   ├── chatClient.ts        WebSocket AI chat client
-│   └── <domain>.ts          Per-domain helpers (typed wrappers)
+│   └── <domain>.ts          Per-domain helpers (typed wrappers) — flat, no chat-specific client file
 ├── components/
 │   ├── ui/                  Generic primitives (Button, Input, Modal, Select, Toggle, Badge)
-│   ├── ClientSidebar.tsx    Full Matcha-platform sidebar
-│   ├── TenantSidebar.tsx    Dispatcher → ClientSidebar / IrSidebar / ResourcesFreeSidebar
-│   ├── AdminSidebar.tsx, BrokerSidebar.tsx
-│   ├── FeatureGate.tsx, UpgradeUpsellCard.tsx
-│   ├── ir/                  IR Copilot, panels, analysis tabs
-│   ├── ir-only/             Matcha-lite shell (IrSidebar, billing CTA)
-│   ├── resources-free/      Free-tier sidebar + upgrade panel
-│   ├── channels/, inbox/, work/  Matcha-work surfaces
+│   ├── sidebars/            Product-shell nav sidebars: AdminSidebar, BrokerSidebar, CappeSidebar,
+│   │                        ClientSidebar (full Matcha-platform), TenantSidebar (tier dispatcher),
+│   │                        SidebarShell (shared shell every sidebar renders through), nav-icons
+│   ├── tier-sidebars/       Sidebars for tiers below full Matcha: IrSidebar (Lite), MatchaXSidebar,
+│   │                        ComplianceSidebar, + their upgrade/add-on panels (Essentials, LiteAddons)
+│   ├── shared/              App-wide singletons mounted once or reused broadly: ErrorBoundary,
+│   │                        FeatureGate, UpgradeUpsellCard, ThemeToggle, RouteTracker, Avatar, HelpAssistant
+│   ├── widgets/              Generic reusable widgets: AiSuggest, NoteThread, PinButton, PinnedResourcesPanel
+│   ├── marketing/            Public/marketing widgets: BlogComments, NewsletterSignup, PricingContactModal
+│   ├── ir/                  IR Copilot, panels, analysis tabs (the full IR feature module)
+│   ├── broker/               Broker UI primitives shared across broker pages (KpiTile, TabBar, …)
+│   │   └── dashboard/        Tables/grids private to pages/broker/BrokerDashboard.tsx
+│   ├── channels/, inbox/, work/, matcha-work/   Matcha-work surfaces — work/ is shell chrome
+│   │                        (sidebars, kanban, notifications) mounted by the route files;
+│   │                        matcha-work/ is in-canvas feature panels (AI agents, recruiting
+│   │                        pipeline, editors) mounted by leaf thread/project pages. Two layers
+│   │                        of the same product, not duplicate folders — don't merge them.
 │   ├── compliance/, employees/, dashboard/, handbook/, …
 │   └── auth/                RequireBusinessAccount, login forms
 ├── features/                Feature-based modules
@@ -30,18 +38,26 @@ client/src/
 │   └── ir-onboarding/
 ├── hooks/                   Domain-specific hooks
 │   ├── useMe.ts             User+features (THE auth state)
-│   ├── ir/, er/, compliance/, discipline/, employees/, risk-assessment/
+│   ├── ir/, er/, compliance/, discipline/, employees/, risk-assessment/, training/
 │   └── single-file utilities (useChannelNotifications, useSidebarBadges)
 ├── layouts/                 WorkLayout, etc.
 ├── pages/                   Route-level pages
 │   ├── app/                 /app/* (Matcha-platform)
 │   ├── admin/, broker/, work/, auth/, shared/, landing/
-│   └── BetaRegister.tsx, Login.tsx, Landing.tsx, ResetPassword.tsx, SSOCallback.tsx
+│   └── BetaRegister.tsx, Login.tsx, ResetPassword.tsx, SSOCallback.tsx  (landing content is
+│                            pages/landing/, not a loose Landing.tsx — there is no free-tier
+│                            "resources free" component dir; Free-tier gating is `<RequireBusinessAccount>`)
 ├── types/                   Shared TypeScript types
-├── utils/                   Pure utilities (incl. tier.ts)
-├── data/                    Static / seed data
+├── utils/                   Pure utilities (incl. tier.ts, usageTracker.ts — no separate lib/)
+├── data/                    Static / seed data (incl. laborLabels.ts)
 └── generated/               Auto-generated types (DO NOT EDIT)
 ```
+
+`components/` root only holds subject-area folders now — no loose top-level files. If you're
+adding a component and unsure where it goes: product-tier sidebar → `sidebars/` or
+`tier-sidebars/`; app-wide singleton with no feature coupling → `shared/`; reusable widget with
+no product coupling → `widgets/`; everything else → the relevant domain folder (create one if it
+doesn't exist yet, following the existing per-domain pattern).
 
 ## Conventions
 
@@ -51,9 +67,9 @@ client/src/
 - Public/anon endpoints bypass the auth interceptor: pass `{ skipAuth: true }` option, or use the bare `fetch()` (see `IRCopilotPanel.tsx` stream handler).
 
 **Routing + tier dispatch**:
-- `App.tsx` registers all routes. `TenantSidebar` dispatches sidebar shell by tier (`client/src/utils/tier.ts` has `isIrOnlyTier`, `isMatchaLitePending`, `isResourcesFreeTier`).
-- Free tier → `ResourcesFreeSidebar`; matcha-lite paid → `IrSidebar`; matcha-lite pending → `MatchaLitePendingSidebar`; full Matcha → `ClientSidebar`.
-- Per-feature pages are gated by `<FeatureGate flag="…">` (`components/FeatureGate.tsx`). When a user URL-hops to a feature they don't have, the gate renders `<UpgradeUpsellCard>` instead of a 403.
+- `App.tsx` registers all routes. `TenantSidebar` (`components/sidebars/TenantSidebar.tsx`) dispatches sidebar shell by tier (`client/src/utils/tier.ts` has `isIrOnlyTier`, `isMatchaLitePending`, etc.).
+- Free tier has no dedicated sidebar variant — it falls through to `ClientSidebar` and is gated page-by-page via `<RequireBusinessAccount>`; matcha-lite/Matcha-X/Compliance paid → `IrSidebar` / `MatchaXSidebar` / `ComplianceSidebar` (`components/tier-sidebars/`); those pending payment → the `*PendingSidebar` components defined inline in `TenantSidebar.tsx`; full Matcha → `ClientSidebar` (`components/sidebars/`).
+- Per-feature pages are gated by `<FeatureGate flag="…">` (`components/shared/FeatureGate.tsx`). When a user URL-hops to a feature they don't have, the gate renders `<UpgradeUpsellCard>` (`components/shared/UpgradeUpsellCard.tsx`) instead of a 403.
 
 **API calls**:
 - Use the `api` helper from `api/client.ts` (`api.get<T>(path, opts?)`, `api.post`, `api.put`, `api.delete`, `api.upload`, `api.download`).
@@ -83,7 +99,7 @@ client/src/
 
 ## Sidebar dispatch quickstart
 
-`TenantSidebar.tsx:36-ish` is the only place that picks the sidebar. Adding a new tier means a new branch here plus a new sidebar component. Don't fork at the page level.
+`components/sidebars/TenantSidebar.tsx` is the only place that picks the sidebar. Adding a new tier means a new branch here plus a new sidebar component (in `components/sidebars/` for a full-platform variant, `components/tier-sidebars/` for a below-full-platform tier).  Don't fork at the page level.
 
 ## Adding a new feature flag
 
@@ -91,7 +107,7 @@ Backend (`server/app/core/feature_flags.py`) is authoritative. Frontend just con
 
 1. Add to `DEFAULT_COMPANY_FEATURES` in `feature_flags.py` (defaults to false unless rolled out).
 2. Add a row to the flag table in root `CLAUDE.md`.
-3. In sidebars (`ClientSidebar.tsx` etc.), use `hasFeature("flag_name")` to conditionally render the nav entry.
+3. In sidebars (`components/sidebars/ClientSidebar.tsx` etc.), use `hasFeature("flag_name")` to conditionally render the nav entry.
 4. Mount the backend router with `dependencies=[Depends(require_feature("flag_name"))]` in `server/app/matcha/routes/__init__.py`.
 5. Wrap the route page with `<FeatureGate flag="flag_name">` so URL-hopping users see the upsell.
 

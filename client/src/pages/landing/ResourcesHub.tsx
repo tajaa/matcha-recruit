@@ -4,8 +4,8 @@ import { ArrowUpRight, FileText, Lock } from 'lucide-react'
 
 import MarketingNav from './MarketingNav'
 import MarketingFooter from './MarketingFooter'
-import NewsletterSignup from '../../components/NewsletterSignup'
-import { PricingContactModal } from '../../components/PricingContactModal'
+import NewsletterSignup from '../../components/marketing/NewsletterSignup'
+import { PricingContactModal } from '../../components/marketing/PricingContactModal'
 import { useMe } from '../../hooks/useMe'
 
 const INK = 'var(--color-ivory-ink)'

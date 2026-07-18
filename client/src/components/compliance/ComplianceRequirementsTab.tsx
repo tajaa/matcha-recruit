@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from 'react'
 import { Lock } from 'lucide-react'
 import { Select } from '../ui'
 import { LABEL } from '../ui/typography'
-import { UpgradeUpsellCard } from '../UpgradeUpsellCard'
+import { UpgradeUpsellCard } from '../shared/UpgradeUpsellCard'
 import { EmployeesTooltip } from './EmployeesTooltip'
 import {
   useComplianceRequirements,

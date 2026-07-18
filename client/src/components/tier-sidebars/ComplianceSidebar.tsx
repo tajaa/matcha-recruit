@@ -1,6 +1,6 @@
 import { BadgeCheck, Building2, CalendarClock, FileText, Shield, Users, Zap } from 'lucide-react'
-import SidebarShell from '../SidebarShell'
-import type { NavItem, NavGroup } from '../SidebarShell'
+import SidebarShell from '../sidebars/SidebarShell'
+import type { NavItem, NavGroup } from '../sidebars/SidebarShell'
 import { useMe } from '../../hooks/useMe'
 
 // Standalone Matcha Compliance product sidebar. A paid matcha_compliance tenant

@@ -4,8 +4,8 @@ import { ChevronRight, Download, FileText, Search } from 'lucide-react'
 
 import MarketingNav from '../MarketingNav'
 import MarketingFooter from '../MarketingFooter'
-import { PricingContactModal } from '../../../components/PricingContactModal'
-import { PinButton } from '../../../components/PinButton'
+import { PricingContactModal } from '../../../components/marketing/PricingContactModal'
+import { PinButton } from '../../../components/widgets/PinButton'
 import { useMe } from '../../../hooks/useMe'
 import { INDUSTRIES, JOB_DESCRIPTIONS, type Industry, type JobDescription } from './jobDescriptionsData'
 

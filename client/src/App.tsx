@@ -3,7 +3,7 @@ import { lazy, Suspense } from "react";
 import Home from "./pages/Home";
 import Login from "./pages/Login";
 import RequireBusinessAccount from "./components/auth/RequireBusinessAccount";
-import RouteTracker from "./components/RouteTracker";
+import RouteTracker from "./components/shared/RouteTracker";
 
 // Lazy area modules — each /<area>/* prefix is its own chunk, loaded on entry.
 const AdminRoutes = lazy(() => import("./routes/AdminRoutes"));

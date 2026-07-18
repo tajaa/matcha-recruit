@@ -7,8 +7,8 @@ import {
 } from 'lucide-react'
 import SidebarShell from './SidebarShell'
 import type { NavGroup, NavItem } from './SidebarShell'
-import { useMe } from '../hooks/useMe'
-import { useSidebarBadges } from '../hooks/useSidebarBadges'
+import { useMe } from '../../hooks/useMe'
+import { useSidebarBadges } from '../../hooks/useSidebarBadges'
 
 const nav: (NavItem | NavGroup)[] = [
   { to: '/app', icon: LayoutDashboard, label: 'Dashboard' },

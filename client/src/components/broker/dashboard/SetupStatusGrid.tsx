@@ -1,5 +1,5 @@
-import { HelpHint } from '../broker/HelpHint'
-import { LABEL } from '../ui/typography'
+import { HelpHint } from '../HelpHint'
+import { LABEL } from '../../ui/typography'
 
 const PANEL = 'rounded-2xl border border-white/[0.06] bg-zinc-950 p-5'
 

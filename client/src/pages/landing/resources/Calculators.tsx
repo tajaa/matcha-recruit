@@ -4,9 +4,9 @@ import { ArrowUpRight, Calculator, ChevronRight } from 'lucide-react'
 
 import MarketingNav from '../MarketingNav'
 import MarketingFooter from '../MarketingFooter'
-import NewsletterSignup from '../../../components/NewsletterSignup'
-import { PricingContactModal } from '../../../components/PricingContactModal'
-import { PinButton } from '../../../components/PinButton'
+import NewsletterSignup from '../../../components/marketing/NewsletterSignup'
+import { PricingContactModal } from '../../../components/marketing/PricingContactModal'
+import { PinButton } from '../../../components/widgets/PinButton'
 
 const INK = 'var(--color-ivory-ink)'
 const BG = 'var(--color-ivory-bg)'

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { Send, BellOff, Bell, ArrowLeft, Paperclip, X, FileText, Download } from 'lucide-react'
 import type { Conversation, Participant, Attachment } from '../../api/inbox'
 import { toggleMute as apiToggleMute } from '../../api/inbox'
-import Avatar from '../Avatar'
+import Avatar from '../shared/Avatar'
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10 MB
 const MAX_FILE_COUNT = 5

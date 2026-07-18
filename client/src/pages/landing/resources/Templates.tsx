@@ -4,8 +4,8 @@ import { ArrowUpRight, Bell, ChevronRight, Download, FileText, Lock } from 'luci
 
 import MarketingNav from '../MarketingNav'
 import MarketingFooter from '../MarketingFooter'
-import { PricingContactModal } from '../../../components/PricingContactModal'
-import { PinButton } from '../../../components/PinButton'
+import { PricingContactModal } from '../../../components/marketing/PricingContactModal'
+import { PinButton } from '../../../components/widgets/PinButton'
 import { api } from '../../../api/client'
 import { useMe } from '../../../hooks/useMe'
 

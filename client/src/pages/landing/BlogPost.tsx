@@ -5,9 +5,9 @@ import remarkGfm from 'remark-gfm'
 
 import MarketingNav from './MarketingNav'
 import MarketingFooter from './MarketingFooter'
-import NewsletterSignup from '../../components/NewsletterSignup'
-import BlogComments from '../../components/BlogComments'
-import { PricingContactModal } from '../../components/PricingContactModal'
+import NewsletterSignup from '../../components/marketing/NewsletterSignup'
+import BlogComments from '../../components/marketing/BlogComments'
+import { PricingContactModal } from '../../components/marketing/PricingContactModal'
 import { api } from '../../api/client'
 
 const INK = 'var(--color-ivory-ink)'

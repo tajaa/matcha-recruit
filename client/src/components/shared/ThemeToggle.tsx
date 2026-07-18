@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Sun, Moon } from 'lucide-react'
-import { getTheme, setTheme, type AppTheme } from '../utils/theme'
+import { getTheme, setTheme, type AppTheme } from '../../utils/theme'
 
 /** Dark ⇄ light switch. Lives in every sidebar footer (SidebarShell default),
  *  where it sits in a row of icon controls alongside settings and log out —

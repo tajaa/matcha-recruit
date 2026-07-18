@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import MarketingNav from "../landing/MarketingNav";
 import MarketingFooter from "../landing/MarketingFooter";
-import { PricingContactModal } from "../../components/PricingContactModal";
+import { PricingContactModal } from "../../components/marketing/PricingContactModal";
 import { useSEO } from "../../hooks/useSEO";
 import { HOME_JSON_LD } from "./data";
 import { BONE, NOIR } from "./theme";

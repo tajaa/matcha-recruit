@@ -1,7 +1,7 @@
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import RequireRole from '../components/auth/RequireRole'
 import AppLayout from '../layouts/AppLayout'
-import AdminSidebar from '../components/AdminSidebar'
+import AdminSidebar from '../components/sidebars/AdminSidebar'
 import Companies from '../pages/admin/Companies'
 import AdminCompanyDetail from '../pages/admin/AdminCompanyDetail'
 import Features from '../pages/admin/Features'

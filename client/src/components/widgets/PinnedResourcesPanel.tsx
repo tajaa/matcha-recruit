@@ -2,8 +2,8 @@ import { useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { Pin, X } from 'lucide-react'
 
-import { usePinnedResources } from '../hooks/usePinnedResources'
-import { ensureStateGuideLabels, resolveResourcePin } from '../data/resourceCatalog'
+import { usePinnedResources } from '../../hooks/usePinnedResources'
+import { ensureStateGuideLabels, resolveResourcePin } from '../../data/resourceCatalog'
 
 /**
  * Dashboard widget rendered above the resource category grid. Shows the

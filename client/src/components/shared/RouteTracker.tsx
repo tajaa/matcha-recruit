@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { useLocation } from 'react-router-dom'
-import { trackPageView } from '../lib/usageTracker'
+import { trackPageView } from '../../utils/usageTracker'
 
 /** Records a page view on every navigation. Mounted once beside <Routes> in
  *  App.tsx — that's the single seam every surface (app, admin, work, werk,

@@ -1,6 +1,6 @@
-import { HelpHint } from '../broker/HelpHint'
-import { LABEL } from '../ui/typography'
-import type { BrokerHandbookCoverage } from '../../types/broker'
+import { HelpHint } from '../HelpHint'
+import { LABEL } from '../../ui/typography'
+import type { BrokerHandbookCoverage } from '../../../types/broker'
 
 const PANEL = 'rounded-2xl border border-white/[0.06] bg-zinc-950 p-5'
 

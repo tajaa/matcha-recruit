@@ -1,13 +1,13 @@
 import { useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import ClientSidebar from './ClientSidebar'
-import IrSidebar from './ir-only/IrSidebar'
-import MatchaXSidebar from './ir-only/MatchaXSidebar'
-import ComplianceSidebar from './ir-only/ComplianceSidebar'
-import { useMe } from '../hooks/useMe'
-import { isIrOnlyTier, isMatchaLitePending, isMatchaX, isMatchaXPending, isMatchaCompliance, isMatchaCompliancePending } from '../utils/tier'
-import { useMatchaLitePricing, computeLitePriceDollars } from '../api/matchaLitePricing'
-import { api, ApiError } from '../api/client'
+import IrSidebar from '../tier-sidebars/IrSidebar'
+import MatchaXSidebar from '../tier-sidebars/MatchaXSidebar'
+import ComplianceSidebar from '../tier-sidebars/ComplianceSidebar'
+import { useMe } from '../../hooks/useMe'
+import { isIrOnlyTier, isMatchaLitePending, isMatchaX, isMatchaXPending, isMatchaCompliance, isMatchaCompliancePending } from '../../utils/tier'
+import { useMatchaLitePricing, computeLitePriceDollars } from '../../api/matchaLitePricing'
+import { api, ApiError } from '../../api/client'
 
 /**
  * Routes the tenant to the right sidebar based on signup tier:

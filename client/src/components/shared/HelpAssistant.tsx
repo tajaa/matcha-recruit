@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Loader2, Send, X } from 'lucide-react'
 import { authStreamHeaders } from '../../api/client'
-import { IconGuide } from '../nav-icons'
+import { IconGuide } from '../sidebars/nav-icons'
 import type { PageHelp } from '../../data/pageHelp'
 
 type Message = { role: 'user' | 'assistant'; text: string }

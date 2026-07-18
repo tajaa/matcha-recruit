@@ -11,7 +11,7 @@ import type {
 import {
   GRIEVANCE_STATUS_LABEL, GRIEVANCE_STATUS_VARIANT, RESOLUTION_OPTIONS,
   STEP_OUTCOME_OPTIONS, STEP_STATUS_VARIANT, personName,
-} from '../../components/labor/labels'
+} from '../../data/laborLabels'
 
 const TERMINAL = new Set(['resolved', 'withdrawn', 'denied', 'settled'])
 

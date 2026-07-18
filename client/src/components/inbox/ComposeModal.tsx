@@ -3,7 +3,7 @@ import { X, Loader2, Paperclip, FileText } from 'lucide-react'
 import { Modal } from '../ui'
 import { searchUsers, createConversation } from '../../api/inbox'
 import type { UserSearchResult, Conversation } from '../../api/inbox'
-import Avatar from '../Avatar'
+import Avatar from '../shared/Avatar'
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10 MB
 const MAX_FILE_COUNT = 5

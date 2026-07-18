@@ -1,7 +1,7 @@
 import { Pin, PinOff } from 'lucide-react'
 
-import type { ResourceKind } from '../api/resourcePins'
-import { usePinnedResources } from '../hooks/usePinnedResources'
+import type { ResourceKind } from '../../api/resourcePins'
+import { usePinnedResources } from '../../hooks/usePinnedResources'
 
 /**
  * Reusable pin/unpin toggle. Hosted inside `<Link>` rows on every

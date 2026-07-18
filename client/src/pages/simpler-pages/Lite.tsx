@@ -7,7 +7,7 @@ import MarketingNav from '../landing/MarketingNav'
 import MarketingFooter from '../landing/MarketingFooter'
 import { ComplianceTicker } from '../../components/landing/ComplianceTicker'
 import { RiskInsightsHero } from '../../components/landing/RiskInsightsHero'
-import { PricingContactModal } from '../../components/PricingContactModal'
+import { PricingContactModal } from '../../components/marketing/PricingContactModal'
 
 const INK = 'var(--color-ivory-ink)'
 const BG = 'var(--color-ivory-bg)'

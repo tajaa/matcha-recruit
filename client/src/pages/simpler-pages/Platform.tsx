@@ -5,7 +5,7 @@ import MarketingNav from '../landing/MarketingNav'
 import MarketingFooter from '../landing/MarketingFooter'
 import { LazyMount } from '../landing/LazyMount'
 import { ComplianceTicker } from '../../components/landing/ComplianceTicker'
-import { PricingContactModal } from '../../components/PricingContactModal'
+import { PricingContactModal } from '../../components/marketing/PricingContactModal'
 
 const AgentReasoningAnimation = lazy(() => import('../landing/AgentReasoningAnimation'))
 

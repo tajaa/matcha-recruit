@@ -7,7 +7,7 @@ import { HandbookSectionEditor } from '../../components/handbook/HandbookSection
 import { HandbookChangeRequests } from '../../components/handbook/HandbookChangeRequests'
 import { HandbookFreshnessPanel } from '../../components/handbook/HandbookFreshnessPanel'
 import { HandbookCoveragePanel } from '../../components/handbook/HandbookCoveragePanel'
-import { HandbookDistributeModal } from '../../components/HandbookDistributeModal'
+import { HandbookDistributeModal } from '../../components/handbook/HandbookDistributeModal'
 import { HandbookShareCard } from '../../components/handbook/HandbookShareCard'
 import type {
   HandbookDetail as HandbookDetailType,

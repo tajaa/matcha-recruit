@@ -7,7 +7,7 @@ import {
 } from '../../api/residentCare'
 import type { SafetyProgram, MvrReview, ResidentCareSummary, ProgramType, MvrStatus } from '../../types/residentCare'
 import { PROGRAM_LABELS, PROGRAM_TYPES } from '../../types/residentCare'
-import { AiSuggest } from '../../components/AiSuggest'
+import { AiSuggest } from '../../components/widgets/AiSuggest'
 
 const today = () => new Date().toISOString().slice(0, 10)
 const inputCls = 'w-full bg-zinc-900 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500'

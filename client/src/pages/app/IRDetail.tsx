@@ -17,7 +17,7 @@ import { IRInterviewScheduler } from '../../components/ir/IRInterviewScheduler'
 import { IREscalationForm } from '../../components/ir/IREscalationForm'
 import { IRCategoryDataDisplay } from '../../components/ir/IRCategoryDataDisplay'
 import IRCopilotPanel from '../../components/ir/IRCopilotPanel'
-import { UpgradeUpsellCard } from '../../components/UpgradeUpsellCard'
+import { UpgradeUpsellCard } from '../../components/shared/UpgradeUpsellCard'
 import { useMe } from '../../hooks/useMe'
 import { isIrOnlyTier, isMatchaX } from '../../utils/tier'
 import {

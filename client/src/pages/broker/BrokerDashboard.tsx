@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Users, AlertTriangle, Building2, Gauge, Loader2, AlertCircle } from 'lucide-react'
-import { ClientTable, HandbookCoverageList, SetupStatusGrid } from '../../components/broker-dashboard'
+import { ClientTable, HandbookCoverageList, SetupStatusGrid } from '../../components/broker/dashboard'
 import OutreachDrawer from '../../components/broker/action-center/OutreachDrawer'
 import { PageHeader } from '../../components/broker/PageHeader'
 import { KpiTile } from '../../components/broker/KpiTile'

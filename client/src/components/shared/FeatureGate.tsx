@@ -1,5 +1,5 @@
 import { useEffect, type ReactNode } from 'react'
-import { getMeCacheAgeMs, useMe } from '../hooks/useMe'
+import { getMeCacheAgeMs, useMe } from '../../hooks/useMe'
 import { UpgradeUpsellCard } from './UpgradeUpsellCard'
 
 const STALE_REVALIDATE_AFTER_MS = 60_000

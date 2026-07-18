@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Users, X, Send, MessageSquare } from 'lucide-react'
 import { useOnlineUsers } from '../../hooks/useOnlineUsers'
 import { createConversation } from '../../api/inbox'
-import Avatar from '../Avatar'
+import Avatar from '../shared/Avatar'
 
 export function OnlineUsersPanel() {
   const { users, loading } = useOnlineUsers()

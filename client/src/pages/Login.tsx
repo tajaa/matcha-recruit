@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate, useSearchParams, Link } from 'react-router-dom'
-import { PricingContactModal } from '../components/PricingContactModal'
+import { PricingContactModal } from '../components/marketing/PricingContactModal'
 import { api } from '../api/client'
 import { invalidateMeCache } from '../hooks/useMe'
 
