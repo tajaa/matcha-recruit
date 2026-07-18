@@ -224,7 +224,13 @@ export default function MatchaWorkList() {
             dismissedIds={taskBoard?.dismissed_ids ?? []}
             onCreateTask={async (body) => {
               const newTask = await createTask(body)
-              setTaskBoard((prev) => prev ? { ...prev, manual_items: [newTask, ...prev.manual_items], total: prev.total + 1 } : prev)
+              // The card renders even before the board has loaded (or if the
+              // fetch failed), so seed a board on null rather than bailing —
+              // otherwise the task is created server-side but stays invisible
+              // until a reload.
+              setTaskBoard((prev) => prev
+                ? { ...prev, manual_items: [newTask, ...prev.manual_items], total: prev.total + 1 }
+                : { auto_items: [], manual_items: [newTask], dismissed_ids: [], total: 1 })
             }}
             onCompleteTask={async (id) => {
               await updateTask(id, { status: 'completed' })
