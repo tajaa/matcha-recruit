@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import { HelpHint } from './HelpHint'
 import { LABEL } from '../ui/typography'
-import { fmtMoney } from '../../utils/brokerFormat'
+import { fmtMoney } from '../../utils/broker/brokerFormat'
 import type { WcPortfolioResponse, EplPortfolioResponse } from '../../types/broker'
 import type { RiskIndexPortfolio } from '../../types/riskIndex'
 

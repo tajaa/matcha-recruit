@@ -3,7 +3,7 @@ import { Sparkles } from 'lucide-react'
 import { DeltaPill } from '../DeltaPill'
 import { HelpHint } from '../HelpHint'
 import { LABEL } from '../../ui/typography'
-import { fmtMoney } from '../../../utils/brokerFormat'
+import { fmtMoney } from '../../../utils/broker/brokerFormat'
 import type { BrokerCompanyMetric, WcPortfolioRow } from '../../../types/broker'
 
 const PANEL = 'rounded-2xl border border-white/[0.06] bg-zinc-950 p-5'

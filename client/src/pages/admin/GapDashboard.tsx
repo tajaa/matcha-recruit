@@ -22,8 +22,8 @@ import { adminOnboarding } from '../../api/adminOnboarding'
 import type {
   GapDashboardResponse, ResolvedScopeMissing, GapRequirementDetail,
 } from '../../api/adminOnboarding'
-import { useEnrichStream, type EnrichEvent } from '../../hooks/useEnrichStream'
-import { useResearchGaps, type ResearchGapItem } from '../../hooks/useResearchGaps'
+import { useEnrichStream, type EnrichEvent } from '../../hooks/admin/useEnrichStream'
+import { useResearchGaps, type ResearchGapItem } from '../../hooks/admin/useResearchGaps'
 import StatutoryFitPanel from '../../features/admin-onboarding/StatutoryFitPanel'
 import GapCard, { humanizeCategory, jurisdictionLabel } from '../../features/admin-onboarding/GapCard'
 import { complexityBandClass } from './GapOverview'

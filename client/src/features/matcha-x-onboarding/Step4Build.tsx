@@ -3,7 +3,7 @@ import {
   AlertTriangle, BookOpen, CheckCircle2, FileSearch, Landmark, Loader2,
   MapPin, Play, Scale, Search, Sparkles, XCircle, Zap,
 } from 'lucide-react'
-import { useMatchaXBuildStream, type BuildEvent, type HandbookGrade } from '../../hooks/useMatchaXBuildStream'
+import { useMatchaXBuildStream, type BuildEvent, type HandbookGrade } from './useMatchaXBuildStream'
 
 type Phase = 'pending' | 'building' | 'built'
 type Tiers = { federal: boolean; state: boolean; county: boolean; city: boolean }

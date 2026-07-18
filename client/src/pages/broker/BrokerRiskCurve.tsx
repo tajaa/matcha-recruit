@@ -7,7 +7,7 @@ import {
 import { Card } from '../../components/ui'
 import { HelpHint } from '../../components/broker/HelpHint'
 import { fetchBookRiskCurve } from '../../api/riskIndex'
-import { computeWeightedBookRisk, computeBookLoss, buildLossCurve, type LossPoint } from '../../utils/bookRisk'
+import { computeWeightedBookRisk, computeBookLoss, buildLossCurve, type LossPoint } from '../../utils/broker/bookRisk'
 import type { BookRiskCurve, BookRiskClient, ExposureBasis } from '../../types/riskIndex'
 import { RISK_BAND_TONE, RISK_CONFIDENCE_TONE, EPL_BANDS } from '../../types/riskIndex'
 

@@ -2,7 +2,7 @@
 // drift from the canonical Python helper (risk_index.weighted_book_risk).
 import { describe, it, expect } from 'vitest'
 import { computeWeightedBookRisk, computeBookLoss, buildLossCurve } from './bookRisk'
-import type { BookRiskClient } from '../types/riskIndex'
+import type { BookRiskClient } from '../../types/riskIndex'
 
 function c(index: number, band: string, headcount: number | null = null, premium: number | null = null,
            confidence?: 'high' | 'moderate' | 'low'): BookRiskClient {

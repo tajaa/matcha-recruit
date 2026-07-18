@@ -4,7 +4,7 @@
 // app.matcha.services.risk_index.weighted_book_risk — keep the two in sync (the
 // vitest suite ports the same fixtures as the pytest to guard against drift).
 
-import type { BookRiskClient, ExposureBasis, WeightedBookRisk } from '../types/riskIndex'
+import type { BookRiskClient, ExposureBasis, WeightedBookRisk } from '../../types/riskIndex'
 
 const BANDS = ['strong', 'adequate', 'developing', 'exposed'] as const
 const CONFIDENCES = ['high', 'moderate', 'low'] as const
