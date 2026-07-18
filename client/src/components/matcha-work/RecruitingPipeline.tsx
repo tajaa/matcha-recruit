@@ -1,6 +1,6 @@
 import { useState, useMemo, useRef, useCallback, useEffect } from 'react'
 import { Search, Star, MapPin, ChevronDown, ChevronUp, Loader2, CheckCircle2, AlertTriangle, Video, Send, Square, CheckSquare, RefreshCw, GripVertical, Plus, Trash2, FileText, XCircle, Eye, EyeOff, RotateCcw } from 'lucide-react'
-import type { MWProject, RecruitingData } from '../../types/matcha-work'
+import type { MWProject, RecruitingData } from '../../types/matchaWork'
 import { toggleProjectShortlist, toggleProjectDismiss, rejectProjectCandidate, getProjectDetail, addProjectSectionNew, updateProjectSectionNew, deleteProjectSectionNew, updateProjectPosting } from '../../api/matchaWork'
 import { useToast } from '../ui/Toast'
 import SectionEditor from './SectionEditor'

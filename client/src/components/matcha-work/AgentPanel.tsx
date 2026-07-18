@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { ArrowLeft, Mail, RefreshCw, Loader2, Send, PenLine } from 'lucide-react'
-import type { AgentEmail } from '../../types/matcha-work'
+import type { AgentEmail } from '../../types/matchaWork'
 import { agentEmailStatus, agentConnectGmail, agentDisconnectGmail, agentFetchEmails, agentDraftReply, agentSendEmail } from '../../api/matchaWork'
 
 export default function AgentPanel() {

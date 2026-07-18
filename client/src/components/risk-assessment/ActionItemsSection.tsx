@@ -1,8 +1,8 @@
 import { useEffect, useState, useCallback } from 'react'
 import { api } from '../../api/client'
 import { Plus, Check, X, ChevronDown, ChevronRight, User, Calendar, Clock } from 'lucide-react'
-import { formatCurrency, capitalize } from '../../types/risk-assessment'
-import type { ActionItem, AssignableUser, RiskAssessment, EmployeeViolation, OpenCase } from '../../types/risk-assessment'
+import { formatCurrency, capitalize } from '../../types/riskAssessment'
+import type { ActionItem, AssignableUser, RiskAssessment, EmployeeViolation, OpenCase } from '../../types/riskAssessment'
 
 function formatStatus(status: string): string {
   return status.replace(/_/g, ' ')

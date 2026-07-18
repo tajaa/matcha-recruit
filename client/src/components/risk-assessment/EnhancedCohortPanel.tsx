@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { ScatterChart, Scatter, XAxis, YAxis, ZAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 import { api } from '../../api/client'
-import type { CohortResult } from '../../types/risk-assessment'
+import type { CohortResult } from '../../types/riskAssessment'
 import { InfoTip } from './InfoTip'
 
 type Props = { qs: string }

@@ -33,7 +33,7 @@ import type {
   MWTaskDraft,
   MWProjectTaskCreate,
   ProjectCollaborator,
-} from '../../types/matcha-work'
+} from '../../types/matchaWork'
 import { ProjectSocket } from '../../api/projectSocket'
 import { useMe } from '../../hooks/useMe'
 import KanbanCard from './KanbanCard'

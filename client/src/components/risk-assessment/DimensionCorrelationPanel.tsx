@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Scatter, XAxis, YAxis, Tooltip, ResponsiveContainer, Line, ComposedChart } from 'recharts'
 import { api } from '../../api/client'
-import { DIMENSION_LABELS, DIMENSION_ORDER, DIMENSION_COLORS } from '../../types/risk-assessment'
+import { DIMENSION_LABELS, DIMENSION_ORDER, DIMENSION_COLORS } from '../../types/riskAssessment'
 import { InfoTip } from './InfoTip'
-import type { CorrelationResult } from '../../types/risk-assessment'
+import type { CorrelationResult } from '../../types/riskAssessment'
 
 type Props = { qs: string }
 

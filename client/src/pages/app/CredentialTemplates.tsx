@@ -15,8 +15,8 @@ import type {
   RoleCategory,
   CredentialRequirementTemplate,
   PreviewResult,
-} from '../../types/credential-templates'
-import { STATUS_COLORS, PRIORITY_COLORS } from '../../types/credential-templates'
+} from '../../types/credentialTemplates'
+import { STATUS_COLORS, PRIORITY_COLORS } from '../../types/credentialTemplates'
 
 const US_STATES = [
   { value: 'AL', label: 'Alabama' }, { value: 'AK', label: 'Alaska' }, { value: 'AZ', label: 'Arizona' },

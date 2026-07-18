@@ -9,7 +9,7 @@ import {
   Send,
   X,
 } from 'lucide-react'
-import type { PresentationSlide, PresentationState } from '../../types/matcha-work'
+import type { PresentationSlide, PresentationState } from '../../types/matchaWork'
 import { getPresentationPdf } from '../../api/matchaWork'
 
 const THEMES: Record<string, { bg: string; accent: string; text: string; slideBg: string }> = {

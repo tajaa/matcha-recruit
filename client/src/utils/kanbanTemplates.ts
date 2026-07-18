@@ -1,5 +1,5 @@
 import { Hammer, DollarSign, Sparkles, Bug, FileText, Wrench, type LucideIcon } from 'lucide-react'
-import type { TaskPriority } from '../types/matcha-work'
+import type { TaskPriority } from '../types/matchaWork'
 
 export type TemplateFieldKind = 'single' | 'multi' | { picker: string[] }
 

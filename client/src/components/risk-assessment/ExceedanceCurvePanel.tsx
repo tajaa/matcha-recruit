@@ -1,6 +1,6 @@
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ReferenceLine, ResponsiveContainer } from 'recharts'
-import type { MonteCarloResult } from '../../types/risk-assessment'
-import { fmtCompact } from '../../types/risk-assessment'
+import type { MonteCarloResult } from '../../types/riskAssessment'
+import { fmtCompact } from '../../types/riskAssessment'
 import { InfoTip } from './InfoTip'
 
 type Props = { mc: MonteCarloResult }

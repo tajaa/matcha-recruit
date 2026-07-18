@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../../api/client'
-import type { AnomalyDetectionResult } from '../../types/risk-assessment'
+import type { AnomalyDetectionResult } from '../../types/riskAssessment'
 
 type Props = {
   qs: string

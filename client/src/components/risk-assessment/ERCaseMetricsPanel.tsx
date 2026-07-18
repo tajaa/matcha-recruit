@@ -3,7 +3,7 @@ import { api } from '../../api/client'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LabelList,
 } from 'recharts'
-import type { ERCaseMetrics } from '../../types/risk-assessment'
+import type { ERCaseMetrics } from '../../types/riskAssessment'
 
 const CATEGORY_COLORS = ['#f59e0b', '#ef4444', '#3b82f6', '#10b981', '#a855f7', '#f97316', '#06b6d4', '#6366f1']
 const OUTCOME_COLORS = ['#10b981', '#f59e0b', '#3b82f6', '#ef4444', '#a855f7', '#6366f1']

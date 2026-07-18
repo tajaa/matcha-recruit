@@ -4,7 +4,7 @@ import { ShieldAlert } from 'lucide-react'
 import {
   BAND_COLOR, BAND_LABEL, getBandForScore,
   type Band, type PreTermAnalytics,
-} from '../../types/risk-assessment'
+} from '../../types/riskAssessment'
 
 const OUTCOME_COLORS: Record<string, string> = {
   proceeded: '#ef4444',

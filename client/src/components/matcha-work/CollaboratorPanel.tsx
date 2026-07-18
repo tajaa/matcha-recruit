@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { X, Search, UserPlus, Crown, Users } from 'lucide-react'
 import { listCollaborators, addCollaborator, removeCollaborator } from '../../api/matchaWork'
 import { searchInvitableUsers } from '../../api/channels'
-import type { ProjectCollaborator } from '../../types/matcha-work'
+import type { ProjectCollaborator } from '../../types/matchaWork'
 
 interface Props {
   projectId: string

@@ -1,5 +1,5 @@
 import { Paperclip, RefreshCw, Calendar, ListChecks, CheckCircle2, Circle, ChevronRight, Clock } from 'lucide-react'
-import type { MWProjectTask } from '../../types/matcha-work'
+import type { MWProjectTask } from '../../types/matchaWork'
 import Avatar from '../shared/Avatar'
 import { KANBAN_COLUMNS } from '../../utils/kanbanColumns'
 import { KANBAN_TEMPLATES } from '../../utils/kanbanTemplates'

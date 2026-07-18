@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { api } from '../../api/client'
 import { Play, Loader2 } from 'lucide-react'
-import { fmtCompact } from '../../types/risk-assessment'
-import type { MonteCarloResult } from '../../types/risk-assessment'
+import { fmtCompact } from '../../types/riskAssessment'
+import type { MonteCarloResult } from '../../types/riskAssessment'
 
 type Props = {
   qs: string

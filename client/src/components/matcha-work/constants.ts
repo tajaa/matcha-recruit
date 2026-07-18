@@ -1,5 +1,5 @@
 import { Database, Shield, Stethoscope, HeartPulse, Scale, Gauge, GraduationCap, LifeBuoy } from 'lucide-react'
-import type { MWModeKey } from '../../types/matcha-work'
+import type { MWModeKey } from '../../types/matchaWork'
 
 // Grounding-mode registry — mirrors the backend
 // (server/app/matcha/services/matcha_work_modes.py THREAD_MODES).

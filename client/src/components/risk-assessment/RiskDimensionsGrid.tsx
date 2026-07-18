@@ -4,7 +4,7 @@ import {
   BAND_COLOR, BAND_LABEL, DIMENSION_LABELS, DIMENSION_HELP,
   formatCurrency,
   type Band, type DimensionResult, type CostOfRisk, type CostLineItem,
-} from '../../types/risk-assessment'
+} from '../../types/riskAssessment'
 import { HoverTip } from './InfoTip'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────

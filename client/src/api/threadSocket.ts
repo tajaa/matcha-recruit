@@ -1,4 +1,4 @@
-import type { MWMessage } from '../types/matcha-work'
+import type { MWMessage } from '../types/matchaWork'
 
 type NewMessageHandler = (messages: MWMessage[]) => void
 type TypingHandler = (user: { id: string; name: string }) => void

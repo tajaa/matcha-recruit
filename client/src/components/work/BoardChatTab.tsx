@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Loader2, Send } from 'lucide-react'
 import { getProjectDetail, getThread, sendMessageStream, createProjectChat } from '../../api/matchaWork'
-import type { MWMessage, MWStreamEvent, MWSendResponse } from '../../types/matcha-work'
+import type { MWMessage, MWStreamEvent, MWSendResponse } from '../../types/matchaWork'
 import MessageBubble from '../matcha-work/MessageBubble'
 
 interface BoardChatTabProps {

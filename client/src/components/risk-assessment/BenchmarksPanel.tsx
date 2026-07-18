@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../../api/client'
-import type { BenchmarkResult } from '../../types/risk-assessment'
+import type { BenchmarkResult } from '../../types/riskAssessment'
 
 const METRIC_LABELS: Record<string, string> = {
   incident_rate_per_100: 'Incident Rate / 100 FTE',

@@ -1,4 +1,4 @@
-import type { BoardColumn } from '../types/matcha-work'
+import type { BoardColumn } from '../types/matchaWork'
 
 /** Board lane order — matches the desktop `kanbanColumns` (todo → in_progress
  *  → review → changes_requested → done). Shared by the board and list views

@@ -14,7 +14,7 @@ import { safeUrl } from './markdownToHtml'
 import type {
   AIReasoningStep,
   ComplianceReasoningCategory,
-} from '../../types/matcha-work'
+} from '../../types/matchaWork'
 import dagre from '@dagrejs/dagre'
 
 const NODE_W = 300

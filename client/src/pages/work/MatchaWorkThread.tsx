@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { ArrowLeft, Send, Loader2, Pencil, Check, X, MapPin, Sun, Moon, Paperclip, Bot, FileText, Users, Presentation, Package, ClipboardList, Scale, BookOpen, FileCheck, MessageSquare, Briefcase, Languages } from 'lucide-react'
-import type { MWMessage, MWModeKey, MWThreadDetail, MWSendResponse, MWStreamEvent } from '../../types/matcha-work'
+import type { MWMessage, MWModeKey, MWThreadDetail, MWSendResponse, MWStreamEvent } from '../../types/matchaWork'
 import { getThread, sendMessageStream, uploadResumes, uploadInventory, sendCandidateInterviews, syncInterviewStatuses, addProjectSection, updateTitle, getPdfProxyUrl, setThreadMode, fetchUsageSummary, fetchUsageSummary24h } from '../../api/matchaWork'
 import type { UsageSummary } from '../../api/matchaWork'
 import { ThreadSocket } from '../../api/threadSocket'

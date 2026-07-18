@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { MWProjectTask, TaskPriority } from '../../types/matcha-work'
+import type { MWProjectTask, TaskPriority } from '../../types/matchaWork'
 import { KANBAN_COLUMNS } from '../../utils/kanbanColumns'
 import { taskMatches } from '../../utils/kanbanSearch'
 

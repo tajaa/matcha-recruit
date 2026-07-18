@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, ApiError } from '../../api/client'
-import type { RiskAssessment, AdminCompany } from '../../types/risk-assessment'
+import type { RiskAssessment, AdminCompany } from '../../types/riskAssessment'
 import { useMe } from '../useMe'
 
 export function useRiskAssessment() {

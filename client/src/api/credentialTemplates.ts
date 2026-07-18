@@ -6,7 +6,7 @@ import type {
   CredentialResearchLog,
   EmployeeCredentialRequirement,
   PreviewResult,
-} from '../types/credential-templates'
+} from '../types/credentialTemplates'
 
 // ── Credential Types ──
 

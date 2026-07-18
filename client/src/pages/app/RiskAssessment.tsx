@@ -12,7 +12,7 @@ import { BenchmarksPanel } from '../../components/risk-assessment/BenchmarksPane
 import { AnomaliesPanel } from '../../components/risk-assessment/AnomaliesPanel'
 import { SeparationRiskCard } from '../../components/risk-assessment/SeparationRiskCard'
 import { ERCaseMetricsPanel } from '../../components/risk-assessment/ERCaseMetricsPanel'
-import { BAND_COLOR, BAND_LABEL, type Band } from '../../types/risk-assessment'
+import { BAND_COLOR, BAND_LABEL, type Band } from '../../types/riskAssessment'
 import { useMonteCarloData } from '../../hooks/risk-assessment/useMonteCarloData'
 import { LossDistributionPanel } from '../../components/risk-assessment/LossDistributionPanel'
 import { ExceedanceCurvePanel } from '../../components/risk-assessment/ExceedanceCurvePanel'

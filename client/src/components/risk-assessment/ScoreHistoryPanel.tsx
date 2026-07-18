@@ -7,7 +7,7 @@ import {
 import {
   DIMENSION_LABELS, DIMENSION_COLORS, DIMENSION_ORDER,
   type HistoryEntry,
-} from '../../types/risk-assessment'
+} from '../../types/riskAssessment'
 
 const DIMENSION_META: Record<string, { label: string }> = Object.fromEntries(
   DIMENSION_ORDER.map(k => [k, { label: DIMENSION_LABELS[k] ?? k }])

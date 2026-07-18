@@ -3,7 +3,7 @@ import {
   Plus, Trash2, Play, ChevronDown, ChevronRight,
   Globe, Loader2, CheckCircle, Search, AlertCircle, FileOutput, Camera,
 } from 'lucide-react'
-import type { MWProject, ResearchTask, ResearchResult } from '../../types/matcha-work'
+import type { MWProject, ResearchTask, ResearchResult } from '../../types/matchaWork'
 import { useToast } from '../ui'
 import {
   createResearchTask, updateResearchTask, deleteResearchTask,

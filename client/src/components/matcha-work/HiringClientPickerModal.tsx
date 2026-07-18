@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { X, Plus, Loader2, Building2, Search } from 'lucide-react'
 import { listRecruitingClients, createRecruitingClient } from '../../api/matchaWork'
-import type { RecruitingClient } from '../../types/matcha-work'
+import type { RecruitingClient } from '../../types/matchaWork'
 
 interface Props {
   onClose: () => void

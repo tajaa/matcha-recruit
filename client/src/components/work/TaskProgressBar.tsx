@@ -1,4 +1,4 @@
-import type { MWProjectTask } from '../../types/matcha-work'
+import type { MWProjectTask } from '../../types/matchaWork'
 
 interface TaskProgressBarProps {
   tasks: MWProjectTask[]

@@ -4,7 +4,7 @@ import { Shield, ChevronDown, MapPin, Loader2 } from 'lucide-react'
 import type {
   AIReasoningStep,
   ComplianceReasoningLocation,
-} from '../../types/matcha-work'
+} from '../../types/matchaWork'
 
 const ComplianceDecisionTree = React.lazy(() => import('./ComplianceDecisionTree'))
 

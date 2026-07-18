@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 import { api } from '../../api/client'
-import type { BenchmarkResult } from '../../types/risk-assessment'
+import type { BenchmarkResult } from '../../types/riskAssessment'
 import { InfoTip } from './InfoTip'
 
 type Props = { qs: string }

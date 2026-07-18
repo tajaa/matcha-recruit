@@ -1,4 +1,4 @@
-import type { ProjectSection } from '../../types/matcha-work'
+import type { ProjectSection } from '../../types/matchaWork'
 
 /** Escape a string for safe interpolation into an HTML attribute value. */
 function escapeAttr(s: string): string {

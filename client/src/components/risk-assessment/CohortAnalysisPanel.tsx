@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../../api/client'
-import type { CohortResult } from '../../types/risk-assessment'
+import type { CohortResult } from '../../types/riskAssessment'
 
 type CohortDimension = 'department' | 'location' | 'hire_quarter' | 'tenure'
 

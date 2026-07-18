@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { ComposedChart, Line, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, Scatter } from 'recharts'
 import { api } from '../../api/client'
-import type { AnomalyDetectionResult, MetricTimeSeries } from '../../types/risk-assessment'
+import type { AnomalyDetectionResult, MetricTimeSeries } from '../../types/riskAssessment'
 import { InfoTip } from './InfoTip'
 
 type Props = { qs: string }

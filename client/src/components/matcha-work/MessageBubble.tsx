@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react'
 import { FileText, Package, PlusCircle } from 'lucide-react'
 import Markdown from 'react-markdown'
-import type { MWMessage } from '../../types/matcha-work'
+import type { MWMessage } from '../../types/matchaWork'
 import ComplianceReasoningPanel from './ComplianceReasoningPanel'
 import { safeUrl } from './markdownToHtml'
 

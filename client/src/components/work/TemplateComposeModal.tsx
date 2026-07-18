@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { X, Loader2 } from 'lucide-react'
-import type { MWProjectTaskCreate, ProjectCollaborator, BoardColumn, TaskPriority } from '../../types/matcha-work'
+import type { MWProjectTaskCreate, ProjectCollaborator, BoardColumn, TaskPriority } from '../../types/matchaWork'
 import type { KanbanTemplate } from '../../utils/kanbanTemplates'
 import { composeDescription } from '../../utils/kanbanTemplates'
 

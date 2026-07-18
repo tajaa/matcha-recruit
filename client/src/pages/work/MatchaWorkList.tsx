@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Plus, Pin, Archive, Loader2, FileText, Presentation, Users, X, Hash, Compass, ShieldAlert, KanbanSquare, Search } from 'lucide-react'
-import type { MWThread, MWProject } from '../../types/matcha-work'
+import type { MWThread, MWProject } from '../../types/matchaWork'
 import { listChannels } from '../../api/channels'
 import type { ChannelSummary } from '../../api/channels'
 import { listThreads, createThread, pinThread, archiveThread, createProjectNew, fetchTaskBoard, createTask, updateTask, deleteTask, dismissAutoTask, listProjects } from '../../api/matchaWork'

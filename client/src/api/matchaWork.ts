@@ -9,7 +9,7 @@ import type {
   MWStreamEvent,
   ResearchTask,
   ResearchInput,
-} from '../types/matcha-work'
+} from '../types/matchaWork'
 
 const BASE = import.meta.env.VITE_API_URL ?? '/api'
 
@@ -208,7 +208,7 @@ export function agentDisconnectGmail() {
 }
 
 export function agentFetchEmails() {
-  return api.post<{ emails: import('../types/matcha-work').AgentEmail[] }>('/matcha-work/agent/email/fetch')
+  return api.post<{ emails: import('../types/matchaWork').AgentEmail[] }>('/matcha-work/agent/email/fetch')
 }
 
 export function agentDraftReply(emailId: string, instructions: string) {
@@ -229,7 +229,7 @@ export function agentSendEmail(to: string, subject: string, body: string, replyT
 
 export function listProjects(status?: string) {
   const qs = status ? `?status=${encodeURIComponent(status)}` : ''
-  return api.get<import('../types/matcha-work').MWProject[]>(`/matcha-work/projects${qs}`)
+  return api.get<import('../types/matchaWork').MWProject[]>(`/matcha-work/projects${qs}`)
 }
 
 export function createProjectNew(
@@ -238,7 +238,7 @@ export function createProjectNew(
   hiringClientId?: string | null,
   template?: string | null,
 ) {
-  return api.post<import('../types/matcha-work').MWProject>('/matcha-work/projects', {
+  return api.post<import('../types/matchaWork').MWProject>('/matcha-work/projects', {
     title,
     project_type: projectType,
     hiring_client_id: hiringClientId ?? null,
@@ -248,7 +248,7 @@ export function createProjectNew(
 
 // ── Recruiting clients ──
 
-import type { RecruitingClient } from '../types/matcha-work'
+import type { RecruitingClient } from '../types/matchaWork'
 
 export function listRecruitingClients(includeArchived = false) {
   const qs = includeArchived ? '?include_archived=true' : ''
@@ -301,11 +301,11 @@ export function unarchiveRecruitingClient(id: string) {
 }
 
 export function getProjectDetail(id: string) {
-  return api.get<import('../types/matcha-work').MWProject>(`/matcha-work/projects/${id}`)
+  return api.get<import('../types/matchaWork').MWProject>(`/matcha-work/projects/${id}`)
 }
 
 export function updateProjectMeta(id: string, updates: Record<string, unknown>) {
-  return api.patch<import('../types/matcha-work').MWProject>(`/matcha-work/projects/${id}`, updates)
+  return api.patch<import('../types/matchaWork').MWProject>(`/matcha-work/projects/${id}`, updates)
 }
 
 export function archiveProjectById(id: string) {
@@ -329,33 +329,33 @@ export function reorderProjectSectionsNew(projectId: string, sectionIds: string[
 }
 
 export function editDiagramAI(projectId: string, sectionId: string, instruction: string, region?: { x: number; y: number; width: number; height: number }) {
-  return api.post<import('../types/matcha-work').MWProject>(`/matcha-work/projects/${projectId}/sections/${sectionId}/edit-diagram`, { instruction, ...(region ? { region } : {}) })
+  return api.post<import('../types/matchaWork').MWProject>(`/matcha-work/projects/${projectId}/sections/${sectionId}/edit-diagram`, { instruction, ...(region ? { region } : {}) })
 }
 
 export function editDiagramText(projectId: string, sectionId: string, edits: { old_text: string; new_text: string }[]) {
-  return api.post<import('../types/matcha-work').MWProject>(`/matcha-work/projects/${projectId}/sections/${sectionId}/edit-diagram-text`, { edits })
+  return api.post<import('../types/matchaWork').MWProject>(`/matcha-work/projects/${projectId}/sections/${sectionId}/edit-diagram-text`, { edits })
 }
 
 export function saveDiagramSVG(projectId: string, sectionId: string, svg: string) {
-  return api.post<import('../types/matcha-work').MWProject>(`/matcha-work/projects/${projectId}/sections/${sectionId}/save-diagram`, { svg })
+  return api.post<import('../types/matchaWork').MWProject>(`/matcha-work/projects/${projectId}/sections/${sectionId}/save-diagram`, { svg })
 }
 
 export function createProjectChat(projectId: string, title?: string) {
-  return api.post<import('../types/matcha-work').MWThread>(`/matcha-work/projects/${projectId}/chats`, { title })
+  return api.post<import('../types/matchaWork').MWThread>(`/matcha-work/projects/${projectId}/chats`, { title })
 }
 
 // ── Collaborators ──
 
 export function listCollaborators(projectId: string) {
-  return api.get<import('../types/matcha-work').ProjectCollaborator[]>(`/matcha-work/projects/${projectId}/collaborators`)
+  return api.get<import('../types/matchaWork').ProjectCollaborator[]>(`/matcha-work/projects/${projectId}/collaborators`)
 }
 
 export function addCollaborator(projectId: string, userId: string) {
-  return api.post<import('../types/matcha-work').ProjectCollaborator[]>(`/matcha-work/projects/${projectId}/collaborators`, { user_id: userId })
+  return api.post<import('../types/matchaWork').ProjectCollaborator[]>(`/matcha-work/projects/${projectId}/collaborators`, { user_id: userId })
 }
 
 export function removeCollaborator(projectId: string, userId: string) {
-  return api.delete<import('../types/matcha-work').ProjectCollaborator[]>(`/matcha-work/projects/${projectId}/collaborators/${userId}`)
+  return api.delete<import('../types/matchaWork').ProjectCollaborator[]>(`/matcha-work/projects/${projectId}/collaborators/${userId}`)
 }
 
 export function searchAdminUsers(query: string) {
@@ -495,7 +495,7 @@ export function extractPlaceholderValue(input: string, placeholder: string, cont
 }
 
 export function analyzeProjectCandidates(projectId: string) {
-  return api.post<{ analyzed: number; candidates: import('../types/matcha-work').ResumeCandidate[] }>(
+  return api.post<{ analyzed: number; candidates: import('../types/matchaWork').ResumeCandidate[] }>(
     `/matcha-work/projects/${projectId}/resume/analyze`
   )
 }
@@ -566,7 +566,7 @@ export function rejectProjectCandidate(
   candidateId: string,
   opts: { rejectionReason?: string; customMessage?: string; sendEmail?: boolean } = {},
 ) {
-  return api.post<{ project: import('../types/matcha-work').MWProject; email_sent: boolean }>(
+  return api.post<{ project: import('../types/matchaWork').MWProject; email_sent: boolean }>(
     `/matcha-work/projects/${projectId}/reject/${candidateId}`,
     {
       rejection_reason: opts.rejectionReason,
@@ -581,7 +581,7 @@ export function updateProjectPosting(projectId: string, posting: Record<string, 
 }
 
 export function populatePostingFromChat(projectId: string, content: string) {
-  return api.post<import('../types/matcha-work').MWProject>(
+  return api.post<import('../types/matchaWork').MWProject>(
     `/matcha-work/projects/${projectId}/posting/from-chat`,
     { content }
   )
@@ -1235,7 +1235,7 @@ import type {
   MWProjectTaskPatch,
   MWSubtask,
   MWTaskDraft,
-} from '../types/matcha-work'
+} from '../types/matchaWork'
 
 export function listProjectTasks(projectId: string) {
   return api.get<MWProjectTask[]>(`/matcha-work/projects/${projectId}/tasks`)

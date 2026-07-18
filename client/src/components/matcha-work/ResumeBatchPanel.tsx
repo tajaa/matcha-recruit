@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react'
 import { Search, ChevronDown, ChevronUp, MapPin, Briefcase, AlertTriangle, CheckCircle2, Loader2, Send, Video, Square, CheckSquare, RefreshCw } from 'lucide-react'
-import type { ResumeCandidate } from '../../types/matcha-work'
+import type { ResumeCandidate } from '../../types/matchaWork'
 
 type SortKey = 'name' | 'experience_years' | 'current_title' | 'location'
 

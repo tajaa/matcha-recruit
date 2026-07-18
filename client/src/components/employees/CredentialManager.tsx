@@ -4,8 +4,8 @@ import { useCredentialDocuments } from '../../hooks/employees/useCredentialDocum
 import { api } from '../../api/client'
 import { fetchEmployeeRequirements } from '../../api/credentialTemplates'
 import type { CredentialDocument } from '../../types/employee'
-import type { EmployeeCredentialRequirement } from '../../types/credential-templates'
-import { REQUIREMENT_STATUS_COLORS } from '../../types/credential-templates'
+import type { EmployeeCredentialRequirement } from '../../types/credentialTemplates'
+import { REQUIREMENT_STATUS_COLORS } from '../../types/credentialTemplates'
 
 const DOC_TYPE_LABELS: Record<string, string> = {
   medical_license: 'Professional License',

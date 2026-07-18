@@ -1,4 +1,4 @@
-import type { MWProjectTask } from '../types/matcha-work'
+import type { MWProjectTask } from '../types/matchaWork'
 
 /** Tokenize a kanban search query — whitespace-split AND tokens, lowercased,
  *  with `"quoted phrases"` kept as a single token. Mirrors the desktop

@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { api } from '../../api/client'
-import type { MonteCarloResult } from '../../types/risk-assessment'
+import type { MonteCarloResult } from '../../types/riskAssessment'
 
 export function useMonteCarloData(qs: string) {
   const [data, setData] = useState<MonteCarloResult | null>(null)

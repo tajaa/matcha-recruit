@@ -1,5 +1,5 @@
-import { PRIORITY_COLOR, DIMENSION_LABELS } from '../../types/risk-assessment'
-import type { Recommendation } from '../../types/risk-assessment'
+import { PRIORITY_COLOR, DIMENSION_LABELS } from '../../types/riskAssessment'
+import type { Recommendation } from '../../types/riskAssessment'
 
 type Props = {
   recommendations: Recommendation[]

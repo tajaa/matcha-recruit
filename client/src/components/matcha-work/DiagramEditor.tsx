@@ -1,7 +1,7 @@
 import { useState, useMemo, useRef, useCallback, lazy, Suspense } from 'react'
 import { Loader2, Sparkles, Type, PenTool, X, Crop } from 'lucide-react'
 import { editDiagramAI, editDiagramText, saveDiagramSVG } from '../../api/matchaWork'
-import type { MWProject } from '../../types/matcha-work'
+import type { MWProject } from '../../types/matchaWork'
 
 const Excalidraw = lazy(() =>
   import('@excalidraw/excalidraw').then((m) => ({ default: m.Excalidraw }))

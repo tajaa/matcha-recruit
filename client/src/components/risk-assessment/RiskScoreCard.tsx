@@ -2,7 +2,7 @@ import { HelpCircle } from 'lucide-react'
 import {
   BAND_COLOR, BAND_LABEL, DIMENSION_ORDER, DIMENSION_LABELS, DIMENSION_HELP,
   type Band, type DimensionResult,
-} from '../../types/risk-assessment'
+} from '../../types/riskAssessment'
 import { HoverTip } from './InfoTip'
 
 function HelpTooltip({ text }: { text: string }) {

@@ -6,7 +6,7 @@ import type {
   ProjectCollaborator,
   BoardColumn,
   TaskPriority,
-} from '../../types/matcha-work'
+} from '../../types/matchaWork'
 import { KANBAN_COLUMNS } from '../../utils/kanbanColumns'
 
 const PRIORITIES: TaskPriority[] = ['critical', 'high', 'medium', 'low']
