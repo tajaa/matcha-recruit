@@ -9,9 +9,9 @@ import RouteTracker from "./components/shared/RouteTracker";
 const AdminRoutes = lazy(() => import("./routes/AdminRoutes"));
 const AppRoutes = lazy(() => import("./routes/AppRoutes"));
 const BrokerRoutes = lazy(() => import("./routes/BrokerRoutes"));
-const WorkRoutes = lazy(() => import("./routes/WorkRoutes"));
-const WerkRoutes = lazy(() => import("./routes/WerkRoutes"));
-const WerkLiteRoutes = lazy(() => import("./routes/WerkLiteRoutes"));
+const WorkRoutes = lazy(() => import("./work/routes/WorkRoutes"));
+const WerkRoutes = lazy(() => import("./work/routes/WerkRoutes"));
+const WerkLiteRoutes = lazy(() => import("./work/routes/WerkLiteRoutes"));
 const PortalRoutes = lazy(() => import("./routes/PortalRoutes"));
 const CappeRoutes = lazy(() => import("./cappe/routes")); // Cappe — website builder (separate product)
 
@@ -77,7 +77,7 @@ const SignupPicker = lazy(() => import("./pages/auth/SignupPicker"));
 const SSOCallback = lazy(() => import("./pages/SSOCallback"));
 const BetaRegister = lazy(() => import("./pages/BetaRegister"));
 const ChannelInviteLanding = lazy(
-  () => import("./pages/work/ChannelInviteLanding"),
+  () => import("./work/pages/ChannelInviteLanding"),
 );
 const ResetPassword = lazy(() => import("./pages/ResetPassword"));
 const ERExportDownload = lazy(() => import("./pages/shared/ERExportDownload"));

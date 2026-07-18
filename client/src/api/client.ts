@@ -33,7 +33,7 @@ function _logout() {
   resetAuthCaches()
   // Best-effort cleanup of the shared channel WS. Lazy-imported to avoid
   // a circular dependency between api/client.ts and api/channelSocket.ts.
-  import('./channelSocket').then((m) => m.disconnectSharedChannelSocket()).catch(() => {})
+  import('../work/api/channelSocket').then((m) => m.disconnectSharedChannelSocket()).catch(() => {})
   // Guard against a redirect loop: a failed refresh fired from the login page
   // itself would otherwise reassign location to /login repeatedly.
   if (window.location.pathname !== '/login') {

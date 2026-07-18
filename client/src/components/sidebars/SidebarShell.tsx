@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, type ComponentType } from 'react'
 import Avatar from '../shared/Avatar'
 import { useMe } from '../../hooks/useMe'
 import { resetAuthCaches } from '../../api/authReset'
-import { disconnectSharedChannelSocket } from '../../api/channelSocket'
+import { disconnectSharedChannelSocket } from '../../work/api/channelSocket'
 import { useLayoutContext } from '../../layouts/LayoutContext'
 import ThemeToggle from '../shared/ThemeToggle'
 

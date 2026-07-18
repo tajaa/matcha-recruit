@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams } from 'react-router-dom'
 import { Loader2, Video, CheckCircle2, XCircle, AlertTriangle, Mic, MicOff, Square } from 'lucide-react'
 import { Logo } from '../../components/ui'
-import { useVoiceSession } from '../../hooks/useVoiceSession'
+import { useVoiceSession } from '../../work/hooks/useVoiceSession'
 
 const BASE = import.meta.env.VITE_API_URL ?? '/api'
 

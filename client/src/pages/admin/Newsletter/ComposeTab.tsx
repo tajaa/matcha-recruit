@@ -1,5 +1,5 @@
 import { Loader2, Plus, Send, Tag as TagIcon, Calendar, Blocks, Code2 } from 'lucide-react'
-import SectionEditor from '../../../components/matcha-work/SectionEditor'
+import SectionEditor from '../../../work/components/panels/SectionEditor'
 import { Button } from '../../../components/ui/Button'
 import { LABEL } from '../../../components/ui/typography'
 import { MobilePreview, type ViewportKey } from './MobilePreview'
