@@ -27,7 +27,7 @@ Sidebar dispatch in `client/src/components/sidebars/TenantSidebar.tsx`. Tier-che
 - Checkout: `POST /resources/checkout/lite` (`server/app/core/routes/resources.py`). Stripe webhook `checkout.session.completed` flips `enabled_features.incidents=true` — until then `MatchaLitePendingSidebar` shows the Subscribe CTA.
 - Once paid: `incidents` + `employees` + `handbooks` (handbook **generation**) on; `IrSidebar` exposes incidents, risk insights, OSHA, handbooks, employees, company. **No** handbook audit, training, discipline, or credentialing — those moved up to **Matcha-X** (the `matcha_lite` tier overlay force-asserts `training`/`discipline` off). See the tier-bundle note under Feature Flags.
 - Backend routers: `ir_incidents_router` (`/ir/incidents/*`), `ir_onboarding_router` (`/ir-onboarding/*`) in `server/app/matcha/routes/__init__.py`.
-- Onboarding: `client/src/features/ir-onboarding/IrOnboardingWizard.tsx`; completion stamps `companies.ir_onboarding_completed_at`.
+- Onboarding: `client/src/components/ir/onboarding/IrOnboardingWizard.tsx`; completion stamps `companies.ir_onboarding_completed_at`.
 - Legacy `pages/auth/IrSignup.tsx` (`tier='ir_only'`, `signup_source='ir_only_self_serve'`) still wired at `/ir/signup` for private beta — also lands on `IrSidebar`.
 
 ### Matcha Compliance — standalone self-serve compliance product
@@ -41,7 +41,7 @@ Sidebar dispatch in `client/src/components/sidebars/TenantSidebar.tsx`. Tier-che
 ### Matcha — full bespoke platform
 - Companies created with `signup_source='bespoke'` (default) by admins post-sales call, or via `BetaRegister.tsx` invite tokens.
 - Sidebar: `ClientSidebar` (Dashboard, Company, HR Ops, Compliance, Communication, Safety, AI groups).
-- Routes: `/app/*` registered in `client/src/App.tsx`.
+- Routes: `/app/*` registered in `client/src/routes/AppRoutes.tsx`.
 - Backend: everything under `server/app/matcha/` plus `server/app/core/`.
 - Per-company access via `companies.enabled_features` JSONB. When a user URL-hops to a feature they don't have, `<FeatureGate>` (`client/src/components/shared/FeatureGate.tsx`) renders `<UpgradeUpsellCard>` instead of a 403.
 
@@ -152,33 +152,34 @@ server/
 ├── tests/
 └── alembic/
 
-client/src/
-├── api/                            # API client layer (client.ts, chatClient.ts, etc.)
-├── components/                     # Shared + product-specific UI
-│   ├── ClientSidebar.tsx           # Full Matcha platform sidebar
-│   ├── TenantSidebar.tsx           # Dispatcher → ClientSidebar / IrSidebar / ResourcesFreeSidebar
-│   ├── AdminSidebar.tsx, BrokerSidebar.tsx
-│   ├── FeatureGate.tsx, UpgradeUpsellCard.tsx
-│   ├── ir-only/                    # IrSidebar + lite-tier shells
-│   ├── resources-free/             # Free-tier sidebar + upgrade panel
-│   ├── channels/, inbox/, work/    # Matcha-work surfaces
-│   ├── ir/, er/, compliance/, employees/, dashboard/, handbook/, …
-│   └── ui/                         # Generic primitives (Button, Input, …)
-├── features/                       # Feature-based modules
-│   ├── discipline/
-│   └── ir-onboarding/
-├── hooks/                          # Domain-specific hooks
-│   ├── compliance/, discipline/, employees/, er/, ir/, risk-assessment/
-│   └── single-file utilities (useMe, useChannelNotifications, useSidebarBadges, …)
-├── layouts/                        # WorkLayout, etc.
-├── pages/                          # Route-level pages
-│   ├── admin/, app/, auth/, broker/, landing/, shared/, work/
-│   └── BetaRegister.tsx, Login.tsx, Landing.tsx, ResetPassword.tsx, SSOCallback.tsx
-├── types/                          # Shared TypeScript types
+client/src/                         # app-first: cappe/ and work/ are self-contained
+├── cappe/                          # Cappe app — own api/pages/routes/layout/hooks
+├── work/                           # matcha-work / werk / werk-lite — own api/pages/routes
+│                                   # ── everything below is Matcha, the risk platform ──
+├── api/                            # client.ts (THE http helper) + infra at root;
+│   └── <domain>/                   # one folder per domain, named to match components/
+├── components/
+│   ├── ui/                         # Generic primitives (Button, Input, …)
+│   ├── shared/                     # App-wide infra chrome (FeatureGate, ErrorBoundary, …)
+│   ├── widgets/                    # Reusable content widgets (AiSuggest, NoteThread, …)
+│   ├── sidebars/                   # ClientSidebar, TenantSidebar (tier dispatcher), Admin, Broker
+│   ├── tier-sidebars/              # Ir / MatchaLitePending / ResourcesFree / Compliance shells
+│   └── <domain>/                   # ir/, er/, compliance/, employees/, discipline/, matcha-x/, …
+│                                   # onboarding flows live in <domain>/onboarding/
+├── hooks/                          # useMe (THE auth state) + domain subdirs
+├── routes/                         # Per-app route trees (AppRoutes, AdminRoutes, …)
+├── layouts/                        # AppLayout
+├── pages/
+│   ├── app/<domain>/               # /app/* grouped by domain; AppRoutes.tsx is sole importer
+│   ├── admin/, broker/             # still flat — deferred on purpose
+│   └── auth/, home/, landing/, portal/, shared/, simpler-pages/
+├── types/                          # Shared TypeScript types — <domain>.ts
 ├── utils/                          # Pure utilities (incl. tier.ts)
 ├── data/                           # Static / seed data
 └── generated/                      # Auto-generated types (do not edit)
 ```
+
+Placement rules, boundary rules between the three apps, and the deferred/follow-up list live in `client/CLAUDE.md`.
 
 ## Frontend ↔ Backend Connection
 
@@ -434,8 +435,7 @@ Quick lookup for frequently-touched code. Saves grepping the same things repeate
 - Policy mapping helpers → `server/app/matcha/routes/ir_incidents/ai_analysis.py:_auto_map_policy_violations` + `_get_handbook_policy_entries`
 - Anonymous IR intake → `server/app/matcha/routes/inbound_email.py` (public `/report/:token` endpoint)
 - Anonymous report token mgmt → `server/app/matcha/routes/ir_incidents/anonymous_reporting.py`
-- IR detail page → `client/src/pages/app/IRDetail.tsx`
-- Security survey question bank → `client/src/components/ir/data/security_survey_questions.ts` (IDs are persisted in `ir_surveys.responses` JSONB — keep stable)
+- IR detail page → `client/src/pages/app/ir/IRDetail.tsx`
 
 ### Employees
 
@@ -485,7 +485,7 @@ Quick lookup for frequently-touched code. Saves grepping the same things repeate
 ### Routing assembly
 
 - Backend route aggregator → `server/app/matcha/routes/__init__.py`
-- Frontend route registration → `client/src/App.tsx`
+- Frontend route registration → `client/src/routes/AppRoutes.tsx` (per-app trees in `client/src/routes/`; `App.tsx` is the composition root)
 - IR-incidents package router → `server/app/matcha/routes/ir_incidents/__init__.py` (re-exports `crud.router` as the package router)
 
 ## Claude Code Setup

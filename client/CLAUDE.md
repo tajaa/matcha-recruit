@@ -40,26 +40,38 @@ client/src/
 │
 ├── ── MATCHA (main app) — everything below is the risk platform ──
 ├── api/                     client.ts (THE http helper), errorReporter, authReset, resourcePins,
-│   │                        profileResume (shared w/ work); domain subfolders:
-│   └── risk/ hr/ admin/ billing/ broker/ compliance/
+│   │                        profileResume (shared w/ work); domain subfolders — one per
+│   │                        domain, named to match components/ and pages/app/:
+│   └── admin/ analysis-pilot/ billing/ broker/ compliance/ dashboard/ discipline/
+│       employees/ handbook-pilot/ labor/ legal-defense/ limit-adequacy/ matcha-x/
+│       portal/ property/ risk/ training/
 ├── components/
 │   ├── ui/                  Generic primitives (Button, Input, Modal, …) — the shared design system
 │   ├── sidebars/            AdminSidebar, BrokerSidebar, ClientSidebar (full platform),
 │   │                        TenantSidebar (tier dispatcher), SidebarShell, nav-icons
 │   ├── tier-sidebars/       Below-full-platform tiers: IrSidebar/MatchaXSidebar/ComplianceSidebar + panels
-│   ├── shared/              App-wide singletons: ErrorBoundary, FeatureGate, UpgradeUpsellCard,
+│   ├── shared/              App-wide infra chrome — wraps or decorates the whole app, one
+│   │                        instance: ErrorBoundary, FeatureGate, UpgradeUpsellCard,
 │   │                        ThemeToggle, RouteTracker, Avatar, HelpAssistant
-│   ├── widgets/             Generic reusable widgets: AiSuggest, NoteThread, PinButton, …
+│   ├── widgets/             Content widgets a page drops into its own body:
+│   │                        AiSuggest, NoteThread, PinButton, PinnedResourcesPanel
 │   ├── marketing/           Public widgets: BlogComments, NewsletterSignup, PricingContactModal
-│   ├── ir/ compliance/ employees/ dashboard/ handbook/ broker/ er/ …   domain modules
+│   ├── ir/ compliance/ employees/ dashboard/ handbook/ broker/ er/ discipline/
+│   │   matcha-x/ …          domain modules; onboarding flows live in <domain>/onboarding/
 │   └── auth/                RequireBusinessAccount, RequireRole, login forms
-├── features/               Feature modules: discipline/, ir-onboarding/, matcha-x-onboarding/, admin-onboarding/
 ├── hooks/                  useMe (THE auth state) + shared hooks at root; domain subdirs
 │   │                        (ir/ er/ compliance/ discipline/ employees/ risk-assessment/ training/ admin/)
 ├── layouts/                AppLayout (Cappe/Work layouts live in their own app folders now)
 ├── pages/                  app/ admin/ broker/ portal/ auth/ shared/ landing/ home/ simpler-pages/
 │   │                        + loose: BetaRegister, Login, ResetPassword, SSOCallback
 │   │                        (page DIRS are lowercase-kebab; component FILES stay PascalCase)
+│   ├── app/<domain>/        /app/* grouped by domain — analysis-pilot, ask-expert, billing,
+│   │                        compliance, dashboard, discipline, employees, er, handbook,
+│   │                        handbook-pilot, ir, labor, legal-defense, limit-adequacy,
+│   │                        property, risk, risk-assessment, settings, training.
+│   │                        routes/AppRoutes.tsx is the ONLY importer of this tree.
+│   └── admin/ broker/       still flat (76 + 40 files) — deferred on purpose, not an
+│                            oversight. Leave alone unless doing that pass deliberately.
 ├── types/                  Shared TS types (camelCase filenames)
 ├── utils/                  Pure utilities: tier.ts, theme, dateFormat, staleChunk, usageTracker,
 │   │                        pcmToWav, + broker/ subdir
@@ -84,10 +96,17 @@ client/src/
   - work→matcha (reverse): `MatchaWorkThread` → `api/compliance` + `types/compliance`;
     `TaskBoard` → `types/dashboard`; `channels/JobPostingDetail` → `api/profileResume`
 - **Within matcha, `components/` root holds only subject-area folders** — no loose files. New
-  component placement: product-tier sidebar → `sidebars/`/`tier-sidebars/`; app-wide singleton →
-  `shared/`; product-agnostic reusable → `widgets/`; else the relevant domain folder.
+  component placement: product-tier sidebar → `sidebars/`/`tier-sidebars/`; app-wide infra chrome
+  → `shared/`; reusable content widget → `widgets/`; else the relevant domain folder. If you'd
+  render several of them on one page, it's a `widgets/` item, not a `shared/` one.
+- **An onboarding or wizard flow for domain X goes in `components/<x>/onboarding/`** — not a
+  top-level folder of its own. (There is no `features/` tree; it was dissolved because none of
+  its modules was a real vertical slice — each kept its hooks in `hooks/<domain>/` and its api
+  client in `api/<domain>/`, so it was a second organizing axis that earned nothing.)
 - **New api client** goes in the app's `api/` (work/cappe) or a matcha `api/<domain>/` subfolder;
-  `api/` root is cross-cutting infra only.
+  `api/` root is cross-cutting infra only. Domain folder names match `components/`. Dir-name-
+  repeats-filename (`api/discipline/discipline.ts`) is the convention, not an accident.
+- **New page** goes in `pages/app/<domain>/` and is registered in `routes/AppRoutes.tsx`.
 
 ## Conventions
 
@@ -110,6 +129,10 @@ client/src/
 - `strict: true` in `tsconfig.json`. No `any` in new code; use `unknown` and narrow.
 - Generated types under `src/generated/` come from a tooling step — don't hand-edit.
 - Shared API response types live in `src/types/<domain>.ts`. Use them on `api.get<T>(...)` calls.
+  **Don't export a domain type from a page or an api module.** 9 modules still do — e.g.
+  `AccommodationCase` in `pages/app/employees/AccommodationDetail.tsx` and `Quote`/`QuotableLine`/
+  `QuotePayload` in `api/risk/insurance.ts`. Hoisting them is a known follow-up (its own PR); don't
+  fix them piecemeal, and don't add new ones.
 - Prefer `type` aliases over `interface` for response shapes; reserve `interface` for component props (consistent with codebase style).
 
 **Components**:
