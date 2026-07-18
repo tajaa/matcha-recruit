@@ -16,7 +16,7 @@ from fastapi.exceptions import RequestValidationError
 from starlette.requests import Request
 
 from app.matcha.routes.ir_incidents import _shared
-from app.matcha.routes.inbound_email import _parse_intake_body
+from app.matcha.routes.intake.inbound_email import _parse_intake_body
 
 
 def _make_request(body: bytes, content_type: str) -> Request:

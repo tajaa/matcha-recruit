@@ -153,7 +153,7 @@ import asyncio
 
 import pytest
 
-from app.matcha.routes import broker_pilot as bpr
+from app.matcha.routes.broker import pilot as bpr
 
 
 class _CountingConn:
