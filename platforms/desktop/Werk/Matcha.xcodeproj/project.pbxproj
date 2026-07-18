@@ -242,7 +242,21 @@
 		PRDV000000000000000000B1 /* ProductivityModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = PRDV000000000000000000B2 /* ProductivityModels.swift */; };
 		PRDV000000000000000000B3 /* MatchaWorkService+Productivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = PRDV000000000000000000B4 /* MatchaWorkService+Productivity.swift */; };
 		PRDV000000000000000000B5 /* ProductivityWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = PRDV000000000000000000B6 /* ProductivityWorkspace.swift */; };
+		BC01DD22EE33FF44551100C0 /* ServiceCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC01DD22EE33FF44551100B0 /* ServiceCacheTests.swift */; };
+		BC01DD22EE33FF44551100C1 /* WorkDetailVMStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC01DD22EE33FF44551100B1 /* WorkDetailVMStoreTests.swift */; };
+		BC01DD22EE33FF44551100C2 /* APIErrorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC01DD22EE33FF44551100B2 /* APIErrorTests.swift */; };
+		BC01DD22EE33FF44551100C3 /* CacheKeyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC01DD22EE33FF44551100B3 /* CacheKeyTests.swift */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		BC01DD22EE33FF44551100A9 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 9E88446A3F44B57E975BE17B /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = EAD6E01D8FE688AA86861CC7;
+			remoteInfo = Matcha;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
 		0273A4834997732F3B373320 /* AppState+Theme.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "AppState+Theme.swift"; sourceTree = "<group>"; };
@@ -468,6 +482,11 @@
 		PRDV000000000000000000B2 /* ProductivityModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ProductivityModels.swift; path = Matcha/Models/MatchaWork/ProductivityModels.swift; sourceTree = SOURCE_ROOT; };
 		PRDV000000000000000000B4 /* MatchaWorkService+Productivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "MatchaWorkService+Productivity.swift"; path = "Matcha/Services/MatchaWorkService+Productivity.swift"; sourceTree = SOURCE_ROOT; };
 		PRDV000000000000000000B6 /* ProductivityWorkspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ProductivityWorkspace.swift; path = Matcha/Views/Productivity/ProductivityWorkspace.swift; sourceTree = SOURCE_ROOT; };
+		BC01DD22EE33FF44551100B0 /* ServiceCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServiceCacheTests.swift; sourceTree = "<group>"; };
+		BC01DD22EE33FF44551100B1 /* WorkDetailVMStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkDetailVMStoreTests.swift; sourceTree = "<group>"; };
+		BC01DD22EE33FF44551100B2 /* APIErrorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIErrorTests.swift; sourceTree = "<group>"; };
+		BC01DD22EE33FF44551100B3 /* CacheKeyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CacheKeyTests.swift; sourceTree = "<group>"; };
+		BC01DD22EE33FF44551100A2 /* MatchaTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MatchaTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -485,6 +504,13 @@
 			files = (
 				AA70EF5F7A555C4FF52A09CA /* Foundation.framework in Frameworks */,
 				8D8634B4FA61331B0FC68AA5 /* LiveKit in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		BC01DD22EE33FF44551100A4 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -507,6 +533,7 @@
 			isa = PBXGroup;
 			children = (
 				564E3C3CDF69E05F3D1338CB /* Matcha.app */,
+				BC01DD22EE33FF44551100A2 /* MatchaTests.xctest */,
 				740AA245B1A783D2EF2D0E49 /* WerkiOS.app */,
 				31FEFD53712CE1C7487EB098 /* WerkiOS.app */,
 				95462616CF3E49D2E1B4E99D /* WerkiOS.app */,
@@ -532,6 +559,7 @@
 			isa = PBXGroup;
 			children = (
 				A6EBBB116F8E23175474B629 /* Matcha */,
+				BC01DD22EE33FF44551100A0 /* MatchaTests */,
 				1E78B559816E575FC0BDB29C /* Products */,
 				54917CD963D91BE37B94696B /* Frameworks */,
 				3E3B096AAEBCC1F54DB55EC9 /* WerkiOS */,
@@ -1025,6 +1053,17 @@
 			path = People;
 			sourceTree = "<group>";
 		};
+		BC01DD22EE33FF44551100A0 /* MatchaTests */ = {
+			isa = PBXGroup;
+			children = (
+				BC01DD22EE33FF44551100B0 /* ServiceCacheTests.swift */,
+				BC01DD22EE33FF44551100B1 /* WorkDetailVMStoreTests.swift */,
+				BC01DD22EE33FF44551100B2 /* APIErrorTests.swift */,
+				BC01DD22EE33FF44551100B3 /* CacheKeyTests.swift */,
+			);
+			path = MatchaTests;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -1069,6 +1108,23 @@
 			productReference = 564E3C3CDF69E05F3D1338CB /* Matcha.app */;
 			productType = "com.apple.product-type.application";
 		};
+		BC01DD22EE33FF44551100A1 /* MatchaTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = BC01DD22EE33FF44551100A5 /* Build configuration list for PBXNativeTarget "MatchaTests" */;
+			buildPhases = (
+				BC01DD22EE33FF44551100A3 /* Sources */,
+				BC01DD22EE33FF44551100A4 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				BC01DD22EE33FF44551100A8 /* PBXTargetDependency */,
+			);
+			name = MatchaTests;
+			productName = MatchaTests;
+			productReference = BC01DD22EE33FF44551100A2 /* MatchaTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -1081,6 +1137,10 @@
 				TargetAttributes = {
 					EAD6E01D8FE688AA86861CC7 = {
 						CreatedOnToolsVersion = 15.0;
+					};
+					BC01DD22EE33FF44551100A1 = {
+						CreatedOnToolsVersion = 15.0;
+						TestTargetID = EAD6E01D8FE688AA86861CC7;
 					};
 				};
 			};
@@ -1101,6 +1161,7 @@
 			projectRoot = "";
 			targets = (
 				EAD6E01D8FE688AA86861CC7 /* Matcha */,
+				BC01DD22EE33FF44551100A1 /* MatchaTests */,
 				DDB398464846E88CD25795A7 /* WerkiOS */,
 			);
 		};
@@ -1387,7 +1448,26 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		BC01DD22EE33FF44551100A3 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				BC01DD22EE33FF44551100C0 /* ServiceCacheTests.swift in Sources */,
+				BC01DD22EE33FF44551100C1 /* WorkDetailVMStoreTests.swift in Sources */,
+				BC01DD22EE33FF44551100C2 /* APIErrorTests.swift in Sources */,
+				BC01DD22EE33FF44551100C3 /* CacheKeyTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		BC01DD22EE33FF44551100A8 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = EAD6E01D8FE688AA86861CC7 /* Matcha */;
+			targetProxy = BC01DD22EE33FF44551100A9 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		06638E962A6E8E2ACAE332C2 /* Debug */ = {
@@ -1548,6 +1628,50 @@
 			};
 			name = Release;
 		};
+		BC01DD22EE33FF44551100A6 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 5D6TJVCPBK;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.matchawork.app.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Matcha.app/Contents/MacOS/Matcha";
+			};
+			name = Debug;
+		};
+		BC01DD22EE33FF44551100A7 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 5D6TJVCPBK;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.matchawork.app.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Matcha.app/Contents/MacOS/Matcha";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -1574,6 +1698,15 @@
 			buildConfigurations = (
 				C6F7D77CFEE3F3714426E427 /* Debug */,
 				9F8E5B827E07885EFAD454FC /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		BC01DD22EE33FF44551100A5 /* Build configuration list for PBXNativeTarget "MatchaTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				BC01DD22EE33FF44551100A6 /* Debug */,
+				BC01DD22EE33FF44551100A7 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
