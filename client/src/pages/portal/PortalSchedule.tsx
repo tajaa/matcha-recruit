@@ -3,7 +3,7 @@ import { CalendarClock, Loader2, X, Check, Repeat, LogOut, CalendarOff, AlertTri
 import { useToast } from '../../components/ui'
 import {
   fetchMySchedule, fetchMyRequests, createMyRequest, cancelMyRequest,
-} from '../../api/hr/employeeSchedule'
+} from '../../api/employees/employeeSchedule'
 import type { Shift, ScheduleRequest } from '../../types/employeeSchedule'
 import {
   REQUEST_TONE, errorMessage, fmtTime, fmtDayLabel as fmtDay, addDays, toISODate,

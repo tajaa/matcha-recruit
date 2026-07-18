@@ -9,7 +9,7 @@ import {
   triggerResearch,
   deleteTemplate,
   previewRequirements,
-} from '../../../api/hr/credentialTemplates'
+} from '../../../api/employees/credentialTemplates'
 import type {
   CredentialType,
   RoleCategory,

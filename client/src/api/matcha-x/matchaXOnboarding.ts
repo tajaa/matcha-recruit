@@ -1,7 +1,7 @@
 /**
  * Typed wrappers for the Matcha-X self-serve onboarding wizard backend
  * (/api/matcha-x-onboarding/*). The live "build" finale is consumed as an SSE
- * stream via fetch + ReadableStream (see hooks/useMatchaXBuildStream) — only the
+ * stream via fetch + ReadableStream (see components/matcha-x/onboarding/useMatchaXBuildStream) — only the
  * status/complete/upload helpers go through the `api` client here.
  */
 

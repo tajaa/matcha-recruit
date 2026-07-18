@@ -1,6 +1,6 @@
 import { useState, type ChangeEvent } from 'react'
 import { Upload, Download, Loader2, X, Check, AlertCircle, Sparkles, Trash2 } from 'lucide-react'
-import { downloadBuildingTemplate, bulkUploadBuildings, parseSovFile, bulkInsertBuildings } from '../../api/risk/property'
+import { downloadBuildingTemplate, bulkUploadBuildings, parseSovFile, bulkInsertBuildings } from '../../api/property/property'
 import type { BuildingPayload, BulkUploadResult, ConstructionType } from '../../types/property'
 import { CONSTRUCTION_LABEL } from '../../types/property'
 

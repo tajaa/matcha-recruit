@@ -2,7 +2,7 @@ import { useState, useEffect, Fragment, type FormEvent } from 'react'
 import { Building2, Plus, Loader2, AlertCircle, Pencil, Trash2, X, ChevronDown, ChevronRight, Upload } from 'lucide-react'
 import { Card } from '../../../components/ui'
 import { SovImportModal } from '../../../components/property/SovImportModal'
-import { fetchPropertySov, createBuilding, updateBuilding, deleteBuilding } from '../../../api/risk/property'
+import { fetchPropertySov, createBuilding, updateBuilding, deleteBuilding } from '../../../api/property/property'
 import type { PropertySov, PropertyBuilding, BuildingPayload, ConstructionType } from '../../../types/property'
 import { CONSTRUCTION_LABEL, COPE_TONE, PERIL_TONE, READINESS_TONE, FIX_SEVERITY_TONE, RISK_LEVEL_TONE } from '../../../types/property'
 

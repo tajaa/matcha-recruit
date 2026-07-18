@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { GraduationCap, AlertCircle, CheckCircle2, FileSignature, Loader2, Download } from 'lucide-react'
 import { Card, Badge, Button } from '../../components/ui'
-import { employeeTrainingApi, type MyTrainingRecord } from '../../api/hr/training'
-import { portalDocumentsApi, type EmployeeDocument } from '../../api/hr/portalDocuments'
+import { employeeTrainingApi, type MyTrainingRecord } from '../../api/training/training'
+import { portalDocumentsApi, type EmployeeDocument } from '../../api/portal/portalDocuments'
 import { formatDateOnly } from '../../utils/dateFormat'
 
 export default function PortalDashboard() {

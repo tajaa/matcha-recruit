@@ -5,7 +5,7 @@ import { fetchClientLimitAdequacy, downloadClientLimits } from '../../../api/bro
 import {
   uploadBrokerContract, updateBrokerContract, confirmBrokerContract,
   fetchBrokerContractReview, downloadBrokerContractReviewPdf, fetchBrokerContractSourceUrl,
-} from '../../../api/risk/limitAdequacy'
+} from '../../../api/limit-adequacy/limitAdequacy'
 import type { LimitReview, CoverageCatalogEntry } from '../../../types/limitAdequacy'
 import { LIMIT_STATUS_LABEL, fmtMoney } from '../../../types/limitAdequacy'
 import { ContractsPanel } from '../../../components/limit-adequacy/ContractsPanel'

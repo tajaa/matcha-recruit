@@ -3,7 +3,7 @@ import {
   Accessibility, Bell, BookMarked, BookOpenCheck, FileSignature, Gavel, GraduationCap,
   HardHat, Landmark, ScrollText, Users,
 } from 'lucide-react'
-import type { Matter, MatterType } from '../../../api/hr/legalDefense'
+import type { Matter, MatterType } from '../../../api/legal-defense/legalDefense'
 
 export const MATTER_TYPES: { value: MatterType; label: string }[] = [
   { value: 'class_action', label: 'Class action' },

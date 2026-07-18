@@ -10,7 +10,7 @@ import {
   type LessonResponse,
   type QuizResult,
   type AttestResult,
-} from '../../api/hr/training'
+} from '../../api/training/training'
 
 type Stage = 'loading' | 'not_started' | 'in_progress' | 'quiz' | 'pass_attest' | 'completed' | 'failed'
 

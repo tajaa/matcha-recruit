@@ -6,7 +6,7 @@ import { useDisciplinePolicies } from '../../../hooks/discipline/useDiscipline'
 import type {
   DisciplinePolicy,
   DisciplineSeverity,
-} from '../../../api/hr/discipline'
+} from '../../../api/discipline/discipline'
 
 const SEVERITIES: { value: DisciplineSeverity; label: string }[] = [
   { value: 'minor', label: 'Minor' },

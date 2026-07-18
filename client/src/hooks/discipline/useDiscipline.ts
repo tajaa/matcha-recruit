@@ -8,7 +8,7 @@ import {
   type DisciplineIssueInput,
   type DisciplinePolicy,
   type DisciplineAuditEntry,
-} from '../../api/hr/discipline'
+} from '../../api/discipline/discipline'
 
 export function useDisciplineList(initialStatus: DisciplineStatus | undefined = undefined) {
   const [records, setRecords] = useState<DisciplineRecord[]>([])

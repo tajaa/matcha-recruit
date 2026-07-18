@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Loader2, Scale, Send, ShieldAlert } from 'lucide-react'
-import type { EvidencePreview, MatterMessage, MatterType } from '../../../api/hr/legalDefense'
+import type { EvidencePreview, MatterMessage, MatterType } from '../../../api/legal-defense/legalDefense'
 import { CID_KIND_LABEL, DISCLAIMER, LABEL, startersFor, fmtWhen, type CidInfo } from './shared'
 import { RecordViewer, type ViewerTarget } from './RecordViewer'
 

@@ -3,8 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import { Badge, Button, Card, Input, Modal, PillTabs, Select, Textarea } from '../../../components/ui'
 import { Handshake, Plus, Loader2, AlertTriangle, FileText, CalendarClock } from 'lucide-react'
 import { api } from '../../../api/client'
-import { laborApi } from '../../../api/hr/laborClient'
-import type { CBA, Grievance, GrievanceDashboard, GrievanceType } from '../../../api/hr/laborClient'
+import { laborApi } from '../../../api/labor/laborClient'
+import type { CBA, Grievance, GrievanceDashboard, GrievanceType } from '../../../api/labor/laborClient'
 import {
   CBA_STATUS_VARIANT, GRIEVANCE_STATUS_LABEL, GRIEVANCE_STATUS_VARIANT,
   GRIEVANCE_TYPE_OPTIONS, personName,

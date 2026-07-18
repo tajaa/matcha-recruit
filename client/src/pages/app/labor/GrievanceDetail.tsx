@@ -4,10 +4,10 @@ import { Badge, Button, Card, FileUpload, Modal, Select, Textarea } from '../../
 import {
   ArrowLeft, Loader2, Sparkles, AlertTriangle, ChevronRight, FileText, Send, Upload, Download,
 } from 'lucide-react'
-import { laborApi, streamGrievanceMerit } from '../../../api/hr/laborClient'
+import { laborApi, streamGrievanceMerit } from '../../../api/labor/laborClient'
 import type {
   Clause, GrievanceDetail as GrievanceDetailType, GrievanceResolution, GrievanceStep, StepOutcome,
-} from '../../../api/hr/laborClient'
+} from '../../../api/labor/laborClient'
 import {
   GRIEVANCE_STATUS_LABEL, GRIEVANCE_STATUS_VARIANT, RESOLUTION_OPTIONS,
   STEP_OUTCOME_OPTIONS, STEP_STATUS_VARIANT, personName,

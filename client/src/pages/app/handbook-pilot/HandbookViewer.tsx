@@ -12,7 +12,7 @@ import {
   getPilotHandbook, runComplianceScan, updatePilotDraft,
   type AssembledHandbook, type AssembledSection, type ComplianceScanResult, type ComplianceGap,
   type CoverageEntry,
-} from '../../../api/hr/handbookPilot'
+} from '../../../api/handbook-pilot/handbookPilot'
 import { HelpHint } from '../../../components/ui/HelpHint'
 import RequirementsPanel, { SEVERITY_STYLE } from './RequirementsPanel'
 

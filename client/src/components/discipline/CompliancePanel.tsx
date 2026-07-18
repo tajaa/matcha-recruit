@@ -1,6 +1,6 @@
 import { AlertTriangle, ShieldAlert, ShieldCheck, Loader2 } from 'lucide-react'
 import { Textarea } from '../../components/ui'
-import type { ComplianceVerdict } from '../../api/hr/discipline'
+import type { ComplianceVerdict } from '../../api/discipline/discipline'
 
 type Props = {
   verdict: ComplianceVerdict | null

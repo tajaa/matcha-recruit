@@ -6,13 +6,13 @@ import {
   useDisciplinePolicies,
   useDisciplineRecommendation,
 } from '../../hooks/discipline/useDiscipline'
-import { disciplineApi } from '../../api/hr/discipline'
+import { disciplineApi } from '../../api/discipline/discipline'
 import type {
   ComplianceVerdict,
   DisciplineLevel,
   DisciplineSeverity,
   DisciplineRecord,
-} from '../../api/hr/discipline'
+} from '../../api/discipline/discipline'
 import CompliancePanel from './CompliancePanel'
 import { Loader2, Plus, Sparkles, X } from 'lucide-react'
 

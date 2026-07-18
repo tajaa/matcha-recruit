@@ -4,8 +4,8 @@ import { Badge, Button, Card, FileUpload, Input, Modal, Select, Textarea } from 
 import {
   ArrowLeft, Loader2, Upload, Download, Sparkles, Plus, Trash2, Check, ShieldCheck, AlertTriangle,
 } from 'lucide-react'
-import { laborApi } from '../../../api/hr/laborClient'
-import type { CBADetail as CBADetailType, Clause, ClauseCategory } from '../../../api/hr/laborClient'
+import { laborApi } from '../../../api/labor/laborClient'
+import type { CBADetail as CBADetailType, Clause, ClauseCategory } from '../../../api/labor/laborClient'
 import { CBA_STATUS_VARIANT, CLAUSE_CATEGORY_LABEL, CLAUSE_CATEGORY_OPTIONS } from '../../../data/laborLabels'
 
 export default function CBADetail() {

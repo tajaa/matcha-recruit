@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Loader2, X } from 'lucide-react'
-import { matchaXOnboarding, type MatchaXStep } from '../../../api/billing/matchaXOnboarding'
+import { matchaXOnboarding, type MatchaXStep } from '../../../api/matcha-x/matchaXOnboarding'
 import Step1Locations from './Step1Locations'
 import Step2Policies from './Step2Policies'
 import Step3People from './Step3People'

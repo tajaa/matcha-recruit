@@ -5,7 +5,7 @@ import { Button } from '../../../components/ui'
 
 import { useMe } from '../../../hooks/useMe'
 import { isIrOnlyTier } from '../../../utils/tier'
-import { fetchDashboardStats, fetchDashboardFlags, analyzeDashboardFlags } from '../../../api/hr/dashboard'
+import { fetchDashboardStats, fetchDashboardFlags, analyzeDashboardFlags } from '../../../api/dashboard/dashboard'
 
 import {
   ProfileBanner,
