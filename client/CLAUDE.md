@@ -2,62 +2,92 @@
 
 React 18 + TypeScript + Vite + Tailwind. Single SPA served at `/`; backend API at `/api` (proxied in dev via Vite, served by Nginx in prod).
 
-## Layout
+## Layout — app-first
+
+Three products share this SPA. Each guest app is a **self-contained vertical slice** under its
+own top-level folder; **Matcha** (the main HR/risk platform) keeps the classic
+`pages/`/`components/`/`api/`… tree at the root. `App.tsx` + `main.tsx` are the shared
+composition root that dispatches between them (host axis for Cappe, route-prefix axis for the
+rest — see "Routing" below).
 
 ```
 client/src/
-├── App.tsx                  Route registration. Tier-routed via TenantSidebar.
-├── main.tsx                 Vite entry
+├── App.tsx, main.tsx        Composition root: host + route-prefix dispatch, shell providers
 ├── index.css                Tailwind directives + global styles
-├── api/                     API client layer
-│   ├── client.ts            api.get/post/put/delete + 401 refresh
-│   └── <domain>.ts          Per-domain helpers (typed wrappers) — flat, no chat-specific client file
+│
+├── cappe/                   ← CAPPE app (website builder, host-routed on gummfit.com)
+│   ├── routes.tsx           Route tree (mounted by App.tsx on /cappe/* and on the cappe host apex)
+│   ├── layout/              CappeLayout
+│   ├── pages/               incl. site/ + site/PageEditor/
+│   ├── components/          incl. its OWN ui.ts + CappeSidebar (parallel stack, not shared UI)
+│   ├── onboarding/          CappeOnboardingWizard
+│   ├── api.ts               cappeApi (own http client — NOT api/client.ts)
+│   ├── hooks/useCappeMe.ts  own auth-state hook (NOT hooks/useMe)
+│   ├── host.ts              isCappeHost / cappeSiteHost (host detection)
+│   ├── types.ts, data/      cappe types + cappeThemes/cappePagePresets/timezones
+│
+├── work/                    ← WORK app (matcha-work / werk / werk-lite — one product, 3 URL surfaces)
+│   ├── routes/              WorkRoutes, WerkRoutes, WerkLiteRoutes, WorkSurfaceContext
+│   ├── layout/              WorkLayout
+│   ├── pages/               incl. Inbox (also surfaced by matcha at /app/inbox — see boundary rules)
+│   ├── components/shell/    Surface chrome: sidebars, kanban, notifications, connections
+│   ├── components/panels/   In-canvas feature panels: AI agents, recruiting pipeline, editors
+│   ├── components/channels/, components/inbox/
+│   ├── api/                 matchaWork, channels, channel*, inbox, projectSocket, threadSocket, notifications
+│   ├── hooks/               presence, livekit, channel-notifications, voice, …
+│   ├── utils/               avatarColor, kanban*, notificationSound
+│   ├── types.ts             (was types/matchaWork)  data/projectTemplates
+│
+├── ── MATCHA (main app) — everything below is the risk platform ──
+├── api/                     client.ts (THE http helper), errorReporter, authReset, resourcePins,
+│   │                        profileResume (shared w/ work); domain subfolders:
+│   └── risk/ hr/ admin/ billing/ broker/ compliance/
 ├── components/
-│   ├── ui/                  Generic primitives (Button, Input, Modal, Select, Toggle, Badge)
-│   ├── sidebars/            Product-shell nav sidebars: AdminSidebar, BrokerSidebar, CappeSidebar,
-│   │                        ClientSidebar (full Matcha-platform), TenantSidebar (tier dispatcher),
-│   │                        SidebarShell (shared shell every sidebar renders through), nav-icons
-│   ├── tier-sidebars/       Sidebars for tiers below full Matcha: IrSidebar (Lite), MatchaXSidebar,
-│   │                        ComplianceSidebar, + their upgrade/add-on panels (Essentials, LiteAddons)
-│   ├── shared/              App-wide singletons mounted once or reused broadly: ErrorBoundary,
-│   │                        FeatureGate, UpgradeUpsellCard, ThemeToggle, RouteTracker, Avatar, HelpAssistant
-│   ├── widgets/              Generic reusable widgets: AiSuggest, NoteThread, PinButton, PinnedResourcesPanel
-│   ├── marketing/            Public/marketing widgets: BlogComments, NewsletterSignup, PricingContactModal
-│   ├── ir/                  IR Copilot, panels, analysis tabs (the full IR feature module)
-│   ├── broker/               Broker UI primitives shared across broker pages (KpiTile, TabBar, …)
-│   │   └── dashboard/        Tables/grids private to pages/broker/BrokerDashboard.tsx
-│   ├── channels/, inbox/, work/, matcha-work/   Matcha-work surfaces — work/ is shell chrome
-│   │                        (sidebars, kanban, notifications) mounted by the route files;
-│   │                        matcha-work/ is in-canvas feature panels (AI agents, recruiting
-│   │                        pipeline, editors) mounted by leaf thread/project pages. Two layers
-│   │                        of the same product, not duplicate folders — don't merge them.
-│   ├── compliance/, employees/, dashboard/, handbook/, …
-│   └── auth/                RequireBusinessAccount, login forms
-├── features/                Feature-based modules
-│   ├── discipline/
-│   └── ir-onboarding/
-├── hooks/                   Domain-specific hooks
-│   ├── useMe.ts             User+features (THE auth state)
-│   ├── ir/, er/, compliance/, discipline/, employees/, risk-assessment/, training/
-│   └── single-file utilities (useChannelNotifications, useSidebarBadges)
-├── layouts/                 WorkLayout, etc.
-├── pages/                   Route-level pages
-│   ├── app/                 /app/* (Matcha-platform)
-│   ├── admin/, broker/, work/, auth/, shared/, landing/
-│   └── BetaRegister.tsx, Login.tsx, ResetPassword.tsx, SSOCallback.tsx  (landing content is
-│                            pages/landing/, not a loose Landing.tsx — there is no free-tier
-│                            "resources free" component dir; Free-tier gating is `<RequireBusinessAccount>`)
-├── types/                   Shared TypeScript types
-├── utils/                   Pure utilities (incl. tier.ts, usageTracker.ts — no separate lib/)
-├── data/                    Static / seed data (incl. laborLabels.ts)
-└── generated/               Auto-generated types (DO NOT EDIT)
+│   ├── ui/                  Generic primitives (Button, Input, Modal, …) — the shared design system
+│   ├── sidebars/            AdminSidebar, BrokerSidebar, ClientSidebar (full platform),
+│   │                        TenantSidebar (tier dispatcher), SidebarShell, nav-icons
+│   ├── tier-sidebars/       Below-full-platform tiers: IrSidebar/MatchaXSidebar/ComplianceSidebar + panels
+│   ├── shared/              App-wide singletons: ErrorBoundary, FeatureGate, UpgradeUpsellCard,
+│   │                        ThemeToggle, RouteTracker, Avatar, HelpAssistant
+│   ├── widgets/             Generic reusable widgets: AiSuggest, NoteThread, PinButton, …
+│   ├── marketing/           Public widgets: BlogComments, NewsletterSignup, PricingContactModal
+│   ├── ir/ compliance/ employees/ dashboard/ handbook/ broker/ er/ …   domain modules
+│   └── auth/                RequireBusinessAccount, RequireRole, login forms
+├── features/               Feature modules: discipline/, ir-onboarding/, matcha-x-onboarding/, admin-onboarding/
+├── hooks/                  useMe (THE auth state) + shared hooks at root; domain subdirs
+│   │                        (ir/ er/ compliance/ discipline/ employees/ risk-assessment/ training/ admin/)
+├── layouts/                AppLayout (Cappe/Work layouts live in their own app folders now)
+├── pages/                  app/ admin/ broker/ portal/ auth/ shared/ landing/ home/ simpler-pages/
+│   │                        + loose: BetaRegister, Login, ResetPassword, SSOCallback
+│   │                        (page DIRS are lowercase-kebab; component FILES stay PascalCase)
+├── types/                  Shared TS types (camelCase filenames)
+├── utils/                  Pure utilities: tier.ts, theme, dateFormat, staleChunk, usageTracker,
+│   │                        pcmToWav, + broker/ subdir
+├── data/                   Static / seed data
+└── generated/              Auto-generated types (DO NOT EDIT)
 ```
 
-`components/` root only holds subject-area folders now — no loose top-level files. If you're
-adding a component and unsure where it goes: product-tier sidebar → `sidebars/` or
-`tier-sidebars/`; app-wide singleton with no feature coupling → `shared/`; reusable widget with
-no product coupling → `widgets/`; everything else → the relevant domain folder (create one if it
-doesn't exist yet, following the existing per-domain pattern).
+### Boundary rules (keep the apps separate)
+
+- **Any app may import the shared layer**: `components/ui`, `components/shared`, `hooks/useMe`,
+  `api/client`, and the shell-infra utils (`theme`, `staleChunk`, `usageTracker`,
+  `api/errorReporter`). Cappe deliberately does NOT use these — it has its own parallel stack.
+- **Matcha must not reach into `cappe/`** except the two composition seams: `App.tsx` (host
+  dispatch via `cappe/host`) and `pages/admin/Cappe.tsx` (matcha's internal admin console *for*
+  Cappe). Nothing else.
+- **Matcha ↔ work** crossings are limited to this documented set (like the backend's
+  `tellus/geo.py` exception — don't add more without a note here):
+  - `routes/AppRoutes.tsx` mounts `work/pages/Inbox` at `/app/inbox` (matcha surfaces the work inbox)
+  - `pages/admin/newsletter/ComposeTab.tsx` → `work/components/panels/SectionEditor`
+  - `pages/shared/CandidateInterview.tsx` → `work/hooks/useVoiceSession`
+  - `components/sidebars/SidebarShell.tsx` → `work/api/channelSocket` (disconnect-on-logout)
+  - work→matcha (reverse): `MatchaWorkThread` → `api/compliance` + `types/compliance`;
+    `TaskBoard` → `types/dashboard`; `channels/JobPostingDetail` → `api/profileResume`
+- **Within matcha, `components/` root holds only subject-area folders** — no loose files. New
+  component placement: product-tier sidebar → `sidebars/`/`tier-sidebars/`; app-wide singleton →
+  `shared/`; product-agnostic reusable → `widgets/`; else the relevant domain folder.
+- **New api client** goes in the app's `api/` (work/cappe) or a matcha `api/<domain>/` subfolder;
+  `api/` root is cross-cutting infra only.
 
 ## Conventions
 
