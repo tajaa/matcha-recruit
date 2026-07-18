@@ -106,7 +106,9 @@ PILOT_TEMPLATES: tuple[dict, ...] = (
             "non-contributory) appear to be in place, and the insurability of "
             "each indemnity form. A recorded clause verdict is a starting point "
             "for counsel — report it as such and never state that a clause is or "
-            "is not enforceable. Insurance and risk-transfer terms only."
+            "is not enforceable. Where a contract's requirement turns on the "
+            "client's statutory obligations, ground it in the codified law "
+            "(`jur:` records). Insurance and risk-transfer terms only."
         ),
         "starters": [
             "Do the limits this client carries meet what their contracts require? Flag every gap.",
@@ -177,7 +179,9 @@ PILOT_TEMPLATES: tuple[dict, ...] = (
             "projected ultimates (`platform:lossdev.*`), submission-data "
             "completeness (`platform:readiness`), the controls story "
             "(`platform:controls`), and the workers'-comp / EPL metrics an "
-            "underwriter will scrutinize (`platform:wc`, `platform:epl.*`). End "
+            "underwriter will scrutinize (`platform:wc`, `platform:epl.*`), and "
+            "the codified employment-law obligations that shape the EPL exposure "
+            "(`jur:` records). End "
             "every analysis with the concrete data the broker should gather "
             "before marketing the account."
         ),
@@ -820,7 +824,30 @@ async def gather_native_sources(conn, company_id) -> dict:
     return {"sources": sources, "notes": notes}
 
 
-def build_corpus(subject_name: str, ctx: dict, docs: list[dict], native: dict | None = None) -> dict:
+def _jurisdiction_records(index: dict) -> list[dict]:
+    """Reshape `er_compliance_grounding.build_jurisdiction_corpus`'s flat index
+    (``jur:<id>`` → {cid, requirement_id, state, category, title,
+    statute_citation, source_url}) into corpus records (`{cid, ref, summary,
+    when}`), the same shape every other source uses.
+
+    Pure. Empty index → []."""
+    recs: list[dict] = []
+    for rec in (index or {}).values():
+        state = (rec.get("state") or "").strip().upper()
+        category = (rec.get("category") or "").strip()
+        title = (rec.get("title") or "Requirement").strip()
+        citation = (rec.get("statute_citation") or "").strip() or "uncited"
+        recs.append({
+            "cid": rec["cid"],
+            "ref": f"{state} — {title}",
+            "summary": f"({category}) {title}. Citation: {citation}",
+            "when": "current",
+        })
+    return recs
+
+
+def build_corpus(subject_name: str, ctx: dict, docs: list[dict], native: dict | None = None,
+                 jurisdiction: list[dict] | None = None) -> dict:
     """Assemble the grounding corpus: `{sources, index, notes}` — the same shape
     Legal Pilot's `gather_evidence` returns, so `validate_citations` and the
     memo renderer work unchanged.
@@ -828,6 +855,11 @@ def build_corpus(subject_name: str, ctx: dict, docs: list[dict], native: dict | 
     ``native`` is the platform-generated operational corpus from
     ``gather_native_sources`` (company subjects only); None for off-platform
     clients, which instead get a note naming what an on-platform client adds.
+
+    ``jurisdiction`` is the codified statutory-obligation corpus (``jur:`` cids)
+    from ``_jurisdiction_records`` (company subjects only); empty/None for
+    off-platform clients. It flows into the flat index like every other source,
+    so the shared ``validate_citations`` gates ``jur:`` cids automatically.
     """
     platform = _platform_records(ctx)
     clauses = _clause_records(ctx)
@@ -837,6 +869,8 @@ def build_corpus(subject_name: str, ctx: dict, docs: list[dict], native: dict | 
     }
     if clauses:
         sources["clauses"] = {"label": "Contract indemnity clauses", "records": clauses}
+    if jurisdiction:
+        sources["jurisdiction"] = {"label": "Codified compliance obligations", "records": jurisdiction}
     if native is not None:
         sources.update(native.get("sources") or {})
         notes.extend(native.get("notes") or [])
@@ -861,7 +895,7 @@ def build_corpus(subject_name: str, ctx: dict, docs: list[dict], native: dict | 
 # Grounded AI turn (analyst, not advisor)
 # --------------------------------------------------------------------------- #
 
-_SYSTEM = """You are a commercial P&C insurance analysis assistant working for a licensed insurance broker who is preparing analysis for a client. You ground EVERY statement in the EVIDENCE CORPUS below: the client's platform records (`platform:` IDs), the company's operational records generated natively on the platform (`incident:` / `er_case:` / `compliance_req:` / `compliance_alert:` / `discipline:` / `training:` / `policy_ack:` / `accommodation:` IDs — present only for on-platform clients), the indemnification clauses extracted from the client's contracts (`clause:` IDs), and the broker's uploaded documents (`doc:` / `docfig:` IDs).
+_SYSTEM = """You are a commercial P&C insurance analysis assistant working for a licensed insurance broker who is preparing analysis for a client. You ground EVERY statement in the EVIDENCE CORPUS below: the client's platform records (`platform:` IDs), the company's operational records generated natively on the platform (`incident:` / `er_case:` / `compliance_req:` / `compliance_alert:` / `discipline:` / `training:` / `policy_ack:` / `accommodation:` IDs — present only for on-platform clients), the indemnification clauses extracted from the client's contracts (`clause:` IDs), the codified state and federal statutory obligations the client must follow (`jur:` IDs — present only for on-platform clients), and the broker's uploaded documents (`doc:` / `docfig:` IDs).
 
 HARD RULES:
 - Cite ONLY the bracketed IDs that appear in the EVIDENCE CORPUS. NEVER invent a figure, carrier, date, limit, premium, or ID.
@@ -871,6 +905,7 @@ HARD RULES:
 - You are an ANALYST, NOT AN ADVISOR: do not recommend buying or declining coverage, do not opine on legal duties, and note that quotes and forms must be verified against actual policy language.
 - On `clause:` records: your remit is INSURANCE AND RISK TRANSFER ONLY. Discuss indemnity form, insurability, and the endorsements a clause requires — never opine on payment terms, termination, IP, or dispute resolution, and never state that a clause IS or IS NOT enforceable. A recorded verdict is a starting point for counsel, so report it as such and say so.
 - A `clause:` record marked PROVISIONAL comes from an unconfirmed AI extraction — say that whenever you rely on it.
+- On `jur:` records: these are the client's CODIFIED state and federal statutory obligations (e.g. final-pay timing, pay-transparency, anti-discrimination). Cite the statute when a point turns on the law, and never state a legal conclusion, opine on whether the client is compliant, or give legal advice — surface the obligation and route the judgment to counsel.
 - Raw document text (DOCUMENT TEXT blocks) belongs to its `doc:` ID — cite that ID when using it.
 
 ANSWER SHAPE — a short lead answer, then three reviewable lists. The broker reads

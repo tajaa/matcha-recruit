@@ -63,6 +63,7 @@ export const SOURCE_META: { key: string; label: string; icon: LucideIcon }[] = [
   { key: 'er_cases', label: 'ER cases', icon: Users },
   { key: 'compliance', label: 'Compliance', icon: BookOpenCheck },
   { key: 'compliance_alerts', label: 'Alerts', icon: Bell },
+  { key: 'jurisdiction', label: 'Compliance law', icon: Scale },
   { key: 'discipline', label: 'Discipline', icon: Gavel },
   { key: 'training', label: 'Training', icon: GraduationCap },
   { key: 'policy_ack', label: 'Policy acks', icon: FileSignature },
@@ -74,7 +75,7 @@ export const SOURCE_META: { key: string; label: string; icon: LucideIcon }[] = [
 /** Systems generated natively by the platform — only on-platform clients have
  *  them; the strip advertises them ("on Matcha") when dark. */
 export const NATIVE_KEYS = new Set([
-  'incidents', 'er_cases', 'compliance', 'compliance_alerts',
+  'incidents', 'er_cases', 'compliance', 'compliance_alerts', 'jurisdiction',
   'discipline', 'training', 'policy_ack', 'accommodations',
 ])
 
@@ -95,6 +96,7 @@ export const SYSTEM_LABEL: Record<string, string> = {
   er_cases: 'Employee-relations cases',
   compliance: 'Compliance requirements tracked',
   compliance_alerts: 'Compliance monitoring alerts',
+  jurisdiction: 'Codified compliance obligations',
   discipline: 'Progressive discipline',
   training: 'Training completions',
   policy_ack: 'Policy / handbook acknowledgments',

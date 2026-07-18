@@ -28,6 +28,7 @@ from app.core.services.redis_cache import check_rate_limit, client_ip
 from app.core.services.storage import get_storage
 from ..services import broker_pilot as bp
 from ..services import broker_pilot_requirements as bpr
+from ..services import er_compliance_grounding as ecg
 from ..services import external_clients as ext
 from ..services.er_document_parser import ERDocumentParser
 from .broker_portfolio import _assert_broker_owns_company
@@ -128,8 +129,29 @@ async def _native_for(conn, session: dict) -> dict | None:
     return await bp.gather_native_sources(conn, session["subject_id"])
 
 
+async def _jurisdiction_for(conn, session: dict) -> list[dict]:
+    """Codified statutory-obligation records (`jur:` cids) for the client —
+    company subjects only (the broker's own ownership is already asserted via
+    `_assert_subject` upstream, so `subject_id` is a client company_id here).
+
+    Empty ids → `build_jurisdiction_corpus` falls back through employee
+    work_states → handbook scopes → business_locations, correct for
+    roster-less clients. Grounding must never block a broker turn, so any
+    failure degrades to no jurisdiction grounding."""
+    if session["subject_kind"] != "company":
+        return []
+    try:
+        _text, index = await ecg.build_jurisdiction_corpus(conn, session["subject_id"], [])
+        return bp._jurisdiction_records(index)
+    except Exception:  # noqa: BLE001 — grounding is additive; never fatal to a turn
+        logger.exception("broker_pilot: jurisdiction grounding failed for session %s",
+                         session.get("id"))
+        return []
+
+
 def _corpus_and_requirements(session: dict, subject_name: str, ctx: dict,
-                             docs: list[dict], native: dict | None) -> tuple[dict, list[dict]]:
+                             docs: list[dict], native: dict | None,
+                             jurisdiction: list[dict] | None = None) -> tuple[dict, list[dict]]:
     """Build the corpus, then the mode's document checklist against it, then fold
     the resulting scope notes back into the corpus.
 
@@ -140,7 +162,7 @@ def _corpus_and_requirements(session: dict, subject_name: str, ctx: dict,
     one function, so the checklist the broker sees, the gate the chat enforces,
     and the scope notes the analyst reads can never disagree.
     """
-    corpus = bp.build_corpus(subject_name, ctx, docs, native)
+    corpus = bp.build_corpus(subject_name, ctx, docs, native, jurisdiction)
     template = bp.get_template(session.get("template_key"))
     reqs = bpr.doc_requirements(template, docs, bpr.platform_flags(corpus))
     corpus["notes"].extend(bpr.scope_notes(template, docs, reqs))
@@ -498,7 +520,8 @@ async def get_context(session_id: str, current_user=Depends(require_broker_pro))
         ctx = await _build_ctx(conn, current_user.id, session)
         docs = await _load_docs(conn, session_id)
         native = await _native_for(conn, session)
-    corpus, reqs = _corpus_and_requirements(session, subject_name, ctx, docs, native)
+        jurisdiction = await _jurisdiction_for(conn, session)
+    corpus, reqs = _corpus_and_requirements(session, subject_name, ctx, docs, native, jurisdiction)
     # Source summaries + counts only — the flat index is internal. The document
     # checklist rides here (not on GET /sessions/{id}) because satisfaction needs
     # the corpus this endpoint already pays to build; the frontend loads session
@@ -528,8 +551,9 @@ async def chat(session_id: str, body: ChatIn, request: Request,
         ctx = await _build_ctx(conn, current_user.id, session)
         docs = await _load_docs(conn, session_id, with_text=True)
         native = await _native_for(conn, session)
+        jurisdiction = await _jurisdiction_for(conn, session)
 
-        corpus, reqs = _corpus_and_requirements(session, subject_name, ctx, docs, native)
+        corpus, reqs = _corpus_and_requirements(session, subject_name, ctx, docs, native, jurisdiction)
 
         # The mode's document gate — soft, and it runs BEFORE the message is
         # persisted so a refused turn leaves no orphan in the transcript. Forceable
@@ -609,12 +633,13 @@ async def generate_memo(session_id: str, request: Request,
         ctx = await _build_ctx(conn, current_user.id, session)
         docs = await _load_docs(conn, session_id)
         native = await _native_for(conn, session)
+        jurisdiction = await _jurisdiction_for(conn, session)
         broker_name = await conn.fetchval("SELECT name FROM brokers WHERE id = $1", broker_id)
 
         # Memo generation is NOT gated on the mode's documents — a memo of a
         # forced analysis is legitimate. It carries the scope note instead, so
         # the reader sees what the analysis did not have.
-        corpus, _reqs = _corpus_and_requirements(session, subject_name, ctx, docs, native)
+        corpus, _reqs = _corpus_and_requirements(session, subject_name, ctx, docs, native, jurisdiction)
         packet = await bp.build_memo_pdf(session, subject_name, corpus, memo, docs,
                                          broker_name=broker_name)
 
