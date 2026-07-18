@@ -42,6 +42,7 @@
 		3ADC1A37514702BC2F141FA6 /* AppStateModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2EA646E28D8B03AC9B68E63 /* AppStateModels.swift */; };
 		3D3AF0C357B514459BB061BA /* InboxListViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A5BCC5F62C40F22E465E467 /* InboxListViewModel.swift */; };
 		3DE6C0F826F48540C70FCC03 /* BroadcastView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE77908A8781730D8D82606B /* BroadcastView.swift */; };
+		3E9E0C1BB3656B86327BC446 /* ChannelDetailView+Actions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DC7876D721711965E285AFD /* ChannelDetailView+Actions.swift */; };
 		3F3EE5D89655DDC22EABC2E7 /* BroadcastService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC01DD22EE33FF445566BB02 /* BroadcastService.swift */; };
 		419E73DB667CB1835333F7E8 /* ProjectDetailViewModel+Tasks.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F19096AF0EF70CF44025297 /* ProjectDetailViewModel+Tasks.swift */; };
 		48C216A1C92E1717B236961D /* NewThreadView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1768B8AD82B9DE8709D0ADF7 /* NewThreadView.swift */; };
@@ -85,6 +86,7 @@
 		8563D547DEF316259DBF144C /* BillingUsageModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = B06A176992AA39C8E304EFD0 /* BillingUsageModels.swift */; };
 		8770E93129EFE6F4EAE72C5A /* WorkDetailVMStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C0FF11E570E000000000002 /* WorkDetailVMStore.swift */; };
 		8D8634B4FA61331B0FC68AA5 /* LiveKit in Frameworks */ = {isa = PBXBuildFile; productRef = 68045DB1FA822A22F723F7B9 /* LiveKit */; };
+		8DA37E55EDEBBF213FC4F6D6 /* ChannelDetailView+Messages.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C3824618E8E47BA061C783C /* ChannelDetailView+Messages.swift */; };
 		8E5D6EC70EEDBE08AE76BDEA /* ThreadModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2945FB0998BBD2E516955D3 /* ThreadModels.swift */; };
 		907959E1689B61670C0348A4 /* MatchaWorkService+Collaborators.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2ADCEBB0A5C1A4ECFD24BEE7 /* MatchaWorkService+Collaborators.swift */; };
 		926241C4285E963AA845B22D /* MatchaWorkService+Files.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFC745338E971AFA15B607A9 /* MatchaWorkService+Files.swift */; };
@@ -272,7 +274,9 @@
 		5B117B0AE5CE0C90D1412F5F /* InboxListView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = InboxListView.swift; sourceTree = "<group>"; };
 		5C0FF11E570E000000000002 /* WorkDetailVMStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkDetailVMStore.swift; sourceTree = "<group>"; };
 		5C0FF11E570E000000000012 /* SkeletonView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkeletonView.swift; sourceTree = "<group>"; };
+		5C3824618E8E47BA061C783C /* ChannelDetailView+Messages.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "ChannelDetailView+Messages.swift"; sourceTree = "<group>"; };
 		5C6EEE903BD7EDAD4CB23C91 /* ProjectBizModels.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProjectBizModels.swift; sourceTree = "<group>"; };
+		5DC7876D721711965E285AFD /* ChannelDetailView+Actions.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "ChannelDetailView+Actions.swift"; sourceTree = "<group>"; };
 		5EA68D04368CE35CA6B98DC5 /* ContentViewComponents.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ContentViewComponents.swift; sourceTree = "<group>"; };
 		5F902F513248418EEC0D8FCA /* MainTabView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MainTabView.swift; sourceTree = "<group>"; };
 		603136FE150BA8CD056B028C /* ProjectDetailViewModel+Biz.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "ProjectDetailViewModel+Biz.swift"; sourceTree = "<group>"; };
@@ -949,6 +953,8 @@
 				F2122823C3D149F37FE040CC /* ChannelMessageRowView.swift */,
 				FF4C96E6C5F0062D21DAB318 /* ChannelMessageComposer.swift */,
 				F9D68DEBAAF0B1E63F7FE7AC /* TypingBubbleView.swift */,
+				5C3824618E8E47BA061C783C /* ChannelDetailView+Messages.swift */,
+				5DC7876D721711965E285AFD /* ChannelDetailView+Actions.swift */,
 			);
 			path = Channels;
 			sourceTree = "<group>";
@@ -1322,6 +1328,8 @@
 				3ADC1A37514702BC2F141FA6 /* AppStateModels.swift in Sources */,
 				B5FB3A85E25775E2AF4AAE5E /* AppState+Theme.swift in Sources */,
 				74D7570AF92483A279339C53 /* AppState+Tabs.swift in Sources */,
+				8DA37E55EDEBBF213FC4F6D6 /* ChannelDetailView+Messages.swift in Sources */,
+				3E9E0C1BB3656B86327BC446 /* ChannelDetailView+Actions.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
