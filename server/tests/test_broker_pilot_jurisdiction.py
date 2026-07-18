@@ -166,7 +166,7 @@ class _CountingConn:
 def _patch_corpus(monkeypatch, conn):
     async def _fake_build(_conn, _company_id, _ids):
         conn.builds += 1
-        return "text", _sample_index()
+        return "text", _sample_index(), False
 
     monkeypatch.setattr(bpr.ecg, "build_jurisdiction_corpus", _fake_build)
 
@@ -188,9 +188,9 @@ def test_jurisdiction_corpus_is_built_once_per_company(monkeypatch):
     conn = _CountingConn()
     _patch_corpus(monkeypatch, conn)
 
-    first = asyncio.run(bpr._jurisdiction_for(conn, _session()))
+    first, _t = asyncio.run(bpr._jurisdiction_for(conn, _session()))
     for _ in range(19):
-        again = asyncio.run(bpr._jurisdiction_for(conn, _session()))
+        again, _t = asyncio.run(bpr._jurisdiction_for(conn, _session()))
 
     assert conn.builds == 1          # 20 turns, one build
     assert again == first
@@ -226,11 +226,11 @@ def test_empty_and_failed_grounding_are_not_cached(monkeypatch):
 
     async def _empty(_c, _id, _ids):
         conn.builds += 1
-        return "", {}
+        return "", {}, False
 
     monkeypatch.setattr(bpr.ecg, "build_jurisdiction_corpus", _empty)
-    assert asyncio.run(bpr._jurisdiction_for(conn, _session())) == []
-    assert asyncio.run(bpr._jurisdiction_for(conn, _session())) == []
+    assert asyncio.run(bpr._jurisdiction_for(conn, _session()))[0] == []
+    assert asyncio.run(bpr._jurisdiction_for(conn, _session()))[0] == []
     assert conn.builds == 2
 
     async def _boom(_c, _id, _ids):
@@ -238,14 +238,14 @@ def test_empty_and_failed_grounding_are_not_cached(monkeypatch):
         raise RuntimeError("catalog down")
 
     monkeypatch.setattr(bpr.ecg, "build_jurisdiction_corpus", _boom)
-    assert asyncio.run(bpr._jurisdiction_for(conn, _session())) == []
+    assert asyncio.run(bpr._jurisdiction_for(conn, _session()))[0] == []
     assert conn.builds == 3          # failure retried, not pinned
 
 
 def test_external_subject_never_touches_the_catalog(monkeypatch):
     conn = _CountingConn()
     _patch_corpus(monkeypatch, conn)
-    assert asyncio.run(bpr._jurisdiction_for(conn, _session(kind="external"))) == []
+    assert asyncio.run(bpr._jurisdiction_for(conn, _session(kind="external")))[0] == []
     assert conn.builds == 0
 
 
@@ -255,3 +255,31 @@ def test_jurisdiction_cache_is_size_capped(monkeypatch):
     for i in range(bpr._JUR_CACHE_MAX + 10):
         asyncio.run(bpr._jurisdiction_for(conn, _session(f"c{i:08d}-0000-0000-0000-000000000000")))
     assert len(bpr._JUR_CACHE) <= bpr._JUR_CACHE_MAX
+
+
+def test_truncated_catalog_is_announced_and_cached(monkeypatch):
+    """A silent LIMIT is a grounding gap the reader cannot see: the obligations
+    that fell off the cap read as obligations that do not exist."""
+    conn = _CountingConn()
+
+    async def _truncated(_c, _id, _ids):
+        conn.builds += 1
+        return "text", _sample_index(), True
+
+    monkeypatch.setattr(bpr.ecg, "build_jurisdiction_corpus", _truncated)
+    records, truncated = asyncio.run(bpr._jurisdiction_for(conn, _session()))
+    assert truncated is True
+
+    corpus = bp.build_corpus("Acme Co", {}, [], native={"sources": {}, "notes": []},
+                             jurisdiction=records, jurisdiction_truncated=True)
+    assert any("truncated" in n for n in corpus["notes"])
+
+    # The flag survives the cache alongside the records.
+    again, again_truncated = asyncio.run(bpr._jurisdiction_for(conn, _session()))
+    assert conn.builds == 1
+    assert again_truncated is True
+
+    # Not truncated → no note.
+    clean = bp.build_corpus("Acme Co", {}, [], native={"sources": {}, "notes": []},
+                            jurisdiction=records, jurisdiction_truncated=False)
+    assert not any("truncated" in n for n in clean["notes"])

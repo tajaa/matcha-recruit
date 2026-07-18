@@ -123,15 +123,23 @@ async def build_jurisdiction_corpus(
     conn,
     company_id,
     involved_employee_ids: list[str],
-) -> tuple[str, dict[str, dict[str, Any]]]:
-    """Return ``(corpus_text, index)`` of codified employment-law requirements.
+) -> tuple[str, dict[str, dict[str, Any]], bool]:
+    """Return ``(corpus_text, index, truncated)`` of codified employment-law
+    requirements.
 
     ``index`` maps ``jur:<id>`` → the record dict. Both are empty when nothing
     resolves — callers treat that as "grounding unavailable" and are unchanged.
+
+    ``truncated`` is True when the catalog held more than ``_MAX_ROWS`` matching
+    obligations and the tail was cut. Callers cannot infer this from the index
+    (``len(index) == _MAX_ROWS`` is a false positive at exactly the cap), and a
+    silent cut is a grounding gap the reader cannot see: the model is told these
+    are the client's obligations, so the ones that fell off the LIMIT read as
+    obligations that do not exist.
     """
     states = await _resolve_states(conn, company_id, involved_employee_ids)
     if not states:
-        return "", {}
+        return "", {}, False
     # Federal employment law lives on the jurisdiction keyed state='US' (never a
     # value of employees.work_state), so it must be added explicitly or the whole
     # federal slice — the bulk of the codified corpus — is excluded.
@@ -161,15 +169,20 @@ async def build_jurisdiction_corpus(
             """,
             states_with_federal,
             list(ER_RELEVANT_CATEGORIES),
-            _MAX_ROWS,
+            # One past the cap: if the extra row comes back the catalog had more
+            # than we will show, which is the only way to tell a full page from
+            # a truncated one. The probe row is dropped below.
+            _MAX_ROWS + 1,
         )
     except Exception:
         logger.exception("er_grounding: requirement fetch failed")
-        return "", {}
+        return "", {}, False
 
     chosen = [dict(r) for r in rows]
+    truncated = len(chosen) > _MAX_ROWS
+    chosen = chosen[:_MAX_ROWS]
     if not chosen:
-        return "", {}
+        return "", {}, False
 
     index: dict[str, dict[str, Any]] = {}
     lines: list[str] = []
@@ -200,7 +213,15 @@ async def build_jurisdiction_corpus(
         cite_str = citation or "uncited"
         lines.append(f"[{cid}] ({state} — {category}) {title}: {desc} Citation: {cite_str}")
 
-    return "\n".join(lines), index
+    if truncated:
+        # In the TEXT as well as the flag, so every model reading this corpus
+        # knows the list is partial without each caller wiring it up.
+        lines.append(
+            f"(NOTE: truncated — the first {_MAX_ROWS} matching obligations are shown; "
+            "the client has more codified obligations than appear here.)"
+        )
+
+    return "\n".join(lines), index, truncated
 
 
 def build_citation_records(

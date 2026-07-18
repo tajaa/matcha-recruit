@@ -59,3 +59,61 @@ def test_gate_handles_missing_evidence_map():
     clean, dropped = validate_citations(None, _index())
     assert clean == [] and dropped == []
     assert g.build_citation_records(clean, _index()) == []
+
+
+# --------------------------------------------------------------------------- #
+# Truncation signal — the LIMIT must not be silent
+# --------------------------------------------------------------------------- #
+
+import asyncio
+
+
+class _FakeConn:
+    """Returns `n` catalog rows; records the LIMIT the query asked for."""
+
+    def __init__(self, n):
+        self.n = n
+        self.limit_requested = None
+
+    async def fetch(self, _query, *args):
+        # (states, categories, limit) — the corpus query; anything else is a
+        # state-resolution query, which we answer with one work_state.
+        if len(args) == 3:
+            self.limit_requested = args[2]
+            return [
+                {"id": f"{i}", "state": "CA", "category": "final_pay",
+                 "title": f"Requirement {i}", "description": "Body.",
+                 "current_value": None, "statute_citation": "Cal. Lab. Code § 201",
+                 "source_url": None, "effective_date": None}
+                for i in range(self.n)
+            ][: args[2]]
+        return [{"work_state": "CA", "state": "CA"}]
+
+
+def _run_corpus(conn, monkeypatch):
+    async def _gate(_alias, *, conn=None):
+        return ""
+
+    monkeypatch.setattr("app.core.services.compliance_service.codified_gate_sql", _gate)
+    return asyncio.run(g.build_jurisdiction_corpus(conn, "c1", ["e1"]))
+
+
+def test_truncation_flag_set_when_catalog_exceeds_cap(monkeypatch):
+    conn = _FakeConn(g._MAX_ROWS + 5)
+    text, index, truncated = _run_corpus(conn, monkeypatch)
+    assert truncated is True
+    # Probes one past the cap to detect the overflow, but never shows it.
+    assert conn.limit_requested == g._MAX_ROWS + 1
+    assert len(index) == g._MAX_ROWS
+    # The model reading the text is told, without each caller wiring it up.
+    assert "truncated" in text
+
+
+def test_no_truncation_at_exactly_the_cap(monkeypatch):
+    """`len(index) == _MAX_ROWS` is the false positive the probe row exists to
+    avoid — a full page is not a cut one."""
+    conn = _FakeConn(g._MAX_ROWS)
+    text, index, truncated = _run_corpus(conn, monkeypatch)
+    assert truncated is False
+    assert len(index) == g._MAX_ROWS
+    assert "truncated" not in text

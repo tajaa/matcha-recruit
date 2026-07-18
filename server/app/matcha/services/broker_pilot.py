@@ -866,7 +866,8 @@ def _jurisdiction_records(index: dict) -> list[dict]:
 
 
 def build_corpus(subject_name: str, ctx: dict, docs: list[dict], native: dict | None = None,
-                 jurisdiction: list[dict] | None = None) -> dict:
+                 jurisdiction: list[dict] | None = None,
+                 jurisdiction_truncated: bool = False) -> dict:
     """Assemble the grounding corpus: `{sources, index, notes}` — the same shape
     Legal Pilot's `gather_evidence` returns, so `validate_citations` and the
     memo renderer work unchanged.
@@ -908,6 +909,13 @@ def build_corpus(subject_name: str, ctx: dict, docs: list[dict], native: dict | 
             "Codified statutory obligations (`jur:`) are unavailable for this client — "
             "no work states resolved, or no codified requirements on file for them. "
             "Employment-law points in this analysis are NOT grounded in the statute catalog."
+        )
+    if jurisdiction and jurisdiction_truncated:
+        # The catalog held more than the corpus cap. Say so, or the obligations
+        # that fell off the LIMIT read as obligations that do not exist.
+        notes.append(
+            f"Codified statutory obligations were truncated to the first {len(jurisdiction)} "
+            "records — this client has more codified obligations than are grounded here."
         )
     if native is None:
         notes.append(

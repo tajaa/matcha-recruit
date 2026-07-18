@@ -127,7 +127,7 @@ async def generate_suggested_guidance(
         completed_investigation_transcript_count = ctx["completed_investigation_transcript_count"]
 
         try:
-            corpus_text, corpus_index = await er_compliance_grounding.build_jurisdiction_corpus(
+            corpus_text, corpus_index, _truncated = await er_compliance_grounding.build_jurisdiction_corpus(
                 conn, company_id, _involved_employee_ids(case_row["involved_employees"])
             )
         except Exception:
@@ -359,7 +359,7 @@ async def generate_suggested_guidance_stream(
         all_doc_text_rows_s = ctx["all_doc_text_rows"]
 
         try:
-            corpus_text, corpus_index = await er_compliance_grounding.build_jurisdiction_corpus(
+            corpus_text, corpus_index, _truncated = await er_compliance_grounding.build_jurisdiction_corpus(
                 conn, company_id, _involved_employee_ids(case_row["involved_employees"])
             )
         except Exception:
@@ -579,7 +579,7 @@ async def generate_outcome_analysis_stream(
 
         involved_parties = await _resolve_involved_parties(conn, case_row.get("involved_employees"))
         try:
-            corpus_text, corpus_index = await er_compliance_grounding.build_jurisdiction_corpus(
+            corpus_text, corpus_index, _truncated = await er_compliance_grounding.build_jurisdiction_corpus(
                 conn, company_id, _involved_employee_ids(case_row.get("involved_employees"))
             )
         except Exception:
@@ -866,7 +866,7 @@ async def generate_outcome_analysis(
 
         involved_parties_ns = await _resolve_involved_parties(conn, case_row.get("involved_employees"))
         try:
-            corpus_text, corpus_index = await er_compliance_grounding.build_jurisdiction_corpus(
+            corpus_text, corpus_index, _truncated = await er_compliance_grounding.build_jurisdiction_corpus(
                 conn, company_id, _involved_employee_ids(case_row.get("involved_employees"))
             )
         except Exception:
