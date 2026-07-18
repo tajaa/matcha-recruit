@@ -221,6 +221,15 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     # /v1/portal/me/schedule endpoints, and the /app/employee-schedule page.
     # Default off; admin-toggle (paid add-on). NOT in any tier overlay.
     "employee_schedule": False,
+    # Carrier quote/bind — connect a business to Coterie (small-commercial
+    # BOP/GL/WC/PL) for a real quote built from data it already has on file, then
+    # bind a policy inline (lands in the certificate store + carried-coverage
+    # lines). Carrier calls run in mock mode until live partner credentials exist
+    # (COTERIE_MODE=live + COTERIE_API_KEY). Gates the /insurance router + the
+    # /app/ir/insurance page (surfaced on the matcha-lite IrSidebar + the full
+    # ClientSidebar). Default off; admin-toggle; NOT in any tier overlay (a paid
+    # gate, like incidents — could later be added to the matcha_lite overlay).
+    "carrier_quotes": False,
     # OSHA 300/301/300A logs within IR. Default True (existing behavior for
     # every `incidents` company, unchanged) — forced False for the no-roster
     # matcha_lite_essentials config, where there's no employee roster to log

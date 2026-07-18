@@ -49,6 +49,7 @@ const nav: (NavItem | NavGroup)[] = [
       { to: '/app/property', icon: Building2, label: 'Commercial Property', feature: 'property' },
       { to: '/app/tcor', icon: Coins, label: 'Total Cost of Risk', feature: 'tcor' },
       { to: '/app/coi', icon: FileText, label: 'Certificate Tracking', feature: 'coi_tracking' },
+      { to: '/app/ir/insurance', icon: ShieldCheck, label: 'Insurance', feature: 'carrier_quotes' },
       { to: '/app/management-liability', icon: ShieldAlert, label: 'D&O Readiness', feature: 'do_readiness' },
       { to: '/app/acord', icon: FileSignature, label: 'ACORD Forms', feature: 'acord_forms' },
     ],

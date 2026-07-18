@@ -34,6 +34,7 @@ import DriverRisk from '../pages/app/DriverRisk'
 import EmployeeSchedule from '../pages/app/EmployeeSchedule'
 import Tcor from '../pages/app/Tcor'
 import Coi from '../pages/app/Coi'
+import Insurance from '../pages/app/Insurance'
 import ManagementLiability from '../pages/app/ManagementLiability'
 import Acord from '../pages/app/Acord'
 import Property from '../pages/app/Property'
@@ -108,6 +109,7 @@ export default function AppRoutes() {
         <Route path="driver-risk" element={<FeatureGate feature="driver_risk" label="Driver Risk"><DriverRisk /></FeatureGate>} />
         <Route path="tcor" element={<FeatureGate feature="tcor" label="Total Cost of Risk"><Tcor /></FeatureGate>} />
         <Route path="coi" element={<FeatureGate feature="coi_tracking" label="Certificate Tracking"><Coi /></FeatureGate>} />
+        <Route path="ir/insurance" element={<FeatureGate feature="carrier_quotes" label="Insurance"><Insurance /></FeatureGate>} />
         <Route path="management-liability" element={<FeatureGate feature="do_readiness" label="D&O Readiness"><ManagementLiability /></FeatureGate>} />
         <Route path="acord" element={<FeatureGate feature="acord_forms" label="ACORD Forms"><Acord /></FeatureGate>} />
         <Route path="property" element={<FeatureGate feature="property" label="Commercial Property"><Property /></FeatureGate>} />
