@@ -11,190 +11,26 @@
  *   • "Re-run analysis" → full role-aware enrichment (picks up new locations /
  *     roster changes flagged by the drift banner).
  */
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import {
   ArrowLeft, Loader2, Play, Sparkles, RefreshCw, FileDown, FileText,
-  CheckCircle2, AlertTriangle, XCircle, Search, MapPin, Scale, Users,
-  FileSearch, CalendarCheck, Lightbulb, ChevronRight, ExternalLink,
+  CheckCircle2, AlertTriangle, Search, MapPin, FileSearch, Lightbulb,
+  ChevronRight,
 } from 'lucide-react'
 import { adminOnboarding } from '../../api/admin/adminOnboarding'
-import type {
-  GapDashboardResponse, ResolvedScopeMissing, GapRequirementDetail,
-} from '../../api/admin/adminOnboarding'
-import { useEnrichStream, type EnrichEvent } from '../../hooks/admin/useEnrichStream'
-import { useResearchGaps, type ResearchGapItem } from '../../hooks/admin/useResearchGaps'
+import type { GapDashboardResponse, ResolvedScopeMissing } from '../../api/admin/adminOnboarding'
+import { useEnrichStream } from '../../hooks/admin/useEnrichStream'
+import { useResearchGaps } from '../../hooks/admin/useResearchGaps'
 import StatutoryFitPanel from '../../components/admin/onboarding/StatutoryFitPanel'
 import GapCard, { humanizeCategory, jurisdictionLabel } from '../../components/admin/onboarding/GapCard'
 import { complexityBandClass } from './GapOverview'
-
-// Provenance chip for the Coverage stat card — engine = scope-registry grounded,
-// engine_partial = grounded but on a partially-classified index (a floor, not the
-// whole scope), bank = compliance-catalog fallback. Same chip idiom as
-// ScopeStudio's badge maps.
-const COVERAGE_SOURCE_BADGE: Record<'engine' | 'engine_partial' | 'bank', string> = {
-  engine: 'border-emerald-500/30 bg-emerald-500/15 text-emerald-300',
-  engine_partial: 'border-amber-500/30 bg-amber-500/15 text-amber-300',
-  bank: 'border-zinc-500/30 bg-zinc-500/15 text-zinc-400',
-}
-
-const COVERAGE_SOURCE_LABEL: Record<'engine' | 'engine_partial' | 'bank', string> = {
-  engine: 'grounded (engine)',
-  engine_partial: 'grounded (partial)',
-  bank: 'catalog (bank)',
-}
-
-const COVERAGE_SOURCE_TITLE: Record<'engine' | 'engine_partial' | 'bank', string> = {
-  engine: 'Grounded in the scope-registry engine (registry classifies every coordinate)',
-  engine_partial:
-    'Grounded in the scope-registry engine, but at least one covering authority index is not fully classified — these obligations really are in scope, but unclassified items may add more.',
-  bank: 'From the compliance catalog (registry not yet definitive for this company)',
-}
-
-type CoveredItem = {
-  requirement_id?: string
-  category_slug?: string
-  title?: string | null
-  scope_level?: string
-  city?: string | null
-  county?: string | null
-  state?: string | null
-}
-
-function missingId(m: ResolvedScopeMissing): string {
-  return [m.category_slug, m.scope_level, m.state || '-', m.county || '-', m.city || '-'].join('::')
-}
-
-function toResearchItem(m: ResolvedScopeMissing): ResearchGapItem {
-  return { category_slug: m.category_slug, scope_level: m.scope_level, state: m.state, county: m.county, city: m.city }
-}
-
-function eventStyle(type: string): { icon: React.ElementType; color: string; spin?: boolean } {
-  switch (type) {
-    case 'roster_scanned':
-    case 'roles_detected': return { icon: Users, color: 'text-blue-400' }
-    case 'jurisdiction_new': return { icon: MapPin, color: 'text-amber-400' }
-    case 'jurisdiction_tracking': return { icon: CalendarCheck, color: 'text-emerald-400' }
-    case 'researching':
-    case 'repository_refresh':
-    case 'retrying': return { icon: Search, color: 'text-violet-400', spin: true }
-    case 'repository_refreshed':
-    case 'started':
-    case 'facility_inference': return { icon: FileSearch, color: 'text-violet-300' }
-    case 'scoping': return { icon: Scale, color: 'text-blue-400' }
-    case 'scoped':
-    case 'complete': return { icon: CheckCircle2, color: 'text-emerald-400' }
-    case 'warning':
-    case 'repository_only': return { icon: AlertTriangle, color: 'text-amber-400' }
-    case 'error': return { icon: XCircle, color: 'text-red-400' }
-    default: return { icon: Sparkles, color: 'text-zinc-400' }
-  }
-}
-
-function eventText(ev: EnrichEvent): string {
-  if (ev.message) return ev.message
-  if (ev.type === 'complete') return 'Analysis complete.'
-  return ev.type.replace(/_/g, ' ')
-}
-
-function StatCard({ label, value, tone }: { label: string; value: number | string; tone?: 'gap' | 'ok' }) {
-  const valueColor = tone === 'gap' ? 'text-amber-300' : tone === 'ok' ? 'text-emerald-300' : 'text-zinc-100'
-  return (
-    <div className="rounded-lg border border-vsc-border bg-vsc-panel p-3">
-      <div className="text-[10px] text-zinc-500 uppercase tracking-wider">{label}</div>
-      <div className={`text-2xl font-semibold mt-1 ${valueColor}`}>{value}</div>
-    </div>
-  )
-}
-
-function EventFeed({ events, running, label }: { events: EnrichEvent[]; running: boolean; label: string }) {
-  const feedRef = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    feedRef.current?.scrollTo({ top: feedRef.current.scrollHeight, behavior: 'smooth' })
-  }, [events])
-  if (!events.length && !running) return null
-  return (
-    <div ref={feedRef} className="rounded-xl border border-vsc-border bg-vsc-panel p-4 max-h-72 overflow-y-auto space-y-2">
-      {events.filter((e) => e.type !== 'complete').map((ev, i) => {
-        const { icon: Icon, color, spin } = eventStyle(ev.type)
-        return (
-          <div key={i} className="flex items-start gap-3 text-sm">
-            <Icon className={`w-4 h-4 mt-0.5 shrink-0 ${color} ${spin ? 'animate-pulse' : ''}`} />
-            <div className="flex-1 min-w-0">
-              <span className="text-zinc-300">{eventText(ev)}</span>
-              {ev.type === 'roles_detected' && ev.roles && ev.roles.length > 0 && (
-                <div className="flex flex-wrap gap-1 mt-1">
-                  {ev.roles.map((r) => (
-                    <span key={r} className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-300 border border-blue-500/20">{r}</span>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        )
-      })}
-      {running && (
-        <div className="flex items-center gap-2 text-xs text-zinc-500 pt-1">
-          <Loader2 className="w-3.5 h-3.5 animate-spin" /> {label}
-        </div>
-      )}
-    </div>
-  )
-}
-
-function CoveredRow({ companyId, item }: { companyId: string; item: CoveredItem }) {
-  const [open, setOpen] = useState(false)
-  const [detail, setDetail] = useState<GapRequirementDetail | null>(null)
-  const [loading, setLoading] = useState(false)
-
-  function toggle() {
-    const next = !open
-    setOpen(next)
-    if (next && !detail && item.requirement_id) {
-      setLoading(true)
-      adminOnboarding.getRequirementDetail(companyId, item.requirement_id)
-        .then(setDetail).catch(() => {}).finally(() => setLoading(false))
-    }
-  }
-
-  return (
-    <div className="border-b border-vsc-border last:border-0">
-      <button onClick={toggle} className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-vsc-bg/40">
-        <ChevronRight className={`w-3.5 h-3.5 text-zinc-600 transition-transform ${open ? 'rotate-90' : ''}`} />
-        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-        <span className="text-xs text-zinc-200 truncate">{item.title || humanizeCategory(item.category_slug || '')}</span>
-        <span className="text-[10px] text-zinc-500 ml-auto shrink-0">{jurisdictionLabel(item)}</span>
-      </button>
-      {open && (
-        <div className="px-9 pb-3 text-[11px] text-zinc-400 space-y-1">
-          {loading && <span className="inline-flex items-center gap-1.5"><Loader2 className="w-3 h-3 animate-spin" /> loading…</span>}
-          {detail && (
-            <>
-              {detail.current_value && <div><span className="text-zinc-500">Value: </span><span className="text-zinc-200 font-mono">{detail.current_value}</span>{detail.rate_type ? ` (${detail.rate_type})` : ''}</div>}
-              {detail.description && <div className="leading-relaxed">{detail.description}</div>}
-              {Array.isArray(detail.implementation_steps) && detail.implementation_steps.length > 0 && (
-                <div className="pt-0.5">
-                  <div className="text-zinc-500 mb-1">How to comply:</div>
-                  <ol className="list-decimal pl-4 space-y-1 text-zinc-300 marker:text-vsc-accent">
-                    {detail.implementation_steps.map((s, i) => <li key={i} className="leading-relaxed">{s}</li>)}
-                  </ol>
-                </div>
-              )}
-              {detail.effective_date && <div><span className="text-zinc-500">Effective: </span>{detail.effective_date}</div>}
-              {detail.requires_written_policy && <div className="text-amber-300">Requires a written policy (handbook).</div>}
-              {detail.source_url && (
-                <a href={detail.source_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-emerald-300 hover:underline">
-                  <ExternalLink className="w-3 h-3" /> {detail.source_name || 'Source'}
-                </a>
-              )}
-              {!detail.description && !detail.current_value && <div className="text-zinc-500 italic">No additional detail recorded.</div>}
-            </>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
+import type { CoveredItem } from './GapDashboard/types'
+import { COVERAGE_SOURCE_BADGE, COVERAGE_SOURCE_LABEL, COVERAGE_SOURCE_TITLE } from './GapDashboard/constants'
+import { missingId, toResearchItem } from './GapDashboard/helpers'
+import StatCard from './GapDashboard/StatCard'
+import EventFeed from './GapDashboard/EventFeed'
+import CoveredRow from './GapDashboard/CoveredRow'
 
 export default function GapDashboard() {
   const { companyId } = useParams<{ companyId: string }>()
