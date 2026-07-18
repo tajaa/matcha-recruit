@@ -10,6 +10,7 @@ import type { MWProject } from '../../types'
 import { useMe } from '../../../hooks/useMe'
 import CreateChannelModal from '../channels/CreateChannelModal'
 import { useWorkBase } from '../../routes/WorkSurfaceContext'
+import { canCreateChannel, canCreatePaidChannel } from '../../utils/channelPermissions'
 
 interface Props {
   open: boolean
@@ -27,7 +28,7 @@ export default function WerkLiteSidebar({ open, onToggle }: Props) {
   const location = useLocation()
   const base = useWorkBase()
   const { me } = useMe()
-  const canCreateChannel = ['client', 'admin', 'individual'].includes(me?.user?.role ?? '')
+  const canCreate = canCreateChannel(me?.user?.role)
 
   const [channels, setChannels] = useState<ChannelSummary[]>([])
   const [boards, setBoards] = useState<MWProject[]>([])
@@ -214,7 +215,7 @@ export default function WerkLiteSidebar({ open, onToggle }: Props) {
                 >
                   <Compass size={12} />
                 </span>
-                {canCreateChannel && (
+                {canCreate && (
                   <span
                     onClick={(e) => { e.stopPropagation(); setShowCreateChannel(true) }}
                     className="hover:text-w-accent cursor-pointer"
@@ -276,7 +277,7 @@ export default function WerkLiteSidebar({ open, onToggle }: Props) {
             >
               Boards
               <div className="flex items-center gap-1">
-                {canCreateChannel && (
+                {canCreate && (
                   <span
                     onClick={(e) => { e.stopPropagation(); handleCreateBoard() }}
                     className="hover:text-w-accent cursor-pointer"
@@ -313,7 +314,7 @@ export default function WerkLiteSidebar({ open, onToggle }: Props) {
                         >
                           {b.title}
                         </button>
-                        {canCreateChannel && (
+                        {canCreate && (
                           <button
                             onClick={(e) => { e.stopPropagation(); startRename('board', b.id, b.title) }}
                             className="opacity-0 group-hover:opacity-100 shrink-0 p-0.5 text-w-dim hover:text-w-text transition-all"
@@ -359,7 +360,7 @@ export default function WerkLiteSidebar({ open, onToggle }: Props) {
       {showCreateChannel && (
         <CreateChannelModal
           onClose={() => setShowCreateChannel(false)}
-          canCreatePaid={me?.user?.role === 'admin'}
+          canCreatePaid={canCreatePaidChannel(me?.user?.role, 'werk-lite')}
           onCreated={(ch) => {
             setShowCreateChannel(false)
             setChannels((prev) => [{ ...ch, member_count: 1, unread_count: 0, last_message_at: null, last_message_preview: null, is_member: true } as ChannelSummary, ...prev])

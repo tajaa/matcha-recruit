@@ -21,7 +21,7 @@ import { useMe, invalidateMeCache } from '../../hooks/useMe'
 export default function ChannelInviteLanding() {
   const { code } = useParams<{ code: string }>()
   const navigate = useNavigate()
-  const { me, loading: meLoading, isPersonal } = useMe()
+  const { me, loading: meLoading, isPersonal, hasFeature } = useMe()
 
   const [info, setInfo] = useState<ChannelInviteInfo | null>(null)
   const [infoLoading, setInfoLoading] = useState(true)
@@ -34,12 +34,21 @@ export default function ChannelInviteLanding() {
   const [existingAccount, setExistingAccount] = useState(false)
 
   // Already signed in → hand off to the in-surface join flow.
+  //
+  // This page is routed at the app root (`/join-channel/:code`), so it renders
+  // OUTSIDE any WorkSurfaceProvider and cannot use useWorkBase() — the target
+  // surface has to be derived from identity here. werk-lite users were missing
+  // entirely and got bounced to /work, a surface their company may not use.
   useEffect(() => {
     if (!meLoading && me && code) {
-      const base = isPersonal ? '/werk' : '/work'
+      const base = isPersonal
+        ? '/werk'
+        : hasFeature('werk_lite')
+          ? '/werk-lite'
+          : '/work'
       navigate(`${base}/channels/join/${code}`, { replace: true })
     }
-  }, [meLoading, me, isPersonal, code, navigate])
+  }, [meLoading, me, isPersonal, hasFeature, code, navigate])
 
   // Load invite context for the signup form (only matters when signed out).
   useEffect(() => {

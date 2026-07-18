@@ -4,7 +4,8 @@ import { Hash, Search, Users, Lock, Loader2, LogIn, Crown } from 'lucide-react'
 import { listChannels, discoverChannels, joinChannel, createChannelCheckout } from '../api/channels'
 import type { ChannelSummary } from '../api/channels'
 import { useMe } from '../../hooks/useMe'
-import { useWorkBase } from '../routes/WorkSurfaceContext'
+import { useWorkBase, useWorkSurface } from '../routes/WorkSurfaceContext'
+import { canCreateChannel, canCreatePaidChannel } from '../utils/channelPermissions'
 
 const CreateChannelModal = lazy(() => import('../components/channels/CreateChannelModal'))
 
@@ -18,6 +19,7 @@ function formatPrice(cents: number | null | undefined, _currency?: string): stri
 export default function ChannelBrowse() {
   const navigate = useNavigate()
   const base = useWorkBase()
+  const surface = useWorkSurface()
   const { me } = useMe()
   const [channels, setChannels] = useState<ChannelSummary[]>([])
   const [discoverList, setDiscoverList] = useState<ChannelSummary[]>([])
@@ -44,7 +46,7 @@ export default function ChannelBrowse() {
       .finally(() => setDiscoverLoading(false))
   }, [tab, search])
 
-  const canCreate = me?.user?.role === 'client' || me?.user?.role === 'admin' || me?.user?.role === 'individual'
+  const canCreate = canCreateChannel(me?.user?.role)
 
   const filtered = useMemo(() => {
     if (tab === 'discover') return discoverList  // server-side filtered
@@ -259,7 +261,7 @@ export default function ChannelBrowse() {
         <Suspense fallback={null}>
           <CreateChannelModal
             onClose={() => setShowCreate(false)}
-            canCreatePaid={me?.user?.role === 'individual' || me?.user?.role === 'admin'}
+            canCreatePaid={canCreatePaidChannel(me?.user?.role, surface)}
             onCreated={(ch) => {
               setShowCreate(false)
               navigate(`${base}/channels/${ch.id}`)

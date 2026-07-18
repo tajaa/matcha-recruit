@@ -7,6 +7,7 @@ import { listProjects, createProjectNew } from '../api/matchaWork'
 import type { MWProject } from '../types'
 import CreateChannelModal from '../components/channels/CreateChannelModal'
 import { useWorkBase, useWorkBrand } from '../routes/WorkSurfaceContext'
+import { canCreateChannel, canCreatePaidChannel } from '../utils/channelPermissions'
 import { useMe } from '../../hooks/useMe'
 
 // werk-lite landing: just the two things the product is — Channels + Boards.
@@ -16,7 +17,7 @@ export default function WerkLiteHome() {
   const base = useWorkBase()
   const brand = useWorkBrand()
   const { me } = useMe()
-  const canCreateChannel = ['client', 'admin', 'individual'].includes(me?.user?.role ?? '')
+  const canCreate = canCreateChannel(me?.user?.role)
 
   const [channels, setChannels] = useState<ChannelSummary[]>([])
   const [boards, setBoards] = useState<MWProject[]>([])
@@ -74,7 +75,7 @@ export default function WerkLiteHome() {
               >
                 <Compass size={15} />
               </button>
-              {canCreateChannel && (
+              {canCreate && (
                 <button
                   onClick={() => setShowCreateChannel(true)}
                   className="p-1.5 rounded text-w-dim hover:text-w-accent hover:bg-w-surface2 transition-colors"
@@ -114,7 +115,7 @@ export default function WerkLiteHome() {
             <div className="flex items-center gap-2 text-w-text font-medium text-sm">
               <LayoutGrid size={16} className="text-[#ce9178]" /> Boards
             </div>
-            {canCreateChannel && (
+            {canCreate && (
               <button
                 onClick={handleCreateBoard}
                 disabled={creatingBoard}
@@ -147,7 +148,7 @@ export default function WerkLiteHome() {
       {showCreateChannel && (
         <CreateChannelModal
           onClose={() => setShowCreateChannel(false)}
-          canCreatePaid={me?.user?.role === 'admin'}
+          canCreatePaid={canCreatePaidChannel(me?.user?.role, 'werk-lite')}
           onCreated={(ch) => {
             setShowCreateChannel(false)
             navigate(`${base}/channels/${ch.id}`)

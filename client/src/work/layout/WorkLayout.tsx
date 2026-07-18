@@ -155,17 +155,19 @@ export default function WorkLayout() {
   }
 
   // Identity ↔ surface alignment: personal users live under /werk, business
-  // users under /work. Bounce stale/cross bookmarks, preserving subpath + query
-  // ('/work' and '/werk' are both 5 chars, so slice(5) yields the shared tail).
+  // users under /work. Bounce stale/cross bookmarks, preserving subpath + query.
   // werk-lite is business-only (no personal counterpart), so it's never part of
-  // the identity bounce — access is gated by the feature flag instead. The
-  // slice(5) tail trick also only holds for the 5-char /work + /werk bases.
+  // the identity bounce — access is gated by the feature flag instead.
   if (!loading && surface !== 'werk-lite') {
+    // Strip the surface prefix explicitly rather than by a fixed offset: the
+    // old slice(5) silently depended on '/work' and '/werk' both being 5 chars,
+    // so it would corrupt the tail the moment a base of another length is added.
+    const tail = pathname.replace(/^\/(?:work|werk)(?=\/|$)/, '')
     if (surface === 'matcha-work' && isPersonal) {
-      return <Navigate to={`/werk${pathname.slice(5)}${search}`} replace />
+      return <Navigate to={`/werk${tail}${search}`} replace />
     }
     if (surface === 'werk' && !isPersonal) {
-      return <Navigate to={`/work${pathname.slice(5)}${search}`} replace />
+      return <Navigate to={`/work${tail}${search}`} replace />
     }
   }
 

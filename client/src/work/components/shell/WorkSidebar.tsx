@@ -13,7 +13,8 @@ import CreateChannelModal from '../channels/CreateChannelModal'
 import HiringClientPickerModal from '../panels/HiringClientPickerModal'
 import TemplatePickerModal from '../panels/TemplatePickerModal'
 import type { RecruitingClient } from '../../types'
-import { useWorkBase, useWorkBrand } from '../../routes/WorkSurfaceContext'
+import { useWorkBase, useWorkBrand, useWorkSurface } from '../../routes/WorkSurfaceContext'
+import { canCreateChannel, canCreatePaidChannel } from '../../utils/channelPermissions'
 
 /** Sidebar "TABS" strip — the browser-tab-like strip of recently opened items
  *  desktop Werk keeps in `WorkTabsSidebarSection`. Persisted per work surface so
@@ -33,8 +34,9 @@ export default function WorkSidebar({ open, onToggle }: Props) {
   const location = useLocation()
   const base = useWorkBase()
   const brand = useWorkBrand()
+  const surface = useWorkSurface()
   const { me, isPersonal, mwBetaLite } = useMe()
-  const canCreateChannel = ['client', 'admin', 'individual'].includes(me?.user?.role ?? '')
+  const canCreate = canCreateChannel(me?.user?.role)
 
   const [channels, setChannels] = useState<ChannelSummary[]>([])
   const [projects, setProjects] = useState<MWProject[]>([])
@@ -521,7 +523,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
                 >
                   <Compass size={12} />
                 </span>
-                {canCreateChannel && (
+                {canCreate && (
                   <span
                     onClick={(e) => { e.stopPropagation(); setShowCreateChannel(true) }}
                     className="hover:text-w-accent cursor-pointer"
@@ -828,7 +830,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
       {showCreateChannel && (
         <CreateChannelModal
           onClose={() => setShowCreateChannel(false)}
-          canCreatePaid={me?.user?.role === 'individual' || me?.user?.role === 'admin'}
+          canCreatePaid={canCreatePaidChannel(me?.user?.role, surface)}
           onCreated={(ch) => {
             setShowCreateChannel(false)
             setChannels((prev) => [{ ...ch, member_count: 1, unread_count: 0, last_message_at: null, last_message_preview: null, is_member: true } as ChannelSummary, ...prev])
