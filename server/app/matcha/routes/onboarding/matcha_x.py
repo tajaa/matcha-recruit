@@ -27,24 +27,24 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from ...database import get_connection
-from ..dependencies import require_admin_or_client, get_client_company_id
-from ...core.services.compliance_service import (
+from app.database import get_connection
+from app.matcha.dependencies import require_admin_or_client, get_client_company_id
+from app.core.services.compliance_service import (
     run_compliance_check_stream,
     MATCHA_X_LITE_CATEGORIES,
     _get_industry_profile,
     _heartbeat_while,
 )
-from ...core.services.roster_jurisdictions import (
+from app.core.services.roster_jurisdictions import (
     collect_roster_jurisdictions,
     sync_and_check_roster_jurisdictions,
 )
-from ...core.services.handbook_audit_service import (
+from app.core.services.handbook_audit_service import (
     _extract_sections_from_pdf,
     _grade_state_coverage,
 )
-from ...core.services.storage import get_storage
-from ...core.services import vertical_coverage
+from app.core.services.storage import get_storage
+from app.core.services import vertical_coverage
 
 router = APIRouter()
 logger = logging.getLogger(__name__)

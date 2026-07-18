@@ -8,10 +8,10 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from ...database import get_connection
-from ..dependencies import require_admin_or_client, get_client_company_id
-from ..services import do_readiness
-from ..models.do_readiness import DoAttestation
+from app.database import get_connection
+from app.matcha.dependencies import require_admin_or_client, get_client_company_id
+from app.matcha.services import do_readiness
+from app.matcha.models.do_readiness import DoAttestation
 
 router = APIRouter()
 

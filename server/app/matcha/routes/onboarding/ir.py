@@ -18,8 +18,8 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from ...database import get_connection
-from ..dependencies import require_admin_or_client, get_client_company_id
+from app.database import get_connection
+from app.matcha.dependencies import require_admin_or_client, get_client_company_id
 
 router = APIRouter()
 

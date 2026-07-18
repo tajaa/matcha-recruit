@@ -15,20 +15,20 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile
 from pydantic import BaseModel, Field
 
-from ...database import get_connection
-from ..dependencies import require_broker
-from .ir_incidents import compute_wc_metrics
-from ..services.wc_benchmarks import SEVERITY_BAND_RANK
-from ..services import benefits_eligibility as be
-from ..services import wc_depth
-from ..services import wc_mod_parser
-from ..services import epl_readiness
-from ..services import risk_index
-from ..services import external_clients as ext
-from ..services import property_sov
-from ..services import property_cat
-from ..services import wc_classmap
-from ..models.broker_action_center import MilestonesResponse, OutreachResponse
+from app.database import get_connection
+from app.matcha.dependencies import require_broker
+from app.matcha.routes.ir_incidents import compute_wc_metrics
+from app.matcha.services.wc_benchmarks import SEVERITY_BAND_RANK
+from app.matcha.services import benefits_eligibility as be
+from app.matcha.services import wc_depth
+from app.matcha.services import wc_mod_parser
+from app.matcha.services import epl_readiness
+from app.matcha.services import risk_index
+from app.matcha.services import external_clients as ext
+from app.matcha.services import property_sov
+from app.matcha.services import property_cat
+from app.matcha.services import wc_classmap
+from app.matcha.models.broker_action_center import MilestonesResponse, OutreachResponse
 
 logger = logging.getLogger(__name__)
 
@@ -599,7 +599,7 @@ async def get_risk_index_client(company_id: UUID, current_user=Depends(require_b
 @router.post("/risk-index/{company_id}/narrative")
 async def get_risk_index_narrative(company_id: UUID, current_user=Depends(require_broker)):
     """AI explanation + prioritized moves for one client, written for the broker."""
-    from ..services import risk_narrative
+    from app.matcha.services import risk_narrative
     async with get_connection() as conn:
         meta = await _assert_broker_owns_company(conn, current_user.id, company_id)
         result = await risk_index.compute_risk_index(conn, company_id)
@@ -745,7 +745,7 @@ async def nudge_client_hr(exc_id: UUID, current_user=Depends(require_broker)):
     if not to_email:
         raise HTTPException(status_code=400, detail="No client HR contact on file to notify")
 
-    from ...core.services.email import get_email_service
+    from app.core.services.email import get_email_service
     svc = get_email_service()
     sent = await svc.send_benefit_eligibility_nudge_email(
         to_email=to_email,
@@ -1039,7 +1039,7 @@ async def action_center_outreach(
 
     # Gemini call happens OUTSIDE any pooled connection so a slow model call
     # doesn't hold a connection.
-    from ..services.broker_outreach import generate_outreach_prompts
+    from app.matcha.services.broker_outreach import generate_outreach_prompts
     result = await generate_outreach_prompts(
         company_name=meta["name"],
         wc_metrics=wc,

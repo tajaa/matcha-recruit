@@ -13,10 +13,10 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile
 
-from ...database import get_connection
-from ..dependencies import require_admin_or_client, get_client_company_id
-from ..services import limit_adequacy as la, risk_transfer as rt
-from ..models.limit_adequacy import CoverageLineUpdate, ContractCreate, ContractUpdate
+from app.database import get_connection
+from app.matcha.dependencies import require_admin_or_client, get_client_company_id
+from app.matcha.services import limit_adequacy as la, risk_transfer as rt
+from app.matcha.models.limit_adequacy import CoverageLineUpdate, ContractCreate, ContractUpdate
 
 router = APIRouter()
 

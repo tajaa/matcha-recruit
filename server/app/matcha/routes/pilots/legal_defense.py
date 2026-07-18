@@ -23,13 +23,13 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Re
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
-from ...database import get_connection
-from ..dependencies import require_admin_or_client, get_client_company_id
+from app.database import get_connection
+from app.matcha.dependencies import require_admin_or_client, get_client_company_id
 from app.core.feature_flags import merge_company_features
 from app.core.services.redis_cache import check_rate_limit, client_ip
 from app.core.services.storage import get_storage
-from ..services import legal_defense as ld
-from ..services import legal_research
+from app.matcha.services import legal_defense as ld
+from app.matcha.services import legal_research
 
 logger = logging.getLogger(__name__)
 
@@ -204,7 +204,7 @@ async def parse_intake(file: UploadFile = File(...), current_user=Depends(requir
         raise HTTPException(status_code=400, detail="Empty file")
     if len(data) > 15_000_000:
         raise HTTPException(status_code=413, detail="PDF too large (max 15 MB)")
-    from ..services import legal_intake_parser
+    from app.matcha.services import legal_intake_parser
     return await legal_intake_parser.parse_intake_document(data)
 
 

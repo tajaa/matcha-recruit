@@ -13,11 +13,11 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile
 from pydantic import BaseModel
 
-from ...database import get_connection
-from ...core.feature_flags import merge_company_features
-from ..dependencies import require_broker, require_broker_pro
-from ..models.limit_adequacy import ContractUpdate
-from ..services import (
+from app.database import get_connection
+from app.core.feature_flags import merge_company_features
+from app.matcha.dependencies import require_broker, require_broker_pro
+from app.matcha.models.limit_adequacy import ContractUpdate
+from app.matcha.services import (
     wc_depth, epl_readiness, external_clients as ext, submission_packet as sp,
     controls_evidence as ce, claims_readiness as cr, submission_readiness as sr,
     venue_severity as vs, exclusion_gap as eg, limit_adequacy as la,
@@ -26,9 +26,9 @@ from ..services import (
     property_exposure as property_exp, property_recommendations as property_recs,
     property_risk as property_risk_svc,
 )
-from .ir_incidents import compute_wc_metrics
-from .broker_portfolio import _assert_broker_owns_company
-from .broker_external import _broker_id
+from app.matcha.routes.ir_incidents import compute_wc_metrics
+from .portfolio import _assert_broker_owns_company
+from .external import _broker_id
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

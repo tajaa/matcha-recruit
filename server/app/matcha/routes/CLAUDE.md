@@ -1,6 +1,8 @@
 # Matcha Routes Zoo
 
-29 routers, ~39,000 lines. Aggregated in `__init__.py` and mounted onto `matcha_router`. Each router corresponds to one product surface or sub-feature.
+~50 routers, ~39,000 lines. Aggregated in `__init__.py` and mounted onto `matcha_router`. Each router corresponds to one product surface or sub-feature.
+
+Loose single-file routers sit at top level; related ones are collected into **grouping folders** (`broker/`, `insurance/`, `pilots/`, `onboarding/`, `intake/` — see below). Grouping folders differ from the split-router packages (`employees/`, `ir_incidents/`, `er_copilot/`, `matcha_work/`, `employee_schedule/`, `labor_relations/`): a split-router package is **one** router carved into submodules; a grouping folder namespaces **several independent** routers, each still self-mounted + self-gated in `__init__.py`. Its `folder/__init__.py` only re-exports the sub-routers under their historical `*_router` names, so the top aggregator's mount block is unchanged by the grouping.
 
 ## Router map (by domain)
 
@@ -10,19 +12,19 @@
 | `employees/` | `/employees` (+ `/employees/pto`, `/employees/leave`) | Employee CRUD, bulk upload, invitations, onboarding, offboarding, credentials, OIG, leave, incidents, pto/leave admin — **package** (split 2026-05-16; see `employees/CLAUDE.md`) |
 | `employee_portal.py` | `/v1/portal` | Employee-facing self-service portal (incl. `/me/schedule*` — view published shifts + file swap/drop/unavailability requests, gated `employee_schedule`) |
 | `employee_schedule/` | `/employee-schedule` | Employee shift scheduling — shift CRUD + publish + weekly view (`shifts.py`), assignment (`assignments.py`), templates + recurrence generation (`templates.py`), admin request review (`requests.py`). **Package**; `require_feature("employee_schedule")` |
-| `onboarding.py` | `/onboarding` | New-hire onboarding tasks + notification settings |
-| `invitations.py` | `/invitations` | Token-based invite acceptance |
+| `onboarding/new_hire.py` | `/onboarding` | New-hire onboarding tasks + notification settings |
+| `onboarding/invitations.py` | `/invitations` | Token-based invite acceptance |
 | `offer_letters.py` | `/offer-letters` | Offer letter creation, signing, candidate portal (1,288 lines) |
 | `interviews.py` | — | Live interview WS + transcript handling (1,522 lines) |
 | `er_copilot/` | `/er/cases` (+ `/shared/er-export`) | Employee Relations case mgmt + AI — **package** (split 2026-07-06, 43 routes; see `er_copilot/CLAUDE.md`) |
 | `ir_incidents/` | `/ir/incidents` | Incident reporting (matcha-lite) — **already a package** (50 routes incl. no-roster people index), see `ir_incidents/CLAUDE.md` |
-| `ir_onboarding.py` | `/ir-onboarding` | IR-only onboarding wizard backend |
+| `onboarding/ir.py` | `/ir-onboarding` | IR-only onboarding wizard backend |
 | `ir_surveys.py` | `/ir/surveys` | Security survey CRUD (matcha-lite) |
-| `inbound_email.py` | (none) | Public intake: anonymous `/report/:token` + per-location magic-link `/intake/:token` forms |
+| `intake/inbound_email.py` | (none) | Public intake: anonymous `/report/:token` + per-location magic-link `/intake/:token` forms |
 | `accommodations.py` | `/accommodations` | ADA accommodation cases (1,175 lines) |
 | `discipline.py` | `/discipline` | Progressive discipline workflow + signatures |
 | `risk_assessment.py` | `/risk-assessment` | Risk-assessment dashboard data (849 lines) |
-| `analysis_pilot.py` | `/analysis-pilot` | Analysis Pilot — general-purpose bring-your-own-data analysis in a chat UI (upload CSV/XLSX/PDF → deterministic `services/analysis_packs` metrics incl. volatility/risk, financial, insurance, inventory, general stats → grounded SSE chat with highlight-to-chat + proposed extraction corrections → analyst PDF). Company-scoped; `require_feature("analysis_pilot")` |
+| `pilots/analysis.py` | `/analysis-pilot` | Analysis Pilot — general-purpose bring-your-own-data analysis in a chat UI (upload CSV/XLSX/PDF → deterministic `services/analysis_packs` metrics incl. volatility/risk, financial, insurance, inventory, general stats → grounded SSE chat with highlight-to-chat + proposed extraction corrections → analyst PDF). Company-scoped; `require_feature("analysis_pilot")` |
 | `pre_termination.py` | `/pre-termination` | Pre-term review packets (985 lines) |
 | `separation.py` | `/separation` | Separation agreement workflow |
 | `flight_risk.py` | `/flight-risk` | Flight-risk scoring per employee |
@@ -30,8 +32,8 @@
 | `i9.py` | `/i9` | I-9 verification |
 | `cobra.py` | `/cobra` | COBRA admin |
 | `dashboard.py` | `/dashboard` | Cross-feature dashboard aggregation (2,141 lines) |
-| `brokers.py` | `/brokers` | HR broker admin (1,605 lines) |
-| `broker_portfolio.py` | `/broker-portfolio` | Per-broker client roster + cross-client metrics |
+| `broker/brokers.py` | `/brokers` | HR broker admin (1,605 lines) |
+| `broker/portfolio.py` | `/broker-portfolio` | Per-broker client roster + cross-client metrics |
 | `fractional_hr.py` | `/fractional-hr` | Fractional HR engagement tooling — internal master-admin only (`require_admin` at mount, **not** feature-gated). Clients/scope/tasks/time + aggregate book-of-business overview. `fractional_*` tables; `company_id` nullable (client may have no tenant) |
 | `provisioning.py` | `/provisioning` | Google Workspace + Slack auto-provision (1,606 lines) |
 | `matcha_work/` | (multiple: `/matcha-work`, `/matcha-work/public`, `/matcha-work/presence`) | Matcha-work projects/threads/tasks/recruiting/AI turns — **package** (split 2026-07-03, 204 routes; see `matcha_work/CLAUDE.md`) |
@@ -41,6 +43,22 @@
 | `fake_hris.py` | `/fake-hris` | Mock HRIS connector for demos |
 | `thread_ws.py` | `/threads` | Matcha-work thread websocket |
 | `twilio_webhook.py` | `/twilio` | Twilio inbound for voice surfaces |
+
+## Grouping folders (namespace only — not split-router packages)
+
+Each folder's `__init__.py` re-exports the members' routers under their historical
+`*_router` names; the top `__init__.py` imports those names from the folder and mounts each
+member with its own prefix + gate (unchanged). Sibling helpers inside a folder are imported
+relative (`from .portfolio import _assert_broker_owns_company`); everything else is absolute
+(`from app.matcha.services.X import …`, `from app.matcha.routes.ir_incidents import …`).
+
+| Folder | Members (file → router) |
+|---|---|
+| `broker/` | `brokers`→brokers_router, `external`→broker_external_router, `loss_runs`→broker_loss_runs_router, `pilot`→broker_pilot_router, `portfolio`→broker_portfolio_router, `submission`→broker_submission_router (all mount `/broker*`; cross-import each other) |
+| `insurance/` | `acord`, `coi`, `controls_evidence`, `driver_risk`, `limit_adequacy`, `management_liability`, `property`, `resident_care`, `risk_profile`, `tcor`, `workforce_compliance` (each `*_router`; each its own feature flag) |
+| `pilots/` | `analysis`→analysis_pilot_router, `handbook`→handbook_pilot_router, `legal_defense`→legal_defense_router + legal_defense_public_router (filename kept to match the `legal_defense` flag + `legal_matter*` tables) |
+| `onboarding/` | `new_hire`→onboarding_router, `ir`→ir_onboarding_router, `matcha_x`→matcha_x_onboarding_router, `invitations`→invitations_router |
+| `intake/` | `inbound_email`→anonymous_report_router, `external`→external_intake_router (public, token-validated, no auth/gate) |
 
 ## Mounting convention
 

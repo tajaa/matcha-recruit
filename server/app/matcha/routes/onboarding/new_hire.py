@@ -9,15 +9,15 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 
-from ...database import get_connection
-from ..dependencies import require_admin_or_client, get_client_company_id
-from ..services.onboarding_state_machine import (
+from app.database import get_connection
+from app.matcha.dependencies import require_admin_or_client, get_client_company_id
+from app.matcha.services.onboarding_state_machine import (
     BLOCK_REASONS,
     all_states,
     event_schema_contract,
     state_machine_map,
 )
-from ...core.models.auth import CurrentUser
+from app.core.models.auth import CurrentUser
 
 router = APIRouter()
 
@@ -679,7 +679,7 @@ async def get_jurisdiction_packet(
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         raise HTTPException(status_code=403, detail="No company associated with this account")
-    from ..services import new_hire_packet
+    from app.matcha.services import new_hire_packet
     async with get_connection() as conn:
         return await new_hire_packet.build_packet(conn, company_id, employee_id)
 
@@ -693,6 +693,6 @@ async def get_new_states(
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         raise HTTPException(status_code=403, detail="No company associated with this account")
-    from ..services import new_hire_packet
+    from app.matcha.services import new_hire_packet
     async with get_connection() as conn:
         return await new_hire_packet.new_state_summary(conn, company_id)

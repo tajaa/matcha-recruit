@@ -6,38 +6,47 @@ from .companies import router as companies_router
 from .interviews import router as interviews_router
 from .employees import router as employees_router, pto_admin_router, leave_admin_router
 from .employee_portal import router as employee_portal_router
-from .onboarding import router as onboarding_router
-from .invitations import router as invitations_router
+from .onboarding import (
+    onboarding_router,
+    invitations_router,
+    ir_onboarding_router,
+    matcha_x_onboarding_router,
+)
 from .offer_letters import router as offer_letters_router, candidate_router as offer_letters_candidate_router
 from .er_copilot import router as er_copilot_router, public_router as er_copilot_public_router
 from .help_assistant import router as help_assistant_router
 from .ir_incidents import router as ir_incidents_router
-from .broker_portfolio import router as broker_portfolio_router
-from .broker_external import router as broker_external_router
-from .broker_submission import router as broker_submission_router
-from .broker_loss_runs import router as broker_loss_runs_router
-from .broker_pilot import router as broker_pilot_router
-from .workforce_compliance import router as workforce_compliance_router
-from .risk_profile import router as risk_profile_router
-from .resident_care import router as resident_care_router
-from .controls_evidence import router as controls_evidence_router
-from .legal_defense import router as legal_defense_router, public_router as legal_defense_public_router
-from .handbook_pilot import router as handbook_pilot_router
-from .analysis_pilot import router as analysis_pilot_router
-from .limit_adequacy import router as limit_adequacy_router
-from .property import router as property_router
-from .driver_risk import router as driver_risk_router
+from .broker import (
+    brokers_router,
+    broker_portfolio_router,
+    broker_external_router,
+    broker_submission_router,
+    broker_loss_runs_router,
+    broker_pilot_router,
+)
+from .insurance import (
+    acord_router,
+    coi_router,
+    controls_evidence_router,
+    driver_risk_router,
+    limit_adequacy_router,
+    management_liability_router,
+    property_router,
+    resident_care_router,
+    risk_profile_router,
+    tcor_router,
+    workforce_compliance_router,
+)
+from .pilots import (
+    analysis_pilot_router,
+    handbook_pilot_router,
+    legal_defense_router,
+    legal_defense_public_router,
+)
 from .employee_schedule import router as employee_schedule_router
-from .tcor import router as tcor_router
-from .coi import router as coi_router
-from .management_liability import router as management_liability_router
-from .acord import router as acord_router
-from .ir_onboarding import router as ir_onboarding_router
-from .matcha_x_onboarding import router as matcha_x_onboarding_router
 from .ir_surveys import router as ir_surveys_router
 from .accommodations import router as accommodations_router
 from .dashboard import router as dashboard_router
-from .brokers import router as brokers_router
 from .fractional_hr import router as fractional_hr_router
 from .provisioning import router as provisioning_router
 from .matcha_work import router as matcha_work_router, public_router as matcha_work_public_router, presence_router as matcha_work_presence_router
@@ -49,8 +58,7 @@ from .risk_assessment import router as risk_assessment_router
 from .pre_termination import router as pre_termination_router
 from .discipline import router as discipline_router, public_router as discipline_public_router
 from .flight_risk import router as flight_risk_router
-from .inbound_email import router as anonymous_report_router
-from .external_intake import router as external_intake_router
+from .intake import anonymous_report_router, external_intake_router
 from .wc_rates_admin import router as wc_rates_admin_router
 from .training import router as training_router
 from .i9 import router as i9_router

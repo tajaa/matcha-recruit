@@ -78,7 +78,7 @@ def test_ir_route_modules_have_no_undefined_names():
 # ---------------------------------------------------------------------------
 
 def test_public_report_honeypot_is_not_autofillable():
-    from app.matcha.routes.inbound_email import (
+    from app.matcha.routes.intake.inbound_email import (
         AnonymousReportRequest,
         LocationReportRequest,
     )

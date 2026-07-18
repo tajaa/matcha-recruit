@@ -8,8 +8,8 @@ or expired. Answers are attributed to the broker who minted the link.
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from ...database import get_connection
-from ..services import external_clients as ext
+from app.database import get_connection
+from app.matcha.services import external_clients as ext
 
 router = APIRouter()
 

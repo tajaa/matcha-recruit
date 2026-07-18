@@ -9,13 +9,13 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from ...database import get_connection
-from ...core.services.auth import (
+from app.database import get_connection
+from app.core.services.auth import (
     hash_password,
     create_access_token,
     create_refresh_token,
 )
-from ...core.services.email import EmailService
+from app.core.services.email import EmailService
 
 router = APIRouter()
 

@@ -16,15 +16,15 @@ from uuid import UUID
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 
-from ...database import get_connection
-from ..dependencies import require_admin_or_client, get_client_company_id
-from ..services import property_sov as sov
-from ..services import property_sov_parser as sov_parser
-from ..services import property_exposure as exposure
-from ..services import property_recommendations as recs
-from ..services import property_risk as prisk
-from ..services import submission_readiness as sr
-from ..models.property import BuildingUpsert, BuildingBulkInsert, BulkUploadResult
+from app.database import get_connection
+from app.matcha.dependencies import require_admin_or_client, get_client_company_id
+from app.matcha.services import property_sov as sov
+from app.matcha.services import property_sov_parser as sov_parser
+from app.matcha.services import property_exposure as exposure
+from app.matcha.services import property_recommendations as recs
+from app.matcha.services import property_risk as prisk
+from app.matcha.services import submission_readiness as sr
+from app.matcha.models.property import BuildingUpsert, BuildingBulkInsert, BulkUploadResult
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

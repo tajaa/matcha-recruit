@@ -9,10 +9,10 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from ...database import get_connection
-from ..dependencies import require_admin_or_client, get_client_company_id
-from ..services import tcor_service
-from ..models.tcor import TcorInput
+from app.database import get_connection
+from app.matcha.dependencies import require_admin_or_client, get_client_company_id
+from app.matcha.services import tcor_service
+from app.matcha.models.tcor import TcorInput
 
 router = APIRouter()
 

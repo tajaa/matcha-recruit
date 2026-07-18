@@ -22,20 +22,20 @@ from fastapi import (APIRouter, Depends, File, HTTPException, Query, Request, Re
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from ...database import get_connection
-from ..dependencies import require_broker_pro
+from app.database import get_connection
+from app.matcha.dependencies import require_broker_pro
 from app.core.services.redis_cache import check_rate_limit, client_ip
 from app.core.services.storage import get_storage
-from ..services import broker_pilot as bp
-from ..services import broker_pilot_requirements as bpr
-from ..services import external_clients as ext
-from ..services.er_document_parser import ERDocumentParser
-from .broker_portfolio import _assert_broker_owns_company
-from .broker_external import _broker_id
-from .broker_submission import _tenant_context, _external_context
+from app.matcha.services import broker_pilot as bp
+from app.matcha.services import broker_pilot_requirements as bpr
+from app.matcha.services import external_clients as ext
+from app.matcha.services.er_document_parser import ERDocumentParser
+from .portfolio import _assert_broker_owns_company
+from .external import _broker_id
+from .submission import _tenant_context, _external_context
 # Shared ASCII filename hardening (Starlette latin-1-encodes headers; an em dash
 # in a title would 500 every download). One implementation, one place to patch.
-from .legal_defense import _safe_name, _safe_filename
+from app.matcha.routes.pilots.legal_defense import _safe_name, _safe_filename
 
 logger = logging.getLogger(__name__)
 

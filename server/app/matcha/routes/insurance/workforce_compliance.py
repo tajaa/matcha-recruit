@@ -11,12 +11,12 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from ...database import get_connection
-from ..dependencies import require_admin_or_client, get_client_company_id
-from ..services import pay_equity_analysis
-from ..services import workforce_suggest
-from ..services import workforce_compliance as wf
-from ..models.workforce_compliance import (
+from app.database import get_connection
+from app.matcha.dependencies import require_admin_or_client, get_client_company_id
+from app.matcha.services import pay_equity_analysis
+from app.matcha.services import workforce_suggest
+from app.matcha.services import workforce_compliance as wf
+from app.matcha.models.workforce_compliance import (
     HiringAiAuditCreate, HiringAiAuditUpdate, HiringAiAuditResponse,
     BiometricPointCreate, BiometricPointUpdate, BiometricPointResponse,
     PayTransparencyStateRow, PayTransparencyUpdate,

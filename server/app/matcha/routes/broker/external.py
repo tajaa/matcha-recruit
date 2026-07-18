@@ -12,11 +12,11 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, File, UploadFile
 from pydantic import BaseModel, Field
 
-from ...database import get_connection
-from ..dependencies import require_broker_pro
-from ..services import external_clients as ext
-from ..services import epl_readiness
-from ..services import loss_run_parser
+from app.database import get_connection
+from app.matcha.dependencies import require_broker_pro
+from app.matcha.services import external_clients as ext
+from app.matcha.services import epl_readiness
+from app.matcha.services import loss_run_parser
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

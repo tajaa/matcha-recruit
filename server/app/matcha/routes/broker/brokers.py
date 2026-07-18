@@ -11,12 +11,12 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, EmailStr, Field
 
-from ...config import get_settings
-from ...core.feature_flags import default_company_features_json, merge_company_features
-from ...core.models.auth import CurrentUser
-from ...core.services.email import get_email_service
-from ...database import get_connection
-from ..dependencies import require_broker
+from app.config import get_settings
+from app.core.feature_flags import default_company_features_json, merge_company_features
+from app.core.models.auth import CurrentUser
+from app.core.services.email import get_email_service
+from app.database import get_connection
+from app.matcha.dependencies import require_broker
 
 router = APIRouter()
 
@@ -1019,7 +1019,7 @@ async def get_broker_company_detail(
     current_user: CurrentUser = Depends(require_broker),
 ):
     """Return detailed read-only data about one of the broker's linked clients."""
-    from ...core.services.handbook_service import HandbookService
+    from app.core.services.handbook_service import HandbookService
 
     async with get_connection() as conn:
         membership = await _get_broker_membership(conn, user_id=current_user.id)
@@ -1592,7 +1592,7 @@ async def list_referred_clients(current_user: CurrentUser = Depends(require_brok
 
 @router.get("/reporting/handbook-coverage")
 async def get_broker_handbook_coverage(current_user: CurrentUser = Depends(require_broker)):
-    from ...core.services.handbook_service import HandbookService
+    from app.core.services.handbook_service import HandbookService
 
     async with get_connection() as conn:
         membership = await _get_broker_membership(conn, user_id=current_user.id)
@@ -1887,7 +1887,7 @@ async def create_broker_member(
     current_user: CurrentUser = Depends(require_broker),
 ):
     """Create an additional broker user under this brokerage (owner/admin only)."""
-    from ...core.services.auth import hash_password  # lazy: avoid import cycle
+    from app.core.services.auth import hash_password  # lazy: avoid import cycle
 
     generated_password = not bool(request.password and request.password.strip())
     member_password = request.password.strip() if request.password else secrets.token_urlsafe(12)

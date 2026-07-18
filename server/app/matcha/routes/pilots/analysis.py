@@ -24,14 +24,14 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile
 from fastapi.responses import StreamingResponse
 
-from ...database import get_connection
-from ..dependencies import require_admin_or_client, get_client_company_id
+from app.database import get_connection
+from app.matcha.dependencies import require_admin_or_client, get_client_company_id
 from app.core.services.redis_cache import check_rate_limit, client_ip
 from app.core.services.storage import get_storage
-from ..services import analysis_pilot as ap
-from ..services import analysis_packs as packs
-from ..services.er_document_parser import ERDocumentParser
-from ..models.analysis_pilot import (
+from app.matcha.services import analysis_pilot as ap
+from app.matcha.services import analysis_packs as packs
+from app.matcha.services.er_document_parser import ERDocumentParser
+from app.matcha.models.analysis_pilot import (
     SessionCreate, SessionUpdate, DatasetPatch, ComparisonCreate, ChatIn, ReportIn, DemoDatasetIn,
 )
 # Shared ASCII filename hardening (Starlette latin-1-encodes headers).

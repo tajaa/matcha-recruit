@@ -10,13 +10,13 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from ...database import get_connection
-from ..dependencies import require_admin_or_client, get_client_company_id
-from ..services import risk_index
-from ..services import risk_narrative
-from ..services import submission_readiness
-from ..services import venue_severity
-from ..services import exclusion_gap
+from app.database import get_connection
+from app.matcha.dependencies import require_admin_or_client, get_client_company_id
+from app.matcha.services import risk_index
+from app.matcha.services import risk_narrative
+from app.matcha.services import submission_readiness
+from app.matcha.services import venue_severity
+from app.matcha.services import exclusion_gap
 
 logger = logging.getLogger(__name__)
 

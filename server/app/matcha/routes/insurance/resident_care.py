@@ -9,11 +9,11 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 
-from ...database import get_connection
-from ..dependencies import require_admin_or_client, get_client_company_id
-from ..services import resident_care as rc
-from ..services import workforce_suggest
-from ..models.resident_care import (
+from app.database import get_connection
+from app.matcha.dependencies import require_admin_or_client, get_client_company_id
+from app.matcha.services import resident_care as rc
+from app.matcha.services import workforce_suggest
+from app.matcha.models.resident_care import (
     SafetyProgramCreate, SafetyProgramUpdate, MvrReviewCreate, MvrReviewUpdate,
 )
 
