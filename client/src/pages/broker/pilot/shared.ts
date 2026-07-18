@@ -47,7 +47,9 @@ export const DOC_STATUS_CLASS: Record<DocStatus, string> = {
  *  sources — the operational records Matcha generates for ON-platform clients.
  *  They stay dark for off-platform clients: that's the visual incentive to
  *  bring the client onto the platform. */
-export const SOURCE_META: { key: string; label: string; icon: LucideIcon }[] = [
+/** `darkHint` overrides the strip's dark-state tooltip for a source whose
+ *  absence the generic NATIVE_KEYS wording would describe wrongly. */
+export const SOURCE_META: { key: string; label: string; icon: LucideIcon; darkHint?: string }[] = [
   { key: 'profile', label: 'Profile', icon: Building2 },
   { key: 'wc', label: "Workers' Comp", icon: HardHat },
   { key: 'lossdev', label: 'Loss dev', icon: TrendingUp },
@@ -63,6 +65,13 @@ export const SOURCE_META: { key: string; label: string; icon: LucideIcon }[] = [
   { key: 'er_cases', label: 'ER cases', icon: Users },
   { key: 'compliance', label: 'Compliance', icon: BookOpenCheck },
   { key: 'compliance_alerts', label: 'Alerts', icon: Bell },
+  {
+    key: 'jurisdiction', label: 'Compliance law', icon: Scale,
+    // Not client-generated history like incidents or ER cases — it is the
+    // codified catalog, resolved for the states this client operates in. The
+    // generic NATIVE_KEYS wording ("generated natively") would misdescribe it.
+    darkHint: 'codified law for the client’s states — grounds sessions once this client is on Matcha',
+  },
   { key: 'discipline', label: 'Discipline', icon: Gavel },
   { key: 'training', label: 'Training', icon: GraduationCap },
   { key: 'policy_ack', label: 'Policy acks', icon: FileSignature },
@@ -74,7 +83,7 @@ export const SOURCE_META: { key: string; label: string; icon: LucideIcon }[] = [
 /** Systems generated natively by the platform — only on-platform clients have
  *  them; the strip advertises them ("on Matcha") when dark. */
 export const NATIVE_KEYS = new Set([
-  'incidents', 'er_cases', 'compliance', 'compliance_alerts',
+  'incidents', 'er_cases', 'compliance', 'compliance_alerts', 'jurisdiction',
   'discipline', 'training', 'policy_ack', 'accommodations',
 ])
 
@@ -95,6 +104,7 @@ export const SYSTEM_LABEL: Record<string, string> = {
   er_cases: 'Employee-relations cases',
   compliance: 'Compliance requirements tracked',
   compliance_alerts: 'Compliance monitoring alerts',
+  jurisdiction: 'Codified compliance obligations',
   discipline: 'Progressive discipline',
   training: 'Training completions',
   policy_ack: 'Policy / handbook acknowledgments',

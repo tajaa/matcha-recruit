@@ -106,7 +106,12 @@ PILOT_TEMPLATES: tuple[dict, ...] = (
             "non-contributory) appear to be in place, and the insurability of "
             "each indemnity form. A recorded clause verdict is a starting point "
             "for counsel — report it as such and never state that a clause is or "
-            "is not enforceable. Insurance and risk-transfer terms only."
+            "is not enforceable. Insurance and risk-transfer terms only. The "
+            "`jur:` records are the client's codified EMPLOYMENT-law obligations "
+            "(final pay, leave, pay transparency, anti-discrimination) — cite "
+            "them only where an employment-practices exposure is genuinely at "
+            "issue; they do not speak to contractual insurance requirements, so "
+            "never stretch one to cover a limits or endorsement question."
         ),
         "starters": [
             "Do the limits this client carries meet what their contracts require? Flag every gap.",
@@ -177,7 +182,9 @@ PILOT_TEMPLATES: tuple[dict, ...] = (
             "projected ultimates (`platform:lossdev.*`), submission-data "
             "completeness (`platform:readiness`), the controls story "
             "(`platform:controls`), and the workers'-comp / EPL metrics an "
-            "underwriter will scrutinize (`platform:wc`, `platform:epl.*`). End "
+            "underwriter will scrutinize (`platform:wc`, `platform:epl.*`), and "
+            "the codified employment-law obligations that shape the EPL exposure "
+            "(`jur:` records). End "
             "every analysis with the concrete data the broker should gather "
             "before marketing the account."
         ),
@@ -820,7 +827,47 @@ async def gather_native_sources(conn, company_id) -> dict:
     return {"sources": sources, "notes": notes}
 
 
-def build_corpus(subject_name: str, ctx: dict, docs: list[dict], native: dict | None = None) -> dict:
+def _jurisdiction_records(index: dict) -> list[dict]:
+    """Reshape `er_compliance_grounding.build_jurisdiction_corpus`'s flat index
+    (``jur:<id>`` → {cid, requirement_id, state, category, title, description,
+    statute_citation, source_url}) into corpus records (`{cid, ref, summary,
+    when}`), the same shape every other source uses.
+
+    ``summary`` mirrors ER's own corpus line — ``(STATE — category) title:
+    description Citation: x`` — because `_corpus_text` renders ONLY `summary`
+    (`ref` reaches the memo appendix, never the prompt). Two consequences are
+    load-bearing: the **state** must be in the summary or a multi-state client's
+    federal and per-state rows are byte-identical to the model, which then
+    attributes one state's rule to another; and the **description** must be
+    there or the model has a real cid with no statement of what the law
+    requires, so it supplies the rule from its own weights while citing a
+    genuine ID — the one hallucination `validate_citations` cannot catch.
+
+    ``source_url`` rides along for the appendix (extra keys flow through
+    `build_corpus`'s `{**r}` into the index untouched).
+
+    Pure. Empty index → []."""
+    recs: list[dict] = []
+    for rec in (index or {}).values():
+        state = (rec.get("state") or "").strip().upper() or "—"
+        category = (rec.get("category") or "").strip()
+        title = (rec.get("title") or "Requirement").strip()
+        desc = (rec.get("description") or "").strip()
+        citation = (rec.get("statute_citation") or "").strip() or "uncited"
+        body = f"{title}: {desc}" if desc else title
+        recs.append({
+            "cid": rec["cid"],
+            "ref": f"{state} — {title}",
+            "summary": f"({state} — {category}) {body} Citation: {citation}",
+            "when": "current",
+            "source_url": rec.get("source_url") or None,
+        })
+    return recs
+
+
+def build_corpus(subject_name: str, ctx: dict, docs: list[dict], native: dict | None = None,
+                 jurisdiction: list[dict] | None = None,
+                 jurisdiction_truncated: bool = False) -> dict:
     """Assemble the grounding corpus: `{sources, index, notes}` — the same shape
     Legal Pilot's `gather_evidence` returns, so `validate_citations` and the
     memo renderer work unchanged.
@@ -828,6 +875,11 @@ def build_corpus(subject_name: str, ctx: dict, docs: list[dict], native: dict | 
     ``native`` is the platform-generated operational corpus from
     ``gather_native_sources`` (company subjects only); None for off-platform
     clients, which instead get a note naming what an on-platform client adds.
+
+    ``jurisdiction`` is the codified statutory-obligation corpus (``jur:`` cids)
+    from ``_jurisdiction_records`` (company subjects only); empty/None for
+    off-platform clients. It flows into the flat index like every other source,
+    so the shared ``validate_citations`` gates ``jur:`` cids automatically.
     """
     platform = _platform_records(ctx)
     clauses = _clause_records(ctx)
@@ -837,6 +889,8 @@ def build_corpus(subject_name: str, ctx: dict, docs: list[dict], native: dict | 
     }
     if clauses:
         sources["clauses"] = {"label": "Contract indemnity clauses", "records": clauses}
+    if jurisdiction:
+        sources["jurisdiction"] = {"label": "Codified compliance obligations", "records": jurisdiction}
     if native is not None:
         sources.update(native.get("sources") or {})
         notes.extend(native.get("notes") or [])
@@ -844,6 +898,25 @@ def build_corpus(subject_name: str, ctx: dict, docs: list[dict], native: dict | 
     sources["doc_figures"] = {"label": "Key figures extracted from documents", "records": fig_recs}
     if not platform:
         notes.append("No platform data on file for this client yet.")
+    if native is not None and not jurisdiction:
+        # On-platform client (native is the company-subject signal) whose
+        # codified grounding came back empty — no work states resolved, the
+        # catalog held nothing for them, or the lookup failed. Say so: `_SYSTEM`
+        # tells the model `jur:` records are present for on-platform clients, so
+        # without this the broker reads a confident analysis with no statutory
+        # grounding and no indication any was expected.
+        notes.append(
+            "Codified statutory obligations (`jur:`) are unavailable for this client — "
+            "no work states resolved, or no codified requirements on file for them. "
+            "Employment-law points in this analysis are NOT grounded in the statute catalog."
+        )
+    if jurisdiction and jurisdiction_truncated:
+        # The catalog held more than the corpus cap. Say so, or the obligations
+        # that fell off the LIMIT read as obligations that do not exist.
+        notes.append(
+            f"Codified statutory obligations were truncated to the first {len(jurisdiction)} "
+            "records — this client has more codified obligations than are grounded here."
+        )
     if native is None:
         notes.append(
             "Off-platform client: only broker-entered records ground this analysis. "
@@ -861,7 +934,7 @@ def build_corpus(subject_name: str, ctx: dict, docs: list[dict], native: dict | 
 # Grounded AI turn (analyst, not advisor)
 # --------------------------------------------------------------------------- #
 
-_SYSTEM = """You are a commercial P&C insurance analysis assistant working for a licensed insurance broker who is preparing analysis for a client. You ground EVERY statement in the EVIDENCE CORPUS below: the client's platform records (`platform:` IDs), the company's operational records generated natively on the platform (`incident:` / `er_case:` / `compliance_req:` / `compliance_alert:` / `discipline:` / `training:` / `policy_ack:` / `accommodation:` IDs — present only for on-platform clients), the indemnification clauses extracted from the client's contracts (`clause:` IDs), and the broker's uploaded documents (`doc:` / `docfig:` IDs).
+_SYSTEM = """You are a commercial P&C insurance analysis assistant working for a licensed insurance broker who is preparing analysis for a client. You ground EVERY statement in the EVIDENCE CORPUS below: the client's platform records (`platform:` IDs), the company's operational records generated natively on the platform (`incident:` / `er_case:` / `compliance_req:` / `compliance_alert:` / `discipline:` / `training:` / `policy_ack:` / `accommodation:` IDs — present only for on-platform clients), the indemnification clauses extracted from the client's contracts (`clause:` IDs), the codified state and federal statutory obligations the client must follow (`jur:` IDs — present only for on-platform clients), and the broker's uploaded documents (`doc:` / `docfig:` IDs).
 
 HARD RULES:
 - Cite ONLY the bracketed IDs that appear in the EVIDENCE CORPUS. NEVER invent a figure, carrier, date, limit, premium, or ID.
@@ -871,6 +944,7 @@ HARD RULES:
 - You are an ANALYST, NOT AN ADVISOR: do not recommend buying or declining coverage, do not opine on legal duties, and note that quotes and forms must be verified against actual policy language.
 - On `clause:` records: your remit is INSURANCE AND RISK TRANSFER ONLY. Discuss indemnity form, insurability, and the endorsements a clause requires — never opine on payment terms, termination, IP, or dispute resolution, and never state that a clause IS or IS NOT enforceable. A recorded verdict is a starting point for counsel, so report it as such and say so.
 - A `clause:` record marked PROVISIONAL comes from an unconfirmed AI extraction — say that whenever you rely on it.
+- On `jur:` records: these are the client's CODIFIED state and federal statutory obligations (e.g. final-pay timing, pay-transparency, anti-discrimination). Cite the statute when a point turns on the law, and never state a legal conclusion, opine on whether the client is compliant, or give legal advice — surface the obligation and route the judgment to counsel.
 - Raw document text (DOCUMENT TEXT blocks) belongs to its `doc:` ID — cite that ID when using it.
 
 ANSWER SHAPE — a short lead answer, then three reviewable lists. The broker reads
@@ -1230,6 +1304,39 @@ def _native_appendix_html(source_key: str, cited: list[str], corpus: dict) -> st
     """
 
 
+def _jurisdiction_appendix_html(cited: list[str], corpus: dict) -> str:
+    """Deterministic appendix for cited codified obligations. Its own builder,
+    NOT the native one: these are statutes, not records the platform generated
+    about this client, and `_native_appendix_html` would head the table
+    "Platform records" / "What the platform recorded" — misrepresenting
+    provenance in the one artifact that leaves the building. Carries the
+    citation and, where the catalog has it, a link to the source."""
+    src = corpus.get("sources", {}).get("jurisdiction", {})
+    cited_set = set(cited)
+    recs = [r for r in (src.get("records") or []) if r["cid"] in cited_set]
+    rows = "".join(
+        f"<tr><td>{_esc(r.get('ref'))}</td><td>{_esc(r.get('summary'))}</td>"
+        f"<td>{_link_or_dash(r.get('source_url'))}</td></tr>"
+        for r in recs
+    ) or f"<tr><td colspan='3'>{_GONE}</td></tr>"
+    return f"""
+      <h2>Appendix — Codified statutory obligations</h2>
+      <p style="font-size:9px; color:#888;">Codified law on file for this client's
+      jurisdictions, not legal advice. Verify against the source before relying on it.</p>
+      <table><thead><tr><th>Obligation</th><th>What the law requires</th><th>Source</th></tr></thead>
+      <tbody>{rows}</tbody></table>
+    """
+
+
+def _link_or_dash(url: str | None) -> str:
+    """Escaped anchor for a catalog source_url, else an em dash. Only http(s) —
+    the URL is catalog data rendered into a PDF, never a caller-supplied scheme."""
+    u = (url or "").strip()
+    if not u.lower().startswith(("http://", "https://")):
+        return "—"
+    return f'<a href="{_esc(u)}">{_esc(u)}</a>'
+
+
 def _narrative_html(text: str) -> str:
     """Model narrative → escaped paragraphs (blank-line separated). Keeps the
     memo typographically clean without trusting model markup."""
@@ -1311,6 +1418,12 @@ def _memo_html(session: dict, subject_name: str, corpus: dict, memo: dict,
                 continue
             seen_sections.add(section)
             appendix += f"<div class='appendix-section'>{_platform_appendix_html(section, corpus)}</div>"
+        elif c.startswith("jur:"):
+            # Statutes get their own appendix — see _jurisdiction_appendix_html.
+            if "jurisdiction" in seen_native:
+                continue
+            seen_native.add("jurisdiction")
+            appendix += f"<div class='appendix-section'>{_jurisdiction_appendix_html(cited, corpus)}</div>"
         else:
             # native operational record (incident:, er_case:, discipline:, …) —
             # one appendix table per source, listing the cited records.

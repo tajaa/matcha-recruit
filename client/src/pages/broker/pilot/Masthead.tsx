@@ -146,9 +146,11 @@ function SystemsStrip({ context }: { context: ContextPreview | null }) {
             style={{ transitionDelay: `${i * 40}ms` }}
             title={active
               ? `${s.label}: ${records.length} record(s)`
-              : NATIVE_KEYS.has(s.key)
-                ? `${s.label}: generated natively once this client operates on Matcha`
-                : `${s.label}: none on file`}
+              : s.darkHint
+                ? `${s.label}: ${s.darkHint}`
+                : NATIVE_KEYS.has(s.key)
+                  ? `${s.label}: generated natively once this client operates on Matcha`
+                  : `${s.label}: none on file`}
           >
             <Icon className={`h-3.5 w-3.5 ${active ? 'text-emerald-400' : 'text-zinc-700'}`} />
             <span className={`text-[10px] font-medium uppercase tracking-[0.15em] ${active ? 'text-zinc-300' : 'text-zinc-600'}`}>
