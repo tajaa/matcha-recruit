@@ -188,6 +188,12 @@ async def build_jurisdiction_corpus(
             "state": state,
             "category": category,
             "title": title,
+            # What the law actually requires. Kept on the row (not only in the
+            # corpus TEXT below) so a consumer that grounds off the index alone
+            # still gets the obligation, not just its title — citing a real cid
+            # while inventing its content is the one hallucination
+            # `validate_citations` cannot catch.
+            "description": desc,
             "statute_citation": citation or None,
             "source_url": r.get("source_url") or None,
         }

@@ -106,9 +106,12 @@ PILOT_TEMPLATES: tuple[dict, ...] = (
             "non-contributory) appear to be in place, and the insurability of "
             "each indemnity form. A recorded clause verdict is a starting point "
             "for counsel — report it as such and never state that a clause is or "
-            "is not enforceable. Where a contract's requirement turns on the "
-            "client's statutory obligations, ground it in the codified law "
-            "(`jur:` records). Insurance and risk-transfer terms only."
+            "is not enforceable. Insurance and risk-transfer terms only. The "
+            "`jur:` records are the client's codified EMPLOYMENT-law obligations "
+            "(final pay, leave, pay transparency, anti-discrimination) — cite "
+            "them only where an employment-practices exposure is genuinely at "
+            "issue; they do not speak to contractual insurance requirements, so "
+            "never stretch one to cover a limits or endorsement question."
         ),
         "starters": [
             "Do the limits this client carries meet what their contracts require? Flag every gap.",
@@ -826,22 +829,38 @@ async def gather_native_sources(conn, company_id) -> dict:
 
 def _jurisdiction_records(index: dict) -> list[dict]:
     """Reshape `er_compliance_grounding.build_jurisdiction_corpus`'s flat index
-    (``jur:<id>`` → {cid, requirement_id, state, category, title,
+    (``jur:<id>`` → {cid, requirement_id, state, category, title, description,
     statute_citation, source_url}) into corpus records (`{cid, ref, summary,
     when}`), the same shape every other source uses.
+
+    ``summary`` mirrors ER's own corpus line — ``(STATE — category) title:
+    description Citation: x`` — because `_corpus_text` renders ONLY `summary`
+    (`ref` reaches the memo appendix, never the prompt). Two consequences are
+    load-bearing: the **state** must be in the summary or a multi-state client's
+    federal and per-state rows are byte-identical to the model, which then
+    attributes one state's rule to another; and the **description** must be
+    there or the model has a real cid with no statement of what the law
+    requires, so it supplies the rule from its own weights while citing a
+    genuine ID — the one hallucination `validate_citations` cannot catch.
+
+    ``source_url`` rides along for the appendix (extra keys flow through
+    `build_corpus`'s `{**r}` into the index untouched).
 
     Pure. Empty index → []."""
     recs: list[dict] = []
     for rec in (index or {}).values():
-        state = (rec.get("state") or "").strip().upper()
+        state = (rec.get("state") or "").strip().upper() or "—"
         category = (rec.get("category") or "").strip()
         title = (rec.get("title") or "Requirement").strip()
+        desc = (rec.get("description") or "").strip()
         citation = (rec.get("statute_citation") or "").strip() or "uncited"
+        body = f"{title}: {desc}" if desc else title
         recs.append({
             "cid": rec["cid"],
             "ref": f"{state} — {title}",
-            "summary": f"({category}) {title}. Citation: {citation}",
+            "summary": f"({state} — {category}) {body} Citation: {citation}",
             "when": "current",
+            "source_url": rec.get("source_url") or None,
         })
     return recs
 
@@ -878,6 +897,18 @@ def build_corpus(subject_name: str, ctx: dict, docs: list[dict], native: dict | 
     sources["doc_figures"] = {"label": "Key figures extracted from documents", "records": fig_recs}
     if not platform:
         notes.append("No platform data on file for this client yet.")
+    if native is not None and not jurisdiction:
+        # On-platform client (native is the company-subject signal) whose
+        # codified grounding came back empty — no work states resolved, the
+        # catalog held nothing for them, or the lookup failed. Say so: `_SYSTEM`
+        # tells the model `jur:` records are present for on-platform clients, so
+        # without this the broker reads a confident analysis with no statutory
+        # grounding and no indication any was expected.
+        notes.append(
+            "Codified statutory obligations (`jur:`) are unavailable for this client — "
+            "no work states resolved, or no codified requirements on file for them. "
+            "Employment-law points in this analysis are NOT grounded in the statute catalog."
+        )
     if native is None:
         notes.append(
             "Off-platform client: only broker-entered records ground this analysis. "
@@ -1265,6 +1296,39 @@ def _native_appendix_html(source_key: str, cited: list[str], corpus: dict) -> st
     """
 
 
+def _jurisdiction_appendix_html(cited: list[str], corpus: dict) -> str:
+    """Deterministic appendix for cited codified obligations. Its own builder,
+    NOT the native one: these are statutes, not records the platform generated
+    about this client, and `_native_appendix_html` would head the table
+    "Platform records" / "What the platform recorded" — misrepresenting
+    provenance in the one artifact that leaves the building. Carries the
+    citation and, where the catalog has it, a link to the source."""
+    src = corpus.get("sources", {}).get("jurisdiction", {})
+    cited_set = set(cited)
+    recs = [r for r in (src.get("records") or []) if r["cid"] in cited_set]
+    rows = "".join(
+        f"<tr><td>{_esc(r.get('ref'))}</td><td>{_esc(r.get('summary'))}</td>"
+        f"<td>{_link_or_dash(r.get('source_url'))}</td></tr>"
+        for r in recs
+    ) or f"<tr><td colspan='3'>{_GONE}</td></tr>"
+    return f"""
+      <h2>Appendix — Codified statutory obligations</h2>
+      <p style="font-size:9px; color:#888;">Codified law on file for this client's
+      jurisdictions, not legal advice. Verify against the source before relying on it.</p>
+      <table><thead><tr><th>Obligation</th><th>What the law requires</th><th>Source</th></tr></thead>
+      <tbody>{rows}</tbody></table>
+    """
+
+
+def _link_or_dash(url: str | None) -> str:
+    """Escaped anchor for a catalog source_url, else an em dash. Only http(s) —
+    the URL is catalog data rendered into a PDF, never a caller-supplied scheme."""
+    u = (url or "").strip()
+    if not u.lower().startswith(("http://", "https://")):
+        return "—"
+    return f'<a href="{_esc(u)}">{_esc(u)}</a>'
+
+
 def _narrative_html(text: str) -> str:
     """Model narrative → escaped paragraphs (blank-line separated). Keeps the
     memo typographically clean without trusting model markup."""
@@ -1346,6 +1410,12 @@ def _memo_html(session: dict, subject_name: str, corpus: dict, memo: dict,
                 continue
             seen_sections.add(section)
             appendix += f"<div class='appendix-section'>{_platform_appendix_html(section, corpus)}</div>"
+        elif c.startswith("jur:"):
+            # Statutes get their own appendix — see _jurisdiction_appendix_html.
+            if "jurisdiction" in seen_native:
+                continue
+            seen_native.add("jurisdiction")
+            appendix += f"<div class='appendix-section'>{_jurisdiction_appendix_html(cited, corpus)}</div>"
         else:
             # native operational record (incident:, er_case:, discipline:, …) —
             # one appendix table per source, listing the cited records.
