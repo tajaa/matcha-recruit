@@ -143,3 +143,115 @@ def test_appendix_source_link_rejects_non_http_scheme():
     assert bp._link_or_dash(None) == "—"
     assert bp._link_or_dash("javascript:alert(1)") == "—"
     assert bp._link_or_dash("https://example.test/x").startswith('<a href="https://example.test/x"')
+
+
+# --------------------------------------------------------------------------- #
+# Per-turn cost: the corpus is cached per company (route-level)
+# --------------------------------------------------------------------------- #
+
+import asyncio
+
+import pytest
+
+from app.matcha.routes import broker_pilot as bpr
+
+
+class _CountingConn:
+    """Stands in for the asyncpg conn; counts how often the corpus is built."""
+
+    def __init__(self):
+        self.builds = 0
+
+
+def _patch_corpus(monkeypatch, conn):
+    async def _fake_build(_conn, _company_id, _ids):
+        conn.builds += 1
+        return "text", _sample_index()
+
+    monkeypatch.setattr(bpr.ecg, "build_jurisdiction_corpus", _fake_build)
+
+
+def _session(subject_id="c0000000-0000-0000-0000-000000000001", kind="company"):
+    return {"id": "s1", "subject_kind": kind, "subject_id": subject_id}
+
+
+@pytest.fixture(autouse=True)
+def _clear_jur_cache():
+    bpr._JUR_CACHE.clear()
+    yield
+    bpr._JUR_CACHE.clear()
+
+
+def test_jurisdiction_corpus_is_built_once_per_company(monkeypatch):
+    """A multi-turn session must not pay ~4 sequential round-trips per turn for
+    rows that cannot change mid-conversation."""
+    conn = _CountingConn()
+    _patch_corpus(monkeypatch, conn)
+
+    first = asyncio.run(bpr._jurisdiction_for(conn, _session()))
+    for _ in range(19):
+        again = asyncio.run(bpr._jurisdiction_for(conn, _session()))
+
+    assert conn.builds == 1          # 20 turns, one build
+    assert again == first
+    assert len(first) == 2
+
+
+def test_jurisdiction_cache_is_per_company(monkeypatch):
+    conn = _CountingConn()
+    _patch_corpus(monkeypatch, conn)
+
+    asyncio.run(bpr._jurisdiction_for(conn, _session("c0000000-0000-0000-0000-00000000000a")))
+    asyncio.run(bpr._jurisdiction_for(conn, _session("c0000000-0000-0000-0000-00000000000b")))
+    assert conn.builds == 2          # no cross-client bleed
+
+
+def test_jurisdiction_cache_expires(monkeypatch):
+    conn = _CountingConn()
+    _patch_corpus(monkeypatch, conn)
+
+    clock = {"t": 1000.0}
+    monkeypatch.setattr(bpr.time, "monotonic", lambda: clock["t"])
+
+    asyncio.run(bpr._jurisdiction_for(conn, _session()))
+    clock["t"] += bpr._JUR_CACHE_TTL_SECONDS + 1
+    asyncio.run(bpr._jurisdiction_for(conn, _session()))
+    assert conn.builds == 2
+
+
+def test_empty_and_failed_grounding_are_not_cached(monkeypatch):
+    """Pinning an empty result for the TTL would outlast the fix — a client
+    whose states resolve a minute later would stay ungrounded for 15 minutes."""
+    conn = _CountingConn()
+
+    async def _empty(_c, _id, _ids):
+        conn.builds += 1
+        return "", {}
+
+    monkeypatch.setattr(bpr.ecg, "build_jurisdiction_corpus", _empty)
+    assert asyncio.run(bpr._jurisdiction_for(conn, _session())) == []
+    assert asyncio.run(bpr._jurisdiction_for(conn, _session())) == []
+    assert conn.builds == 2
+
+    async def _boom(_c, _id, _ids):
+        conn.builds += 1
+        raise RuntimeError("catalog down")
+
+    monkeypatch.setattr(bpr.ecg, "build_jurisdiction_corpus", _boom)
+    assert asyncio.run(bpr._jurisdiction_for(conn, _session())) == []
+    assert conn.builds == 3          # failure retried, not pinned
+
+
+def test_external_subject_never_touches_the_catalog(monkeypatch):
+    conn = _CountingConn()
+    _patch_corpus(monkeypatch, conn)
+    assert asyncio.run(bpr._jurisdiction_for(conn, _session(kind="external"))) == []
+    assert conn.builds == 0
+
+
+def test_jurisdiction_cache_is_size_capped(monkeypatch):
+    conn = _CountingConn()
+    _patch_corpus(monkeypatch, conn)
+    for i in range(bpr._JUR_CACHE_MAX + 10):
+        asyncio.run(bpr._jurisdiction_for(conn, _session(f"c{i:08d}-0000-0000-0000-000000000000")))
+    assert len(bpr._JUR_CACHE) <= bpr._JUR_CACHE_MAX

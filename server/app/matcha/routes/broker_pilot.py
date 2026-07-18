@@ -14,6 +14,7 @@ turn, upload, memo generation, and download lands in `broker_pilot_audit_log`.
 import asyncio
 import json
 import logging
+import time
 from typing import Literal, Optional
 from uuid import UUID
 
@@ -129,6 +130,17 @@ async def _native_for(conn, session: dict) -> dict | None:
     return await bp.gather_native_sources(conn, session["subject_id"])
 
 
+# Codified obligations move on legislative timescales, but `_jurisdiction_for`
+# is on the per-turn chat path and costs up to four sequential round-trips
+# (`_resolve_states` walks employee work_states → handbook scopes →
+# business_locations, then the catalog join) — unlike `_native_for`, which is a
+# single fetchrow. A 20-turn session paid that 20 times for identical rows.
+# Same module-level TTL shape as `platform_settings.get_tenant_codified_only`.
+_JUR_CACHE: dict[str, tuple[float, list[dict]]] = {}
+_JUR_CACHE_TTL_SECONDS = 900
+_JUR_CACHE_MAX = 128
+
+
 async def _jurisdiction_for(conn, session: dict) -> list[dict]:
     """Codified statutory-obligation records (`jur:` cids) for the client —
     company subjects only (the broker's own ownership is already asserted via
@@ -137,16 +149,34 @@ async def _jurisdiction_for(conn, session: dict) -> list[dict]:
     Empty ids → `build_jurisdiction_corpus` falls back through employee
     work_states → handbook scopes → business_locations, correct for
     roster-less clients. Grounding must never block a broker turn, so any
-    failure degrades to no jurisdiction grounding."""
+    failure degrades to no jurisdiction grounding.
+
+    Cached per company for `_JUR_CACHE_TTL_SECONDS`. Only non-empty results are
+    cached: an empty list is either a real failure (the except below) or a
+    client whose states have not resolved yet, and pinning that for 15 minutes
+    would outlast the fix."""
     if session["subject_kind"] != "company":
         return []
+
+    key = str(session["subject_id"])
+    now = time.monotonic()
+    hit = _JUR_CACHE.get(key)
+    if hit is not None and now - hit[0] < _JUR_CACHE_TTL_SECONDS:
+        return hit[1]
+
     try:
         _text, index = await ecg.build_jurisdiction_corpus(conn, session["subject_id"], [])
-        return bp._jurisdiction_records(index)
+        records = bp._jurisdiction_records(index)
     except Exception:  # noqa: BLE001 — grounding is additive; never fatal to a turn
         logger.exception("broker_pilot: jurisdiction grounding failed for session %s",
                          session.get("id"))
         return []
+
+    if records:
+        if len(_JUR_CACHE) >= _JUR_CACHE_MAX:
+            _JUR_CACHE.pop(min(_JUR_CACHE, key=lambda k: _JUR_CACHE[k][0]), None)
+        _JUR_CACHE[key] = (now, records)
+    return records
 
 
 def _corpus_and_requirements(session: dict, subject_name: str, ctx: dict,
