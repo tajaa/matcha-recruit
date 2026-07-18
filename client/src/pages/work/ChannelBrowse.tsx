@@ -93,7 +93,7 @@ export default function ChannelBrowse() {
   ]
 
   return (
-    <div className="min-h-screen bg-zinc-950 px-4 py-8 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-w-bg px-4 py-8 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-6xl">
         {/* Header */}
         <div className="mb-8 flex items-center justify-between">
@@ -101,7 +101,7 @@ export default function ChannelBrowse() {
           {canCreate && (
             <button
               onClick={() => setShowCreate(true)}
-              className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 transition-colors"
+              className="rounded-lg bg-w-accent px-4 py-2 text-sm font-medium text-white hover:bg-w-accent-hi transition-colors"
             >
               Create Channel
             </button>
@@ -110,26 +110,26 @@ export default function ChannelBrowse() {
 
         {/* Search */}
         <div className="relative mb-6">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-w-dim" />
           <input
             type="text"
             placeholder="Search channels..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full rounded-lg border border-zinc-800 bg-zinc-900 py-2.5 pl-10 pr-4 text-sm text-zinc-300 placeholder-zinc-500 outline-none focus:border-zinc-700 transition-colors"
+            className="w-full rounded-lg border border-w-line bg-w-surface py-2.5 pl-10 pr-4 text-sm text-w-text placeholder-w-faint outline-none focus:border-w-line transition-colors"
           />
         </div>
 
         {/* Tabs */}
-        <div className="mb-6 flex gap-1 rounded-lg bg-zinc-900 p-1">
+        <div className="mb-6 flex gap-1 rounded-lg bg-w-surface p-1">
           {tabs.map((t) => (
             <button
               key={t.key}
               onClick={() => setTab(t.key)}
               className={`flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
                 tab === t.key
-                  ? 'bg-zinc-800 text-white'
-                  : 'text-zinc-400 hover:text-zinc-300'
+                  ? 'bg-w-surface2 text-white'
+                  : 'text-w-dim hover:text-w-text'
               }`}
             >
               {t.label}
@@ -140,16 +140,16 @@ export default function ChannelBrowse() {
         {/* Content */}
         {tab === 'discover' && discoverLoading ? (
           <div className="flex items-center justify-center py-20">
-            <Loader2 className="h-6 w-6 animate-spin text-zinc-500" />
+            <Loader2 className="h-6 w-6 animate-spin text-w-dim" />
           </div>
         ) : loading ? (
           <div className="flex items-center justify-center py-20">
-            <Loader2 className="h-6 w-6 animate-spin text-zinc-500" />
+            <Loader2 className="h-6 w-6 animate-spin text-w-dim" />
           </div>
         ) : channels.length === 0 ? (
-          <div className="py-20 text-center text-zinc-500">No channels yet</div>
+          <div className="py-20 text-center text-w-dim">No channels yet</div>
         ) : filtered.length === 0 ? (
-          <div className="py-20 text-center text-zinc-500">No channels found</div>
+          <div className="py-20 text-center text-w-dim">No channels found</div>
         ) : (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {filtered.map((ch) => {
@@ -162,17 +162,17 @@ export default function ChannelBrowse() {
                   onClick={() => {
                     if (ch.is_member) navigate(`${base}/channels/${ch.id}`)
                   }}
-                  className="cursor-pointer rounded-xl border border-zinc-800 bg-zinc-900 p-4 hover:border-zinc-700 transition-colors"
+                  className="cursor-pointer rounded-xl border border-w-line bg-w-surface p-4 hover:border-w-accent/40 transition-colors"
                 >
                   {/* Top row */}
                   <div className="mb-2 flex items-center gap-2">
-                    <Hash className="h-4 w-4 flex-shrink-0 text-emerald-500" />
+                    <Hash className="h-4 w-4 flex-shrink-0 text-w-accent" />
                     <span className="truncate font-semibold text-white">{ch.name}</span>
                     {ch.visibility === 'private' && (
-                      <Lock className="h-3.5 w-3.5 flex-shrink-0 text-zinc-500" />
+                      <Lock className="h-3.5 w-3.5 flex-shrink-0 text-w-dim" />
                     )}
                     {ch.is_paid && price && (
-                      <span className="ml-auto flex-shrink-0 rounded-full bg-emerald-600/20 px-2 py-0.5 text-xs text-emerald-400">
+                      <span className="ml-auto flex-shrink-0 rounded-full bg-w-accent/15 px-2 py-0.5 text-xs text-w-accent">
                         {price}
                       </span>
                     )}
@@ -180,19 +180,19 @@ export default function ChannelBrowse() {
 
                   {/* Description */}
                   {ch.description && (
-                    <p className="mb-3 line-clamp-2 text-sm text-zinc-400">{ch.description}</p>
+                    <p className="mb-3 line-clamp-2 text-sm text-w-dim">{ch.description}</p>
                   )}
                   {!ch.description && <div className="mb-3" />}
 
                   {/* Bottom row */}
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3 text-xs text-zinc-500">
+                    <div className="flex items-center gap-3 text-xs text-w-dim">
                       <span className="flex items-center gap-1">
                         <Users className="h-3.5 w-3.5" />
                         {ch.member_count}
                       </span>
                       {ch.unread_count > 0 && (
-                        <span className="rounded-full bg-emerald-600 px-1.5 py-0.5 text-[10px] font-medium text-white">
+                        <span className="rounded-full bg-w-accent px-1.5 py-0.5 text-[10px] font-medium text-white">
                           {ch.unread_count}
                         </span>
                       )}
@@ -205,7 +205,7 @@ export default function ChannelBrowse() {
                           e.stopPropagation()
                           navigate(`${base}/channels/${ch.id}`)
                         }}
-                        className="rounded-lg bg-zinc-800 px-3 py-1.5 text-xs font-medium text-zinc-300 hover:bg-zinc-700 transition-colors"
+                        className="rounded-lg bg-w-surface2 px-3 py-1.5 text-xs font-medium text-w-text hover:bg-w-surface2 transition-colors"
                       >
                         Open
                       </button>
@@ -216,7 +216,7 @@ export default function ChannelBrowse() {
                           handleSubscribe(ch)
                         }}
                         disabled={isLoading}
-                        className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-500 transition-colors disabled:opacity-50"
+                        className="flex items-center gap-1.5 rounded-lg bg-w-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-w-accent-hi transition-colors disabled:opacity-50"
                       >
                         {isLoading ? (
                           <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -234,7 +234,7 @@ export default function ChannelBrowse() {
                           handleJoin(ch)
                         }}
                         disabled={isLoading}
-                        className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-500 transition-colors disabled:opacity-50"
+                        className="flex items-center gap-1.5 rounded-lg bg-w-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-w-accent-hi transition-colors disabled:opacity-50"
                       >
                         {isLoading ? (
                           <Loader2 className="h-3.5 w-3.5 animate-spin" />

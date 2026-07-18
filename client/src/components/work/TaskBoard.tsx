@@ -121,12 +121,12 @@ export default function TaskBoard({
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between mb-2">
-        <span className="text-xs text-zinc-500">
+        <span className="text-xs text-w-dim">
           {totalCount} item{totalCount !== 1 ? 's' : ''} across all horizons
         </span>
         <button
           onClick={() => setShowCreate(!showCreate)}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white transition-colors"
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-w-accent hover:bg-w-accent-hi text-white transition-colors"
         >
           <Plus size={14} />
           New Task
@@ -174,7 +174,7 @@ export default function TaskBoard({
           onUncomplete={onUncompleteTask}
           onDismiss={onDismiss}
           onDelete={onDeleteTask}
-          accent="text-zinc-500"
+          accent="text-w-dim"
         />
       )}
     </div>

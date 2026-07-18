@@ -94,7 +94,7 @@ export default function BoardChatTab({ projectId }: BoardChatTabProps) {
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center">
-        <Loader2 className="h-6 w-6 animate-spin text-zinc-500" />
+        <Loader2 className="h-6 w-6 animate-spin text-w-dim" />
       </div>
     )
   }
@@ -109,7 +109,7 @@ export default function BoardChatTab({ projectId }: BoardChatTabProps) {
 
       <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
         {messages.length === 0 ? (
-          <div className="flex h-full items-center justify-center text-sm text-zinc-600">
+          <div className="flex h-full items-center justify-center text-sm text-w-faint">
             No messages yet — say something to get started.
           </div>
         ) : (
@@ -118,7 +118,7 @@ export default function BoardChatTab({ projectId }: BoardChatTabProps) {
         <div ref={messagesEndRef} />
       </div>
 
-      <div className="flex items-end gap-2 border-t border-zinc-800 p-3">
+      <div className="flex items-end gap-2 border-t border-w-line p-3">
         <textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -131,12 +131,12 @@ export default function BoardChatTab({ projectId }: BoardChatTabProps) {
           placeholder="Type a message…"
           rows={1}
           disabled={streaming || !threadId}
-          className="min-h-[44px] flex-1 resize-none rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2.5 text-sm text-zinc-100 placeholder-zinc-600 outline-none focus:border-zinc-700 disabled:opacity-50"
+          className="min-h-[44px] flex-1 resize-none rounded-lg border border-w-line bg-w-surface px-3 py-2.5 text-sm text-w-text placeholder-w-faint outline-none focus:border-w-line disabled:opacity-50"
         />
         <button
           onClick={handleSend}
           disabled={streaming || !input.trim() || !threadId}
-          className="rounded-lg bg-emerald-600 p-3 text-white transition-colors hover:bg-emerald-500 disabled:opacity-40"
+          className="rounded-lg bg-w-accent p-3 text-white transition-colors hover:bg-w-accent-hi disabled:opacity-40"
         >
           {streaming ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
         </button>

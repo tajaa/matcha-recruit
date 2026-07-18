@@ -56,13 +56,13 @@ export default function AiDraftReviewModal({ draft, collaborators, busy, onCreat
     <>
       <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
         <div
-          className="w-full max-w-md rounded-xl border border-zinc-800 bg-zinc-950 shadow-2xl"
+          className="w-full max-w-md rounded-xl border border-w-line bg-w-bg shadow-2xl"
           onClick={(e) => e.stopPropagation()}
         >
-          <div className="flex items-center gap-2 border-b border-zinc-800 px-4 py-3">
-            <Sparkles className="h-3.5 w-3.5 text-emerald-400" />
-            <h2 className="text-sm font-semibold text-zinc-100">Review AI ticket</h2>
-            <button onClick={onClose} className="ml-auto text-zinc-500 hover:text-zinc-300">
+          <div className="flex items-center gap-2 border-b border-w-line px-4 py-3">
+            <Sparkles className="h-3.5 w-3.5 text-w-accent" />
+            <h2 className="text-sm font-semibold text-w-text">Review AI ticket</h2>
+            <button onClick={onClose} className="ml-auto text-w-dim hover:text-w-text">
               <X className="h-4 w-4" />
             </button>
           </div>
@@ -72,23 +72,23 @@ export default function AiDraftReviewModal({ draft, collaborators, busy, onCreat
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="Title"
-              className="w-full rounded-lg border border-zinc-800 bg-zinc-900 px-2.5 py-1.5 text-sm text-zinc-100 outline-none focus:border-zinc-700"
+              className="w-full rounded-lg border border-w-line bg-w-surface px-2.5 py-1.5 text-sm text-w-text outline-none focus:border-w-line"
             />
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               rows={7}
               placeholder="Description"
-              className="w-full resize-y rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-xs text-zinc-300 outline-none focus:border-zinc-700"
+              className="w-full resize-y rounded-lg border border-w-line bg-w-surface px-3 py-2 text-xs text-w-text outline-none focus:border-w-line"
             />
 
             <div className="grid grid-cols-2 gap-2">
               <label className="block">
-                <span className="mb-1 block text-[11px] text-zinc-500">Priority</span>
+                <span className="mb-1 block text-[11px] text-w-dim">Priority</span>
                 <select
                   value={priority}
                   onChange={(e) => setPriority(e.target.value as TaskPriority)}
-                  className="w-full rounded-lg border border-zinc-800 bg-zinc-900 px-2 py-1 text-xs capitalize text-zinc-200 outline-none focus:border-zinc-700"
+                  className="w-full rounded-lg border border-w-line bg-w-surface px-2 py-1 text-xs capitalize text-w-text outline-none focus:border-w-line"
                 >
                   {PRIORITIES.map((p) => (
                     <option key={p} value={p} className="capitalize">
@@ -98,11 +98,11 @@ export default function AiDraftReviewModal({ draft, collaborators, busy, onCreat
                 </select>
               </label>
               <label className="block">
-                <span className="mb-1 block text-[11px] text-zinc-500">Type</span>
+                <span className="mb-1 block text-[11px] text-w-dim">Type</span>
                 <select
                   value={category}
                   onChange={(e) => setCategory(e.target.value)}
-                  className="w-full rounded-lg border border-zinc-800 bg-zinc-900 px-2 py-1 text-xs capitalize text-zinc-200 outline-none focus:border-zinc-700"
+                  className="w-full rounded-lg border border-w-line bg-w-surface px-2 py-1 text-xs capitalize text-w-text outline-none focus:border-w-line"
                 >
                   {CATEGORIES.map((c) => (
                     <option key={c} value={c} className="capitalize">
@@ -114,11 +114,11 @@ export default function AiDraftReviewModal({ draft, collaborators, busy, onCreat
             </div>
 
             <label className="block">
-              <span className="mb-1 block text-[11px] text-zinc-500">Column</span>
+              <span className="mb-1 block text-[11px] text-w-dim">Column</span>
               <select
                 value={boardColumn}
                 onChange={(e) => setBoardColumn(e.target.value as BoardColumn)}
-                className="w-full rounded-lg border border-zinc-800 bg-zinc-900 px-2 py-1 text-xs text-zinc-200 outline-none focus:border-zinc-700"
+                className="w-full rounded-lg border border-w-line bg-w-surface px-2 py-1 text-xs text-w-text outline-none focus:border-w-line"
               >
                 {KANBAN_COLUMNS.map((c) => (
                   <option key={c.key} value={c.key}>
@@ -130,11 +130,11 @@ export default function AiDraftReviewModal({ draft, collaborators, busy, onCreat
 
             {collaborators.length > 0 && (
               <label className="block">
-                <span className="mb-1 block text-[11px] text-zinc-500">Assignee</span>
+                <span className="mb-1 block text-[11px] text-w-dim">Assignee</span>
                 <select
                   value={assignedTo}
                   onChange={(e) => setAssignedTo(e.target.value)}
-                  className="w-full rounded-lg border border-zinc-800 bg-zinc-900 px-2 py-1 text-xs text-zinc-200 outline-none focus:border-zinc-700"
+                  className="w-full rounded-lg border border-w-line bg-w-surface px-2 py-1 text-xs text-w-text outline-none focus:border-w-line"
                 >
                   <option value="">Unassigned</option>
                   {collaborators.map((c) => (
@@ -146,11 +146,11 @@ export default function AiDraftReviewModal({ draft, collaborators, busy, onCreat
               </label>
             )}
 
-            <div className="rounded-lg bg-zinc-900/60 p-2.5">
-              <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
+            <div className="rounded-lg bg-w-surface/60 p-2.5">
+              <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-w-dim">
                 <ListChecks className="h-3 w-3" />
                 Checklist
-                {steps.length > 0 && <span className="text-zinc-600">({steps.length})</span>}
+                {steps.length > 0 && <span className="text-w-faint">({steps.length})</span>}
               </div>
               <div className="space-y-1">
                 {steps.map((s, i) => (
@@ -158,11 +158,11 @@ export default function AiDraftReviewModal({ draft, collaborators, busy, onCreat
                     <input
                       value={s}
                       onChange={(e) => setSteps((prev) => prev.map((v, idx) => (idx === i ? e.target.value : v)))}
-                      className="flex-1 rounded border border-zinc-800 bg-zinc-900 px-2 py-1 text-xs text-zinc-200 outline-none focus:border-zinc-700"
+                      className="flex-1 rounded border border-w-line bg-w-surface px-2 py-1 text-xs text-w-text outline-none focus:border-w-line"
                     />
                     <button
                       onClick={() => setSteps((prev) => prev.filter((_, idx) => idx !== i))}
-                      className="shrink-0 text-zinc-600 hover:text-red-400"
+                      className="shrink-0 text-w-faint hover:text-red-400"
                     >
                       <X className="h-3.5 w-3.5" />
                     </button>
@@ -179,9 +179,9 @@ export default function AiDraftReviewModal({ draft, collaborators, busy, onCreat
                       }
                     }}
                     placeholder="Add a step…"
-                    className="flex-1 rounded border border-zinc-800 bg-zinc-900 px-2 py-1 text-xs text-zinc-200 placeholder-zinc-600 outline-none focus:border-zinc-700"
+                    className="flex-1 rounded border border-w-line bg-w-surface px-2 py-1 text-xs text-w-text placeholder-w-faint outline-none focus:border-w-line"
                   />
-                  <button onClick={addStep} disabled={!newStep.trim()} className="shrink-0 text-zinc-500 hover:text-zinc-300 disabled:opacity-40">
+                  <button onClick={addStep} disabled={!newStep.trim()} className="shrink-0 text-w-dim hover:text-w-text disabled:opacity-40">
                     <Plus className="h-3.5 w-3.5" />
                   </button>
                 </div>
@@ -189,14 +189,14 @@ export default function AiDraftReviewModal({ draft, collaborators, busy, onCreat
             </div>
           </div>
 
-          <div className="flex items-center justify-between border-t border-zinc-800 px-4 py-3">
-            <button onClick={onClose} className="text-xs text-zinc-500 hover:text-zinc-300">
+          <div className="flex items-center justify-between border-t border-w-line px-4 py-3">
+            <button onClick={onClose} className="text-xs text-w-dim hover:text-w-text">
               Cancel
             </button>
             <button
               onClick={handleCreate}
               disabled={busy || !title.trim()}
-              className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-emerald-500 disabled:opacity-50"
+              className="flex items-center gap-1.5 rounded-lg bg-w-accent px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-w-accent-hi disabled:opacity-50"
             >
               {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
               Create

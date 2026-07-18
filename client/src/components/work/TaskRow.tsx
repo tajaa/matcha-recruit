@@ -5,7 +5,7 @@ import type { UnifiedTask } from './TaskBoard'
 const SEV_DOT: Record<string, string> = {
   critical: 'bg-red-500',
   warning: 'bg-amber-500',
-  info: 'bg-zinc-500',
+  info: 'bg-w-dim',
 }
 
 const CATEGORY_LABEL: Record<string, string> = {
@@ -36,7 +36,7 @@ function daysColor(d: number): string {
   if (d < 0) return 'text-red-400'
   if (d <= 7) return 'text-amber-400'
   if (d <= 30) return 'text-yellow-400'
-  return 'text-zinc-500'
+  return 'text-w-dim'
 }
 
 interface Props {
@@ -78,7 +78,7 @@ export default function TaskRow({ item, onComplete, onUncomplete, onDismiss, onD
   return (
     <div
       onClick={handleClick}
-      className={`flex items-center gap-3 px-3 py-2.5 rounded-md hover:bg-zinc-800/50 transition-colors group ${
+      className={`flex items-center gap-3 px-3 py-2.5 rounded-md hover:bg-w-surface2/50 transition-colors group ${
         item.link ? 'cursor-pointer' : ''
       } ${isCompleted ? 'opacity-50' : ''}`}
     >
@@ -88,8 +88,8 @@ export default function TaskRow({ item, onComplete, onUncomplete, onDismiss, onD
           onClick={handleCheck}
           className={`w-4 h-4 rounded border shrink-0 flex items-center justify-center transition-colors ${
             isCompleted
-              ? 'bg-emerald-600 border-emerald-600'
-              : 'border-zinc-600 hover:border-zinc-400'
+              ? 'bg-w-accent border-w-accent'
+              : 'border-w-line hover:border-w-accent/40'
           }`}
         >
           {isCompleted && (
@@ -103,15 +103,15 @@ export default function TaskRow({ item, onComplete, onUncomplete, onDismiss, onD
       )}
 
       <div className="flex-1 min-w-0">
-        <div className={`text-sm truncate ${isCompleted ? 'line-through text-zinc-500' : 'text-zinc-200'}`}>
+        <div className={`text-sm truncate ${isCompleted ? 'line-through text-w-dim' : 'text-w-text'}`}>
           {item.title}
         </div>
         {item.subtitle && (
-          <div className="text-xs text-zinc-500 truncate mt-0.5">{item.subtitle}</div>
+          <div className="text-xs text-w-dim truncate mt-0.5">{item.subtitle}</div>
         )}
       </div>
 
-      <span className="shrink-0 px-2 py-0.5 text-[10px] font-medium rounded-full bg-zinc-800 text-zinc-400">
+      <span className="shrink-0 px-2 py-0.5 text-[10px] font-medium rounded-full bg-w-surface2 text-w-dim">
         {CATEGORY_LABEL[item.category] ?? item.category}
       </span>
 
@@ -126,7 +126,7 @@ export default function TaskRow({ item, onComplete, onUncomplete, onDismiss, onD
         {isManual && !isCompleted && onDelete && (
           <button
             onClick={handleDelete}
-            className="p-1 rounded text-zinc-600 hover:text-red-400 transition-colors"
+            className="p-1 rounded text-w-faint hover:text-red-400 transition-colors"
             title="Delete task"
           >
             <Trash2 size={12} />
@@ -135,7 +135,7 @@ export default function TaskRow({ item, onComplete, onUncomplete, onDismiss, onD
         {!isManual && onDismiss && (
           <button
             onClick={handleDismiss}
-            className="p-1 rounded text-zinc-600 hover:text-zinc-300 transition-colors"
+            className="p-1 rounded text-w-faint hover:text-w-text transition-colors"
             title="Dismiss"
           >
             <X size={12} />

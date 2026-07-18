@@ -385,7 +385,7 @@ export default function ProjectKanbanBoard({ projectId }: ProjectKanbanBoardProp
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center">
-        <Loader2 className="h-6 w-6 animate-spin text-zinc-500" />
+        <Loader2 className="h-6 w-6 animate-spin text-w-dim" />
       </div>
     )
   }
@@ -402,17 +402,17 @@ export default function ProjectKanbanBoard({ projectId }: ProjectKanbanBoardProp
       )}
 
       {tasks.length > 0 && (
-        <div className="flex items-center gap-2 px-3 pt-2">
-          <Search className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
+        <div className="flex items-center gap-2 px-3 pt-3">
+          <Search className="h-3.5 w-3.5 shrink-0 text-w-dim" />
           <input
             value={searchText}
             onChange={(e) => setSearchText(e.target.value)}
             placeholder="Search tasks…"
             title='space = AND, "quotes" = exact phrase'
-            className="min-w-0 flex-1 bg-transparent text-xs text-zinc-200 placeholder-zinc-600 outline-none"
+            className="min-w-0 flex-1 bg-transparent text-[13px] text-w-text placeholder-w-faint outline-none"
           />
           {searchText && (
-            <button onClick={() => setSearchText('')} className="shrink-0 text-zinc-500 hover:text-zinc-300">
+            <button onClick={() => setSearchText('')} className="shrink-0 text-w-dim hover:text-w-text">
               <X className="h-3.5 w-3.5" />
             </button>
           )}
@@ -421,14 +421,14 @@ export default function ProjectKanbanBoard({ projectId }: ProjectKanbanBoardProp
 
       {tasks.length > 0 && <TaskProgressBar tasks={tasks} />}
 
-      <div className="flex items-center gap-1 px-3 pb-1">
+      <div className="flex items-center gap-1 px-3 pb-2">
         <button
           onClick={() => {
             setShowList(false)
             localStorage.setItem('mw-kanban-list-layout', '0')
           }}
           className={`flex items-center gap-1 rounded px-2 py-1 text-[11px] font-medium transition-colors ${
-            !showList ? 'bg-emerald-500/15 text-emerald-400' : 'text-zinc-500 hover:text-zinc-300'
+            !showList ? 'bg-w-accent/15 text-w-accent' : 'text-w-dim hover:text-w-text'
           }`}
         >
           <LayoutGrid className="h-3 w-3" />
@@ -440,7 +440,7 @@ export default function ProjectKanbanBoard({ projectId }: ProjectKanbanBoardProp
             localStorage.setItem('mw-kanban-list-layout', '1')
           }}
           className={`flex items-center gap-1 rounded px-2 py-1 text-[11px] font-medium transition-colors ${
-            showList ? 'bg-emerald-500/15 text-emerald-400' : 'text-zinc-500 hover:text-zinc-300'
+            showList ? 'bg-w-accent/15 text-w-accent' : 'text-w-dim hover:text-w-text'
           }`}
         >
           <List className="h-3 w-3" />
@@ -462,7 +462,7 @@ export default function ProjectKanbanBoard({ projectId }: ProjectKanbanBoardProp
           }}
         />
       ) : (
-        <div className="flex flex-1 gap-2 overflow-x-auto p-2.5 max-sm:flex-col max-sm:overflow-y-auto">
+        <div className="flex flex-1 gap-2 overflow-x-auto p-2.5 max-md:snap-x max-md:snap-mandatory">
           {KANBAN_COLUMNS.map((col) => {
             let colTasks = visible.filter((t) => t.board_column === col.key)
             if (col.key === 'done') {
@@ -497,23 +497,23 @@ export default function ProjectKanbanBoard({ projectId }: ProjectKanbanBoardProp
                   setDragOverColumn(null)
                   if (draggingId) moveTask(draggingId, col.key)
                 }}
-                className={`flex shrink-0 flex-col rounded-lg border bg-zinc-900/40 transition-[width] duration-150 ease-out max-sm:w-full ${
-                  collapsed ? 'w-[100px]' : 'w-[240px]'
-                } ${isDropTarget ? 'border-emerald-600/60 bg-emerald-950/10' : 'border-zinc-800'}`}
+                className={`flex shrink-0 flex-col rounded-lg border bg-w-surface transition-[width] duration-150 ease-out max-md:w-[85vw] max-md:snap-center ${
+                  collapsed ? 'w-[136px]' : 'w-[240px]'
+                } ${isDropTarget ? 'border-w-accent/60 bg-w-accent/10' : 'border-w-line'}`}
               >
                 {/* Column header */}
-                <div className="relative flex items-center justify-between px-2.5 py-2">
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
+                <div className="relative flex items-center justify-between gap-1.5 px-2.5 py-2">
+                  <div className="flex min-w-0 items-center gap-1.5">
+                    <span className="min-w-0 truncate whitespace-nowrap text-[10px] font-semibold uppercase tracking-wider text-w-dim" title={col.label}>
                       {col.label}
                     </span>
-                    <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-400">
+                    <span className="shrink-0 rounded bg-w-surface2 px-1.5 py-0.5 text-[10px] text-w-dim">
                       {totalInColumn}
                     </span>
                   </div>
                   <button
                     onClick={() => setMenuColumn((c) => (c === col.key ? null : col.key))}
-                    className="text-zinc-500 transition-colors hover:text-zinc-300"
+                    className="shrink-0 text-w-dim transition-colors hover:text-w-text"
                     title="Add card"
                   >
                     <Plus className="h-4 w-4" />
@@ -522,7 +522,7 @@ export default function ProjectKanbanBoard({ projectId }: ProjectKanbanBoardProp
                   {menuColumn === col.key && (
                     <div
                       ref={menuRef}
-                      className="absolute right-0 top-full z-20 mt-1 w-44 rounded-lg border border-zinc-800 bg-zinc-900 py-1 shadow-xl"
+                      className="absolute right-0 top-full z-20 mt-1 w-44 rounded-lg border border-w-line bg-w-surface py-1 shadow-xl"
                     >
                       <button
                         onClick={() => {
@@ -530,11 +530,11 @@ export default function ProjectKanbanBoard({ projectId }: ProjectKanbanBoardProp
                           setNewTitle('')
                           setMenuColumn(null)
                         }}
-                        className="block w-full px-3 py-1.5 text-left text-xs text-zinc-200 hover:bg-zinc-800"
+                        className="block w-full px-3 py-1.5 text-left text-xs text-w-text hover:bg-w-surface2"
                       >
                         Blank task
                       </button>
-                      <div className="my-1 border-t border-zinc-800" />
+                      <div className="my-1 border-t border-w-line" />
                       {KANBAN_TEMPLATES.map((t) => {
                         const TIcon = t.icon
                         return (
@@ -545,7 +545,7 @@ export default function ProjectKanbanBoard({ projectId }: ProjectKanbanBoardProp
                               setTemplateCompose({ template: t, column: col.key })
                               setMenuColumn(null)
                             }}
-                            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-zinc-200 hover:bg-zinc-800"
+                            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-w-text hover:bg-w-surface2"
                           >
                             <TIcon className={`h-3.5 w-3.5 shrink-0 ${t.colorClass}`} />
                             {t.displayName}
@@ -558,7 +558,7 @@ export default function ProjectKanbanBoard({ projectId }: ProjectKanbanBoardProp
 
                 {/* Cards — collapsed empty columns show header only */}
                 {!collapsed && (
-                  <div className="flex flex-1 flex-col gap-2 px-2 pb-2">
+                  <div className="flex flex-1 flex-col gap-2 px-2 pb-2 min-h-0 max-md:overflow-y-auto">
                     {addingColumn === col.key && (
                       <AddCardInput
                         value={newTitle}
@@ -598,7 +598,7 @@ export default function ProjectKanbanBoard({ projectId }: ProjectKanbanBoardProp
                     {col.key === 'done' && totalInColumn > 5 && (
                       <button
                         onClick={() => setDoneExpanded((v) => !v)}
-                        className="w-full rounded bg-zinc-800/50 py-1 text-[10px] font-medium text-zinc-500 transition-colors hover:text-zinc-300"
+                        className="w-full rounded bg-w-surface2/60 py-1 text-[10px] font-medium text-w-dim transition-colors hover:text-w-text"
                       >
                         {doneExpanded ? 'Show less' : `Show ${totalInColumn - 5} more`}
                       </button>
@@ -684,7 +684,7 @@ function AddCardInput({ value, onChange, onSubmit, onCancel, busy }: AddCardInpu
     ref.current?.focus()
   }, [])
   return (
-    <div className="rounded-lg border border-zinc-700 bg-zinc-900 p-2">
+    <div className="rounded-lg border border-w-line bg-w-surface p-2">
       <textarea
         ref={ref}
         value={value}
@@ -699,20 +699,20 @@ function AddCardInput({ value, onChange, onSubmit, onCancel, busy }: AddCardInpu
         }}
         rows={2}
         placeholder="Card title…"
-        className="w-full resize-none bg-transparent text-sm text-zinc-100 placeholder-zinc-600 outline-none"
+        className="w-full resize-none bg-transparent text-sm text-w-text placeholder-w-faint outline-none"
       />
       <div className="mt-2 flex items-center gap-2">
         <button
           onClick={onSubmit}
           disabled={busy || !value.trim()}
-          className="flex items-center gap-1 rounded bg-emerald-600 px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-emerald-500 disabled:opacity-50"
+          className="flex items-center gap-1 rounded bg-w-accent px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-w-accent-hi disabled:opacity-50"
         >
           {busy && <Loader2 className="h-3 w-3 animate-spin" />}
           Add
         </button>
         <button
           onClick={onCancel}
-          className="rounded px-2 py-1 text-xs text-zinc-400 transition-colors hover:text-zinc-200"
+          className="rounded px-2 py-1 text-xs text-w-dim transition-colors hover:text-w-text"
         >
           Cancel
         </button>
@@ -862,10 +862,10 @@ function TaskDetailPanel({
       {/* Scrim */}
       <div className="fixed inset-0 z-40 bg-black/40" onClick={onClose} />
       {/* Panel */}
-      <aside className="fixed inset-y-0 right-0 z-50 flex w-full max-w-md flex-col border-l border-zinc-800 bg-zinc-950 shadow-2xl">
-        <div className="flex items-start justify-between gap-3 border-b border-zinc-800 px-5 py-4">
-          <h2 className="text-base font-semibold leading-snug text-zinc-100">{task.title}</h2>
-          <button onClick={onClose} className="shrink-0 text-zinc-500 hover:text-zinc-300">
+      <aside className="fixed inset-y-0 right-0 z-50 flex w-full max-w-md flex-col border-l border-w-line bg-w-bg shadow-2xl">
+        <div className="flex items-start justify-between gap-3 border-b border-w-line px-5 py-4">
+          <h2 className="text-base font-semibold leading-snug text-w-text">{task.title}</h2>
+          <button onClick={onClose} className="shrink-0 text-w-dim hover:text-w-text">
             <X className="h-5 w-5" />
           </button>
         </div>
@@ -874,12 +874,12 @@ function TaskDetailPanel({
           {/* Lane + priority */}
           <div className="grid grid-cols-2 gap-3">
             <label className="block">
-              <span className="mb-1 block text-xs font-medium text-zinc-500">Column</span>
+              <span className="mb-1 block text-xs font-medium text-w-dim">Column</span>
               <select
                 value={task.board_column}
                 disabled={savingField}
                 onChange={(e) => patchField({ board_column: e.target.value as BoardColumn })}
-                className="w-full rounded-lg border border-zinc-800 bg-zinc-900 px-2.5 py-1.5 text-sm text-zinc-200 outline-none focus:border-zinc-700"
+                className="w-full rounded-lg border border-w-line bg-w-surface px-2.5 py-1.5 text-sm text-w-text outline-none focus:border-w-line"
               >
                 {KANBAN_COLUMNS.map((c) => (
                   <option key={c.key} value={c.key}>
@@ -889,12 +889,12 @@ function TaskDetailPanel({
               </select>
             </label>
             <label className="block">
-              <span className="mb-1 block text-xs font-medium text-zinc-500">Priority</span>
+              <span className="mb-1 block text-xs font-medium text-w-dim">Priority</span>
               <select
                 value={task.priority}
                 disabled={savingField}
                 onChange={(e) => patchField({ priority: e.target.value as TaskPriority })}
-                className="w-full rounded-lg border border-zinc-800 bg-zinc-900 px-2.5 py-1.5 text-sm capitalize text-zinc-200 outline-none focus:border-zinc-700"
+                className="w-full rounded-lg border border-w-line bg-w-surface px-2.5 py-1.5 text-sm capitalize text-w-text outline-none focus:border-w-line"
               >
                 {PRIORITIES.map((p) => (
                   <option key={p} value={p} className="capitalize">
@@ -907,13 +907,13 @@ function TaskDetailPanel({
 
           {/* Review send-back / approve — only while sitting in Review */}
           {task.board_column === 'review' && (
-            <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-3">
+            <div className="rounded-lg border border-w-line bg-w-surface/60 p-3">
               {!showRejectNote ? (
                 <div className="flex items-center gap-2">
                   <button
                     onClick={handleApprove}
                     disabled={reviewBusy}
-                    className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs font-medium text-white transition-colors hover:bg-emerald-500 disabled:opacity-50"
+                    className="flex items-center gap-1.5 rounded-lg bg-w-accent px-2.5 py-1.5 text-xs font-medium text-white transition-colors hover:bg-w-accent-hi disabled:opacity-50"
                   >
                     {reviewBusy ? (
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -925,7 +925,7 @@ function TaskDetailPanel({
                   <button
                     onClick={() => setShowRejectNote(true)}
                     disabled={reviewBusy}
-                    className="flex items-center gap-1.5 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs font-medium text-zinc-300 transition-colors hover:bg-zinc-800 disabled:opacity-50"
+                    className="flex items-center gap-1.5 rounded-lg border border-w-line px-2.5 py-1.5 text-xs font-medium text-w-text transition-colors hover:bg-w-surface2 disabled:opacity-50"
                   >
                     <Undo2 className="h-3.5 w-3.5" />
                     Send back
@@ -939,7 +939,7 @@ function TaskDetailPanel({
                     autoFocus
                     rows={2}
                     placeholder="What needs to change?"
-                    className="w-full resize-none rounded-lg border border-zinc-800 bg-zinc-900 px-2.5 py-1.5 text-sm text-zinc-200 placeholder-zinc-600 outline-none focus:border-zinc-700"
+                    className="w-full resize-none rounded-lg border border-w-line bg-w-surface px-2.5 py-1.5 text-sm text-w-text placeholder-w-faint outline-none focus:border-w-line"
                   />
                   <div className="flex items-center gap-2">
                     <button
@@ -955,7 +955,7 @@ function TaskDetailPanel({
                         setShowRejectNote(false)
                         setRejectNote('')
                       }}
-                      className="rounded-lg px-2.5 py-1.5 text-xs text-zinc-400 transition-colors hover:text-zinc-200"
+                      className="rounded-lg px-2.5 py-1.5 text-xs text-w-dim transition-colors hover:text-w-text"
                     >
                       Cancel
                     </button>
@@ -968,14 +968,14 @@ function TaskDetailPanel({
           {/* Assignee (read-only — no people-picker on the lite surface yet) */}
           {(task.assigned_name || task.assigned_email) && (
             <div>
-              <span className="mb-1 block text-xs font-medium text-zinc-500">Assignee</span>
-              <p className="text-sm text-zinc-300">{task.assigned_name ?? task.assigned_email}</p>
+              <span className="mb-1 block text-xs font-medium text-w-dim">Assignee</span>
+              <p className="text-sm text-w-text">{task.assigned_name ?? task.assigned_email}</p>
             </div>
           )}
 
           {/* Description */}
           <div>
-            <span className="mb-1 block text-xs font-medium text-zinc-500">Description</span>
+            <span className="mb-1 block text-xs font-medium text-w-dim">Description</span>
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
@@ -986,24 +986,24 @@ function TaskDetailPanel({
               }}
               rows={4}
               placeholder="Add a description…"
-              className="w-full resize-y rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 placeholder-zinc-600 outline-none focus:border-zinc-700"
+              className="w-full resize-y rounded-lg border border-w-line bg-w-surface px-3 py-2 text-sm text-w-text placeholder-w-faint outline-none focus:border-w-line"
             />
           </div>
 
           {/* Subtasks */}
           <div>
-            <div className="mb-2 flex items-center gap-1.5 text-xs font-medium text-zinc-500">
+            <div className="mb-2 flex items-center gap-1.5 text-xs font-medium text-w-dim">
               <ListChecks className="h-3.5 w-3.5" />
               Checklist
               {subtasks.length > 0 && (
-                <span className="text-zinc-600">
+                <span className="text-w-faint">
                   ({subtasks.filter((s) => s.is_done).length}/{subtasks.length})
                 </span>
               )}
             </div>
 
             {subtasksLoading ? (
-              <Loader2 className="h-4 w-4 animate-spin text-zinc-600" />
+              <Loader2 className="h-4 w-4 animate-spin text-w-faint" />
             ) : (
               <div className="space-y-1.5">
                 {subtasks.map((sub) => (
@@ -1012,18 +1012,18 @@ function TaskDetailPanel({
                       type="checkbox"
                       checked={sub.is_done}
                       onChange={() => toggleSubtask(sub)}
-                      className="h-4 w-4 shrink-0 rounded border-zinc-700 bg-zinc-900 text-emerald-500 focus:ring-0 focus:ring-offset-0"
+                      className="h-4 w-4 shrink-0 rounded border-w-line bg-w-surface text-w-accent focus:ring-0 focus:ring-offset-0"
                     />
                     <span
                       className={`flex-1 text-sm ${
-                        sub.is_done ? 'text-zinc-600 line-through' : 'text-zinc-300'
+                        sub.is_done ? 'text-w-faint line-through' : 'text-w-text'
                       }`}
                     >
                       {sub.title}
                     </span>
                     <button
                       onClick={() => removeSubtask(sub)}
-                      className="shrink-0 text-zinc-700 opacity-0 transition-opacity hover:text-red-400 group-hover:opacity-100"
+                      className="shrink-0 text-w-faint opacity-0 transition-opacity hover:text-red-400 group-hover:opacity-100"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
@@ -1041,12 +1041,12 @@ function TaskDetailPanel({
                       }
                     }}
                     placeholder="Add an item…"
-                    className="flex-1 rounded-lg border border-zinc-800 bg-zinc-900 px-2.5 py-1.5 text-sm text-zinc-200 placeholder-zinc-600 outline-none focus:border-zinc-700"
+                    className="flex-1 rounded-lg border border-w-line bg-w-surface px-2.5 py-1.5 text-sm text-w-text placeholder-w-faint outline-none focus:border-w-line"
                   />
                   <button
                     onClick={addSubtask}
                     disabled={!newSubtask.trim()}
-                    className="shrink-0 rounded-lg bg-zinc-800 px-2 py-1.5 text-zinc-300 transition-colors hover:bg-zinc-700 disabled:opacity-40"
+                    className="shrink-0 rounded-lg bg-w-surface2 px-2 py-1.5 text-w-text transition-colors hover:bg-w-surface2 disabled:opacity-40"
                   >
                     <Plus className="h-4 w-4" />
                   </button>
@@ -1057,7 +1057,7 @@ function TaskDetailPanel({
         </div>
 
         {/* Footer actions */}
-        <div className="border-t border-zinc-800 px-5 py-3">
+        <div className="border-t border-w-line px-5 py-3">
           <button
             onClick={onDelete}
             className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm text-red-400 transition-colors hover:bg-red-950/40"

@@ -88,7 +88,7 @@ export default function NotificationBell() {
     <div ref={panelRef} className="relative">
       <button
         onClick={() => setOpen(!open)}
-        className="relative flex items-center text-zinc-400 hover:text-white transition-colors"
+        className="relative flex items-center text-w-dim hover:text-white transition-colors"
       >
         <Bell size={16} />
         {unreadCount > 0 && (
@@ -99,20 +99,20 @@ export default function NotificationBell() {
       </button>
 
       {open && (
-        <div className="absolute top-full right-0 mt-2 z-50 w-80 bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl overflow-hidden">
+        <div className="absolute top-full right-0 mt-2 z-50 w-80 bg-w-surface border border-w-line rounded-xl shadow-2xl overflow-hidden">
           {/* Header */}
-          <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
-            <span className="text-xs font-medium text-zinc-200">Notifications</span>
+          <div className="flex items-center justify-between px-4 py-3 border-b border-w-line">
+            <span className="text-xs font-medium text-w-text">Notifications</span>
             <div className="flex items-center gap-2">
               {unreadCount > 0 && (
                 <button
                   onClick={handleMarkAllRead}
-                  className="text-[10px] text-emerald-400 hover:text-emerald-300"
+                  className="text-[10px] text-w-accent hover:text-w-accent"
                 >
                   Mark all read
                 </button>
               )}
-              <button onClick={() => setOpen(false)} className="text-zinc-500 hover:text-zinc-300">
+              <button onClick={() => setOpen(false)} className="text-w-dim hover:text-w-text">
                 <X size={14} />
               </button>
             </div>
@@ -121,11 +121,11 @@ export default function NotificationBell() {
           {/* List */}
           <div className="max-h-96 overflow-y-auto">
             {loading && (
-              <div className="px-4 py-6 text-center text-xs text-zinc-500 animate-pulse">Loading...</div>
+              <div className="px-4 py-6 text-center text-xs text-w-dim animate-pulse">Loading...</div>
             )}
 
             {!loading && notifications.length === 0 && (
-              <div className="px-4 py-8 text-center text-xs text-zinc-500">
+              <div className="px-4 py-8 text-center text-xs text-w-dim">
                 No notifications yet
               </div>
             )}
@@ -136,30 +136,30 @@ export default function NotificationBell() {
                 <button
                   key={n.id}
                   onClick={() => handleClick(n)}
-                  className={`w-full text-left px-4 py-3 hover:bg-zinc-800/50 transition-colors border-b border-zinc-800/50 ${
-                    !n.is_read ? 'bg-zinc-800/30' : ''
+                  className={`w-full text-left px-4 py-3 hover:bg-w-surface2/50 transition-colors border-b border-w-line/50 ${
+                    !n.is_read ? 'bg-w-surface2/30' : ''
                   }`}
                 >
                   <div className="flex gap-2.5">
-                    <div className={`shrink-0 mt-0.5 ${!n.is_read ? 'text-emerald-400' : 'text-zinc-600'}`}>
+                    <div className={`shrink-0 mt-0.5 ${!n.is_read ? 'text-w-accent' : 'text-w-faint'}`}>
                       <Icon size={14} />
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
-                        <p className={`text-xs truncate ${!n.is_read ? 'text-zinc-100 font-medium' : 'text-zinc-400'}`}>
+                        <p className={`text-xs truncate ${!n.is_read ? 'text-w-text font-medium' : 'text-w-dim'}`}>
                           {n.title}
                         </p>
                         {!n.is_read && (
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
+                          <span className="w-1.5 h-1.5 rounded-full bg-w-accent shrink-0" />
                         )}
                       </div>
                       {n.body && (
-                        <p className="text-[11px] text-zinc-500 truncate mt-0.5">{n.body}</p>
+                        <p className="text-[11px] text-w-dim truncate mt-0.5">{n.body}</p>
                       )}
-                      <p className="text-[10px] text-zinc-600 mt-0.5">{timeAgo(n.created_at)}</p>
+                      <p className="text-[10px] text-w-faint mt-0.5">{timeAgo(n.created_at)}</p>
                     </div>
                     {n.link && (
-                      <ExternalLink size={10} className="shrink-0 text-zinc-600 mt-1" />
+                      <ExternalLink size={10} className="shrink-0 text-w-faint mt-1" />
                     )}
                   </div>
                 </button>

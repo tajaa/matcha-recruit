@@ -92,7 +92,7 @@ export default function ChannelInviteLanding() {
   if (meLoading || (me && code) || infoLoading) {
     return (
       <div className="min-h-screen bg-[#0c0c0e] flex items-center justify-center">
-        <Loader2 className="w-6 h-6 text-zinc-500 animate-spin" />
+        <Loader2 className="w-6 h-6 text-w-dim animate-spin" />
       </div>
     )
   }
@@ -101,11 +101,11 @@ export default function ChannelInviteLanding() {
     return (
       <div className="min-h-screen bg-[#0c0c0e] flex items-center justify-center px-4">
         <div className="max-w-sm w-full text-center space-y-2">
-          <h1 className="text-xl font-semibold text-zinc-100">Invite unavailable</h1>
-          <p className="text-sm text-zinc-500">
+          <h1 className="text-xl font-semibold text-w-text">Invite unavailable</h1>
+          <p className="text-sm text-w-dim">
             This invite link is invalid, expired, or has already been used.
           </p>
-          <Link to="/login" className="inline-block text-sm text-emerald-400 hover:text-emerald-300">
+          <Link to="/login" className="inline-block text-sm text-w-accent hover:text-w-accent">
             Go to sign in
           </Link>
         </div>
@@ -117,21 +117,21 @@ export default function ChannelInviteLanding() {
     <div className="min-h-screen bg-[#0c0c0e] flex items-center justify-center px-4">
       <div className="max-w-sm w-full">
         <div className="text-center mb-8">
-          <div className="inline-flex items-center gap-1.5 text-emerald-400 text-sm font-medium">
+          <div className="inline-flex items-center gap-1.5 text-w-accent text-sm font-medium">
             <Hash className="w-4 h-4" />
             {info.channel_name}
           </div>
-          <h1 className="text-2xl font-semibold text-zinc-100 mt-3">
+          <h1 className="text-2xl font-semibold text-w-text mt-3">
             {info.inviter_name ? `${info.inviter_name} invited you` : "You're invited"}
           </h1>
-          <p className="text-sm text-zinc-500 mt-1">
+          <p className="text-sm text-w-dim mt-1">
             Create a free account to join the conversation.
           </p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-xs text-zinc-400 mb-1">Email</label>
+            <label className="block text-xs text-w-dim mb-1">Email</label>
             <input
               type="email"
               value={email}
@@ -139,12 +139,12 @@ export default function ChannelInviteLanding() {
               disabled={!!info.email}
               required
               placeholder="you@example.com"
-              className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2.5 text-sm text-zinc-100 placeholder-zinc-600 outline-none focus:border-zinc-500 transition-colors disabled:bg-zinc-900/50 disabled:text-zinc-400"
+              className="w-full rounded-lg border border-w-line bg-w-surface px-3 py-2.5 text-sm text-w-text placeholder-w-faint outline-none focus:border-w-line transition-colors disabled:bg-w-surface/50 disabled:text-w-dim"
             />
           </div>
 
           <div>
-            <label className="block text-xs text-zinc-400 mb-1">Full Name</label>
+            <label className="block text-xs text-w-dim mb-1">Full Name</label>
             <input
               type="text"
               value={name}
@@ -152,12 +152,12 @@ export default function ChannelInviteLanding() {
               required
               autoFocus
               placeholder="Jane Smith"
-              className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2.5 text-sm text-zinc-100 placeholder-zinc-600 outline-none focus:border-zinc-500 transition-colors"
+              className="w-full rounded-lg border border-w-line bg-w-surface px-3 py-2.5 text-sm text-w-text placeholder-w-faint outline-none focus:border-w-line transition-colors"
             />
           </div>
 
           <div>
-            <label className="block text-xs text-zinc-400 mb-1">Password</label>
+            <label className="block text-xs text-w-dim mb-1">Password</label>
             <input
               type="password"
               value={password}
@@ -165,7 +165,7 @@ export default function ChannelInviteLanding() {
               required
               minLength={8}
               placeholder="At least 8 characters"
-              className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2.5 text-sm text-zinc-100 placeholder-zinc-600 outline-none focus:border-zinc-500 transition-colors"
+              className="w-full rounded-lg border border-w-line bg-w-surface px-3 py-2.5 text-sm text-w-text placeholder-w-faint outline-none focus:border-w-line transition-colors"
             />
           </div>
 
@@ -175,7 +175,7 @@ export default function ChannelInviteLanding() {
               {existingAccount && (
                 <>
                   {' '}
-                  <Link to="/login" className="text-emerald-400 hover:text-emerald-300 underline">
+                  <Link to="/login" className="text-w-accent hover:text-w-accent underline">
                     Sign in
                   </Link>{' '}
                   to join.
@@ -187,16 +187,16 @@ export default function ChannelInviteLanding() {
           <button
             type="submit"
             disabled={submitting || !name.trim() || !password || (!info.email && !email.trim())}
-            className="w-full rounded-lg bg-emerald-600 py-2.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
+            className="w-full rounded-lg bg-w-accent py-2.5 text-sm font-medium text-white hover:bg-w-accent-hi disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
           >
             {submitting && <Loader2 className="w-4 h-4 animate-spin" />}
             {submitting ? 'Joining…' : `Join #${info.channel_name}`}
           </button>
         </form>
 
-        <p className="text-center text-[11px] text-zinc-600 mt-6">
+        <p className="text-center text-[11px] text-w-faint mt-6">
           Already have an account?{' '}
-          <Link to="/login" className="text-zinc-400 hover:text-zinc-300">
+          <Link to="/login" className="text-w-dim hover:text-w-text">
             Sign in
           </Link>
         </p>

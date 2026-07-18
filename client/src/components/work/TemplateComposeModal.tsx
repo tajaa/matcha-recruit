@@ -50,13 +50,13 @@ export default function TemplateComposeModal({
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
       <div
-        className="w-full max-w-md rounded-xl border border-zinc-800 bg-zinc-950 shadow-2xl"
+        className="w-full max-w-md rounded-xl border border-w-line bg-w-bg shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center gap-2 border-b border-zinc-800 px-4 py-3">
+        <div className="flex items-center gap-2 border-b border-w-line px-4 py-3">
           <Icon className={`h-3.5 w-3.5 ${template.colorClass}`} />
-          <h2 className="text-sm font-semibold text-zinc-100">New {template.displayName} Ticket</h2>
-          <button onClick={onClose} className="ml-auto text-zinc-500 hover:text-zinc-300">
+          <h2 className="text-sm font-semibold text-w-text">New {template.displayName} Ticket</h2>
+          <button onClick={onClose} className="ml-auto text-w-dim hover:text-w-text">
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -67,17 +67,17 @@ export default function TemplateComposeModal({
             onChange={(e) => setTitle(e.target.value)}
             autoFocus
             placeholder="Title"
-            className="w-full rounded-lg border border-zinc-800 bg-zinc-900 px-2.5 py-1.5 text-sm text-zinc-100 outline-none focus:border-zinc-700"
+            className="w-full rounded-lg border border-w-line bg-w-surface px-2.5 py-1.5 text-sm text-w-text outline-none focus:border-w-line"
           />
 
           {template.fields.map((field) => (
             <label key={field.key} className="block">
-              <span className="mb-1 block text-[11px] text-zinc-500">{field.label}</span>
+              <span className="mb-1 block text-[11px] text-w-dim">{field.label}</span>
               {typeof field.kind === 'object' ? (
                 <select
                   value={values[field.key] ?? ''}
                   onChange={(e) => setField(field.key, e.target.value)}
-                  className="w-full rounded-lg border border-zinc-800 bg-zinc-900 px-2 py-1.5 text-xs text-zinc-200 outline-none focus:border-zinc-700"
+                  className="w-full rounded-lg border border-w-line bg-w-surface px-2 py-1.5 text-xs text-w-text outline-none focus:border-w-line"
                 >
                   <option value="">—</option>
                   {field.kind.picker.map((opt) => (
@@ -92,14 +92,14 @@ export default function TemplateComposeModal({
                   onChange={(e) => setField(field.key, e.target.value)}
                   rows={3}
                   placeholder={field.placeholder}
-                  className="w-full resize-y rounded-lg border border-zinc-800 bg-zinc-900 px-2.5 py-1.5 text-xs text-zinc-200 placeholder-zinc-600 outline-none focus:border-zinc-700"
+                  className="w-full resize-y rounded-lg border border-w-line bg-w-surface px-2.5 py-1.5 text-xs text-w-text placeholder-w-faint outline-none focus:border-w-line"
                 />
               ) : (
                 <input
                   value={values[field.key] ?? ''}
                   onChange={(e) => setField(field.key, e.target.value)}
                   placeholder={field.placeholder}
-                  className="w-full rounded-lg border border-zinc-800 bg-zinc-900 px-2.5 py-1.5 text-xs text-zinc-200 placeholder-zinc-600 outline-none focus:border-zinc-700"
+                  className="w-full rounded-lg border border-w-line bg-w-surface px-2.5 py-1.5 text-xs text-w-text placeholder-w-faint outline-none focus:border-w-line"
                 />
               )}
             </label>
@@ -107,11 +107,11 @@ export default function TemplateComposeModal({
 
           <div className="grid grid-cols-2 gap-2">
             <label className="block">
-              <span className="mb-1 block text-[11px] text-zinc-500">Priority</span>
+              <span className="mb-1 block text-[11px] text-w-dim">Priority</span>
               <select
                 value={priority}
                 onChange={(e) => setPriority(e.target.value as TaskPriority)}
-                className="w-full rounded-lg border border-zinc-800 bg-zinc-900 px-2 py-1 text-xs capitalize text-zinc-200 outline-none focus:border-zinc-700"
+                className="w-full rounded-lg border border-w-line bg-w-surface px-2 py-1 text-xs capitalize text-w-text outline-none focus:border-w-line"
               >
                 {PRIORITIES.map((p) => (
                   <option key={p} value={p} className="capitalize">
@@ -122,11 +122,11 @@ export default function TemplateComposeModal({
             </label>
             {collaborators.length > 0 && (
               <label className="block">
-                <span className="mb-1 block text-[11px] text-zinc-500">Assignee</span>
+                <span className="mb-1 block text-[11px] text-w-dim">Assignee</span>
                 <select
                   value={assignedTo}
                   onChange={(e) => setAssignedTo(e.target.value)}
-                  className="w-full rounded-lg border border-zinc-800 bg-zinc-900 px-2 py-1 text-xs text-zinc-200 outline-none focus:border-zinc-700"
+                  className="w-full rounded-lg border border-w-line bg-w-surface px-2 py-1 text-xs text-w-text outline-none focus:border-w-line"
                 >
                   <option value="">Unassigned</option>
                   {collaborators.map((c) => (
@@ -140,14 +140,14 @@ export default function TemplateComposeModal({
           </div>
         </div>
 
-        <div className="flex items-center justify-between border-t border-zinc-800 px-4 py-3">
-          <button onClick={onClose} className="text-xs text-zinc-500 hover:text-zinc-300">
+        <div className="flex items-center justify-between border-t border-w-line px-4 py-3">
+          <button onClick={onClose} className="text-xs text-w-dim hover:text-w-text">
             Cancel
           </button>
           <button
             onClick={handleCreate}
             disabled={busy || !title.trim()}
-            className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-emerald-500 disabled:opacity-50"
+            className="flex items-center gap-1.5 rounded-lg bg-w-accent px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-w-accent-hi disabled:opacity-50"
           >
             {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
             Add

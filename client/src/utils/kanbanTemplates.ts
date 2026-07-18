@@ -41,7 +41,7 @@ export const KANBAN_TEMPLATES: KanbanTemplate[] = [
     key: 'sales',
     displayName: 'Sales',
     icon: DollarSign,
-    colorClass: 'text-emerald-400',
+    colorClass: 'text-w-accent',
     defaultPriority: 'medium',
     fields: [
       { key: 'account', label: 'Account', placeholder: 'Company · contact · role', kind: 'single' },
@@ -87,7 +87,7 @@ export const KANBAN_TEMPLATES: KanbanTemplate[] = [
     key: 'general',
     displayName: 'General',
     icon: FileText,
-    colorClass: 'text-zinc-400',
+    colorClass: 'text-w-dim',
     defaultPriority: 'medium',
     fields: [{ key: 'description', label: 'Description', placeholder: 'What needs to happen?', kind: 'multi' }],
   },

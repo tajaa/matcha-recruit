@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { Hash, FolderOpen, MessageSquare, Plus, ChevronDown, PanelLeftClose, Mail, MailOpen, Home, Pencil, LogOut, FileText, Presentation, Users, X, Compass, CreditCard, Sparkles } from 'lucide-react'
+import { Hash, FolderOpen, MessageSquare, Plus, ChevronDown, PanelLeftClose, Mail, MailOpen, Home, Pencil, LogOut, FileText, Presentation, Users, X, Compass, CreditCard, Sparkles, Search } from 'lucide-react'
 import { listChannels, updateChannel, listPendingConnections, CHANNELS_CHANGED_EVENT } from '../../api/channels'
 import { disconnectSharedChannelSocket } from '../../api/channelSocket'
 import { resetAuthCaches } from '../../api/authReset'
@@ -13,7 +13,13 @@ import CreateChannelModal from '../channels/CreateChannelModal'
 import HiringClientPickerModal from '../matcha-work/HiringClientPickerModal'
 import TemplatePickerModal from '../matcha-work/TemplatePickerModal'
 import type { RecruitingClient } from '../../types/matcha-work'
-import { useWorkBase } from '../../routes/WorkSurfaceContext'
+import { useWorkBase, useWorkBrand } from '../../routes/WorkSurfaceContext'
+
+/** Sidebar "TABS" strip — the browser-tab-like strip of recently opened items
+ *  desktop Werk keeps in `WorkTabsSidebarSection`. Persisted per work surface so
+ *  /work and /werk don't bleed into each other. */
+type OpenTab = { type: 'channel' | 'project' | 'thread'; id: string; label: string }
+const MAX_OPEN_TABS = 6
 
 interface Props {
   open: boolean
@@ -26,6 +32,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
   const navigate = useNavigate()
   const location = useLocation()
   const base = useWorkBase()
+  const brand = useWorkBrand()
   const { me, isPersonal, mwBetaLite } = useMe()
   const canCreateChannel = ['client', 'admin', 'individual'].includes(me?.user?.role ?? '')
 
@@ -39,11 +46,33 @@ export default function WorkSidebar({ open, onToggle }: Props) {
   const [showHiringClientPicker, setShowHiringClientPicker] = useState(false)
   const [showTemplatePicker, setShowTemplatePicker] = useState(false)
 
-  const [channelsOpen, setChannelsOpen] = useState(true)
-  const [projectsOpen, setProjectsOpen] = useState(true)
+  const [channelsOpen, setChannelsOpen] = useState(false)
+  const [projectsOpen, setProjectsOpen] = useState(false)
   const [threadsOpen, setThreadsOpen] = useState(false)
   const [plusActive, setPlusActive] = useState<boolean | null>(null)
   const [upgrading, setUpgrading] = useState(false)
+  const [filter, setFilter] = useState('')
+
+  const tabsKey = `mw-open-tabs:${base}`
+  const [openTabs, setOpenTabs] = useState<OpenTab[]>(() => {
+    // Validate shape, not just JSON syntax: a valid-but-wrong value (`{}`, a
+    // string, entries missing `type`) would otherwise survive parse and then
+    // blow up in `prev.filter` / `tabIcon[t.type]` on the next navigation.
+    try {
+      const raw: unknown = JSON.parse(localStorage.getItem(tabsKey) || '[]')
+      if (!Array.isArray(raw)) return []
+      return raw.filter(
+        (t): t is OpenTab =>
+          !!t &&
+          typeof t === 'object' &&
+          typeof (t as OpenTab).id === 'string' &&
+          typeof (t as OpenTab).label === 'string' &&
+          ['channel', 'project', 'thread'].includes((t as OpenTab).type),
+      )
+    } catch {
+      return []
+    }
+  })
 
   // Inline rename state
   const [renaming, setRenaming] = useState<RenameItem | null>(null)
@@ -92,6 +121,71 @@ export default function WorkSidebar({ open, onToggle }: Props) {
   useEffect(() => {
     if (renaming) renameRef.current?.focus()
   }, [renaming])
+
+  // Track the currently-open channel/project/thread into the TABS strip —
+  // upsert-to-front, capped, persisted per work surface. Only fires once the
+  // matching list has loaded so the label is real, not a placeholder.
+  useEffect(() => {
+    const path = location.pathname
+    let entry: OpenTab | null = null
+    const channelMatch = path.match(new RegExp(`^${base}/channels/([^/]+)$`))
+    const projectMatch = path.match(new RegExp(`^${base}/projects/([^/]+)$`))
+    const threadMatch = path.match(new RegExp(`^${base}/([^/]+)$`))
+    if (channelMatch) {
+      const ch = channels.find((c) => c.id === channelMatch[1])
+      if (ch) entry = { type: 'channel', id: ch.id, label: ch.name }
+    } else if (projectMatch) {
+      const p = projects.find((x) => x.id === projectMatch[1])
+      if (p) entry = { type: 'project', id: p.id, label: p.title }
+    } else if (threadMatch && threadMatch[1] !== 'email' && threadMatch[1] !== 'inbox' && threadMatch[1] !== 'connections' && threadMatch[1] !== 'billing' && threadMatch[1] !== 'channels') {
+      const t = threads.find((x) => x.id === threadMatch[1])
+      if (t) entry = { type: 'thread', id: t.id, label: t.title }
+    }
+    setOpenTabs((prev) => {
+      // Re-label stored tabs from the freshly loaded lists, so renaming an item
+      // that isn't the currently-open one doesn't strand a stale label forever.
+      const relabelled = prev.map((t) => {
+        const src =
+          t.type === 'channel' ? channels.find((c) => c.id === t.id)?.name
+          : t.type === 'project' ? projects.find((p) => p.id === t.id)?.title
+          : threads.find((x) => x.id === t.id)?.title
+        return src && src !== t.label ? { ...t, label: src } : t
+      })
+      const next = entry
+        ? [entry, ...relabelled.filter((t) => !(t.type === entry!.type && t.id === entry!.id))].slice(0, MAX_OPEN_TABS)
+        : relabelled
+      // Bail out when nothing actually changed — this effect re-runs on every
+      // list refetch (channel create/join, home navigation), and writing an
+      // identical array would re-render the sidebar and hit localStorage each time.
+      const same =
+        next.length === prev.length &&
+        next.every((t, i) => t.type === prev[i].type && t.id === prev[i].id && t.label === prev[i].label)
+      if (same) return prev
+      try {
+        localStorage.setItem(tabsKey, JSON.stringify(next))
+      } catch {}
+      return next
+    })
+  }, [location.pathname, channels, projects, threads])
+
+  function closeTab(e: React.MouseEvent, tab: OpenTab) {
+    e.stopPropagation()
+    setOpenTabs((prev) => {
+      const next = prev.filter((t) => !(t.type === tab.type && t.id === tab.id))
+      try {
+        localStorage.setItem(tabsKey, JSON.stringify(next))
+      } catch {}
+      return next
+    })
+  }
+
+  function openTabPath(tab: OpenTab): string {
+    if (tab.type === 'channel') return `${base}/channels/${tab.id}`
+    if (tab.type === 'project') return `${base}/projects/${tab.id}`
+    return `${base}/${tab.id}`
+  }
+
+  const tabIcon = { channel: Hash, project: FolderOpen, thread: MessageSquare } as const
 
   function startRename(type: RenameItem['type'], id: string, name: string) {
     setRenaming({ type: type!, id, name })
@@ -201,19 +295,19 @@ export default function WorkSidebar({ open, onToggle }: Props) {
   // ─── Collapsed: icon rail ───
   if (!open) {
     return (
-      <aside className="w-12 bg-[#0c0c0e] border-r border-zinc-800/30 flex flex-col items-center py-2 gap-1 shrink-0">
+      <aside className="w-12 bg-w-surface border-r border-w-line flex flex-col items-center py-2 gap-1 shrink-0">
         <button
           onClick={onToggle}
-          className="p-2 rounded-lg hover:bg-zinc-800 text-zinc-500 hover:text-white transition-colors mb-1"
+          className="p-2 rounded-lg hover:bg-w-surface2 text-w-dim hover:text-white transition-colors mb-1"
           title="Open sidebar"
         >
           <PanelLeftClose size={16} className="rotate-180" />
         </button>
-        <div className="w-6 border-t border-zinc-800/40 mb-1" />
+        <div className="w-6 border-t border-w-line/40 mb-1" />
 
         <button
           onClick={() => navigate(base)}
-          className={`p-2 rounded-lg transition-colors ${isActive(base) ? 'bg-zinc-800 text-white' : 'text-zinc-500 hover:text-white hover:bg-zinc-800/50'}`}
+          className={`p-2 rounded-lg transition-colors ${isActive(base) ? 'bg-w-surface2 text-white' : 'text-w-dim hover:text-white hover:bg-w-surface2/60'}`}
           title="Home"
         >
           <Home size={16} />
@@ -221,7 +315,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
 
         <button
           onClick={() => navigate(`${base}/email`)}
-          className={`p-2 rounded-lg transition-colors ${isActive(`${base}/email`) ? 'bg-zinc-800 text-white' : 'text-zinc-500 hover:text-white hover:bg-zinc-800/50'}`}
+          className={`p-2 rounded-lg transition-colors ${isActive(`${base}/email`) ? 'bg-w-surface2 text-white' : 'text-w-dim hover:text-white hover:bg-w-surface2/60'}`}
           title="Email"
         >
           <MailOpen size={16} />
@@ -229,12 +323,12 @@ export default function WorkSidebar({ open, onToggle }: Props) {
 
         <button
           onClick={() => { onToggle(); setChannelsOpen(true) }}
-          className={`relative p-2 rounded-lg transition-colors ${location.pathname.includes('/channels/') ? 'bg-zinc-800 text-white' : 'text-zinc-500 hover:text-white hover:bg-zinc-800/50'}`}
+          className={`relative p-2 rounded-lg transition-colors ${location.pathname.includes('/channels/') ? 'bg-w-surface2 text-white' : 'text-w-dim hover:text-white hover:bg-w-surface2/60'}`}
           title="Channels"
         >
           <Hash size={16} />
           {totalChannelUnread > 0 && (
-            <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-emerald-600 text-[8px] font-bold text-white flex items-center justify-center">
+            <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-w-accent text-[8px] font-bold text-white flex items-center justify-center">
               {totalChannelUnread > 9 ? '!' : totalChannelUnread}
             </span>
           )}
@@ -243,7 +337,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
         {mwBetaLite && (
           <button
             onClick={() => { onToggle(); setProjectsOpen(true) }}
-            className={`p-2 rounded-lg transition-colors ${location.pathname.includes('/projects/') ? 'bg-zinc-800 text-white' : 'text-zinc-500 hover:text-white hover:bg-zinc-800/50'}`}
+            className={`p-2 rounded-lg transition-colors ${location.pathname.includes('/projects/') ? 'bg-w-surface2 text-white' : 'text-w-dim hover:text-white hover:bg-w-surface2/60'}`}
             title="Projects"
           >
             <FolderOpen size={16} />
@@ -252,7 +346,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
 
         <button
           onClick={() => { onToggle(); setThreadsOpen(true) }}
-          className={`p-2 rounded-lg transition-colors ${new RegExp(`^${base}/[^/]+$`).test(location.pathname) && !location.pathname.includes('/channels/') && !location.pathname.includes('/projects/') ? 'bg-zinc-800 text-white' : 'text-zinc-500 hover:text-white hover:bg-zinc-800/50'}`}
+          className={`p-2 rounded-lg transition-colors ${new RegExp(`^${base}/[^/]+$`).test(location.pathname) && !location.pathname.includes('/channels/') && !location.pathname.includes('/projects/') ? 'bg-w-surface2 text-white' : 'text-w-dim hover:text-white hover:bg-w-surface2/60'}`}
           title="Threads"
         >
           <MessageSquare size={16} />
@@ -262,12 +356,12 @@ export default function WorkSidebar({ open, onToggle }: Props) {
 
         <button
           onClick={() => navigate(`${base}/connections`)}
-          className={`relative p-2 rounded-lg transition-colors ${isActive(`${base}/connections`) ? 'bg-zinc-800 text-white' : 'text-zinc-500 hover:text-white hover:bg-zinc-800/50'}`}
+          className={`relative p-2 rounded-lg transition-colors ${isActive(`${base}/connections`) ? 'bg-w-surface2 text-white' : 'text-w-dim hover:text-white hover:bg-w-surface2/60'}`}
           title="People"
         >
           <Users size={16} />
           {pendingConnections > 0 && (
-            <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-emerald-600 text-[8px] font-bold text-white flex items-center justify-center">
+            <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-w-accent text-[8px] font-bold text-white flex items-center justify-center">
               {pendingConnections > 9 ? '!' : pendingConnections}
             </span>
           )}
@@ -275,7 +369,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
 
         <button
           onClick={() => navigate(inboxPath)}
-          className={`relative p-2 rounded-lg transition-colors text-zinc-500 hover:text-white hover:bg-zinc-800/50`}
+          className={`relative p-2 rounded-lg transition-colors text-w-dim hover:text-white hover:bg-w-surface2/60`}
           title="Inbox"
         >
           <Mail size={16} />
@@ -302,7 +396,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
             if (e.key === 'Escape') setRenaming(null)
           }}
           onBlur={submitRename}
-          className="flex-1 min-w-0 rounded border border-zinc-600 bg-zinc-800 px-1.5 py-0.5 text-[13px] text-zinc-100 outline-none focus:border-emerald-600"
+          className="flex-1 min-w-0 rounded border border-w-line bg-w-surface2 px-1.5 py-0.5 text-[13px] text-w-text outline-none focus:border-w-accent"
         />
       </div>
     )
@@ -311,13 +405,16 @@ export default function WorkSidebar({ open, onToggle }: Props) {
   // ─── Expanded sidebar ───
   return (
     <>
-      <aside className="w-56 bg-[#0c0c0e] border-r border-zinc-800/30 flex flex-col shrink-0 overflow-hidden">
-        {/* Header */}
-        <div className="flex items-center justify-between px-3 py-3">
-          <span className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Workspace</span>
+      <aside className="w-56 bg-w-surface border-r border-w-line flex flex-col shrink-0 overflow-hidden">
+        {/* Brand */}
+        <div className="flex items-center gap-2 px-3 py-3">
+          <div className="w-6 h-6 rounded-md bg-w-accent/15 text-w-accent flex items-center justify-center text-[10px] font-bold shrink-0">
+            {brand.replace('-', ' ').split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase()}
+          </div>
+          <span className="flex-1 min-w-0 truncate text-[13px] font-semibold text-w-text">{brand.replace('-', ' ')}</span>
           <button
             onClick={onToggle}
-            className="p-1 rounded hover:bg-zinc-800 text-zinc-500 hover:text-white transition-colors"
+            className="shrink-0 p-1 rounded hover:bg-w-surface2 text-w-dim hover:text-white transition-colors"
             title="Collapse sidebar"
           >
             <PanelLeftClose size={16} />
@@ -330,21 +427,69 @@ export default function WorkSidebar({ open, onToggle }: Props) {
             onClick={() => navigate(base)}
             className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] transition-colors ${
               location.pathname === base
-                ? 'bg-zinc-800/60 text-white font-medium'
-                : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/30'
+                ? 'bg-w-surface2 text-white font-medium'
+                : 'text-w-dim hover:text-w-text hover:bg-w-surface2/50'
             }`}
           >
             <Home size={14} strokeWidth={1.6} />
             Home
           </button>
 
+          {/* Filter sidebar */}
+          <div className="relative mt-1 mb-1.5">
+            <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-w-faint pointer-events-none" />
+            <input
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder="Filter sidebar…"
+              className="w-full pl-7 pr-2 py-1.5 rounded-md bg-w-surface2/60 border border-w-line text-[12px] text-w-text placeholder:text-w-faint outline-none focus:border-w-accent/50 transition-colors"
+            />
+          </div>
+
+          {/* Tabs — recently/currently opened items, browser-tab style */}
+          {openTabs.length > 0 && (
+            <div className="mb-1">
+              <div className="flex items-center justify-between px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-w-faint">
+                Tabs
+                <button onClick={() => navigate(base)} className="hover:text-w-accent" title="New tab">
+                  <Plus size={11} />
+                </button>
+              </div>
+              <div className="space-y-0.5">
+                {openTabs.map((t) => {
+                  const Icon = tabIcon[t.type]
+                  const active = isActive(openTabPath(t))
+                  return (
+                    <div
+                      key={`${t.type}-${t.id}`}
+                      onClick={() => navigate(openTabPath(t))}
+                      className={`group w-full flex items-center gap-2 px-2.5 py-1 rounded-md text-[12px] cursor-pointer transition-colors ${
+                        active ? 'bg-w-surface2 text-white font-medium' : 'text-w-dim hover:text-w-text hover:bg-w-surface2/50'
+                      }`}
+                    >
+                      <Icon size={12} className="shrink-0" />
+                      <span className="flex-1 min-w-0 truncate">{t.label}</span>
+                      <button
+                        onClick={(e) => closeTab(e, t)}
+                        className="shrink-0 opacity-0 group-hover:opacity-100 p-0.5 text-w-faint hover:text-w-text transition-all"
+                        title="Close tab"
+                      >
+                        <X size={10} />
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
           {/* Email */}
           <button
             onClick={() => navigate(`${base}/email`)}
             className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] transition-colors ${
               location.pathname === `${base}/email`
-                ? 'bg-zinc-800/60 text-white font-medium'
-                : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/30'
+                ? 'bg-w-surface2 text-white font-medium'
+                : 'text-w-dim hover:text-w-text hover:bg-w-surface2/50'
             }`}
           >
             <MailOpen size={14} strokeWidth={1.6} />
@@ -355,13 +500,23 @@ export default function WorkSidebar({ open, onToggle }: Props) {
           <div className="mt-2">
             <button
               onClick={() => setChannelsOpen(!channelsOpen)}
-              className="flex items-center justify-between w-full px-2.5 py-1.5 text-[11px] font-medium uppercase tracking-wider text-zinc-500 hover:text-zinc-400 transition-colors"
+              className="flex items-center justify-between w-full px-2.5 py-1.5 text-[11px] font-medium uppercase tracking-wider text-w-dim transition-colors"
             >
-              Channels
+              <span className="flex items-center gap-1.5">
+                <Hash size={12} />
+                Channels
+                {/* Sections default collapsed, so without this the expanded
+                    sidebar shows no unread signal at all until you open it. */}
+                {!channelsOpen && !filter && totalChannelUnread > 0 && (
+                  <span className="w-4 h-4 rounded-full bg-w-accent text-[9px] font-bold text-black flex items-center justify-center">
+                    {totalChannelUnread > 9 ? '9+' : totalChannelUnread}
+                  </span>
+                )}
+              </span>
               <div className="flex items-center gap-1">
                 <span
                   onClick={(e) => { e.stopPropagation(); navigate(`${base}/channels`) }}
-                  className="hover:text-emerald-400 cursor-pointer"
+                  className="hover:text-w-accent cursor-pointer"
                   title="Browse channels"
                 >
                   <Compass size={12} />
@@ -369,32 +524,32 @@ export default function WorkSidebar({ open, onToggle }: Props) {
                 {canCreateChannel && (
                   <span
                     onClick={(e) => { e.stopPropagation(); setShowCreateChannel(true) }}
-                    className="hover:text-emerald-400 cursor-pointer"
+                    className="hover:text-w-accent cursor-pointer"
                   >
                     <Plus size={12} />
                   </span>
                 )}
-                <ChevronDown size={12} className={`transition-transform ${channelsOpen ? '' : '-rotate-90'}`} />
+                <ChevronDown size={12} className={`transition-transform ${channelsOpen || filter ? '' : '-rotate-90'}`} />
               </div>
             </button>
-            {channelsOpen && (
+            {(channelsOpen || !!filter) && (
               <div className="space-y-0.5 mt-0.5">
-                {channels.length === 0 && (
-                  <p className="px-2.5 py-1 text-[11px] text-zinc-600">No channels</p>
+                {channels.filter((ch) => ch.name.toLowerCase().includes(filter.toLowerCase())).length === 0 && (
+                  <p className="px-2.5 py-1 text-[11px] text-w-faint">No channels</p>
                 )}
-                {channels.map((ch) => (
+                {channels.filter((ch) => ch.name.toLowerCase().includes(filter.toLowerCase())).map((ch) => (
                   <div
                     key={ch.id}
                     className={`group w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] transition-colors cursor-pointer ${
                       isActive(`${base}/channels/${ch.id}`)
-                        ? 'bg-zinc-800/60 text-white font-medium'
-                        : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/30'
+                        ? 'bg-w-surface2 text-white font-medium'
+                        : 'text-w-dim hover:text-w-text hover:bg-w-surface2/50'
                     }`}
                     onClick={() => navigate(`${base}/channels/${ch.id}`)}
                   >
-                    <Hash size={14} className="text-zinc-500 shrink-0" strokeWidth={1.6} />
+                    <Hash size={14} className="text-w-dim shrink-0" strokeWidth={1.6} />
                     {ch.is_paid && (
-                      <span className="text-[9px] font-bold text-emerald-500 shrink-0">$</span>
+                      <span className="text-[9px] font-bold text-w-accent shrink-0">$</span>
                     )}
                     {renaming?.type === 'channel' && renaming.id === ch.id ? (
                       renderRenameInput()
@@ -405,7 +560,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
                         </span>
                         <button
                           onClick={(e) => { e.stopPropagation(); startRename('channel', ch.id, ch.name) }}
-                          className="opacity-0 group-hover:opacity-100 shrink-0 p-0.5 text-zinc-500 hover:text-zinc-300 transition-all"
+                          className="opacity-0 group-hover:opacity-100 shrink-0 p-0.5 text-w-dim hover:text-w-text transition-all"
                           title="Rename"
                         >
                           <Pencil size={11} />
@@ -413,7 +568,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
                       </>
                     )}
                     {ch.unread_count > 0 && !renaming && (
-                      <span className="ml-auto w-4 h-4 rounded-full bg-emerald-600 text-[9px] font-bold text-white flex items-center justify-center shrink-0">
+                      <span className="ml-auto w-4 h-4 rounded-full bg-w-accent text-[9px] font-bold text-white flex items-center justify-center shrink-0">
                         {ch.unread_count > 9 ? '9+' : ch.unread_count}
                       </span>
                     )}
@@ -427,35 +582,36 @@ export default function WorkSidebar({ open, onToggle }: Props) {
           {mwBetaLite && <div className="mt-1">
             <button
               onClick={() => setProjectsOpen(!projectsOpen)}
-              className="flex items-center justify-between w-full px-2.5 py-1.5 text-[11px] font-medium uppercase tracking-wider text-zinc-500 hover:text-zinc-400 transition-colors"
+              className="flex items-center justify-between w-full px-2.5 py-1.5 text-[11px] font-medium uppercase tracking-wider text-w-dim transition-colors"
             >
-              Projects
+              <span className="flex items-center gap-1.5">
+                <FolderOpen size={12} />
+                Workspaces
+              </span>
               <div className="flex items-center gap-1">
                 <span
                   onClick={(e) => { e.stopPropagation(); setShowProjectTypePicker(true) }}
-                  className="hover:text-emerald-400 cursor-pointer"
+                  className="hover:text-w-accent cursor-pointer"
                 >
                   <Plus size={12} />
                 </span>
-                <ChevronDown size={12} className={`transition-transform ${projectsOpen ? '' : '-rotate-90'}`} />
+                <ChevronDown size={12} className={`transition-transform ${projectsOpen || filter ? '' : '-rotate-90'}`} />
               </div>
             </button>
-            {projectsOpen && (
+            {(projectsOpen || !!filter) && (
               <div className="space-y-0.5 mt-0.5">
-                {projects.length === 0 && (
-                  <p className="px-2.5 py-1 text-[11px] text-zinc-600">No projects</p>
-                )}
                 {(() => {
+                  const filteredProjects = projects.filter((p) => p.title.toLowerCase().includes(filter.toLowerCase()))
                   const renderProjectRow = (p: MWProject) => (
                     <div
                       key={p.id}
                       className={`group w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] transition-colors ${
                         isActive(`${base}/projects/${p.id}`)
-                          ? 'bg-zinc-800/60 text-white font-medium'
-                          : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/30'
+                          ? 'bg-w-surface2 text-white font-medium'
+                          : 'text-w-dim hover:text-w-text hover:bg-w-surface2/50'
                       }`}
                     >
-                      <FolderOpen size={14} className="text-[#ce9178] shrink-0" strokeWidth={1.6} />
+                      <FolderOpen size={14} className="text-w-accent shrink-0" strokeWidth={1.6} />
                       {renaming?.type === 'project' && renaming.id === p.id ? (
                         renderRenameInput()
                       ) : (
@@ -468,7 +624,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
                           </button>
                           <button
                             onClick={(e) => { e.stopPropagation(); startRename('project', p.id, p.title) }}
-                            className="opacity-0 group-hover:opacity-100 shrink-0 p-0.5 text-zinc-500 hover:text-zinc-300 transition-all"
+                            className="opacity-0 group-hover:opacity-100 shrink-0 p-0.5 text-w-dim hover:text-w-text transition-all"
                             title="Rename"
                           >
                             <Pencil size={11} />
@@ -478,13 +634,17 @@ export default function WorkSidebar({ open, onToggle }: Props) {
                     </div>
                   )
 
+                  if (filteredProjects.length === 0) {
+                    return <p className="px-2.5 py-1 text-[11px] text-w-faint">No workspaces</p>
+                  }
+
                   if (!isPersonal) {
-                    return projects.slice(0, 10).map(renderProjectRow)
+                    return filteredProjects.slice(0, 10).map(renderProjectRow)
                   }
 
                   // Personal: group by hiring client (Unassigned last)
                   const groups = new Map<string, { name: string; items: MWProject[] }>()
-                  for (const p of projects) {
+                  for (const p of filteredProjects) {
                     const key = p.hiring_client_id || '__unassigned'
                     const name = p.hiring_client_name || 'Unassigned'
                     if (!groups.has(key)) groups.set(key, { name, items: [] })
@@ -499,7 +659,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
                     const g = groups.get(key)!
                     return (
                       <div key={key}>
-                        <p className="px-2.5 pt-1 pb-0.5 text-[10px] uppercase tracking-wider text-zinc-600 truncate">
+                        <p className="px-2.5 pt-1 pb-0.5 text-[10px] uppercase tracking-wider text-w-faint truncate">
                           {g.name}
                         </p>
                         {g.items.map(renderProjectRow)}
@@ -517,25 +677,29 @@ export default function WorkSidebar({ open, onToggle }: Props) {
           <div className="mt-1">
             <button
               onClick={() => setThreadsOpen(!threadsOpen)}
-              className="flex items-center justify-between w-full px-2.5 py-1.5 text-[11px] font-medium uppercase tracking-wider text-zinc-500 hover:text-zinc-400 transition-colors"
+              className="flex items-center justify-between w-full px-2.5 py-1.5 text-[11px] font-medium uppercase tracking-wider text-w-dim transition-colors"
             >
-              Threads
-              <ChevronDown size={12} className={`transition-transform ${threadsOpen ? '' : '-rotate-90'}`} />
+              <span className="flex items-center gap-1.5">
+                <MessageSquare size={12} />
+                Threads
+              </span>
+              <ChevronDown size={12} className={`transition-transform ${threadsOpen || filter ? '' : '-rotate-90'}`} />
             </button>
-            {threadsOpen && (() => {
-              const myThreads = threads.filter((t) => t.collaborator_count === 0)
-              const sharedThreads = threads.filter((t) => t.collaborator_count > 0)
+            {(threadsOpen || !!filter) && (() => {
+              const filteredThreads = threads.filter((t) => t.title.toLowerCase().includes(filter.toLowerCase()))
+              const myThreads = filteredThreads.filter((t) => t.collaborator_count === 0)
+              const sharedThreads = filteredThreads.filter((t) => t.collaborator_count > 0)
 
               const renderThread = (t: MWThread) => (
                 <div
                   key={t.id}
                   className={`group w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] transition-colors ${
                     isActive(`${base}/${t.id}`)
-                      ? 'bg-zinc-800/60 text-white font-medium'
-                      : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/30'
+                      ? 'bg-w-surface2 text-white font-medium'
+                      : 'text-w-dim hover:text-w-text hover:bg-w-surface2/50'
                   }`}
                 >
-                  <MessageSquare size={14} className="text-zinc-500 shrink-0" strokeWidth={1.6} />
+                  <MessageSquare size={14} className="text-w-dim shrink-0" strokeWidth={1.6} />
                   {renaming?.type === 'thread' && renaming.id === t.id ? (
                     renderRenameInput()
                   ) : (
@@ -548,7 +712,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
                       </button>
                       <button
                         onClick={(e) => { e.stopPropagation(); startRename('thread', t.id, t.title) }}
-                        className="opacity-0 group-hover:opacity-100 shrink-0 p-0.5 text-zinc-500 hover:text-zinc-300 transition-all"
+                        className="opacity-0 group-hover:opacity-100 shrink-0 p-0.5 text-w-dim hover:text-w-text transition-all"
                         title="Rename"
                       >
                         <Pencil size={11} />
@@ -558,8 +722,8 @@ export default function WorkSidebar({ open, onToggle }: Props) {
                 </div>
               )
 
-              if (threads.length === 0) {
-                return <p className="px-2.5 py-1 text-[11px] text-zinc-600">No threads</p>
+              if (filteredThreads.length === 0) {
+                return <p className="px-2.5 py-1 text-[11px] text-w-faint">No threads</p>
               }
 
               return (
@@ -567,7 +731,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
                   {myThreads.slice(0, 10).map(renderThread)}
                   {sharedThreads.length > 0 && (
                     <>
-                      <p className="px-2.5 pt-2 pb-0.5 text-[10px] uppercase tracking-wider text-zinc-600 flex items-center gap-1">
+                      <p className="px-2.5 pt-2 pb-0.5 text-[10px] uppercase tracking-wider text-w-faint flex items-center gap-1">
                         <Users size={10} />
                         Shared
                       </p>
@@ -581,7 +745,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
         </nav>
 
         {/* Footer: Inbox + User profile + Logout */}
-        <div className="px-2 py-2 border-t border-zinc-800/30 space-y-1">
+        <div className="px-2 py-2 border-t border-w-line space-y-1">
           {isPersonal && plusActive === false && (
             <button
               onClick={handleUpgradeToPlus}
@@ -598,58 +762,61 @@ export default function WorkSidebar({ open, onToggle }: Props) {
               Plus active
             </div>
           )}
-          <button
-            onClick={() => navigate(`${base}/billing`)}
-            className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/30 transition-colors"
-          >
-            <CreditCard size={14} strokeWidth={1.6} />
-            Billing
-          </button>
-          <button
-            onClick={() => navigate(`${base}/connections`)}
-            className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] transition-colors ${
-              isActive(`${base}/connections`)
-                ? 'bg-zinc-800/60 text-white font-medium'
-                : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/30'
-            }`}
-          >
-            <Users size={14} strokeWidth={1.6} />
-            People
-            {pendingConnections > 0 && (
-              <span className="ml-auto w-4 h-4 rounded-full bg-emerald-600 text-[9px] font-bold text-white flex items-center justify-center shrink-0">
-                {pendingConnections > 9 ? '!' : pendingConnections}
-              </span>
-            )}
-          </button>
-          <button
-            onClick={() => navigate(inboxPath)}
-            className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/30 transition-colors"
-          >
-            <Mail size={14} strokeWidth={1.6} />
-            Inbox
-            {inboxUnread > 0 && (
-              <span className="ml-auto w-4 h-4 rounded-full bg-blue-500 text-[9px] font-bold text-white flex items-center justify-center shrink-0">
-                {inboxUnread > 9 ? '!' : inboxUnread}
-              </span>
-            )}
-          </button>
+          {/* Footer nav row — Inbox / People / Billing as compact icon+label buttons */}
+          <div className="flex items-stretch gap-1">
+            <button
+              onClick={() => navigate(inboxPath)}
+              className="relative flex-1 flex flex-col items-center gap-0.5 py-1.5 rounded-md text-[10px] font-medium text-w-dim hover:text-w-text hover:bg-w-surface2/50 transition-colors"
+            >
+              <Mail size={14} strokeWidth={1.6} />
+              Inbox
+              {inboxUnread > 0 && (
+                <span className="absolute top-0.5 right-2.5 w-3.5 h-3.5 rounded-full bg-blue-500 text-[8px] font-bold text-white flex items-center justify-center">
+                  {inboxUnread > 9 ? '!' : inboxUnread}
+                </span>
+              )}
+            </button>
+            <button
+              onClick={() => navigate(`${base}/connections`)}
+              className={`relative flex-1 flex flex-col items-center gap-0.5 py-1.5 rounded-md text-[10px] font-medium transition-colors ${
+                isActive(`${base}/connections`)
+                  ? 'bg-w-surface2 text-white'
+                  : 'text-w-dim hover:text-w-text hover:bg-w-surface2/50'
+              }`}
+            >
+              <Users size={14} strokeWidth={1.6} />
+              People
+              {pendingConnections > 0 && (
+                <span className="absolute top-0.5 right-2.5 w-3.5 h-3.5 rounded-full bg-w-accent text-[8px] font-bold text-white flex items-center justify-center">
+                  {pendingConnections > 9 ? '!' : pendingConnections}
+                </span>
+              )}
+            </button>
+            <button
+              onClick={() => navigate(`${base}/billing`)}
+              className="flex-1 flex flex-col items-center gap-0.5 py-1.5 rounded-md text-[10px] font-medium text-w-dim hover:text-w-text hover:bg-w-surface2/50 transition-colors"
+            >
+              <CreditCard size={14} strokeWidth={1.6} />
+              Billing
+            </button>
+          </div>
 
           {/* User profile */}
           <div className="flex items-center gap-2 px-2.5 py-2 mt-1">
             {userAvatar ? (
               <img src={userAvatar} alt={userName} className="w-7 h-7 rounded-full object-cover shrink-0" />
             ) : (
-              <div className="w-7 h-7 rounded-full bg-zinc-800 flex items-center justify-center text-[11px] font-medium text-zinc-400 shrink-0">
+              <div className="w-7 h-7 rounded-full bg-w-surface2 flex items-center justify-center text-[11px] font-medium text-w-dim shrink-0">
                 {userName.charAt(0).toUpperCase()}
               </div>
             )}
             <div className="flex-1 min-w-0">
-              <p className="text-[12px] text-zinc-300 truncate">{userName}</p>
-              <p className="text-[10px] text-zinc-600 truncate">{userEmail}</p>
+              <p className="text-[12px] text-w-text truncate">{userName}</p>
+              <p className="text-[10px] text-w-faint truncate">{userEmail}</p>
             </div>
             <button
               onClick={handleLogout}
-              className="shrink-0 p-1 rounded text-zinc-600 hover:text-red-400 hover:bg-zinc-800/50 transition-colors"
+              className="shrink-0 p-1 rounded text-w-faint hover:text-red-400 hover:bg-w-surface2/60 transition-colors"
               title="Log out"
             >
               <LogOut size={13} />
@@ -672,14 +839,14 @@ export default function WorkSidebar({ open, onToggle }: Props) {
 
       {showProjectTypePicker && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setShowProjectTypePicker(false)}>
-          <div className="bg-zinc-900 border border-zinc-700 rounded-xl p-6 w-full max-w-sm mx-4" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-w-surface border border-w-line rounded-xl p-6 w-full max-w-sm mx-4" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-white font-semibold">New Project</h2>
-              <button onClick={() => setShowProjectTypePicker(false)} className="text-zinc-500 hover:text-white">
+              <button onClick={() => setShowProjectTypePicker(false)} className="text-w-dim hover:text-white">
                 <X size={16} />
               </button>
             </div>
-            <p className="text-zinc-400 text-sm mb-4">What kind of project?</p>
+            <p className="text-w-dim text-sm mb-4">What kind of project?</p>
             <div className="space-y-2">
               {([
                 { type: 'general' as const, icon: FileText, label: 'Research / Report', desc: 'Build documents and plans from chat' },
@@ -689,12 +856,12 @@ export default function WorkSidebar({ open, onToggle }: Props) {
                 <button
                   key={opt.type}
                   onClick={() => handleCreateProject(opt.type)}
-                  className="w-full flex items-center gap-3 p-3 rounded-lg border border-zinc-700 hover:border-emerald-600 hover:bg-zinc-800/50 transition-colors text-left"
+                  className="w-full flex items-center gap-3 p-3 rounded-lg border border-w-line hover:border-w-accent hover:bg-w-surface2/60 transition-colors text-left"
                 >
-                  <opt.icon size={20} className="text-emerald-500 shrink-0" />
+                  <opt.icon size={20} className="text-w-accent shrink-0" />
                   <div>
                     <p className="text-sm font-medium text-white">{opt.label}</p>
-                    <p className="text-xs text-zinc-400">{opt.desc}</p>
+                    <p className="text-xs text-w-dim">{opt.desc}</p>
                   </div>
                 </button>
               ))}

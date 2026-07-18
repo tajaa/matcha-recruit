@@ -36,13 +36,13 @@ const steps: Step[] = [
     title: 'Welcome to Werk',
     description:
       'Your AI-powered workspace for research, documents, and collaboration.',
-    icon: <Sparkles size={48} className="text-emerald-400" />,
+    icon: <Sparkles size={48} className="text-w-accent" />,
   },
   {
     title: 'Threads',
     description:
       'Start a chat thread to research any topic. The AI assistant helps with HR questions, compliance, document drafting, and more.',
-    icon: <MessageSquare size={48} className="text-emerald-400" />,
+    icon: <MessageSquare size={48} className="text-w-accent" />,
     badges: [
       { label: 'Chat', icon: <MessageSquare size={14} /> },
       { label: 'Projects', icon: <FolderKanban size={14} /> },
@@ -53,7 +53,7 @@ const steps: Step[] = [
     title: 'Language Tutor',
     description:
       'Practice English, Spanish, or French with an AI voice tutor. Get real-time grammar corrections and a proficiency analysis when you\'re done.',
-    icon: <Languages size={48} className="text-emerald-400" />,
+    icon: <Languages size={48} className="text-w-accent" />,
     badges: [
       { label: 'Voice Practice', icon: <Mic size={14} /> },
       { label: 'Grammar Feedback', icon: <Sparkles size={14} /> },
@@ -63,7 +63,7 @@ const steps: Step[] = [
     title: 'Projects',
     description:
       'Create projects to organize work. Recruiting projects include a full hiring pipeline \u2014 post roles, upload resumes, AI-rank candidates, and conduct voice interviews.',
-    icon: <FolderKanban size={48} className="text-emerald-400" />,
+    icon: <FolderKanban size={48} className="text-w-accent" />,
     badges: [
       { label: 'Research', icon: <FolderKanban size={14} /> },
       { label: 'Recruiting', icon: <BriefcaseBusiness size={14} /> },
@@ -75,7 +75,7 @@ const steps: Step[] = [
     description:
       'Invite people to your threads for real-time collaboration. Both of you can query the AI together and see responses live.',
     extra: 'Use the Invite button on any thread, or visit the People page to manage connections.',
-    icon: <UserPlus size={48} className="text-emerald-400" />,
+    icon: <UserPlus size={48} className="text-w-accent" />,
     badges: [
       { label: 'Invite', icon: <UserPlus size={14} /> },
       { label: 'Connections', icon: <Users size={14} /> },
@@ -85,12 +85,12 @@ const steps: Step[] = [
     title: 'Channels',
     description:
       'Join or create channels to communicate with your team. Paid creator channels are available for verified accounts.',
-    icon: <Hash size={48} className="text-emerald-400" />,
+    icon: <Hash size={48} className="text-w-accent" />,
   },
   {
     title: "You're all set!",
     description: 'Start by creating a new thread.',
-    icon: <Rocket size={48} className="text-emerald-400" />,
+    icon: <Rocket size={48} className="text-w-accent" />,
   },
 ]
 
@@ -135,7 +135,7 @@ export default function OnboardingWizard({ onDismiss }: OnboardingWizardProps) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4">
-      <div className="bg-zinc-900 border border-zinc-700 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl">
+      <div className="bg-w-surface border border-w-line rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl">
         {/* Step dots */}
         <div className="flex justify-center gap-1.5 pt-5 pb-2">
           {steps.map((_, i) => (
@@ -143,10 +143,10 @@ export default function OnboardingWizard({ onDismiss }: OnboardingWizardProps) {
               key={i}
               className={`h-1.5 rounded-full transition-all duration-300 ${
                 i === step
-                  ? 'w-6 bg-emerald-500'
+                  ? 'w-6 bg-w-accent'
                   : i < step
-                    ? 'w-1.5 bg-emerald-700'
-                    : 'w-1.5 bg-zinc-700'
+                    ? 'w-1.5 bg-w-accent'
+                    : 'w-1.5 bg-w-surface2'
               }`}
             />
           ))}
@@ -154,17 +154,17 @@ export default function OnboardingWizard({ onDismiss }: OnboardingWizardProps) {
 
         {/* Content */}
         <div className="px-8 py-8 flex flex-col items-center text-center min-h-[320px] justify-center">
-          <div className="mb-6 p-4 rounded-2xl bg-zinc-800/60 border border-zinc-700/50">
+          <div className="mb-6 p-4 rounded-2xl bg-w-surface2/60 border border-w-line/50">
             {current.icon}
           </div>
           <h2 className="text-xl font-semibold text-white mb-3">
             {current.title}
           </h2>
-          <p className="text-zinc-400 text-sm leading-relaxed max-w-sm">
+          <p className="text-w-dim text-sm leading-relaxed max-w-sm">
             {current.description}
           </p>
           {current.extra && (
-            <p className="text-zinc-500 text-xs leading-relaxed max-w-sm mt-2">
+            <p className="text-w-dim text-xs leading-relaxed max-w-sm mt-2">
               {current.extra}
             </p>
           )}
@@ -173,7 +173,7 @@ export default function OnboardingWizard({ onDismiss }: OnboardingWizardProps) {
               {current.badges.map((b) => (
                 <span
                   key={b.label}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-zinc-800 border border-zinc-700 text-xs text-zinc-300"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-w-surface2 border border-w-line text-xs text-w-text"
                 >
                   {b.icon}
                   {b.label}
@@ -188,7 +188,7 @@ export default function OnboardingWizard({ onDismiss }: OnboardingWizardProps) {
           {step > 0 ? (
             <button
               onClick={() => setStep(step - 1)}
-              className="flex items-center gap-1 text-sm text-zinc-400 hover:text-white transition-colors"
+              className="flex items-center gap-1 text-sm text-w-dim hover:text-white transition-colors"
             >
               <ChevronLeft size={16} />
               Back
@@ -196,7 +196,7 @@ export default function OnboardingWizard({ onDismiss }: OnboardingWizardProps) {
           ) : (
             <button
               onClick={finish}
-              className="text-sm text-zinc-500 hover:text-zinc-300 transition-colors"
+              className="text-sm text-w-dim hover:text-w-text transition-colors"
             >
               Skip
             </button>
@@ -204,14 +204,14 @@ export default function OnboardingWizard({ onDismiss }: OnboardingWizardProps) {
           {isLast ? (
             <button
               onClick={finish}
-              className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium rounded-lg transition-colors"
+              className="px-6 py-2.5 bg-w-accent hover:bg-w-accent-hi text-white text-sm font-medium rounded-lg transition-colors"
             >
               Start Working
             </button>
           ) : (
             <button
               onClick={() => setStep(step + 1)}
-              className="flex items-center gap-1 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium rounded-lg transition-colors"
+              className="flex items-center gap-1 px-5 py-2.5 bg-w-accent hover:bg-w-accent-hi text-white text-sm font-medium rounded-lg transition-colors"
             >
               Next
               <ChevronRight size={16} />

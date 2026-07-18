@@ -138,7 +138,7 @@ export default function ConnectionsPanel() {
       return <img src={url} alt={name} className={`${dim} rounded-full object-cover shrink-0`} />
     }
     return (
-      <div className={`${dim} rounded-full bg-zinc-800 flex items-center justify-center ${textSize} font-medium text-zinc-400 shrink-0`}>
+      <div className={`${dim} rounded-full bg-w-surface2 flex items-center justify-center ${textSize} font-medium text-w-dim shrink-0`}>
         {name.charAt(0).toUpperCase()}
       </div>
     )
@@ -151,11 +151,11 @@ export default function ConnectionsPanel() {
   ]
 
   return (
-    <div className="flex-1 flex flex-col bg-zinc-900 min-h-0">
+    <div className="flex-1 flex flex-col bg-w-surface min-h-0">
       {/* Header */}
-      <div className="px-6 pt-6 pb-4 border-b border-zinc-800">
+      <div className="px-6 pt-6 pb-4 border-b border-w-line">
         <div className="flex items-center gap-2 mb-4">
-          <Users size={20} className="text-emerald-500" />
+          <Users size={20} className="text-w-accent" />
           <h1 className="text-lg font-semibold text-white">People</h1>
         </div>
 
@@ -167,14 +167,14 @@ export default function ConnectionsPanel() {
               onClick={() => setTab(t.key)}
               className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
                 tab === t.key
-                  ? 'bg-zinc-800 text-white'
-                  : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50'
+                  ? 'bg-w-surface2 text-white'
+                  : 'text-w-dim hover:text-w-text hover:bg-w-surface2/50'
               }`}
             >
               {t.label}
               {t.count != null && t.count > 0 && (
                 <span className={`ml-1.5 inline-flex items-center justify-center min-w-[18px] h-[18px] rounded-full text-[10px] font-bold ${
-                  t.key === 'pending' ? 'bg-emerald-600 text-white' : 'bg-zinc-700 text-zinc-300'
+                  t.key === 'pending' ? 'bg-w-accent text-white' : 'bg-w-surface2 text-w-text'
                 }`}>
                   {t.count}
                 </span>
@@ -189,37 +189,37 @@ export default function ConnectionsPanel() {
         {tab === 'connections' && (
           <div className="space-y-2">
             {loading ? (
-              <p className="text-zinc-500 text-sm">Loading...</p>
+              <p className="text-w-dim text-sm">Loading...</p>
             ) : connections.length === 0 ? (
               <div className="text-center py-12">
-                <Users size={32} className="mx-auto text-zinc-700 mb-3" />
-                <p className="text-zinc-500 text-sm">No connections yet</p>
+                <Users size={32} className="mx-auto text-w-faint mb-3" />
+                <p className="text-w-dim text-sm">No connections yet</p>
                 <button
                   onClick={() => setTab('find')}
-                  className="mt-3 text-emerald-500 text-sm hover:text-emerald-400 transition-colors"
+                  className="mt-3 text-w-accent text-sm hover:text-w-accent transition-colors"
                 >
                   Find people to connect with
                 </button>
               </div>
             ) : (
               connections.map((c) => (
-                <div key={c.user_id} className="flex items-center gap-3 p-3 rounded-lg hover:bg-zinc-800/50 group transition-colors">
+                <div key={c.user_id} className="flex items-center gap-3 p-3 rounded-lg hover:bg-w-surface2/50 group transition-colors">
                   <Avatar name={c.name} url={c.avatar_url} />
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-zinc-200 truncate">{c.name}</p>
-                    <p className="text-xs text-zinc-500 truncate">{c.email}</p>
+                    <p className="text-sm font-medium text-w-text truncate">{c.name}</p>
+                    <p className="text-xs text-w-dim truncate">{c.email}</p>
                   </div>
                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button
                       onClick={() => handleBlock(c.user_id)}
-                      className="p-1.5 rounded text-zinc-600 hover:text-red-400 hover:bg-zinc-800 transition-colors"
+                      className="p-1.5 rounded text-w-faint hover:text-red-400 hover:bg-w-surface2 transition-colors"
                       title="Block"
                     >
                       <Shield size={14} />
                     </button>
                     <button
                       onClick={() => handleRemove(c.user_id)}
-                      className="p-1.5 rounded text-zinc-600 hover:text-red-400 hover:bg-zinc-800 transition-colors"
+                      className="p-1.5 rounded text-w-faint hover:text-red-400 hover:bg-w-surface2 transition-colors"
                       title="Remove connection"
                     >
                       <X size={14} />
@@ -234,36 +234,36 @@ export default function ConnectionsPanel() {
         {tab === 'pending' && (
           <div className="space-y-4">
             {loading ? (
-              <p className="text-zinc-500 text-sm">Loading...</p>
+              <p className="text-w-dim text-sm">Loading...</p>
             ) : pending.length === 0 && sent.length === 0 ? (
               <div className="text-center py-12">
-                <UserCheck size={32} className="mx-auto text-zinc-700 mb-3" />
-                <p className="text-zinc-500 text-sm">No pending requests</p>
+                <UserCheck size={32} className="mx-auto text-w-faint mb-3" />
+                <p className="text-w-dim text-sm">No pending requests</p>
               </div>
             ) : (
               <>
                 {pending.length > 0 && (
                   <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500 mb-2">Incoming Requests</p>
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-w-dim mb-2">Incoming Requests</p>
                     <div className="space-y-2">
                       {pending.map((p) => (
-                        <div key={p.user_id} className="flex items-center gap-3 p-3 rounded-lg bg-zinc-800/30 transition-colors">
+                        <div key={p.user_id} className="flex items-center gap-3 p-3 rounded-lg bg-w-surface2/30 transition-colors">
                           <Avatar name={p.name} url={p.avatar_url} />
                           <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-zinc-200 truncate">{p.name}</p>
-                            <p className="text-xs text-zinc-500 truncate">{p.email}</p>
+                            <p className="text-sm font-medium text-w-text truncate">{p.name}</p>
+                            <p className="text-xs text-w-dim truncate">{p.email}</p>
                           </div>
                           <div className="flex items-center gap-2">
                             <button
                               onClick={() => handleAccept(p.user_id)}
-                              className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium transition-colors"
+                              className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-w-accent hover:bg-w-accent-hi text-white text-xs font-medium transition-colors"
                             >
                               <UserCheck size={13} />
                               Accept
                             </button>
                             <button
                               onClick={() => handleDecline(p.user_id)}
-                              className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-zinc-700 hover:bg-zinc-600 text-zinc-300 text-xs font-medium transition-colors"
+                              className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-w-surface2 hover:bg-w-faint text-w-text text-xs font-medium transition-colors"
                             >
                               <UserX size={13} />
                               Decline
@@ -276,16 +276,16 @@ export default function ConnectionsPanel() {
                 )}
                 {sent.length > 0 && (
                   <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500 mb-2">Sent Requests</p>
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-w-dim mb-2">Sent Requests</p>
                     <div className="space-y-2">
                       {sent.map((s) => (
-                        <div key={s.user_id} className="flex items-center gap-3 p-3 rounded-lg bg-zinc-800/30 transition-colors">
+                        <div key={s.user_id} className="flex items-center gap-3 p-3 rounded-lg bg-w-surface2/30 transition-colors">
                           <Avatar name={s.name} url={s.avatar_url} />
                           <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-zinc-200 truncate">{s.name}</p>
-                            <p className="text-xs text-zinc-500 truncate">{s.email}</p>
+                            <p className="text-sm font-medium text-w-text truncate">{s.name}</p>
+                            <p className="text-xs text-w-dim truncate">{s.email}</p>
                           </div>
-                          <span className="text-xs text-zinc-500 px-3 py-1.5">Awaiting response</span>
+                          <span className="text-xs text-w-dim px-3 py-1.5">Awaiting response</span>
                         </div>
                       ))}
                     </div>
@@ -299,45 +299,45 @@ export default function ConnectionsPanel() {
         {tab === 'find' && (
           <div>
             <div className="relative mb-4">
-              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-w-dim" />
               <input
                 type="text"
                 placeholder="Search by name or email..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-9 pr-4 py-2.5 rounded-lg bg-zinc-800 border border-zinc-700 text-sm text-zinc-200 placeholder-zinc-500 outline-none focus:border-emerald-600 transition-colors"
+                className="w-full pl-9 pr-4 py-2.5 rounded-lg bg-w-surface2 border border-w-line text-sm text-w-text placeholder-w-faint outline-none focus:border-w-accent transition-colors"
                 autoFocus
               />
             </div>
 
             {searchQuery.length < 2 && (
-              <p className="text-zinc-500 text-sm text-center py-8">
+              <p className="text-w-dim text-sm text-center py-8">
                 Type at least 2 characters to search
               </p>
             )}
 
             {searching && (
-              <p className="text-zinc-500 text-sm text-center py-4">Searching...</p>
+              <p className="text-w-dim text-sm text-center py-4">Searching...</p>
             )}
 
             {!searching && searchQuery.length >= 2 && searchResults.length === 0 && (
-              <p className="text-zinc-500 text-sm text-center py-8">No results found</p>
+              <p className="text-w-dim text-sm text-center py-8">No results found</p>
             )}
 
             <div className="space-y-2">
               {searchResults.map((r) => (
-                <div key={r.id} className="flex items-center gap-3 p-3 rounded-lg hover:bg-zinc-800/50 transition-colors">
+                <div key={r.id} className="flex items-center gap-3 p-3 rounded-lg hover:bg-w-surface2/50 transition-colors">
                   <Avatar name={r.name} url={r.avatar_url} size="sm" />
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-zinc-200 truncate">{r.name}</p>
-                    <p className="text-xs text-zinc-500 truncate">{r.email}</p>
+                    <p className="text-sm font-medium text-w-text truncate">{r.name}</p>
+                    <p className="text-xs text-w-dim truncate">{r.email}</p>
                   </div>
                   {sentRequests.has(r.id) ? (
-                    <span className="text-xs text-zinc-500 px-3 py-1.5">Sent</span>
+                    <span className="text-xs text-w-dim px-3 py-1.5">Sent</span>
                   ) : (
                     <button
                       onClick={() => handleConnect(r.id)}
-                      className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 text-xs font-medium transition-colors"
+                      className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-w-accent/20 hover:bg-w-accent-hi/30 text-w-accent text-xs font-medium transition-colors"
                     >
                       <UserPlus size={13} />
                       Connect

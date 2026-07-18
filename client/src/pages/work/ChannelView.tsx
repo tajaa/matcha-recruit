@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Hash, Users, Send, Loader2, LogIn, LogOut, UserPlus, Paperclip, X, FileText, Image as ImageIcon, Crown, Shield, Settings, Heart, Phone, BarChart2, Briefcase, Trash2 } from 'lucide-react'
+import { Hash, Users, Send, Loader2, LogIn, LogOut, UserPlus, Paperclip, X, FileText, Image as ImageIcon, Crown, Shield, Settings, Heart, Phone, BarChart2, Briefcase, Trash2, MoreHorizontal } from 'lucide-react'
 import { getChannel, getChannelMessages, joinChannel, leaveChannel, uploadChannelFiles, kickMember, setMemberRole, getChannelPaymentInfo, createChannelCheckout, deleteChannelMessage } from '../../api/channels'
 import type { ChannelDetail, ChannelMessage, ChannelMember, ChannelAttachment, ChannelPaymentInfo } from '../../api/channels'
 import { ChannelSocket, getSharedChannelSocket } from '../../api/channelSocket'
@@ -62,7 +62,7 @@ function renderMessageContent(
           className={
             isMe
               ? 'inline-block px-1 rounded bg-yellow-500/25 text-yellow-200 font-medium'
-              : 'inline-block px-1 rounded bg-emerald-500/20 text-emerald-300 font-medium'
+              : 'inline-block px-1 rounded bg-w-accent/20 text-w-accent-hi font-medium'
           }
         >
           {handleToken}
@@ -109,6 +109,7 @@ export default function ChannelView() {
   const [showJobPostings, setShowJobPostings] = useState(false)
   const [activePostingId, setActivePostingId] = useState<string | null>(null)
   const [openPostings, setOpenPostings] = useState<OpenPostingSummary[]>([])
+  const [showMobileActions, setShowMobileActions] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -500,7 +501,7 @@ export default function ChannelView() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
-        <Loader2 className="animate-spin text-zinc-500" size={24} />
+        <Loader2 className="animate-spin text-w-dim" size={24} />
       </div>
     )
   }
@@ -529,21 +530,21 @@ export default function ChannelView() {
     const isPublic = !channel?.visibility || channel.visibility === 'public'
     return (
       <div className="flex flex-col items-center justify-center h-full gap-4">
-        <Hash size={48} className="text-zinc-600" />
-        <p className="text-zinc-400 text-sm">
+        <Hash size={48} className="text-w-faint" />
+        <p className="text-w-dim text-sm">
           {isPublic ? "You're not a member of this channel" : "This channel requires an invitation to join"}
         </p>
         {isPublic && (
           <button
             onClick={handleJoin}
             disabled={joining}
-            className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50"
+            className="flex items-center gap-2 px-4 py-2 bg-w-accent hover:bg-w-accent-hi text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50"
           >
             {joining ? <Loader2 size={14} className="animate-spin" /> : <LogIn size={14} />}
             Join Channel
           </button>
         )}
-        <button onClick={() => navigate(base)} className="text-zinc-500 text-xs hover:text-zinc-300">
+        <button onClick={() => navigate(base)} className="text-w-dim text-xs hover:text-w-text">
           Back to {brand}
         </button>
       </div>
@@ -554,87 +555,53 @@ export default function ChannelView() {
     return (
       <div className="flex flex-col items-center justify-center h-full gap-4">
         <p className="text-red-400 text-sm">{error}</p>
-        <button onClick={() => navigate(base)} className="text-zinc-500 text-xs hover:text-zinc-300">
+        <button onClick={() => navigate(base)} className="text-w-dim text-xs hover:text-w-text">
           Back to {brand}
         </button>
       </div>
     )
   }
 
+  const isOwner = channel?.my_role === 'owner'
+  const isOwnerOrMod = !!channel?.my_role && ['owner', 'moderator'].includes(channel.my_role)
+  const isPaid = !!paymentInfo?.is_paid
+  type HeaderAction = { key: string; icon: React.ElementType; label: string; onClick: () => void; active?: boolean; hover: string }
+  const secondaryActions: HeaderAction[] = ([
+    isOwnerOrMod && { key: 'add', icon: UserPlus, label: 'Add members', onClick: () => setShowAddMembers(true), hover: 'hover:text-w-accent' },
+    ((isOwnerOrMod && isPaid) || (!isOwnerOrMod && isMember)) && { key: 'jobs', icon: Briefcase, label: 'Job postings', active: showJobPostings, onClick: () => { setShowJobPostings(!showJobPostings); setShowSettings(false); setShowAnalytics(false) }, hover: 'hover:text-w-accent' },
+    isOwner && isPaid && { key: 'analytics', icon: BarChart2, label: 'Channel analytics', active: showAnalytics, onClick: () => { setShowAnalytics(!showAnalytics); setShowSettings(false); setShowJobPostings(false) }, hover: 'hover:text-w-accent' },
+    isOwner && isPaid && { key: 'settings', icon: Settings, label: 'Channel settings', active: showSettings, onClick: () => { setShowSettings(!showSettings); setShowAnalytics(false); setShowJobPostings(false) }, hover: 'hover:text-w-accent' },
+    !isOwner && isMember && { key: 'tip', icon: Heart, label: 'Send a tip', onClick: () => setShowTip(true), hover: 'hover:text-pink-400' },
+    !isOwner && { key: 'leave', icon: LogOut, label: 'Leave channel', onClick: handleLeave, hover: 'hover:text-red-400' },
+  ].filter(Boolean) as HeaderAction[])
+
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="flex items-center gap-3 px-4 py-3 border-b border-zinc-800 shrink-0">
-        <button onClick={() => navigate(base)} className="text-zinc-500 hover:text-white sm:hidden">
-          <ArrowLeft size={18} />
-        </button>
-        <Hash size={18} className="text-emerald-500 shrink-0" />
+      <div className="flex items-center gap-3 px-4 py-3 border-b border-w-line shrink-0">
+        <Hash size={18} className="text-w-accent shrink-0" />
         <div className="flex-1 min-w-0">
           <h2 className="text-white font-semibold truncate flex items-center gap-1.5">
             {channel?.name}
             {paymentInfo?.is_paid && (
-              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-600/20 text-emerald-400">$</span>
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-w-accent/15 text-w-accent">$</span>
             )}
           </h2>
           {channel?.description && (
-            <p className="text-xs text-zinc-500 truncate">{channel.description}</p>
+            <p className="text-xs text-w-dim truncate">{channel.description}</p>
           )}
         </div>
         <div className="flex items-center gap-2 shrink-0">
           {onlineUsers.length > 0 && (
-            <span className="flex items-center gap-1 text-xs text-zinc-500">
-              <span className="w-2 h-2 bg-emerald-500 rounded-full" />
+            <span className="hidden sm:flex items-center gap-1 text-xs text-w-dim">
+              <span className="w-2 h-2 bg-w-accent rounded-full" />
               {onlineUsers.length} online
             </span>
           )}
-          {channel?.my_role && ['owner', 'moderator'].includes(channel.my_role) && (
-            <button
-              onClick={() => setShowAddMembers(true)}
-              className="p-1.5 rounded hover:bg-zinc-800 text-zinc-500 hover:text-emerald-400"
-              title="Add members"
-            >
-              <UserPlus size={16} />
-            </button>
-          )}
-          {channel?.my_role && ['owner', 'moderator'].includes(channel.my_role) && paymentInfo?.is_paid && (
-            <button
-              onClick={() => { setShowJobPostings(!showJobPostings); setShowSettings(false); setShowAnalytics(false) }}
-              className={`p-1.5 rounded hover:bg-zinc-800 ${showJobPostings ? 'text-emerald-400' : 'text-zinc-500'}`}
-              title="Job postings"
-            >
-              <Briefcase size={16} />
-            </button>
-          )}
-          {channel?.my_role !== 'owner' && channel?.my_role !== 'moderator' && isMember && (
-            <button
-              onClick={() => { setShowJobPostings(!showJobPostings); setShowSettings(false); setShowAnalytics(false) }}
-              className={`p-1.5 rounded hover:bg-zinc-800 ${showJobPostings ? 'text-emerald-400' : 'text-zinc-500'}`}
-              title="Job postings"
-            >
-              <Briefcase size={16} />
-            </button>
-          )}
-          {channel?.my_role === 'owner' && paymentInfo?.is_paid && (
-            <button
-              onClick={() => { setShowAnalytics(!showAnalytics); setShowSettings(false); setShowJobPostings(false) }}
-              className={`p-1.5 rounded hover:bg-zinc-800 ${showAnalytics ? 'text-emerald-400' : 'text-zinc-500'}`}
-              title="Channel analytics"
-            >
-              <BarChart2 size={16} />
-            </button>
-          )}
-          {channel?.my_role === 'owner' && paymentInfo?.is_paid && (
-            <button
-              onClick={() => { setShowSettings(!showSettings); setShowAnalytics(false); setShowJobPostings(false) }}
-              className={`p-1.5 rounded hover:bg-zinc-800 ${showSettings ? 'text-emerald-400' : 'text-zinc-500'}`}
-              title="Channel settings"
-            >
-              <Settings size={16} />
-            </button>
-          )}
+          {/* Primary actions — always inline */}
           <button
             onClick={() => setShowMembers(!showMembers)}
-            className={`p-1.5 rounded hover:bg-zinc-800 ${showMembers ? 'text-emerald-400' : 'text-zinc-500'}`}
+            className={`p-1.5 rounded hover:bg-w-surface2 ${showMembers ? 'text-w-accent' : 'text-w-dim'}`}
             title="Members"
           >
             <Users size={16} />
@@ -642,29 +609,54 @@ export default function ChannelView() {
           {isMember && (
             <button
               onClick={voice.callState === 'idle' ? voice.joinCall : undefined}
-              className="p-1.5 rounded hover:bg-zinc-700/50 text-zinc-400 hover:text-emerald-400"
+              className="p-1.5 rounded hover:bg-w-surface2 text-w-dim hover:text-w-accent"
               title="Voice call"
             >
               <Phone size={16} />
             </button>
           )}
-          {channel?.my_role !== 'owner' && isMember && (
-            <button
-              onClick={() => setShowTip(true)}
-              className="p-1.5 rounded hover:bg-zinc-800 text-zinc-500 hover:text-pink-400"
-              title="Send a tip"
-            >
-              <Heart size={16} />
-            </button>
-          )}
-          {channel?.my_role !== 'owner' && (
-            <button
-              onClick={handleLeave}
-              className="p-1.5 rounded hover:bg-zinc-800 text-zinc-500 hover:text-red-400"
-              title="Leave channel"
-            >
-              <LogOut size={16} />
-            </button>
+          {/* Secondary actions — inline on desktop */}
+          <div className="hidden sm:flex items-center gap-2">
+            {secondaryActions.map((a) => (
+              <button
+                key={a.key}
+                onClick={a.onClick}
+                className={`p-1.5 rounded hover:bg-w-surface2 ${a.hover} ${a.active ? 'text-w-accent' : 'text-w-dim'}`}
+                title={a.label}
+              >
+                <a.icon size={16} />
+              </button>
+            ))}
+          </div>
+          {/* Secondary actions — kebab dropdown on mobile */}
+          {secondaryActions.length > 0 && (
+            <div className="relative sm:hidden">
+              <button
+                onClick={() => setShowMobileActions((v) => !v)}
+                className={`p-1.5 rounded hover:bg-w-surface2 ${showMobileActions ? 'text-w-accent' : 'text-w-dim'}`}
+                title="More"
+              >
+                <MoreHorizontal size={18} />
+              </button>
+              {showMobileActions && (
+                <>
+                  <div className="fixed inset-0 z-20" onClick={() => setShowMobileActions(false)} />
+                  <div className="absolute right-0 top-full mt-1 z-30 min-w-[180px] py-1 bg-w-surface border border-w-line rounded-lg shadow-xl">
+                    {secondaryActions.map((a) => (
+                      <button
+                        key={a.key}
+                        onClick={() => { a.onClick(); setShowMobileActions(false) }}
+                        className={`w-full flex items-center gap-2.5 px-3 py-2 text-sm text-left hover:bg-w-surface2 ${a.active ? 'text-w-accent' : 'text-w-text'} ${a.hover}`}
+                      >
+                        <a.icon size={16} className="shrink-0" />
+                        <span className="flex-1">{a.label}</span>
+                        {a.active && <span className="w-1.5 h-1.5 rounded-full bg-w-accent shrink-0" />}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
           )}
         </div>
       </div>
@@ -677,14 +669,14 @@ export default function ChannelView() {
       )}
 
       {isMember && paymentInfo?.is_paid && (
-        <div className="flex items-center gap-4 px-4 py-1.5 border-b border-zinc-800/50 bg-zinc-900/50 text-xs text-zinc-500">
-          <span className="text-emerald-400 font-medium">${((paymentInfo.price_cents ?? 0) / 100).toFixed(2)}/mo</span>
+        <div className="flex items-center gap-4 px-4 py-1.5 border-b border-w-line/50 bg-w-surface/60 text-xs text-w-dim">
+          <span className="text-w-accent font-medium">${((paymentInfo.price_cents ?? 0) / 100).toFixed(2)}/mo</span>
           <span>{channel?.member_count ?? 0} members</span>
           {onlineUsers.length > 0 && <span>{onlineUsers.length} online</span>}
           {paymentInfo.subscription_status === 'active' && (
             <button
               onClick={() => navigate(`${base}/billing`)}
-              className="ml-auto text-zinc-600 hover:text-zinc-400"
+              className="ml-auto text-w-faint"
             >
               Manage subscription
             </button>
@@ -728,7 +720,7 @@ export default function ChannelView() {
         <div className="flex-1 flex flex-col min-w-0">
           <div ref={messagesContainerRef} className="flex-1 overflow-y-auto px-4 py-3 space-y-1">
             {messages.length === 0 && (
-              <div className="text-center py-12 text-zinc-600 text-sm">
+              <div className="text-center py-12 text-w-faint text-sm">
                 No messages yet. Start the conversation!
               </div>
             )}
@@ -747,7 +739,7 @@ export default function ChannelView() {
                     msg.sender_avatar_url ? (
                       <img src={msg.sender_avatar_url} alt="" className="w-8 h-8 rounded-full object-cover shrink-0 mt-0.5" />
                     ) : (
-                      <div className="w-8 h-8 rounded-full bg-zinc-800 flex items-center justify-center text-xs font-medium text-zinc-400 shrink-0 mt-0.5">
+                      <div className="w-8 h-8 rounded-full bg-w-surface2 flex items-center justify-center text-xs font-medium text-w-dim shrink-0 mt-0.5">
                         {(msg.sender_name || '?')[0].toUpperCase()}
                       </div>
                     )
@@ -757,23 +749,23 @@ export default function ChannelView() {
                   <div className="min-w-0 flex-1">
                     {showAuthor && (
                       <div className="flex items-baseline gap-2 mb-0.5">
-                        <span className={`text-sm font-medium ${isOwn ? 'text-emerald-400' : 'text-blue-400'}`}>
+                        <span className={`text-sm font-medium ${isOwn ? 'text-w-accent' : 'text-blue-400'}`}>
                           {msg.sender_name}
                         </span>
-                        <span className="text-[10px] text-zinc-600">
+                        <span className="text-[10px] text-w-faint">
                           {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                           {msg.edited_at && !isDeleted ? ' (edited)' : ''}
                         </span>
                       </div>
                     )}
                     {isDeleted ? (
-                      <p className="text-xs italic text-zinc-500">
+                      <p className="text-xs italic text-w-dim">
                         {msg.deleted_by === msg.sender_id
                           ? '[message deleted by author]'
                           : '[message removed by a moderator]'}
                       </p>
                     ) : msg.content ? (
-                      <p className="text-sm text-zinc-200 whitespace-pre-wrap break-words">
+                      <p className="text-sm text-w-text whitespace-pre-wrap break-words">
                         {renderMessageContent(
                           msg.content,
                           channel?.members ?? [],
@@ -787,7 +779,7 @@ export default function ChannelView() {
                       {msg.attachments.map((att, ai) =>
                         att.content_type.startsWith('image/') ? (
                           <a key={ai} href={att.url} target="_blank" rel="noopener noreferrer">
-                            <img src={att.url} alt={att.filename} className="max-w-xs max-h-48 rounded-md border border-zinc-700" />
+                            <img src={att.url} alt={att.filename} className="max-w-xs max-h-48 rounded-md border border-w-line" />
                           </a>
                         ) : (
                           <a
@@ -795,11 +787,11 @@ export default function ChannelView() {
                             href={att.url}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-zinc-800 border border-zinc-700 text-xs text-zinc-300 hover:text-white hover:border-zinc-600 transition-colors"
+                            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-w-surface2 border border-w-line text-xs text-w-text hover:text-white hover:border-w-accent/40 transition-colors"
                           >
                             <FileText size={12} className="shrink-0" />
                             <span className="truncate max-w-[200px]">{att.filename}</span>
-                            <span className="text-zinc-500 shrink-0">
+                            <span className="text-w-dim shrink-0">
                               {att.size >= 1_000_000 ? `${(att.size / 1_000_000).toFixed(1)}MB` : `${Math.round(att.size / 1_000)}KB`}
                             </span>
                           </a>
@@ -812,11 +804,11 @@ export default function ChannelView() {
                       {msg.reactions.map((r) => (
                         <span
                           key={r.emoji}
-                          className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-zinc-800 border border-zinc-700 text-xs"
+                          className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-w-surface2 border border-w-line text-xs"
                           title={r.user_ids.length === 1 ? '1 reaction' : `${r.user_ids.length} reactions`}
                         >
                           <span>{r.emoji}</span>
-                          <span className="text-zinc-400">{r.count}</span>
+                          <span className="text-w-dim">{r.count}</span>
                         </span>
                       ))}
                     </div>
@@ -825,7 +817,7 @@ export default function ChannelView() {
                   {canDelete && (
                     <button
                       onClick={() => handleDeleteMessage(msg)}
-                      className="opacity-0 group-hover:opacity-100 transition-opacity text-zinc-500 hover:text-red-400 shrink-0 self-start mt-0.5"
+                      className="opacity-0 group-hover:opacity-100 transition-opacity text-w-dim hover:text-red-400 shrink-0 self-start mt-0.5"
                       title={isOwn ? 'Delete message' : 'Delete as moderator'}
                     >
                       <Trash2 size={13} />
@@ -839,21 +831,21 @@ export default function ChannelView() {
 
           {/* Typing indicator */}
           {typingText && (
-            <div className="px-4 pb-1 text-xs text-zinc-500 italic">
+            <div className="px-4 pb-1 text-xs text-w-dim italic">
               {typingText} {typingUsers.size === 1 ? 'is' : 'are'} typing...
             </div>
           )}
 
           {/* Input */}
-          <div className="px-4 py-3 border-t border-zinc-800 shrink-0">
+          <div className="px-4 py-3 border-t border-w-line shrink-0">
             {/* Pending file previews */}
             {pendingFiles.length > 0 && (
               <div className="flex flex-wrap gap-2 mb-2">
                 {pendingFiles.map((f, i) => (
-                  <div key={i} className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-zinc-800 border border-zinc-700 text-xs text-zinc-300">
+                  <div key={i} className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-w-surface2 border border-w-line text-xs text-w-text">
                     {f.type.startsWith('image/') ? <ImageIcon size={11} /> : <FileText size={11} />}
                     <span className="truncate max-w-[150px]">{f.name}</span>
-                    <button onClick={() => setPendingFiles(prev => prev.filter((_, j) => j !== i))} className="text-zinc-500 hover:text-zinc-300">
+                    <button onClick={() => setPendingFiles(prev => prev.filter((_, j) => j !== i))} className="text-w-dim hover:text-w-text">
                       <X size={10} />
                     </button>
                   </div>
@@ -863,7 +855,7 @@ export default function ChannelView() {
             <div className="flex items-end gap-2">
               <button
                 onClick={() => fileInputRef.current?.click()}
-                className="p-2 text-zinc-500 hover:text-zinc-300 transition-colors shrink-0"
+                className="p-2 text-w-dim hover:text-w-text transition-colors shrink-0"
                 title="Attach files"
               >
                 <Paperclip size={16} />
@@ -881,8 +873,8 @@ export default function ChannelView() {
               />
               <div className="flex-1 relative">
                 {mentionQuery !== null && mentionMatches.length > 0 && (
-                  <div className="absolute bottom-full left-0 mb-1 w-full max-w-xs bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl z-20 overflow-hidden">
-                    <div className="px-2 py-1 text-[10px] uppercase tracking-wide text-zinc-500 border-b border-zinc-800">
+                  <div className="absolute bottom-full left-0 mb-1 w-full max-w-xs bg-w-surface border border-w-line rounded-lg shadow-xl z-20 overflow-hidden">
+                    <div className="px-2 py-1 text-[10px] uppercase tracking-wide text-w-dim border-b border-w-line">
                       Mention a member
                     </div>
                     {mentionMatches.map((m, i) => {
@@ -892,10 +884,10 @@ export default function ChannelView() {
                           key={m.user_id}
                           type="button"
                           onMouseDown={(e) => { e.preventDefault(); applyMention(m) }}
-                          className={`w-full text-left px-3 py-1.5 text-sm flex items-center justify-between hover:bg-zinc-800 ${i === 0 ? 'bg-zinc-800/50' : ''}`}
+                          className={`w-full text-left px-3 py-1.5 text-sm flex items-center justify-between hover:bg-w-surface2 ${i === 0 ? 'bg-w-surface2/60' : ''}`}
                         >
-                          <span className="text-zinc-200 truncate">{m.name}</span>
-                          <span className="text-emerald-400 text-xs ml-2 shrink-0">@{handle}</span>
+                          <span className="text-w-text truncate">{m.name}</span>
+                          <span className="text-w-accent text-xs ml-2 shrink-0">@{handle}</span>
                         </button>
                       )
                     })}
@@ -908,14 +900,14 @@ export default function ChannelView() {
                   onKeyDown={handleKeyDown}
                   placeholder={`Message #${channel?.name ?? 'channel'}...`}
                   rows={1}
-                  className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-white text-sm placeholder:text-zinc-500 focus:outline-none focus:border-emerald-600 resize-none max-h-32"
+                  className="w-full px-3 py-2 bg-w-surface2 border border-w-line rounded-lg text-white text-sm placeholder:text-w-dim focus:outline-none focus:border-w-accent resize-none max-h-32"
                   style={{ minHeight: '38px' }}
                 />
               </div>
               <button
                 onClick={handleSend}
                 disabled={(!input.trim() && pendingFiles.length === 0) || uploading}
-                className="p-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg transition-colors disabled:opacity-30 shrink-0"
+                className="p-2 bg-w-accent hover:bg-w-accent-hi text-white rounded-lg transition-colors disabled:opacity-30 shrink-0"
               >
                 {uploading ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
               </button>
@@ -925,8 +917,8 @@ export default function ChannelView() {
 
         {/* Members sidebar */}
         {showMembers && (
-          <div className="w-64 border-l border-zinc-800 overflow-y-auto px-3 py-3 hidden sm:block">
-            <h3 className="text-xs font-medium text-zinc-500 uppercase mb-2">
+          <div className="w-64 border-l border-w-line overflow-y-auto px-3 py-3 hidden sm:block">
+            <h3 className="text-xs font-medium text-w-dim uppercase mb-2">
               Members ({channel?.member_count ?? 0})
             </h3>
             <div className="space-y-0.5">
@@ -935,9 +927,9 @@ export default function ChannelView() {
                 const canManage = channel.my_role === 'owner' || (channel.my_role === 'moderator' && m.channel_role === 'member')
                 const isMe = m.user_id === userId
                 return (
-                  <div key={m.user_id} className="group flex items-center gap-2 py-1.5 px-1 rounded hover:bg-zinc-800/30">
-                    <span className={`w-2 h-2 rounded-full shrink-0 ${isOnline ? 'bg-emerald-500' : 'bg-zinc-600'}`} />
-                    <span className="text-sm text-zinc-300 truncate flex-1">{m.name}</span>
+                  <div key={m.user_id} className="group flex items-center gap-2 py-1.5 px-1 rounded hover:bg-w-surface2/50">
+                    <span className={`w-2 h-2 rounded-full shrink-0 ${isOnline ? 'bg-w-accent' : 'bg-w-surface2'}`} />
+                    <span className="text-sm text-w-text truncate flex-1">{m.name}</span>
                     {m.channel_role === 'owner' && (
                       <Crown size={12} className="text-amber-500 shrink-0" aria-label="Owner" />
                     )}
@@ -956,7 +948,7 @@ export default function ChannelView() {
                                 setChannel(data)
                               } catch {}
                             }}
-                            className="p-0.5 text-zinc-500 hover:text-blue-400"
+                            className="p-0.5 text-w-dim hover:text-blue-400"
                             title={m.channel_role === 'moderator' ? 'Remove moderator' : 'Make moderator'}
                           >
                             <Shield size={11} />
@@ -970,7 +962,7 @@ export default function ChannelView() {
                               setChannel(data)
                             } catch {}
                           }}
-                          className="p-0.5 text-zinc-500 hover:text-red-400"
+                          className="p-0.5 text-w-dim hover:text-red-400"
                           title="Remove from channel"
                         >
                           <X size={11} />

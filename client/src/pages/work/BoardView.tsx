@@ -49,11 +49,11 @@ export default function BoardView() {
 
   if (!projectId) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 bg-zinc-950 text-center">
-        <p className="text-sm text-zinc-400">No board selected.</p>
+      <div className="flex h-full flex-col items-center justify-center gap-3 bg-w-bg text-center">
+        <p className="text-sm text-w-dim">No board selected.</p>
         <Link
           to={`${base}`}
-          className="text-sm font-medium text-emerald-400 hover:text-emerald-300"
+          className="text-sm font-medium text-w-accent hover:text-w-accent-hi"
         >
           Back to boards
         </Link>
@@ -62,23 +62,23 @@ export default function BoardView() {
   }
 
   return (
-    <div className="flex h-full flex-col bg-zinc-950">
+    <div className="flex h-full flex-col bg-w-bg">
       {/* Header */}
-      <div className="flex items-center gap-3 border-b border-zinc-800 px-4 py-3">
+      <div className="flex items-center gap-3 border-b border-w-line px-4 py-3">
         <Link
           to={`${base}`}
-          className="shrink-0 text-zinc-400 transition-colors hover:text-zinc-200"
+          className="shrink-0 text-w-dim transition-colors hover:text-w-text"
           title="Back to boards"
         >
           <ArrowLeft className="h-5 w-5" />
         </Link>
-        <h1 className="flex items-center gap-2 truncate text-lg font-semibold text-zinc-100">
-          {title ?? (titleLoading ? <Loader2 className="h-4 w-4 animate-spin text-zinc-500" /> : 'Board')}
+        <h1 className="flex items-center gap-2 truncate text-lg font-semibold text-w-text">
+          {title ?? (titleLoading ? <Loader2 className="h-4 w-4 animate-spin text-w-dim" /> : 'Board')}
         </h1>
       </div>
 
       {/* Tab strip */}
-      <div className="flex items-center gap-1 border-b border-zinc-800 px-3">
+      <div className="flex items-center gap-1 border-b border-w-line px-3">
         {TABS.map((t) => {
           const Icon = t.icon
           const active = tab === t.key
@@ -88,8 +88,8 @@ export default function BoardView() {
               onClick={() => setTab(t.key)}
               className={`flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-medium transition-colors ${
                 active
-                  ? 'border-emerald-500 text-emerald-400'
-                  : 'border-transparent text-zinc-500 hover:text-zinc-300'
+                  ? 'border-w-accent text-w-accent'
+                  : 'border-transparent text-w-dim hover:text-w-text'
               }`}
             >
               <Icon className="h-3.5 w-3.5" />

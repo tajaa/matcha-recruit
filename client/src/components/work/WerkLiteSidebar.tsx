@@ -112,37 +112,37 @@ export default function WerkLiteSidebar({ open, onToggle }: Props) {
   // ─── Collapsed: icon rail ───
   if (!open) {
     return (
-      <aside className="w-12 bg-[#0c0c0e] border-r border-zinc-800/30 flex flex-col items-center py-2 gap-1 shrink-0">
+      <aside className="w-12 bg-w-surface border-r border-w-line flex flex-col items-center py-2 gap-1 shrink-0">
         <button
           onClick={onToggle}
-          className="p-2 rounded-lg hover:bg-zinc-800 text-zinc-500 hover:text-white transition-colors mb-1"
+          className="p-2 rounded-lg hover:bg-w-surface2 text-w-dim hover:text-white transition-colors mb-1"
           title="Open sidebar"
         >
           <PanelLeftClose size={16} className="rotate-180" />
         </button>
-        <div className="w-6 border-t border-zinc-800/40 mb-1" />
+        <div className="w-6 border-t border-w-line/40 mb-1" />
         <button
           onClick={() => navigate(base)}
-          className={`p-2 rounded-lg transition-colors ${isActive(base) ? 'bg-zinc-800 text-white' : 'text-zinc-500 hover:text-white hover:bg-zinc-800/50'}`}
+          className={`p-2 rounded-lg transition-colors ${isActive(base) ? 'bg-w-surface2 text-white' : 'text-w-dim hover:text-white hover:bg-w-surface2/60'}`}
           title="Home"
         >
           <Home size={16} />
         </button>
         <button
           onClick={() => { onToggle(); setChannelsOpen(true) }}
-          className={`relative p-2 rounded-lg transition-colors ${location.pathname.includes('/channels/') ? 'bg-zinc-800 text-white' : 'text-zinc-500 hover:text-white hover:bg-zinc-800/50'}`}
+          className={`relative p-2 rounded-lg transition-colors ${location.pathname.includes('/channels/') ? 'bg-w-surface2 text-white' : 'text-w-dim hover:text-white hover:bg-w-surface2/60'}`}
           title="Channels"
         >
           <Hash size={16} />
           {totalChannelUnread > 0 && (
-            <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-emerald-600 text-[8px] font-bold text-white flex items-center justify-center">
+            <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-w-accent text-[8px] font-bold text-white flex items-center justify-center">
               {totalChannelUnread > 9 ? '!' : totalChannelUnread}
             </span>
           )}
         </button>
         <button
           onClick={() => { onToggle(); setBoardsOpen(true) }}
-          className={`p-2 rounded-lg transition-colors ${location.pathname.includes('/boards/') ? 'bg-zinc-800 text-white' : 'text-zinc-500 hover:text-white hover:bg-zinc-800/50'}`}
+          className={`p-2 rounded-lg transition-colors ${location.pathname.includes('/boards/') ? 'bg-w-surface2 text-white' : 'text-w-dim hover:text-white hover:bg-w-surface2/60'}`}
           title="Boards"
         >
           <LayoutGrid size={16} />
@@ -164,7 +164,7 @@ export default function WerkLiteSidebar({ open, onToggle }: Props) {
             if (e.key === 'Escape') setRenaming(null)
           }}
           onBlur={submitRename}
-          className="flex-1 min-w-0 rounded border border-zinc-600 bg-zinc-800 px-1.5 py-0.5 text-[13px] text-zinc-100 outline-none focus:border-emerald-600"
+          className="flex-1 min-w-0 rounded border border-w-line bg-w-surface2 px-1.5 py-0.5 text-[13px] text-w-text outline-none focus:border-w-accent"
         />
       </div>
     )
@@ -173,12 +173,12 @@ export default function WerkLiteSidebar({ open, onToggle }: Props) {
   // ─── Expanded sidebar ───
   return (
     <>
-      <aside className="w-56 bg-[#0c0c0e] border-r border-zinc-800/30 flex flex-col shrink-0 overflow-hidden">
+      <aside className="w-56 bg-w-surface border-r border-w-line flex flex-col shrink-0 overflow-hidden">
         <div className="flex items-center justify-between px-3 py-3">
-          <span className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Workspace</span>
+          <span className="text-xs font-semibold text-w-dim uppercase tracking-wider">Workspace</span>
           <button
             onClick={onToggle}
-            className="p-1 rounded hover:bg-zinc-800 text-zinc-500 hover:text-white transition-colors"
+            className="p-1 rounded hover:bg-w-surface2 text-w-dim hover:text-white transition-colors"
             title="Collapse sidebar"
           >
             <PanelLeftClose size={16} />
@@ -191,8 +191,8 @@ export default function WerkLiteSidebar({ open, onToggle }: Props) {
             onClick={() => navigate(base)}
             className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] transition-colors ${
               location.pathname === base
-                ? 'bg-zinc-800/60 text-white font-medium'
-                : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/30'
+                ? 'bg-w-surface2 text-white font-medium'
+                : 'text-w-dim hover:text-w-text hover:bg-w-surface2/50'
             }`}
           >
             <Home size={14} strokeWidth={1.6} />
@@ -203,13 +203,13 @@ export default function WerkLiteSidebar({ open, onToggle }: Props) {
           <div className="mt-2">
             <button
               onClick={() => setChannelsOpen(!channelsOpen)}
-              className="flex items-center justify-between w-full px-2.5 py-1.5 text-[11px] font-medium uppercase tracking-wider text-zinc-500 hover:text-zinc-400 transition-colors"
+              className="flex items-center justify-between w-full px-2.5 py-1.5 text-[11px] font-medium uppercase tracking-wider text-w-dim transition-colors"
             >
               Channels
               <div className="flex items-center gap-1">
                 <span
                   onClick={(e) => { e.stopPropagation(); navigate(`${base}/channels`) }}
-                  className="hover:text-emerald-400 cursor-pointer"
+                  className="hover:text-w-accent cursor-pointer"
                   title="Browse channels"
                 >
                   <Compass size={12} />
@@ -217,7 +217,7 @@ export default function WerkLiteSidebar({ open, onToggle }: Props) {
                 {canCreateChannel && (
                   <span
                     onClick={(e) => { e.stopPropagation(); setShowCreateChannel(true) }}
-                    className="hover:text-emerald-400 cursor-pointer"
+                    className="hover:text-w-accent cursor-pointer"
                   >
                     <Plus size={12} />
                   </span>
@@ -228,19 +228,19 @@ export default function WerkLiteSidebar({ open, onToggle }: Props) {
             {channelsOpen && (
               <div className="space-y-0.5 mt-0.5">
                 {channels.length === 0 && (
-                  <p className="px-2.5 py-1 text-[11px] text-zinc-600">No channels</p>
+                  <p className="px-2.5 py-1 text-[11px] text-w-faint">No channels</p>
                 )}
                 {channels.map((ch) => (
                   <div
                     key={ch.id}
                     className={`group w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] transition-colors cursor-pointer ${
                       isActive(`${base}/channels/${ch.id}`)
-                        ? 'bg-zinc-800/60 text-white font-medium'
-                        : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/30'
+                        ? 'bg-w-surface2 text-white font-medium'
+                        : 'text-w-dim hover:text-w-text hover:bg-w-surface2/50'
                     }`}
                     onClick={() => navigate(`${base}/channels/${ch.id}`)}
                   >
-                    <Hash size={14} className="text-zinc-500 shrink-0" strokeWidth={1.6} />
+                    <Hash size={14} className="text-w-dim shrink-0" strokeWidth={1.6} />
                     {renaming?.type === 'channel' && renaming.id === ch.id ? (
                       renderRenameInput()
                     ) : (
@@ -250,7 +250,7 @@ export default function WerkLiteSidebar({ open, onToggle }: Props) {
                         </span>
                         <button
                           onClick={(e) => { e.stopPropagation(); startRename('channel', ch.id, ch.name) }}
-                          className="opacity-0 group-hover:opacity-100 shrink-0 p-0.5 text-zinc-500 hover:text-zinc-300 transition-all"
+                          className="opacity-0 group-hover:opacity-100 shrink-0 p-0.5 text-w-dim hover:text-w-text transition-all"
                           title="Rename"
                         >
                           <Pencil size={11} />
@@ -258,7 +258,7 @@ export default function WerkLiteSidebar({ open, onToggle }: Props) {
                       </>
                     )}
                     {ch.unread_count > 0 && !renaming && (
-                      <span className="ml-auto w-4 h-4 rounded-full bg-emerald-600 text-[9px] font-bold text-white flex items-center justify-center shrink-0">
+                      <span className="ml-auto w-4 h-4 rounded-full bg-w-accent text-[9px] font-bold text-white flex items-center justify-center shrink-0">
                         {ch.unread_count > 9 ? '9+' : ch.unread_count}
                       </span>
                     )}
@@ -272,14 +272,14 @@ export default function WerkLiteSidebar({ open, onToggle }: Props) {
           <div className="mt-1">
             <button
               onClick={() => setBoardsOpen(!boardsOpen)}
-              className="flex items-center justify-between w-full px-2.5 py-1.5 text-[11px] font-medium uppercase tracking-wider text-zinc-500 hover:text-zinc-400 transition-colors"
+              className="flex items-center justify-between w-full px-2.5 py-1.5 text-[11px] font-medium uppercase tracking-wider text-w-dim transition-colors"
             >
               Boards
               <div className="flex items-center gap-1">
                 {canCreateChannel && (
                   <span
                     onClick={(e) => { e.stopPropagation(); handleCreateBoard() }}
-                    className="hover:text-emerald-400 cursor-pointer"
+                    className="hover:text-w-accent cursor-pointer"
                     title="New board"
                   >
                     <Plus size={12} />
@@ -291,15 +291,15 @@ export default function WerkLiteSidebar({ open, onToggle }: Props) {
             {boardsOpen && (
               <div className="space-y-0.5 mt-0.5">
                 {boards.length === 0 && (
-                  <p className="px-2.5 py-1 text-[11px] text-zinc-600">No boards</p>
+                  <p className="px-2.5 py-1 text-[11px] text-w-faint">No boards</p>
                 )}
                 {boards.slice(0, 30).map((b) => (
                   <div
                     key={b.id}
                     className={`group w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] transition-colors ${
                       isActive(`${base}/boards/${b.id}`)
-                        ? 'bg-zinc-800/60 text-white font-medium'
-                        : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/30'
+                        ? 'bg-w-surface2 text-white font-medium'
+                        : 'text-w-dim hover:text-w-text hover:bg-w-surface2/50'
                     }`}
                   >
                     <LayoutGrid size={14} className="text-[#ce9178] shrink-0" strokeWidth={1.6} />
@@ -316,7 +316,7 @@ export default function WerkLiteSidebar({ open, onToggle }: Props) {
                         {canCreateChannel && (
                           <button
                             onClick={(e) => { e.stopPropagation(); startRename('board', b.id, b.title) }}
-                            className="opacity-0 group-hover:opacity-100 shrink-0 p-0.5 text-zinc-500 hover:text-zinc-300 transition-all"
+                            className="opacity-0 group-hover:opacity-100 shrink-0 p-0.5 text-w-dim hover:text-w-text transition-all"
                             title="Rename"
                           >
                             <Pencil size={11} />
@@ -332,22 +332,22 @@ export default function WerkLiteSidebar({ open, onToggle }: Props) {
         </nav>
 
         {/* Footer: company/user + logout */}
-        <div className="px-2 py-2 border-t border-zinc-800/30">
+        <div className="px-2 py-2 border-t border-w-line">
           <div className="flex items-center gap-2 px-2.5 py-2">
             {userAvatar ? (
               <img src={userAvatar} alt={userName} className="w-7 h-7 rounded-full object-cover shrink-0" />
             ) : (
-              <div className="w-7 h-7 rounded-full bg-zinc-800 flex items-center justify-center text-[11px] font-medium text-zinc-400 shrink-0">
+              <div className="w-7 h-7 rounded-full bg-w-surface2 flex items-center justify-center text-[11px] font-medium text-w-dim shrink-0">
                 {userName.charAt(0).toUpperCase()}
               </div>
             )}
             <div className="flex-1 min-w-0">
-              <p className="text-[12px] text-zinc-300 truncate">{userName}</p>
-              <p className="text-[10px] text-zinc-600 truncate">{userEmail}</p>
+              <p className="text-[12px] text-w-text truncate">{userName}</p>
+              <p className="text-[10px] text-w-faint truncate">{userEmail}</p>
             </div>
             <button
               onClick={handleLogout}
-              className="shrink-0 p-1 rounded text-zinc-600 hover:text-red-400 hover:bg-zinc-800/50 transition-colors"
+              className="shrink-0 p-1 rounded text-w-faint hover:text-red-400 hover:bg-w-surface2/60 transition-colors"
               title="Log out"
             >
               <LogOut size={13} />

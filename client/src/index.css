@@ -31,6 +31,20 @@
   --color-sev-row-via: #2e2015;
   --color-sev-row-to: transparent;
 
+  /* Werk palette — black theme with a single warm-orange accent.
+     Mirrors the desktop Werk app's premium-minimal look (one restrained accent,
+     hairline borders, soft-elevated cards) in a near-black skin. Used across the
+     /work + /werk surface only; the rest of the app keeps its zinc palette. */
+  --color-w-bg: #0A0A0B;
+  --color-w-surface: #141416;
+  --color-w-surface2: #1C1C20;
+  --color-w-line: #262629;
+  --color-w-text: #F5F5F7;
+  --color-w-dim: #8A8A90;
+  --color-w-faint: #5A5A60;
+  --color-w-accent: #F26A21;
+  --color-w-accent-hi: #FF7E3A;
+
   /* Marketing/landing palette — ivory paper with ink text */
   --color-ivory-bg: #F5F2ED;
   --color-ivory-ink: #1F1D1A;
@@ -56,6 +70,17 @@ html[data-app-shell-bg] {
 
 html[data-app-shell-bg="admin"] {
   background-color: #3f3f46;
+}
+
+html[data-app-shell-bg="werk"] {
+  background-color: var(--color-w-bg);
+}
+
+/* Soft top-anchored depth behind the Werk main pane — the web echo of the
+   desktop app's ThemeRadialBackground. Deliberately subtle: it should read as
+   depth, not as a visible gradient band. */
+.werk-radial {
+  background-image: radial-gradient(115% 75% at 50% 0%, #17171A 0%, var(--color-w-bg) 58%);
 }
 
 /* Noir marketing landing (pages/Home) sets this while mounted — same idea as

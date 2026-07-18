@@ -20,15 +20,15 @@ export default function NotificationSettingsMenu() {
     <div ref={ref} className="relative">
       <button
         onClick={() => setOpen((v) => !v)}
-        className="text-zinc-400 hover:text-white p-1 rounded transition-colors"
+        className="text-w-dim hover:text-white p-1 rounded transition-colors"
         title="Notification settings"
         aria-label="Notification settings"
       >
         <Settings size={16} />
       </button>
       {open && (
-        <div className="absolute right-0 top-full mt-2 w-64 rounded-lg border border-zinc-700 bg-zinc-900 shadow-xl z-50 text-xs">
-          <div className="px-3 py-2 border-b border-zinc-800 text-zinc-400 font-medium">
+        <div className="absolute right-0 top-full mt-2 w-64 rounded-lg border border-w-line bg-w-surface shadow-xl z-50 text-xs">
+          <div className="px-3 py-2 border-b border-w-line text-w-dim font-medium">
             Channel notifications
           </div>
           <Toggle
@@ -43,7 +43,7 @@ export default function NotificationSettingsMenu() {
             value={toast}
             onChange={setToast}
           />
-          <div className="px-3 py-2 border-t border-zinc-800 text-[10px] text-zinc-500">
+          <div className="px-3 py-2 border-t border-w-line text-[10px] text-w-dim">
             Notifications fire for channels you&apos;re a member of, except the one you&apos;re currently viewing.
           </div>
         </div>
@@ -66,13 +66,13 @@ function Toggle({
   return (
     <button
       onClick={() => onChange(!value)}
-      className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-zinc-800/60 text-left"
+      className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-w-surface2/60 text-left"
     >
-      <span className="text-zinc-400">{icon}</span>
-      <span className="flex-1 text-zinc-200">{label}</span>
+      <span className="text-w-dim">{icon}</span>
+      <span className="flex-1 text-w-text">{label}</span>
       <span
         className={`inline-block w-8 h-4 rounded-full relative transition-colors ${
-          value ? 'bg-emerald-500' : 'bg-zinc-700'
+          value ? 'bg-w-accent' : 'bg-w-surface2'
         }`}
       >
         <span

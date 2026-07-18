@@ -69,7 +69,7 @@ export default function BoardFilesTab({ projectId }: BoardFilesTabProps) {
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center">
-        <Loader2 className="h-6 w-6 animate-spin text-zinc-500" />
+        <Loader2 className="h-6 w-6 animate-spin text-w-dim" />
       </div>
     )
   }
@@ -100,12 +100,12 @@ export default function BoardFilesTab({ projectId }: BoardFilesTabProps) {
       )}
 
       <div className="mb-3 flex items-center justify-between">
-        <span className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+        <span className="text-xs font-semibold uppercase tracking-wide text-w-dim">
           Files ({files.length})
         </span>
         <button
           onClick={() => fileInputRef.current?.click()}
-          className="flex items-center gap-1.5 rounded-lg border border-zinc-800 px-2.5 py-1.5 text-xs font-medium text-zinc-300 transition-colors hover:bg-zinc-800"
+          className="flex items-center gap-1.5 rounded-lg border border-w-line px-2.5 py-1.5 text-xs font-medium text-w-text transition-colors hover:bg-w-surface2"
         >
           <Upload className="h-3.5 w-3.5" />
           Upload
@@ -125,37 +125,37 @@ export default function BoardFilesTab({ projectId }: BoardFilesTabProps) {
 
       <div
         className={`flex-1 rounded-xl border ${
-          isDragOver ? 'border-emerald-600/60 bg-emerald-950/10' : 'border-zinc-800'
+          isDragOver ? 'border-w-accent/60 bg-w-accent/10' : 'border-w-line'
         }`}
       >
         {uploadingNames.map((name) => (
-          <div key={name} className="flex items-center gap-2 border-b border-zinc-800 px-3 py-2 text-xs text-zinc-500">
+          <div key={name} className="flex items-center gap-2 border-b border-w-line px-3 py-2 text-xs text-w-dim">
             <Loader2 className="h-3 w-3 shrink-0 animate-spin" />
             <span className="truncate">{name}</span>
           </div>
         ))}
 
         {files.length === 0 && uploadingNames.length === 0 ? (
-          <div className="flex h-full flex-col items-center justify-center gap-1 py-16 text-center text-sm text-zinc-600">
+          <div className="flex h-full flex-col items-center justify-center gap-1 py-16 text-center text-sm text-w-faint">
             <p>No files yet.</p>
-            <p className="text-xs text-zinc-700">Drag files here or click Upload.</p>
+            <p className="text-xs text-w-faint">Drag files here or click Upload.</p>
           </div>
         ) : (
           files.map((f) => (
-            <div key={f.id} className="group flex items-center gap-2 border-b border-zinc-800 px-3 py-2 last:border-b-0">
-              <FileText className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
+            <div key={f.id} className="group flex items-center gap-2 border-b border-w-line px-3 py-2 last:border-b-0">
+              <FileText className="h-3.5 w-3.5 shrink-0 text-w-dim" />
               <a
                 href={f.storage_url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex-1 truncate text-sm text-zinc-200 hover:underline"
+                className="flex-1 truncate text-sm text-w-text hover:underline"
               >
                 {f.filename}
               </a>
-              <span className="shrink-0 text-[10px] text-zinc-500">{formatBytes(f.file_size)}</span>
+              <span className="shrink-0 text-[10px] text-w-dim">{formatBytes(f.file_size)}</span>
               <button
                 onClick={() => handleDelete(f.id)}
-                className="shrink-0 text-zinc-700 opacity-0 transition-opacity hover:text-red-400 group-hover:opacity-100"
+                className="shrink-0 text-w-faint opacity-0 transition-opacity hover:text-red-400 group-hover:opacity-100"
               >
                 <Trash2 className="h-3.5 w-3.5" />
               </button>

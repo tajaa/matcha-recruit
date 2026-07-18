@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Send, Loader2, Plus, MessageSquare, HelpCircle, UserPlus, Mail, Pin, PinOff, Pencil, Menu, Paperclip } from 'lucide-react'
+import { ArrowLeft, ChevronLeft, Send, Loader2, Plus, MessageSquare, HelpCircle, UserPlus, Mail, Pin, PinOff, Pencil, Menu, Paperclip, KanbanSquare, FileText } from 'lucide-react'
 import { listConversations, getConversation, sendMessage as sendInboxMessage, getUnreadCount } from '../../api/inbox'
 import type { ConversationSummary, Conversation } from '../../api/inbox'
 import { ConversationList } from '../../components/inbox/ConversationList'
@@ -12,6 +12,8 @@ import { getProjectDetail, getThread, sendMessageStream, createProjectChat, addP
 import type { UsageSummary } from '../../api/matchaWork'
 import MessageBubble from '../../components/matcha-work/MessageBubble'
 import ProjectPanel from '../../components/matcha-work/ProjectPanel'
+import ProjectKanbanBoard from '../../components/work/ProjectKanbanBoard'
+import BoardFilesTab from '../../components/work/BoardFilesTab'
 import RecruitingPipeline from '../../components/matcha-work/RecruitingPipeline'
 import RecruitingWizard from '../../components/matcha-work/RecruitingWizard'
 import CollaboratorPanel from '../../components/matcha-work/CollaboratorPanel'
@@ -71,8 +73,10 @@ export default function ProjectView() {
   // we track which placeholders need answers. Each user chat message fills the next one.
   const pendingPlaceholders = useRef<{ placeholder: string; label: string; question: string }[]>([])
 
-  // Mobile panel toggle: chat vs panel
-  const [mobileView, setMobileView] = useState<'chat' | 'panel'>('chat')
+  // Which surface of the workspace is showing. Mirrors desktop Werk's collab tab
+  // strip (CollabRightPanel): one tab set driving one content pane, rendered as a
+  // top strip on desktop and a bottom bar on mobile.
+  const [activeTab, setActiveTab] = useState<'chat' | 'panel' | 'board' | 'files'>('chat')
 
   // Sidebar mode: 'chats' or 'inbox'
   const [sidebarMode, setSidebarMode] = useState<'chats' | 'inbox'>('chats')
@@ -117,6 +121,22 @@ export default function ProjectView() {
     if (!project) return
     setActivePageKey(project.project_type === 'recruiting' ? 'pipeline' : 'sections')
   }, [project?.project_type])
+
+  // Clamp the active tab to one the *current* project actually offers. This
+  // component stays mounted across `projects/:projectId` changes, so without
+  // this a user on Kanban who opens a recruiting workspace (no board tab) would
+  // land on a pane that renders nothing at all.
+  useEffect(() => {
+    if (!project) return
+    const type = project.project_type
+    const allowed =
+      type === 'recruiting'
+        ? ['chat', 'panel']
+        : type === 'presentation'
+        ? ['chat', 'panel', 'board']
+        : ['chat', 'board']
+    setActiveTab((prev) => (allowed.includes(prev) ? prev : 'chat'))
+  }, [projectId, project?.project_type])
 
   const loadInbox = useCallback(async () => {
     setInboxLoading(true)
@@ -424,7 +444,7 @@ export default function ProjectView() {
   if (loading) {
     return (
       <div className="flex justify-center items-center h-[calc(100vh-49px)]">
-        <Loader2 className="animate-spin text-zinc-500" size={24} />
+        <Loader2 className="animate-spin text-w-dim" size={24} />
       </div>
     )
   }
@@ -433,7 +453,7 @@ export default function ProjectView() {
     return (
       <div className="flex flex-col items-center justify-center h-[calc(100vh-49px)] gap-4">
         <p className="text-red-400">{error || 'Project not found'}</p>
-        <Link to={base} className="text-sm text-zinc-400 hover:text-white">Back to threads</Link>
+        <Link to={base} className="text-sm text-w-dim hover:text-white">Back to threads</Link>
       </div>
     )
   }
@@ -446,19 +466,44 @@ export default function ProjectView() {
   }
 
   const isRecruiting = project.project_type === 'recruiting'
+  // Scope for now: a workspace only needs Chat + Kanban (recruiting swaps in its
+  // Pipeline in place of Kanban — it has no board surface anywhere else in the
+  // product, so tasks created there would be orphaned). Presentations keep the
+  // sections panel as "Notes": those sections ARE the deliverable, and the panel
+  // is their only viewer/exporter on web. Files comes later — its render branch
+  // below stays intact, just unreferenced by this tab set.
+  const workspaceTabs = isRecruiting
+    ? [
+        { key: 'chat' as const, icon: MessageSquare, label: 'Chat' },
+        { key: 'panel' as const, icon: FileText, label: 'Pipeline' },
+      ]
+    : project.project_type === 'presentation'
+    ? [
+        { key: 'chat' as const, icon: MessageSquare, label: 'Chat' },
+        { key: 'panel' as const, icon: FileText, label: 'Notes' },
+        { key: 'board' as const, icon: KanbanSquare, label: 'Kanban' },
+      ]
+    : [
+        { key: 'chat' as const, icon: MessageSquare, label: 'Chat' },
+        { key: 'board' as const, icon: KanbanSquare, label: 'Kanban' },
+      ]
+  // The sections panel is only reachable when a `panel` tab exists. Chat writes
+  // into it ("Add to Project"), so that affordance has to follow the tab set —
+  // otherwise sections accumulate in a surface the UI can't open.
+  const hasPanelTab = workspaceTabs.some((t) => t.key === 'panel')
 
   const SidebarContent = (
     <>
       {/* Top: back + (new chat, non-recruiting only) */}
-      <div className="px-3 py-3 flex items-center justify-between shrink-0" style={{ borderBottom: '1px solid #333' }}>
-        <Link to={base} className="text-[#6a737d] hover:text-[#e8e8e8]">
+      <div className="px-3 py-3 flex items-center justify-between shrink-0" style={{ borderBottom: '1px solid var(--color-w-line)' }}>
+        <Link to={base} className="text-[var(--color-w-dim)] hover:text-[var(--color-w-text)]">
           <ArrowLeft size={14} />
         </Link>
         {!isRecruiting && (
           <button
             onClick={handleNewChat}
             title="New chat"
-            className="p-1 rounded transition-colors text-[#6a737d] hover:text-[#ce9178]"
+            className="p-1 rounded transition-colors text-[var(--color-w-dim)] hover:text-[var(--color-w-accent)]"
           >
             <Plus size={14} />
           </button>
@@ -468,8 +513,8 @@ export default function ProjectView() {
       {/* Project title (recruiting) or Chat list (other) */}
       {isRecruiting ? (
         <div className="flex-1 overflow-y-auto py-2 px-3">
-          <p className="text-[10px] uppercase tracking-wider text-[#6a737d] mb-1">Project</p>
-          <p className="text-xs font-medium text-[#e8e8e8] truncate" title={project.title}>{project.title}</p>
+          <p className="text-[10px] uppercase tracking-wider text-[var(--color-w-dim)] mb-1">Project</p>
+          <p className="text-xs font-medium text-[var(--color-w-text)] truncate" title={project.title}>{project.title}</p>
         </div>
       ) : (
       <div className="flex-1 overflow-y-auto py-1">
@@ -478,10 +523,10 @@ export default function ProjectView() {
             key={c.id}
             className={`group flex items-center px-3 py-2 transition-colors cursor-pointer ${
               activeChatId === c.id && sidebarMode === 'chats'
-                ? 'text-[#e8e8e8]'
-                : 'text-[#6a737d] hover:text-[#d4d4d4]'
+                ? 'text-[var(--color-w-text)]'
+                : 'text-[var(--color-w-dim)] hover:text-[var(--color-w-text)]'
             }`}
-            style={activeChatId === c.id && sidebarMode === 'chats' ? { background: '#2a2d2e' } : {}}
+            style={activeChatId === c.id && sidebarMode === 'chats' ? { background: 'var(--color-w-surface2)' } : {}}
             onClick={() => { setActiveChatId(c.id); setSidebarMode('chats'); setMobileMenuOpen(false) }}
           >
             {renamingChatId === c.id ? (
@@ -492,25 +537,25 @@ export default function ProjectView() {
                 onKeyDown={(e) => { if (e.key === 'Enter') handleRenameChat(c.id); if (e.key === 'Escape') setRenamingChatId(null) }}
                 onBlur={() => handleRenameChat(c.id)}
                 autoFocus
-                className="flex-1 text-xs bg-transparent border-b border-[#ce9178] outline-none text-[#e8e8e8] min-w-0"
+                className="flex-1 text-xs bg-transparent border-b border-[var(--color-w-accent)] outline-none text-[var(--color-w-text)] min-w-0"
                 onClick={(e) => e.stopPropagation()}
               />
             ) : (
               <>
-                {c.is_pinned && <Pin size={8} className="shrink-0 mr-1 text-[#ce9178]" />}
+                {c.is_pinned && <Pin size={8} className="shrink-0 mr-1 text-[var(--color-w-accent)]" />}
                 <MessageSquare size={10} className="shrink-0 mr-1.5" />
                 <span className="flex-1 text-xs truncate">{c.title}</span>
                 <div className="hidden group-hover:flex items-center gap-0.5 shrink-0 ml-1">
                   <button
                     onClick={(e) => { e.stopPropagation(); setRenamingChatId(c.id); setRenameDraft(c.title) }}
-                    className="p-0.5 rounded hover:text-[#ce9178]"
+                    className="p-0.5 rounded hover:text-[var(--color-w-accent)]"
                     title="Rename"
                   >
                     <Pencil size={9} />
                   </button>
                   <button
                     onClick={(e) => { e.stopPropagation(); handlePinChat(c.id, c.is_pinned) }}
-                    className="p-0.5 rounded hover:text-[#ce9178]"
+                    className="p-0.5 rounded hover:text-[var(--color-w-accent)]"
                     title={c.is_pinned ? 'Unpin' : 'Pin'}
                   >
                     {c.is_pinned ? <PinOff size={9} /> : <Pin size={9} />}
@@ -524,13 +569,13 @@ export default function ProjectView() {
       )}
 
       {/* Bottom: Inbox + User */}
-      <div style={{ borderTop: '1px solid #333' }} className="shrink-0">
+      <div style={{ borderTop: '1px solid var(--color-w-line)' }} className="shrink-0">
         <button
-          onClick={() => { setSidebarMode(sidebarMode === 'inbox' ? 'chats' : 'inbox'); setMobileMenuOpen(false) }}
+          onClick={() => { setSidebarMode(sidebarMode === 'inbox' ? 'chats' : 'inbox'); setActiveTab('chat'); setMobileMenuOpen(false) }}
           className={`w-full flex items-center gap-1.5 px-3 py-2.5 text-xs transition-colors ${
-            sidebarMode === 'inbox' ? 'text-[#e8e8e8]' : 'text-[#6a737d] hover:text-[#d4d4d4]'
+            sidebarMode === 'inbox' ? 'text-[var(--color-w-text)]' : 'text-[var(--color-w-dim)] hover:text-[var(--color-w-text)]'
           }`}
-          style={sidebarMode === 'inbox' ? { background: '#2a2d2e' } : {}}
+          style={sidebarMode === 'inbox' ? { background: 'var(--color-w-surface2)' } : {}}
         >
           <Mail size={12} />
           <span className="flex-1 text-left">Inbox</span>
@@ -542,12 +587,12 @@ export default function ProjectView() {
         </button>
         <Link
           to="/app/settings"
-          className="flex items-center gap-1.5 px-3 py-2.5 text-xs text-[#6a737d] hover:text-[#d4d4d4] transition-colors"
+          className="flex items-center gap-1.5 px-3 py-2.5 text-xs text-[var(--color-w-dim)] hover:text-[var(--color-w-text)] transition-colors"
         >
           {me?.user?.avatar_url ? (
             <img src={me.user.avatar_url} className="w-5 h-5 rounded-full object-cover" alt="" />
           ) : (
-            <div className="w-5 h-5 rounded-full bg-zinc-700 flex items-center justify-center text-[8px] font-bold text-zinc-300">
+            <div className="w-5 h-5 rounded-full bg-w-surface2 flex items-center justify-center text-[8px] font-bold text-w-text">
               {(me?.profile?.name || me?.user?.email || '?')[0].toUpperCase()}
             </div>
           )}
@@ -558,7 +603,7 @@ export default function ProjectView() {
   )
 
   return (
-    <div className="flex h-[calc(100vh-49px)] relative overflow-hidden" style={{ background: '#1e1e1e' }}>
+    <div className="flex flex-col md:flex-row h-full min-h-0 relative overflow-hidden bg-w-bg">
       {/* Mobile Sidebar Overlay */}
       {mobileMenuOpen && (
         <div 
@@ -568,20 +613,50 @@ export default function ProjectView() {
       )}
 
       {/* Mobile Chat Sidebar */}
-      <div className={`fixed inset-y-0 left-0 z-50 transform transition-transform duration-200 ease-in-out md:hidden flex flex-col w-[240px] shrink-0 h-[calc(100vh-49px)] top-[49px] ${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}`} style={{ borderRight: '1px solid #333', background: '#252526' }}>
+      <div className={`fixed inset-y-0 left-0 z-50 transform transition-transform duration-200 ease-in-out md:hidden flex flex-col w-[240px] shrink-0 h-[calc(100dvh-49px)] top-[49px] ${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}`} style={{ borderRight: '1px solid var(--color-w-line)', background: 'var(--color-w-surface)' }}>
         {SidebarContent}
       </div>
 
       {/* Desktop Chat Sidebar — hidden for recruiting projects (single-chat flow, no list needed) */}
       {!isRecruiting && (
-        <div className="hidden md:flex flex-col w-[180px] shrink-0" style={{ borderRight: '1px solid #333', background: '#252526' }}>
+        <div className="hidden md:flex flex-col w-[200px] shrink-0 border-r border-w-line bg-w-surface">
           {SidebarContent}
         </div>
       )}
 
+      {/* Main column — back bar + tab strip (desktop) + the active surface + bottom bar (mobile) */}
+      <div className="flex-1 min-w-0 min-h-0 flex flex-col">
+
+      {/* Desktop back bar + tab strip */}
+      <div className="hidden md:flex flex-col shrink-0 border-b border-w-line">
+        <Link
+          to={base}
+          className="flex items-center gap-1 px-3 pt-2.5 pb-1 text-[12px] text-w-dim hover:text-w-text transition-colors w-fit"
+        >
+          <ChevronLeft size={13} />
+          Workspaces
+        </Link>
+        <div className="flex items-center gap-1 px-2.5 pb-2">
+          {workspaceTabs.map((t) => (
+            <button
+              key={t.key}
+              onClick={() => setActiveTab(t.key)}
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[13px] font-medium transition-colors border ${
+                activeTab === t.key
+                  ? 'bg-w-surface2 border-w-line text-w-accent'
+                  : 'border-transparent text-w-dim hover:text-w-text hover:bg-w-surface2/60'
+              }`}
+            >
+              <t.icon size={14} />
+              {t.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* Center — inbox view when sidebar is in inbox mode */}
       {sidebarMode === 'inbox' && (
-        <div className={`flex-1 flex flex-col min-w-0 ${mobileView === 'panel' ? 'hidden md:flex' : 'flex'}`} style={{ borderRight: '1px solid #333', background: '#1e1e1e' }}>
+        <div className={`flex-1 flex-col min-w-0 min-h-0 bg-w-bg ${activeTab === 'chat' ? 'flex' : 'hidden'}`}>
           {inboxActiveConvo ? (
             <MessageThread
               conversation={inboxActiveConvo}
@@ -595,7 +670,7 @@ export default function ProjectView() {
             />
           ) : inboxLoading ? (
             <div className="flex items-center justify-center h-full">
-              <Loader2 size={20} className="animate-spin text-[#6a737d]" />
+              <Loader2 size={20} className="animate-spin text-[var(--color-w-dim)]" />
             </div>
           ) : (
             <ConversationList
@@ -626,23 +701,23 @@ export default function ProjectView() {
 
       {/* Center — chat messages */}
       {sidebarMode === 'chats' && (
-      <div className={`flex-1 flex flex-col min-w-0 ${mobileView === 'panel' ? 'hidden md:flex' : 'flex'}`} style={{ borderRight: '1px solid #333' }}>
+      <div className={`flex-1 flex-col min-w-0 min-h-0 ${activeTab === 'chat' ? 'flex' : 'hidden'}`}>
         {/* Header */}
-        <div className="px-4 py-2 flex items-center gap-2" style={{ borderBottom: '1px solid #333' }}>
+        <div className="px-4 py-2 flex items-center gap-2" style={{ borderBottom: '1px solid var(--color-w-line)' }}>
           {isRecruiting ? (
-            <Link to={base} className="text-[#6a737d] hover:text-[#e8e8e8]" title="Back to workspace">
+            <Link to={base} className="text-[var(--color-w-dim)] hover:text-[var(--color-w-text)]" title="Back to workspace">
               <ArrowLeft size={14} />
             </Link>
           ) : (
-            <button onClick={() => setMobileMenuOpen(true)} className="sm:hidden text-[#6a737d] hover:text-[#e8e8e8]">
+            <button onClick={() => setMobileMenuOpen(true)} className="sm:hidden text-[var(--color-w-dim)] hover:text-[var(--color-w-text)]">
               <Menu size={14} />
             </button>
           )}
-          <h2 className="text-xs font-medium truncate" style={{ color: '#e8e8e8' }}>
+          <h2 className="text-xs font-medium truncate" style={{ color: 'var(--color-w-text)' }}>
             {project.title}
           </h2>
           {activeThread && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ color: '#6a737d', background: '#2a2d2e' }}>
+            <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ color: 'var(--color-w-dim)', background: 'var(--color-w-surface2)' }}>
               {activeThread.title}
             </span>
           )}
@@ -653,7 +728,7 @@ export default function ProjectView() {
                 <button
                   onClick={() => { if (!showCollaborators) setShowCollaborators(true) }}
                   className="p-1 rounded transition-colors"
-                  style={{ color: showCollaborators ? '#ce9178' : '#6a737d' }}
+                  style={{ color: showCollaborators ? 'var(--color-w-accent)' : 'var(--color-w-dim)' }}
                   title="Share project"
                 >
                   <UserPlus size={14} />
@@ -667,23 +742,6 @@ export default function ProjectView() {
                 )}
               </div>
             )}
-            {/* Mobile view toggle */}
-            <div className="flex md:hidden rounded overflow-hidden" style={{ border: '1px solid #444' }}>
-              <button
-                onClick={() => setMobileView('chat')}
-                className="px-2.5 py-1 text-[10px] font-medium"
-                style={{ background: mobileView === 'chat' ? '#ce9178' : '#2a2d2e', color: mobileView === 'chat' ? '#fff' : '#6a737d' }}
-              >
-                Chat
-              </button>
-              <button
-                onClick={() => setMobileView('panel')}
-                className="px-2.5 py-1 text-[10px] font-medium"
-                style={{ background: mobileView === 'panel' ? '#ce9178' : '#2a2d2e', color: mobileView === 'panel' ? '#fff' : '#6a737d' }}
-              >
-                {project.project_type === 'recruiting' ? 'Pipeline' : 'Project'}
-              </button>
-            </div>
             {/* Model selector */}
             <select
               value={selectedModel}
@@ -692,7 +750,7 @@ export default function ProjectView() {
                 localStorage.setItem('mw-model', e.target.value)
               }}
               className="shrink-0 text-[11px] font-medium rounded-full px-2.5 py-1 appearance-none cursor-pointer border-0"
-              style={{ background: '#2a2d2e', color: '#9ca3af' }}
+              style={{ background: 'var(--color-w-surface2)', color: 'var(--color-w-dim)' }}
             >
               {MODEL_OPTIONS.map((m) => (
                 <option key={m.id} value={m.id}>{m.label}</option>
@@ -701,7 +759,7 @@ export default function ProjectView() {
 
             {/* Token counter */}
             {(usage24h?.totals.total_tokens || usageTotal?.totals.total_tokens) ? (
-              <div className="hidden sm:flex items-center gap-1.5 text-[10px] font-mono" style={{ color: '#6a737d' }}>
+              <div className="hidden sm:flex items-center gap-1.5 text-[10px] font-mono" style={{ color: 'var(--color-w-dim)' }}>
                 {usage24h && usage24h.totals.total_tokens > 0 && <span>24h: {formatTokens(usage24h.totals.total_tokens)}</span>}
                 {usage24h?.totals.total_tokens && usageTotal?.totals.total_tokens ? <span>|</span> : null}
                 {usageTotal && usageTotal.totals.total_tokens > 0 && <span>30d: {formatTokens(usageTotal.totals.total_tokens)}</span>}
@@ -712,7 +770,7 @@ export default function ProjectView() {
               <button
                 onClick={() => setShowWizard(true)}
                 title="How it works"
-                className="p-1 rounded transition-colors text-[#6a737d] hover:text-[#ce9178]"
+                className="p-1 rounded transition-colors text-[var(--color-w-dim)] hover:text-[var(--color-w-accent)]"
               >
                 <HelpCircle size={14} />
               </button>
@@ -721,7 +779,7 @@ export default function ProjectView() {
               <button
                 onClick={() => setShowTour(true)}
                 title="Project tour"
-                className="p-1 rounded transition-colors text-[#6a737d] hover:text-[#ce9178]"
+                className="p-1 rounded transition-colors text-[var(--color-w-dim)] hover:text-[var(--color-w-accent)]"
               >
                 <HelpCircle size={14} />
               </button>
@@ -747,11 +805,11 @@ export default function ProjectView() {
             <div
               className="absolute inset-0 z-10 border-2 border-dashed rounded-lg flex items-center justify-center pointer-events-none"
               style={{
-                background: isPostingFinalized ? '#22c55e10' : '#f59e0b10',
-                borderColor: isPostingFinalized ? '#22c55e' : '#f59e0b',
+                background: isPostingFinalized ? 'rgba(242,106,33,0.08)' : 'rgba(245,158,11,0.08)',
+                borderColor: isPostingFinalized ? 'var(--color-w-accent)' : '#f59e0b',
               }}
             >
-              <p className="text-sm font-medium" style={{ color: isPostingFinalized ? '#22c55e' : '#f59e0b' }}>
+              <p className="text-sm font-medium" style={{ color: isPostingFinalized ? 'var(--color-w-accent)' : '#f59e0b' }}>
                 {isPostingFinalized ? 'Drop resumes here to add candidates' : 'Finalize the posting first before adding resumes'}
               </p>
             </div>
@@ -767,12 +825,14 @@ export default function ProjectView() {
               />
             </div>
           ) : messages.length === 0 ? (
-            <div className="flex items-center justify-center h-full text-sm" style={{ color: '#6a737d' }}>
+            <div className="flex items-center justify-center h-full text-sm" style={{ color: 'var(--color-w-dim)' }}>
               {project?.project_type === 'recruiting'
                 ? (isPostingFinalized
                     ? 'Posting finalized. Drop resumes to add candidates.'
                     : 'Describe the role you\'re hiring for, then click "Add to Project" to build the posting.')
-                : 'Start chatting \u2014 use "Add to Project" to build your document.'}
+                : hasPanelTab
+                ? 'Start chatting \u2014 use "Add to Project" to build your document.'
+                : 'Start chatting.'}
             </div>
           ) : null}
           {messages.map((m) => (
@@ -780,14 +840,16 @@ export default function ProjectView() {
               key={m.id}
               message={m}
               isProjectThread
-              onAddToProject={(msgId, content) => handleAddToProject(msgId, content)}
+              // Only offer "Add to Project" when a panel tab exists to view the
+              // result \u2014 otherwise the section is written somewhere unreachable.
+              onAddToProject={hasPanelTab ? (msgId, content) => handleAddToProject(msgId, content) : undefined}
             />
           ))}
           {streaming && (
             <div className="flex justify-start">
-              <div className="rounded-lg px-4 py-2.5 flex items-center gap-2" style={{ background: '#252526', border: '1px solid #333' }}>
-                <Loader2 size={14} className="animate-spin" style={{ color: '#6a737d' }} />
-                <span className="text-sm" style={{ color: '#6a737d' }}>{statusMessage || 'Thinking...'}</span>
+              <div className="rounded-lg px-4 py-2.5 flex items-center gap-2" style={{ background: 'var(--color-w-surface)', border: '1px solid var(--color-w-line)' }}>
+                <Loader2 size={14} className="animate-spin" style={{ color: 'var(--color-w-dim)' }} />
+                <span className="text-sm" style={{ color: 'var(--color-w-dim)' }}>{statusMessage || 'Thinking...'}</span>
               </div>
             </div>
           )}
@@ -803,7 +865,7 @@ export default function ProjectView() {
         )}
 
         {/* Input */}
-        <div className="px-4 py-3" style={{ borderTop: '1px solid #333' }}>
+        <div className="px-4 py-3" style={{ borderTop: '1px solid var(--color-w-line)' }}>
           <div className="flex items-end gap-2">
             {project?.project_type === 'recruiting' && isPostingFinalized && (
               <>
@@ -822,8 +884,8 @@ export default function ProjectView() {
                 <button
                   onClick={() => resumeFileRef.current?.click()}
                   disabled={streaming}
-                  className="p-2.5 rounded-lg transition-colors disabled:opacity-40 hover:bg-zinc-700/50"
-                  style={{ color: '#6a737d' }}
+                  className="p-2.5 rounded-lg transition-colors disabled:opacity-40 hover:bg-w-surface2/50"
+                  style={{ color: 'var(--color-w-dim)' }}
                   title="Upload resumes"
                 >
                   <Paperclip size={18} />
@@ -840,13 +902,13 @@ export default function ProjectView() {
               rows={1}
               disabled={streaming || (!activeChatId && pendingPlaceholders.current.length === 0)}
               className="flex-1 text-sm rounded-lg px-3 py-2.5 border focus:outline-none resize-none disabled:opacity-50 min-h-[44px]"
-              style={{ background: '#1a1a1a', color: '#d4d4d4', borderColor: '#555' }}
+              style={{ background: 'var(--color-w-surface)', color: 'var(--color-w-text)', borderColor: 'var(--color-w-line)' }}
             />
             <button
               onClick={handleSend}
               disabled={streaming || !input.trim() || (!activeChatId && pendingPlaceholders.current.length === 0)}
               className="p-3 rounded-lg transition-colors disabled:opacity-40"
-              style={{ background: '#22c55e', color: '#fff' }}
+              style={{ background: 'var(--color-w-accent)', color: '#fff' }}
             >
               {streaming ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
             </button>
@@ -857,7 +919,7 @@ export default function ProjectView() {
 
       {/* Right — Project panel or Recruiting pipeline */}
       <div
-        className={`${mobileView === 'panel' ? 'flex w-full' : 'hidden'} md:flex flex-1 min-w-0 flex-col`}
+        className={`${activeTab === 'panel' ? 'flex' : 'hidden'} flex-1 w-full min-w-0 min-h-0 flex-col`}
         data-tour="sections-panel"
       >
         {/* Collaborator presence pill (cross-tab awareness). Always rendered
@@ -866,12 +928,12 @@ export default function ProjectView() {
         <div
           data-tour="collaborators-pill"
           className="flex items-center justify-end px-3 py-1"
-          style={{ borderBottom: '1px solid #333', background: '#1e1e1e' }}
+          style={{ borderBottom: '1px solid var(--color-w-line)', background: 'var(--color-w-bg)' }}
         >
           {presence.members.length > 1 ? (
             <CollaboratorsPill members={presence.members} selfId={currentUserId} />
           ) : (
-            <span style={{ fontSize: 10, color: '#555' }}>Working solo</span>
+            <span style={{ fontSize: 10, color: 'var(--color-w-line)' }}>Working solo</span>
           )}
         </div>
         <PresenceLayer
@@ -949,8 +1011,58 @@ export default function ProjectView() {
         </PresenceLayer>
       </div>
 
+      {/* Kanban board */}
+      {activeTab === 'board' && !isRecruiting && (
+        <div className="flex-1 min-h-0 flex flex-col bg-w-bg">
+          <ProjectKanbanBoard projectId={projectId!} />
+        </div>
+      )}
+
+      {/* Files */}
+      {activeTab === 'files' && (
+        <div className="flex-1 min-h-0 flex flex-col bg-w-bg">
+          <BoardFilesTab projectId={projectId!} />
+        </div>
+      )}
+
+      {/* Mobile bottom tab bar — same tab set as the desktop strip */}
+      <nav
+        className="md:hidden shrink-0 flex items-stretch border-t border-w-line bg-w-surface"
+        style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+      >
+        {workspaceTabs.map((t) => {
+          const active = activeTab === t.key
+          return (
+            <button
+              key={t.key}
+              onClick={() => setActiveTab(t.key)}
+              className={`flex-1 flex flex-col items-center justify-center gap-0.5 py-2 transition-colors ${
+                active ? 'text-w-accent' : 'text-w-dim'
+              }`}
+            >
+              <span
+                className={`flex items-center justify-center rounded-lg px-3.5 py-1 transition-colors ${
+                  active ? 'bg-w-accent/15' : ''
+                }`}
+              >
+                <t.icon size={18} />
+              </span>
+              <span className="text-[10px] font-medium">{t.label}</span>
+            </button>
+          )
+        })}
+      </nav>
+
+      </div>
+
       {showTour && project.project_type !== 'recruiting' && (
-        <ProjectTour steps={TOUR_STEPS} onComplete={dismissTour} />
+        // Three of the four steps point into the sections panel (and its export
+        // button). Without a panel tab those targets never render, and the tour
+        // would narrate — then dead-end on — UI the user can't reach.
+        <ProjectTour
+          steps={hasPanelTab ? TOUR_STEPS : TOUR_STEPS.filter((s) => s.target === '[data-tour="chat-input"]')}
+          onComplete={dismissTour}
+        />
       )}
     </div>
   )

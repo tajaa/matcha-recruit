@@ -544,7 +544,7 @@ export default function MatchaWorkThread() {
     streamText:  lm ? 'text-zinc-500'   : 'text-zinc-400',
     textarea:    lm
       ? 'bg-zinc-100 text-zinc-900 border-zinc-300 focus:border-emerald-600 placeholder-zinc-400'
-      : 'bg-zinc-800 text-white border-zinc-700 focus:border-emerald-600 placeholder-zinc-500',
+      : 'bg-zinc-800 text-white border-zinc-700 focus:border-emerald-600 placeholder-w-faint',
     finText:     lm ? 'text-zinc-500'   : 'text-zinc-500',
   }
 

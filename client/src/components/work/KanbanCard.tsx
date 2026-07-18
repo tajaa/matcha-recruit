@@ -1,6 +1,18 @@
-import { Paperclip, RefreshCw, Calendar, ListChecks, CheckCircle2, Clock } from 'lucide-react'
+import { Paperclip, RefreshCw, Calendar, ListChecks, CheckCircle2, Circle, ChevronRight, Clock } from 'lucide-react'
 import type { MWProjectTask } from '../../types/matcha-work'
 import Avatar from '../Avatar'
+import { KANBAN_COLUMNS } from '../../utils/kanbanColumns'
+import { KANBAN_TEMPLATES } from '../../utils/kanbanTemplates'
+
+/** Chip color for a task's category — reuses the same per-template color the
+ *  "+" compose menu uses (KANBAN_TEMPLATES.colorClass), so a "Bug" card and
+ *  the Bug template entry always agree. Unrecognized/manual categories fall
+ *  back to a neutral chip. */
+function categoryChip(category: string | null | undefined): { label: string; colorClass: string } | null {
+  if (!category || category === 'manual') return null
+  const tpl = KANBAN_TEMPLATES.find((t) => t.key === category)
+  return { label: tpl?.displayName ?? category, colorClass: tpl?.colorClass ?? 'text-w-dim' }
+}
 
 interface KanbanCardProps {
   task: MWProjectTask
@@ -71,7 +83,9 @@ export default function KanbanCard({ task, onClick, onDragStart, onDragEnd, drag
   // marking it would put an accent on nearly every card; absence = normal.
   const edgeColor = task.priority === 'critical' ? 'bg-red-500' : task.priority === 'high' ? 'bg-orange-500' : null
   const ageState = aging(task)
-  const ageColor = ageState === 'overdue' ? 'text-red-400' : ageState === 'warn' ? 'text-orange-400' : 'text-zinc-500'
+  const ageColor = ageState === 'overdue' ? 'text-red-400' : ageState === 'warn' ? 'text-orange-400' : 'text-w-dim'
+  const columnLabel = KANBAN_COLUMNS.find((c) => c.key === task.board_column)?.label
+  const tag = categoryChip(task.category)
 
   return (
     <div
@@ -79,47 +93,67 @@ export default function KanbanCard({ task, onClick, onDragStart, onDragEnd, drag
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
       onClick={onClick}
-      className={`group relative cursor-pointer overflow-hidden rounded-lg border bg-zinc-900 p-3 transition-all hover:scale-[1.01] ${
+      className={`group relative cursor-pointer overflow-hidden rounded-lg border bg-w-surface p-3 transition-all hover:scale-[1.01] ${
         ringed
           ? 'border-yellow-400/75 shadow-[0_0_10px_rgba(250,204,21,0.35)]'
-          : 'border-zinc-800 hover:border-zinc-700'
+          : 'border-w-line hover:border-w-accent/40'
       } ${dragging ? 'opacity-40' : ''}`}
     >
       {edgeColor && <span className={`absolute inset-y-1.5 left-0 w-[3px] rounded-full ${edgeColor}`} />}
 
-      {task.created_by_name && (
-        <div className="absolute right-1.5 top-1.5" title={`Created by ${task.created_by_name}`}>
-          <Avatar name={task.created_by_name} avatarUrl={task.created_by_avatar_url} size="xs" />
-        </div>
-      )}
+      {/* Title row: completion state (left) + title + creator avatar (right) */}
+      <div className="flex items-start gap-2">
+        {completed ? (
+          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-w-accent" />
+        ) : (
+          <Circle className="mt-0.5 h-4 w-4 shrink-0 text-w-faint" />
+        )}
+        <p className={`min-w-0 flex-1 line-clamp-3 text-sm leading-snug text-w-text ${completed ? 'line-through text-w-dim' : ''}`}>
+          {task.title}
+        </p>
+        {task.created_by_name && (
+          <div className="shrink-0" title={`Created by ${task.created_by_name}`}>
+            <Avatar name={task.created_by_name} avatarUrl={task.created_by_avatar_url} size="xs" />
+          </div>
+        )}
+      </div>
 
-      {/* Title */}
-      <p
-        className={`text-sm leading-snug text-zinc-100 ${
-          completed ? 'line-through text-zinc-500' : ''
-        } ${task.created_by_name ? 'pr-5' : ''}`}
-      >
-        {task.title}
-      </p>
+      {/* Status row: column + assignee */}
+      <div className="mt-1.5 flex items-center gap-1 pl-6 text-xs text-w-dim">
+        <ChevronRight className="h-3 w-3 shrink-0" />
+        <span className="truncate">{columnLabel}</span>
+        {assignee && (
+          <span className="ml-1.5 flex min-w-0 items-center gap-1 truncate">
+            <Avatar name={assignee} avatarUrl={task.assigned_avatar_url} size="xs" />
+            <span className="truncate">{assignee}</span>
+          </span>
+        )}
+      </div>
 
       {/* Progress note ("where we're at") */}
       {task.progress_note?.trim() && (
-        <p className="mt-1.5 truncate text-xs italic text-zinc-500">{task.progress_note}</p>
+        <p className="mt-1.5 truncate pl-6 text-xs italic text-w-dim">{task.progress_note}</p>
       )}
 
       {/* Why it bounced — shown while sitting in the rework lane */}
       {task.board_column === 'changes_requested' && reviewNote && (
-        <div className="mt-1.5 flex items-start gap-1 text-xs text-orange-400/90">
+        <div className="mt-1.5 flex items-start gap-1 pl-6 text-xs text-orange-400/90">
           <RefreshCw className="mt-0.5 h-3 w-3 shrink-0" />
           <span className="line-clamp-2">{reviewNote}</span>
         </div>
       )}
 
-      {/* Meta row: churn, column tags. Priority is the left-edge accent above
-          (critical/high only) — no dot/label here, it read as noise on every
-          card since medium (the default) would otherwise tag along too. */}
-      {(cycles > 0 || (task.category && task.category !== 'manual') || task.element_name) && (
-        <div className="mt-2.5 flex flex-wrap items-center gap-x-2 gap-y-1.5">
+      {/* Tag chip + churn. Priority is the left-edge accent above (critical/high
+          only) — no dot/label here, it read as noise on every card since medium
+          (the default) would otherwise tag along too. */}
+      {(cycles > 0 || tag || task.element_name) && (
+        <div className="mt-2 flex flex-wrap items-center gap-x-1.5 gap-y-1.5 pl-6">
+          {tag && (
+            <span className={`rounded bg-current/10 px-1.5 py-0.5 text-[10px] font-semibold ${tag.colorClass}`}>
+              {tag.label}
+            </span>
+          )}
+
           {cycles > 0 && (
             <span
               className="flex items-center gap-0.5 rounded bg-orange-500/15 px-1.5 py-0.5 text-[10px] font-bold text-orange-400"
@@ -129,14 +163,8 @@ export default function KanbanCard({ task, onClick, onDragStart, onDragEnd, drag
             </span>
           )}
 
-          {task.category && task.category !== 'manual' && (
-            <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] font-medium text-zinc-400">
-              {task.category}
-            </span>
-          )}
-
           {task.element_name && (
-            <span className="rounded bg-emerald-500/12 px-1.5 py-0.5 text-[10px] font-medium text-emerald-400">
+            <span className="rounded bg-w-accent/12 px-1.5 py-0.5 text-[10px] font-medium text-w-accent">
               {task.element_name}
             </span>
           )}
@@ -145,33 +173,24 @@ export default function KanbanCard({ task, onClick, onDragStart, onDragEnd, drag
 
       {/* Subtask progress bar */}
       {subtaskTotal > 0 && (
-        <div className="mt-2 flex items-center gap-1.5">
+        <div className="mt-2 flex items-center gap-1.5 pl-6">
           {subtasksComplete ? (
-            <CheckCircle2 className="h-3 w-3 shrink-0 text-emerald-500" />
+            <CheckCircle2 className="h-3 w-3 shrink-0 text-w-accent" />
           ) : (
-            <ListChecks className="h-3 w-3 shrink-0 text-zinc-500" />
+            <ListChecks className="h-3 w-3 shrink-0 text-w-dim" />
           )}
-          <div className="h-[3px] w-14 overflow-hidden rounded-full bg-zinc-700">
-            <div
-              className={`h-full ${subtasksComplete ? 'bg-emerald-500' : 'bg-emerald-400'}`}
-              style={{ width: `${subtaskFrac * 100}%` }}
-            />
+          <div className="h-[3px] flex-1 max-w-24 overflow-hidden rounded-full bg-w-surface2">
+            <div className="h-full bg-w-accent" style={{ width: `${subtaskFrac * 100}%` }} />
           </div>
-          <span className="text-[10px] font-medium text-zinc-400">
+          <span className="ml-auto text-[10px] font-medium text-w-dim">
             {subtaskDone}/{subtaskTotal}
           </span>
         </div>
       )}
 
-      {/* Footer: assignee, due date, attachments */}
-      {(assignee || task.due_date || attachmentCount > 0) && (
-        <div className="mt-2.5 flex items-center gap-2.5 text-xs text-zinc-400">
-          {assignee && (
-            <span className="flex items-center gap-1 truncate">
-              <Avatar name={assignee} avatarUrl={task.assigned_avatar_url} size="xs" />
-              <span className="truncate">{assignee}</span>
-            </span>
-          )}
+      {/* Due date / attachments */}
+      {(task.due_date || attachmentCount > 0) && (
+        <div className="mt-2 flex items-center gap-2.5 pl-6 text-xs text-w-dim">
           {task.due_date && (
             <span className="flex shrink-0 items-center gap-1">
               <Calendar className="h-3 w-3" />
@@ -190,7 +209,7 @@ export default function KanbanCard({ task, onClick, onDragStart, onDragEnd, drag
       {/* Timestamps — compact date + aging-tinted elapsed time, full detail
           in the title attr (matches the desktop card's tooltip convention). */}
       <div
-        className="mt-2 flex items-center gap-1 text-[10px] text-zinc-600"
+        className="mt-2 flex items-center gap-1 pl-6 text-[10px] text-w-faint"
         title={`Added ${new Date(task.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}`}
       >
         <span>{shortDate(task.created_at)}</span>

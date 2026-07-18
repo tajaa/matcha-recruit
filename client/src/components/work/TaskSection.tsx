@@ -34,19 +34,19 @@ export default function TaskSection({ label, items, defaultOpen = false, accent,
   }
 
   return (
-    <div className="border border-zinc-800 rounded-lg overflow-hidden">
+    <div className="border border-w-line rounded-lg overflow-hidden">
       <button
         onClick={() => setOpen(!open)}
-        className="w-full flex items-center gap-3 px-4 py-3 hover:bg-zinc-800/30 transition-colors"
+        className="w-full flex items-center gap-3 px-4 py-3 hover:bg-w-surface2/30 transition-colors"
       >
         <ChevronDown
           size={14}
-          className={`text-zinc-500 transition-transform ${open ? '' : '-rotate-90'}`}
+          className={`text-w-dim transition-transform ${open ? '' : '-rotate-90'}`}
         />
-        <span className={`text-sm font-medium ${accent ?? 'text-zinc-200'}`}>
+        <span className={`text-sm font-medium ${accent ?? 'text-w-text'}`}>
           {label}
         </span>
-        <span className="text-xs text-zinc-500">({items.length})</span>
+        <span className="text-xs text-w-dim">({items.length})</span>
 
         <div className="flex items-center gap-1 ml-1">
           {critCount > 0 && (
@@ -66,10 +66,10 @@ export default function TaskSection({ label, items, defaultOpen = false, accent,
         <div className="ml-auto">
           <button
             onClick={handleCopy}
-            className="p-1 rounded text-zinc-600 hover:text-zinc-300 transition-colors"
+            className="p-1 rounded text-w-faint hover:text-w-text transition-colors"
             title="Copy to clipboard"
           >
-            {copied ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
+            {copied ? <Check size={12} className="text-w-accent" /> : <Copy size={12} />}
           </button>
         </div>
       </button>

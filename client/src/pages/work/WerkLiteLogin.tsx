@@ -54,23 +54,23 @@ export default function WerkLiteLogin() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center px-4 bg-zinc-950 text-zinc-100">
+    <div className="min-h-screen flex items-center justify-center px-4 bg-w-bg text-w-text">
       <div className="w-full max-w-sm">
         {/* Wordmark */}
         <div className="flex items-center justify-center gap-2 mb-8">
-          <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-emerald-600 text-white">
+          <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-w-accent text-white">
             <Hash size={18} />
           </span>
           <span className="text-2xl font-semibold tracking-tight">Werk Lite</span>
         </div>
 
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-7">
+        <div className="rounded-2xl border border-w-line bg-w-surface/60 p-7">
           <h1 className="text-xl font-semibold mb-1">Sign in</h1>
-          <p className="text-sm text-zinc-500 mb-6">Your team's chat, calls, and boards.</p>
+          <p className="text-sm text-w-dim mb-6">Your team's chat, calls, and boards.</p>
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label htmlFor="email" className="block text-[11px] uppercase tracking-wider text-zinc-500 mb-1.5">Email</label>
+              <label htmlFor="email" className="block text-[11px] uppercase tracking-wider text-w-dim mb-1.5">Email</label>
               <input
                 id="email"
                 type="email"
@@ -78,11 +78,11 @@ export default function WerkLiteLogin() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@company.com"
-                className="w-full px-3 py-2.5 rounded-lg bg-zinc-800 border border-zinc-700 text-sm text-white placeholder:text-zinc-500 outline-none focus:border-emerald-600"
+                className="w-full px-3 py-2.5 rounded-lg bg-w-surface2 border border-w-line text-sm text-white placeholder:text-w-dim outline-none focus:border-w-accent"
               />
             </div>
             <div>
-              <label htmlFor="password" className="block text-[11px] uppercase tracking-wider text-zinc-500 mb-1.5">Password</label>
+              <label htmlFor="password" className="block text-[11px] uppercase tracking-wider text-w-dim mb-1.5">Password</label>
               <input
                 id="password"
                 type="password"
@@ -90,7 +90,7 @@ export default function WerkLiteLogin() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
-                className="w-full px-3 py-2.5 rounded-lg bg-zinc-800 border border-zinc-700 text-sm text-white placeholder:text-zinc-500 outline-none focus:border-emerald-600"
+                className="w-full px-3 py-2.5 rounded-lg bg-w-surface2 border border-w-line text-sm text-white placeholder:text-w-dim outline-none focus:border-w-accent"
               />
             </div>
             {error && (
@@ -101,19 +101,19 @@ export default function WerkLiteLogin() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full h-11 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+              className="w-full h-11 rounded-lg bg-w-accent hover:bg-w-accent-hi text-white text-sm font-medium transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
             >
               {loading ? <><Loader2 size={15} className="animate-spin" /> Signing in…</> : 'Sign in'}
             </button>
             <div className="text-center">
-              <Link to="/reset-password" className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors">
+              <Link to="/reset-password" className="text-xs text-w-dim hover:text-w-text transition-colors">
                 Forgot password?
               </Link>
             </div>
           </form>
         </div>
 
-        <p className="mt-6 text-center text-xs text-zinc-600">
+        <p className="mt-6 text-center text-xs text-w-faint">
           Part of a Matcha company. Ask your admin for an invite if you don't have an account.
         </p>
       </div>

@@ -37,10 +37,10 @@ export default function ChannelJoinByInvite() {
       <div className="flex-1 flex items-center justify-center">
         <div className="text-center space-y-4">
           <AlertCircle className="w-10 h-10 text-red-400 mx-auto" />
-          <p className="text-sm text-zinc-400">{error}</p>
+          <p className="text-sm text-w-dim">{error}</p>
           <Link
             to={base}
-            className="inline-block text-sm text-emerald-400 hover:text-emerald-300 transition-colors"
+            className="inline-block text-sm text-w-accent hover:text-w-accent transition-colors"
           >
             Back to {brand}
           </Link>
@@ -52,8 +52,8 @@ export default function ChannelJoinByInvite() {
   return (
     <div className="flex-1 flex items-center justify-center">
       <div className="text-center space-y-3">
-        <Loader2 className="w-8 h-8 text-emerald-500 animate-spin mx-auto" />
-        <div className="flex items-center gap-1.5 text-sm text-zinc-400">
+        <Loader2 className="w-8 h-8 text-w-accent animate-spin mx-auto" />
+        <div className="flex items-center gap-1.5 text-sm text-w-dim">
           <Hash className="w-4 h-4" />
           Joining channel...
         </div>

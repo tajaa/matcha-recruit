@@ -15,9 +15,9 @@ export default function TaskProgressBar({ tasks }: TaskProgressBarProps) {
 
   return (
     <div className="flex items-center gap-2 px-3 py-1">
-      <div className="h-1 flex-1 overflow-hidden rounded-sm bg-zinc-800">
+      <div className="h-1 flex-1 overflow-hidden rounded-sm bg-w-surface2">
         <div
-          className="h-full rounded-sm bg-emerald-500 transition-[width] duration-300 ease-out"
+          className="h-full rounded-sm bg-w-accent transition-[width] duration-300 ease-out"
           style={{ width: `${pct}%` }}
         />
       </div>
