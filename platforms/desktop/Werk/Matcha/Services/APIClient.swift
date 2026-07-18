@@ -84,7 +84,17 @@ class APIClient {
         return "https://hey-matcha.com/api"
         #endif
     }()
-    var accessToken: String?
+    /// Bearer token. Read on every request from background executors and
+    /// written from @MainActor (login / logout / refresh). `APIClient` is a
+    /// plain shared singleton, so guard the non-atomic `Optional<String>`
+    /// behind a lock — the previous bare `var` was an unsynchronized read/write
+    /// data race (a logout clearing it could tear a concurrent request's read).
+    private let _tokenLock = NSLock()
+    private var _accessToken: String?
+    var accessToken: String? {
+        get { _tokenLock.lock(); defer { _tokenLock.unlock() }; return _accessToken }
+        set { _tokenLock.lock(); defer { _tokenLock.unlock() }; _accessToken = newValue }
+    }
 
     // Will be set by AppState to handle logout on 401
     var onUnauthorized: (() -> Void)?
