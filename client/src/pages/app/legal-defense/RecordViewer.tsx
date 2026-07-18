@@ -6,7 +6,7 @@ import { severityLabel, statusLabel, SEVERITY_BADGE, STATUS_BADGE, type IRIncide
 import type { ERCase, ERNote } from '../../../types/er'
 import { disciplineApi, type DisciplineRecord } from '../../../api/hr/discipline'
 import { trainingApi, type TrainingRecord } from '../../../api/hr/training'
-import type { AccommodationCase } from '../AccommodationDetail'
+import type { AccommodationCase } from '../employees/AccommodationDetail'
 import { Badge, Modal, type BadgeVariant } from '../../../components/ui'
 import { LABEL, hum } from './shared'
 

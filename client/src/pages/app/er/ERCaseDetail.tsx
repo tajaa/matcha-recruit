@@ -1,0 +1,497 @@
+import { useEffect, useState } from 'react'
+import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Copy, Check } from 'lucide-react'
+import { Badge, Button, Select, LABEL, PillTabs, type BadgeVariant } from '../../../components/ui'
+import { NoteThread } from '../../../components/widgets/NoteThread'
+import { ERDocumentList } from '../../../components/er/ERDocumentList'
+import { ERGuidancePanel } from '../../../components/er/ERGuidancePanel'
+import { ERTimelinePanel } from '../../../components/er/ERTimelinePanel'
+import { ERPolicyCheckPanel } from '../../../components/er/ERPolicyCheckPanel'
+import { ERDiscrepanciesPanel } from '../../../components/er/ERDiscrepanciesPanel'
+import { ERSimilarCasesPanel } from '../../../components/er/ERSimilarCasesPanel'
+import { EREvidenceSearch } from '../../../components/er/EREvidenceSearch'
+import { EROutcomePanel } from '../../../components/er/EROutcomePanel'
+import { useERCase } from '../../../hooks/er/useERCase'
+import {
+  categoryLabel,
+  statusLabel,
+  outcomeLabel,
+  NOTE_TYPES,
+  type ERCaseStatus,
+  type ERCaseOutcome,
+  type OutcomeOption,
+  type SuggestedGuidanceResponse,
+  type TimelineAnalysisResponse,
+  type ShareLink,
+} from '../../../types/er'
+import { api, ensureFreshToken } from '../../../api/client'
+
+const statusVariant: Record<string, BadgeVariant> = {
+  open: 'warning',
+  in_review: 'neutral',
+  pending_determination: 'warning',
+  closed: 'success',
+}
+
+const STATUS_OPTIONS = [
+  { value: 'open', label: 'Open' },
+  { value: 'in_review', label: 'In Review' },
+  { value: 'pending_determination', label: 'Pending Determination' },
+  { value: 'closed', label: 'Closed' },
+]
+
+const NOTE_TYPE_CONFIG = NOTE_TYPES.map((t) => ({
+  value: t.value,
+  label: t.label,
+  variant: (t.value === 'guidance' ? 'success' : t.value === 'system' ? 'warning' : t.value === 'question' ? 'warning' : 'neutral') as BadgeVariant,
+}))
+
+type Tab = 'notes' | 'documents' | 'guidance' | 'discrepancies' | 'similar' | 'evidence' | 'outcome' | 'policy' | 'timeline'
+
+const TAB_LABELS: Record<Tab, string> = {
+  notes: 'Notes',
+  documents: 'Documents',
+  guidance: 'Guidance',
+  discrepancies: 'Discrepancies',
+  similar: 'Similar Cases',
+  evidence: 'Evidence',
+  outcome: 'Outcome',
+  policy: 'Policy Check',
+  timeline: 'Timeline',
+}
+
+const ALL_TABS: Tab[] = ['notes', 'documents', 'guidance', 'discrepancies', 'similar', 'evidence', 'outcome', 'policy', 'timeline']
+const TAB_OPTIONS = ALL_TABS.map((t) => ({ value: t, label: TAB_LABELS[t] }))
+
+const EXPIRY_OPTIONS = [
+  { value: '7', label: '7 days' },
+  { value: '30', label: '30 days' },
+  { value: '90', label: '90 days' },
+  { value: '', label: 'No expiry' },
+]
+
+export default function ERCaseDetail() {
+  const { caseId } = useParams<{ caseId: string }>()
+  const navigate = useNavigate()
+  const { case_, loading, error, updateCase, deleteCase, refetch } = useERCase(caseId!)
+  const [tab, setTab] = useState<Tab>('guidance')
+  const [guidance, setGuidance] = useState<SuggestedGuidanceResponse | null>(null)
+  const [timeline, setTimeline] = useState<TimelineAnalysisResponse | null>(null)
+  const [skipGuidanceCache, setSkipGuidanceCache] = useState(false)
+
+  // Export sidebar state
+  const [exportOpen, setExportOpen] = useState(false)
+  const [exportPassword, setExportPassword] = useState('')
+  const [sharePassword, setSharePassword] = useState('')
+  const [shareExpiry, setShareExpiry] = useState('7')
+  const [shareLinks, setShareLinks] = useState<ShareLink[]>([])
+  const [exporting, setExporting] = useState(false)
+  const [creatingLink, setCreatingLink] = useState(false)
+  const [newShareUrl, setNewShareUrl] = useState('')
+  const [shareLinkError, setShareLinkError] = useState('')
+  const [copied, setCopied] = useState(false)
+
+  async function loadShareLinks() {
+    try {
+      const res = await api.get<ShareLink[]>(`/er/cases/${caseId}/export/links`)
+      setShareLinks(Array.isArray(res) ? res : [])
+    } catch { /* no links */ }
+  }
+
+  async function handleDownloadPdf() {
+    if (!exportPassword.trim()) return
+    setExporting(true)
+    try {
+      const BASE = import.meta.env.VITE_API_URL ?? '/api'
+      const token = await ensureFreshToken()
+      const res = await fetch(`${BASE}/er/cases/${caseId}/export`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ password: exportPassword }),
+      })
+      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${case_?.case_number ?? 'case'}-export.pdf`
+      a.click()
+      URL.revokeObjectURL(url)
+      setExportPassword('')
+    } catch { /* error handled silently */ } finally {
+      setExporting(false)
+    }
+  }
+
+  async function handleCreateShareLink() {
+    if (!sharePassword.trim()) return
+    setCreatingLink(true)
+    setNewShareUrl('')
+    setShareLinkError('')
+    try {
+      const body: Record<string, unknown> = { password: sharePassword }
+      if (shareExpiry) body.expires_in_days = Number(shareExpiry)
+      const res = await api.post<{ url: string }>(`/er/cases/${caseId}/export/share`, body)
+      setNewShareUrl(window.location.origin + res.url)
+      setSharePassword('')
+      loadShareLinks()
+    } catch (err) {
+      setShareLinkError(err instanceof Error ? err.message : 'Failed to create share link')
+    } finally {
+      setCreatingLink(false)
+    }
+  }
+
+  async function handleRevokeLink(linkId: string) {
+    try {
+      await api.delete(`/er/cases/${caseId}/export/links/${linkId}`)
+      loadShareLinks()
+    } catch { /* error */ }
+  }
+
+  // Auto-open Documents tab for brand-new cases (0 docs, created <60s ago)
+  const [defaultTabSet, setDefaultTabSet] = useState(false)
+  useEffect(() => {
+    if (case_ && !defaultTabSet) {
+      setDefaultTabSet(true)
+      const isNew = case_.document_count === 0 &&
+        (Date.now() - new Date(case_.created_at).getTime()) < 60_000
+      if (isNew) setTab('documents')
+    }
+  }, [case_, defaultTabSet])
+
+  async function handleGuidanceGenerated(g: SuggestedGuidanceResponse) {
+    setGuidance(g)
+    const lines = [g.summary]
+    g.cards.forEach((card, i) => {
+      lines.push(`${i + 1}. ${card.title}: ${card.recommendation}`)
+    })
+    try {
+      await api.post(`/er/cases/${caseId}/notes`, {
+        note_type: 'guidance',
+        content: lines.join('\n'),
+        metadata: { source: 'auto_guidance', note_purpose: 'next_steps' },
+      })
+    } catch { /* note is supplementary */ }
+  }
+
+  if (loading) return <p className="text-sm text-zinc-500">Loading case...</p>
+  if (error) return <p className="text-sm text-red-400">{error}</p>
+  if (!case_) return <p className="text-sm text-zinc-500">Case not found.</p>
+
+  async function handleStatusChange(status: ERCaseStatus) {
+    await updateCase({ status })
+  }
+
+  return (
+    <div className="flex h-[calc(100vh-4rem)] flex-col overflow-hidden rounded-xl border border-white/[0.06] bg-zinc-950">
+      {/* Header */}
+      <div className="shrink-0 border-b border-white/[0.06] px-5 pt-4 pb-3">
+        <div className="flex items-center gap-3">
+          <Link to="/app/er-copilot" className="text-zinc-500 hover:text-zinc-300 transition-colors">
+            &larr;
+          </Link>
+          <span className="text-xs text-zinc-500 font-mono">{case_.case_number}</span>
+          <h1 className="text-xl font-semibold text-zinc-100">
+            {case_.title}
+          </h1>
+          <Badge variant={statusVariant[case_.status] ?? 'neutral'}>
+            {statusLabel[case_.status] ?? case_.status}
+          </Badge>
+          <Badge variant="neutral">
+            {categoryLabel[case_.category ?? ''] ?? case_.category ?? '—'}
+          </Badge>
+        </div>
+        <div className="mt-3 overflow-x-auto">
+          <PillTabs options={TAB_OPTIONS} value={tab} onChange={setTab} />
+        </div>
+      </div>
+
+      <div className="flex min-h-0 flex-1">
+        {/* Main column */}
+        <div className="min-w-0 flex-1">
+          <div className="h-full overflow-y-auto px-5 py-4">
+            {tab === 'notes' && (
+              <NoteThread
+                endpoint={`/er/cases/${caseId}/notes`}
+                noteTypes={NOTE_TYPE_CONFIG}
+              />
+            )}
+            {tab === 'documents' && (
+              <ERDocumentList caseId={caseId!} onUploadComplete={() => { refetch(); setGuidance(null); setTimeline(null); setSkipGuidanceCache(true) }} />
+            )}
+            {tab === 'guidance' && (
+              <ERGuidancePanel
+                caseId={caseId!}
+                guidance={guidance}
+                onGuidanceChange={setGuidance}
+                onGuidanceGenerated={handleGuidanceGenerated}
+                documentCount={case_.document_count}
+                hasDescription={!!case_.description}
+                caseStatus={case_.status}
+                skipCache={skipGuidanceCache}
+                onCacheSkipped={() => setSkipGuidanceCache(false)}
+                onActionClick={(action) => {
+                  // Route Guidance card buttons to the correct tab. The click
+                  // was previously a no-op because no handler was wired.
+                  switch (action.type) {
+                    case 'upload_document':
+                      setTab('documents')
+                      break
+                    case 'search_evidence':
+                      setTab('evidence')
+                      break
+                    case 'open_tab':
+                      if (action.tab === 'timeline') setTab('timeline')
+                      else if (action.tab === 'discrepancies') setTab('discrepancies')
+                      else if (action.tab === 'policy') setTab('policy')
+                      else if (action.tab === 'search') setTab('evidence')
+                      break
+                    case 'run_analysis':
+                      // Stay on guidance — generating runs from this panel.
+                      break
+                  }
+                }}
+                onBeginDetermination={async (outcome: ERCaseOutcome, adminNotes: string, outcomeDetail?: OutcomeOption) => {
+                  await updateCase({ status: 'closed' as ERCaseStatus, outcome })
+                  try {
+                    const noteLines = [`Case closed with outcome: ${outcomeLabel[outcome] ?? outcome}`]
+                    if (outcomeDetail?.party_actions?.length) {
+                      noteLines.push('\n\nParty actions:')
+                      outcomeDetail.party_actions.forEach(pa => {
+                        noteLines.push(`\n- ${pa.name} (${pa.role}): ${pa.action}`)
+                      })
+                    }
+                    if (adminNotes.trim()) noteLines.push(`\nAdmin notes: ${adminNotes.trim()}`)
+                    await api.post(`/er/cases/${caseId}/notes`, {
+                      note_type: 'system',
+                      content: noteLines.join(''),
+                      metadata: { source: 'determination', note_purpose: 'determination' },
+                    })
+                  } catch { /* note is supplementary */ }
+                }}
+              />
+            )}
+            {tab === 'discrepancies' && (
+              <ERDiscrepanciesPanel caseId={caseId!} />
+            )}
+            {tab === 'similar' && (
+              <ERSimilarCasesPanel caseId={caseId!} />
+            )}
+            {tab === 'evidence' && (
+              <EREvidenceSearch caseId={caseId!} />
+            )}
+            {tab === 'outcome' && (
+              <EROutcomePanel caseId={caseId!} onApplyOutcome={async () => { await refetch() }} />
+            )}
+            {tab === 'policy' && (
+              <ERPolicyCheckPanel caseId={caseId!} />
+            )}
+            {tab === 'timeline' && (
+              <ERTimelinePanel caseId={caseId!} timeline={timeline} onTimelineChange={setTimeline} />
+            )}
+          </div>
+        </div>
+
+        {/* Sidebar */}
+        <div className="flex w-80 shrink-0 flex-col overflow-y-auto border-l border-white/[0.06]">
+          {/* Status & Classification */}
+          <div>
+            <div className="px-5 py-3 border-b border-white/[0.06] bg-white/[0.02]">
+              <h3 className={LABEL}>Case Details</h3>
+            </div>
+            <div className="px-5 py-4 space-y-4">
+              <div>
+                <dt className={`${LABEL} mb-1.5`}>Status</dt>
+                <dd>
+                  <Select
+                    label=""
+                    options={STATUS_OPTIONS}
+                    value={case_.status}
+                    onChange={(e) => handleStatusChange(e.target.value as ERCaseStatus)}
+                  />
+                </dd>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <dt className={`${LABEL} mb-1`}>Category</dt>
+                  <dd className="text-sm text-zinc-200">{categoryLabel[case_.category ?? ''] ?? '—'}</dd>
+                </div>
+                <div>
+                  <dt className={`${LABEL} mb-1`}>Outcome</dt>
+                  <dd className="text-sm text-zinc-200">{case_.outcome ? (outcomeLabel[case_.outcome] ?? case_.outcome) : '—'}</dd>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Dates & Metadata */}
+          <div className="border-t border-white/[0.06] px-5 py-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <dt className={`${LABEL} mb-1`}>Created</dt>
+                <dd className="text-sm text-zinc-200">{new Date(case_.created_at).toLocaleDateString()}</dd>
+              </div>
+              <div>
+                <dt className={`${LABEL} mb-1`}>Updated</dt>
+                <dd className="text-sm text-zinc-200">{new Date(case_.updated_at).toLocaleDateString()}</dd>
+              </div>
+            </div>
+            <div className="mt-4 flex items-center justify-between">
+              <dt className={LABEL}>Documents</dt>
+              <dd className="text-sm font-medium text-zinc-200">{case_.document_count}</dd>
+            </div>
+          </div>
+
+          {/* Description */}
+          {case_.description && (
+            <div className="border-t border-white/[0.06]">
+              <div className="px-5 py-3 border-b border-white/[0.06] bg-white/[0.02]">
+                <h3 className={LABEL}>Description</h3>
+              </div>
+              <div className="px-5 py-4">
+                <p className="text-sm text-zinc-300 leading-relaxed whitespace-pre-wrap">{case_.description}</p>
+              </div>
+            </div>
+          )}
+
+          {/* Export Case */}
+          <div className="border-t border-white/[0.06]">
+            <button
+              type="button"
+              className="w-full px-5 py-3 flex items-center justify-between border-b border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.03] transition-colors"
+              onClick={() => { setExportOpen(!exportOpen); if (!exportOpen) loadShareLinks() }}
+            >
+              <h3 className={LABEL}>Export Case</h3>
+              <span className="text-zinc-500 text-xs">{exportOpen ? '▾' : '▸'}</span>
+            </button>
+            {exportOpen && (
+              <div className="px-5 py-4 space-y-4">
+                {/* Direct download */}
+                <div className="space-y-2">
+                  <p className={LABEL}>Download PDF</p>
+                  <input
+                    type="password"
+                    value={exportPassword}
+                    onChange={(e) => setExportPassword(e.target.value)}
+                    placeholder="Password"
+                    className="w-full bg-zinc-900 border border-white/[0.08] rounded-lg px-3 py-1.5 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-emerald-500/50"
+                  />
+                  <Button size="sm" disabled={exporting || !exportPassword.trim()} onClick={handleDownloadPdf}>
+                    {exporting ? 'Downloading...' : 'Download PDF'}
+                  </Button>
+                </div>
+
+                <div className="border-t border-white/[0.06]" />
+
+                {/* Claims-readiness / defense packet (no password) */}
+                <div className="space-y-2">
+                  <p className={LABEL}>Claims-readiness packet</p>
+                  <Button size="sm" variant="secondary"
+                    onClick={() => api.download(`/er/cases/${caseId}/claims-readiness.pdf`, `claims-readiness-${case_?.case_number ?? 'case'}.pdf`)}>
+                    Download defense file
+                  </Button>
+                </div>
+
+                <div className="border-t border-white/[0.06]" />
+
+                {/* Share link */}
+                <div className="space-y-2">
+                  <p className={LABEL}>Create Share Link</p>
+                  <input
+                    type="password"
+                    value={sharePassword}
+                    onChange={(e) => setSharePassword(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleCreateShareLink()}
+                    placeholder="Password"
+                    className="w-full bg-zinc-900 border border-white/[0.08] rounded-lg px-3 py-1.5 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-emerald-500/50"
+                  />
+                  <select
+                    value={shareExpiry}
+                    onChange={(e) => setShareExpiry(e.target.value)}
+                    className="w-full bg-zinc-900 border border-white/[0.08] rounded-lg px-3 py-1.5 text-sm text-zinc-300 focus:outline-none focus:border-emerald-500/50"
+                  >
+                    {EXPIRY_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>{o.label}</option>
+                    ))}
+                  </select>
+                  <Button type="button" size="sm" disabled={creatingLink || !sharePassword.trim()} onClick={handleCreateShareLink}>
+                    {creatingLink ? 'Creating...' : 'Create Link'}
+                  </Button>
+                  {shareLinkError && <p className="text-xs text-red-400">{shareLinkError}</p>}
+                  {newShareUrl && (
+                    <div className="rounded-lg bg-zinc-900 border border-white/[0.08] p-2">
+                      <div className="flex items-center justify-between mb-1">
+                        <p className="text-[11px] text-zinc-500">Share URL</p>
+                        <button
+                          type="button"
+                          className="flex items-center gap-1 text-[11px] text-zinc-400 hover:text-white transition-colors"
+                          onClick={() => {
+                            navigator.clipboard.writeText(newShareUrl)
+                            setCopied(true)
+                            setTimeout(() => setCopied(false), 2000)
+                          }}
+                        >
+                          {copied ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
+                          {copied ? 'Copied!' : 'Copy'}
+                        </button>
+                      </div>
+                      <p className="text-xs text-emerald-400 break-all select-all">{newShareUrl}</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Existing links */}
+                {shareLinks.length > 0 && (
+                  <>
+                    <div className="border-t border-white/[0.06]" />
+                    <div className="space-y-2">
+                      <p className={LABEL}>Active Links</p>
+                      {shareLinks.filter((l) => !l.revoked_at).map((link) => (
+                        <div key={link.id} className="flex items-center justify-between text-xs border border-white/[0.08] rounded-lg px-3 py-2">
+                          <div className="min-w-0">
+                            <p className="text-zinc-300 truncate">{link.filename}</p>
+                            <p className="text-zinc-600">
+                              {new Date(link.created_at).toLocaleDateString()} &middot; {link.download_count} downloads
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            className="text-zinc-600 hover:text-red-400 ml-2 shrink-0"
+                            onClick={() => handleRevokeLink(link.id)}
+                            title="Revoke"
+                          >
+                            &times;
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Actions */}
+          <div className="border-t border-white/[0.06] px-5 py-4">
+            <button
+              type="button"
+              className="text-xs text-zinc-600 hover:text-red-400 transition-colors"
+              onClick={async () => {
+                if (confirm('Delete this case? This cannot be undone.')) {
+                  await deleteCase()
+                  navigate('/app/er-copilot')
+                }
+              }}
+            >
+              Delete case
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
