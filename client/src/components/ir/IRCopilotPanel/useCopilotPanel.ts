@@ -42,6 +42,20 @@ export function useCopilotPanel({
     void refresh()
   }, [refresh])
 
+  // Poll for transcript changes made outside this browser tab — most
+  // notably, an outside respondent submitting the "more info" link, which
+  // lands a new system event straight in the DB with no push notification
+  // to an already-open panel. Skipped while a round/accept is in flight so
+  // the poll doesn't clobber their in-progress optimistic UI, and once the
+  // incident is closed (nothing left to change).
+  useEffect(() => {
+    if (incidentIsClosed) return
+    const intervalId = window.setInterval(() => {
+      if (!streaming && !busyCardMessageId) void refresh()
+    }, 15000)
+    return () => window.clearInterval(intervalId)
+  }, [refresh, streaming, busyCardMessageId, incidentIsClosed])
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
   }, [messages.length, currentCards.length])

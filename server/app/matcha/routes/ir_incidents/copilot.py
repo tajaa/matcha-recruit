@@ -257,6 +257,66 @@ async def stream_copilot_round(
     )
 
 
+async def resume_copilot_after_info_request(*, company_id: str, incident_id: UUID) -> None:
+    """Auto-resume Copilot guidance after an external "Request More Info"
+    submission lands a new system event in the transcript (``submit_info_request``
+    in ``intake/inbound_email.py``). Without this, the AI only reacts the next
+    time an admin manually types a chat message — the respondent's answers
+    would otherwise just sit in the transcript as an inert system event until
+    someone prompts the copilot by hand.
+
+    Runs as a ``BackgroundTasks`` job: no request-scoped connection and no
+    authenticated user (the submitter is an anonymous public respondent), so
+    failures are logged and swallowed rather than surfaced to the
+    already-responded HTTP caller. Mirrors the connection-release pattern in
+    ``stream_copilot_round`` — state is loaded and released before the
+    (up-to-60s) Gemini call, then a fresh connection persists the result.
+    """
+    from app.matcha.services.ir_ai_orchestrator import (
+        generate_guidance,
+        load_incident_state,
+        persist_assistant_round,
+    )
+
+    try:
+        async with get_connection() as conn:
+            incident, analyses, messages = await load_incident_state(
+                conn, incident_id, UUID(str(company_id)),
+            )
+        if incident is None or incident.get("status") in {"closed", "resolved"}:
+            return
+
+        payload = await generate_guidance(
+            incident=incident, analyses=analyses, messages=messages,
+        )
+
+        async with get_connection() as conn:
+            await persist_assistant_round(
+                conn,
+                incident_id=incident_id,
+                user_id=None,
+                user_message=None,
+                guidance_payload=payload,
+            )
+            await log_audit(
+                conn,
+                incident_id=str(incident_id),
+                user_id=None,
+                action="copilot_auto_resume",
+                entity_type="incident",
+                entity_id=str(incident_id),
+                details={
+                    "trigger": "info_request_submitted",
+                    "cards": len(payload.get("cards") or []),
+                },
+                ip_address=None,
+            )
+    except Exception:
+        logger.exception(
+            "IR Copilot auto-resume failed for incident %s", incident_id,
+        )
+
+
 _FIELD_WHITELIST = {
     "category": "incident_type",  # alias — DB col is incident_type
     "incident_type": "incident_type",

@@ -99,3 +99,4 @@ from ._shared import (  # noqa: F401  (used by inbound_email.py)
     validate_upload_name,
 )
 from .copilot import _close_incident_via_copilot  # noqa: F401  (future cross-router use)
+from .copilot import resume_copilot_after_info_request  # noqa: F401  (used by inbound_email.py)

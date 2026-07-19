@@ -34,6 +34,7 @@ from ..ir_incidents import (
     create_incident_core,
     document_type_for_ext,
     read_upload_capped,
+    resume_copilot_after_info_request,
     send_ir_info_request_notification_task,
     validate_upload_name,
 )
@@ -716,7 +717,10 @@ async def parse_location_intake_voice(token: str, request: Request, file: Upload
 # answers to an EXISTING one, created via the admin-side info_requests.py
 # router. Answers land in the Copilot transcript as a system event; they are
 # never auto-written into ir_incidents columns (admin reviews and applies
-# them by hand).
+# them by hand). Submission also schedules resume_copilot_after_info_request
+# as a background task so the AI reacts to the new answers on its own —
+# without it, the copilot only "wakes up" the next time an admin manually
+# sends a chat message.
 # ---------------------------------------------------------------------------
 
 class InfoRequestAnswers(BaseModel):
@@ -894,6 +898,14 @@ async def submit_info_request(
         incident_id=str(row["incident_id"]),
         incident_number=incident["incident_number"] if incident else "",
         respondent_name=respondent_name,
+    )
+    # Backgrounded: auto-resume the Copilot guidance round so the new answers
+    # are acted on immediately instead of waiting for an admin to type a
+    # manual chat message.
+    background_tasks.add_task(
+        resume_copilot_after_info_request,
+        company_id=company_id,
+        incident_id=row["incident_id"],
     )
 
     return {"submitted": True}
