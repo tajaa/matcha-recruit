@@ -1,5 +1,5 @@
 import {
-  IconBook, IconCompany, IconDraft, IconIncident, IconLedger,
+  IconAudit, IconBook, IconCompany, IconDraft, IconIncident, IconLedger,
   IconPeople, IconSeal, IconSetup, IconShield,
   IconSteps, IconTraining, IconTrend,
 } from '../sidebars/nav-icons'
@@ -49,6 +49,7 @@ const nav: (NavItem | NavGroup)[] = [
       { to: '/app/training', icon: IconTraining, label: 'Training', feature: 'training' },
       { to: '/app/discipline', icon: IconSteps, label: 'Performance Action', feature: 'discipline' },
       { to: '/app/credential-templates', icon: IconSeal, label: 'Credentialing', feature: 'credential_templates' },
+      { to: '/app/workforce-compliance', icon: IconAudit, label: 'Workforce Compliance', feature: 'workforce_compliance' },
     ],
   },
   {

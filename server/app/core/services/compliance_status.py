@@ -244,6 +244,82 @@ async def _derive_injury_recordkeeping(
     }
 
 
+# ── workforce-compliance verdicts (pure, one source of truth) ───────────────
+# Used BOTH by the DERIVATIONS below (per catalog requirement, where 'unknown'
+# means "blind → return None") and by the workforce-page requirement gate
+# (matcha/services/workforce_requirement_gate.py, where 'unknown' is shown as
+# "not yet tracked"). Same rule, two presentations — never two copies of it.
+
+def pay_transparency_verdict(status_str: Optional[str]) -> Tuple[str, str]:
+    if status_str == "compliant":
+        return "compliant", "job postings include salary ranges"
+    if status_str == "action_needed":
+        return "non_compliant", "state requires salary ranges in postings; not yet confirmed"
+    return "unknown", "this state not yet marked on the pay-transparency tracker"
+
+
+def pay_equity_verdict(review: Optional[Dict[str, Any]]) -> Tuple[str, str]:
+    if not review:
+        return "unknown", "no pay-equity study on file"
+    if review.get("overdue"):
+        return "in_progress", "pay-equity study overdue for refresh"
+    gap = review.get("gap_pct")
+    if gap is not None and float(gap) > 5 and not (review.get("remediation") or "").strip():
+        return "non_compliant", f"pay-equity study shows a {float(gap):.1f}% unremediated gap"
+    if gap is None:
+        # A dispersion-only study satisfies the "have a current study" obligation, but
+        # says nothing about a protected-class gap — the thing the statute is about.
+        # Named here so this doesn't read as a clean bill of health, and so it doesn't
+        # contradict workforce_compliance.derive_pay_equity, which scores loud spread
+        # down on the same row.
+        return "compliant", "current pay-equity study on file (dispersion screen only — no measured gap)"
+    return "compliant", "current pay-equity study on file"
+
+
+def biometrics_verdict(registered: int, missing: int) -> Tuple[str, str]:
+    if registered == 0:
+        return "unknown", "no biometric collection points registered"
+    if missing:
+        return "non_compliant", f"{missing} biometric collection point(s) without consent on file"
+    return "compliant", "all biometric collection points have consent"
+
+
+def _verdict_to_derivation(status: str, reason: str, **extra: Any) -> DerivationResult:
+    """A verdict → a DerivationResult, turning 'unknown' into None (blind, per the
+    module's rule that we never certify or invent what we cannot see)."""
+    if status == "unknown":
+        return None
+    return status, {"rule": reason, **extra}
+
+
+async def _derive_pay_transparency(
+    conn, *, company_id: UUID, location_id: UUID, row: Dict[str, Any], ctx: Dict[str, Any]
+) -> DerivationResult:
+    """Per-state salary-range posting law, keyed on THIS location's state — a company
+    compliant in CA but not CO is non-compliant only at the CO location."""
+    state = (ctx.get("locations") or {}).get(location_id)
+    if not state:
+        return None
+    row_pt = (ctx.get("pay_transparency") or {}).get(state.upper())
+    status, reason = pay_transparency_verdict(row_pt.get("status") if row_pt else None)
+    return _verdict_to_derivation(status, reason, state=state)
+
+
+async def _derive_pay_equity(
+    conn, *, company_id: UUID, location_id: UUID, row: Dict[str, Any], ctx: Dict[str, Any]
+) -> DerivationResult:
+    status, reason = pay_equity_verdict(ctx.get("pay_equity"))
+    return _verdict_to_derivation(status, reason)
+
+
+async def _derive_biometrics(
+    conn, *, company_id: UUID, location_id: UUID, row: Dict[str, Any], ctx: Dict[str, Any]
+) -> DerivationResult:
+    bio = ctx.get("biometrics") or {}
+    status, reason = biometrics_verdict(int(bio.get("registered") or 0), int(bio.get("missing_consent") or 0))
+    return _verdict_to_derivation(status, reason)
+
+
 DERIVATIONS: Dict[str, Derivation] = {
     d.key: d
     for d in (
@@ -259,6 +335,19 @@ DERIVATIONS: Dict[str, Derivation] = {
                    "Harassment prevention training", required_feature="training"),
         Derivation("injury_illness_recordkeeping", _derive_injury_recordkeeping,
                    "Injury & illness recordkeeping", required_feature="incidents"),
+        # Workforce-compliance trackers as the backstop for their matching
+        # jurisdiction requirements. Same data epl_readiness derives its EPL
+        # factors from — the workforce page is where the business maintains it.
+        # (AI hiring-tool / LL144 has no catalog regulation_key yet, so there is
+        # nothing to derive against — it stays self-tracked on the page.)
+        Derivation("pay_transparency", _derive_pay_transparency, "Pay transparency",
+                   required_feature="workforce_compliance"),
+        Derivation("federal_equal_pay", _derive_pay_equity, "Pay equity",
+                   required_feature="workforce_compliance"),
+        Derivation("pay_equity", _derive_pay_equity, "Pay equity",
+                   required_feature="workforce_compliance"),
+        Derivation("state_biometric_privacy_laws", _derive_biometrics, "Biometric privacy",
+                   required_feature="workforce_compliance"),
     )
 }
 
@@ -309,6 +398,46 @@ async def _build_context(conn, company_id: UUID, features: Dict[str, Any]) -> Di
             company_id,
         ):
             ctx["incidents"][r["location_id"]] = dict(r)
+
+    # Workforce-compliance backstops (pay transparency / pay equity / biometrics).
+    # Loaded once here so the per-requirement derivations never re-query.
+    if features.get("workforce_compliance"):
+        ctx["locations"] = {
+            r["id"]: r["state"]
+            for r in await conn.fetch(
+                # Active only — a deactivated location must not go on driving a
+                # per-location pay-transparency verdict. Mirrors the same filter in
+                # matcha/services/workforce_requirement_gate.
+                "SELECT id, state FROM business_locations "
+                "WHERE company_id = $1 AND COALESCE(is_active, true) = true", company_id,
+            )
+        }
+        ctx["pay_transparency"] = {
+            r["state"].upper(): dict(r)
+            for r in await conn.fetch(
+                "SELECT state, status FROM pay_transparency_status WHERE company_id = $1", company_id,
+            )
+            if r["state"]
+        }
+        ctx["pay_equity"] = await conn.fetchrow(
+            """
+            SELECT review_date, gap_pct, remediation,
+                   (next_due_date IS NOT NULL AND next_due_date < CURRENT_DATE) AS overdue
+            FROM pay_equity_reviews WHERE company_id = $1
+            ORDER BY review_date DESC NULLS LAST, created_at DESC LIMIT 1
+            """,
+            company_id,
+        )
+        bio = await conn.fetchrow(
+            """
+            SELECT COUNT(*) AS registered,
+                   COUNT(*) FILTER (WHERE consent_obtained IS NOT TRUE) AS missing_consent
+            FROM biometric_consent_points
+            WHERE company_id = $1 AND COALESCE(is_active, true) = true
+            """,
+            company_id,
+        )
+        ctx["biometrics"] = dict(bio) if bio else {}
 
     return ctx
 

@@ -566,6 +566,20 @@ class FinchHRISService:
         manager_obj = employment.get("manager") or individual.get("manager") or {}
         manager_hris_id = manager_obj.get("id")
 
+        # Protected-class demographics, nested so the orchestrator can route them to
+        # their own restricted table rather than onto `employees`. Only what Finch
+        # actually returns on `individual` — `ssn`/`encrypted_ssn` ride the same
+        # payload and are deliberately left there. Omitted entirely (None, not a
+        # dict of Nones) when the provider returned nothing, so a provider with no
+        # demographic coverage can't overwrite a populated row with blanks.
+        demographics = {
+            "date_of_birth": individual.get("dob"),
+            "gender": individual.get("gender"),
+            "ethnicity": individual.get("ethnicity"),
+        }
+        if not any(demographics.values()):
+            demographics = None
+
         return {
             "hris_id": finch_record.get("id") or individual.get("id"),
             "first_name": individual.get("first_name") or employment.get("first_name"),
@@ -584,8 +598,14 @@ class FinchHRISService:
             "termination_date": termination_date,
             "address": address,
             "manager_hris_id": manager_hris_id,
-            "is_manager": False,
+            # Finch has no "is a manager" flag — it only names each worker's manager.
+            # None = unknown, which the orchestrator COALESCEs (no new fact). The
+            # truth is derived from the manager edges in the second pass, once the
+            # whole org graph is known. Hardcoding False here asserted every Finch
+            # employee manages nobody, which is worse than admitting we don't know.
+            "is_manager": None,
             "employment_status": employment_status,
+            "demographics": demographics,
             # Finch (like Gusto) does not carry clinical credentials — stays CSV/manual.
             "credentials": None,
         }

@@ -12,6 +12,7 @@ import pytest
 from app.matcha.services import workforce_compliance as wf
 from app.matcha.services import epl_readiness as epl
 from app.matcha.services import pay_equity_analysis as pe
+from app.matcha.services import workforce_requirement_gate as gate
 
 
 # --- audit_dates (AI-audit cadence / overdue math) -------------------------
@@ -219,3 +220,130 @@ def test_priority_actions_ranks_below_band_by_cost_desc():
 def test_priority_actions_caps_at_limit():
     roles = [_role(f"R{i}", below=1, cost=1000 * (i + 1), severity="flag") for i in range(8)]
     assert len(pe.priority_actions(roles)) == 5
+
+
+# ── protected-class gap (HRIS demographics) ───────────────────────────────────
+
+def _cell(n: int, pay: float) -> list[float]:
+    return [pay] * n
+
+
+def test_class_gap_measures_between_group_medians():
+    """The thing role_stats deliberately is not: a difference attributable to class."""
+    g = pe.class_gap_stats("Engineer", {
+        "male": _cell(6, 100_000),
+        "female": _cell(5, 90_000),
+    })
+    assert g["gap_pct"] == 10.0          # (100k-90k)/100k
+    assert g["reference"] == "male"      # highest-paid class
+    assert g["lowest"] == "female"
+    assert g["n"] == 11
+
+
+def test_class_gap_suppresses_small_cells():
+    """A class with n<5 in a role is one or two people: its 'median' is an individual's
+    salary, so the gap would be that person — invented statistics plus re-identification."""
+    g = pe.class_gap_stats("Engineer", {
+        "male": _cell(6, 100_000),
+        "female": _cell(2, 40_000),      # suppressed — would otherwise show a 60% gap
+    })
+    assert g is None                     # only one class survives → nothing to compare
+    g2 = pe.class_gap_stats("Analyst", {
+        "male": _cell(5, 100_000),
+        "female": _cell(5, 95_000),
+        "other": _cell(1, 20_000),       # suppressed, but counted
+    })
+    assert g2["gap_pct"] == 5.0
+    assert g2["suppressed_n"] == 1
+    assert [c["class"] for c in g2["classes"]] == ["male", "female"]
+
+
+def test_class_gap_needs_two_comparable_classes():
+    """One group is not a comparison. Returning 0.0 would read as 'no gap found' when
+    the truth is 'not measurable'."""
+    assert pe.class_gap_stats("Solo", {"male": _cell(9, 100_000)}) is None
+    assert pe.class_gap_stats("Empty", {}) is None
+
+
+def test_class_gap_parity_is_zero_not_none():
+    """Measured-and-equal must be distinguishable from not-measured."""
+    g = pe.class_gap_stats("Support", {"male": _cell(5, 80_000), "female": _cell(5, 80_000)})
+    assert g is not None and g["gap_pct"] == 0.0
+
+
+def test_review_row_without_demographics_leaves_gap_pct_null():
+    """The live defect: the dispersion share was written into gap_pct, which
+    derive_pay_equity reports to brokers as '{x}% gap'."""
+    a = {
+        "flagged_roles": 2, "analyzed_roles": 5, "employee_count": 20,
+        "headline_gap_pct": 40, "worst": None, "remediation_estimate": 0,
+        "employees_below_band": 0, "class_gap_pct": None, "class_gaps": [],
+        "demographics_coverage_pct": 0.0,
+    }
+    r = pe.review_row(a)
+    assert r["gap_pct"] is None           # we did not measure a gap → claim nothing
+    assert r["dispersion_pct"] == 40      # the screen result, under its own name
+    assert "screen only" in r["methodology"]
+
+
+def test_review_row_with_demographics_reports_the_measured_gap():
+    a = {
+        "flagged_roles": 1, "analyzed_roles": 4, "employee_count": 30,
+        "headline_gap_pct": 25, "worst": None, "remediation_estimate": 0,
+        "employees_below_band": 0, "class_gap_pct": 8.4,
+        "class_gaps": [{"title": "Engineer", "gap_pct": 12.0, "reference": "male", "n": 12}],
+        "demographics_coverage_pct": 87.0,
+    }
+    r = pe.review_row(a)
+    assert r["gap_pct"] == 8.4
+    assert r["dispersion_pct"] == 25
+    assert "HRIS demographics" in r["methodology"]
+    assert "87.0% coverage" in r["methodology"]
+    assert "8.4% gender pay gap" in r["note"]
+
+
+# ── requirement-gate footprint rule ───────────────────────────────────────────
+# The catalog carries city and county rows (Seattle, King County, Las Vegas, Clark
+# County). Selecting on state alone showed a Spokane-only WA employer the Seattle
+# ordinance as an applicable requirement.
+
+SPOKANE = [("WA", "Spokane", "Spokane County")]
+SEATTLE = [("WA", "Seattle", "King County")]
+
+
+def test_federal_applies_to_everyone():
+    assert gate.row_applies("national", None, None, None, SPOKANE)
+    assert gate.row_applies("federal", None, None, None, SPOKANE)
+
+
+def test_state_row_applies_on_state_match_only():
+    assert gate.row_applies("state", "WA", None, None, SPOKANE)
+    assert not gate.row_applies("state", "CA", None, None, SPOKANE)
+
+
+def test_city_row_needs_the_city_not_just_the_state():
+    assert not gate.row_applies("city", "WA", "seattle", "King", SPOKANE)
+    assert gate.row_applies("city", "WA", "seattle", "King", SEATTLE)
+
+
+def test_county_row_matches_despite_the_county_suffix():
+    """business_locations stores 'King County'; jurisdictions stores 'King'."""
+    assert gate.row_applies("county", "WA", "_county_king", "King", SEATTLE)
+    assert not gate.row_applies("county", "WA", "_county_king", "King", SPOKANE)
+
+
+def test_county_row_ignores_the_synthetic_city_marker():
+    """A county row's `city` is '_county_king', never a real city — matching on it
+    would make every county row unmatchable."""
+    assert not gate.row_applies("city", "WA", "_county_king", "King", SEATTLE)
+
+
+def test_unmodeled_level_degrades_to_the_state_test():
+    """Never hide a law because we don't recognize its level."""
+    assert gate.row_applies("borough", "WA", None, None, SPOKANE)
+    assert not gate.row_applies("borough", "CA", None, None, SPOKANE)
+
+
+def test_sub_state_row_needs_the_matching_state_first():
+    """Same city name in another state must not match."""
+    assert not gate.row_applies("city", "NV", "las vegas", "Clark", [("NM", "Las Vegas", "San Miguel")])

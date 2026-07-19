@@ -16,6 +16,8 @@ from ...dependencies import require_admin_or_client, get_client_company_id
 from ...services import pay_equity_analysis
 from ...services import workforce_suggest
 from ...services import workforce_compliance as wf
+from ...services import workforce_requirement_gate
+from ....core.feature_flags import get_company_features
 from ...models.workforce_compliance import (
     HiringAiAuditCreate, HiringAiAuditUpdate, HiringAiAuditResponse,
     BiometricPointCreate, BiometricPointUpdate, BiometricPointResponse,
@@ -33,8 +35,23 @@ _AI_COLS = ("id, company_id, tool_name, vendor, purpose, last_audit_date, cadenc
             f"next_due_date, {_OVERDUE_EXPR} AS is_overdue, notes, created_at")
 _BIO_COLS = ("id, company_id, location_id, collection_type, purpose, consent_obtained, "
              "consent_obtained_date, consent_method, retention_policy, is_active, notes, created_at")
-_PE_COLS = ("id, company_id, review_date, scope, methodology, gap_pct, remediation, cadence_days, "
-            f"next_due_date, {_OVERDUE_EXPR} AS is_overdue, notes, created_at")
+_PE_COLS = ("id, company_id, review_date, scope, methodology, gap_pct, dispersion_pct, remediation, "
+            f"cadence_days, next_due_date, {_OVERDUE_EXPR} AS is_overdue, notes, created_at")
+
+
+# --- Requirements gate (jurisdiction requirements ↔ tracker data) -----------
+
+@router.get("/requirement-gate")
+async def requirement_gate(current_user=Depends(require_admin_or_client)):
+    """Per-domain: the jurisdiction requirements that apply to this company, and
+    whether its tracker data leaves it out of compliance with each. The backstop
+    the trackers are checked against."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=400, detail="No company associated with user")
+    features = await get_company_features(company_id)
+    async with get_connection() as conn:
+        return await workforce_requirement_gate.compute_requirement_gate(conn, company_id, features)
 
 
 # --- AI hiring-tool audits --------------------------------------------------
@@ -299,12 +316,12 @@ async def analyze_pay_equity(current_user=Depends(require_admin_or_client)):
         row = await conn.fetchrow(
             f"""
             INSERT INTO pay_equity_reviews
-                (company_id, review_date, scope, methodology, gap_pct, remediation,
-                 cadence_days, next_due_date, notes, created_by)
-            VALUES ($1,$2,$3,$4,$5,NULL,365,$6,$7,$8) RETURNING {_PE_COLS}
+                (company_id, review_date, scope, methodology, gap_pct, dispersion_pct,
+                 remediation, cadence_days, next_due_date, notes, created_by)
+            VALUES ($1,$2,$3,$4,$5,$6,NULL,365,$7,$8,$9) RETURNING {_PE_COLS}
             """,
             company_id, date.today(), r["scope"], r["methodology"], r["gap_pct"],
-            next_due, r["note"], current_user.id,
+            r["dispersion_pct"], next_due, r["note"], current_user.id,
         )
     return {"analysis": a, "review": dict(row)}
 

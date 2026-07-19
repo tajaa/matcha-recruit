@@ -6,12 +6,14 @@ import {
   fetchBiometricPoints, createBiometricPoint, updateBiometricPoint, deleteBiometricPoint,
   fetchPayTransparency, setPayTransparency,
   fetchPayEquityReviews, createPayEquityReview, deletePayEquityReview, analyzePayEquity, fetchPayEquityAnalysis,
-  suggestAiAudits, suggestBiometricPoints,
+  suggestAiAudits, suggestBiometricPoints, fetchRequirementGate,
 } from '../../../api/compliance/workforceCompliance'
 import { AiSuggest } from '../../../components/widgets/AiSuggest'
+import { RequirementBanner } from '../../../components/compliance/RequirementBanner'
+import { PayEquityGapChart } from '../../../components/compliance/PayEquityGapChart'
 import type {
   AiAudit, BiometricPoint, PayTransparencyRow, PayTransparencyStatus, CollectionType, PayEquityReview,
-  PayEquityAnalysisResult, PayEquityRole, PayEquityPriorityAction,
+  PayEquityAnalysisResult, PayEquityRole, PayEquityPriorityAction, RequirementGate, GateDomain,
 } from '../../../types/workforceCompliance'
 
 const today = () => new Date().toISOString().slice(0, 10)
@@ -39,6 +41,7 @@ export default function WorkforceCompliance() {
   const [points, setPoints] = useState<BiometricPoint[]>([])
   const [pt, setPt] = useState<PayTransparencyRow[]>([])
   const [payEquity, setPayEquity] = useState<PayEquityReview[]>([])
+  const [gate, setGate] = useState<RequirementGate>({})
   const [loading, setLoading] = useState(true)
 
   function load() {
@@ -48,6 +51,7 @@ export default function WorkforceCompliance() {
       fetchBiometricPoints().then(setPoints),
       fetchPayTransparency().then(setPt),
       fetchPayEquityReviews().then(setPayEquity),
+      fetchRequirementGate().then(setGate).catch(() => setGate({})),
     ]).finally(() => setLoading(false))
   }
   useEffect(load, [])
@@ -86,16 +90,16 @@ export default function WorkforceCompliance() {
         ))}
       </div>
 
-      <PayTransparencySection rows={pt} onChange={setPt} />
+      <PayEquitySection reviews={payEquity} reload={load} gate={gate.pay_equity} />
+      <PayTransparencySection rows={pt} onChange={setPt} gate={gate.pay_transparency} />
       <AiAuditSection audits={audits} reload={load} />
-      <BiometricSection points={points} reload={load} />
-      <PayEquitySection reviews={payEquity} reload={load} />
+      <BiometricSection points={points} reload={load} gate={gate.biometrics} />
     </div>
   )
 }
 
 /* ── Pay transparency ── */
-function PayTransparencySection({ rows, onChange }: { rows: PayTransparencyRow[]; onChange: (r: PayTransparencyRow[]) => void }) {
+function PayTransparencySection({ rows, onChange, gate }: { rows: PayTransparencyRow[]; onChange: (r: PayTransparencyRow[]) => void; gate?: GateDomain }) {
   const [saving, setSaving] = useState<string | null>(null)
   async function set(state: string, status: PayTransparencyStatus, postings: boolean) {
     setSaving(state)
@@ -107,6 +111,7 @@ function PayTransparencySection({ rows, onChange }: { rows: PayTransparencyRow[]
     <Card className="p-5">
       <div className="flex items-center gap-2 mb-1"><ShieldCheck className="h-4 w-4 text-zinc-500" /><h3 className="text-sm font-medium text-zinc-200 tracking-wide">Pay transparency</h3></div>
       <p className="text-[11px] text-zinc-500 mb-3">States in your footprint that require salary ranges in job postings. Mark each compliant once your postings include ranges.</p>
+      <RequirementBanner gate={gate} />
       {required.length === 0 ? (
         <p className="text-sm text-zinc-500">No pay-transparency states in your locations.</p>
       ) : (
@@ -157,6 +162,7 @@ function AiAuditSection({ audits, reload }: { audits: AiAudit[]; reload: () => v
         <div className="flex items-center gap-2"><Bot className="h-4 w-4 text-zinc-500" /><h3 className="text-sm font-medium text-zinc-200 tracking-wide">AI hiring-tool audits</h3></div>
         <div className="flex items-center gap-2">
           <AiSuggest
+            label="Suggest tools"
             fetchSuggestions={suggestAiAudits}
             itemLabel={(s) => `${s.tool_name}${s.vendor ? ` · ${s.vendor}` : ''}${s.purpose ? ` — ${s.purpose}` : ''}`}
             createItem={(s) => createAiAudit({ tool_name: s.tool_name, vendor: s.vendor, purpose: s.purpose })}
@@ -166,6 +172,7 @@ function AiAuditSection({ audits, reload }: { audits: AiAudit[]; reload: () => v
         </div>
       </div>
       <p className="text-[11px] text-zinc-500 mb-3">Register every automated hiring tool + its last bias-audit date (NYC LL144 / IL / CO require regular audits).</p>
+      <p className="text-[10px] text-zinc-600 mb-3 italic">Automated-hiring audit laws aren't in the jurisdiction requirements catalog yet, so this section is self-tracked — no requirement backstop below.</p>
       {show && (
         <form onSubmit={add} className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4 p-3 rounded-xl bg-zinc-900/60 border border-zinc-800">
           <input className={inputCls} placeholder="Tool name" value={form.tool_name} onChange={(e) => setForm({ ...form, tool_name: e.target.value })} />
@@ -194,7 +201,7 @@ function AiAuditSection({ audits, reload }: { audits: AiAudit[]; reload: () => v
 }
 
 /* ── Biometric consent ── */
-function BiometricSection({ points, reload }: { points: BiometricPoint[]; reload: () => void }) {
+function BiometricSection({ points, reload, gate }: { points: BiometricPoint[]; reload: () => void; gate?: GateDomain }) {
   const [show, setShow] = useState(false)
   const [form, setForm] = useState<{ collection_type: CollectionType; purpose: string; consent_obtained: boolean }>({ collection_type: 'fingerprint', purpose: '', consent_obtained: false })
   const [busy, setBusy] = useState(false)
@@ -212,6 +219,7 @@ function BiometricSection({ points, reload }: { points: BiometricPoint[]; reload
         <div className="flex items-center gap-2"><Fingerprint className="h-4 w-4 text-zinc-500" /><h3 className="text-sm font-medium text-zinc-200 tracking-wide">Biometric consent (BIPA)</h3></div>
         <div className="flex items-center gap-2">
           <AiSuggest
+            label="Suggest points"
             fetchSuggestions={suggestBiometricPoints}
             itemLabel={(s) => `${s.collection_type.replace('_', ' ')}${s.purpose ? ` — ${s.purpose}` : ''}`}
             createItem={(s) => createBiometricPoint({ collection_type: s.collection_type, purpose: s.purpose })}
@@ -221,6 +229,7 @@ function BiometricSection({ points, reload }: { points: BiometricPoint[]; reload
         </div>
       </div>
       <p className="text-[11px] text-zinc-500 mb-3">Every biometric collection point (time clocks, access control) + whether written consent is on file. BIPA carries $1–5k statutory damages per violation.</p>
+      <RequirementBanner gate={gate} />
       {show && (
         <form onSubmit={add} className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4 p-3 rounded-xl bg-zinc-900/60 border border-zinc-800 items-end">
           <div><label className="block text-[10px] text-zinc-500 uppercase mb-1">Type</label>
@@ -260,6 +269,59 @@ function SpreadBar({ r }: { r: PayEquityRole }) {
   )
 }
 
+/* Protected-class gap — the real measurement, shown only where HRIS demographics
+   reach far enough to make one. Absent demographics this says so plainly rather than
+   showing a reassuring 0%: the dispersion screen above is NOT a gap finding, and the
+   whole point of separating them is that a broker can tell which one they're reading. */
+function ClassGapPanel({ a }: { a: PayEquityAnalysisResult }) {
+  const material = a.class_gap_pct !== null && a.class_gap_pct >= 5
+  if (!a.class_gap_measurable) {
+    return (
+      <div className="rounded-xl border border-white/10 bg-white/[0.02] px-3 py-2.5 mb-3">
+        <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold mb-1">Protected-class gap</div>
+        <p className="text-[11px] text-zinc-500">
+          Not measured — {a.demographics_coverage_pct > 0
+            ? `demographics on file for only ${a.demographics_coverage_pct}% of the roster`
+            : 'no demographics on file'}. The figures above screen pay spread within a
+          role, which seniority can explain; measuring a gap between protected classes
+          needs gender data from a connected HRIS.
+        </p>
+      </div>
+    )
+  }
+  return (
+    <div className={`rounded-xl border px-3 py-2.5 mb-3 ${material ? 'border-amber-500/20 bg-amber-500/[0.04]' : 'border-white/10 bg-white/[0.02]'}`}>
+      <div className="flex items-center justify-between mb-1.5">
+        <span className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold">Protected-class gap (gender)</span>
+        <span className="text-[10px] text-zinc-600">{a.demographics_coverage_pct}% roster coverage</span>
+      </div>
+      <div className={`text-2xl font-light font-mono ${material ? 'text-amber-400' : 'text-zinc-200'}`}>
+        {a.class_gap_pct}%
+      </div>
+      {a.class_gaps.length > 0 && (
+        <ul className="mt-2 space-y-1">
+          {a.class_gaps.slice(0, 5).map((g) => (
+            <li key={g.title} className="flex items-center gap-2 text-[12px] text-zinc-300">
+              <span className="flex-1 truncate">{g.title}</span>
+              <span className="text-zinc-600 text-[10px]">
+                {g.classes.map((c) => `${c.class} ${c.n}`).join(' · ')}
+              </span>
+              <span className={`font-mono w-14 text-right ${g.gap_pct >= 5 ? 'text-amber-400' : 'text-zinc-400'}`}>
+                {g.gap_pct}%
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="text-[10px] text-zinc-600 mt-2">
+        Median pay difference between the highest- and lowest-paid gender in each role.
+        Groups smaller than {a.min_class_cell} people in a role are excluded — too few to
+        compare, and small enough to identify someone.
+      </p>
+    </div>
+  )
+}
+
 /* deep within-role dispersion report (rollups + per-role table) */
 function PayEquityReport({ a }: { a: PayEquityAnalysisResult }) {
   if (!a.analyzed_roles) {
@@ -290,6 +352,8 @@ function PayEquityReport({ a }: { a: PayEquityAnalysisResult }) {
           </div>
         ))}
       </div>
+      <ClassGapPanel a={a} />
+      <PayEquityGapChart a={a} />
       {a.priority_actions.length > 0 && (
         <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.04] px-3 py-2.5 mb-3">
           <div className="text-[9px] text-amber-400/80 uppercase tracking-widest font-bold mb-1.5">Priority fixes</div>
@@ -343,7 +407,7 @@ function PayEquityReport({ a }: { a: PayEquityAnalysisResult }) {
 }
 
 /* ── pay-equity study register ── */
-function PayEquitySection({ reviews, reload }: { reviews: PayEquityReview[]; reload: () => void }) {
+function PayEquitySection({ reviews, reload, gate }: { reviews: PayEquityReview[]; reload: () => void; gate?: GateDomain }) {
   const [show, setShow] = useState(false)
   const [form, setForm] = useState({ review_date: today(), scope: '', gap_pct: '', remediation: '' })
   const [busy, setBusy] = useState(false)
@@ -385,6 +449,7 @@ function PayEquitySection({ reviews, reload }: { reviews: PayEquityReview[]; rel
         </div>
       </div>
       <p className="text-[11px] text-zinc-500 mb-3">Run a pay-dispersion analysis from your payroll, or log an external audit. A current study (within cadence) is a named EPL underwriting control; default cadence is annual.</p>
+      <RequirementBanner gate={gate} />
       {analyzeNote && <p className="text-[11px] text-emerald-400/90 mb-3">{analyzeNote}</p>}
       {analysis && <PayEquityReport a={analysis} />}
       {show && (
@@ -401,7 +466,15 @@ function PayEquitySection({ reviews, reload }: { reviews: PayEquityReview[]; rel
           {reviews.map((r) => (
             <div key={r.id} className="flex items-center gap-3 py-1.5 border-b border-zinc-800/30 last:border-0">
               <span className="text-sm text-zinc-200 w-28 shrink-0">{r.review_date ?? '—'}</span>
-              <span className="text-sm text-zinc-400 flex-1 min-w-0 truncate">{r.scope || 'Pay-equity study'}{r.gap_pct != null && <span className="text-[11px] text-zinc-600 ml-2">{r.gap_pct}% gap</span>}</span>
+              <span className="text-sm text-zinc-400 flex-1 min-w-0 truncate">
+                {r.scope || 'Pay-equity study'}
+                {/* Only a measured protected-class gap earns the word "gap"; a study with
+                    only the dispersion screen shows that instead of borrowing the label. */}
+                {r.gap_pct != null && <span className="text-[11px] text-zinc-600 ml-2">{r.gap_pct}% gap</span>}
+                {r.gap_pct == null && r.dispersion_pct != null && (
+                  <span className="text-[11px] text-zinc-600 ml-2">{r.dispersion_pct}% of roles show spread</span>
+                )}
+              </span>
               <span className="text-[11px] text-zinc-500">due {r.next_due_date ?? '—'}</span>
               {r.is_overdue && <span className="inline-flex items-center gap-1 text-[11px] text-red-400"><AlertTriangle className="h-3 w-3" /> overdue</span>}
               {!r.is_overdue && <span className="inline-flex items-center gap-1 text-[11px] text-emerald-400"><Check className="h-3 w-3" /> current</span>}

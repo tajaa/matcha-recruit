@@ -1,9 +1,11 @@
 import { useState } from 'react'
 import { Sparkles, Loader2 } from 'lucide-react'
 
-// Reusable "AI suggest → review → add selected" panel for register-style sections.
-// Fetches AI suggestions, lets the user uncheck any, then bulk-creates the chosen.
-export function AiSuggest<T>({ fetchSuggestions, itemLabel, createItem, onDone, label = 'AI suggest' }: {
+// Reusable "propose → review → add selected" panel for register-style sections.
+// Proposes likely rows from the company's own context, lets the user uncheck any,
+// then bulk-creates the chosen. Label is per-use ("Suggest tools" etc.) — the
+// button describes the register it fills, not the machinery behind it.
+export function AiSuggest<T>({ fetchSuggestions, itemLabel, createItem, onDone, label = 'Suggest likely' }: {
   fetchSuggestions: () => Promise<{ suggestions: T[]; available: boolean }>
   itemLabel: (t: T) => string
   createItem: (t: T) => Promise<unknown>
@@ -47,7 +49,7 @@ export function AiSuggest<T>({ fetchSuggestions, itemLabel, createItem, onDone, 
           ) : (
             <>
               <div className="flex items-center justify-between mb-2">
-                <span className="text-[11px] text-emerald-400 font-medium">AI suggested {items.length} — uncheck any, then add.</span>
+                <span className="text-[11px] text-emerald-400 font-medium">{items.length} suggested — uncheck any, then add.</span>
                 <div className="flex items-center gap-2">
                   <button onClick={() => setItems(null)} className="text-[11px] text-zinc-500 hover:text-zinc-300">Dismiss</button>
                   <button onClick={addSelected} disabled={saving || sel.size === 0} className="text-xs bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg px-3 py-1 disabled:opacity-50">{saving ? 'Adding…' : `Add ${sel.size}`}</button>

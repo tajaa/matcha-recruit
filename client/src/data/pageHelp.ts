@@ -140,6 +140,24 @@ const PAGE_HELP: PageHelp[] = [
     ],
     suggestions: ['What are these requirements based on?', 'What do I get if I upgrade?'],
   },
+  {
+    match: 'workforce-compliance',
+    title: 'Workforce Compliance',
+    summary:
+      'Four employment-practices controls you track for your own compliance — pay transparency, AI hiring-tool audits, biometric consent, and pay-equity studies. Keeping them current also strengthens the EPL (employment-practices liability) insurance profile your broker submits.',
+    tips: [
+      'Pay-equity studies: "Run analysis from payroll" computes a within-role pay screen from your roster; when employee demographics are on file (via HRIS), it also measures a real protected-class pay gap. Or log an external audit under "Log study".',
+      'The gap panel compares median pay between genders within each role. Groups under 5 people in a role are excluded — too few to compare, and small enough to identify someone.',
+      'A pay gap and pay dispersion are different: the gap is a difference between protected classes; dispersion is spread within a role that seniority can explain. Both are shown, separately.',
+      'Pay transparency: mark each state in your footprint compliant once your job postings include salary ranges.',
+      'AI hiring-tool audits and biometric consent: register each tool / collection point and keep its audit or consent current — "Suggest tools" / "Suggest points" proposes likely ones from your setup to start from.',
+    ],
+    suggestions: [
+      'What is a protected-class pay gap and how is it measured?',
+      'Why does a role show no gap even though it has men and women?',
+      'How does keeping these current help my insurance?',
+    ],
+  },
 ]
 
 /** Resolve the help card for the current pathname (first match wins). */

@@ -49,7 +49,11 @@ export interface PayEquityReview {
   review_date: string | null
   scope: string | null
   methodology: string | null
+  // A measured protected-class pay gap, or null when none was measured. Distinct
+  // from dispersion_pct (within-role spread, which seniority can explain) — the two
+  // used to share this field, so a "40% gap" was often 40% of roles showing spread.
   gap_pct: number | null
+  dispersion_pct: number | null
   remediation: string | null
   cadence_days: number
   next_due_date: string | null
@@ -93,12 +97,31 @@ export interface PayEquityPriorityAction {
   action: string
 }
 
-// Full result of the within-role dispersion engine (pay_equity_analysis.analyze).
+// One role's protected-class comparison. Only classes with n ≥ min_class_cell appear;
+// smaller cells are counted in suppressed_n and never named.
+export interface PayEquityClassGap {
+  title: string
+  gap_pct: number
+  reference: string
+  lowest: string
+  n: number
+  classes: { class: string; n: number; median: number }[]
+  suppressed_n: number
+}
+
+// Full result of the pay-equity engine (pay_equity_analysis.analyze).
 export interface PayEquityAnalysisResult {
   employee_count: number
   analyzed_roles: number
   flagged_roles: number
   headline_gap_pct: number
+  // null = not measured (no/insufficient HRIS demographics), never 0 — "we didn't
+  // look" and "we looked and found parity" must stay distinguishable.
+  class_gap_pct: number | null
+  class_gaps: PayEquityClassGap[]
+  demographics_coverage_pct: number
+  class_gap_measurable: boolean
+  min_class_cell: number
   worst: PayEquityRole | null
   roles: PayEquityRole[]
   total_payroll: number
@@ -110,6 +133,26 @@ export interface PayEquityAnalysisResult {
   posture: PayEquityPosture
   priority_actions: PayEquityPriorityAction[]
 }
+
+// One jurisdiction requirement that applies to the company, cross-referenced
+// against the tracker data (the "backstop").
+export type RequirementStatus = 'compliant' | 'non_compliant' | 'in_progress' | 'unknown'
+export interface GateRequirement {
+  jurisdiction: string
+  jurisdiction_level: string
+  title: string
+  status: RequirementStatus
+  reason: string
+  effective_date: string | null
+  source_url: string | null
+}
+export interface GateDomain {
+  status: RequirementStatus
+  requirements: GateRequirement[]
+}
+// Keyed by domain: 'pay_transparency' | 'pay_equity' | 'biometrics'. Domains with
+// no applicable requirement are absent.
+export type RequirementGate = Record<string, GateDomain>
 
 export interface WorkforceSummary {
   ai_audits: { total: number; overdue: number }

@@ -10,6 +10,14 @@ from datetime import date, timedelta
 from typing import Optional
 from uuid import UUID
 
+# A measured protected-class pay gap above this is a finding worth scoring down.
+_MATERIAL_GAP_PCT = 5.0
+# Share of roles showing excess pay spread that makes the dispersion screen itself
+# actionable. Mirrors pay_equity_analysis.posture_band's "action" band (a quarter of
+# roles flagged) so the client report and the broker score can't disagree about what
+# counts as loud.
+_EXCESS_DISPERSION_PCT = 25.0
+
 # States with salary-range / pay-scale posting (or on-request) laws as of 2026.
 # Lightweight static list — not the heavy jurisdiction engine. Extend as laws change.
 PAY_TRANSPARENCY_STATES = {
@@ -128,9 +136,25 @@ async def derive_biometric(conn, company_id: UUID) -> Optional[tuple[int, str]]:
 
 async def derive_pay_equity(conn, company_id: UUID) -> Optional[tuple[int, str]]:
     """Score from the most recent pay-equity study: current & remediated → high,
-    current but a sizeable unremediated gap → mid, overdue → low, none → fall back."""
+    current but a sizeable unremediated gap → mid, overdue → low, none → fall back.
+
+    `gap_pct` and `dispersion_pct` are different measurements and must be said
+    differently. A pay GAP is a difference in pay between protected classes; DISPERSION
+    is spread within a role, which seniority alone can explain. The detail string here
+    reaches an underwriter, so it names which one we actually measured — it previously
+    reported the dispersion share as "{x}% gap" because both quantities were stored in
+    gap_pct (see the payequity02 migration).
+
+    Deliberate: a measured gap silences the dispersion branch entirely, so a tenant with
+    a 2% gap and loud spread scores 100. Dispersion is a proxy for "is pay here
+    defensible"; once the real thing is measured, the proxy has nothing to add, and
+    scoring someone down for spread we've since explained would double-count. The cost
+    is that broad spread with a narrow class gap now reads clean — acceptable, because
+    that IS the EPL question. Revisit only if measured-gap tenants start hiding real
+    exposure behind it.
+    """
     row = await conn.fetchrow(
-        "SELECT review_date, gap_pct, remediation, "
+        "SELECT review_date, gap_pct, dispersion_pct, remediation, "
         "(next_due_date IS NOT NULL AND next_due_date < CURRENT_DATE) AS overdue "
         "FROM pay_equity_reviews WHERE company_id = $1 "
         "ORDER BY review_date DESC NULLS LAST, created_at DESC LIMIT 1",
@@ -140,7 +164,21 @@ async def derive_pay_equity(conn, company_id: UUID) -> Optional[tuple[int, str]]
         return None  # no study on file → fall back to broker attestation
     if row["overdue"]:
         return 40, f"Pay-equity study {row['review_date']} — overdue for refresh"
+
+    remediating = bool((row["remediation"] or "").strip())
     gap = float(row["gap_pct"]) if row["gap_pct"] is not None else None
-    if gap is not None and gap > 5 and not (row["remediation"] or "").strip():
-        return 70, f"Pay-equity study current — {gap:.1f}% gap, remediation pending"
+    dispersion = float(row["dispersion_pct"]) if row["dispersion_pct"] is not None else None
+
+    # A measured protected-class gap is the real finding and outranks the screen.
+    if gap is not None and gap > _MATERIAL_GAP_PCT and not remediating:
+        return 70, f"Pay-equity study current — {gap:.1f}% pay gap, remediation pending"
+    # No measured gap, but the dispersion screen is loud. Not a gap finding, and it
+    # doesn't score like one: it means "unexplained spread nobody has documented",
+    # which is worth the same 70 as an unremediated gap only because both leave an
+    # EPL exposure undocumented. Threshold mirrors posture_band's action band.
+    if gap is None and dispersion is not None and dispersion >= _EXCESS_DISPERSION_PCT and not remediating:
+        return 70, (f"Pay-dispersion screen current — {dispersion:.0f}% of roles show excess spread, "
+                    f"undocumented (no demographics on file to measure a protected-class gap)")
+    if gap is not None:
+        return 100, f"Pay-equity study current ({row['review_date']}) — {gap:.1f}% pay gap"
     return 100, f"Pay-equity study current ({row['review_date']})"
