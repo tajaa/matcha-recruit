@@ -1,5 +1,30 @@
 [
   {
+    "id": "workforce-compliance-real-pay-gap",
+    "date": "2026-07-19",
+    "category": "Workforce Compliance",
+    "title": "Pay equity now measures a real gap (not a dispersion proxy), plus a requirements backstop scoped to each employer's actual footprint",
+    "summary": "Pay-equity analysis previously scored pay dispersion within a role as a stand-in for a real pay gap. HRIS sync was extended to pull each employee's manager flag and demographics, so pay-equity analysis can now compute an actual gap (e.g. by gender/protected class) instead of a proxy — existing auto-generated dispersion-screen rows were relabeled so they don't get misread as the new metric once it lands. workforce_compliance was also bundled into the Matcha-X tier overlay, its page reordered to lead with pay equity (with a page-help guide, dropping the generic \"AI suggest\" widget), and a new requirements backstop + chart show which pay-transparency/reporting obligations actually apply. A same-day fix closed a scoping bug: the backstop matched catalog rows on state alone, so every city/county ordinance in a touched state applied regardless of which city the employer is actually in — a Spokane-only WA employer was being shown the Seattle pay-transparency ordinance as a requirement.",
+    "whatsNew": [
+      "HRIS sync now pulls manager flag (employees.is_manager) and employee demographics, feeding a real pay-gap computation instead of a within-role dispersion proxy.",
+      "Previously auto-generated dispersion-screen rows were relabeled on upgrade so old data doesn't get misread as the new real-gap metric.",
+      "workforce_compliance flag bundled into the Matcha-X tier overlay — X companies get it without an admin toggle.",
+      "WorkforceCompliance page reordered to lead with pay equity, with a page-help guide; the generic \"AI suggest\" widget was dropped from this page.",
+      "New requirements backstop + PayEquityGapChart/RequirementBanner surface which pay-transparency/reporting obligations apply to the company.",
+      "Fixed: the backstop was scoping catalog rows to state alone, so every city/county row in a touched state applied even to employers with no presence there — now scoped to the real location footprint."
+    ],
+    "howToUse": [
+      "Company (Matcha-X) → Workforce Compliance → Pay Equity is now the lead tab, with a page-help guide and the requirements banner/chart."
+    ],
+    "setup": [
+      "Apply migrations emphris0002 (employees.is_manager), emphris0003 (employee demographics), and payequity02 (pay_equity_reviews.dispersion_pct) before deploying."
+    ],
+    "notes": [
+      "The footprint-scoping bug meant any WA employer — not just Seattle/King County ones — saw the Seattle/King County pay-transparency ordinance as an open requirement; worth a spot-check on any company whose gap dashboard changed after this deploy."
+    ],
+    "tag": "action-needed"
+  },
+  {
     "id": "ir-copilot-close-gate-progress",
     "date": "2026-07-18",
     "category": "IR",
