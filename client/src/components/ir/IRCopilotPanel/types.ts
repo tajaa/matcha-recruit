@@ -28,6 +28,18 @@ export type CopilotProgress = {
   is_complete: boolean
 }
 
+/** Mirrors `services/ir_flow.copilot_evidence`. */
+export type CopilotEvidence = {
+  score: number
+  threshold: number
+  sufficient: boolean
+  signals: string[]
+  missing: string[]
+  days_open: number
+  max_days: number
+  is_overdue: boolean
+}
+
 export type Transcript = {
   incident_id: string
   messages: CopilotMessage[]
@@ -35,6 +47,7 @@ export type Transcript = {
   summary: string | null
   open_questions: string[]
   progress: CopilotProgress | null
+  evidence: CopilotEvidence | null
 }
 
 export interface Props {

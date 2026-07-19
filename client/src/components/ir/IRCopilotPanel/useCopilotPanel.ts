@@ -4,7 +4,7 @@ import { api, ensureFreshToken } from '../../../api/client'
 import { reportApiError } from '../../../api/errorReporter'
 import { useIRInfoRequests } from '../../../hooks/ir/useIRInfoRequests'
 import { BASE } from './helpers'
-import { type CopilotMessage, type CopilotProgress, type Transcript, type Props } from './types'
+import { type CopilotMessage, type CopilotProgress, type CopilotEvidence, type Transcript, type Props } from './types'
 
 export function useCopilotPanel({
   incidentId, incidentStatus, reportedByName, reportedByEmail, onIncidentChanged, onOpenDocuments,
@@ -13,6 +13,7 @@ export function useCopilotPanel({
   const [currentCards, setCurrentCards] = useState<CopilotCard[]>([])
   const [openQuestions, setOpenQuestions] = useState<string[]>([])
   const [progress, setProgress] = useState<CopilotProgress | null>(null)
+  const [evidence, setEvidence] = useState<CopilotEvidence | null>(null)
   const [loading, setLoading] = useState(true)
   const [streaming, setStreaming] = useState(false)
   const [busyCardMessageId, setBusyCardMessageId] = useState<string | null>(null)
@@ -36,6 +37,7 @@ export function useCopilotPanel({
       setCurrentCards(t.current_cards)
       setOpenQuestions(t.open_questions)
       setProgress(t.progress ?? null)
+      setEvidence(t.evidence ?? null)
     } catch (e) {
       if (!opts?.silent) setError(e instanceof Error ? e.message : 'Failed to load copilot')
     } finally {
@@ -368,6 +370,7 @@ export function useCopilotPanel({
     currentCards,
     openQuestions,
     progress,
+    evidence,
     loading,
     streaming,
     busyCardMessageId,

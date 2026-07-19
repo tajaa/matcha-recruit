@@ -1000,6 +1000,22 @@ class IRCopilotProgress(BaseModel):
     is_complete: bool = False
 
 
+class IRCopilotEvidence(BaseModel):
+    """Preponderance-of-evidence + duration tracker. Computed by
+    ``services/ir_flow.copilot_evidence``, mirroring the ER Copilot's
+    evidence-confidence banner (``determination_confidence``) applied to the
+    incident-reporting workflow, plus a severity-scaled days-open ceiling so
+    an investigation can't run indefinitely unnoticed."""
+    score: int = 0
+    threshold: int = 80
+    sufficient: bool = False
+    signals: list[str] = []
+    missing: list[str] = []
+    days_open: int = 0
+    max_days: int = 30
+    is_overdue: bool = False
+
+
 class IRCopilotTranscript(BaseModel):
     incident_id: UUID
     messages: list[IRCopilotMessage]
@@ -1007,6 +1023,7 @@ class IRCopilotTranscript(BaseModel):
     summary: Optional[str] = None
     open_questions: list[str] = []
     progress: Optional[IRCopilotProgress] = None
+    evidence: Optional[IRCopilotEvidence] = None
 
 
 class IRCopilotStreamRequest(BaseModel):

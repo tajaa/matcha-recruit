@@ -42,6 +42,7 @@ from ._shared import (
     _safe_json_loads,
     _sse,
     _utc_now_naive,
+    parse_witnesses,
     build_log_root_cause_query_card,
     build_osha_clean_description_card,
     build_osha_days_count_card,
@@ -146,7 +147,8 @@ async def get_copilot_transcript(
             conn, incident_id, current_user,
             columns=(
                 "id, title, description, status, incident_type, severity, "
-                "root_cause, osha_recordable, category_data"
+                "root_cause, corrective_actions, osha_recordable, category_data, "
+                "witnesses, reported_at, resolved_at"
             ),
         )
         rows = await conn.fetch(
@@ -154,17 +156,39 @@ async def get_copilot_transcript(
             "FROM ir_incident_ai_messages WHERE incident_id = $1 ORDER BY created_at",
             incident_id,
         )
+        # Single round trip for the evidence-tracker counts — cheaper than one
+        # query per table, and this endpoint is polled every 15s per open tab.
+        evidence_counts = await conn.fetchrow(
+            """
+            SELECT
+                (SELECT COUNT(*) FROM ir_incident_documents WHERE incident_id = $1) AS document_count,
+                (SELECT COUNT(*) FROM ir_corrective_actions WHERE incident_id = $1) AS corrective_action_count,
+                (SELECT COUNT(*) FROM ir_investigation_interviews
+                    WHERE incident_id = $1 AND status = 'completed') AS completed_interview_count
+            """,
+            incident_id,
+        )
 
     messages = [_serialize_message(r) for r in rows]
     cards = _extract_current_cards(messages)
     summary, open_questions = _extract_summary_and_open_questions(messages)
+    incident_dict = dict(incident) if incident else {}
+    witness_count = len(parse_witnesses(incident_dict.get("witnesses"))) + (
+        evidence_counts["completed_interview_count"] if evidence_counts else 0
+    )
     return IRCopilotTranscript(
         incident_id=incident_id,
         messages=messages,
         current_cards=cards,
         summary=summary,
         open_questions=open_questions,
-        progress=ir_flow.close_progress(dict(incident) if incident else {}),
+        progress=ir_flow.close_progress(incident_dict),
+        evidence=ir_flow.copilot_evidence(
+            incident_dict,
+            document_count=(evidence_counts["document_count"] if evidence_counts else 0),
+            witness_count=witness_count,
+            corrective_action_count=(evidence_counts["corrective_action_count"] if evidence_counts else 0),
+        ),
     )
 
 
