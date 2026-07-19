@@ -410,6 +410,19 @@ _MAX_OPEN_DAYS = {"critical": 7, "high": 14, "medium": 30, "low": 45}
 _DEFAULT_MAX_OPEN_DAYS = 30
 
 
+def _as_naive_utc(dt: datetime) -> datetime:
+    """Normalize to naive UTC so mixed naive/aware timestamps can subtract.
+
+    ir_incidents timestamps are naive TIMESTAMP today, but newer IR tables
+    are already TIMESTAMPTZ — if these columns follow, a naive-minus-aware
+    subtraction raises TypeError and 500s the whole transcript endpoint,
+    not just this widget.
+    """
+    if dt.tzinfo is None:
+        return dt
+    return dt.astimezone(timezone.utc).replace(tzinfo=None)
+
+
 def copilot_evidence(
     incident: dict[str, Any],
     *,
@@ -462,10 +475,11 @@ def copilot_evidence(
     if opened_at is None:
         days_open = 0
     else:
-        # DB timestamps are naive (TIMESTAMP, not TIMESTAMPTZ) — compare
-        # against a naive UTC "now" rather than reconciling tzinfo.
-        end = (incident.get("resolved_at") if is_terminal else None) or datetime.now(timezone.utc).replace(tzinfo=None)
-        days_open = max(0, (end - opened_at).days)
+        # Normalize both ends to naive UTC before subtracting — see
+        # _as_naive_utc: a mixed naive/aware pair raises TypeError and would
+        # 500 the whole transcript endpoint, not just this widget.
+        end = (incident.get("resolved_at") if is_terminal else None) or datetime.now(timezone.utc)
+        days_open = max(0, (_as_naive_utc(end) - _as_naive_utc(opened_at)).days)
 
     return {
         "score": score,
