@@ -29,8 +29,8 @@ from fastapi import APIRouter, Body, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from ...database import get_connection
-from ..dependencies import get_current_user
-from ..models.auth import CurrentUser
+from ...core.dependencies import get_current_user
+from ...core.models.auth import CurrentUser
 from .channel_broadcasts import _active_broadcast, _assert_member, _assert_owner
 
 logger = logging.getLogger(__name__)
@@ -194,7 +194,7 @@ async def _notify_call_started(
 
 async def _force_end_call(channel_id: UUID, call_id: UUID, reason: str) -> None:
     """End an active call: mark ended_at, delete LiveKit room, push WS event."""
-    from ..services.livekit_service import delete_room
+    from ...core.services.livekit_service import delete_room
 
     async with get_connection() as conn:
         row = await conn.fetchrow(
@@ -280,7 +280,7 @@ class InviteBody(BaseModel):
 
 async def _channel_company_features(conn, company_id) -> dict:
     """Merged enabled_features for a channel's company (werk-lite call policy)."""
-    from ..feature_flags import merge_company_features
+    from ...core.feature_flags import merge_company_features
     row = await conn.fetchrow(
         "SELECT enabled_features, signup_source FROM companies WHERE id = $1",
         company_id,
@@ -297,7 +297,7 @@ async def start_call(
     current_user: CurrentUser = Depends(get_current_user),
 ):
     """Owner starts a call session. Returns a publisher token + LiveKit URL."""
-    from ..services.livekit_service import create_room, mint_token, _get_lk_config
+    from ...core.services.livekit_service import create_room, mint_token, _get_lk_config
     from ...matcha.services import entitlements_service
     try:
         livekit_url, _, _ = _get_lk_config()
@@ -451,7 +451,7 @@ async def get_call_token(
     current_user: CurrentUser = Depends(get_current_user),
 ):
     """Mint a join token for the active call, subject to the join policy."""
-    from ..services.livekit_service import mint_token, list_participant_identities, _get_lk_config
+    from ...core.services.livekit_service import mint_token, list_participant_identities, _get_lk_config
     try:
         livekit_url, _, _ = _get_lk_config()
     except RuntimeError as e:
@@ -559,7 +559,7 @@ async def stop_call(
     current_user: CurrentUser = Depends(get_current_user),
 ):
     """Owner ends the active call."""
-    from ..services.livekit_service import delete_room
+    from ...core.services.livekit_service import delete_room
 
     async with get_connection() as conn:
         await _assert_owner(conn, channel_id, current_user.id)
@@ -610,7 +610,7 @@ async def get_call_status(
 
     participant_ids: list[str] = []
     try:
-        from ..services.livekit_service import list_participant_identities
+        from ...core.services.livekit_service import list_participant_identities
         participant_ids = await list_participant_identities(call["livekit_room"])
     except Exception:
         participant_ids = [str(call["started_by"])]
@@ -671,7 +671,7 @@ async def handle_call_webhook_event(event_type: str, event: dict, room_name: str
 
         participant_ids: list[str] = []
         try:
-            from ..services.livekit_service import list_participant_identities
+            from ...core.services.livekit_service import list_participant_identities
             participant_ids = await list_participant_identities(room_name)
         except Exception:
             # Fall back to the event's own participant as a coarse signal.

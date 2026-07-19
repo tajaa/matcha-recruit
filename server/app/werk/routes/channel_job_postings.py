@@ -10,8 +10,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
 from ...database import get_connection
-from ..dependencies import get_current_user
-from ..models.auth import CurrentUser
+from ...core.dependencies import get_current_user
+from ...core.models.auth import CurrentUser
 from ..services.channel_job_posting_service import (
     create_job_posting_product_and_price,
     create_job_posting_checkout,
@@ -102,7 +102,7 @@ async def create_job_posting(
         company_id = ch["company_id"]
 
         features = await conn.fetchval("SELECT enabled_features FROM companies WHERE id = $1", company_id)
-        from ..feature_flags import merge_company_features
+        from ...core.feature_flags import merge_company_features
         merged = merge_company_features(features)
         if not merged.get("channel_job_postings") and current_user.role != "admin":
             raise HTTPException(status_code=403, detail="Job postings feature is not enabled for this company")

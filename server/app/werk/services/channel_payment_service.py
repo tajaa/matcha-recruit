@@ -150,7 +150,7 @@ async def create_checkout_session(
 async def cancel_subscription(stripe_subscription_id: str) -> datetime:
     """Cancel a channel subscription at period end. Returns paid_through date."""
     _ensure_stripe()
-    from .stripe_service import extract_current_period_end
+    from ...core.services.stripe_service import extract_current_period_end
 
     def _cancel():
         sub = stripe.Subscription.modify(

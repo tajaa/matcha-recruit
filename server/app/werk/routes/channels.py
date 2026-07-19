@@ -13,10 +13,10 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Upl
 from pydantic import BaseModel, EmailStr
 
 from ...database import get_connection
-from ..dependencies import get_current_user
-from ..models.auth import CurrentUser
+from ...core.dependencies import get_current_user
+from ...core.models.auth import CurrentUser
 from ...matcha.dependencies import resolve_accessible_company_scope, require_admin_or_client
-from ..services.storage import get_storage
+from ...core.services.storage import get_storage
 
 logger = logging.getLogger(__name__)
 
@@ -2981,7 +2981,7 @@ async def create_email_invites(
     email a free-signup link. Free (non-paid) channels only in v1.
     """
     from ...config import get_settings
-    from ..services.email import get_email_service
+    from ...core.services.email import get_email_service
 
     if not body.emails:
         raise HTTPException(status_code=400, detail="At least one email is required")
@@ -3167,9 +3167,9 @@ async def accept_invite_signup(code: str, body: AcceptInviteRequest, http_reques
     Returns auth tokens + channel_id so the client can sign in and route in.
     """
     from ...config import get_settings
-    from ..feature_flags import DEFAULT_COMPANY_FEATURES
-    from ..services.auth import hash_password, create_access_token, create_refresh_token
-    from ..services.redis_cache import check_rate_limit, client_ip
+    from ...core.feature_flags import DEFAULT_COMPANY_FEATURES
+    from ...core.services.auth import hash_password, create_access_token, create_refresh_token
+    from ...core.services.redis_cache import check_rate_limit, client_ip
     from ...matcha.services.token_budget_service import FREE_TOKEN_GRANT
 
     ip = client_ip(http_request)

@@ -21,8 +21,8 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Header, Request
 from pydantic import BaseModel
 
 from ...database import get_connection
-from ..dependencies import get_current_user
-from ..models.auth import CurrentUser
+from ...core.dependencies import get_current_user
+from ...core.models.auth import CurrentUser
 
 logger = logging.getLogger(__name__)
 
@@ -138,7 +138,7 @@ async def _weekly_broadcast_count(conn, channel_id: UUID) -> int:
 
 async def _force_end_broadcast(channel_id: UUID, broadcast_id: UUID, reason: str) -> None:
     """End an active broadcast: mark ended_at, delete LiveKit room, push WS event."""
-    from ..services.livekit_service import delete_room
+    from ...core.services.livekit_service import delete_room
 
     async with get_connection() as conn:
         row = await conn.fetchrow(
@@ -217,7 +217,7 @@ async def start_broadcast(
     current_user: CurrentUser = Depends(get_current_user),
 ):
     """Owner starts a live broadcast. Returns publisher token + LiveKit URL."""
-    from ..services.livekit_service import mint_token, _get_lk_config
+    from ...core.services.livekit_service import mint_token, _get_lk_config
     from ...matcha.services import entitlements_service
     try:
         livekit_url, _, _ = _get_lk_config()
@@ -337,7 +337,7 @@ async def stop_broadcast(
     current_user: CurrentUser = Depends(get_current_user),
 ):
     """Owner ends the active broadcast."""
-    from ..services.livekit_service import delete_room
+    from ...core.services.livekit_service import delete_room
 
     async with get_connection() as conn:
         await _assert_owner(conn, channel_id, current_user.id)
@@ -380,7 +380,7 @@ async def get_viewer_token(
     current_user: CurrentUser = Depends(get_current_user),
 ):
     """Return a subscriber-only token for any channel member."""
-    from ..services.livekit_service import mint_token, _get_lk_config
+    from ...core.services.livekit_service import mint_token, _get_lk_config
     try:
         livekit_url, _, _ = _get_lk_config()
     except RuntimeError as e:
@@ -430,7 +430,7 @@ async def refresh_broadcast_token(
     """Re-mint the caller's token. Capped at the broadcast's remaining duration —
     cannot extend a broadcast past BROADCAST_MAX_DURATION_SECONDS.
     """
-    from ..services.livekit_service import mint_token, list_participant_identities, _get_lk_config
+    from ...core.services.livekit_service import mint_token, list_participant_identities, _get_lk_config
     try:
         livekit_url, _, _ = _get_lk_config()
     except RuntimeError as e:
@@ -486,7 +486,7 @@ async def promote_publisher(
     current_user: CurrentUser = Depends(get_current_user),
 ):
     """Owner promotes an existing channel member to on-stage publisher."""
-    from ..services.livekit_service import mint_token, update_participant_can_publish, _get_lk_config
+    from ...core.services.livekit_service import mint_token, update_participant_can_publish, _get_lk_config
     try:
         livekit_url, _, _ = _get_lk_config()
     except RuntimeError as e:
@@ -571,7 +571,7 @@ async def demote_publisher(
     current_user: CurrentUser = Depends(get_current_user),
 ):
     """Owner removes a guest from the stage (back to viewer)."""
-    from ..services.livekit_service import mint_token, update_participant_can_publish, _get_lk_config
+    from ...core.services.livekit_service import mint_token, update_participant_can_publish, _get_lk_config
     try:
         livekit_url, _, _ = _get_lk_config()
     except RuntimeError as e:
@@ -667,7 +667,7 @@ async def get_broadcast_status(
 
     publisher_ids: list[str] = []
     try:
-        from ..services.livekit_service import list_participant_identities
+        from ...core.services.livekit_service import list_participant_identities
         publisher_ids = await list_participant_identities(bc["livekit_room"])
     except Exception:
         publisher_ids = [str(bc["started_by"])]
@@ -699,7 +699,7 @@ async def livekit_webhook(
     body = await request.body()
 
     try:
-        from ..services.livekit_service import receive_webhook
+        from ...core.services.livekit_service import receive_webhook
         event = receive_webhook(body, authorization or "")
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e))

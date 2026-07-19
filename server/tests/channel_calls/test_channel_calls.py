@@ -31,7 +31,7 @@ sys.modules.setdefault("google.genai", genai_module)
 sys.modules.setdefault("google.genai.types", types_module)
 
 
-MOD = "app.core.routes.channel_calls"
+MOD = "app.werk.routes.channel_calls"
 LK = "app.core.services.livekit_service"
 
 
@@ -71,11 +71,11 @@ def _call_row(channel_id, *, mode="members", started_by=None, started_minutes_ag
 
 class TestBasics:
     def test_max_participants(self):
-        from app.core.routes.channel_calls import CALL_MAX_PARTICIPANTS
+        from app.werk.routes.channel_calls import CALL_MAX_PARTICIPANTS
         assert CALL_MAX_PARTICIPANTS == 4
 
     def test_room_name_prefix_distinct_from_broadcasts(self):
-        from app.core.routes.channel_calls import _call_room_name
+        from app.werk.routes.channel_calls import _call_room_name
         cid = uuid4()
         assert _call_room_name(cid) == f"call-{cid}"
         assert not _call_room_name(cid).startswith("channel-")
@@ -94,7 +94,7 @@ class TestJoinPolicy:
 
     @pytest.mark.asyncio
     async def test_invite_only_rejects_non_invitee(self):
-        from app.core.routes.channel_calls import get_call_token
+        from app.werk.routes.channel_calls import get_call_token
         channel_id = uuid4()
         user = _user("member@example.com")
         call = _call_row(channel_id, mode="invite_only")
@@ -110,7 +110,7 @@ class TestJoinPolicy:
 
     @pytest.mark.asyncio
     async def test_invite_only_admits_invitee(self):
-        from app.core.routes.channel_calls import get_call_token
+        from app.werk.routes.channel_calls import get_call_token
         channel_id = uuid4()
         user = _user("invitee@example.com")
         call = _call_row(channel_id, mode="invite_only")
@@ -130,7 +130,7 @@ class TestJoinPolicy:
 
     @pytest.mark.asyncio
     async def test_invite_only_owner_bypasses_invite_check(self):
-        from app.core.routes.channel_calls import get_call_token
+        from app.werk.routes.channel_calls import get_call_token
         channel_id = uuid4()
         user = _user("owner@example.com")
         call = _call_row(channel_id, mode="invite_only", started_by=user.id)
@@ -155,7 +155,7 @@ class TestJoinPolicy:
 class TestCapacity:
     @pytest.mark.asyncio
     async def test_full_room_rejected(self):
-        from app.core.routes.channel_calls import get_call_token
+        from app.werk.routes.channel_calls import get_call_token
         channel_id = uuid4()
         user = _user("late@example.com")
         call = _call_row(channel_id, mode="members")
@@ -174,7 +174,7 @@ class TestCapacity:
 
     @pytest.mark.asyncio
     async def test_rejoin_allowed_when_own_identity_counted(self):
-        from app.core.routes.channel_calls import get_call_token
+        from app.werk.routes.channel_calls import get_call_token
         channel_id = uuid4()
         user = _user("rejoiner@example.com")
         call = _call_row(channel_id, mode="members")
@@ -219,7 +219,7 @@ class TestStartCall:
     @pytest.mark.asyncio
     async def test_409_when_call_active(self):
         from contextlib import ExitStack
-        from app.core.routes.channel_calls import start_call, StartCallBody
+        from app.werk.routes.channel_calls import start_call, StartCallBody
         channel_id = uuid4()
         user = _user()
         conn = AsyncMock()
@@ -235,7 +235,7 @@ class TestStartCall:
     @pytest.mark.asyncio
     async def test_409_when_broadcast_active(self):
         from contextlib import ExitStack
-        from app.core.routes.channel_calls import start_call, StartCallBody
+        from app.werk.routes.channel_calls import start_call, StartCallBody
         channel_id = uuid4()
         user = _user()
         conn = AsyncMock()
@@ -251,7 +251,7 @@ class TestStartCall:
     @pytest.mark.asyncio
     async def test_start_members_mode_happy_path(self):
         from contextlib import ExitStack
-        from app.core.routes.channel_calls import start_call, StartCallBody, CALL_MAX_PARTICIPANTS
+        from app.werk.routes.channel_calls import start_call, StartCallBody, CALL_MAX_PARTICIPANTS
         channel_id = uuid4()
         user = _user()
         call_id = uuid4()
@@ -283,7 +283,7 @@ class TestStartCall:
 class TestWebhook:
     @pytest.mark.asyncio
     async def test_room_finished_closes_row_and_pushes_ended(self):
-        from app.core.routes.channel_calls import handle_call_webhook_event
+        from app.werk.routes.channel_calls import handle_call_webhook_event
         channel_id = uuid4()
         call_id = uuid4()
         conn = AsyncMock()
@@ -301,7 +301,7 @@ class TestWebhook:
 
     @pytest.mark.asyncio
     async def test_participants_changed_payload(self):
-        from app.core.routes.channel_calls import handle_call_webhook_event
+        from app.werk.routes.channel_calls import handle_call_webhook_event
         channel_id = uuid4()
         call = _call_row(channel_id)
         conn = AsyncMock()
@@ -321,7 +321,7 @@ class TestWebhook:
 
     @pytest.mark.asyncio
     async def test_bad_room_uuid_is_ignored(self):
-        from app.core.routes.channel_calls import handle_call_webhook_event
+        from app.werk.routes.channel_calls import handle_call_webhook_event
         resp = await handle_call_webhook_event("room_finished", {}, "call-not-a-uuid")
         assert resp == {"ok": True}
 
@@ -329,7 +329,7 @@ class TestWebhook:
     async def test_shared_webhook_dispatches_call_prefix(self):
         """channel_broadcasts.livekit_webhook routes call- rooms to our handler
         and leaves channel- (broadcast) handling untouched."""
-        from app.core.routes.channel_broadcasts import livekit_webhook
+        from app.werk.routes.channel_broadcasts import livekit_webhook
         channel_id = uuid4()
 
         event = {"event": "room_finished", "room": {"name": f"call-{channel_id}"}}
@@ -347,7 +347,7 @@ class TestWebhook:
 
     @pytest.mark.asyncio
     async def test_shared_webhook_ignores_foreign_rooms(self):
-        from app.core.routes.channel_broadcasts import livekit_webhook
+        from app.werk.routes.channel_broadcasts import livekit_webhook
         event = {"event": "room_finished", "room": {"name": "interview-xyz"}}
         request = MagicMock()
         request.body = AsyncMock(return_value=b"{}")

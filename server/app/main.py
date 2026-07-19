@@ -150,7 +150,7 @@ async def lifespan(app: FastAPI):
     # connect. Both are per-worker tasks; with uvicorn --workers N they run
     # N times across the cluster, which is correct (each worker subscribes
     # and dispatches to its own local sockets).
-    from .core.routes.channels_ws import (
+    from .werk.routes.channels_ws import (
         start_fanout_subscriber, start_server_ping_loop,
         stop_fanout_subscriber, stop_server_ping_loop,
     )
@@ -168,7 +168,7 @@ async def lifespan(app: FastAPI):
     print("[Matcha] Project WS fanout subscriber started")
 
     # Start channel inactivity checker (runs every 12h)
-    from .core.services.inactivity_worker import start_inactivity_scheduler
+    from .werk.services.inactivity_worker import start_inactivity_scheduler
     inactivity_task = await start_inactivity_scheduler()
 
     # Batched usage-event writer (per worker; each owns its own buffer).
@@ -520,7 +520,8 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 
 
 # Import and include domain routers
-from .core.routes import core_router, chat_ws_router, channels_ws_router
+from .core.routes import core_router, chat_ws_router
+from .werk.routes import werk_router, channels_ws_router
 from .core.routes.stripe_webhook import router as stripe_webhook_router
 from .matcha.routes import matcha_router
 from .cappe.routes import cappe_router
@@ -528,6 +529,7 @@ from .tellus.routes import tellus_router
 
 # Mount domain routers
 app.include_router(core_router, prefix="/api")
+app.include_router(werk_router, prefix="/api")
 app.include_router(matcha_router, prefix="/api")
 # Cappe (website builder) — a separate product. Mounted standalone, NOT under
 # matcha_router, so it bypasses the require_feature/company gate chain. Its own

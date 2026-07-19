@@ -11,9 +11,9 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 from pydantic import BaseModel, Field
 
 from ...database import get_connection
-from ..dependencies import get_current_user
-from ..models.auth import CurrentUser
-from ..services.storage import get_storage
+from ...core.dependencies import get_current_user
+from ...core.models.auth import CurrentUser
+from ...core.services.storage import get_storage
 
 logger = logging.getLogger(__name__)
 
@@ -230,7 +230,7 @@ async def _send_message_notification(
     Opens its own DB connection so the caller's connection isn't held during email I/O.
     """
     try:
-        from ..services.email import get_email_service
+        from ...core.services.email import get_email_service
         email_svc = get_email_service()
         if not email_svc.is_configured():
             return
@@ -276,7 +276,7 @@ async def _send_message_notification(
         # participants. DMs aren't on the channels socket, so push is the only
         # realtime signal once the recipient's app is backgrounded.
         try:
-            from ..services import apns_service
+            from ...core.services import apns_service
             for p in participants:
                 if not await apns_service.is_user_online(p["user_id"]):
                     await apns_service.send_to_user(

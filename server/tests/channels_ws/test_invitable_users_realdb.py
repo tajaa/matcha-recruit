@@ -34,7 +34,7 @@ pytestmark = [
 
 
 # Mirror the _USER_NAME_EXPR + WHERE template from
-# app/core/routes/channels.py:721. The {name_filter} and
+# app/werk/routes/channels.py:721. The {name_filter} and
 # {exact_email_clause} placeholders are filled per-shape below.
 _USER_NAME_EXPR = (
     "COALESCE(c.name, CONCAT(e.first_name, ' ', e.last_name), a.name, u.email)"

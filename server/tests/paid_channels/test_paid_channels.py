@@ -48,24 +48,24 @@ sys.modules.setdefault("stripe", stripe_module)
 
 class TestPriceValidation:
     def test_min_price_constant(self):
-        from app.core.services.channel_payment_service import MIN_PRICE_CENTS
+        from app.werk.services.channel_payment_service import MIN_PRICE_CENTS
         assert MIN_PRICE_CENTS == 50  # $0.50
 
     def test_max_price_constant(self):
-        from app.core.services.channel_payment_service import MAX_PRICE_CENTS
+        from app.werk.services.channel_payment_service import MAX_PRICE_CENTS
         assert MAX_PRICE_CENTS == 99900  # $999.00
 
     def test_price_range_excludes_zero(self):
-        from app.core.services.channel_payment_service import MIN_PRICE_CENTS
+        from app.werk.services.channel_payment_service import MIN_PRICE_CENTS
         assert MIN_PRICE_CENTS > 0
 
     @pytest.mark.asyncio
     async def test_create_stripe_product_rejects_low_price(self):
-        from app.core.services.channel_payment_service import (
+        from app.werk.services.channel_payment_service import (
             create_stripe_product_and_price,
             ChannelPaymentError,
         )
-        with patch("app.core.services.channel_payment_service._ensure_stripe"):
+        with patch("app.werk.services.channel_payment_service._ensure_stripe"):
             with pytest.raises(ChannelPaymentError, match="Price must be between"):
                 await create_stripe_product_and_price(
                     channel_id=uuid4(), channel_name="test", price_cents=10
@@ -73,11 +73,11 @@ class TestPriceValidation:
 
     @pytest.mark.asyncio
     async def test_create_stripe_product_rejects_high_price(self):
-        from app.core.services.channel_payment_service import (
+        from app.werk.services.channel_payment_service import (
             create_stripe_product_and_price,
             ChannelPaymentError,
         )
-        with patch("app.core.services.channel_payment_service._ensure_stripe"):
+        with patch("app.werk.services.channel_payment_service._ensure_stripe"):
             with pytest.raises(ChannelPaymentError, match="Price must be between"):
                 await create_stripe_product_and_price(
                     channel_id=uuid4(), channel_name="test", price_cents=100000
@@ -154,11 +154,11 @@ class TestRejoinEligibility:
         mock_conn = AsyncMock()
         mock_conn.fetchrow = AsyncMock(return_value=None)
 
-        with patch("app.core.services.channel_payment_service.get_connection") as mock_gc:
+        with patch("app.werk.services.channel_payment_service.get_connection") as mock_gc:
             mock_gc.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
             mock_gc.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            from app.core.services.channel_payment_service import check_rejoin_eligibility
+            from app.werk.services.channel_payment_service import check_rejoin_eligibility
             result = await check_rejoin_eligibility(uuid4(), uuid4())
             assert result["can_rejoin"] is True
             assert result["cooldown_until"] is None
@@ -175,11 +175,11 @@ class TestRejoinEligibility:
         mock_conn = AsyncMock()
         mock_conn.fetchrow = AsyncMock(return_value=mock_row)
 
-        with patch("app.core.services.channel_payment_service.get_connection") as mock_gc:
+        with patch("app.werk.services.channel_payment_service.get_connection") as mock_gc:
             mock_gc.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
             mock_gc.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            from app.core.services.channel_payment_service import check_rejoin_eligibility
+            from app.werk.services.channel_payment_service import check_rejoin_eligibility
             result = await check_rejoin_eligibility(uuid4(), uuid4())
             assert result["can_rejoin"] is False
             assert result["reason"] == "removal_cooldown"
@@ -196,11 +196,11 @@ class TestRejoinEligibility:
         mock_conn = AsyncMock()
         mock_conn.fetchrow = AsyncMock(return_value=mock_row)
 
-        with patch("app.core.services.channel_payment_service.get_connection") as mock_gc:
+        with patch("app.werk.services.channel_payment_service.get_connection") as mock_gc:
             mock_gc.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
             mock_gc.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            from app.core.services.channel_payment_service import check_rejoin_eligibility
+            from app.werk.services.channel_payment_service import check_rejoin_eligibility
             result = await check_rejoin_eligibility(uuid4(), uuid4())
             assert result["can_rejoin"] is True
 
@@ -216,11 +216,11 @@ class TestPaymentInfo:
         mock_conn = AsyncMock()
         mock_conn.fetchrow = AsyncMock(return_value={"is_paid": False, "price_cents": None, "currency": "usd", "inactivity_threshold_days": None, "inactivity_warning_days": 3})
 
-        with patch("app.core.services.channel_payment_service.get_connection") as mock_gc:
+        with patch("app.werk.services.channel_payment_service.get_connection") as mock_gc:
             mock_gc.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
             mock_gc.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            from app.core.services.channel_payment_service import get_payment_info
+            from app.werk.services.channel_payment_service import get_payment_info
             result = await get_payment_info(uuid4(), uuid4())
             assert result["is_paid"] is False
             assert "price_cents" not in result
@@ -233,11 +233,11 @@ class TestPaymentInfo:
         # First call = channel, second = member
         mock_conn.fetchrow = AsyncMock(side_effect=[ch_row, None])
 
-        with patch("app.core.services.channel_payment_service.get_connection") as mock_gc:
+        with patch("app.werk.services.channel_payment_service.get_connection") as mock_gc:
             mock_gc.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
             mock_gc.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            from app.core.services.channel_payment_service import get_payment_info
+            from app.werk.services.channel_payment_service import get_payment_info
             result = await get_payment_info(uuid4(), uuid4())
             assert result["is_paid"] is True
             assert result["price_cents"] == 500
@@ -259,11 +259,11 @@ class TestPaymentInfo:
         mock_conn = AsyncMock()
         mock_conn.fetchrow = AsyncMock(side_effect=[ch_row, member_row])
 
-        with patch("app.core.services.channel_payment_service.get_connection") as mock_gc:
+        with patch("app.werk.services.channel_payment_service.get_connection") as mock_gc:
             mock_gc.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
             mock_gc.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            from app.core.services.channel_payment_service import get_payment_info
+            from app.werk.services.channel_payment_service import get_payment_info
             result = await get_payment_info(uuid4(), uuid4())
             # 14 day threshold, contributed 10 days ago → ~4 days remaining
             assert result["days_until_removal"] is not None
@@ -282,11 +282,11 @@ class TestSubscriptionLifecycle:
         mock_conn.fetchval = AsyncMock(return_value=None)  # not existing
         mock_conn.execute = AsyncMock()
 
-        with patch("app.core.services.channel_payment_service.get_connection") as mock_gc:
+        with patch("app.werk.services.channel_payment_service.get_connection") as mock_gc:
             mock_gc.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
             mock_gc.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            from app.core.services.channel_payment_service import handle_subscription_activated
+            from app.werk.services.channel_payment_service import handle_subscription_activated
             await handle_subscription_activated(
                 channel_id=uuid4(),
                 user_id=uuid4(),
@@ -304,11 +304,11 @@ class TestSubscriptionLifecycle:
         mock_conn.fetchval = AsyncMock(return_value=user_id)  # existing member
         mock_conn.execute = AsyncMock()
 
-        with patch("app.core.services.channel_payment_service.get_connection") as mock_gc:
+        with patch("app.werk.services.channel_payment_service.get_connection") as mock_gc:
             mock_gc.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
             mock_gc.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            from app.core.services.channel_payment_service import handle_subscription_activated
+            from app.werk.services.channel_payment_service import handle_subscription_activated
             await handle_subscription_activated(
                 channel_id=uuid4(),
                 user_id=user_id,
@@ -327,11 +327,11 @@ class TestSubscriptionLifecycle:
         mock_conn.fetchval = AsyncMock(return_value="test-channel")
         mock_conn.execute = AsyncMock()
 
-        with patch("app.core.services.channel_payment_service.get_connection") as mock_gc:
+        with patch("app.werk.services.channel_payment_service.get_connection") as mock_gc:
             mock_gc.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
             mock_gc.return_value.__aexit__ = AsyncMock(return_value=False)
-            with patch("app.core.services.channel_payment_service.notif_svc", create=True):
-                from app.core.services.channel_payment_service import handle_payment_failed
+            with patch("app.werk.services.channel_payment_service.notif_svc", create=True):
+                from app.werk.services.channel_payment_service import handle_payment_failed
                 await handle_payment_failed("sub_failed")
                 # Check that subscription_status was set to past_due
                 calls = [str(c) for c in mock_conn.execute.call_args_list]
@@ -343,11 +343,11 @@ class TestSubscriptionLifecycle:
         mock_conn = AsyncMock()
         mock_conn.fetchrow = AsyncMock(return_value=None)
 
-        with patch("app.core.services.channel_payment_service.get_connection") as mock_gc:
+        with patch("app.werk.services.channel_payment_service.get_connection") as mock_gc:
             mock_gc.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
             mock_gc.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            from app.core.services.channel_payment_service import handle_payment_failed
+            from app.werk.services.channel_payment_service import handle_payment_failed
             await handle_payment_failed("sub_nonexistent")
             # Should not call execute (no matching member)
             mock_conn.execute.assert_not_called()
@@ -360,11 +360,11 @@ class TestSubscriptionLifecycle:
         mock_conn.fetchrow = AsyncMock(return_value=row)
         mock_conn.execute = AsyncMock()
 
-        with patch("app.core.services.channel_payment_service.get_connection") as mock_gc:
+        with patch("app.werk.services.channel_payment_service.get_connection") as mock_gc:
             mock_gc.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
             mock_gc.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            from app.core.services.channel_payment_service import handle_subscription_canceled
+            from app.werk.services.channel_payment_service import handle_subscription_canceled
             await handle_subscription_canceled("sub_cancel")
             # The UPDATE should set status to canceled but NOT null stripe_subscription_id
             update_call = str(mock_conn.execute.call_args_list[0])
@@ -379,11 +379,11 @@ class TestSubscriptionLifecycle:
         mock_conn.fetchrow = AsyncMock(return_value=row)
         mock_conn.execute = AsyncMock()
 
-        with patch("app.core.services.channel_payment_service.get_connection") as mock_gc:
+        with patch("app.werk.services.channel_payment_service.get_connection") as mock_gc:
             mock_gc.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
             mock_gc.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            from app.core.services.channel_payment_service import handle_subscription_renewed
+            from app.werk.services.channel_payment_service import handle_subscription_renewed
             future_ts = int((datetime.now(timezone.utc) + timedelta(days=30)).timestamp())
             await handle_subscription_renewed("sub_renew", future_ts, 500)
             assert mock_conn.execute.call_count >= 2  # UPDATE + INSERT event
@@ -433,11 +433,11 @@ class TestInactivityWorkerExecution:
         mock_conn = AsyncMock()
         mock_conn.fetch = AsyncMock(return_value=[])
 
-        with patch("app.core.services.inactivity_worker.get_connection") as mock_gc:
+        with patch("app.werk.services.inactivity_worker.get_connection") as mock_gc:
             mock_gc.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
             mock_gc.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            from app.core.services.inactivity_worker import run_inactivity_checks
+            from app.werk.services.inactivity_worker import run_inactivity_checks
             await run_inactivity_checks()
             # Only one fetch call (channels query), no members to process
             assert mock_conn.fetch.call_count == 1
@@ -480,10 +480,10 @@ class TestInactivityWorkerExecution:
             call_idx[0] += 1
             return contexts[idx] if idx < len(contexts) else self._make_ctx(AsyncMock())
 
-        with patch("app.core.services.inactivity_worker.get_connection", side_effect=mock_get_connection):
-            with patch("app.core.services.inactivity_worker.cancel_subscription_immediately", new_callable=AsyncMock):
+        with patch("app.werk.services.inactivity_worker.get_connection", side_effect=mock_get_connection):
+            with patch("app.werk.services.inactivity_worker.cancel_subscription_immediately", new_callable=AsyncMock):
                 with patch("app.matcha.services.notification_service.create_notification", new_callable=AsyncMock) as mock_notif:
-                    from app.core.services.inactivity_worker import run_inactivity_checks
+                    from app.werk.services.inactivity_worker import run_inactivity_checks
                     await run_inactivity_checks()
                     mock_notif.assert_called_once()
                     call_kwargs = mock_notif.call_args.kwargs
@@ -519,10 +519,10 @@ class TestInactivityWorkerExecution:
             call_idx[0] += 1
             return contexts[idx] if idx < len(contexts) else self._make_ctx(AsyncMock())
 
-        with patch("app.core.services.inactivity_worker.get_connection", side_effect=mock_get_connection):
-            with patch("app.core.services.inactivity_worker.cancel_subscription_immediately", new_callable=AsyncMock) as mock_cancel:
+        with patch("app.werk.services.inactivity_worker.get_connection", side_effect=mock_get_connection):
+            with patch("app.werk.services.inactivity_worker.cancel_subscription_immediately", new_callable=AsyncMock) as mock_cancel:
                 with patch("app.matcha.services.notification_service.create_notification", new_callable=AsyncMock) as mock_notif:
-                    from app.core.services.inactivity_worker import run_inactivity_checks
+                    from app.werk.services.inactivity_worker import run_inactivity_checks
                     await run_inactivity_checks()
                     mock_cancel.assert_called_once_with("sub_456")
                     mock_notif.assert_called_once()
@@ -538,9 +538,9 @@ class TestInactivityScheduler:
     async def test_start_returns_task(self):
         """start_inactivity_scheduler returns an asyncio Task."""
         import asyncio
-        from app.core.services.inactivity_worker import start_inactivity_scheduler
+        from app.werk.services.inactivity_worker import start_inactivity_scheduler
 
-        with patch("app.core.services.inactivity_worker.run_inactivity_checks", new_callable=AsyncMock):
+        with patch("app.werk.services.inactivity_worker.run_inactivity_checks", new_callable=AsyncMock):
             task = await start_inactivity_scheduler()
             assert isinstance(task, asyncio.Task)
             task.cancel()
@@ -550,7 +550,7 @@ class TestInactivityScheduler:
                 pass
 
     def test_check_interval_is_12_hours(self):
-        from app.core.services.inactivity_worker import CHECK_INTERVAL_SECONDS
+        from app.werk.services.inactivity_worker import CHECK_INTERVAL_SECONDS
         assert CHECK_INTERVAL_SECONDS == 12 * 60 * 60
 
 
@@ -560,7 +560,7 @@ class TestInactivityScheduler:
 
 class TestPaidChannelConfigModel:
     def test_valid_config(self):
-        from app.core.routes.channels import PaidChannelConfig
+        from app.werk.routes.channels import PaidChannelConfig
         config = PaidChannelConfig(
             price_cents=500,
             currency="usd",
@@ -571,17 +571,17 @@ class TestPaidChannelConfigModel:
         assert config.currency == "usd"
 
     def test_default_currency(self):
-        from app.core.routes.channels import PaidChannelConfig
+        from app.werk.routes.channels import PaidChannelConfig
         config = PaidChannelConfig(price_cents=500)
         assert config.currency == "usd"
 
     def test_default_warning_days(self):
-        from app.core.routes.channels import PaidChannelConfig
+        from app.werk.routes.channels import PaidChannelConfig
         config = PaidChannelConfig(price_cents=500)
         assert config.inactivity_warning_days == 3
 
     def test_null_threshold_allowed(self):
-        from app.core.routes.channels import PaidChannelConfig
+        from app.werk.routes.channels import PaidChannelConfig
         config = PaidChannelConfig(price_cents=500, inactivity_threshold_days=None)
         assert config.inactivity_threshold_days is None
 
@@ -592,7 +592,7 @@ class TestPaidChannelConfigModel:
 
 class TestPydanticModels:
     def test_channel_summary_has_is_paid(self):
-        from app.core.routes.channels import ChannelSummary
+        from app.werk.routes.channels import ChannelSummary
         summary = ChannelSummary(
             id=uuid4(), name="test", slug="test",
             is_paid=True, member_count=5,
@@ -600,12 +600,12 @@ class TestPydanticModels:
         assert summary.is_paid is True
 
     def test_channel_summary_default_not_paid(self):
-        from app.core.routes.channels import ChannelSummary
+        from app.werk.routes.channels import ChannelSummary
         summary = ChannelSummary(id=uuid4(), name="test", slug="test")
         assert summary.is_paid is False
 
     def test_channel_detail_has_paid_fields(self):
-        from app.core.routes.channels import ChannelDetail
+        from app.werk.routes.channels import ChannelDetail
         detail = ChannelDetail(
             id=uuid4(), name="test", slug="test",
             created_by=uuid4(), created_at=datetime.now(timezone.utc),
@@ -616,7 +616,7 @@ class TestPydanticModels:
         assert detail.currency == "eur"
 
     def test_channel_detail_defaults(self):
-        from app.core.routes.channels import ChannelDetail
+        from app.werk.routes.channels import ChannelDetail
         detail = ChannelDetail(
             id=uuid4(), name="test", slug="test",
             created_by=uuid4(), created_at=datetime.now(timezone.utc),
@@ -626,7 +626,7 @@ class TestPydanticModels:
         assert detail.currency == "usd"
 
     def test_update_paid_settings_request(self):
-        from app.core.routes.channels import UpdatePaidSettingsRequest
+        from app.werk.routes.channels import UpdatePaidSettingsRequest
         req = UpdatePaidSettingsRequest(
             inactivity_threshold_days=7,
             inactivity_warning_days=2,
@@ -634,7 +634,7 @@ class TestPydanticModels:
         assert req.inactivity_threshold_days == 7
 
     def test_update_paid_settings_optional(self):
-        from app.core.routes.channels import UpdatePaidSettingsRequest
+        from app.werk.routes.channels import UpdatePaidSettingsRequest
         req = UpdatePaidSettingsRequest()
         assert req.inactivity_threshold_days is None
         assert req.inactivity_warning_days is None
@@ -708,7 +708,7 @@ class TestWebSocketMembershipFilter:
     def test_membership_query_excludes_removed(self):
         """Verify the SQL pattern used in channels_ws.py filters removed members."""
         import inspect
-        from app.core.routes.channels_ws import channel_websocket
+        from app.werk.routes.channels_ws import channel_websocket
 
         source = inspect.getsource(channel_websocket)
         # All membership checks should include the removed_for_inactivity filter
@@ -717,7 +717,7 @@ class TestWebSocketMembershipFilter:
     def test_join_room_query_excludes_removed(self):
         """The join_room membership check should also filter removed members."""
         import inspect
-        from app.core.routes.channels_ws import channel_websocket
+        from app.werk.routes.channels_ws import channel_websocket
 
         source = inspect.getsource(channel_websocket)
         # Count occurrences - should appear in both join_room and message checks
@@ -949,11 +949,11 @@ class TestPaymentFailedCycleDedupe:
         mock_conn.fetchval = AsyncMock(side_effect=[None, False, "test-channel", uuid4()])
         mock_conn.execute = AsyncMock()
 
-        with patch("app.core.services.channel_payment_service.get_connection") as mock_gc:
+        with patch("app.werk.services.channel_payment_service.get_connection") as mock_gc:
             mock_gc.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
             mock_gc.return_value.__aexit__ = AsyncMock(return_value=False)
             with patch("app.matcha.services.notification_service.create_notification", new_callable=AsyncMock) as mock_notif:
-                from app.core.services.channel_payment_service import handle_payment_failed
+                from app.werk.services.channel_payment_service import handle_payment_failed
                 await handle_payment_failed("sub_failure_1")
 
                 # status update + payment_failed event row both fire
@@ -973,11 +973,11 @@ class TestPaymentFailedCycleDedupe:
         mock_conn.fetchval = AsyncMock(side_effect=[None, True])
         mock_conn.execute = AsyncMock()
 
-        with patch("app.core.services.channel_payment_service.get_connection") as mock_gc:
+        with patch("app.werk.services.channel_payment_service.get_connection") as mock_gc:
             mock_gc.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
             mock_gc.return_value.__aexit__ = AsyncMock(return_value=False)
             with patch("app.matcha.services.notification_service.create_notification", new_callable=AsyncMock) as mock_notif:
-                from app.core.services.channel_payment_service import handle_payment_failed
+                from app.werk.services.channel_payment_service import handle_payment_failed
                 await handle_payment_failed("sub_failure_retry")
                 # Status still updates to past_due (idempotent)
                 calls = [str(c) for c in mock_conn.execute.call_args_list]
@@ -1004,11 +1004,11 @@ class TestActivationDoesNotIncrementInvite:
         mock_conn.fetchval = AsyncMock(return_value=None)  # not existing
         mock_conn.execute = AsyncMock()
 
-        with patch("app.core.services.channel_payment_service.get_connection") as mock_gc:
+        with patch("app.werk.services.channel_payment_service.get_connection") as mock_gc:
             mock_gc.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
             mock_gc.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            from app.core.services.channel_payment_service import handle_subscription_activated
+            from app.werk.services.channel_payment_service import handle_subscription_activated
             await handle_subscription_activated(
                 channel_id=uuid4(), user_id=uuid4(),
                 stripe_subscription_id="sub_with_invite",
@@ -1027,11 +1027,11 @@ class TestActivationDoesNotIncrementInvite:
         mock_conn.fetchval = AsyncMock(return_value=None)
         mock_conn.execute = AsyncMock()
 
-        with patch("app.core.services.channel_payment_service.get_connection") as mock_gc:
+        with patch("app.werk.services.channel_payment_service.get_connection") as mock_gc:
             mock_gc.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
             mock_gc.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            from app.core.services.channel_payment_service import handle_subscription_activated
+            from app.werk.services.channel_payment_service import handle_subscription_activated
             await handle_subscription_activated(
                 channel_id=uuid4(), user_id=uuid4(),
                 stripe_subscription_id="sub_with_invite",
@@ -1056,7 +1056,7 @@ class TestSuccessURLPrefix:
 
     @pytest.mark.asyncio
     async def test_channel_subscription_url_uses_work_prefix(self):
-        from app.core.services import channel_payment_service
+        from app.werk.services import channel_payment_service
 
         captured = {}
 
@@ -1084,7 +1084,7 @@ class TestSuccessURLPrefix:
 
     @pytest.mark.asyncio
     async def test_job_posting_url_uses_work_prefix(self):
-        from app.core.services import channel_job_posting_service
+        from app.werk.services import channel_job_posting_service
 
         captured = {}
 
@@ -1119,7 +1119,7 @@ class TestJobPostingCustomFee:
 
     @pytest.mark.asyncio
     async def test_uses_channel_override(self):
-        from app.core.services import channel_job_posting_service
+        from app.werk.services import channel_job_posting_service
 
         captured = {}
 
@@ -1148,7 +1148,7 @@ class TestJobPostingCustomFee:
 
     @pytest.mark.asyncio
     async def test_falls_back_to_platform_default(self):
-        from app.core.services import channel_job_posting_service
+        from app.werk.services import channel_job_posting_service
 
         captured = {}
 
@@ -1177,7 +1177,7 @@ class TestJobPostingCustomFee:
 
     @pytest.mark.asyncio
     async def test_below_minimum_rejected(self):
-        from app.core.services import channel_job_posting_service
+        from app.werk.services import channel_job_posting_service
 
         with patch.object(channel_job_posting_service, "_ensure_stripe"):
             with pytest.raises(channel_job_posting_service.JobPostingPaymentError, match="between"):
@@ -1201,11 +1201,11 @@ class TestJobPostingLifecycleHandlers:
         mock_conn.fetchval = AsyncMock(return_value=None)
         mock_conn.execute = AsyncMock()
 
-        with patch("app.core.services.channel_job_posting_service.get_connection") as mock_gc:
+        with patch("app.werk.services.channel_job_posting_service.get_connection") as mock_gc:
             mock_gc.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
             mock_gc.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            from app.core.services.channel_job_posting_service import handle_job_posting_activated
+            from app.werk.services.channel_job_posting_service import handle_job_posting_activated
             await handle_job_posting_activated(
                 posting_id=uuid4(), channel_id=uuid4(), user_id=uuid4(),
                 stripe_subscription_id="sub_jp_test",
@@ -1222,11 +1222,11 @@ class TestJobPostingLifecycleHandlers:
         mock_conn.fetchrow = AsyncMock(return_value=None)
         mock_conn.execute = AsyncMock()
 
-        with patch("app.core.services.channel_job_posting_service.get_connection") as mock_gc:
+        with patch("app.werk.services.channel_job_posting_service.get_connection") as mock_gc:
             mock_gc.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
             mock_gc.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            from app.core.services.channel_job_posting_service import handle_job_posting_renewed
+            from app.werk.services.channel_job_posting_service import handle_job_posting_renewed
             await handle_job_posting_renewed(
                 stripe_subscription_id="sub_jp_unknown",
                 current_period_end=int(time.time() + 30 * 86400),
@@ -1241,11 +1241,11 @@ class TestJobPostingLifecycleHandlers:
         mock_conn.fetchrow = AsyncMock(return_value=row)
         mock_conn.execute = AsyncMock()
 
-        with patch("app.core.services.channel_job_posting_service.get_connection") as mock_gc:
+        with patch("app.werk.services.channel_job_posting_service.get_connection") as mock_gc:
             mock_gc.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
             mock_gc.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            from app.core.services.channel_job_posting_service import handle_job_posting_renewed
+            from app.werk.services.channel_job_posting_service import handle_job_posting_renewed
             await handle_job_posting_renewed(
                 stripe_subscription_id="sub_jp_renew",
                 current_period_end=int(time.time() + 30 * 86400),
@@ -1265,11 +1265,11 @@ class TestJobPostingLifecycleHandlers:
         mock_conn.fetchval = AsyncMock(side_effect=[None, True])
         mock_conn.execute = AsyncMock()
 
-        with patch("app.core.services.channel_job_posting_service.get_connection") as mock_gc:
+        with patch("app.werk.services.channel_job_posting_service.get_connection") as mock_gc:
             mock_gc.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
             mock_gc.return_value.__aexit__ = AsyncMock(return_value=False)
             with patch("app.matcha.services.notification_service.create_notification", new_callable=AsyncMock) as mock_notif:
-                from app.core.services.channel_job_posting_service import handle_job_posting_payment_failed
+                from app.werk.services.channel_job_posting_service import handle_job_posting_payment_failed
                 await handle_job_posting_payment_failed("sub_jp_fail")
 
                 calls = [str(c) for c in mock_conn.execute.call_args_list]
@@ -1285,11 +1285,11 @@ class TestJobPostingLifecycleHandlers:
         mock_conn.fetchrow = AsyncMock(return_value=row)
         mock_conn.execute = AsyncMock()
 
-        with patch("app.core.services.channel_job_posting_service.get_connection") as mock_gc:
+        with patch("app.werk.services.channel_job_posting_service.get_connection") as mock_gc:
             mock_gc.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
             mock_gc.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            from app.core.services.channel_job_posting_service import handle_job_posting_canceled
+            from app.werk.services.channel_job_posting_service import handle_job_posting_canceled
             await handle_job_posting_canceled("sub_jp_cancel")
             calls = [str(c) for c in mock_conn.execute.call_args_list]
             # Status flips both subscription_status='canceled' and posting status='closed'
@@ -1309,7 +1309,7 @@ class TestChannelPriceUpdate:
 
     @pytest.mark.asyncio
     async def test_creates_new_price_archives_old(self):
-        from app.core.services import channel_payment_service
+        from app.werk.services import channel_payment_service
 
         captured = {}
 
@@ -1339,7 +1339,7 @@ class TestChannelPriceUpdate:
 
     @pytest.mark.asyncio
     async def test_below_minimum_rejected(self):
-        from app.core.services import channel_payment_service
+        from app.werk.services import channel_payment_service
         with patch.object(channel_payment_service, "_ensure_stripe"):
             with pytest.raises(channel_payment_service.ChannelPaymentError, match="between"):
                 await channel_payment_service.update_channel_price(
@@ -1350,7 +1350,7 @@ class TestChannelPriceUpdate:
 
     @pytest.mark.asyncio
     async def test_old_price_archive_failure_doesnt_block(self):
-        from app.core.services import channel_payment_service
+        from app.werk.services import channel_payment_service
 
         def fake_create(**kwargs):
             class P: id = "price_new_zzz"

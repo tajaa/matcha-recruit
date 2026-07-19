@@ -83,7 +83,7 @@ async def test_plus_substitution_when_query_has_space(monkeypatch):
     """Old client sends `q=user+tag@gmail.com`; Starlette decodes to
     `user tag@gmail.com`. Server must try the `+`-substituted form so
     the cross-tenant exact-email lookup can still match."""
-    from app.core.routes import channels as channels_route
+    from app.werk.routes import channels as channels_route
 
     conn = _CapturingConn()
     monkeypatch.setattr(channels_route, "get_connection", lambda: _Ctx(conn))
@@ -109,7 +109,7 @@ async def test_correctly_encoded_query_still_matches(monkeypatch):
     """New client sends `q=user%2Btag@gmail.com` → Starlette decodes to the
     correct `user+tag@gmail.com`. No space, so the substitution path
     short-circuits — only the original exact-email clause fires."""
-    from app.core.routes import channels as channels_route
+    from app.werk.routes import channels as channels_route
 
     conn = _CapturingConn()
     monkeypatch.setattr(channels_route, "get_connection", lambda: _Ctx(conn))
@@ -133,7 +133,7 @@ async def test_non_email_query_does_not_substitute(monkeypatch):
     """A bare name like `john smith` has a space but isn't an email. The
     `+`-substitution branch is gated by an email-shape check; it must not
     fire for plain names."""
-    from app.core.routes import channels as channels_route
+    from app.werk.routes import channels as channels_route
 
     conn = _CapturingConn()
     monkeypatch.setattr(channels_route, "get_connection", lambda: _Ctx(conn))
@@ -157,7 +157,7 @@ async def test_query_used_in_ilike_pattern_too(monkeypatch):
     """The `+`-substituted form must also be available to the ILIKE pattern
     (the AND-ed name filter), not only the exact-email OR-source. Otherwise
     the AND filter rejects the row before Source 6 can include it."""
-    from app.core.routes import channels as channels_route
+    from app.werk.routes import channels as channels_route
 
     conn = _CapturingConn()
     monkeypatch.setattr(channels_route, "get_connection", lambda: _Ctx(conn))

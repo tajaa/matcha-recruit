@@ -337,7 +337,7 @@ async def cancel_job_posting_subscription(
 ) -> datetime:
     """Cancel a job posting subscription at period end. Returns paid_through date."""
     _ensure_stripe()
-    from .stripe_service import extract_current_period_end
+    from ...core.services.stripe_service import extract_current_period_end
 
     def _cancel():
         sub = stripe.Subscription.modify(

@@ -485,7 +485,7 @@ async def _route_event(event_type: str, event_object: dict) -> dict:
 
             if channel_id_str and user_id_str and stripe_sub_id:
                 try:
-                    from ..services.channel_payment_service import handle_subscription_activated
+                    from ...werk.services.channel_payment_service import handle_subscription_activated
                     import asyncio
                     import stripe as _stripe
                     _stripe.api_key = StripeService().settings.stripe_secret_key
@@ -512,7 +512,7 @@ async def _route_event(event_type: str, event_object: dict) -> dict:
 
             if posting_id_str and channel_id_str and user_id_str and stripe_sub_id:
                 try:
-                    from ..services.channel_job_posting_service import handle_job_posting_activated
+                    from ...werk.services.channel_job_posting_service import handle_job_posting_activated
                     import asyncio
                     import stripe as _stripe
                     _stripe.api_key = StripeService().settings.stripe_secret_key
@@ -628,13 +628,13 @@ async def _route_event(event_type: str, event_object: dict) -> dict:
         if stripe_sub_id:
             # Only handle for channel subscriptions (safe no-op if not found)
             try:
-                from ..services.channel_payment_service import handle_payment_failed
+                from ...werk.services.channel_payment_service import handle_payment_failed
                 await handle_payment_failed(stripe_sub_id)
             except Exception as exc:
                 logger.error("Channel payment failure handler error: %s", exc)
 
             try:
-                from ..services.channel_job_posting_service import handle_job_posting_payment_failed
+                from ...werk.services.channel_job_posting_service import handle_job_posting_payment_failed
                 await handle_job_posting_payment_failed(stripe_sub_id)
             except Exception as exc:
                 logger.error("Job posting payment failure handler error: %s", exc)
@@ -648,7 +648,7 @@ async def _route_event(event_type: str, event_object: dict) -> dict:
         if stripe_sub_id and stripe_invoice_id and billing_reason == "subscription_cycle":
             # Check if this is a channel subscription renewal
             try:
-                from ..services.channel_payment_service import handle_subscription_renewed
+                from ...werk.services.channel_payment_service import handle_subscription_renewed
                 from ...database import get_connection as _get_conn
                 async with _get_conn() as _conn:
                     is_channel_sub = await _conn.fetchval(
@@ -676,7 +676,7 @@ async def _route_event(event_type: str, event_object: dict) -> dict:
                     stripe_sub_id,
                 )
             if is_job_sub:
-                from ..services.channel_job_posting_service import handle_job_posting_renewed
+                from ...werk.services.channel_job_posting_service import handle_job_posting_renewed
                 amount = int(event_object.get("amount_paid") or 0)
                 lines = event_object.get("lines", {}).get("data", [])
                 period_end = lines[0]["period"]["end"] if lines else None
@@ -711,13 +711,13 @@ async def _route_event(event_type: str, event_object: dict) -> dict:
         if stripe_sub_id:
             # Handle channel subscription cancellation
             try:
-                from ..services.channel_payment_service import handle_subscription_canceled
+                from ...werk.services.channel_payment_service import handle_subscription_canceled
                 await handle_subscription_canceled(stripe_sub_id)
             except Exception as exc:
                 logger.error("Channel subscription cancellation error: %s", exc)
 
             try:
-                from ..services.channel_job_posting_service import handle_job_posting_canceled
+                from ...werk.services.channel_job_posting_service import handle_job_posting_canceled
                 await handle_job_posting_canceled(stripe_sub_id)
             except Exception as exc:
                 logger.error("Job posting cancellation handler error: %s", exc)

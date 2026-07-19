@@ -64,7 +64,7 @@ async def is_user_online(user_id: UUID) -> bool:
     in-process socket table only sees this worker's clients); falls back to the
     local socket table if Redis is unavailable."""
     try:
-        from ..routes.channels_ws import _ONLINE_KEY_PREFIX, manager
+        from ...werk.routes.channels_ws import _ONLINE_KEY_PREFIX, manager
         from .redis_cache import get_redis_cache
         redis = get_redis_cache()
         if redis is not None:

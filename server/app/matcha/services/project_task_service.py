@@ -660,7 +660,7 @@ async def _post_kanban_move_to_chat(
         return
 
     try:
-        from app.core.routes.channels_ws import manager as _ch_manager
+        from app.werk.routes.channels_ws import manager as _ch_manager
         await _ch_manager.broadcast_message(str(channel_id), {
             "id": str(row["id"]),
             "channel_id": str(channel_id),

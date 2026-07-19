@@ -43,7 +43,7 @@ sys.modules.setdefault("bleach", bleach_module)
 
 
 def _make_user(name: str = "Test User"):
-    from app.core.routes.channels_ws import ChannelUser
+    from app.werk.routes.channels_ws import ChannelUser
     return ChannelUser(
         id=uuid4(),
         name=name,
@@ -70,7 +70,7 @@ class TestRoomBroadcastRouting:
 
     @pytest.mark.asyncio
     async def test_broadcast_to_user_in_room(self):
-        from app.core.routes.channels_ws import ChannelConnectionManager
+        from app.werk.routes.channels_ws import ChannelConnectionManager
         manager = ChannelConnectionManager()
         user = _make_user()
         ws = _make_ws_mock()
@@ -96,7 +96,7 @@ class TestRoomBroadcastRouting:
         """The macOS bug: if client never joins the room (or leaves it),
         the server's broadcast must NOT reach them. This is the invariant
         that forced `joinBackgroundRooms` on the client side."""
-        from app.core.routes.channels_ws import ChannelConnectionManager
+        from app.werk.routes.channels_ws import ChannelConnectionManager
         manager = ChannelConnectionManager()
         user = _make_user()
         ws = _make_ws_mock()
@@ -116,7 +116,7 @@ class TestRoomBroadcastRouting:
         """Confirms that a client calling leave_room (e.g. the
         `ChannelDetailView.onDisappear` path) stops receiving broadcasts
         for that room, even though the WebSocket is still connected."""
-        from app.core.routes.channels_ws import ChannelConnectionManager
+        from app.werk.routes.channels_ws import ChannelConnectionManager
         manager = ChannelConnectionManager()
         user = _make_user()
         ws = _make_ws_mock()
@@ -138,7 +138,7 @@ class TestRoomBroadcastRouting:
         """Background-notifications case: user is subscribed to all member
         channels via `joinBackgroundRooms`. Broadcasts to any of them must
         route to the single connection."""
-        from app.core.routes.channels_ws import ChannelConnectionManager
+        from app.werk.routes.channels_ws import ChannelConnectionManager
         manager = ChannelConnectionManager()
         user = _make_user()
         ws = _make_ws_mock()
@@ -161,7 +161,7 @@ class TestRoomBroadcastRouting:
 
     @pytest.mark.asyncio
     async def test_one_user_leaves_other_still_receives(self):
-        from app.core.routes.channels_ws import ChannelConnectionManager
+        from app.werk.routes.channels_ws import ChannelConnectionManager
         manager = ChannelConnectionManager()
         alice, bob = _make_user("Alice"), _make_user("Bob")
         alice_ws, bob_ws = _make_ws_mock(), _make_ws_mock()
@@ -195,7 +195,7 @@ class TestDisconnectCleansRooms:
 
     @pytest.mark.asyncio
     async def test_disconnect_removes_from_all_rooms(self):
-        from app.core.routes.channels_ws import ChannelConnectionManager
+        from app.werk.routes.channels_ws import ChannelConnectionManager
         manager = ChannelConnectionManager()
         user = _make_user()
         ws = _make_ws_mock()
@@ -217,7 +217,7 @@ class TestDisconnectCleansRooms:
     async def test_disconnect_one_of_multiple_connections_keeps_membership(self):
         """If the user has two WebSockets (e.g. desktop + web) and one
         closes, the other stays subscribed to all rooms."""
-        from app.core.routes.channels_ws import ChannelConnectionManager
+        from app.werk.routes.channels_ws import ChannelConnectionManager
         manager = ChannelConnectionManager()
         user = _make_user()
         ws1, ws2 = _make_ws_mock(), _make_ws_mock()
@@ -242,7 +242,7 @@ class TestSelfBroadcastIsIncluded:
 
     @pytest.mark.asyncio
     async def test_sender_receives_own_broadcast_message(self):
-        from app.core.routes.channels_ws import ChannelConnectionManager
+        from app.werk.routes.channels_ws import ChannelConnectionManager
         manager = ChannelConnectionManager()
         user = _make_user()
         ws = _make_ws_mock()

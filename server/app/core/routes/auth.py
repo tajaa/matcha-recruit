@@ -3104,7 +3104,7 @@ async def upload_avatar(
     # carry the new avatar without a reconnect — the broadcast reads the
     # in-memory ChannelUser, which would otherwise stay stale until reconnect.
     try:
-        from .channels_ws import manager
+        from ...werk.routes.channels_ws import manager
         if current_user.id in manager.users:
             manager.users[current_user.id].avatar_url = url
     except Exception:

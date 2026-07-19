@@ -10,8 +10,8 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
 from pydantic import BaseModel
 
 from ...database import get_connection
-from ..services.auth import decode_token
-from ..services.redis_cache import get_redis_cache
+from ...core.services.auth import decode_token
+from ...core.services.redis_cache import get_redis_cache
 
 logger = logging.getLogger(__name__)
 

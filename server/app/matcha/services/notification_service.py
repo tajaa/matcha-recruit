@@ -76,7 +76,7 @@ async def create_notification(
     # toasts (chat WS already toasts starred channels; the bell observer
     # only ticks the badge for channel_message — see AppState).
     try:
-        from ...core.routes.channels_ws import manager as _ch_manager
+        from ...werk.routes.channels_ws import manager as _ch_manager
         async with _ch_manager.lock:
             conn_count = len(_ch_manager.active_connections.get(user_id, set()))
         logger.info(

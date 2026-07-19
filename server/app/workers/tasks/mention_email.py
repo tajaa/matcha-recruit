@@ -1,6 +1,6 @@
 """Celery task: email a user when they're @-mentioned in a channel and offline.
 
-Triggered from `core/routes/channels_ws.py` after a message containing one or
+Triggered from `werk/routes/channels_ws.py` after a message containing one or
 more resolved mentions is broadcast. The task checks Redis for an "online"
 heartbeat key (written by the WS server on every receive); only mentioned users
 without a fresh heartbeat get an email. A throttle key per (user, channel)
