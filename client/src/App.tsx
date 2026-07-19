@@ -103,6 +103,9 @@ const LocationIntake = lazy(() => import("./pages/shared/LocationIntake"));
 const ExternalIntake = lazy(() => import("./pages/shared/ExternalIntake"));
 const RequestInfoForm = lazy(() => import("./pages/shared/RequestInfoForm"));
 const SignPolicy = lazy(() => import("./pages/shared/SignPolicy"));
+const SignEmployeeDocument = lazy(
+  () => import("./pages/shared/SignEmployeeDocument"),
+);
 
 // On the dedicated Cappe domain the Cappe route tree also mounts at "/" so
 // the bare apex shows the Gummfit landing instead of the Matcha landing.
@@ -232,6 +235,10 @@ export default function App() {
         <Route path="/intake/external/:token" element={<ExternalIntake />} />
         <Route path="/request-info/:token" element={<RequestInfoForm />} />
         <Route path="/sign/:token" element={<SignPolicy />} />
+        <Route
+          path="/sign-document/:token"
+          element={<SignEmployeeDocument />}
+        />
         <Route path="/cappe/*" element={<CappeRoutes />} />
         {/* Dedicated Cappe domain: bare apex serves the Cappe tree at root.
             /cappe/* links inside the pages still resolve via the mount above,

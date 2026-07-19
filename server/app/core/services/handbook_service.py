@@ -4269,7 +4269,8 @@ class HandbookService:
                         skipped += 1
                         continue
 
-                    record = {"employee_id": employee["id"]}
+                    sign_token = secrets.token_urlsafe(32)
+                    record = {"employee_id": employee["id"], "sign_token": sign_token}
                     record.update(insertable)
                     cols = [col for col in record.keys() if col in columns]
                     values = [record[col] for col in cols]
@@ -4285,7 +4286,8 @@ class HandbookService:
                     )
                     if result == "INSERT 0 1":
                         assigned += 1
-                        notify_rows.append(dict(employee))
+                        # Carries the public sign link's token — no login required to acknowledge.
+                        notify_rows.append({**dict(employee), "sign_token": sign_token})
                     else:
                         skipped += 1
 
@@ -4359,6 +4361,7 @@ class HandbookService:
                         to_name=name or None,
                         company_name=company_name or "Your employer",
                         handbook_title=handbook_title,
+                        sign_token=row.get("sign_token"),
                     )
                 except Exception as exc:  # one bad address must not stop the rest
                     logger.warning(
