@@ -1,3 +1,4 @@
+import logging
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request
@@ -6,6 +7,8 @@ from pydantic import BaseModel
 from ..services.handbook_service import HandbookService
 from ..services.policy_service import SignatureService
 from ...database import get_connection
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/employee-documents", tags=["public-employee-documents"])
 
@@ -25,7 +28,9 @@ class EmployeeDocumentSignData(BaseModel):
 
 
 class SignAction(BaseModel):
-    action: str  # "sign" or "decline"
+    # Acknowledgement is the only outcome employee_documents supports (its status
+    # has no 'declined' state), so this endpoint only signs — there is no action
+    # to choose. The typed legal name IS the signature.
     signature_data: Optional[str] = None
 
 
@@ -108,9 +113,7 @@ async def submit_employee_document_signature(token: str, data: SignAction, reque
     if doc["status"] != "pending_signature":
         raise HTTPException(status_code=410, detail="This signature request is no longer pending")
 
-    # employee_documents.status has no "declined" state (unlike policy_signatures) —
-    # acknowledgement is the only outcome the portal's own sign endpoint supports.
-    if data.action != "sign" or not data.signature_data:
+    if not data.signature_data or not data.signature_data.strip():
         raise HTTPException(status_code=400, detail="A typed signature is required")
 
     ip_address = request.client.host if request.client else None
@@ -150,7 +153,15 @@ async def submit_employee_document_signature(token: str, data: SignAction, reque
             signature_data=data.signature_data,
             ip_address=ip_address,
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        # The document is already signed; only the admin-side policy_signatures
+        # mirror failed. Don't fail the employee's request, but don't hide it —
+        # a silent miss leaves the admin dashboard out of sync with no trace.
+        logger.warning(
+            "Failed to sync employee document signature to policy tracking "
+            "(document_id=%s): %s",
+            doc["id"],
+            exc,
+        )
 
     return {"status": updated["status"], "message": "Signature recorded successfully"}

@@ -72,7 +72,6 @@ export default function SignEmployeeDocument() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          action: 'sign',
           signature_data: typedName.trim(),
         }),
       })

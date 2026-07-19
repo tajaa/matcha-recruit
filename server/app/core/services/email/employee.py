@@ -297,7 +297,19 @@ Questions? Contact your HR administrator.
         import html as _html
 
         app_base_url = self.settings.app_base_url
-        sign_url = f"{app_base_url}/sign-document/{sign_token}" if sign_token else f"{app_base_url}/portal"
+        if sign_token:
+            sign_url = f"{app_base_url}/sign-document/{sign_token}"
+        else:
+            # No public token → the recipient must log into the portal to sign,
+            # i.e. the login-wall this flow exists to avoid. Only expected before
+            # migration signdoc01 is applied; log it so a persistent fallback is
+            # visible rather than a silent regression.
+            sign_url = f"{app_base_url}/portal"
+            logger.warning(
+                "Handbook acknowledgement email for %s has no sign_token; "
+                "falling back to portal login link.",
+                to_email,
+            )
         title_safe = _html.escape(handbook_title)
         html_content = f"""<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><style>
