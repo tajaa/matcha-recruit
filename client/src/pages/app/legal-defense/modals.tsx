@@ -77,7 +77,7 @@ export function NewMatterModal({ onClose, onCreated }: { onClose: () => void; on
 
   return (
     <Modal open onClose={onClose} title="New legal matter">
-      <div className="space-y-3">
+      <div className="space-y-3 max-h-[68vh] overflow-y-auto pr-1.5">
         <input ref={fileRef} type="file" accept="application/pdf,.pdf" className="hidden"
           onChange={(e) => { const f = e.target.files?.[0]; if (f) void parseDocument(f); e.target.value = '' }} />
         <button type="button" disabled={parsing} onClick={() => fileRef.current?.click()}
@@ -133,8 +133,10 @@ export function NewMatterModal({ onClose, onCreated }: { onClose: () => void; on
         {counsel && (
           <Input label="Counsel name" value={counselName} onChange={(e) => setCounselName(e.target.value)} placeholder="Firm or attorney" />
         )}
-        {err && <p className="text-sm text-red-400">{err}</p>}
-        <div className="flex justify-end gap-2 pt-1">
+      </div>
+      <div className="mt-3 border-t border-white/[0.06] pt-3">
+        {err && <p className="mb-2 text-sm text-red-400">{err}</p>}
+        <div className="flex justify-end gap-2">
           <Button variant="secondary" onClick={onClose}>Cancel</Button>
           <Button onClick={() => void submit()} disabled={saving}>{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Create'}</Button>
         </div>
