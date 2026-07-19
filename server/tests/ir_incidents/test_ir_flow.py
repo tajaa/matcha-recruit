@@ -288,3 +288,179 @@ class TestCloseProgressMatchesCloseGuards:
         assert ir_flow.treatment_beyond_first_aid({"treatment_beyond_first_aid": "true"}) is True
         assert ir_flow.treatment_beyond_first_aid({"treatment_beyond_first_aid": True}) is True
         assert ir_flow.treatment_beyond_first_aid({"treatment_beyond_first_aid": "false"}) is False
+
+
+# ---------------------------------------------------------------------------
+# copilot_evidence — the preponderance-of-evidence + duration tracker.
+#
+# A second, independent read on "how much is left" that answers a question
+# close_progress can't: not "what does the law require to close" but "how
+# well-documented is this record" — a property-damage report can clear every
+# close gate while still having no photos, no witnesses, no corrective action.
+# Plus a severity-scaled days-open budget so an investigation can't drift
+# open indefinitely unnoticed.
+# ---------------------------------------------------------------------------
+
+from datetime import datetime, timedelta, timezone  # noqa: E402
+
+
+def _evidence_incident(**kw):
+    base = {
+        "status": "reported",
+        "incident_type": "other",
+        "severity": "medium",
+        "description": "",
+        "root_cause": None,
+        "corrective_actions": None,
+        "category_data": {},
+    }
+    base.update(kw)
+    return base
+
+
+def _naive_utc_now():
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+class TestCopilotEvidenceScore:
+    def test_root_cause_excluded_from_denominator_when_not_required(self):
+        # incident_type='other' / severity='medium' owes no root cause, so the
+        # ceiling is the other four factors (15+15+20+25 = 75). All four done
+        # must reach a full 100, not strand at 75/100 — otherwise every
+        # no-injury report is permanently "insufficient".
+        e = ir_flow.copilot_evidence(
+            _evidence_incident(description="A rack was dented."),
+            document_count=1, witness_count=1, corrective_action_count=1,
+        )
+        assert e["score"] == 100
+        assert e["sufficient"] is True
+        assert e["missing"] == []
+        assert "Root cause analysis" not in e["signals"]
+
+    def test_root_cause_required_incident_missing_it_is_insufficient(self):
+        # safety/high owes a root cause (denominator now includes its 25).
+        e = ir_flow.copilot_evidence(
+            _evidence_incident(
+                incident_type="safety", severity="high",
+                description="Worker slipped.",
+            ),
+            document_count=1, witness_count=1, corrective_action_count=1,
+        )
+        # 15+15+20+25 earned of 100 = 75, below the 80 threshold.
+        assert e["score"] == 75
+        assert e["sufficient"] is False
+        assert e["missing"] == ["Root cause analysis"]
+
+    def test_threshold_is_inclusive_at_the_boundary(self):
+        # Exactly 80 (everything but the 20-weight documents factor) must count
+        # as sufficient — the check is score >= threshold.
+        e = ir_flow.copilot_evidence(
+            _evidence_incident(
+                incident_type="safety", severity="high",
+                description="Worker slipped.", root_cause="Wet floor, no signage.",
+            ),
+            document_count=0, witness_count=1, corrective_action_count=1,
+        )
+        assert e["score"] == 80
+        assert e["sufficient"] is True
+        assert e["missing"] == ["Supporting documents"]
+
+    def test_signals_and_missing_partition_the_applicable_factors(self):
+        e = ir_flow.copilot_evidence(
+            _evidence_incident(description="Something happened."),
+            document_count=0, witness_count=0, corrective_action_count=0,
+        )
+        assert e["signals"] == ["Incident description"]
+        # documents/witnesses/corrective all pending; root cause not applicable.
+        assert set(e["missing"]) == {
+            "Witness statements", "Supporting documents", "Corrective actions",
+        }
+        assert "Root cause analysis" not in e["missing"]
+
+    def test_declined_root_cause_counts_as_done_from_json_string(self):
+        # asyncpg hands category_data back as either dict or str; an explicit
+        # decline satisfies the root-cause factor (same rule as close_progress).
+        e = ir_flow.copilot_evidence(
+            _evidence_incident(
+                incident_type="safety", severity="high",
+                description="Worker slipped.",
+                category_data='{"root_cause_declined": true}',
+            ),
+            document_count=1, witness_count=1, corrective_action_count=1,
+        )
+        assert "Root cause analysis" in e["signals"]
+        assert e["score"] == 100
+
+    def test_legacy_free_text_corrective_actions_satisfies_the_factor(self):
+        # The factor is satisfied by a structured CAPA row OR the legacy
+        # free-text ir_incidents.corrective_actions column.
+        e = ir_flow.copilot_evidence(
+            _evidence_incident(
+                description="A rack was dented.",
+                corrective_actions="Retrained the operator.",
+            ),
+            document_count=1, witness_count=1, corrective_action_count=0,
+        )
+        assert "Corrective actions" in e["signals"]
+
+    def test_empty_incident_scores_zero_without_raising(self):
+        e = ir_flow.copilot_evidence({})
+        assert e["score"] == 0
+        assert e["sufficient"] is False
+        assert e["days_open"] == 0
+
+
+class TestCopilotEvidenceDuration:
+    def test_severity_scales_the_open_days_budget(self):
+        for severity, expected in [
+            ("critical", 7), ("high", 14), ("medium", 30), ("low", 45),
+        ]:
+            e = ir_flow.copilot_evidence(_evidence_incident(severity=severity))
+            assert e["max_days"] == expected
+
+    def test_unknown_severity_falls_back_to_default_budget(self):
+        e = ir_flow.copilot_evidence(_evidence_incident(severity="bogus"))
+        assert e["max_days"] == 30
+
+    def test_open_incident_past_budget_is_overdue(self):
+        e = ir_flow.copilot_evidence(_evidence_incident(
+            severity="medium",
+            reported_at=_naive_utc_now() - timedelta(days=40),
+        ))
+        assert e["days_open"] == 40
+        assert e["is_overdue"] is True
+
+    def test_open_incident_within_budget_is_not_overdue(self):
+        e = ir_flow.copilot_evidence(_evidence_incident(
+            severity="medium",
+            reported_at=_naive_utc_now() - timedelta(days=5),
+        ))
+        assert e["is_overdue"] is False
+
+    def test_terminal_incident_freezes_days_open_and_never_overdue(self):
+        opened = _naive_utc_now() - timedelta(days=100)
+        e = ir_flow.copilot_evidence(_evidence_incident(
+            status="closed", severity="critical",
+            reported_at=opened, resolved_at=opened + timedelta(days=5),
+        ))
+        assert e["days_open"] == 5  # frozen at resolved_at, not 100 days to "now"
+        assert e["is_overdue"] is False
+
+    def test_closed_incident_never_overdue_even_when_it_ran_long(self):
+        opened = _naive_utc_now() - timedelta(days=100)
+        e = ir_flow.copilot_evidence(_evidence_incident(
+            status="resolved", severity="critical",
+            reported_at=opened, resolved_at=opened + timedelta(days=90),
+        ))
+        assert e["days_open"] == 90
+        assert e["is_overdue"] is False
+
+    def test_timezone_aware_timestamp_does_not_raise(self):
+        # F1: reported_at may arrive tz-aware if the column is ever migrated to
+        # TIMESTAMPTZ; a mixed naive/aware subtraction would 500 the endpoint.
+        e = ir_flow.copilot_evidence(_evidence_incident(
+            severity="medium",
+            reported_at=datetime.now(timezone.utc) - timedelta(days=10),
+        ))
+        assert e["days_open"] == 10
+        assert e["is_overdue"] is False

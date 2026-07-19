@@ -384,6 +384,115 @@ def close_progress(incident: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# ── Preponderance-of-evidence tracker ────────────────────────────────────
+# Mirrors the ER Copilot's evidence-confidence banner (ERGuidancePanel /
+# guidance.determination_confidence): a second, independent read on "how
+# much is left" from close_progress above. close_progress answers "what does
+# the law require"; this answers "how well-documented is the record" — a
+# property-damage report can clear every close gate (no root cause required,
+# no OSHA chain) while still having no photos, no witnesses, and no logged
+# corrective action, and that gap is exactly what this surfaces.
+EVIDENCE_SUFFICIENCY_THRESHOLD = 80
+
+_EVIDENCE_FACTOR_LABELS = {
+    "description": "Incident description",
+    "witnesses": "Witness statements",
+    "documents": "Supporting documents",
+    "root_cause": "Root cause analysis",
+    "corrective_actions": "Corrective actions",
+}
+
+# Severity-scaled ceiling on days an incident should stay open — the other
+# half of "prevent indefinite pilot durations". A high evidence score doesn't
+# help if nobody ever revisits a report that's been sitting untouched, so
+# this is surfaced alongside the score rather than left to a separate sweep.
+_MAX_OPEN_DAYS = {"critical": 7, "high": 14, "medium": 30, "low": 45}
+_DEFAULT_MAX_OPEN_DAYS = 30
+
+
+def _as_naive_utc(dt: datetime) -> datetime:
+    """Normalize to naive UTC so mixed naive/aware timestamps can subtract.
+
+    ir_incidents timestamps are naive TIMESTAMP today, but newer IR tables
+    are already TIMESTAMPTZ — if these columns follow, a naive-minus-aware
+    subtraction raises TypeError and 500s the whole transcript endpoint,
+    not just this widget.
+    """
+    if dt.tzinfo is None:
+        return dt
+    return dt.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def copilot_evidence(
+    incident: dict[str, Any],
+    *,
+    document_count: int = 0,
+    witness_count: int = 0,
+    corrective_action_count: int = 0,
+) -> dict[str, Any]:
+    """Weighted evidence-sufficiency score (0-100) plus a days-open budget.
+
+    Each factor only counts toward the denominator when it applies to this
+    incident — a near-miss with no injury never owes a root cause, and
+    scoring it against a 100%-possible ceiling that includes an inapplicable
+    factor would strand every near-miss report below "sufficient" forever.
+    Counts (documents/witnesses/corrective actions) are computed by the
+    caller — this function stays DB-free like ``close_progress`` above.
+    """
+    incident = incident or {}
+    category_data = _safe_json(incident.get("category_data"), {}) or {}
+    status = (incident.get("status") or "").lower()
+    is_terminal = status in {"closed", "resolved"}
+    incident_type = (incident.get("incident_type") or "").lower()
+    severity = (incident.get("severity") or "").lower()
+
+    # (key, weight, applicable, done)
+    factors = [
+        ("description", 15, True, bool((incident.get("description") or "").strip())),
+        ("witnesses", 15, True, witness_count > 0),
+        ("documents", 20, True, document_count > 0),
+        (
+            "root_cause", 25,
+            root_cause_required(incident_type=incident_type, severity=severity),
+            not needs_root_cause(
+                incident_type=incident_type, severity=severity,
+                root_cause=incident.get("root_cause"), category_data=category_data,
+            ),
+        ),
+        (
+            "corrective_actions", 25, True,
+            corrective_action_count > 0 or bool((incident.get("corrective_actions") or "").strip()),
+        ),
+    ]
+
+    applicable = [(key, weight, done) for key, weight, applies, done in factors if applies]
+    total_weight = sum(weight for _, weight, _ in applicable) or 1
+    earned_weight = sum(weight for _, weight, done in applicable if done)
+    score = round(100 * earned_weight / total_weight)
+
+    max_days = _MAX_OPEN_DAYS.get(severity, _DEFAULT_MAX_OPEN_DAYS)
+    opened_at = incident.get("reported_at") or incident.get("created_at")
+    if opened_at is None:
+        days_open = 0
+    else:
+        # Normalize both ends to naive UTC before subtracting — see
+        # _as_naive_utc: a mixed naive/aware pair raises TypeError and would
+        # 500 the whole transcript endpoint, not just this widget.
+        end = (incident.get("resolved_at") if is_terminal else None) or datetime.now(timezone.utc)
+        days_open = max(0, (_as_naive_utc(end) - _as_naive_utc(opened_at)).days)
+
+    return {
+        "score": score,
+        "threshold": EVIDENCE_SUFFICIENCY_THRESHOLD,
+        "sufficient": score >= EVIDENCE_SUFFICIENCY_THRESHOLD,
+        "signals": [_EVIDENCE_FACTOR_LABELS[k] for k, _, done in applicable if done],
+        "missing": [_EVIDENCE_FACTOR_LABELS[k] for k, _, done in applicable if not done],
+        "days_open": days_open,
+        "max_days": max_days,
+        "is_overdue": not is_terminal and days_open > max_days,
+    }
+
+
 def resolve_next_step(
     incident: dict[str, Any],
     analyses: list[dict[str, Any]] | None,
