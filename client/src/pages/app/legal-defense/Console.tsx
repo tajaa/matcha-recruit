@@ -223,6 +223,19 @@ function Entry({ m, cidIndex, onView }: {
         {isUser ? m.content : <CitedText text={m.content} cidIndex={cidIndex} onView={onView} />}
       </p>
 
+      {!isUser && meta?.intake_requests && meta.intake_requests.length > 0 && (
+        <div className="mt-3 max-w-[65ch] border-l-2 border-sky-500/40 pl-3">
+          <div className="text-[10px] font-medium uppercase tracking-[0.15em] text-sky-400/80">
+            To complete this case file
+          </div>
+          <ul className="mt-1 list-disc pl-4 text-[13px] leading-relaxed text-zinc-300">
+            {meta.intake_requests.map((r, i) => (
+              <li key={i}>{r}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {!isUser && meta?.evidence_map && meta.evidence_map.length > 0 && (
         <div className="mt-3 max-w-[65ch] space-y-2 border-l-2 border-emerald-500/30 pl-3">
           <div className={LABEL}>Grounded observations</div>

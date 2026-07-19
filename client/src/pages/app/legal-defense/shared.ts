@@ -28,7 +28,13 @@ export function seedRecap(m: Matter): string | null {
   if (m.evidence_start && m.evidence_end) lines.push(`Timeframe: ${m.evidence_start} – ${m.evidence_end}`)
   else if (m.evidence_start) lines.push(`Timeframe: from ${m.evidence_start}`)
   else if (m.evidence_end) lines.push(`Timeframe: through ${m.evidence_end}`)
-  lines.push('Map the records to this claim and flag what counsel should look at.')
+  // Invites either path deliberately: the old copy ("Map the records … and flag
+  // what counsel should look at.") instructed the model to conclude, which on a
+  // thin matter steered it straight past the intake round.
+  lines.push(
+    "Map the records to this claim. If the case file is missing anything you'd need, "
+    + 'tell me what to get you before you analyze it.',
+  )
   return lines.join('\n')
 }
 

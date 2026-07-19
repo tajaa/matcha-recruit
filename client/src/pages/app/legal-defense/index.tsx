@@ -213,7 +213,11 @@ function MatterWorkbench({ matter, evidence, research, researching, onRunResearc
       onResult: (data: ChatResult) => {
         setMessages((prev) => [...prev, {
           role: 'assistant', content: data.assistant_text, created_at: new Date().toISOString(),
-          metadata: { evidence_map: data.evidence_map, open_questions: data.open_questions, dropped_citations: data.dropped_citations },
+          metadata: {
+            evidence_map: data.evidence_map, open_questions: data.open_questions,
+            dropped_citations: data.dropped_citations,
+            intake_requests: data.intake_requests, ready_for_analysis: data.ready_for_analysis,
+          },
         }])
       },
       onError: (m) => toast(m, 'error'),

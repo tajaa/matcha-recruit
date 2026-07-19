@@ -56,6 +56,9 @@ MODEL = "gemini-3-flash-preview"
 _GEMINI_TIMEOUT = 90
 _PER_SOURCE_CAP = 100
 _HISTORY_TURNS = 12
+# Matches the prompt's "AT MOST 3 requests" rule; enforced server-side because
+# the model's compliance with its own instruction is not a guarantee.
+_MAX_INTAKE_REQUESTS = 3
 
 DISCLAIMER = (
     "Prepared from system records to assist counsel. Reflects records on file as "
@@ -1208,6 +1211,9 @@ async def gather_evidence(conn, company_id, start, end, features: dict, matter: 
 
     return {"sources": sources, "index": index, "notes": notes,
             "legal_context": legal_context,
+            # Carried so downstream callers can tell "feature off" from "no
+            # records" — the sources dict alone conflates them (see intake_gaps).
+            "features": features,
             "theory": {
                 "slug": theory,
                 "label": topic.label,
@@ -1233,10 +1239,82 @@ HARD RULES:
 - This is not legal advice; frame everything for attorney review.
 - Records with `law:`, `bill:`, or `case:` IDs are LEGAL CONTEXT (governing requirements, pending legislation, externally researched case law) — they describe the legal landscape, NOT the company's conduct. You may cite them to identify which requirements or authorities appear relevant. NEVER conclude the company complied with or violated anything, and NEVER present a `case:` record as precedent analysis — flag it for counsel to evaluate.
 
+INTAKE FIRST — build the case file before you analyze it:
+- A matter usually opens before its record is complete. When material listed under MATERIAL NOT YET IN THE RECORD is still missing, spend the turn ASKING THE ADMIN for it instead of concluding. Ask conversationally, in plain language, for what would actually change the picture — name the document or fact, and say briefly why it matters.
+- Ask in small batches: AT MOST 3 requests in a turn. Prefer the ones that matter most for this matter type.
+- On a turn where you are still gathering, set "ready_for_analysis": false and return "evidence_map": [] and "open_questions": [] — an empty record produces no observations. Put your questions in "intake_requests".
+- ADVANCE, never loop. Do NOT ask for the same item twice. If the admin supplies it, says they do not have it, declines, or asks you to proceed anyway, set "ready_for_analysis": true and analyze what exists — then record the still-missing item under "open_questions" for counsel.
+- When the corpus is already substantive, or the conversation has resolved the gaps, set "ready_for_analysis": true and produce the analysis. Do not manufacture an intake round on a matter that is already well documented.
+- "intake_requests" is addressed to the ADMIN (things they can go get). "open_questions" is addressed to COUNSEL (what the assembled record does not establish). Never mix them.
+
 Return STRICT JSON ONLY (no markdown, no prose outside the JSON), shape:
 {"assistant_text": "<your neutral, conversational reply to the user>",
+ "ready_for_analysis": true|false,
+ "intake_requests": ["<a specific document or fact to ask the ADMIN to provide>"],
  "evidence_map": [{"point": "<a factual observation grounded in the records>", "cited_ids": ["<source:uuid>", ...]}],
  "open_questions": ["<what the records do NOT establish / what counsel should clarify>"]}"""
+
+
+# Corpus sources a matter type would normally draw on. Used only to ask the
+# admin better questions — never to assert a record is absent (a source key can
+# be missing from the corpus because the feature is off, the query failed, or
+# the window/subject filter excluded it; see _intake_source_gaps).
+_MATTER_TYPE_EXPECTED: dict[str, tuple[str, ...]] = {
+    "eeoc_charge": ("policy_ack", "training", "er_cases", "discipline"),
+    "single_plaintiff": ("er_cases", "discipline", "policy_ack"),
+    "class_action": ("discipline", "policy_ack", "compliance"),
+    "subpoena": ("er_cases", "incidents"),
+    "audit": ("compliance", "training", "policy_ack"),
+    "other": ("er_cases", "policy_ack"),
+}
+
+
+def _intake_source_gaps(matter: dict, corpus: dict) -> list[dict]:
+    """Expected-but-empty evidence sources for this matter type.
+
+    A source is only a gap when the company actually RUNS it: ``gather_evidence``
+    omits a key when the feature is disabled, when the query errored, and when it
+    simply returned nothing — three very different things that look identical in
+    ``corpus["sources"]``. Asking an employer without the training feature to go
+    find training records is noise, so anything not enabled is skipped here.
+    """
+    features = corpus.get("features") or {}
+    enabled_for = {key: pred for key, _label, _fn, pred in _SOURCES}
+    labels = {key: label for key, label, _fn, _pred in _SOURCES}
+    sources = corpus.get("sources") or {}
+    out = []
+    for key in _MATTER_TYPE_EXPECTED.get(matter.get("matter_type") or "other", ()):
+        pred = enabled_for.get(key)
+        if pred is None or not pred(features):
+            continue
+        if sources.get(key, {}).get("records"):
+            continue
+        out.append({"key": key, "label": labels.get(key, key)})
+    return out
+
+
+def intake_gaps(matter: dict, corpus: dict) -> list[dict]:
+    """What the case file is still missing — matter facts plus empty sources.
+
+    Pure function (unit-tested): reads only the matter dict and the already
+    assembled corpus, so it costs no queries and no latency on the chat turn.
+    Returns ``[{"key", "label"}]``.
+
+    This is a prompt-context signal for asking better questions. It is NOT a
+    finding of absence and must never be rendered as one — see the wording in
+    ``_intake_text``.
+    """
+    gaps: list[dict] = []
+    if not (matter.get("allegation") or "").strip():
+        gaps.append({"key": "allegation", "label": "What is actually being alleged or claimed"})
+    if not (matter.get("defense_theory") or "").strip():
+        gaps.append({"key": "context", "label": "The company's account of what happened"})
+    if not matter.get("evidence_start") and not matter.get("evidence_end"):
+        gaps.append({"key": "window", "label": "The relevant time period for evidence"})
+    if not ((corpus.get("legal_context") or {}).get("chain")):
+        gaps.append({"key": "jurisdiction", "label": "Governing jurisdiction (work location or state)"})
+    gaps.extend(_intake_source_gaps(matter, corpus))
+    return gaps
 
 
 def _corpus_text(corpus: dict) -> str:
@@ -1268,6 +1346,20 @@ def _scope_text(corpus: dict) -> str:
     return "\n".join(lines) or "- No subject filter was applied to this corpus."
 
 
+def _intake_text(matter: dict, corpus: dict) -> str:
+    """Render the intake gaps for the prompt.
+
+    Deliberately worded as "not provided", never "does not exist": CORPUS SCOPE
+    already warns that a filtered corpus is not a finding of absence, and this
+    block must not undo that by reading as one. It tells the model what to ASK
+    for — it never licenses a statement about what the company does or does not
+    have."""
+    gaps = intake_gaps(matter, corpus)
+    if not gaps:
+        return "- Nothing obvious is missing. Analyze what the records show."
+    return "\n".join(f"- {g['label']}" for g in gaps)
+
+
 def _build_prompt(matter: dict, history: list[dict], corpus: dict, latest: str) -> str:
     return f"""{_SYSTEM}
 
@@ -1281,6 +1373,11 @@ CORPUS SCOPE — the corpus below is a FILTERED subset of the company's records.
 A record type missing from it was filtered out, NOT proven absent. Never state or
 imply the company has no records of a kind that this scope excluded.
 {_scope_text(corpus)}
+
+MATERIAL NOT YET IN THE RECORD — things the admin has not provided, which is NOT
+the same as things that do not exist. Use this to decide what to ASK FOR. Never
+state or imply the company lacks any of it.
+{_intake_text(matter, corpus)}
 
 EVIDENCE CORPUS (the ONLY records you may cite):
 {_corpus_text(corpus)}
@@ -1316,8 +1413,17 @@ async def _generate(matter: dict, history: list[dict], corpus: dict, latest: str
         timeout=_GEMINI_TIMEOUT,
     )
     data = _parse_json(getattr(resp, "text", "") or "")
+    # Default TRUE when the key is absent or non-boolean: a malformed response
+    # then degrades to the pre-intake behavior (analyze and show it) rather than
+    # silently withholding every observation the model just produced.
+    ready = data.get("ready_for_analysis")
     return {
         "assistant_text": str(data.get("assistant_text") or "").strip(),
+        "ready_for_analysis": ready if isinstance(ready, bool) else True,
+        "intake_requests": [
+            str(r).strip() for r in (data.get("intake_requests") or [])
+            if isinstance(r, (str, int, float)) and str(r).strip()
+        ][:_MAX_INTAKE_REQUESTS],
         "evidence_map": data.get("evidence_map") or [],
         "open_questions": [str(q) for q in (data.get("open_questions") or []) if q],
     }
@@ -1344,8 +1450,23 @@ async def run_chat_turn(matter: dict, history: list[dict], corpus: dict, latest:
     if dropped:
         result["dropped_citations"] = dropped
         logger.info("legal_defense: dropped %d hallucinated citation(s)", len(dropped))
+
+    # Still gathering: withhold the analysis blocks. The prompt already asks for
+    # this; enforcing it here means a model that ignores the instruction cannot
+    # hand counsel-facing conclusions drawn from a record the admin is still
+    # assembling. Guarded on there actually being something to ask — a turn that
+    # claims not-ready but produced no requests would otherwise render as a dead
+    # end, so it degrades to showing whatever analysis it did produce.
+    if not result.get("ready_for_analysis") and result.get("intake_requests"):
+        result["evidence_map"] = []
+        result["open_questions"] = []
+    else:
+        result["ready_for_analysis"] = True
+
     if not result["assistant_text"]:
         result["assistant_text"] = (
+            "I still need a bit more before I can organize this."
+            if result.get("intake_requests") else
             "I couldn't organize a response from the records this time. Try rephrasing, "
             "or widen the matter's date range."
         )

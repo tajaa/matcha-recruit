@@ -6,6 +6,7 @@ into a packet.
 """
 import asyncio
 import io
+import json
 import zipfile
 
 from app.core.compliance_registry import CATEGORY_KEYS
@@ -974,3 +975,143 @@ def test_deadline_bucket_boundaries():
     assert bucket_for(14) == 14
     assert bucket_for(15) is None  # beyond lookahead
     assert bucket_for(-1) is None  # overdue — no nag, UI shows red
+
+
+# --- intake gathering (ask before concluding) -------------------------------
+
+def _corpus(sources=None, features=None, chain=True):
+    return {
+        "sources": sources or {},
+        "index": {},
+        "notes": [],
+        "features": features if features is not None else {},
+        "legal_context": {"chain": [{"display_name": "California"}]} if chain else None,
+    }
+
+
+def _full_matter():
+    return {"matter_type": "other", "allegation": "a", "defense_theory": "b",
+            "evidence_start": "2026-01-01", "evidence_end": "2026-02-01"}
+
+
+def test_intake_gaps_flags_unset_matter_fields():
+    keys = {g["key"] for g in ld.intake_gaps({"matter_type": "other"}, _corpus(chain=False))}
+    assert {"allegation", "context", "window", "jurisdiction"} <= keys
+
+
+def test_intake_gaps_clean_when_matter_and_sources_populated():
+    m = _full_matter()
+    corpus = _corpus(
+        sources={"er_cases": {"label": "ER", "records": [{"cid": "er_case:1"}]},
+                 "policy_ack": {"label": "Acks", "records": [{"cid": "policy_ack:1"}]}},
+        features={"handbooks": True},
+    )
+    assert ld.intake_gaps(m, corpus) == []
+
+
+def test_intake_gaps_reports_expected_but_empty_source():
+    m = _full_matter()
+    # er_cases is ungated and empty -> a real gap; policy_ack is populated.
+    corpus = _corpus(sources={"policy_ack": {"label": "Acks", "records": [{"cid": "p:1"}]}},
+                     features={"handbooks": True})
+    assert {g["key"] for g in ld.intake_gaps(m, corpus)} == {"er_cases"}
+
+
+def test_intake_gaps_skips_sources_the_company_does_not_run():
+    """A disabled feature is not a gap — asking for training records from a
+    company without the training feature is noise, and gather_evidence omits
+    disabled, errored and empty sources identically."""
+    m = {**_full_matter(), "matter_type": "eeoc_charge"}
+    corpus = _corpus(sources={}, features={})  # training/discipline/handbooks all off
+    keys = {g["key"] for g in ld.intake_gaps(m, corpus)}
+    assert "training" not in keys and "discipline" not in keys
+    assert "er_cases" in keys          # ungated source, genuinely empty
+    assert "policy_ack" in keys        # handbooks defaults True
+
+
+def _turn(monkeypatch, payload, corpus=None):
+    async def fake_generate(matter, history, corpus_, latest):
+        return payload
+    monkeypatch.setattr(ld, "_generate", fake_generate)
+    evs = []
+
+    async def drain():
+        async for e in ld.run_chat_turn({"matter_type": "other"}, [], corpus or _corpus(), "hi"):
+            evs.append(e)
+    asyncio.run(drain())
+    return next(e["data"] for e in evs if e["type"] == "result")
+
+
+def test_gathering_turn_withholds_analysis_blocks(monkeypatch):
+    out = _turn(monkeypatch, {
+        "assistant_text": "What was the termination date?",
+        "ready_for_analysis": False,
+        "intake_requests": ["The termination letter"],
+        "evidence_map": [{"point": "leaked", "cited_ids": []}],
+        "open_questions": ["leaked too"],
+    })
+    assert out["evidence_map"] == [] and out["open_questions"] == []
+    assert out["intake_requests"] == ["The termination letter"]
+
+
+def test_not_ready_without_requests_still_shows_analysis(monkeypatch):
+    """A turn claiming not-ready but asking for nothing is a dead end; it must
+    degrade to showing what it produced rather than rendering blank."""
+    out = _turn(monkeypatch, {
+        "assistant_text": "here", "ready_for_analysis": False, "intake_requests": [],
+        "evidence_map": [{"point": "p", "cited_ids": []}], "open_questions": ["q"],
+    })
+    assert out["evidence_map"] and out["open_questions"] == ["q"]
+    assert out["ready_for_analysis"] is True
+
+
+def test_ready_turn_passes_analysis_through(monkeypatch):
+    out = _turn(monkeypatch, {
+        "assistant_text": "here", "ready_for_analysis": True, "intake_requests": [],
+        "evidence_map": [{"point": "p", "cited_ids": []}], "open_questions": ["q"],
+    })
+    assert out["evidence_map"][0]["point"] == "p" and out["open_questions"] == ["q"]
+
+
+def _fake_model(monkeypatch, payload, captured=None):
+    class _Resp:
+        text = json.dumps(payload)
+
+    class _Models:
+        async def generate_content(self, model=None, contents=None):
+            if captured is not None:
+                captured["prompt"] = contents
+            return _Resp()
+
+    class _Client:
+        aio = type("_Aio", (), {"models": _Models()})
+
+    monkeypatch.setattr(ld, "_genai", lambda: _Client())
+
+
+def test_missing_ready_flag_defaults_to_analyzing(monkeypatch):
+    """A model response that omits (or garbles) the flag must degrade to the
+    pre-intake behavior — analyze and show it — not silently swallow every
+    observation it just produced."""
+    _fake_model(monkeypatch, {"assistant_text": "x",
+                              "evidence_map": [{"point": "p", "cited_ids": []}],
+                              "open_questions": []})
+    out = asyncio.run(ld._generate(_full_matter(), [], _corpus(), "hi"))
+    assert out["ready_for_analysis"] is True
+
+    _fake_model(monkeypatch, {"assistant_text": "x", "ready_for_analysis": "sure",
+                              "evidence_map": [], "open_questions": []})
+    assert asyncio.run(ld._generate(_full_matter(), [], _corpus(), "hi"))["ready_for_analysis"] is True
+
+
+def test_intake_requests_capped_and_coerced(monkeypatch):
+    captured = {}
+    _fake_model(monkeypatch, {
+        "assistant_text": "a", "ready_for_analysis": False,
+        "intake_requests": ["a", "", "  ", "b", "c", "d", "e"],
+        "evidence_map": [], "open_questions": [],
+    }, captured)
+    out = asyncio.run(ld._generate(_full_matter(), [], _corpus(), "hi"))
+    assert out["intake_requests"] == ["a", "b", "c"]     # blanks dropped, capped at 3
+    assert out["ready_for_analysis"] is False
+    assert "MATERIAL NOT YET IN THE RECORD" in captured["prompt"]

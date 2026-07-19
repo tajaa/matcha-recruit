@@ -165,11 +165,31 @@ async def _load_messages(conn, matter_id: str) -> list[dict]:
 
 
 async def _latest_memo(conn, matter_id: str) -> Optional[dict]:
+    """The newest assistant turn that actually carries an analysis.
+
+    Not simply the newest row: intake turns (the assistant asking the admin for
+    missing material) persist with an empty ``evidence_map`` by design, and
+    building the packet off one of those renders a memo whose observations
+    section reads "No grounded observations were recorded." even though an
+    earlier turn produced a full analysis. Prefer the newest turn with a
+    non-empty map; fall back to the newest row so matters predating this — and
+    matters whose only analysis genuinely found nothing — behave as before, and
+    so the caller's "discuss the matter in chat first" 400 still triggers only
+    on a matter with no assistant turn at all.
+    """
     row = await conn.fetchrow(
         "SELECT content, metadata FROM legal_matter_messages "
-        "WHERE matter_id = $1 AND role = 'assistant' ORDER BY created_at DESC LIMIT 1",
+        "WHERE matter_id = $1 AND role = 'assistant' "
+        "  AND COALESCE(jsonb_array_length(metadata -> 'evidence_map'), 0) > 0 "
+        "ORDER BY created_at DESC LIMIT 1",
         matter_id,
     )
+    if not row:
+        row = await conn.fetchrow(
+            "SELECT content, metadata FROM legal_matter_messages "
+            "WHERE matter_id = $1 AND role = 'assistant' ORDER BY created_at DESC LIMIT 1",
+            matter_id,
+        )
     if not row:
         return None
     meta = row["metadata"]
@@ -372,6 +392,8 @@ async def chat(matter_id: str, body: ChatIn, request: Request, current_user=Depe
                             "evidence_map": result_payload.get("evidence_map"),
                             "open_questions": result_payload.get("open_questions"),
                             "dropped_citations": result_payload.get("dropped_citations"),
+                            "intake_requests": result_payload.get("intake_requests"),
+                            "ready_for_analysis": result_payload.get("ready_for_analysis"),
                         }),
                     )
                     await c2.execute(

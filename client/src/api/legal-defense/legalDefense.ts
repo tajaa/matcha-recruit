@@ -48,6 +48,12 @@ export type MessageMeta = {
   evidence_map?: EvidenceMapItem[]
   open_questions?: string[]
   dropped_citations?: string[]
+  /** Asks directed at the ADMIN — documents or facts still needed to complete
+   *  the case file. Distinct from `open_questions`, which is for counsel. On a
+   *  gathering turn the server withholds the analysis blocks, so these arrive
+   *  with `evidence_map` and `open_questions` empty. */
+  intake_requests?: string[]
+  ready_for_analysis?: boolean
 } | null
 
 export type MatterMessage = {
@@ -195,6 +201,8 @@ export type ChatResult = {
   evidence_map: EvidenceMapItem[]
   open_questions: string[]
   dropped_citations?: string[]
+  intake_requests?: string[]
+  ready_for_analysis?: boolean
 }
 export type ChatHandlers = {
   onStatus?: (message: string) => void
