@@ -712,5 +712,15 @@ async def _build_hr_pilot_bundle_uncached(company_id: UUID) -> dict:
         "topic, say so plainly instead of inventing a policy — tell the supervisor "
         "to check with corporate HR."
     )
+    lines.append(
+        "\nOPERATIONAL RECORDS vs POLICY — the shift, training and incident records "
+        "above are FACTS about what is currently scheduled, completed or logged. "
+        "Cite them for who, when, and status. They are NOT policy and never "
+        "establish a rule: that someone is scheduled does not make it permitted, "
+        "and that a training is unrecorded does not by itself make the person "
+        "unqualified — it means there is no record. When a fact and a policy "
+        "interact ('can I put an untrained person on that shift?'), answer from the "
+        "policy or legal floor and cite the fact only as the situation it applies to."
+    )
     lines.append(_CITATION_INSTRUCTION)
     return {"context_text": "\n".join(lines), "corpus": corpus}

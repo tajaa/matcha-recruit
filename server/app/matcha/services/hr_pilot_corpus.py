@@ -50,11 +50,27 @@ logger = logging.getLogger(__name__)
 _MAX_HR_PILOT_SECTIONS = 60
 _MAX_HR_PILOT_POLICIES = 60
 
+# Operational-fact caps (Supervisor Copilot groups). These read live tables that
+# change daily, unlike the policy corpus above — the caps keep the prompt bounded
+# and every cap that bites emits a truncation note, so the model can never read a
+# clipped list as the complete picture.
+_SCHEDULE_LOOKAHEAD_DAYS = 7
+_MAX_SCHEDULE_SHIFTS = 40
+_MAX_TRAINING_DETAIL = 15
+_MAX_RECENT_INCIDENTS = 15
+_INCIDENT_LOOKBACK_DAYS = 90
+
 # Namespaces the audit gate will recognise inside brackets. Deliberately a
 # closed list: a bare `[...]` regex also matches markdown link text and the
 # `[Handbook — Title]` headers this corpus renders, so unknown brackets must be
 # left alone rather than treated as a citation that failed to resolve.
-_CID_NAMESPACES = ("profile", "law", "handbook", "policy", "playbook", "floor", "ladder")
+_CID_NAMESPACES = (
+    "profile", "law", "handbook", "policy", "playbook", "floor", "ladder",
+    # Supervisor Copilot — operational facts, not policy. See the order-of-
+    # authority note in matcha_work_mode_contexts: these say who/when/status,
+    # they never establish a rule.
+    "schedule", "training", "incident",
+)
 _CITATION_RE = re.compile(
     r"\[(" + "|".join(_CID_NAMESPACES) + r")(:[^\]\s]+)?\]"
 )
@@ -138,13 +154,26 @@ async def gather_hr_pilot_grounding(conn, company_id) -> dict:
     except Exception:  # noqa: BLE001
         logger.warning("hr_pilot_corpus: requirement fetch failed for %s", company_id)
 
+    # One row carries both the industry (playbook selection) and the feature
+    # set. Features are resolved through the PURE `merge_company_features` rather
+    # than read straight off the JSONB: a tier overlay (Matcha-X grants
+    # `training` without storing it) is invisible to `enabled_features ->> …`,
+    # so a SQL-side check would hide a module the company actually has.
     industry = None
+    features: dict = {}
     try:
-        industry = await conn.fetchval(
-            "SELECT industry FROM companies WHERE id = $1", company_id
+        row = await conn.fetchrow(
+            "SELECT industry, enabled_features, signup_source FROM companies WHERE id = $1",
+            company_id,
         )
+        if row:
+            industry = row["industry"]
+            # merge_company_features parses a JSON string itself and applies the
+            # tier overlay — pass the raw column straight through.
+            from app.core.feature_flags import merge_company_features
+            features = merge_company_features(row["enabled_features"], row["signup_source"])
     except Exception:  # noqa: BLE001
-        logger.warning("hr_pilot_corpus: industry fetch failed for %s", company_id)
+        logger.warning("hr_pilot_corpus: company/feature fetch failed for %s", company_id)
 
     profile = None
     try:
@@ -154,6 +183,16 @@ async def gather_hr_pilot_grounding(conn, company_id) -> dict:
     except Exception:  # noqa: BLE001
         logger.warning("hr_pilot_corpus: profile fetch failed for %s", company_id)
 
+    # --- Operational facts (Supervisor Copilot) ---------------------------------
+    # Each rides its own product's feature flag, and the distinction between
+    # "off" and "on but empty" is load-bearing: `None` means the company doesn't
+    # have the module (the corpus emits a note so the model says so plainly
+    # instead of implying nobody is scheduled), `[]` means it has it and there is
+    # genuinely nothing in the window.
+    shifts = await _fetch_shifts(conn, company_id) if features.get("employee_schedule") else None
+    training = await _fetch_training(conn, company_id) if features.get("training") else None
+    incidents = await _fetch_incidents(conn, company_id) if features.get("incidents") else None
+
     return {
         "scopes": scopes,
         "profile": dict(profile) if profile else None,
@@ -161,7 +200,144 @@ async def gather_hr_pilot_grounding(conn, company_id) -> dict:
         "sections": [dict(r) for r in sections],
         "policies": [dict(r) for r in policies],
         "industry": industry,
+        "features": features,
+        "shifts": shifts,
+        "training": training,
+        "incidents": incidents,
     }
+
+
+async def _fetch_shifts(conn, company_id) -> list[dict]:
+    """Published shifts starting in the next `_SCHEDULE_LOOKAHEAD_DAYS`, each with
+    its assignees.
+
+    Deliberately does NOT import `routes/employee_schedule/_shared.fetch_shifts`
+    — a service reaching into a route package inverts the layering every other
+    service here respects. The query is small enough to own.
+
+    Only PUBLISHED shifts: a draft schedule is not something a supervisor should
+    be told is happening."""
+    try:
+        rows = await conn.fetch(
+            """
+            SELECT s.id, s.role, s.department, s.starts_at, s.ends_at,
+                   s.required_staff, s.location_id,
+                   COALESCE(
+                       json_agg(
+                           json_build_object(
+                               'name', TRIM(COALESCE(e.first_name,'') || ' ' || COALESCE(e.last_name,'')),
+                               'job_title', e.job_title,
+                               'status', a.status
+                           ) ORDER BY e.last_name, e.first_name
+                       ) FILTER (WHERE e.id IS NOT NULL),
+                       '[]'::json
+                   ) AS assignees
+            FROM schedule_shifts s
+            LEFT JOIN schedule_shift_assignments a ON a.shift_id = s.id
+            LEFT JOIN employees e ON e.id = a.employee_id
+            WHERE s.company_id = $1 AND s.status = 'published'
+              AND s.starts_at >= NOW()
+              AND s.starts_at < NOW() + ($2 || ' days')::interval
+            GROUP BY s.id
+            ORDER BY s.starts_at
+            LIMIT $3
+            """,
+            company_id, str(_SCHEDULE_LOOKAHEAD_DAYS), _MAX_SCHEDULE_SHIFTS,
+        )
+        return [dict(r) for r in rows]
+    except Exception:  # noqa: BLE001
+        logger.warning("hr_pilot_corpus: shift fetch failed for %s", company_id)
+        return []
+
+
+async def _fetch_training(conn, company_id) -> dict:
+    """Per-program completion aggregates + the overdue and expiring detail rows.
+
+    Same SQL shapes as the `training` thread mode's builder, with the row ids
+    added so each fact gets a stable cid. Status and dates only — scores and
+    certificate numbers are never selected, following the credential precedent
+    in that builder."""
+    out: dict = {"programs": [], "overdue": [], "expiring": []}
+    try:
+        out["programs"] = [dict(r) for r in await conn.fetch(
+            """
+            SELECT r.id, r.title, r.training_type, r.frequency_months,
+                   COUNT(tr.id) AS total_assigned,
+                   COUNT(tr.id) FILTER (WHERE tr.status='completed') AS completed,
+                   COUNT(tr.id) FILTER (WHERE tr.status IN ('assigned','in_progress')
+                                          AND tr.due_date < CURRENT_DATE) AS overdue
+            FROM training_requirements r
+            LEFT JOIN training_records tr ON tr.requirement_id = r.id
+            WHERE r.company_id=$1 AND r.is_active
+            GROUP BY r.id
+            ORDER BY overdue DESC, r.title
+            """,
+            company_id,
+        )]
+    except Exception:  # noqa: BLE001
+        logger.warning("hr_pilot_corpus: training-program fetch failed for %s", company_id)
+
+    try:
+        # `tr.title`, not `tr.course_name` — the latter is referenced in
+        # dashboard.py:1636 but does not exist on this table.
+        out["overdue"] = [dict(r) for r in await conn.fetch(
+            """
+            SELECT tr.id, tr.title, tr.due_date, e.first_name, e.last_name, e.job_title
+            FROM training_records tr
+            JOIN employees e ON e.id = tr.employee_id
+            WHERE tr.company_id=$1 AND tr.status IN ('assigned','in_progress')
+              AND tr.due_date < CURRENT_DATE
+            ORDER BY tr.due_date ASC
+            LIMIT $2
+            """,
+            company_id, _MAX_TRAINING_DETAIL,
+        )]
+    except Exception:  # noqa: BLE001
+        logger.warning("hr_pilot_corpus: training-overdue fetch failed for %s", company_id)
+
+    try:
+        out["expiring"] = [dict(r) for r in await conn.fetch(
+            """
+            SELECT tr.id, tr.title, tr.expiration_date, e.first_name, e.last_name, e.job_title
+            FROM training_records tr
+            JOIN employees e ON e.id = tr.employee_id
+            WHERE tr.company_id=$1 AND tr.status='completed'
+              AND tr.expiration_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '60 days'
+            ORDER BY tr.expiration_date ASC
+            LIMIT $2
+            """,
+            company_id, _MAX_TRAINING_DETAIL,
+        )]
+    except Exception:  # noqa: BLE001
+        logger.warning("hr_pilot_corpus: training-expiring fetch failed for %s", company_id)
+
+    return out
+
+
+async def _fetch_incidents(conn, company_id) -> list[dict]:
+    """Recent incidents, for situational awareness only.
+
+    Names no people: `involved_employee_ids` is deliberately not selected. A
+    supervisor asking "has anything happened at this site lately?" needs the
+    pattern, not a list of who was hurt — and the IR product is where a named
+    record is read, with its own access controls."""
+    try:
+        rows = await conn.fetch(
+            """
+            SELECT id, incident_number, title, incident_type, severity, status,
+                   occurred_at, location
+            FROM ir_incidents
+            WHERE company_id = $1
+              AND occurred_at >= NOW() - ($2 || ' days')::interval
+            ORDER BY occurred_at DESC
+            LIMIT $3
+            """,
+            company_id, str(_INCIDENT_LOOKBACK_DAYS), _MAX_RECENT_INCIDENTS,
+        )
+        return [dict(r) for r in rows]
+    except Exception:  # noqa: BLE001
+        logger.warning("hr_pilot_corpus: incident fetch failed for %s", company_id)
+        return []
 
 
 # --------------------------------------------------------------------------- #
@@ -245,13 +421,171 @@ def _ladder_records() -> list[dict]:
     ]
 
 
+def _fmt_dt(value) -> str:
+    """Weekday-bearing timestamp. A supervisor asks "who's on Saturday", so the
+    day name has to survive into the record — an ISO date alone makes the model
+    do calendar arithmetic, which it does badly."""
+    if value is None:
+        return "unscheduled"
+    try:
+        return value.strftime("%a %Y-%m-%d %H:%M")
+    except (AttributeError, ValueError):
+        return str(value)
+
+
+def _fmt_d(value) -> str:
+    if value is None:
+        return "no date"
+    try:
+        return value.strftime("%Y-%m-%d")
+    except (AttributeError, ValueError):
+        return str(value)
+
+
+def _schedule_records(shifts: list | None) -> list[dict]:
+    """One record per published upcoming shift, naming its assignees.
+
+    The shift id is the cid: it is a real stable UUID, so a citation survives the
+    shift being retimed (the fact it points at is still that shift)."""
+    recs: list[dict] = []
+    for s in shifts or []:
+        if not isinstance(s, dict) or not s.get("id"):
+            continue
+        assignees = s.get("assignees")
+        if isinstance(assignees, str):
+            import json as _json
+            try:
+                assignees = _json.loads(assignees)
+            except (ValueError, TypeError):
+                assignees = []
+        assignees = [a for a in (assignees or []) if isinstance(a, dict)]
+
+        names = [str(a.get("name") or "").strip() for a in assignees]
+        names = [n for n in names if n]
+        required = s.get("required_staff")
+        role = s.get("role") or s.get("department") or "shift"
+
+        bits = [f"{_fmt_dt(s.get('starts_at'))} → {_fmt_dt(s.get('ends_at'))}"]
+        if names:
+            bits.append("assigned: " + ", ".join(names))
+        else:
+            bits.append("nobody assigned")
+        if required is not None:
+            # Staffing shortfall is a deterministic fact, computed here rather
+            # than left for the model to infer from two numbers.
+            short = int(required) - len(names)
+            bits.append(
+                f"needs {required}"
+                + (f" — SHORT BY {short}" if short > 0 else " — fully staffed")
+            )
+        recs.append({
+            "cid": f"schedule:{s['id']}",
+            "ref": f"Shift — {role} {_fmt_dt(s.get('starts_at'))}",
+            "summary": "; ".join(bits) + ".",
+            "when": _fmt_dt(s.get("starts_at")),
+            "role": str(role),
+            "assignee_names": names,
+        })
+    return recs
+
+
+def _training_records(training: dict | None) -> list[dict]:
+    """Per-program completion aggregates plus overdue/expiring detail rows.
+
+    Two cid shapes in one namespace, kept disjoint by construction: aggregates
+    are `training:program-<requirement_uuid>`, detail rows are
+    `training:<record_uuid>`. A raw UUID can never collide with a `program-`
+    prefix, so the flat index stays sound."""
+    training = training or {}
+    recs: list[dict] = []
+
+    for p in training.get("programs") or []:
+        if not isinstance(p, dict) or not p.get("id"):
+            continue
+        total = int(p.get("total_assigned") or 0)
+        done = int(p.get("completed") or 0)
+        overdue = int(p.get("overdue") or 0)
+        pct = round(done * 100 / total) if total else 0
+        bits = [f"{done}/{total} complete ({pct}%)"]
+        if overdue:
+            bits.append(f"{overdue} OVERDUE")
+        if p.get("frequency_months"):
+            bits.append(f"repeats every {p['frequency_months']} months")
+        recs.append({
+            "cid": f"training:program-{p['id']}",
+            "ref": f"Training program — {p.get('title')}",
+            "summary": "; ".join(bits) + ".",
+            "when": "current",
+            "training_type": p.get("training_type"),
+        })
+
+    for r in training.get("overdue") or []:
+        if not isinstance(r, dict) or not r.get("id"):
+            continue
+        who = f"{r.get('first_name') or ''} {r.get('last_name') or ''}".strip() or "employee"
+        recs.append({
+            "cid": f"training:{r['id']}",
+            "ref": f"Overdue training — {who}",
+            "summary": f"{who} has not completed {r.get('title')}; was due {_fmt_d(r.get('due_date'))}.",
+            "when": _fmt_d(r.get("due_date")),
+            "status": "overdue",
+        })
+
+    for r in training.get("expiring") or []:
+        if not isinstance(r, dict) or not r.get("id"):
+            continue
+        who = f"{r.get('first_name') or ''} {r.get('last_name') or ''}".strip() or "employee"
+        recs.append({
+            "cid": f"training:{r['id']}",
+            "ref": f"Expiring training — {who}",
+            "summary": (f"{who} completed {r.get('title')}, but it expires "
+                        f"{_fmt_d(r.get('expiration_date'))}."),
+            "when": _fmt_d(r.get("expiration_date")),
+            "status": "expiring",
+        })
+
+    return recs
+
+
+def _incident_records(incidents: list | None) -> list[dict]:
+    """Recent incidents — pattern awareness, no persons named."""
+    recs: list[dict] = []
+    for i in incidents or []:
+        if not isinstance(i, dict) or not i.get("id"):
+            continue
+        bits = [str(i.get("title") or "incident")]
+        if i.get("incident_type"):
+            bits.append(_hum(i["incident_type"]))
+        if i.get("severity"):
+            bits.append(f"severity {i['severity']}")
+        if i.get("status"):
+            bits.append(f"status {i['status']}")
+        if i.get("location"):
+            bits.append(f"at {i['location']}")
+        recs.append({
+            "cid": f"incident:{i['id']}",
+            "ref": f"Incident {i.get('incident_number') or ''} — {i.get('title')}".strip(),
+            "summary": "; ".join(bits) + ".",
+            "when": _fmt_d(i.get("occurred_at")),
+            "severity": i.get("severity"),
+            "incident_type": i.get("incident_type"),
+        })
+    return recs
+
+
 def build_hr_pilot_corpus(grounding: dict, reasoning_chains: list | None = None) -> dict:
     """Assemble the HR Pilot citation corpus `{sources, index, notes}`. Pure.
 
     Delegates the five shared source groups to `handbook_pilot.build_corpus`
-    (identical source material, already-hardened cid minting) and appends the
-    two HR-Pilot-specific ones."""
-    corpus = build_corpus(grounding or {})
+    (identical source material, already-hardened cid minting), appends the two
+    policy-side HR Pilot groups, then the three operational-fact groups
+    (Supervisor Copilot).
+
+    The operational groups distinguish "module off" (`None`) from "module on,
+    nothing there" (`[]`) — an absent module gets a note telling the model to
+    say so, because silence would otherwise read as "nobody is scheduled"."""
+    grounding = grounding or {}
+    corpus = build_corpus(grounding)
     sources = corpus["sources"]
 
     sources["compliance_floor"] = {
@@ -261,6 +595,18 @@ def build_hr_pilot_corpus(grounding: dict, reasoning_chains: list | None = None)
     sources["discipline_ladder"] = {
         "label": "Progressive discipline ladder",
         "records": _ladder_records(),
+    }
+    sources["schedule"] = {
+        "label": f"Published shifts — next {_SCHEDULE_LOOKAHEAD_DAYS} days",
+        "records": _schedule_records(grounding.get("shifts")),
+    }
+    sources["training_status"] = {
+        "label": "Training compliance status",
+        "records": _training_records(grounding.get("training")),
+    }
+    sources["recent_incidents"] = {
+        "label": f"Incidents — last {_INCIDENT_LOOKBACK_DAYS} days",
+        "records": _incident_records(grounding.get("incidents")),
     }
 
     # Rebuild the flat index over ALL groups. A cid appearing in two groups
@@ -277,6 +623,46 @@ def build_hr_pilot_corpus(grounding: dict, reasoning_chains: list | None = None)
             "No precedence-resolved compliance floor available — answers ground on "
             "the flat per-state requirement list only."
         )
+
+    # Module-off notes. Absence of data and absence of the module are different
+    # answers to "who's on Saturday?" — one is "nobody", the other is "this
+    # company doesn't schedule here".
+    if grounding.get("shifts") is None:
+        notes.append(
+            "Shift scheduling is not enabled for this company — no schedule data is "
+            "available. Say so if asked about shifts; do not infer who is working."
+        )
+    if grounding.get("training") is None:
+        notes.append(
+            "Training records are not enabled for this company — say so if asked "
+            "whether someone is trained or current."
+        )
+    if grounding.get("incidents") is None:
+        notes.append(
+            "Incident reporting is not enabled for this company — say so if asked "
+            "about past incidents."
+        )
+
+    # Cap-hit notes. A clipped list the model reads as complete is how "nobody
+    # else is overdue" gets asserted from a LIMIT.
+    if len(sources["schedule"]["records"]) >= _MAX_SCHEDULE_SHIFTS:
+        notes.append(
+            f"Only the first {_MAX_SCHEDULE_SHIFTS} upcoming shifts are listed — "
+            "there may be more; do not treat the list as complete."
+        )
+    if len(sources["recent_incidents"]["records"]) >= _MAX_RECENT_INCIDENTS:
+        notes.append(
+            f"Only the {_MAX_RECENT_INCIDENTS} most recent incidents are listed — "
+            "there may be more."
+        )
+    _training = grounding.get("training") or {}
+    if (len(_training.get("overdue") or []) >= _MAX_TRAINING_DETAIL
+            or len(_training.get("expiring") or []) >= _MAX_TRAINING_DETAIL):
+        notes.append(
+            f"Training detail is capped at {_MAX_TRAINING_DETAIL} rows per list — "
+            "the per-program counts above are the complete figures."
+        )
+
     return {"sources": sources, "index": index, "notes": notes}
 
 

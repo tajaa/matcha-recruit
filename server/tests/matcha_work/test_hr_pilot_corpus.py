@@ -6,12 +6,19 @@ stable, non-colliding ids, and the audit gate drops everything not in it.
 
 import pytest
 
+from datetime import date, datetime, timedelta
+
 from app.matcha.services.hr_pilot_corpus import (
     audit_citations,
     build_hr_pilot_corpus,
     render_corpus_block,
+    _MAX_SCHEDULE_SHIFTS,
+    _MAX_TRAINING_DETAIL,
     _floor_records,
+    _incident_records,
     _ladder_records,
+    _schedule_records,
+    _training_records,
 )
 
 
@@ -149,12 +156,14 @@ def test_termination_step_still_routes_to_hr():
 # Corpus assembly
 # --------------------------------------------------------------------------- #
 
-def test_corpus_has_all_seven_groups(grounding):
+def test_policy_groups_present_without_operational_data(grounding):
+    """Grounding with no operational keys at all (the pre-Copilot shape) still
+    builds — the operational groups appear empty rather than the build failing.
+    Group membership as a whole is asserted by test_corpus_has_ten_groups."""
     corpus = build_hr_pilot_corpus(grounding, [_chain("Main Office", "meal_rest_breaks")])
-    assert set(corpus["sources"]) == {
-        "profile", "law", "existing_handbook", "existing_policies",
-        "playbook", "compliance_floor", "discipline_ladder",
-    }
+    assert {"profile", "law", "existing_handbook", "existing_policies",
+            "playbook", "compliance_floor", "discipline_ladder"} <= set(corpus["sources"])
+    assert corpus["sources"]["schedule"]["records"] == []
 
 
 def test_index_covers_every_record(grounding):
@@ -326,3 +335,210 @@ def test_no_citations_at_all_passes_through(index):
     text = "Talk to the employee first."
     clean, cites, dropped = audit_citations(text, index)
     assert (clean, cites, dropped) == (text, [], [])
+
+
+# --------------------------------------------------------------------------- #
+# Supervisor Copilot — operational-fact groups
+# --------------------------------------------------------------------------- #
+
+def _shift(sid="aaaaaaaa-0000-0000-0000-000000000001", names=("Ana Ruiz",),
+           required=2, role="Line Cook", start=None):
+    start = start or datetime(2026, 7, 25, 9, 0)
+    return {
+        "id": sid, "role": role, "department": "Kitchen",
+        "starts_at": start, "ends_at": start + timedelta(hours=8),
+        "required_staff": required, "location_id": None,
+        "assignees": [{"name": n, "job_title": role, "status": "assigned"} for n in names],
+    }
+
+
+def test_schedule_record_names_assignees_and_weekday():
+    rec = _schedule_records([_shift()])[0]
+    assert rec["cid"] == "schedule:aaaaaaaa-0000-0000-0000-000000000001"
+    assert "Ana Ruiz" in rec["summary"]
+    # Weekday must survive — "who's on Saturday" is the driving question, and
+    # the model must not have to derive the day from an ISO date.
+    assert "Sat" in rec["when"]
+
+
+def test_schedule_record_computes_shortfall():
+    """Staffing gap is arithmetic, computed here — not left to the model."""
+    rec = _schedule_records([_shift(names=("Ana Ruiz",), required=3)])[0]
+    assert "SHORT BY 2" in rec["summary"]
+
+
+def test_schedule_record_flags_fully_staffed():
+    rec = _schedule_records([_shift(names=("Ana Ruiz", "Bo Lee"), required=2)])[0]
+    assert "fully staffed" in rec["summary"]
+
+
+def test_schedule_record_handles_empty_shift():
+    rec = _schedule_records([_shift(names=())])[0]
+    assert "nobody assigned" in rec["summary"]
+
+
+def test_schedule_records_parse_json_assignees():
+    """asyncpg hands json_agg back as a string on some paths."""
+    s = _shift()
+    s["assignees"] = '[{"name": "Ana Ruiz", "job_title": "Cook", "status": "assigned"}]'
+    assert "Ana Ruiz" in _schedule_records([s])[0]["summary"]
+
+
+def test_schedule_records_tolerate_junk():
+    assert _schedule_records(None) == []
+    assert _schedule_records(["nope", {}, {"id": None}]) == []
+
+
+def _training_fixture():
+    return {
+        "programs": [{"id": "bbbbbbbb-0000-0000-0000-000000000001", "title": "Food Safety",
+                      "training_type": "safety", "frequency_months": 12,
+                      "total_assigned": 10, "completed": 7, "overdue": 2}],
+        "overdue": [{"id": "cccccccc-0000-0000-0000-000000000001", "title": "Food Safety",
+                     "due_date": date(2026, 7, 1), "first_name": "Ana", "last_name": "Ruiz",
+                     "job_title": "Cook"}],
+        "expiring": [{"id": "dddddddd-0000-0000-0000-000000000001", "title": "Food Safety",
+                      "expiration_date": date(2026, 8, 15), "first_name": "Bo",
+                      "last_name": "Lee", "job_title": "Cook"}],
+    }
+
+
+def test_training_program_record_computes_completion_pct():
+    recs = _training_records(_training_fixture())
+    prog = next(r for r in recs if r["cid"].startswith("training:program-"))
+    assert "7/10 complete (70%)" in prog["summary"]
+    assert "2 OVERDUE" in prog["summary"]
+
+
+def test_training_detail_records_name_the_person():
+    recs = _training_records(_training_fixture())
+    overdue = next(r for r in recs if r.get("status") == "overdue")
+    expiring = next(r for r in recs if r.get("status") == "expiring")
+    assert "Ana Ruiz" in overdue["summary"]
+    assert "Bo Lee" in expiring["summary"]
+
+
+def test_training_cids_program_and_detail_are_disjoint():
+    """Two cid shapes share one namespace; a raw UUID can never collide with a
+    `program-` prefix, which is what keeps the flat index sound."""
+    recs = _training_records(_training_fixture())
+    cids = [r["cid"] for r in recs]
+    assert len(cids) == len(set(cids))
+    assert sum(1 for c in cids if c.startswith("training:program-")) == 1
+
+
+def test_training_records_never_expose_scores_or_certificates():
+    """Credential precedent: status and dates only."""
+    fixture = _training_fixture()
+    fixture["overdue"][0]["score"] = 91
+    fixture["overdue"][0]["certificate_number"] = "SECRET-123"
+    blob = repr(_training_records(fixture))
+    assert "SECRET-123" not in blob
+    assert "91" not in blob
+
+
+def test_training_records_tolerate_junk():
+    assert _training_records(None) == []
+    assert _training_records({}) == []
+
+
+def test_incident_records_name_no_people():
+    recs = _incident_records([{
+        "id": "eeeeeeee-0000-0000-0000-000000000001", "incident_number": "IR-4",
+        "title": "Slip in walk-in", "incident_type": "safety", "severity": "medium",
+        "status": "open", "occurred_at": datetime(2026, 7, 10), "location": "Kitchen",
+        "involved_employee_ids": ["should-never-render"],
+    }])
+    assert recs[0]["cid"] == "incident:eeeeeeee-0000-0000-0000-000000000001"
+    assert "should-never-render" not in repr(recs)
+
+
+def test_incident_records_tolerate_junk():
+    assert _incident_records(None) == []
+    assert _incident_records([{}, "x"]) == []
+
+
+# --- corpus integration ----------------------------------------------------- #
+
+def _ops(grounding, **over):
+    g = dict(grounding)
+    g.update({"shifts": [_shift()], "training": _training_fixture(),
+              "incidents": [], **over})
+    return g
+
+
+def test_corpus_has_ten_groups(grounding):
+    corpus = build_hr_pilot_corpus(_ops(grounding), [])
+    assert set(corpus["sources"]) == {
+        "profile", "law", "existing_handbook", "existing_policies", "playbook",
+        "compliance_floor", "discipline_ladder",
+        "schedule", "training_status", "recent_incidents",
+    }
+
+
+def test_no_cid_collisions_with_operational_groups(grounding):
+    corpus = build_hr_pilot_corpus(_ops(grounding), [_chain("Main Office", "meal_rest_breaks")])
+    seen = set()
+    for source in corpus["sources"].values():
+        for rec in source["records"]:
+            assert rec["cid"] not in seen, f"duplicate cid {rec['cid']}"
+            seen.add(rec["cid"])
+    total = sum(len(s["records"]) for s in corpus["sources"].values())
+    assert len(corpus["index"]) == total
+
+
+def test_module_off_emits_a_note_but_empty_does_not(grounding):
+    """`None` (module off) and `[]` (on, nothing there) are different answers to
+    "who's on Saturday" — one is "this company doesn't schedule here"."""
+    off = build_hr_pilot_corpus(_ops(grounding, shifts=None), [])
+    assert any("not enabled" in n and "schedul" in n.lower() for n in off["notes"])
+
+    empty = build_hr_pilot_corpus(_ops(grounding, shifts=[]), [])
+    assert not any("Shift scheduling is not enabled" in n for n in empty["notes"])
+
+
+def test_each_operational_module_has_its_own_off_note(grounding):
+    corpus = build_hr_pilot_corpus(
+        _ops(grounding, shifts=None, training=None, incidents=None), [])
+    notes = " ".join(corpus["notes"]).lower()
+    assert "shift scheduling is not enabled" in notes
+    assert "training records are not enabled" in notes
+    assert "incident reporting is not enabled" in notes
+
+
+def test_cap_hit_emits_truncation_note(grounding):
+    many = [_shift(sid=f"aaaaaaaa-0000-0000-0000-{i:012d}") for i in range(_MAX_SCHEDULE_SHIFTS)]
+    corpus = build_hr_pilot_corpus(_ops(grounding, shifts=many), [])
+    assert any("do not treat the list as complete" in n for n in corpus["notes"])
+
+
+def test_training_cap_note(grounding):
+    t = _training_fixture()
+    t["overdue"] = [dict(t["overdue"][0], id=f"cccccccc-0000-0000-0000-{i:012d}")
+                    for i in range(_MAX_TRAINING_DETAIL)]
+    corpus = build_hr_pilot_corpus(_ops(grounding, training=t), [])
+    assert any("capped at" in n for n in corpus["notes"])
+
+
+def test_audit_gate_resolves_new_namespaces(grounding):
+    corpus = build_hr_pilot_corpus(_ops(grounding), [])
+    index = corpus["index"]
+    text = ("Ana is on [schedule:aaaaaaaa-0000-0000-0000-000000000001] but is overdue "
+            "on [training:cccccccc-0000-0000-0000-000000000001], and [schedule:invented] "
+            "does not exist.")
+    clean, cites, dropped = audit_citations(text, index)
+    assert dropped == ["schedule:invented"]
+    assert {c["cid"] for c in cites} == {
+        "schedule:aaaaaaaa-0000-0000-0000-000000000001",
+        "training:cccccccc-0000-0000-0000-000000000001",
+    }
+    assert "schedule:invented" not in clean
+
+
+def test_operational_records_render_into_the_prompt_block(grounding):
+    corpus = build_hr_pilot_corpus(_ops(grounding), [])
+    block = render_corpus_block(corpus)
+    assert "PUBLISHED SHIFTS" in block.upper()
+    assert "Ana Ruiz" in block
+    for cid in corpus["index"]:
+        assert f"[{cid}]" in block

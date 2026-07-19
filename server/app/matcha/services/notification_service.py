@@ -41,6 +41,11 @@ TYPES = {
     # NOT channel_-prefixed on purpose: the desktop banner path suppresses
     # channel_* types (chat toasts own those), and a call invite must banner.
     "call_started": "Call Started",
+    # HR Pilot opened a thread proactively (workers/tasks/hr_proactive_push.py).
+    # Written by the worker with a raw INSERT, so it never passes through
+    # create_notification — it exists here so the bell renders a real label
+    # rather than the raw key.
+    "hr_proactive": "HR Pilot Alert",
 }
 
 
