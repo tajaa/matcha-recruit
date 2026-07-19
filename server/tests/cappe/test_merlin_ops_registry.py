@@ -12,7 +12,15 @@ os.environ.setdefault("LIVE_API", "test-key")
 os.environ.setdefault("DATABASE_URL", "postgresql://test:test@localhost/test")
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret-key-cappe")
 
-from app.cappe.services.merlin_ops import MERLIN_OPS, OP_NAMES, OPS_BY_NAME  # noqa: E402
+import json  # noqa: E402
+
+from app.cappe.services.merlin_catalog import BLOCK_FIELDS, DESIGN_GROUPS  # noqa: E402
+from app.cappe.services.merlin_ops import (  # noqa: E402
+    MERLIN_OPS,
+    OP_NAMES,
+    OPS_BY_NAME,
+    build_merlin_schema,
+)
 
 _EXPECTED_OPS = {
     "set_field", "set_design", "add_block", "remove_block", "move_block",
@@ -43,3 +51,23 @@ def test_prompt_shapes_and_rules_carry_no_format_landmines():
     # The op-specific rules include a literal JSON example on set_design.
     all_rules = [r for op in MERLIN_OPS for r in op.prompt_rules]
     assert any('{"op":"set_design"' in r for r in all_rules)
+
+
+def test_schema_export_is_json_serializable_and_registry_derived():
+    """The schema endpoint's payload is one JSON view of the registry surface —
+    the mechanism that retires the hand-maintained mirror."""
+    schema = build_merlin_schema()
+    json.dumps(schema)  # must not raise (no frozensets/tuples leak through)
+
+    # ops mirror the registry
+    assert [o["name"] for o in schema["ops"]] == [op.name for op in MERLIN_OPS]
+    # block field names mirror BLOCK_FIELDS
+    for btype, fields in BLOCK_FIELDS.items():
+        assert set(schema["blocks"][btype]["fields"]) == set(fields)
+    # design groups mirror the AI-facing DESIGN_GROUPS (merlin subset)
+    assert set(schema["design"]) == set(DESIGN_GROUPS)
+    for group, keys in DESIGN_GROUPS.items():
+        assert set(schema["design"][group]) == set(keys)
+    # a range spec renders as {min,max}; an enum as {enum:[...]}
+    assert schema["design"]["motion"]["duration"] == {"min": 100, "max": 2000}
+    assert "enum" in schema["design"]["motion"]["effect"]

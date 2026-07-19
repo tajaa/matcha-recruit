@@ -25,9 +25,23 @@ from ..dependencies import require_cappe_account
 from ..models.cappe import CappeAccount, CappeMerlinChatRequest, CappeMerlinChatResponse
 from ..services.design_gate import is_premium_plan
 from ..services.merlin import resolve_model_tier, run_merlin_turn
+from ..services.merlin_ops import build_merlin_schema
 from ._shared import get_owned_site
 
 router = APIRouter()
+
+# The registry-derived op/block/design/theme vocabulary as one JSON document —
+# the single source of truth the editor can read instead of hand-mirroring it in
+# blockSchemas.ts. Static per deploy; cheap to build, so no caching needed.
+_MERLIN_SCHEMA = build_merlin_schema()
+
+
+@router.get("/merlin/schema")
+async def merlin_schema(account: CappeAccount = Depends(require_cappe_account)):
+    """The Merlin vocabulary (ops, block fields, design keys, theme keys, limits)
+    generated from the server registries. Read-only; account-gated for parity
+    with the chat route."""
+    return _MERLIN_SCHEMA
 
 # Turns per account per hour. Paid plans buy headroom; free is a taste.
 _FREE_HOURLY_LIMIT = 10

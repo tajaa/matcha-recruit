@@ -477,6 +477,75 @@ OPS_BY_NAME: dict[str, MerlinOp] = {op.name: op for op in MERLIN_OPS}
 OP_NAMES: frozenset[str] = frozenset(OPS_BY_NAME)
 
 
+# ---------------------------------------------------------------------------
+# Machine-readable schema export
+# ---------------------------------------------------------------------------
+# One JSON view of the whole registry-derived surface, so a consumer (the editor,
+# tooling, a drift test) can read the op/block/design/theme vocabulary from the
+# server's single source of truth instead of hand-mirroring it. This is the
+# mechanism that retires merlin_catalog.py's "hand-maintained mirror" role;
+# wiring the frontend to consume it is a separate (client) stage.
+
+def _spec_json(spec: Any) -> Any:
+    """JSON-safe rendering of a value-spec: enum→sorted list, range→[lo,hi],
+    kind-name→itself."""
+    if isinstance(spec, frozenset):
+        return {"enum": sorted(spec)}
+    if isinstance(spec, tuple):
+        return {"min": spec[0], "max": spec[1]}
+    return {"kind": spec}
+
+
+def build_merlin_schema() -> dict[str, Any]:
+    """Assemble the full Merlin schema from the registries + catalog. Pure and
+    JSON-serializable."""
+    from .merlin_catalog import (
+        BLOCK_LABELS,
+        CANVAS_ELEMENT_KINDS,
+        CANVAS_GRID_COLS,
+        CANVAS_MAX_ELEMENTS,
+        CANVAS_MOBILE_GRID_COLS,
+        THEME_KEY_PREFIXES,
+        THEME_KEYS,
+        THEME_MODE_VALUES,
+    )
+
+    blocks: dict[str, Any] = {}
+    for btype in sorted(BLOCK_TYPES):
+        fields = BLOCK_FIELDS.get(btype, {})
+        opts = SELECT_OPTIONS.get(btype, {})
+        blocks[btype] = {
+            "label": BLOCK_LABELS.get(btype, btype),
+            "fields": {
+                name: {"kind": kind, **({"options": sorted(opts[name])} if name in opts else {})}
+                for name, kind in sorted(fields.items())
+            },
+        }
+
+    return {
+        "ops": [{"name": op.name, "shape": op.prompt_shape} for op in MERLIN_OPS],
+        "blocks": blocks,
+        "design": {
+            group: {key: _spec_json(spec) for key, spec in sorted(keys.items())}
+            for group, keys in sorted(DESIGN_GROUPS.items())
+        },
+        "theme": {
+            "keys": sorted(THEME_KEYS),
+            "prefixes": list(THEME_KEY_PREFIXES),
+            "modes": sorted(THEME_MODE_VALUES),
+        },
+        "limits": {
+            "maxOpsPerTurn": MAX_OPS_PER_TURN,
+            "canvas": {
+                "elementKinds": sorted(CANVAS_ELEMENT_KINDS),
+                "maxElements": CANVAS_MAX_ELEMENTS,
+                "gridCols": CANVAS_GRID_COLS,
+                "mobileGridCols": CANVAS_MOBILE_GRID_COLS,
+            },
+        },
+    }
+
+
 def validate_ops(
     raw_ops: list[Any], blocks: list[dict[str, Any]], *,
     premium: bool = True, theme_intent: bool = True,
