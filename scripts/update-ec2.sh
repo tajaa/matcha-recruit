@@ -39,20 +39,29 @@ Update EC2 deployments by pulling latest images and restarting containers.
 
 OPTIONS:
     --matcha         Update Matcha-Recruit backend + frontend + worker (ports 8002/8082)
-    --frontend       Update only matcha-frontend (no DB backup, no worker stop)
+    --frontend       Update only matcha-frontend (no backup trigger, no worker stop)
     --backend        Update only matcha-backend + matcha-worker
+    --hotfix         Fast path: skip nginx sync, skip backup trigger, skip all
+                     pruning, 5s worker stop. Pull + blue/green swap only.
     --agent          Deploy/update agent (Gemini API)
     --all            Update matcha + agent
     --status         Show status of all containers
     -h, --help       Show this help message
 
 EXAMPLES:
-    $0 --matcha          # Update only Matcha (all services)
-    $0 --frontend        # Frontend-only rollout (fast, no backup)
-    $0 --backend         # Backend + worker only
-    $0 --all             # Update matcha + agent
-    $0 --agent           # Deploy/restart agent
-    $0 --status          # Check container status
+    $0 --matcha            # Update only Matcha (all services)
+    $0 --frontend          # Frontend-only rollout (fast, no backup)
+    $0 --backend           # Backend + worker only
+    $0 --backend --hotfix  # Emergency backend patch — fastest possible swap
+    $0 --all               # Update matcha + agent
+    $0 --agent             # Deploy/restart agent
+    $0 --status            # Check container status
+
+NOTES:
+    Backend deploys fire an RDS logical backup (deploy/backup-prod-rds.sh) in
+    the BACKGROUND on the EC2 — deploys never wait on it. RDS automated
+    snapshots (7-day PITR) are the primary rollback; schema-change rollback is
+    migrate-prod.sh's snapshot gate. Check ~/backup.log on EC2 for dump status.
 EOF
 }
 
@@ -94,27 +103,63 @@ ecr_login() {
 }
 
 backup_database() {
-    log_info "Backing up database before deployment..."
-    ssh_cmd "bash ~/backup-postgres.sh >> ~/backup.log 2>&1" && \
-        log_success "Database backup complete!" || \
-        log_warn "Backup may have failed - check ~/backup.log on EC2"
+    # Fire-and-forget: the RDS logical dump runs in the background on the EC2
+    # so the deploy never blocks on it (the old ~/backup-postgres.sh both
+    # blocked the deploy AND had been broken since the RDS cutover — it still
+    # pointed at the long-gone matcha-postgres container). RDS automated
+    # snapshots (7-day PITR) are the primary rollback path regardless.
+    log_info "Triggering background RDS logical backup (non-blocking)..."
+    # Non-fatal by construction: the whole trigger sits in an `if` so a scp or
+    # ssh failure can't kill the deploy via set -e. The `{ nohup … & }` group
+    # keeps ONLY the dump backgrounded — a bare `A && B &` backgrounds the
+    # entire chain, making ssh exit 0 even when chmod fails (dead-code warn).
+    # </dev/null so ssh returns immediately and the dump survives the session.
+    if scp -i "$SSH_KEY" -o StrictHostKeyChecking=accept-new deploy/backup-prod-rds.sh \
+            "$EC2_USER@$EC2_HOST:~/backup-prod-rds.sh" \
+        && ssh_cmd "chmod +x ~/backup-prod-rds.sh && { nohup bash ~/backup-prod-rds.sh >> ~/backup.log 2>&1 < /dev/null & }"
+    then
+        log_success "Backup running in background (tail ~/backup.log on EC2 to check)"
+    else
+        log_warn "Could not trigger backup — deploy continues; check ~/backup.log on EC2"
+    fi
 }
 
 pre_cleanup() {
-    log_info "Freeing up disk space before pull..."
     if [ "$UPDATE_BACKEND" = true ]; then
-        # Gracefully stop workers with 60s timeout to let them finish current job
-        log_info "Stopping workers gracefully (60s timeout)..."
-        ssh_cmd "docker stop -t 60 matcha-worker 2>/dev/null || true"
+        # Gracefully stop workers to let them finish current job.
+        # 60s normally; 5s on --hotfix (an emergency patch outranks an
+        # in-flight research task, which retries anyway via acks_late).
+        local stop_timeout=60
+        [ "$HOTFIX" = true ] && stop_timeout=5
+        log_info "Stopping workers gracefully (${stop_timeout}s timeout)..."
+        ssh_cmd "docker stop -t $stop_timeout matcha-worker 2>/dev/null || true"
         ssh_cmd "docker rm matcha-worker 2>/dev/null || true"
     fi
-    # Remove all stopped containers
+    if [ "$HOTFIX" = true ]; then
+        return 0
+    fi
+    # Remove stopped containers only. The aggressive `image prune -a` that
+    # used to run HERE was the single biggest deploy-time cost: it deleted
+    # every cached layer BEFORE the pull, forcing a cold full-image pull on
+    # every single deploy. Image/builder pruning now happens post-swap in
+    # cleanup(), where it doesn't sit between you and the new code.
     ssh_cmd "docker container prune -f" || true
-    # Remove ALL unused images (not just dangling) - running containers keep their images
-    ssh_cmd "docker image prune -a -f" || true
-    # Remove build cache
-    ssh_cmd "docker builder prune -f" || true
-    # Show available space
+    # Safety valve: if disk is critically low (<4GB), prune images pre-pull
+    # anyway — a failed pull from ENOSPC is worse than a slow one. Sanitized:
+    # non-numeric output (ssh banner/warning) must neither abort the deploy
+    # (set -e + integer-test error) nor collapse to 0 and silently prune on
+    # every deploy (which restores the cold-pull cost this exists to remove).
+    local avail_kb
+    avail_kb=$(ssh_cmd "df -k / | tail -1 | awk '{print \$4}'" 2>/dev/null | tr -dc '0-9' || true)
+    if [[ "$avail_kb" =~ ^[0-9]+$ ]]; then
+        if [ "$avail_kb" -lt 4194304 ]; then
+            log_warn "Low disk (<4GB) — pruning images before pull"
+            ssh_cmd "docker image prune -a -f" || true
+            ssh_cmd "docker builder prune -f" || true
+        fi
+    else
+        log_warn "Could not read remote disk space — skipping low-disk prune check"
+    fi
     ssh_cmd "df -h / | tail -1 | awk '{print \"Available disk space: \" \$4}'"
 }
 
@@ -179,8 +224,13 @@ show_status() {
 }
 
 cleanup() {
-    log_info "Cleaning up unused images..."
-    ssh_cmd "docker system prune -f"
+    # Post-swap prune: running containers keep their images, so this reclaims
+    # the old blue/green side + stale layers WITHOUT forcing the next deploy
+    # to cold-pull (registry layers unchanged since this deploy stay cached
+    # in the retained running images).
+    log_info "Cleaning up unused images (post-swap)..."
+    ssh_cmd "docker image prune -a -f" || true
+    ssh_cmd "docker builder prune -f" || true
 }
 
 # Parse arguments
@@ -188,6 +238,7 @@ UPDATE_BACKEND=false
 UPDATE_FRONTEND=false
 UPDATE_AGENT=false
 SHOW_STATUS=false
+HOTFIX=false
 
 if [ $# -eq 0 ]; then
     usage
@@ -207,6 +258,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --backend)
             UPDATE_BACKEND=true
+            shift
+            ;;
+        --hotfix)
+            HOTFIX=true
             shift
             ;;
         --agent)
@@ -260,16 +315,20 @@ if [ "$UPDATE_MATCHA" = false ] && [ "$UPDATE_AGENT" = false ]; then
 fi
 
 ecr_login
-# Frontend-only rollouts don't touch the DB — skip the backup for speed.
-if [ "$UPDATE_BACKEND" = true ]; then
+# Frontend-only rollouts don't touch the DB; hotfixes skip the trigger too
+# (it's non-blocking anyway, but --hotfix means "nothing but the swap").
+if [ "$UPDATE_BACKEND" = true ] && [ "$HOTFIX" = false ]; then
     backup_database
 fi
 pre_cleanup
 
 if [ "$UPDATE_MATCHA" = true ]; then
     # Nginx config (incl. the blue/green frontend upstream block) must be live
-    # before the frontend swap script runs against it.
-    sync_nginx
+    # before the frontend swap script runs against it. Hotfix path assumes
+    # nginx config is already current (it survives deploys unchanged).
+    if [ "$HOTFIX" = false ]; then
+        sync_nginx
+    fi
     update_matcha
 fi
 
@@ -277,7 +336,9 @@ if [ "$UPDATE_AGENT" = true ]; then
     deploy_agent
 fi
 
-cleanup
+if [ "$HOTFIX" = false ]; then
+    cleanup
+fi
 show_status
 
 log_success "Deployment complete!"

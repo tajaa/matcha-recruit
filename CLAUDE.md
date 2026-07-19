@@ -90,17 +90,17 @@ Cross-product import rule: `cappe/` and `tellus/` import only from `app/core/*` 
 
 ## Database
 
-**Prod is moving to RDS (2026-06-09, cutover pending).** `matcha-prod` RDS (PG 15.18, encrypted, app VPC) holds a verified clone of prod; the app EC2 still points at the old `:5433` container until `DATABASE_URL` is flipped there. All DBs use name `matcha`, user `matcha`. Full workflow + scripts in `docs/ops/DB_WORKFLOW.md`.
+**RDS cutover is DONE — `matcha-prod` RDS is the one and only production database.** Verified 2026-07-19: the app EC2's `DATABASE_URL` points at the RDS endpoint. `matcha-prod` is PG 15.18, encrypted, in the app VPC; DB name `matcha`, user `matcha`. Full workflow + scripts in `docs/ops/DB_WORKFLOW.md`.
 
 | Instance | Where | Role | Who connects |
 |---|---|---|---|
-| `matcha-prod` RDS | `matcha-prod.cbego6cwwdqy.us-west-1.rds.amazonaws.com:5432` (app VPC) | **PROD** (post-cutover) | app EC2 only (SG-locked); laptop via app-EC2 tunnel → `localhost:5434`. `rds.force_ssl=1` → `sslmode=require` |
-| `matcha-postgres-prod` container | DB EC2 `3.101.83.217` `:5433` | **PROD until cutover**, frozen after | app EC2; hey-matcha.com |
-| `matcha-postgres` container | DB EC2 `3.101.83.217` `:5432` | **DEV** (+ 8 other apps' DBs) | laptop via `dev-remote.sh` SSH tunnel |
+| `matcha-prod` RDS | `matcha-prod.cbego6cwwdqy.us-west-1.rds.amazonaws.com:5432` (app VPC) | **PROD — the only one** | app EC2 (SG-locked); laptop via app-EC2 tunnel → `localhost:5434`. `rds.force_ssl=1` |
+| `matcha-postgres` container | **local** Docker `:5432` | **DEV** | laptop directly / `dev-remote.sh` |
+| `matcha-postgres-prod` container | DB EC2 `3.101.83.217` `:5433` | **RETIRED** — frozen pre-cutover copy, host EC2 is stopped | nothing |
 
-**⚠️ Treat both the RDS instance and `matcha-postgres-prod` (:5433) as live production.** Local dev (`dev-remote.sh`, `DATABASE_URL`) connects to the **dev** container (:5432). The DB EC2 is a **different VPC** and cannot route to RDS — everything that reaches RDS goes through the app EC2 (`54.177.107.107`); laptop tools use an SSH tunnel on `localhost:5434` (`PROD_DATABASE_URL` in `server/.env`; old container kept as `PROD_LEGACY_DATABASE_URL`).
+**⚠️ Prod == RDS. Nothing else.** The old `:5433` container is a frozen historical copy on a **stopped** EC2 — not a deploy target, not a migration target, not a backup. The `--legacy` / `--legacy-source` flags on `migrate-prod.sh`, `prod-psql.sh`, and `refresh-dev-from-prod.sh` are vestigial escape hatches for that dead container; **do not use them** — a migration applied there reaches nothing and creates the illusion prod was migrated. Local dev is a **local** Docker container (see the dev-DB note in `docs/ops/DB_WORKFLOW.md`), no longer on the DB EC2. Everything that reaches RDS goes through the app EC2 (`54.177.107.107`); laptop tools tunnel to `localhost:5434` (`PROD_DATABASE_URL` in `server/.env`).
 
-**NEVER do the following without explicit user approval — especially against prod (RDS or :5433):**
+**NEVER do the following without explicit user approval — especially against prod (RDS):**
 - CREATE ROLE / DROP ROLE
 - CREATE TABLE / DROP TABLE on real tables
 - `alembic upgrade head` against prod
@@ -114,12 +114,13 @@ Cross-product import rule: `cappe/` and `tellus/` import only from `app/core/*` 
 
 Schema is managed via Alembic migrations in `server/alembic/versions/`; `server/app/database.py:init_db()` only bootstraps a fresh DB (it does **not** run migrations). The two DBs drift unless synced deliberately:
 
-- **Schema, dev → prod:** author migration → `./scripts/migrate-dev.sh` (applies to dev :5432) → test → `./scripts/migrate-prod.sh` (applies the same revision to RDS prod via app-EC2 tunnel; `--legacy` targets the old :5433 container — pre-cutover a live-prod migration needs **both**). Applying to only one DB is the drift that caused real `UndefinedColumnError` 500s. `alembic_version` must match afterward.
-- **Data, prod → dev:** `./scripts/refresh-dev-from-prod.sh` — **anonymized** clone of RDS prod into dev (dump on app EC2, streamed via laptop to the DB EC2; `--legacy-source` clones the old :5433 container host-side instead). `--dry-run` previews into a staging DB without swapping. After a scrubbed run, **every dev user's password becomes `devpass123`**; PII is scrubbed by `scripts/sql/anonymize_dev.sql`.
+- **Schema, dev → prod:** author migration → `./scripts/migrate-dev.sh` (applies to dev :5432) → test → `./scripts/migrate-prod.sh` (applies the same revision to RDS prod via app-EC2 tunnel; ignore `--legacy`, it targets the retired container). Applying to dev only is the drift that caused real `UndefinedColumnError` 500s. `alembic_version` must match afterward. Five gates guard the prod path (dirty-tree, pending-revision preview, RDS snapshot **+ a status check that the snapshot actually exists**, a rehearsal that runs every revision against live rows then rolls back, typed confirm) — each one is a bug that already shipped. The snapshot is initiated but **not waited on**: an RDS snapshot's point-in-time is fixed at initiation, so waiting for completion buys nothing; the status check is what proves the rollback path is real.
+- **Data, prod → dev:** `./scripts/refresh-dev-from-prod.sh` — **anonymized** clone of RDS prod into dev. `--dry-run` previews into a staging DB without swapping. After a scrubbed run, **every dev user's password becomes `devpass123`**; PII is scrubbed by `scripts/sql/anonymize_dev.sql`.
 - **Anonymization gate — currently OFF (pre-customer).** `SKIP_ANONYMIZE=1` in `server/.env` makes the refresh clone prod → dev **verbatim** (real emails + passwords, every account logs in) — fine while there's no customer PII. **Turn it back ON the moment real customers exist:** delete/unset `SKIP_ANONYMIZE` in `server/.env` (default = on/scrubbed), then re-run `./scripts/refresh-dev-from-prod.sh` — dev re-anonymizes. To keep *your own* logins working after re-enabling, list them in `DEV_PRESERVE_EMAILS` (comma-sep, env or `server/.env`) — those keep real email + password while everyone else is scrubbed. Details in `docs/ops/DB_WORKFLOW.md`.
-- **Backups:** host cron `~/backup-to-s3.sh` (every 12h) → `s3://matcha-recruit-backups/postgres/` (SSE-AES256); inspect/restore via `./scripts/backups.sh`.
+- **Seed/demo data → prod:** `./scripts/seed-prod.sh <pack> [--dry-run|--undo|--dev]` — the only sanctioned way to write test/demo rows to prod (replaces hand-piped `python … | ssh … psql`). Manages the RDS tunnel itself; guards = **DDL blocked** (schema goes through `migrate-prod.sh`), **non-reserved email domains blocked** (the bounce-storm rule below, `--allow-real-emails` to override), **transaction-control statements blocked** (the runner owns the `BEGIN … ROLLBACK/COMMIT` envelope — a seed's own `COMMIT` would make `--dry-run` silently write prod; a `SAVEPOINT` canary catches any that slip past), and a typed `seed prod` confirm. **Always `--dry-run` first** — it executes every statement against real prod inside a rolled-back transaction. Pack conventions (tagging for undo, additive-only) in `scripts/seed/README.md`.
+- **Backups — the old 12h host cron is DEAD.** It lived on the DB EC2 (now stopped) and `~/backup-postgres.sh` on the app EC2 still targeted the long-gone `matcha-postgres` container (`No such container` in `~/backup.log` on every run since the RDS cutover). Current state: **RDS automated snapshots (7-day retention/PITR) are the primary recovery path**, plus `deploy/backup-prod-rds.sh` — a logical `pg_dump` of RDS **streamed** straight to `s3://matcha-recruit-backups/postgres-rds/` (never lands on the host's disk, so it can't race a deploy's image pull for space or strand a plaintext prod dump in `/tmp`), fired **in the background** by every backend deploy (so a deploy never blocks on it — check `~/backup.log` on the app EC2 if you need to confirm one ran). `./scripts/backups.sh` still points at the dead host and is stale.
 
-**SSH:** `ssh -i secrets/roonMT-arm.pem ec2-user@3.101.83.217` (DB host) · `ssh -i secrets/roonMT-arm.pem ec2-user@54.177.107.107` (app host).
+**SSH:** `ssh -i secrets/roonMT-arm.pem ec2-user@54.177.107.107` (app host — the only one that matters; it is also the jump host to RDS). The old DB host `3.101.83.217` is **stopped**. Beware stale addresses in older notes: `52.9.117.137` (`ec2-ahnimal`) is a different, also-stopped legacy instance.
 
 ## Directory Structure
 
@@ -336,7 +337,18 @@ Host-level nginx server blocks on the app EC2 (`/etc/nginx/conf.d/`) are hand-ma
 
 Retired/backup configs go to `/etc/nginx/conf.d/archive/` (nginx only globs `*.conf`). Legacy `oceaneca.conf` was retired there 2026-07-01 — `gummfit.com` belongs to `cappe.conf` (Cappe); if oceaneca.com ever revives, restore from archive minus its gummfit.com server blocks.
 
-**Primary script**: `./scripts/dev-remote.sh` — SSH-tunnels the **dev** Postgres container from EC2 (`3.101.83.217:5432` → `matcha-postgres`, not prod), starts Redis tunnel, backend on `:8001`, frontend on `:5174`, local chat model on `:8080`. Requires `secrets/roonMT-arm.pem`. To sync dev/prod see the Database section + `docs/ops/DB_WORKFLOW.md`.
+## Deploying (`build-and-push.sh` → `update-ec2.sh`)
+
+Normal rollout is `./scripts/build-and-push.sh && ./scripts/update-ec2.sh --matcha` (`--backend` / `--frontend` to narrow). **Emergency patch: `./scripts/build-and-push.sh --backend-only && ./scripts/update-ec2.sh --backend --hotfix`** — `--hotfix` does pull + blue/green swap and nothing else (no nginx sync, no backup trigger, no pruning, 5s worker stop instead of 60s).
+
+Two things used to make every deploy slow, both fixed 2026-07-19 — don't reintroduce them:
+
+- **Never `docker image prune -a` before the pull.** It deletes the cached layers the pull is about to reuse, forcing a cold full-image pull every single deploy. Pruning belongs **after** the swap (running containers keep their images). The pre-pull prune survives only as a `<4GB` free-disk safety valve, and its `df` output is regex-validated — non-numeric output must warn and skip, never abort the deploy under `set -e` and never collapse to `0` (which silently restores the cold-pull cost).
+- **The pre-deploy DB backup is fire-and-forget, and must stay non-fatal.** It scp's `deploy/backup-prod-rds.sh` and nohups it; the whole trigger sits inside an `if` so a transient scp/ssh failure can't kill the deploy. Note the remote string is `chmod +x f && { nohup … & }` — the brace group is load-bearing: a bare `A && B &` backgrounds the *entire* chain, so ssh always exits 0 and the failure branch becomes dead code.
+
+The previous backup (`~/backup-postgres.sh` on the app EC2) had been **failing silently since the RDS cutover** — it still `docker exec`'d into the deleted `matcha-postgres` container — while blocking every deploy. Any replacement must be checked by actually reading `~/backup.log`, not by the deploy exiting 0.
+
+**Primary script**: `./scripts/dev-remote.sh` — ensures the **local** `matcha-postgres` Docker container is up (dev Postgres moved off the DB EC2; the name is historical), starts the Redis tunnel, backend on `:8001`, frontend on `:5174`, local chat model on `:8080`. Requires `secrets/roonMT-arm.pem`. To sync dev/prod see the Database section + `docs/ops/DB_WORKFLOW.md`.
 
 **⚠️ `dev-remote.sh`'s frontend runs on `:5174` (tmux session `matcha-dev-remote`) — it is almost always already running.** If you spin up your own throwaway `npm run dev` (e.g. to screenshot-verify a change), do NOT clean it up with a port-pattern `pkill -f "vite --port ..."` — that regex also matches the user's real dev-remote.sh frontend process (same command line) and kills it. Track your own process by PID (`$!` / a pidfile) and `kill` that PID specifically instead.
 

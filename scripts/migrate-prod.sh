@@ -46,6 +46,7 @@ LEGACY=0
 ALLOW_DIRTY=0
 NO_SNAPSHOT=0
 SKIP_REHEARSAL=0
+SNAP_CREATED=0
 
 for arg in "$@"; do
   case "$arg" in
@@ -174,15 +175,18 @@ elif command -v aws >/dev/null 2>&1 && aws sts get-caller-identity >/dev/null 2>
   SNAP_ID="matcha-prod-pre-${FIRST_PENDING}-$(date +%Y%m%d%H%M)"
   read -r -p "Create RDS snapshot '${SNAP_ID}' before migrating? [Y/n] " reply
   if [[ "${reply:-Y}" =~ ^[Yy]?$ ]]; then
-    echo "Creating snapshot (this takes a few minutes)..."
+    # RDS snapshots are point-in-time at INITIATION (storage-level), so the
+    # rollback point is fixed the moment create-db-snapshot is accepted —
+    # nothing the migration writes afterwards leaks into it. Waiting for
+    # `db-snapshot-available` (several minutes) buys no additional safety;
+    # it only delays the migration. Let it finish in the background.
+    echo "Initiating snapshot (completes in background — rollback point is NOW)..."
     aws rds create-db-snapshot \
       --region "${AWS_REGION:-$AWS_REGION_DEFAULT}" \
       --db-instance-identifier "$RDS_INSTANCE_ID" \
       --db-snapshot-identifier "$SNAP_ID" >/dev/null
-    aws rds wait db-snapshot-available \
-      --region "${AWS_REGION:-$AWS_REGION_DEFAULT}" \
-      --db-snapshot-identifier "$SNAP_ID"
-    echo "Snapshot available: $SNAP_ID"
+    SNAP_CREATED=1
+    echo "Snapshot of record: $SNAP_ID (verified again before apply)"
     echo
   else
     echo "ABORT: no snapshot, no rollback. Re-run with --no-snapshot to override." >&2
@@ -233,6 +237,30 @@ else
     echo "$REHEARSAL_OUT" >&2
     exit 1
   fi
+fi
+
+# ---------------------------------------------------------------------------
+# GATE 3b — verify the snapshot survived, now that the rehearsal has given it
+# time. create-db-snapshot returning accepted != snapshot exists: it can
+# transition to `failed` afterwards (storage pressure, concurrent snapshot,
+# instance state). Skipping the multi-minute completion WAIT is sound
+# (point-in-time is fixed at initiation) — skipping VERIFICATION is not.
+# One describe call costs ~1s; a failed/missing snapshot aborts before apply.
+# ---------------------------------------------------------------------------
+if [[ "$SNAP_CREATED" == "1" ]]; then
+  SNAP_STATUS="$(aws rds describe-db-snapshots \
+    --region "${AWS_REGION:-$AWS_REGION_DEFAULT}" \
+    --db-snapshot-identifier "$SNAP_ID" \
+    --query 'DBSnapshots[0].Status' --output text 2>/dev/null || echo "MISSING")"
+  case "$SNAP_STATUS" in
+    creating|available)
+      echo "Snapshot $SNAP_ID status: $SNAP_STATUS — rollback path confirmed."
+      echo ;;
+    *)
+      echo "ABORT: snapshot $SNAP_ID is '$SNAP_STATUS' — the rollback path does" >&2
+      echo "not exist. Fix the snapshot (or --no-snapshot) before migrating." >&2
+      exit 1 ;;
+  esac
 fi
 
 # ---------------------------------------------------------------------------
