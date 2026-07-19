@@ -43,16 +43,19 @@ export function DesignInspector({ blockType, design, onChange }: { blockType?: s
             <>
               <section className="space-y-2">
                 <p className={dHead}>Motion</p>
-                <DSelect label="Reveal on scroll" value={fx} onChange={(v) => patch('motion', 'effect', v)} options={[['none', 'None'], ['fade', 'Fade'], ['slide-up', 'Slide up'], ['slide-down', 'Slide down'], ['slide-left', 'Slide left'], ['slide-right', 'Slide right'], ['zoom', 'Zoom'], ['blur-in', 'Blur in'], ['flip', 'Flip'], ['rotate', 'Rotate in'], ['mask-up', 'Mask up'], ['bounce', 'Bounce']]} />
+                <DSelect label="Reveal on scroll" value={fx} onChange={(v) => patch('motion', 'effect', v)} options={[['none', 'None'], ['fade', 'Fade'], ['fade-up', 'Fade up'], ['fade-down', 'Fade down'], ['slide-up', 'Slide up'], ['slide-down', 'Slide down'], ['slide-left', 'Slide left'], ['slide-right', 'Slide right'], ['zoom', 'Zoom'], ['scale-up', 'Scale up'], ['blur-in', 'Blur in'], ['blur-up', 'Blur up'], ['flip', 'Flip'], ['rotate', 'Rotate in'], ['mask-up', 'Mask up'], ['bounce', 'Bounce']]} />
                 {fx !== 'none' && (
-                  <div className="grid grid-cols-2 gap-2">
-                    <DNum label="Delay (ms)" value={Number(motion.delay) || 0} min={0} max={2000} step={50} onChange={(v) => patch('motion', 'delay', v)} />
-                    <DNum label="Duration (ms)" value={Number(motion.duration) || 700} min={100} max={2000} step={50} onChange={(v) => patch('motion', 'duration', v)} />
-                  </div>
+                  <>
+                    <div className="grid grid-cols-2 gap-2">
+                      <DNum label="Delay (ms)" value={Number(motion.delay) || 0} min={0} max={2000} step={50} onChange={(v) => patch('motion', 'delay', v)} />
+                      <DNum label="Duration (ms)" value={Number(motion.duration) || 700} min={100} max={2000} step={50} onChange={(v) => patch('motion', 'duration', v)} />
+                    </div>
+                    <DSelect label="Easing" value={str(motion.easing) || 'smooth'} onChange={(v) => patch('motion', 'easing', v)} options={[['smooth', 'Smooth (default)'], ['gentle', 'Gentle'], ['spring', 'Spring'], ['snappy', 'Snappy'], ['linear', 'Linear']]} />
+                  </>
                 )}
                 <div className="grid grid-cols-2 gap-2">
-                  <DSelect label="Hover effect" value={hover} onChange={(v) => patch('motion', 'hover', v)} options={[['none', 'None'], ['lift', 'Lift'], ['tilt', 'Tilt 3D'], ['glow', 'Glow']]} />
-                  <DSelect label="Continuous loop" value={loop} onChange={(v) => patch('motion', 'loop', v)} options={[['none', 'None'], ['float', 'Float'], ['pulse', 'Pulse']]} />
+                  <DSelect label="Hover effect" value={hover} onChange={(v) => patch('motion', 'hover', v)} options={[['none', 'None'], ['lift', 'Lift'], ['tilt', 'Tilt 3D'], ['glow', 'Glow'], ['grow', 'Grow'], ['sink', 'Sink']]} />
+                  <DSelect label="Continuous loop" value={loop} onChange={(v) => patch('motion', 'loop', v)} options={[['none', 'None'], ['float', 'Float'], ['pulse', 'Pulse'], ['sway', 'Sway'], ['breathe', 'Breathe']]} />
                 </div>
                 <DSelect label="Heading animation" value={headingFx} onChange={(v) => patch('motion', 'heading', v)} options={[['none', 'None'], ['rise', 'Rise in'], ['shimmer', 'Shimmer']]} />
                 <div className="flex flex-wrap gap-x-4 gap-y-1.5">

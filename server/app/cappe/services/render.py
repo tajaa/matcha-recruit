@@ -1033,7 +1033,8 @@ section{position:relative}
   .cz-motion.cz-js .cz-rv--stagger .cz-plans>*{opacity:1!important;transform:none!important;filter:none!important;transition:none}
   .cz-rv--mask-up{clip-path:none!important}
   .cz-kenburns>.cz-bg-media,.cz-parallax>.cz-bg-media,.cz-h-rise .cz-hero__title,.cz-h-shimmer .cz-hero__title,
-  .cz-loop-float,.cz-loop-pulse,.cz-bh-rise h1,.cz-bh-rise h2,.cz-bh-shimmer h1,.cz-bh-shimmer h2{animation:none!important}
+  .cz-loop-float,.cz-loop-pulse,.cz-loop-sway,.cz-loop-breathe,
+  .cz-bh-rise h1,.cz-bh-rise h2,.cz-bh-shimmer h1,.cz-bh-shimmer h2{animation:none!important}
   .cz-h-shimmer .cz-hero__title,.cz-bh-shimmer h1,.cz-bh-shimmer h2{color:var(--ink);-webkit-text-fill-color:var(--ink)}
   .cz-modal__scrim,.cz-modal__card{transition:none}}
 """

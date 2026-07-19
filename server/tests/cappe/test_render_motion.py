@@ -15,7 +15,12 @@ os.environ.setdefault("DATABASE_URL", "postgresql://test:test@localhost/test")
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret-key-cappe")
 
 from app.cappe.services.merlin_ops import validate_ops  # noqa: E402
-from app.cappe.services.render import _EASING, render_site_html  # noqa: E402
+from app.cappe.services.render import (  # noqa: E402
+    _BASE_CSS,
+    _EASING,
+    _LOOP_FX,
+    render_site_html,
+)
 
 _BLOCKS = [{"id": "b1", "type": "hero", "heading": "H"}]
 
@@ -56,6 +61,16 @@ def test_easing_rejects_unknown_and_accepts_known():
                                   "key": "easing", "value": "boing"}], _BLOCKS)
     assert len(good) == 1
     assert not bad_v and "must be one of" in bad_r[0]["reason"]
+
+
+def test_every_loop_animation_is_disabled_under_reduced_motion():
+    """The prefers-reduced-motion block disables loop animations by explicit
+    enumeration — a newly added loop that isn't listed keeps animating for users
+    who asked for reduced motion (the exact bug this guards: sway/breathe were
+    initially missing). Generated from _LOOP_FX so the list can't drift."""
+    rm_block = _BASE_CSS.split("@media(prefers-reduced-motion:reduce)")[1]
+    for loop in _LOOP_FX:
+        assert f".cz-loop-{loop}" in rm_block, f"loop '{loop}' not covered by reduced-motion"
 
 
 def test_reveal_transition_consumes_the_easing_var():
