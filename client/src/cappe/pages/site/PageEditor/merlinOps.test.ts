@@ -72,6 +72,24 @@ describe('block CRUD', () => {
     expect(r.results[0].ok).toBe(false)
   })
 
+  it('applies a server-validated design bag as _design (preset expansion path)', () => {
+    // apply_section_preset arrives server-expanded as add_block + design + preset provenance.
+    const r = run([hero()], [{
+      op: 'add_block', type: 'text', at: 1,
+      content: { heading: 'Statement' },
+      design: { motion: { effect: 'fade-up' }, layout: { maxWidth: 'narrow' } },
+      preset: 'text-statement',
+    }])
+    expect(r.blocks).toHaveLength(2)
+    expect(r.blocks[1]._design).toEqual({ motion: { effect: 'fade-up' }, layout: { maxWidth: 'narrow' } })
+    expect(r.results[0].summary).toContain('text-statement')
+  })
+
+  it('add_block without design sets no _design', () => {
+    const r = run([hero()], [{ op: 'add_block', type: 'faq', at: 0 }])
+    expect(r.blocks[0]._design).toBeUndefined()
+  })
+
   it('removes and moves by id', () => {
     const blocks = [hero(), features()]
     expect(run(blocks, [{ op: 'remove_block', block: 'k1' }]).blocks).toHaveLength(1)

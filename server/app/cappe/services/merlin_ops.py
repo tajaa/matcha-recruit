@@ -20,6 +20,7 @@ that one op into `rejected`) or `None`. A validator may mutate `raw` in place
 to strip unknown/structural keys; the caller still appends the cleaned `raw`.
 """
 import re
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
@@ -42,6 +43,8 @@ from .merlin_catalog import (
     THEME_KEYS,
     THEME_MODE_VALUES,
 )
+
+from .section_presets import PRESETS_BY_KEY, SECTION_PRESETS
 
 _HEX_COLOR_RE = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
 
@@ -282,7 +285,55 @@ def _v_add_block(raw: dict[str, Any], ctx: ValidationCtx) -> Optional[str]:
             k: v for k, v in content.items()
             if k in allowed and _valid_field_value(v, allowed[k], btype, k)
         }
+    design = raw.get("design")
+    if design is not None:
+        if not isinstance(design, dict) or not ctx.premium:
+            # Non-premium: `_design` is stripped on save (gate_content), so
+            # applying it in-editor would look styled and then silently vanish.
+            # Drop the bag but keep the block — an unstyled section is more
+            # useful than refusing the whole add (same philosophy as dropping
+            # bad content entries above).
+            raw.pop("design", None)
+        else:
+            cleaned: dict[str, dict[str, Any]] = {}
+            for group, keys in design.items():
+                sg = _sid(group)
+                spec = DESIGN_GROUPS.get(sg) if sg else None
+                if spec is None or not isinstance(keys, dict):
+                    continue
+                kept = {}
+                for k, v in keys.items():
+                    sk = _sid(k)
+                    # Nulls are dropped (nothing to clear on a brand-new block).
+                    if sk and sk in spec and v is not None and _design_value_error(v, spec[sk], sg, sk) is None:
+                        kept[sk] = v
+                if kept:
+                    cleaned[sg] = kept
+            if cleaned:
+                raw["design"] = cleaned
+            else:
+                raw.pop("design", None)
     return None
+
+
+def _v_apply_section_preset(raw: dict[str, Any], ctx: ValidationCtx) -> Optional[str]:
+    """Expand a preset reference into a fully-populated add_block IN PLACE, then
+    run it through the real add_block validator (same content filtering + the
+    non-premium design strip). The client only ever sees the expanded add_block
+    — the preset library never needs a TS mirror. deepcopy so downstream
+    mutation of the op can't corrupt the shared library data. The original
+    `preset` key is kept as provenance (client uses it in the apply summary)."""
+    preset = PRESETS_BY_KEY.get(_sid(raw.get("preset")))
+    if preset is None:
+        return f"unknown preset '{raw.get('preset')}' — expected one of: {', '.join(sorted(PRESETS_BY_KEY))}"
+    at = raw.get("at")
+    if not isinstance(at, int) or isinstance(at, bool):
+        return "missing/invalid 'at' index"
+    raw["op"] = "add_block"
+    raw["type"] = preset.block_type
+    raw["content"] = deepcopy(preset.content)
+    raw["design"] = deepcopy(preset.design)
+    return _v_add_block(raw, ctx)
 
 
 def _v_remove_block(raw: dict[str, Any], ctx: ValidationCtx) -> Optional[str]:
@@ -426,7 +477,19 @@ MERLIN_OPS: tuple[MerlinOp, ...] = (
     MerlinOp(
         name="add_block",
         validate=_v_add_block,
-        prompt_shape='{"op":"add_block","type":"<blockType>","at":<index>,"content":{...fields...}}',
+        prompt_shape='{"op":"add_block","type":"<blockType>","at":<index>,"content":{...fields...},"design":{...optional set_design groups/keys...}}',
+    ),
+    MerlinOp(
+        name="apply_section_preset",
+        validate=_v_apply_section_preset,
+        prompt_shape='{"op":"apply_section_preset","preset":"<presetName>","at":<index>}',
+        prompt_rules=(
+            "Prefer apply_section_preset over hand-building add_block when the user asks for a new "
+            "section without specifying detailed content — presets are professionally designed. "
+            "Available presets: "
+            + "; ".join(f"{p.key} ({p.block_type}) — {p.blurb}" for p in SECTION_PRESETS)
+            + ".",
+        ),
     ),
     MerlinOp(
         name="remove_block",
@@ -537,6 +600,10 @@ def build_merlin_schema() -> dict[str, Any]:
             "prefixes": list(THEME_KEY_PREFIXES),
             "modes": sorted(THEME_MODE_VALUES),
         },
+        "sectionPresets": [
+            {"name": p.key, "label": p.label, "blurb": p.blurb, "blockType": p.block_type}
+            for p in SECTION_PRESETS
+        ],
         "limits": {
             "maxOpsPerTurn": MAX_OPS_PER_TURN,
             "canvas": {

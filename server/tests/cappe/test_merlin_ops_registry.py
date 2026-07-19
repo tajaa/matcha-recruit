@@ -25,6 +25,7 @@ from app.cappe.services.merlin_ops import (  # noqa: E402
 _EXPECTED_OPS = {
     "set_field", "set_design", "add_block", "remove_block", "move_block",
     "set_theme", "canvas_add", "canvas_update", "canvas_remove",
+    "apply_section_preset",  # Phase 4 — server-expanded into add_block
 }
 
 
