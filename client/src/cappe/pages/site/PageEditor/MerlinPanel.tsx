@@ -68,6 +68,12 @@ export function MerlinDrawer({ merlin }: { merlin: ReturnType<typeof useMerlin> 
                 <div className={`rounded-lg px-3 py-2 text-sm ${m.role === 'user' ? 'bg-emerald-500/10 text-emerald-100' : 'bg-zinc-800 text-zinc-100'}`}>
                   {m.content}
                 </div>
+                {/* Ground truth beats the model's prose: it has claimed
+                    effects it never produced, so say plainly when a turn
+                    changed nothing. */}
+                {m.noChanges && (
+                  <p className="mt-1 text-[11px] font-medium text-amber-300/90">No changes applied.</p>
+                )}
                 {m.role === 'assistant' && m.tier && (
                   <p className="mt-0.5 text-[10px] text-zinc-600">
                     {MERLIN_TIERS.find((t) => t.id === m.tier)?.label ?? m.tier}

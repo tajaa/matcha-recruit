@@ -19,6 +19,11 @@ export type MerlinMessage = {
   content: string
   results?: MerlinOpResult[]
   tier?: MerlinTier
+  /** True when the turn changed nothing. The panel renders an explicit "no
+   *  changes" marker for these — the model's prose has claimed effects it
+   *  never produced ("I've enabled the hero shimmer"), so the UI states the
+   *  ground truth rather than trusting the sentence. */
+  noChanges?: boolean
 }
 
 type MerlinChatResponse = {
@@ -46,7 +51,13 @@ const TIER_KEY = 'cappe:merlin-tier'
 export function useMerlin(
   siteId: string | undefined,
   pageId: string | undefined,
-  getSnapshot: () => { blocks: CappeBlock[]; theme: Record<string, unknown> },
+  /** Also carries `selectedBlock` — the block the user has selected in the
+   *  editor, so "this section" resolves instead of being guessed at. */
+  getSnapshot: () => {
+    blocks: CappeBlock[]
+    theme: Record<string, unknown>
+    selectedBlock?: string | null
+  },
   onApply: (next: {
     blocks: CappeBlock[]
     theme: Record<string, unknown>
@@ -89,7 +100,7 @@ export function useMerlin(
     const sentForPageId = pageId
 
     try {
-      const { blocks, theme } = getSnapshot()
+      const { blocks, theme, selectedBlock } = getSnapshot()
       const snapshotBlocks = blocks.map((b) => {
         const { _k, ...rest } = b
         return { ...rest, id: _k }
@@ -107,6 +118,7 @@ export function useMerlin(
         blocks: snapshotBlocks,
         theme,
         model_tier: tier,
+        selected_block: selectedBlock ?? null,
       })
 
       // Navigated to a different page while in flight — applying now would
@@ -122,9 +134,10 @@ export function useMerlin(
         onApply({ blocks: applied.blocks, theme: applied.theme, blocksChanged, themeChanged })
       }
       const skippedFromServer = (res.rejected || []).map((r) => ({ ok: false, summary: r.reason }))
+      const results = [...applied.results, ...skippedFromServer]
       setMessages((m) => [...m, {
-        role: 'assistant', content: res.message, tier: res.tier,
-        results: [...applied.results, ...skippedFromServer],
+        role: 'assistant', content: res.message, tier: res.tier, results,
+        noChanges: !results.some((r) => r.ok),
       }])
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Merlin failed to respond'

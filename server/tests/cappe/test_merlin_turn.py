@@ -7,6 +7,7 @@ in the validation suite could notice.
 
 Run from server/:  ./venv/bin/python -m pytest tests/cappe/test_merlin_turn.py -q
 """
+import json
 import os
 
 import pytest
@@ -192,3 +193,44 @@ def test_every_tier_maps_to_a_real_model():
     assert DEFAULT_MODEL_TIER in MODEL_TIERS
     assert all(m.startswith("gemini-") for m in MODEL_TIERS.values())
     assert len(set(MODEL_TIERS.values())) == len(MODEL_TIERS)  # no tier aliasing another
+
+
+# --- theme-intent detection ---------------------------------------------------
+
+@pytest.mark.parametrize("message,expected", [
+    # The reported failure: no theme mention at all -> preset swap must not fire.
+    ("make this section animate the main text somehow", False),
+    ("make the heading bigger", False),
+    ("add an FAQ after the features", False),
+    # Genuine theme requests.
+    ("switch to the midnight theme", True),
+    ("change my color scheme", True),
+    ("use a different preset", True),
+    ("can you restyle the site", True),
+    ("update the palette please", True),
+])
+def test_theme_intent_detection(message, expected):
+    from app.cappe.services.merlin import _THEME_INTENT_RE
+    assert bool(_THEME_INTENT_RE.search(message)) is expected
+
+
+@pytest.mark.asyncio
+async def test_animation_request_cannot_swap_the_theme(monkeypatch):
+    """End-to-end guard for the exact reported failure: the model answers an
+    animation request with a theme swap + an unrelated copy edit. The theme op
+    must be rejected; only the design op survives."""
+    payload = json.dumps({
+        "message": "I've enabled the hero shimmer effect.",
+        "ops": [
+            {"op": "set_theme", "key": "preset", "value": "studio"},
+            {"op": "set_design", "block": "b1", "group": "motion", "key": "heading", "value": "shimmer"},
+        ],
+    })
+    monkeypatch.setattr(merlin, "get_genai_client", lambda **kw: _FakeClient(payload))
+    result = await run_merlin_turn(
+        message="make this section animate the main text somehow",
+        history=[], blocks=_BLOCKS, theme={}, plan="pro",
+    )
+    ops = result["ops"]
+    assert len(ops) == 1 and ops[0]["op"] == "set_design"
+    assert any("unless you ask" in r["reason"] for r in result["rejected"])

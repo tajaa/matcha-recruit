@@ -1272,6 +1272,9 @@ class CappeMerlinChatRequest(BaseModel):
     # Clamped server-side to what the plan allows — an unknown or over-plan
     # tier degrades to 'lite' rather than 403ing (see merlin.resolve_model_tier).
     model_tier: Literal["lite", "regular", "pro"] = "lite"
+    # The block the user currently has selected in the editor, so "this
+    # section" resolves to something instead of being guessed at.
+    selected_block: Optional[str] = Field(default=None, max_length=100)
 
 
 class CappeMerlinRejection(BaseModel):

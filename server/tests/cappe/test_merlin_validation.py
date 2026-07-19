@@ -407,3 +407,86 @@ def test_request_model_bounds_snapshot_and_history():
 def test_snapshot_byte_ceiling_is_far_below_the_nginx_body_cap():
     from app.cappe.routes.merlin import _MAX_SNAPSHOT_BYTES
     assert 0 < _MAX_SNAPSHOT_BYTES <= 1_000_000
+
+
+# --- set_design: the op whose absence caused the destructive-substitution bug --
+#
+# Reported failure: "make this section animate the main text somehow" →
+# Merlin switched the whole theme and rewrote a heading, because it had no op
+# that could animate anything. `_design.motion.heading` was always the answer.
+
+def test_set_design_animates_the_heading():
+    valid, rejected = _only([{
+        "op": "set_design", "block": "b1", "group": "motion", "key": "heading", "value": "shimmer",
+    }])
+    assert len(valid) == 1 and not rejected
+
+
+def test_set_design_enforces_enum_values():
+    ok, _ = _only([{"op": "set_design", "block": "b1", "group": "motion", "key": "heading", "value": "rise"}])
+    bad_v, bad_r = _only([{"op": "set_design", "block": "b1", "group": "motion", "key": "heading", "value": "sparkle"}])
+    assert len(ok) == 1
+    assert not bad_v and "must be one of" in bad_r[0]["reason"]
+
+
+def test_set_design_enforces_numeric_ranges():
+    ok, _ = _only([{"op": "set_design", "block": "b1", "group": "motion", "key": "duration", "value": 700}])
+    bad_v, bad_r = _only([{"op": "set_design", "block": "b1", "group": "motion", "key": "duration", "value": 99999}])
+    assert len(ok) == 1
+    assert not bad_v and "between 100 and 2000" in bad_r[0]["reason"]
+
+
+def test_set_design_rejects_unknown_group_and_key():
+    _, bad_group = _only([{"op": "set_design", "block": "b1", "group": "nope", "key": "x", "value": 1}])
+    _, bad_key = _only([{"op": "set_design", "block": "b1", "group": "motion", "key": "bogus", "value": 1}])
+    assert "unknown design group" in bad_group[0]["reason"]
+    assert "is not a motion setting" in bad_key[0]["reason"]
+
+
+def test_set_design_null_clears_a_key():
+    valid, rejected = _only([{"op": "set_design", "block": "b1", "group": "motion", "key": "heading", "value": None}])
+    assert len(valid) == 1 and not rejected
+
+
+def test_set_design_validates_colors_as_hex():
+    ok, _ = _only([{"op": "set_design", "block": "b1", "group": "colors", "key": "heading", "value": "#1a2b3c"}])
+    bad_v, bad_r = _only([{"op": "set_design", "block": "b1", "group": "colors", "key": "heading", "value": "reddish"}])
+    assert len(ok) == 1
+    assert not bad_v and "hex color" in bad_r[0]["reason"]
+
+
+def test_set_design_refused_on_non_premium_with_an_honest_reason():
+    """`gate_content` strips `_design` on save for free plans, so applying it
+    in-editor would look like it worked and then silently vanish."""
+    valid, rejected = validate_ops(
+        [{"op": "set_design", "block": "b1", "group": "motion", "key": "heading", "value": "shimmer"}],
+        _BLOCKS, premium=False,
+    )
+    assert not valid and "Pro feature" in rejected[0]["reason"]
+
+
+# --- theme swaps need explicit intent ----------------------------------------
+
+def test_preset_swap_refused_without_theme_intent():
+    """A whole-site restyle must not ride along on an unrelated request — this
+    is what turned "animate this text" into a theme change."""
+    valid, rejected = validate_ops(
+        [{"op": "set_theme", "key": "preset", "value": "studio"}], _BLOCKS, theme_intent=False,
+    )
+    assert not valid and "unless you ask" in rejected[0]["reason"]
+
+
+def test_preset_swap_allowed_when_the_user_asked_for_a_theme():
+    valid, rejected = validate_ops(
+        [{"op": "set_theme", "key": "preset", "value": "studio"}], _BLOCKS, theme_intent=True,
+    )
+    assert len(valid) == 1 and not rejected
+
+
+def test_non_preset_theme_keys_are_unaffected_by_intent_gate():
+    # Narrow theme tweaks (a brand color) stay available — only the whole-site
+    # preset swap is gated.
+    valid, rejected = validate_ops(
+        [{"op": "set_theme", "key": "colors.brand", "value": "#112233"}], _BLOCKS, theme_intent=False,
+    )
+    assert len(valid) == 1 and not rejected

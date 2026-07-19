@@ -11,6 +11,7 @@ a block type or field is added/renamed/removed on the frontend.
 Kept as plain dicts/sets (not Pydantic) — this is read-only reference data
 consumed by prompt-building and validation, not request/response shapes.
 """
+from typing import Any
 
 # type -> {field name: field kind}, for the block's top-level content fields
 # (excluding `type` itself and the structural `_design`/`_k`). Kinds use the
@@ -120,6 +121,58 @@ CANVAS_STYLE_KEYS: frozenset[str] = frozenset({
 CANVAS_PATCH_KEYS: frozenset[str] = frozenset({"text", "src", "alt", "href", "d", "m", "style"})
 
 MAX_OPS_PER_TURN = 20
+
+# --- Per-block design bag (`_design`) -----------------------------------------
+# Mirrors the per-section inspector in
+# client/src/cappe/pages/site/PageEditor/DesignInspector.tsx (its `patch(group,
+# key, value)` calls are the source of truth). This is where ALL motion and
+# animation lives — without it Merlin literally cannot honor "animate this",
+# and the model substitutes destructive ops it *can* emit instead. That is the
+# exact failure this catalog exists to fix.
+#
+# Value spec per key: a frozenset means a closed enum; "bool" / "color" /
+# "text" / (min, max) int ranges are checked by kind in merlin.py.
+DESIGN_GROUPS: dict[str, dict[str, Any]] = {
+    "motion": {
+        "effect": frozenset({
+            "none", "fade", "slide-up", "slide-down", "slide-left", "slide-right",
+            "zoom", "blur-in", "flip", "rotate", "mask-up", "bounce",
+        }),
+        "heading": frozenset({"none", "rise", "shimmer"}),
+        "hover": frozenset({"none", "lift", "tilt", "glow"}),
+        "loop": frozenset({"none", "float", "pulse"}),
+        "delay": (0, 2000),
+        "duration": (100, 2000),
+        "parallaxStrength": (0, 80),
+        "stagger": "bool",
+        "parallax": "bool",
+        "kenburns": "bool",
+    },
+    "bg": {
+        "type": frozenset({"none", "color", "gradient", "image", "video"}),
+        "overlay": frozenset({"none", "light", "medium", "dark"}),
+        "color": "color",
+        "image": "text",
+        "video": "text",
+        "blur": "bool",
+    },
+    "layout": {
+        "align": frozenset({"default", "left", "center"}),
+        "maxWidth": frozenset({"default", "narrow", "wide", "full"}),
+        "minHeight": frozenset({"default", "tall", "screen"}),
+        "padTop": "text",
+        "padBottom": "text",
+    },
+    "colors": {"heading": "color", "text": "color", "accent": "color"},
+    "border": {"top": "bool", "bottom": "bool", "width": (0, 20), "color": "color"},
+    "anchor": {"id": "text"},
+}
+
+# `_design` is a Pro/Business feature — `gate_content` strips it on save for
+# non-premium plans. Merlin lite is open to free plans, so a design op from a
+# free account must be refused with a reason, not applied in-editor and then
+# silently dropped the moment the user hits Save.
+DESIGN_REQUIRES_PREMIUM = True
 
 # --- Model tiers -------------------------------------------------------------
 # The same ladder the rest of the codebase uses (see

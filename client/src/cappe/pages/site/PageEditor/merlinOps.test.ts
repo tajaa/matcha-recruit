@@ -152,3 +152,28 @@ describe('referential stability', () => {
     expect(r.theme).toBe(theme)
   })
 })
+
+describe('set_design (the op whose absence caused the destructive substitution)', () => {
+  it('sets a motion key, creating the _design bag', () => {
+    const r = run([hero()], [{ op: 'set_design', block: 'k1', group: 'motion', key: 'heading', value: 'shimmer' }])
+    expect(r.blocks[0]._design).toEqual({ motion: { heading: 'shimmer' } })
+    expect(r.results[0].ok).toBe(true)
+  })
+
+  it('merges into an existing group without dropping sibling keys', () => {
+    const b: CappeBlock = { _k: 'k9', type: 'hero', _design: { motion: { effect: 'fade' }, bg: { type: 'color' } } }
+    const r = run([b], [{ op: 'set_design', block: 'k9', group: 'motion', key: 'heading', value: 'rise' }])
+    expect(r.blocks[0]._design).toEqual({ motion: { effect: 'fade', heading: 'rise' }, bg: { type: 'color' } })
+  })
+
+  it('clears a key on null/empty, like DesignInspector patch()', () => {
+    const b: CappeBlock = { _k: 'k9', type: 'hero', _design: { motion: { heading: 'shimmer', effect: 'fade' } } }
+    const r = run([b], [{ op: 'set_design', block: 'k9', group: 'motion', key: 'heading', value: null }])
+    expect(r.blocks[0]._design).toEqual({ motion: { effect: 'fade' } })
+  })
+
+  it('skips a section that no longer exists', () => {
+    const r = run([hero()], [{ op: 'set_design', block: 'ghost', group: 'motion', key: 'heading', value: 'rise' }])
+    expect(r.results[0].ok).toBe(false)
+  })
+})

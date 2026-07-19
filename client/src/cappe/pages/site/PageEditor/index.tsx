@@ -62,8 +62,14 @@ export default function PageEditor() {
   // The snapshot getter reads a ref, not the render closure: a Merlin request
   // is in flight for ~2-5s and its ops must land on whatever the page looks
   // like when the response arrives, or every edit made meanwhile is reverted.
-  const liveStateRef = useRef({ blocks, theme: themeEditor.theme })
-  liveStateRef.current = { blocks, theme: themeEditor.theme }
+  //
+  // `selectedBlock` is what makes "animate this section" resolve to a specific
+  // block instead of the model picking one. Assigned below once `canvas` exists.
+  const liveStateRef = useRef<{
+    blocks: CappeBlock[]
+    theme: Record<string, unknown>
+    selectedBlock?: string | null
+  }>({ blocks, theme: themeEditor.theme })
   const merlin = useMerlin(
     siteId, pageId,
     () => liveStateRef.current,
@@ -82,6 +88,15 @@ export default function PageEditor() {
   // clear of whichever docked panel(s) are open.
   const reservedRight = (themeEditor.themeOpen ? 288 : 0) + (merlin.open ? 320 : 0)
   const canvas = useCanvasBridge(blocks, setBlocks, previewIframeRef, reservedRight, editMode)
+
+  // Refresh Merlin's view of live editor state every render. Assigned here
+  // rather than at the useRef because `canvas` (the block selection) is
+  // declared below the hook that consumes it.
+  liveStateRef.current = {
+    blocks,
+    theme: themeEditor.theme,
+    selectedBlock: canvas.selBlock != null ? (blocks[canvas.selBlock]?._k as string | undefined) ?? null : null,
+  }
 
   // Reverse sync: clicking a page element while the drawer is open probes which
   // theme region governs it; the drawer scrolls to + flashes that control. Only

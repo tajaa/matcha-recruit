@@ -76,6 +76,8 @@ async def merlin_chat(
             theme=body.theme,
             business_name=site["name"],
             model_tier=tier,
+            plan=account.plan,
+            selected_block=body.selected_block,
         )
     except RateLimitExceeded as exc:
         raise HTTPException(

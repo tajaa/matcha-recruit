@@ -19,6 +19,7 @@ message-only response with empty ops.
 import asyncio
 import json
 import logging
+import re
 from typing import Any, Optional
 
 from google.genai import types
@@ -39,6 +40,7 @@ from .merlin_catalog import (
     CANVAS_PATCH_KEYS,
     CANVAS_STYLE_KEYS,
     DEFAULT_MODEL_TIER,
+    DESIGN_GROUPS,
     FREE_PLAN_TIERS,
     LIST_KINDS,
     MAX_OPS_PER_TURN,
@@ -53,8 +55,13 @@ from .merlin_catalog import (
 logger = logging.getLogger(__name__)
 
 MERLIN_CALL_TIMEOUT = 45  # seconds — same order as ir_analysis.GEMINI_CALL_TIMEOUT
+_HEX_COLOR_RE = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
+# A theme swap replaces brand/fonts/radius/mode site-wide, so it only fires when
+# the user actually asked for one. Without this the model reached for `preset`
+# on a request that never mentioned themes and nuked the site's look.
+_THEME_INTENT_RE = re.compile(r"\b(theme|preset|palette|colou?r scheme|restyle|redesign)\b", re.I)
 _OP_NAMES = frozenset({
-    "set_field", "add_block", "remove_block", "move_block",
+    "set_field", "set_design", "add_block", "remove_block", "move_block",
     "set_theme", "canvas_add", "canvas_update", "canvas_remove",
 })
 _MAX_HISTORY_TURNS = 10
@@ -228,18 +235,50 @@ def _valid_field_value(value: Any, kind: str, btype: str, head: str) -> bool:
     return _field_value_error(value, kind, btype, head) is None
 
 
+def _design_value_error(value: Any, spec: Any, group: str, key: str) -> Optional[str]:
+    """Check a `_design` value against its spec from DESIGN_GROUPS: a frozenset
+    is a closed enum, a (min, max) tuple an int range, else a kind name.
+    `None` always passes — it clears the key, mirroring DesignInspector's
+    `patch(group, key, '')` behavior."""
+    if value is None:
+        return None
+    if isinstance(spec, frozenset):
+        if value not in spec:
+            return f"'{key}' must be one of: {', '.join(sorted(spec))}"
+    elif isinstance(spec, tuple):
+        num = _num(value)
+        if num is None or not (spec[0] <= num <= spec[1]):
+            return f"'{key}' must be a number between {spec[0]} and {spec[1]}"
+    elif spec == "bool":
+        if not isinstance(value, bool):
+            return f"'{key}' must be true or false"
+    elif spec == "color":
+        if not isinstance(value, str) or not _HEX_COLOR_RE.match(value):
+            return f"'{key}' must be a hex color like #1a2b3c"
+    elif spec == "text":
+        if not isinstance(value, str):
+            return f"'{key}' must be text"
+    return None
+
+
 def _filter_style(style: Any) -> dict[str, Any]:
     return {k: v for k, v in style.items() if k in CANVAS_STYLE_KEYS} if isinstance(style, dict) else {}
 
 
 def validate_ops(
-    raw_ops: list[Any], blocks: list[dict[str, Any]]
+    raw_ops: list[Any], blocks: list[dict[str, Any]], *,
+    premium: bool = True, theme_intent: bool = True,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Filter a model-produced ops array down to ones that are safe to hand to
     the client. Returns (valid_ops, rejections) where each rejection is
     `{"op": <original>, "reason": <str>}`. Truncates to MAX_OPS_PER_TURN before
     validating anything past it (rejected with a shared reason, not silently
     dropped) — a runaway op count is a prompt/model failure, not routine.
+
+    `premium` gates the `_design` bag (stripped on save for free plans, so
+    applying it would be a lie). `theme_intent` is whether the user's message
+    actually asked about themes — a whole-site preset swap is too destructive
+    to fire off a request that never mentioned one.
 
     Validates against the snapshot the client sent, not against effects of
     earlier ops in the same batch: an op that targets something an earlier op
@@ -273,7 +312,7 @@ def validate_ops(
             rejected.append({"op": raw, "reason": f"unknown op '{op}'"})
             continue
 
-        reason = _validate_one(raw, op, by_id, pending_canvas_count)
+        reason = _validate_one(raw, op, by_id, pending_canvas_count, premium, theme_intent)
         if reason:
             rejected.append({"op": raw, "reason": reason})
         else:
@@ -284,7 +323,7 @@ def validate_ops(
 
 def _validate_one(
     raw: dict[str, Any], op: str, by_id: dict[str, dict[str, Any]],
-    pending_canvas_count: dict[str, int],
+    pending_canvas_count: dict[str, int], premium: bool = True, theme_intent: bool = True,
 ) -> Optional[str]:
     """Returns None if valid, else a rejection reason. May mutate `raw` in
     place to strip unknown/structural keys (e.g. add_block.content, canvas
@@ -307,6 +346,23 @@ def _validate_one(
         if kind is None:
             return f"field '{head}' is not valid on a {btype} block"
         return _validate_field_value(raw, block, head, kind, parts[1:], btype)
+
+    if op == "set_design":
+        block = by_id.get(_sid(raw.get("block")))
+        if block is None:
+            return "block id not found"
+        if not premium:
+            # `_design` is stripped on save for non-premium plans, so applying
+            # it in-editor would look like it worked and then vanish.
+            return "section design and animation are a Pro feature — upgrade to use them"
+        group = _sid(raw.get("group"))
+        spec = DESIGN_GROUPS.get(group) if group else None
+        if spec is None:
+            return f"unknown design group '{raw.get('group')}' — expected one of: {', '.join(sorted(DESIGN_GROUPS))}"
+        key = _sid(raw.get("key"))
+        if key is None or key not in spec:
+            return f"'{raw.get('key')}' is not a {group} setting — expected one of: {', '.join(sorted(spec))}"
+        return _design_value_error(raw.get("value"), spec[key], group, key)
 
     if op == "add_block":
         btype = _sid(raw.get("type"))
@@ -352,6 +408,11 @@ def _validate_one(
             return f"unknown theme key '{key}'"
         if key == "mode" and _sid(raw.get("value")) not in THEME_MODE_VALUES:
             return "mode must be 'light' or 'dark'"
+        if key == "preset" and not theme_intent:
+            # Switching preset replaces brand, fonts, radius and mode site-wide.
+            # Firing that off a request that never mentioned themes is how a
+            # "animate this text" turn silently restyled the whole site.
+            return "won't switch the site theme unless you ask for a theme change directly"
         return None
 
     # Canvas ops all require the target block to exist and be a canvas block.
@@ -438,6 +499,7 @@ plan. You do not write prose explanations of code — you output ONLY a JSON obj
 
 Each op is one of:
 {"op":"set_field","block":"<id>","path":"<fieldName>","value":<any>}
+{"op":"set_design","block":"<id>","group":"motion"|"bg"|"layout"|"colors"|"border"|"anchor","key":"<setting>","value":<any>}
 {"op":"add_block","type":"<blockType>","at":<index>,"content":{...fields...}}
 {"op":"remove_block","block":"<id>"}
 {"op":"move_block","block":"<id>","to":<index>}
@@ -447,6 +509,12 @@ Each op is one of:
 {"op":"canvas_remove","block":"<id>","el":"<elementId>"}
 
 Rules:
+- NEVER substitute a different change for the one you were asked to make. If you cannot accomplish the request with the ops above, return an empty "ops" array and say plainly what you can't do. Doing something the user did not ask for is far worse than doing nothing.
+- Your "message" must describe ONLY the ops you actually emitted. Never describe an effect you did not produce.
+- Change only what was asked. Do not rewrite the user's copy, switch their theme, or restyle sections as a side effect of an unrelated request.
+- Animation and per-section styling live in set_design, NOT in the theme. "Animate the heading" is {"op":"set_design","group":"motion","key":"heading","value":"shimmer"|"rise"}. Reveal-on-scroll is motion.effect. Never switch the site theme to satisfy an animation or styling request.
+- Only use set_theme with key "preset" when the user explicitly asks to change their theme — it replaces their brand color, fonts, corners and light/dark mode site-wide.
+- When the user says "this section", "here", or "it", they mean the SELECTED SECTION named below. If nothing is selected and the target is ambiguous, ask which section rather than guessing.
 - Address blocks and canvas elements ONLY by the "id" values given to you below — never by position/index guessing.
 - At most 20 ops per turn. Prefer editing an existing block over removing and recreating it.
 - Never invent a block type or field name outside the catalog below.
@@ -460,18 +528,52 @@ Rules:
 # raises KeyError). The catalog is concatenated below instead.
 
 
+def _design_catalog_text() -> str:
+    """The `_design` surface, so the model knows animation/styling is expressible
+    at all. Without this it reaches for whatever it *can* emit — which is how an
+    "animate this text" request became a site-wide theme swap."""
+    lines = []
+    for group in sorted(DESIGN_GROUPS):
+        rendered = []
+        for key in sorted(DESIGN_GROUPS[group]):
+            spec = DESIGN_GROUPS[group][key]
+            if isinstance(spec, frozenset):
+                rendered.append(f"{key}({'|'.join(sorted(spec))})")
+            elif isinstance(spec, tuple):
+                rendered.append(f"{key}({spec[0]}-{spec[1]})")
+            else:
+                rendered.append(f"{key}:{spec}")
+        lines.append(f"- {group}: {', '.join(rendered)}")
+    return "\n".join(lines)
+
+
 def _build_prompt(
     *, message: str, history: list[dict[str, Any]], blocks: list[dict[str, Any]],
     theme: dict[str, Any], business_name: Optional[str], business_type: Optional[str],
-    feedback: Optional[str],
+    feedback: Optional[str], selected_block: Optional[str] = None,
 ) -> str:
-    parts = [_SYSTEM_PROMPT, "Block catalog (type: allowed fields):\n" + _catalog_text()]
+    parts = [
+        _SYSTEM_PROMPT,
+        "Block catalog (type: allowed fields):\n" + _catalog_text(),
+        "Section design catalog for set_design (group: settings):\n" + _design_catalog_text(),
+    ]
 
     if business_name or business_type:
         parts.append(f"Site: {business_name or '(unnamed)'} — {business_type or 'general business'}")
 
     parts.append("Current blocks (JSON):\n" + json.dumps(blocks))
     parts.append("Current theme (JSON):\n" + json.dumps(theme))
+
+    if selected_block:
+        parts.append(
+            f"SELECTED SECTION: id={selected_block}. "
+            'Resolve "this section" / "here" / "it" to this block.'
+        )
+    else:
+        parts.append(
+            "SELECTED SECTION: none. If the user refers to \"this section\" and it is "
+            "ambiguous which they mean, ask instead of guessing."
+        )
 
     trimmed = history[-_MAX_HISTORY_TURNS:]
     if trimmed:
@@ -502,7 +604,7 @@ def _rejection_feedback(rejected: list[dict[str, Any]]) -> str:
 async def run_merlin_turn(
     *, message: str, history: list[dict[str, Any]], blocks: list[dict[str, Any]],
     theme: dict[str, Any], business_name: Optional[str] = None, business_type: Optional[str] = None,
-    model_tier: str = DEFAULT_MODEL_TIER,
+    model_tier: str = DEFAULT_MODEL_TIER, plan: Any = None, selected_block: Optional[str] = None,
 ) -> dict[str, Any]:
     """Run one Merlin chat turn. Returns `{"message", "ops", "rejected", "tier"}`.
 
@@ -521,6 +623,10 @@ async def run_merlin_turn(
     tier = model_tier if model_tier in MODEL_TIERS else DEFAULT_MODEL_TIER
     client = get_genai_client()
     model = MODEL_TIERS[tier]
+    premium = is_premium_plan(plan)
+    # Did the user actually ask about themes this turn? Gates the site-wide
+    # preset swap so it can't ride along on an unrelated request.
+    theme_intent = bool(_THEME_INTENT_RE.search(message or ""))
 
     last_feedback: Optional[str] = None
     final_message = "Sorry, I couldn't process that — try again."
@@ -534,6 +640,7 @@ async def run_merlin_turn(
         prompt = _build_prompt(
             message=message, history=history, blocks=blocks, theme=theme,
             business_name=business_name, business_type=business_type, feedback=last_feedback,
+            selected_block=selected_block,
         )
         # Everything from the API call through op validation sits inside the
         # try: a hallucinated payload shape must degrade to a retry or an
@@ -561,7 +668,9 @@ async def run_merlin_turn(
             raw_message = str(payload.get("message") or "").strip() or "Done."
             raw_ops = payload.get("ops")
             raw_ops = raw_ops if isinstance(raw_ops, list) else []
-            valid, rejected = validate_ops(raw_ops, blocks)
+            valid, rejected = validate_ops(
+                raw_ops, blocks, premium=premium, theme_intent=theme_intent,
+            )
         except asyncio.TimeoutError:
             logger.warning("Merlin call timed out (attempt %d/2)", attempt + 1)
             last_feedback = f"the previous attempt timed out after {MERLIN_CALL_TIMEOUT}s — respond more concisely"

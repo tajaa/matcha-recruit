@@ -23,8 +23,11 @@ export type MerlinCanvasElementInput = {
   style?: CappeCanvasElement['style']
 }
 
+export type MerlinDesignGroup = 'motion' | 'bg' | 'layout' | 'colors' | 'border' | 'anchor'
+
 export type MerlinOp =
   | { op: 'set_field'; block: string; path: string; value: unknown }
+  | { op: 'set_design'; block: string; group: MerlinDesignGroup; key: string; value: unknown }
   | { op: 'add_block'; type: string; at: number; content?: Record<string, unknown> }
   | { op: 'remove_block'; block: string }
   | { op: 'move_block'; block: string; to: number }
@@ -146,6 +149,20 @@ export function applyMerlinOps(
         const updated = { ...block, [head]: newVal }
         nextBlocks = nextBlocks.map((b, i) => (i === idx ? updated : b))
         results.push({ ok: true, summary: `Edited ${blockLabel(block.type)} — ${head}` })
+        break
+      }
+      case 'set_design': {
+        const idx = nextBlocks.findIndex((b) => b._k === op.block)
+        if (idx === -1) { results.push({ ok: false, summary: 'Skipped — section no longer exists' }); break }
+        const block = nextBlocks[idx]
+        const design = asRecord(block._design)
+        const group = { ...asRecord(design[op.group]) }
+        // '' / null clears the key — same convention as DesignInspector's patch().
+        if (op.value === '' || op.value == null) delete group[op.key]
+        else group[op.key] = op.value
+        nextBlocks = nextBlocks.map((b, i) =>
+          (i === idx ? { ...b, _design: { ...design, [op.group]: group } } : b))
+        results.push({ ok: true, summary: `${blockLabel(block.type)} — ${op.group} ${op.key}` })
         break
       }
       case 'add_block': {
