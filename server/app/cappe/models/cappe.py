@@ -1245,6 +1245,49 @@ class CappeStylePreset(BaseModel):
 
 
 # ===========================================================================
+# Merlin — AI chat editing (see services/merlin.py + merlin_catalog.py)
+# ===========================================================================
+
+class CappeMerlinHistoryTurn(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(max_length=4000)
+    # Compact recap of what an assistant turn changed (e.g. "set hero.heading;
+    # added faq at 3"), sent instead of raw ops to keep the transcript cheap.
+    ops_summary: Optional[str] = Field(default=None, max_length=4000)
+
+
+class CappeMerlinChatRequest(BaseModel):
+    """Client state is the source of truth — Merlin auto-applies to editor
+    state client-side and nothing persists until the user hits Save, so the
+    server never reads blocks/theme from the DB for this endpoint."""
+    page_id: str
+    message: str = Field(min_length=1, max_length=2000)
+    # The whole snapshot is serialized into the prompt (twice, if the
+    # validation retry fires) and Merlin shares the GLOBAL Gemini budget, so
+    # every list here is bounded. The byte-size of blocks+theme is additionally
+    # capped in the route — item counts alone don't bound a page's content.
+    history: list[CappeMerlinHistoryTurn] = Field(default_factory=list, max_length=20)
+    blocks: list[dict[str, Any]] = Field(default_factory=list, max_length=200)
+    theme: dict[str, Any] = Field(default_factory=dict)
+    # Clamped server-side to what the plan allows — an unknown or over-plan
+    # tier degrades to 'lite' rather than 403ing (see merlin.resolve_model_tier).
+    model_tier: Literal["lite", "regular", "pro"] = "lite"
+
+
+class CappeMerlinRejection(BaseModel):
+    op: dict[str, Any]
+    reason: str
+
+
+class CappeMerlinChatResponse(BaseModel):
+    message: str
+    ops: list[dict[str, Any]]
+    rejected: list[CappeMerlinRejection] = Field(default_factory=list)
+    # The tier actually used — may differ from the request if it was clamped.
+    tier: Literal["lite", "regular", "pro"] = "lite"
+
+
+# ===========================================================================
 # Shared
 # ===========================================================================
 

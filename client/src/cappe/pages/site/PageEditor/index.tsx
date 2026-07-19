@@ -9,10 +9,12 @@ import { SiteCtx } from './context'
 import { usePremium } from './DesignPrimitives'
 import { EditorToolbar } from './EditorToolbar'
 import { FormModeView } from './FormModeView'
+import { MerlinDrawer } from './MerlinPanel'
 import { ThemeDrawer } from './ThemeMenu'
 import { themeObj } from './themeHelpers'
 import { useCanvasBridge } from './useCanvasBridge'
 import { useEditorHistory } from './useEditorHistory'
+import { useMerlin } from './useMerlin'
 import { usePagePreview } from './usePagePreview'
 import { useThemeBridge, type ThemeRegion } from './useThemeBridge'
 import { useThemeEditor } from './useThemeEditor'
@@ -53,9 +55,33 @@ export default function PageEditor() {
   const canvasUnlocked = usePremium()
   const [editMode, setEditMode] = useState<'form' | 'canvas'>('form')
   useEffect(() => { if (canvasUnlocked) setEditMode('canvas') }, [canvasUnlocked])
-  // The theme drawer is a real 18rem flex sibling, but the canvas inspector is
-  // viewport-`fixed` — tell the bridge to clamp it clear of the drawer.
-  const canvas = useCanvasBridge(blocks, setBlocks, previewIframeRef, themeEditor.themeOpen ? 288 : 0, editMode)
+
+  // ── Merlin (Pro & Business): chat-edit the page. Auto-applies ops to
+  // `blocks`/theme state — nothing persists until Save.
+  //
+  // The snapshot getter reads a ref, not the render closure: a Merlin request
+  // is in flight for ~2-5s and its ops must land on whatever the page looks
+  // like when the response arrives, or every edit made meanwhile is reverted.
+  const liveStateRef = useRef({ blocks, theme: themeEditor.theme })
+  liveStateRef.current = { blocks, theme: themeEditor.theme }
+  const merlin = useMerlin(
+    siteId, pageId,
+    () => liveStateRef.current,
+    ({ blocks: nextBlocks, theme: nextTheme, blocksChanged, themeChanged }) => {
+      // Close the history entry for anything the user typed before this turn,
+      // and force the turn itself to record as its own entry instead of
+      // merging with whatever they type in the next 500ms.
+      historyRef.current.checkpoint()
+      if (blocksChanged) setBlocks(nextBlocks)
+      if (themeChanged) { themeEditor.loadTheme(nextTheme); themeEditor.markDirty() }
+    },
+  )
+
+  // The theme drawer (18rem) and Merlin panel (20rem) are real flex siblings,
+  // but the canvas inspector is viewport-`fixed` — tell the bridge to clamp it
+  // clear of whichever docked panel(s) are open.
+  const reservedRight = (themeEditor.themeOpen ? 288 : 0) + (merlin.open ? 320 : 0)
+  const canvas = useCanvasBridge(blocks, setBlocks, previewIframeRef, reservedRight, editMode)
 
   // Reverse sync: clicking a page element while the drawer is open probes which
   // theme region governs it; the drawer scrolls to + flashes that control. Only
@@ -253,6 +279,7 @@ export default function PageEditor() {
           setPromosDirty={setPromosDirty}
           designerUnlocked={designerUnlocked}
           themeEditor={themeEditor}
+          merlin={merlin}
           canvasUnlocked={canvasUnlocked}
           editMode={editMode}
           setEditMode={setEditMode}
@@ -309,6 +336,7 @@ export default function PageEditor() {
           />
         )}
         <ThemeDrawer themeEditor={themeEditor} designerUnlocked={designerUnlocked} bridge={themeBridge} probe={themeProbe} />
+        <MerlinDrawer merlin={merlin} />
         </div>
       </div>
     </SiteCtx.Provider>

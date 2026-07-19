@@ -1,13 +1,15 @@
 import { ArrowLeft, Loader2, MousePointerClick, Pencil, Redo2, Save, Undo2 } from 'lucide-react'
 import { EditorHelp } from './EditorHelp'
+import { MerlinButton } from './MerlinPanel'
 import { PromosPanel } from './PromosPanel'
 import { ThemeMenu } from './ThemeMenu'
+import type { useMerlin } from './useMerlin'
 import type { useThemeEditor } from './useThemeEditor'
 
 export function EditorToolbar({
   title, setTitle, slug, notice, error,
   meta, setMeta, promosDirty, setPromosDirty,
-  designerUnlocked, themeEditor,
+  designerUnlocked, themeEditor, merlin,
   canvasUnlocked, editMode, setEditMode,
   status, setStatus, saving, onSave, onBack,
   onUndo, onRedo, canUndo, canRedo,
@@ -23,6 +25,7 @@ export function EditorToolbar({
   setPromosDirty: (v: boolean) => void
   designerUnlocked: boolean
   themeEditor: ReturnType<typeof useThemeEditor>
+  merlin: ReturnType<typeof useMerlin>
   canvasUnlocked: boolean
   editMode: 'form' | 'canvas'
   setEditMode: (m: 'form' | 'canvas') => void
@@ -66,6 +69,10 @@ export function EditorToolbar({
         {/* Live theme switcher toggle — the drawer itself renders in index.tsx
             as a flex sibling of the preview, not here. */}
         <ThemeMenu themeEditor={themeEditor} />
+
+        {/* Chat-edit toggle — the panel itself renders in index.tsx as a flex
+            sibling of the preview, not here (same pattern as ThemeMenu). */}
+        <MerlinButton open={merlin.open} setOpen={merlin.setOpen} />
 
         {canvasUnlocked && (
           <div className="flex rounded-lg border border-zinc-700 p-0.5">

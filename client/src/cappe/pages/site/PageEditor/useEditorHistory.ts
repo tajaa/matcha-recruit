@@ -20,6 +20,7 @@ export function useEditorHistory(snap: EditorSnapshot, apply: (s: EditorSnapshot
   const past = useRef<EditorSnapshot[]>([])
   const future = useRef<EditorSnapshot[]>([])
   const restoring = useRef(false)
+  const forceRecord = useRef(false)
   const [, bump] = useReducer((n: number) => n + 1, 0)
 
   const same = (a: EditorSnapshot, b: EditorSnapshot) =>
@@ -41,10 +42,32 @@ export function useEditorHistory(snap: EditorSnapshot, apply: (s: EditorSnapshot
     return true
   }
 
+  /** Close the current entry and force the NEXT state change to record
+   *  immediately instead of joining the 500 ms debounce window.
+   *
+   *  For programmatic edits (a Merlin turn), the debounce is wrong twice over:
+   *  a user edit from <500 ms ago would be swallowed into the same entry, and
+   *  anything typed <500 ms after would be too — so one ⌘Z would revert the
+   *  user's own keystrokes along with the turn. */
+  const checkpoint = () => {
+    commitPending()
+    forceRecord.current = true
+    bump()
+  }
+
   useEffect(() => {
     // A restore just applied this exact state — adopt it without recording.
     if (restoring.current) { restoring.current = false; present.current = snap; return }
     if (same(present.current, snap)) return
+    if (forceRecord.current) {
+      forceRecord.current = false
+      past.current.push(present.current)
+      if (past.current.length > 50) past.current.shift()
+      future.current = []
+      present.current = snap
+      bump()
+      return
+    }
     const id = setTimeout(() => {
       if (same(present.current, snap)) return
       past.current.push(present.current)
@@ -86,12 +109,13 @@ export function useEditorHistory(snap: EditorSnapshot, apply: (s: EditorSnapshot
     present.current = s
     latest.current = s
     restoring.current = false
+    forceRecord.current = false
     bump()
   }
 
   const hasPendingEdit = !same(present.current, latest.current)
   return {
-    undo, redo, reset,
+    undo, redo, reset, checkpoint,
     canUndo: past.current.length > 0 || hasPendingEdit,
     canRedo: future.current.length > 0 && !hasPendingEdit,
   }
