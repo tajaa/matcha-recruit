@@ -123,50 +123,19 @@ CANVAS_PATCH_KEYS: frozenset[str] = frozenset({"text", "src", "alt", "href", "d"
 MAX_OPS_PER_TURN = 20
 
 # --- Per-block design bag (`_design`) -----------------------------------------
-# Mirrors the per-section inspector in
-# client/src/cappe/pages/site/PageEditor/DesignInspector.tsx (its `patch(group,
-# key, value)` calls are the source of truth). This is where ALL motion and
-# animation lives — without it Merlin literally cannot honor "animate this",
-# and the model substitutes destructive ops it *can* emit instead. That is the
-# exact failure this catalog exists to fix.
+# The per-section inspector's vocabulary (motion/bg/layout/colors/type/border/
+# anchor) — where ALL motion and animation lives, so without it Merlin can't
+# honor "animate this" and substitutes destructive ops it *can* emit instead.
 #
-# Value spec per key: a frozenset means a closed enum; "bool" / "color" /
-# "text" / (min, max) int ranges are checked by kind in merlin.py.
-DESIGN_GROUPS: dict[str, dict[str, Any]] = {
-    "motion": {
-        "effect": frozenset({
-            "none", "fade", "slide-up", "slide-down", "slide-left", "slide-right",
-            "zoom", "blur-in", "flip", "rotate", "mask-up", "bounce",
-        }),
-        "heading": frozenset({"none", "rise", "shimmer"}),
-        "hover": frozenset({"none", "lift", "tilt", "glow"}),
-        "loop": frozenset({"none", "float", "pulse"}),
-        "delay": (0, 2000),
-        "duration": (100, 2000),
-        "parallaxStrength": (0, 80),
-        "stagger": "bool",
-        "parallax": "bool",
-        "kenburns": "bool",
-    },
-    "bg": {
-        "type": frozenset({"none", "color", "gradient", "image", "video"}),
-        "overlay": frozenset({"none", "light", "medium", "dark"}),
-        "color": "color",
-        "image": "text",
-        "video": "text",
-        "blur": "bool",
-    },
-    "layout": {
-        "align": frozenset({"default", "left", "center"}),
-        "maxWidth": frozenset({"default", "narrow", "wide", "full"}),
-        "minHeight": frozenset({"default", "tall", "screen"}),
-        "padTop": "text",
-        "padBottom": "text",
-    },
-    "colors": {"heading": "color", "text": "color", "accent": "color"},
-    "border": {"top": "bool", "bottom": "bool", "width": (0, 20), "color": "color"},
-    "anchor": {"id": "text"},
-}
+# This is now DERIVED from the single-source-of-truth `design_registry` (the AI
+# gets the `merlin_settable` subset of the renderer's full vocabulary); the
+# derivation is asserted byte-equal to the historical hand-written dict in
+# tests/cappe/test_design_registry.py. Value spec per key: a frozenset is a
+# closed enum; "bool"/"color"/"text"/(min, max) int ranges are checked by kind
+# in merlin_ops.py.
+from .design_registry import build_design_groups
+
+DESIGN_GROUPS: dict[str, dict[str, Any]] = build_design_groups()
 
 # `_design` is a Pro/Business feature — `gate_content` strips it on save for
 # non-premium plans. Merlin lite is open to free plans, so a design op from a

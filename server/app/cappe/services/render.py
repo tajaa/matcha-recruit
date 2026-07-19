@@ -22,6 +22,8 @@ import re
 from typing import Any
 from urllib.parse import quote
 
+from .design_registry import DESIGN_KEYS_BY_GROUP
+
 _uid_counter = itertools.count(1)
 
 
@@ -187,6 +189,35 @@ def _safe_url_css(url: Any) -> str:
     return _esc(u).replace("'", "%27").replace("(", "%28").replace(")", "%29")
 
 
+def _emit_design_group(group: str, values: dict, classes: list, cssvars: list) -> None:
+    """Registry-driven emission for a self-contained design group (colors/type).
+
+    Executes each key's declarative `RenderRule` (from `design_registry`) with
+    this module's own sanitizers (`_hexonly`/`_clampi`) — byte-identical to the
+    former inline blocks, so an unset key emits nothing and the `_BASE_CSS`
+    var-fallback applies. New self-contained tokens become one registry entry
+    rather than a hand-added branch here."""
+    for dk in DESIGN_KEYS_BY_GROUP.get(group, ()):
+        rule = dk.render
+        if rule is None:
+            continue
+        raw = values.get(dk.key)
+        if rule.kind == "hex":
+            v = _hexonly(raw)
+            if v:
+                cssvars.append(f"{rule.var}:{v}")
+                for ev in rule.extra_vars:
+                    cssvars.append(f"{ev}:{v}")
+                if rule.css_class:
+                    classes.append(rule.css_class)
+        elif rule.kind == "int_px":
+            n = _clampi(raw, rule.lo, rule.hi, 0)
+            if n:
+                cssvars.append(f"{rule.var}:{n}px")
+                if rule.css_class:
+                    classes.append(rule.css_class)
+
+
 def _apply_design(html_str: str, design: Any, *, block_index: Any = None, editable: bool = False) -> str:
     """Post-process a block's HTML: merge designer classes/attrs/style into its
     first <section> tag and inject background media layers. When `editable`, also
@@ -305,25 +336,13 @@ def _apply_design(html_str: str, design: Any, *, block_index: Any = None, editab
         if align in ("left", "center"):
             classes.append(f"cz-al-{align}")
 
-        # ── per-section color overrides ─────────────────────────────────────
-        ctext, chead, cacc = _hexonly(colors.get("text")), _hexonly(colors.get("heading")), _hexonly(colors.get("accent"))
-        if ctext:
-            cssvars.append(f"--cz-text:{ctext}")
-        if chead:
-            cssvars.append(f"--cz-heading:{chead}")
-        if cacc:
-            cssvars += [f"--cz-brand:{cacc}", f"--cz-accent:{cacc}"]
-            classes.append("cz-acc")
-
-        # ── per-section type sizes ──────────────────────────────────────────
-        hsize = _clampi(typ.get("headingSize"), 16, 96, 0)
-        if hsize:
-            cssvars.append(f"--cz-h-size:{hsize}px")
-            classes.append("cz-has-hsize")
-        psize = _clampi(typ.get("bodySize"), 12, 28, 0)
-        if psize:
-            cssvars.append(f"--cz-p-size:{psize}px")
-            classes.append("cz-has-psize")
+        # ── per-section color overrides + type sizes (registry-driven) ──────
+        # These two groups are self-contained (each key → a css-var, no coupling
+        # to siblings), so their emission is declared in `design_registry` and
+        # executed by `_emit_design_group`. The coupled groups (motion effects,
+        # background media, layout px-override, border) stay bespoke below/above.
+        _emit_design_group("colors", colors, classes, cssvars)
+        _emit_design_group("type", typ, classes, cssvars)
 
         # ── per-section border / divider ────────────────────────────────────
         if border.get("top") or border.get("bottom"):
