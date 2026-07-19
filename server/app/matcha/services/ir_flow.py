@@ -205,6 +205,185 @@ def _has_injury_signal(incident: dict[str, Any], incident_type: str) -> bool:
     return bool(_INJURY_KEYWORD_RE.search(text))
 
 
+# ── Close-requirement predicates ─────────────────────────────────────────
+# THE source of truth for "what still blocks closing this incident". Both the
+# close intercept (``_close_incident_via_copilot``, which redirects the user to
+# the blocking card) and the progress meter (``close_progress`` below, which
+# tells the user how much is left) consume these. Keeping them in one place is
+# load-bearing: a meter computed from its own copy of these rules drifts, and a
+# progress bar that reads 100% while Close still bounces the user into another
+# card is worse than no progress bar at all.
+
+
+def osha_emergency_blocking(category_data: dict[str, Any]) -> bool:
+    """A reportable-event alert is raised and not yet acknowledged."""
+    return bool((category_data or {}).get("osha_emergency_alert_active"))
+
+
+def root_cause_required(
+    *, incident_type: Optional[str], severity: Optional[str],
+) -> bool:
+    """Whether this incident owes a root cause at all.
+
+    Split out from ``needs_root_cause`` so the progress meter's *applicability*
+    test and the close gate's *blocking* test read the same rule. Inlining the
+    type/severity sets in a second place is how a widened requirement ends up
+    blocking Close while the meter still calls the step not-applicable.
+    """
+    return (
+        (incident_type or "").strip().lower() in {"safety", "near_miss"}
+        or (severity or "").strip().lower() in {"high", "critical"}
+    )
+
+
+def needs_root_cause(
+    *,
+    incident_type: Optional[str],
+    severity: Optional[str],
+    root_cause: Optional[str],
+    category_data: dict[str, Any],
+) -> bool:
+    """Root cause is required-but-missing.
+
+    Required for safety / near-miss incidents and for high / critical severity.
+    Satisfied by a logged root cause, an explicit decline, or an in-progress
+    interview — declining counts, the point is a deliberate decision rather
+    than a safety incident closing with no investigation captured at all.
+    """
+    cd = category_data or {}
+    if (root_cause or "").strip():
+        return False
+    if cd.get("root_cause_declined") in (True, "true"):
+        return False
+    if bool(cd.get("root_cause_interview")):
+        return False
+    return root_cause_required(incident_type=incident_type, severity=severity)
+
+
+def treatment_beyond_first_aid(category_data: dict[str, Any]) -> Optional[bool]:
+    """Tri-state: True / False / None (unanswered)."""
+    raw = (category_data or {}).get("treatment_beyond_first_aid")
+    if raw is None:
+        return None
+    return str(raw).strip().lower() == "true"
+
+
+def needs_osha_recordable(
+    *, category_data: dict[str, Any], osha_recordable: Any,
+) -> bool:
+    """Treatment went beyond first aid but the OSHA 300 chain hasn't run."""
+    return treatment_beyond_first_aid(category_data) is True and osha_recordable is None
+
+
+# Ordered as the user encounters them. ``key`` is stable (the frontend keys
+# off it); ``label`` is user-facing. One entry per close gate — adding a label
+# here without a matching gate in _close_incident_via_copilot is what breaks
+# the meter/gate contract documented on close_progress.
+_STEP_LABELS = {
+    "osha_emergency": "OSHA emergency reporting",
+    "osha_recordable": "OSHA recordability",
+    "root_cause": "Root cause",
+    "close": "Close incident",
+}
+
+
+def close_progress(incident: dict[str, Any]) -> dict[str, Any]:
+    """Completion state for the Copilot progress meter.
+
+    Answers the question the transcript alone can't: *how much is left?* The
+    Copilot is conversational, so from the user's side an unbounded exchange
+    looks like it could loop forever.
+
+    **Every counted step is a gate ``_close_incident_via_copilot`` actually
+    enforces — no more, no less.** That equivalence is the whole contract, and
+    both directions of breaking it are bugs users hit:
+
+      • Counting something Close *doesn't* enforce (triage, or the
+        treatment/injury question) let Close succeed at 60% and then render
+        "Complete" over unfilled segments.
+      • Excluding something Close *does* enforce (the meter used to drop a
+        ``flow_skipped`` OSHA gate) produced a 100% meter with a Close button
+        that bounced straight back into the skipped card. A skip is "not now",
+        not "not required" — the intercept re-emits it, so the meter must keep
+        counting it.
+
+    Steps that don't apply to *this* incident (a property-damage report never
+    enters the OSHA chain) are ``not_applicable`` and excluded from the
+    denominator, so the meter tracks this incident's real remaining work rather
+    than a fixed checklist most incidents can never complete.
+    """
+    incident = incident or {}
+    category_data = _safe_json(incident.get("category_data"), {}) or {}
+    status = (incident.get("status") or "").lower()
+    is_terminal = status in {"closed", "resolved"}
+    incident_type = (incident.get("incident_type") or "").lower()
+    severity = (incident.get("severity") or "").lower()
+
+    treatment = treatment_beyond_first_aid(category_data)
+
+    def step(key: str, *, applicable: bool, done: bool, hint: str = "") -> dict:
+        if not applicable:
+            state = "not_applicable"
+        elif done:
+            state = "done"
+        else:
+            state = "pending"
+        return {
+            "key": key,
+            "label": _STEP_LABELS[key],
+            "status": state,
+            "hint": hint if state == "pending" else "",
+        }
+
+    steps = [
+        # Applicable only once an alert has actually been raised. The key is
+        # set to false on acknowledgement rather than deleted, so presence —
+        # not truthiness — is what marks this incident as having had one.
+        step(
+            "osha_emergency",
+            applicable="osha_emergency_alert_active" in category_data,
+            done=not osha_emergency_blocking(category_data),
+            hint="Acknowledge the OSHA reporting alert.",
+        ),
+        # No flow_skipped exemption: needs_osha_recordable (the close gate)
+        # ignores skips, so honouring one here would put the meter at 100%
+        # while Close redirects into the skipped card.
+        step(
+            "osha_recordable",
+            applicable=treatment is True,
+            done=incident.get("osha_recordable") is not None,
+            hint="Complete the OSHA 300 recordability details.",
+        ),
+        step(
+            "root_cause",
+            applicable=root_cause_required(incident_type=incident_type, severity=severity),
+            done=not needs_root_cause(
+                incident_type=incident_type,
+                severity=severity,
+                root_cause=incident.get("root_cause"),
+                category_data=category_data,
+            ),
+            hint="Log a root cause, or explicitly decline one.",
+        ),
+        step("close", applicable=True, done=is_terminal, hint="Close the incident to lock the record."),
+    ]
+
+    applicable = [s for s in steps if s["status"] != "not_applicable"]
+    completed = [s for s in applicable if s["status"] == "done"]
+    total = len(applicable)
+    next_step = next((s for s in applicable if s["status"] == "pending"), None)
+
+    return {
+        "completed": len(completed),
+        "total": total,
+        "percent": round(100 * len(completed) / total) if total else 0,
+        "steps": steps,
+        "next_step_key": next_step["key"] if next_step else None,
+        "next_step_hint": next_step["hint"] if next_step else "",
+        "is_complete": is_terminal,
+    }
+
+
 def resolve_next_step(
     incident: dict[str, Any],
     analyses: list[dict[str, Any]] | None,
@@ -243,7 +422,7 @@ def resolve_next_step(
     # Fatality / in-patient hospitalization / amputation / loss of eye flagged
     # at intake. Freeze immediately — a legal 8/24-hour reporting duty trumps
     # any conversational triage.
-    if category_data.get("osha_emergency_alert_active"):
+    if osha_emergency_blocking(category_data):
         from app.matcha.routes.ir_incidents._shared import build_osha_emergency_alert_card
         return _payload(
             "This incident may require immediate OSHA reporting.",
@@ -259,7 +438,7 @@ def resolve_next_step(
     # the type/severity check — is what prevents the old "asks treatment the
     # instant an injury word appears" behavior. (Emergency reporting above is
     # NOT cold-start-gated — a reportable event must freeze immediately.)
-    treatment = category_data.get("treatment_beyond_first_aid")
+    treatment = treatment_beyond_first_aid(category_data)
     if (
         not is_cold_start
         and incident_type in VALID_INCIDENT_TYPES
@@ -275,8 +454,12 @@ def resolve_next_step(
         )
 
     # ── OSHA recordable chain ────────────────────────────────────────────
-    treatment_true = str(treatment).strip().lower() == "true"
-    if treatment_true and incident.get("osha_recordable") is None and "osha" not in flow_skipped:
+    # flow_skipped is honoured HERE (the resolver stops re-emitting a skipped
+    # card) but deliberately NOT in needs_osha_recordable / close_progress —
+    # skipping silences the prompt, it doesn't waive the close requirement.
+    if needs_osha_recordable(
+        category_data=category_data, osha_recordable=incident.get("osha_recordable"),
+    ) and "osha" not in flow_skipped:
         from app.matcha.routes.ir_incidents._shared import build_osha_recordable_query_card
         return _payload(
             "Let's capture the OSHA recordable details.",

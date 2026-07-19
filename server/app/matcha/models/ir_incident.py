@@ -980,12 +980,33 @@ class IRCopilotMessage(BaseModel):
     created_at: datetime
 
 
+class IRCopilotProgressStep(BaseModel):
+    key: str
+    label: str
+    status: Literal["done", "pending", "not_applicable"]
+    hint: str = ""
+
+
+class IRCopilotProgress(BaseModel):
+    """How much of the Copilot flow is left. Computed by
+    ``services/ir_flow.close_progress`` from the same predicates that gate
+    closing, so the meter and the Close button always agree."""
+    completed: int = 0
+    total: int = 0
+    percent: int = 0
+    steps: list[IRCopilotProgressStep] = []
+    next_step_key: Optional[str] = None
+    next_step_hint: str = ""
+    is_complete: bool = False
+
+
 class IRCopilotTranscript(BaseModel):
     incident_id: UUID
     messages: list[IRCopilotMessage]
     current_cards: list[IRCopilotCard] = []
     summary: Optional[str] = None
     open_questions: list[str] = []
+    progress: Optional[IRCopilotProgress] = None
 
 
 class IRCopilotStreamRequest(BaseModel):

@@ -253,7 +253,10 @@ def generate_incident_number() -> str:
 async def log_audit(
     conn,
     incident_id: Optional[str],
-    user_id: str,
+    # Nullable: system-triggered actions (e.g. the Copilot auto-resume after an
+    # anonymous respondent submits an info request) have no authenticated user.
+    # ir_audit_log.user_id is a nullable FK, so NULL is a valid trail entry.
+    user_id: Optional[str],
     action: str,
     entity_type: Optional[str] = None,
     entity_id: Optional[str] = None,

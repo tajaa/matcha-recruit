@@ -56,8 +56,8 @@ async def _submit_budget(token: str, company_id: str, kind: str) -> None:
     (applied separately, before the DB lookup). Mirrors ``_voice_parse_budget``
     below: the per-IP cap alone is defeated by IP rotation, so these two bound
     abuse of one link, and total submissions across all of a company's links,
-    regardless of how many IPs the attacker rotates. ``kind`` is 'report' or
-    'intake' so the two public forms don't share a bucket.
+    regardless of how many IPs the attacker rotates. ``kind`` is 'report',
+    'intake' or 'inforeq' so the three public forms don't share a bucket.
     """
     await check_rate_limit(token, f"ir_{kind}_submit_link", 10, 3600)
     await check_rate_limit(company_id, f"ir_{kind}_submit_co", 60, 3600)
@@ -842,6 +842,15 @@ async def submit_info_request(
             if not row:
                 raise HTTPException(status_code=404, detail="Invalid link")
             _check_info_request_usable(row)
+
+            # Charged only AFTER the link is known live — check_rate_limit is
+            # increment-then-check, and these links are single-use, so charging
+            # on the way in let anyone replay one dead token (IP rotation
+            # defeats the per-IP cap) to drain the shared per-company bucket
+            # and 429 every legitimate respondent. /intake/{token} orders it
+            # this way for the same reason. Raising inside the transaction
+            # just rolls it back — the burn hasn't happened yet.
+            await _submit_budget(token, company_id, "inforeq")
 
             questions = _safe_json_loads(row["questions"], [])
             if len(body.answers) != len(questions):

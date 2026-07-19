@@ -4,7 +4,7 @@ import { api, ensureFreshToken } from '../../../api/client'
 import { reportApiError } from '../../../api/errorReporter'
 import { useIRInfoRequests } from '../../../hooks/ir/useIRInfoRequests'
 import { BASE } from './helpers'
-import { type CopilotMessage, type Transcript, type Props } from './types'
+import { type CopilotMessage, type CopilotProgress, type Transcript, type Props } from './types'
 
 export function useCopilotPanel({
   incidentId, incidentStatus, reportedByName, reportedByEmail, onIncidentChanged, onOpenDocuments,
@@ -12,6 +12,7 @@ export function useCopilotPanel({
   const [messages, setMessages] = useState<CopilotMessage[]>([])
   const [currentCards, setCurrentCards] = useState<CopilotCard[]>([])
   const [openQuestions, setOpenQuestions] = useState<string[]>([])
+  const [progress, setProgress] = useState<CopilotProgress | null>(null)
   const [loading, setLoading] = useState(true)
   const [streaming, setStreaming] = useState(false)
   const [busyCardMessageId, setBusyCardMessageId] = useState<string | null>(null)
@@ -25,14 +26,18 @@ export function useCopilotPanel({
   const { requests: infoRequests, refresh: refreshInfoRequests, resend: resendInfoRequest, revoke: revokeInfoRequest } =
     useIRInfoRequests(incidentId)
 
-  const refresh = useCallback(async () => {
+  // `silent` suppresses the error banner: a background poll that fails is not
+  // something the admin asked for, so it must not paint an error over a
+  // transcript that is still perfectly readable. The next poll retries anyway.
+  const refresh = useCallback(async (opts?: { silent?: boolean }) => {
     try {
       const t = await api.get<Transcript>(`/ir/incidents/${incidentId}/copilot`)
       setMessages(t.messages)
       setCurrentCards(t.current_cards)
       setOpenQuestions(t.open_questions)
+      setProgress(t.progress ?? null)
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load copilot')
+      if (!opts?.silent) setError(e instanceof Error ? e.message : 'Failed to load copilot')
     } finally {
       setLoading(false)
     }
@@ -42,6 +47,13 @@ export function useCopilotPanel({
     void refresh()
   }, [refresh])
 
+  // Read the in-flight guards through a ref so they don't sit in the poll
+  // effect's dep list — keeping them there tore the interval down and rebuilt
+  // it on every stream/accept toggle, resetting the 15s clock each time, so a
+  // busy admin could go a long stretch without a single poll actually firing.
+  const pollGuardRef = useRef({ streaming, busyCardMessageId })
+  pollGuardRef.current = { streaming, busyCardMessageId }
+
   // Poll for transcript changes made outside this browser tab — most
   // notably, an outside respondent submitting the "more info" link, which
   // lands a new system event straight in the DB with no push notification
@@ -50,11 +62,27 @@ export function useCopilotPanel({
   // incident is closed (nothing left to change).
   useEffect(() => {
     if (incidentIsClosed) return
+    const canPoll = () => {
+      const { streaming: isStreaming, busyCardMessageId: busyCard } = pollGuardRef.current
+      return !isStreaming && !busyCard
+    }
     const intervalId = window.setInterval(() => {
-      if (!streaming && !busyCardMessageId) void refresh()
+      // A hidden tab has nothing to update — admins keep several incident
+      // tabs open, and unconditional ticking meant thousands of transcript
+      // fetches a night for UI nobody was looking at.
+      if (document.visibilityState === 'hidden') return
+      if (canPoll()) void refresh({ silent: true })
     }, 15000)
-    return () => window.clearInterval(intervalId)
-  }, [refresh, streaming, busyCardMessageId, incidentIsClosed])
+    // Catch up immediately on return so the tab isn't up to 15s stale.
+    const onVisible = () => {
+      if (document.visibilityState === 'visible' && canPoll()) void refresh({ silent: true })
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      window.clearInterval(intervalId)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
+  }, [refresh, incidentIsClosed])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
@@ -339,6 +367,7 @@ export function useCopilotPanel({
     messages,
     currentCards,
     openQuestions,
+    progress,
     loading,
     streaming,
     busyCardMessageId,

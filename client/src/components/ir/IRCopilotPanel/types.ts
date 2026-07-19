@@ -10,12 +10,31 @@ export type CopilotMessage = {
   created_at: string
 }
 
+export type CopilotProgressStep = {
+  key: string
+  label: string
+  status: 'done' | 'pending' | 'not_applicable'
+  hint: string
+}
+
+/** Mirrors `services/ir_flow.close_progress`. */
+export type CopilotProgress = {
+  completed: number
+  total: number
+  percent: number
+  steps: CopilotProgressStep[]
+  next_step_key: string | null
+  next_step_hint: string
+  is_complete: boolean
+}
+
 export type Transcript = {
   incident_id: string
   messages: CopilotMessage[]
   current_cards: CopilotCard[]
   summary: string | null
   open_questions: string[]
+  progress: CopilotProgress | null
 }
 
 export interface Props {

@@ -491,11 +491,20 @@ async def generate_guidance(
     # isn't already closed/resolved), skip the LLM round entirely and surface
     # a close_incident card directly. Avoids the case where the LLM gets the
     # request as conversation noise and emits a generic request_info card.
-    last_user_text = next(
-        (m.get("content") for m in reversed(messages or [])
-         if m.get("role") == "user" and m.get("message_type") == "text"),
-        None,
+    #
+    # Only fires when that request is the NEWEST thing in the transcript. The
+    # search walks back past non-user rows, so without this guard a months-old
+    # "close this out" stays the latest user text forever and re-triggers on
+    # rounds the user didn't start — notably the background auto-resume after
+    # an external info-request submission, which would answer the respondent
+    # with a stale close card and never analyse what they actually said.
+    last_message = (messages or [])[-1] if messages else None
+    last_is_user_text = bool(
+        last_message
+        and last_message.get("role") == "user"
+        and last_message.get("message_type") == "text"
     )
+    last_user_text = last_message.get("content") if last_is_user_text else None
     incident_status = (incident or {}).get("status")
     if (
         _detect_close_intent(last_user_text)
@@ -643,18 +652,19 @@ async def generate_guidance(
         isinstance(raw_category_data, dict)
         and raw_category_data.get("treatment_beyond_first_aid") not in (None, "")
     )
-    # Mirror the close-time gate at copilot.py:_close_incident_via_copilot —
-    # for safety / near-miss / high / critical incidents, the user must log
-    # or decline root cause before close. Trips the rewrite below so the AI
-    # cannot front-load a close_incident card before that prompt.
+    # The close-time gate itself — imported, not mirrored. This used to be a
+    # hand-copied duplicate of the rule in _close_incident_via_copilot; when
+    # the two drifted the AI would front-load a close_incident card that the
+    # intercept then bounced. ir_flow owns the rule for all three consumers
+    # (this safety net, the intercept, and the progress meter).
+    from app.matcha.services.ir_flow import needs_root_cause
     incident_type_lower = (incident.get("incident_type") or "").strip().lower()
     severity_lower = (incident.get("severity") or "").strip().lower()
-    root_cause_required_before_close = (
-        not suppress_root_cause_card
-        and (
-            incident_type_lower in {"safety", "near_miss"}
-            or severity_lower in {"high", "critical"}
-        )
+    root_cause_required_before_close = needs_root_cause(
+        incident_type=incident.get("incident_type"),
+        severity=incident.get("severity"),
+        root_cause=incident.get("root_cause"),
+        category_data=raw_category_data if isinstance(raw_category_data, dict) else {},
     )
 
     filtered_cards: list[dict[str, Any]] = []

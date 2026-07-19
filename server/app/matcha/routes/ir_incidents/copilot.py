@@ -23,6 +23,8 @@ from fastapi.responses import StreamingResponse
 
 from app.database import get_connection
 from app.matcha.dependencies import require_admin_or_client, get_client_company_id
+# Safe at module level: ir_flow's own imports of this package are function-local.
+from app.matcha.services import ir_flow
 from app.matcha.models.ir_incident import (
     IRCopilotAcceptRequest,
     IRCopilotCard,
@@ -140,7 +142,13 @@ async def get_copilot_transcript(
 ):
     """Return the full chat transcript + currently-active cards for an incident."""
     async with get_connection() as conn:
-        await _get_incident_with_company_check(conn, incident_id, current_user, columns="id")
+        incident = await _get_incident_with_company_check(
+            conn, incident_id, current_user,
+            columns=(
+                "id, title, description, status, incident_type, severity, "
+                "root_cause, osha_recordable, category_data"
+            ),
+        )
         rows = await conn.fetch(
             "SELECT id, role, message_type, content, metadata, created_by, created_at "
             "FROM ir_incident_ai_messages WHERE incident_id = $1 ORDER BY created_at",
@@ -156,6 +164,7 @@ async def get_copilot_transcript(
         current_cards=cards,
         summary=summary,
         open_questions=open_questions,
+        progress=ir_flow.close_progress(dict(incident) if incident else {}),
     )
 
 
@@ -257,6 +266,53 @@ async def stream_copilot_round(
     )
 
 
+# Card ids that kick off a multi-step chain. Superseding one mid-chain strands
+# the partially-written JSONB behind it, so the skip endpoint refuses them and
+# the background auto-resume declines to run at all while one is open.
+_PROTECTED_CHAIN_CARD_ID_PREFIXES = ("osha_days_count",)
+_PROTECTED_CHAIN_CARD_IDS = {
+    "osha_recordable_query",
+    "osha_days_type_query",
+    "osha_injury_type_query",
+}
+
+
+def _has_pending_protected_card(messages: list) -> bool:
+    """True when an unanswered card sits mid-chain in the transcript.
+
+    Mirrors the refusals in the skip endpoint: the OSHA emergency alert, the
+    root-cause interview steps, and the OSHA 300 capture chain. "Pending" uses
+    the same accepted/superseded/skipped triple the panel filters on, so this
+    sees exactly the cards the admin still has on screen.
+    """
+    for m in messages or []:
+        if (m.get("role") if isinstance(m, dict) else None) != "assistant":
+            continue
+        if m.get("message_type") != "card":
+            continue
+        md = _coerce_metadata_dict(m.get("metadata")) or {}
+        if md.get("accepted") or md.get("superseded") or md.get("skipped"):
+            continue
+        card = md.get("card")
+        if not isinstance(card, dict):
+            continue
+        action = card.get("action") or {}
+        if action.get("type") == "osha_emergency_alert":
+            return True
+        if (
+            action.get("type") == "text_input"
+            and action.get("target_field") in ROOT_CAUSE_INTERVIEW_STEPS
+        ):
+            return True
+        card_id = card.get("id") or ""
+        if isinstance(card_id, str) and (
+            card_id in _PROTECTED_CHAIN_CARD_IDS
+            or card_id.startswith(_PROTECTED_CHAIN_CARD_ID_PREFIXES)
+        ):
+            return True
+    return False
+
+
 async def resume_copilot_after_info_request(*, company_id: str, incident_id: UUID) -> None:
     """Auto-resume Copilot guidance after an external "Request More Info"
     submission lands a new system event in the transcript (``submit_info_request``
@@ -286,11 +342,35 @@ async def resume_copilot_after_info_request(*, company_id: str, incident_id: UUI
         if incident is None or incident.get("status") in {"closed", "resolved"}:
             return
 
+        # Don't run a round while the admin is mid-chain. persist_assistant_round
+        # opens by superseding every unaccepted card, and the skip endpoint
+        # (400s on these same cards) exists precisely because abandoning one
+        # strands its chain: a half-answered root-cause interview leaves
+        # category_data.root_cause_interview populated, which then satisfies
+        # needs_root_cause — so the incident could close with an investigation
+        # that was never finished, triggered by an anonymous respondent with no
+        # admin action at all. The answers are already in the transcript and
+        # surface via the panel's poll; the copilot picks them up on the
+        # admin's next turn.
+        if _has_pending_protected_card(messages):
+            logger.info(
+                "IR Copilot auto-resume skipped for incident %s — protected card pending",
+                incident_id,
+            )
+            return
+
         payload = await generate_guidance(
             incident=incident, analyses=analyses, messages=messages,
         )
 
-        async with get_connection() as conn:
+        # One transaction for the whole round. persist_assistant_round opens by
+        # marking every unaccepted card superseded, so without this an admin
+        # accepting a card at the same moment could interleave with the
+        # supersede sweep and land a card that is both accepted and superseded;
+        # the row locks serialize the two. It also keeps the audit entry from
+        # being dropped (this task swallows exceptions) while the cards it
+        # describes stay committed.
+        async with get_connection() as conn, conn.transaction():
             await persist_assistant_round(
                 conn,
                 incident_id=incident_id,
@@ -709,7 +789,7 @@ async def _close_incident_via_copilot(
         return {"already_closed": True, "previous_value": prev_status, "new_value": "closed"}
 
     category_data = _safe_json_loads(row["category_data"] if row else None, {}) or {}
-    if category_data.get("osha_emergency_alert_active"):
+    if ir_flow.osha_emergency_blocking(category_data):
         return {
             "blocked_by_emergency": True,
             "previous_value": prev_status,
@@ -724,19 +804,15 @@ async def _close_incident_via_copilot(
     #   - root_cause is non-empty (already logged)
     #   - category_data.root_cause_declined is true (user said No)
     #   - category_data.root_cause_interview has any keys (mid-interview)
-    incident_type_lower = (row["incident_type"] or "").strip().lower() if row else ""
-    severity_lower = (row["severity"] or "").strip().lower() if row else ""
-    rc_existing = (row["root_cause"] or "").strip() if row else ""
-    rc_declined = category_data.get("root_cause_declined") in (True, "true")
-    rc_interview = bool(category_data.get("root_cause_interview"))
-    needs_root_cause_prompt = (
-        not rc_existing
-        and not rc_declined
-        and not rc_interview
-        and (
-            incident_type_lower in {"safety", "near_miss"}
-            or severity_lower in {"high", "critical"}
-        )
+    # Predicate lives in ir_flow so the progress meter (ir_flow.close_progress)
+    # and this redirect can never disagree about whether root cause is still
+    # outstanding — a meter reading 100% while Close bounces the user back into
+    # a root-cause card is exactly the confusion the meter exists to remove.
+    needs_root_cause_prompt = ir_flow.needs_root_cause(
+        incident_type=row["incident_type"] if row else None,
+        severity=row["severity"] if row else None,
+        root_cause=row["root_cause"] if row else None,
+        category_data=category_data,
     )
     if needs_root_cause_prompt:
         card = build_log_root_cause_query_card()
@@ -774,8 +850,10 @@ async def _close_incident_via_copilot(
             "new_value": prev_status,
         }
 
-    treatment_flag = category_data.get("treatment_beyond_first_aid")
-    if treatment_flag in (True, "true") and row["osha_recordable"] is None:
+    if ir_flow.needs_osha_recordable(
+        category_data=category_data,
+        osha_recordable=row["osha_recordable"] if row else None,
+    ):
         card = build_osha_recordable_query_card()
         # Idempotency: if a prior close attempt already emitted the
         # recordable query and the user hasn't answered or skipped, reuse

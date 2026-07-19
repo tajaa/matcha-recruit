@@ -1,17 +1,21 @@
 import { Loader2, Mail, Sparkles } from 'lucide-react'
 import { Button } from '../../ui'
+import { CopilotProgress } from './CopilotProgress'
+import { type CopilotProgress as Progress } from './types'
 
 interface CopilotHeaderProps {
   streaming: boolean
   incidentIsClosed: boolean
   closingIncident: boolean
   emergencyAlertActive: boolean
+  progress: Progress | null
   onRequestInfo: () => void
   onCloseIncident: () => void
 }
 
 export function CopilotHeader({
-  streaming, incidentIsClosed, closingIncident, emergencyAlertActive, onRequestInfo, onCloseIncident,
+  streaming, incidentIsClosed, closingIncident, emergencyAlertActive, progress,
+  onRequestInfo, onCloseIncident,
 }: CopilotHeaderProps) {
   return (
     <div className="shrink-0 border-b border-white/[0.06] px-5 py-3">
@@ -54,6 +58,9 @@ export function CopilotHeader({
           )}
         </div>
       </div>
+      {/* In the header, not the scrolling transcript: "how much is left" has to
+          stay visible while the user reads back through the conversation. */}
+      {progress && <CopilotProgress progress={progress} />}
     </div>
   )
 }
