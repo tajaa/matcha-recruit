@@ -502,14 +502,14 @@ p{margin:0}
 /* sections + section headings */
 section{position:relative}
 .cz-head{text-align:center;max-width:42rem;margin:0 auto 3rem}
-.cz-head h2{font-size:clamp(1.8rem,4vw,2.6rem)}
+.cz-head h2{font-size:calc(var(--cz-h-scale,100)/100*clamp(1.8rem,4vw,2.6rem))}
 .cz-head p{margin-top:.75rem;color:var(--muted)}
 .cz-eyebrow{font-size:.72rem;font-weight:700;letter-spacing:.18em;text-transform:uppercase;color:var(--brand)}
 
 /* hero */
 .cz-hero{padding:clamp(3.5rem,9vw,7rem) 0}
 .cz-hero--centered{text-align:center;background:linear-gradient(180deg,var(--surface),var(--bg))}
-.cz-hero__title{font-size:clamp(2.4rem,6vw,4.4rem)}
+.cz-hero__title{font-size:calc(var(--cz-h-scale,100)/100*clamp(2.4rem,6vw,4.4rem))}
 .cz-hero--centered .cz-hero__title,.cz-hero--centered .cz-hero__lead{margin-left:auto;margin-right:auto}
 .cz-hero__title{max-width:18ch}
 .cz-hero__eyebrow{margin-bottom:1rem}
@@ -585,7 +585,7 @@ section{position:relative}
 
 /* cta band */
 .cz-band{background:var(--brand);color:var(--brand-fg);text-align:center;padding:var(--sec-pad,clamp(3rem,7vw,5rem)) 0}
-.cz-band h2{font-size:clamp(1.8rem,4vw,2.6rem)}
+.cz-band h2{font-size:calc(var(--cz-h-scale,100)/100*clamp(1.8rem,4vw,2.6rem))}
 .cz-band p{margin:.75rem auto 0;max-width:34rem;opacity:.9}
 .cz-band .cz-btn{margin-top:1.75rem;background:rgba(255,255,255,.16);color:#fff}
 .cz-band .cz-btn:hover{background:rgba(255,255,255,.26)}
@@ -612,7 +612,7 @@ section{position:relative}
 /* text */
 .cz-text{padding:clamp(2.5rem,6vw,4rem) 0}
 .cz-text .cz-narrow>*+*{margin-top:1rem}
-.cz-text h2{font-size:clamp(1.6rem,3.5vw,2.2rem);margin-bottom:1rem}
+.cz-text h2{font-size:calc(var(--cz-h-scale,100)/100*clamp(1.6rem,3.5vw,2.2rem));margin-bottom:1rem}
 .cz-text p{font-size:1.12rem;color:var(--muted);line-height:1.75}
 
 /* forms / widgets */
@@ -667,7 +667,7 @@ section{position:relative}
 .cz-pd__media{display:flex;background:color-mix(in srgb,var(--ink) 6%,transparent)}
 .cz-pd__media img,.cz-pd__noimg{width:100%;aspect-ratio:1;object-fit:cover;display:block}
 .cz-pd__info{padding:clamp(1.4rem,4vw,2.4rem);display:flex;flex-direction:column;gap:.45rem}
-.cz-pd__name{font-size:clamp(1.6rem,3.4vw,2.2rem);line-height:1.05;margin:.1rem 0 0}
+.cz-pd__name{font-size:calc(var(--cz-h-scale,100)/100*clamp(1.6rem,3.4vw,2.2rem));line-height:1.05;margin:.1rem 0 0}
 .cz-pd__price{font-family:var(--font-h);font-weight:700;font-size:1.5rem;margin:.15rem 0 .4rem}
 .cz-pd__was{text-decoration:line-through;opacity:.5;margin-right:.4rem;font-weight:400}
 .cz-pd__off{color:var(--brand);font-size:.62em;margin-left:.3rem}
@@ -701,7 +701,7 @@ section{position:relative}
 .cz-stats-grid{display:grid;gap:var(--cz-gap,var(--grid-gap,1.5rem));grid-template-columns:var(--cz-cols,repeat(auto-fit,minmax(150px,1fr)));max-width:62rem;margin:0 auto;text-align:center}
 .cz-stat{padding:1rem .5rem;position:relative}
 .cz-stat+.cz-stat::before{content:"";position:absolute;left:0;top:18%;bottom:18%;width:1px;background:var(--line)}
-.cz-stat__num{font-family:var(--font-h);font-weight:700;font-size:clamp(2.4rem,5vw,3.4rem);line-height:1;
+.cz-stat__num{font-family:var(--font-h);font-weight:700;font-size:calc(var(--cz-h-scale,100)/100*clamp(2.4rem,5vw,3.4rem));line-height:1;
   background:linear-gradient(135deg,var(--brand),var(--accent));-webkit-background-clip:text;background-clip:text;color:transparent}
 .cz-stat__label{margin-top:.55rem;color:var(--muted);font-size:.92rem;letter-spacing:.01em}
 
@@ -744,7 +744,7 @@ section{position:relative}
 .cz-split__grid{display:grid;gap:2.5rem;align-items:center}
 .cz-split__art{aspect-ratio:4/3;border-radius:var(--radius);overflow:hidden;background:linear-gradient(135deg,var(--brand),var(--accent))}
 .cz-split__art img{width:100%;height:100%;object-fit:cover}
-.cz-split__body h2{font-size:clamp(1.6rem,3.5vw,2.4rem);margin-bottom:1rem}
+.cz-split__body h2{font-size:calc(var(--cz-h-scale,100)/100*clamp(1.6rem,3.5vw,2.4rem));margin-bottom:1rem}
 .cz-split__body>.cz-eyebrow{margin-bottom:.9rem}
 .cz-split__body p{color:var(--muted);font-size:1.08rem;line-height:1.7}
 .cz-split__bullets{list-style:none;padding:0;margin:1.25rem 0 0;display:flex;flex-direction:column;gap:.7rem}
@@ -2334,6 +2334,13 @@ def render_site_html(site: dict, page: dict, nav_pages: list[dict], preview: boo
     _ls = str(typ.get("headingSpacing") or "").strip()
     if re.match(r"^-?[0-9]*\.?[0-9]+(em|px)$", _ls):
         _extra.append(f"--ls-h:{_ls}")
+    # Global heading-size scale (percent, 70-140). Consumed by the heading rules
+    # as `calc(var(--cz-h-scale,100)/100*<clamp>)`, so unset (or 100) computes to
+    # the original clamp — identical to today. Emitted only when it actually
+    # differs from the 100 default. Divide-in-CSS keeps the token a clean int.
+    _hscale = _clampi(typ.get("headingScale"), 70, 140, 0)
+    if _hscale and _hscale != 100:
+        _extra.append(f"--cz-h-scale:{_hscale}")
     _grad = _design_gradient(tc_colors.get("brandGradient"))
     if _grad:
         _extra.append(f"--brand-grad:{_grad}")
