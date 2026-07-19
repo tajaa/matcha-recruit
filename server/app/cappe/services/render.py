@@ -116,10 +116,21 @@ _PAD_SCALE = {"none": "0rem", "sm": "2rem", "lg": "6rem", "xl": "9rem"}
 _MAXW = {"narrow": "44rem", "wide": "84rem", "full": "100%"}
 _MINH = {"tall": "70vh", "screen": "100vh"}
 _MOTION_FX = {"fade", "slide-up", "slide-down", "slide-left", "slide-right", "zoom", "blur-in",
-              "flip", "rotate", "mask-up", "bounce"}
-_HOVER_FX = {"lift", "tilt", "glow"}
-_LOOP_FX = {"float", "pulse"}
+              "flip", "rotate", "mask-up", "bounce",
+              "fade-up", "fade-down", "scale-up", "blur-up"}
+_HOVER_FX = {"lift", "tilt", "glow", "grow", "sink"}
+_LOOP_FX = {"float", "pulse", "sway", "breathe"}
 _HEADING_FX = {"rise", "shimmer"}
+# Reveal easing (motion.easing → the transition timing-function on .cz-rv).
+# `smooth` == the historical hardcoded default, so setting it is a no-op and an
+# unset section keeps `var(--cz-ease, cubic-bezier(.2,.7,.2,1))`'s fallback.
+_EASING = {
+    "smooth": "cubic-bezier(.2,.7,.2,1)",
+    "gentle": "cubic-bezier(.16,1,.3,1)",
+    "spring": "cubic-bezier(.34,1.56,.64,1)",
+    "snappy": "cubic-bezier(.65,0,.35,1)",
+    "linear": "linear",
+}
 _OVERLAYS = {"light", "medium", "dark"}
 
 # ── global style system (theme_config.style → extra :root vars) ─────────────
@@ -269,6 +280,11 @@ def _apply_design(html_str: str, design: Any, *, block_index: Any = None, editab
             attrs.append(f'data-cz-dur="{_clampi(motion.get("duration"), 100, 2000, 700)}"')
             if motion.get("stagger"):
                 classes.append("cz-rv--stagger")
+            # Reveal easing — a static inline var the .cz-rv transition consumes.
+            # Unset → the CSS `var(--cz-ease, <default>)` fallback keeps today's curve.
+            ease = _EASING.get(motion.get("easing"))
+            if ease:
+                cssvars.append(f"--cz-ease:{ease}")
         if motion.get("parallax"):
             classes.append("cz-parallax")
             attrs.append(f'data-cz-parallax="{_clampi(motion.get("parallaxStrength"), 0, 80, 20)}"')
@@ -902,9 +918,9 @@ section{position:relative}
 @keyframes czKen{from{transform:scale(1)}to{transform:scale(1.12)}}
 /* motion reveal — gated by body.cz-motion.cz-js (runtime present + JS available) */
 .cz-motion.cz-js .cz-rv{opacity:0;
-  transition:opacity var(--cz-dur,700ms) cubic-bezier(.2,.7,.2,1),
-    transform var(--cz-dur,700ms) cubic-bezier(.2,.7,.2,1),
-    filter var(--cz-dur,700ms) cubic-bezier(.2,.7,.2,1);
+  transition:opacity var(--cz-dur,700ms) var(--cz-ease,cubic-bezier(.2,.7,.2,1)),
+    transform var(--cz-dur,700ms) var(--cz-ease,cubic-bezier(.2,.7,.2,1)),
+    filter var(--cz-dur,700ms) var(--cz-ease,cubic-bezier(.2,.7,.2,1));
   transition-delay:var(--cz-delay,0ms)}
 .cz-motion.cz-js .cz-rv--slide-up{transform:translateY(28px)}
 .cz-motion.cz-js .cz-rv--slide-left{transform:translateX(28px)}
@@ -947,8 +963,13 @@ section{position:relative}
 .cz-motion.cz-js .cz-rv--bounce.cz-in{animation:czBounce .8s cubic-bezier(.2,1.3,.4,1) both}
 @keyframes czBounce{from{transform:translateY(34px)}60%{transform:translateY(-8px)}to{transform:none}}
 .cz-motion.cz-js .cz-rv--mask-up{clip-path:inset(100% 0 0 0);opacity:1;
-  transition:clip-path var(--cz-dur,700ms) cubic-bezier(.2,.7,.2,1);transition-delay:var(--cz-delay,0ms)}
+  transition:clip-path var(--cz-dur,700ms) var(--cz-ease,cubic-bezier(.2,.7,.2,1));transition-delay:var(--cz-delay,0ms)}
 .cz-motion.cz-js .cz-rv--mask-up.cz-in{clip-path:inset(0 0 0 0)}
+/* softer reveals (all reset by .cz-rv.cz-in's transform:none;filter:none) */
+.cz-motion.cz-js .cz-rv--fade-up{transform:translateY(14px)}
+.cz-motion.cz-js .cz-rv--fade-down{transform:translateY(-14px)}
+.cz-motion.cz-js .cz-rv--scale-up{transform:scale(.98)}
+.cz-motion.cz-js .cz-rv--blur-up{filter:blur(8px);transform:translateY(16px)}
 /* hover effects (whole-section, CSS-only) */
 .cz-hover-lift{transition:transform .35s cubic-bezier(.2,.7,.2,1),box-shadow .35s}
 .cz-hover-lift:hover{transform:translateY(-6px);box-shadow:0 30px 60px -34px color-mix(in srgb,var(--brand) 50%,transparent)}
@@ -956,11 +977,19 @@ section{position:relative}
 .cz-hover-tilt:hover{transform:perspective(900px) rotateX(3deg) rotateY(-3deg) scale(1.01)}
 .cz-hover-glow{transition:box-shadow .4s}
 .cz-hover-glow:hover{box-shadow:0 0 0 1px color-mix(in srgb,var(--brand) 40%,transparent),0 24px 60px -30px color-mix(in srgb,var(--brand) 55%,transparent)}
+.cz-hover-grow{transition:transform .35s cubic-bezier(.2,.7,.2,1)}
+.cz-hover-grow:hover{transform:scale(1.02)}
+.cz-hover-sink{transition:transform .3s cubic-bezier(.2,.7,.2,1)}
+.cz-hover-sink:hover{transform:translateY(4px) scale(.99)}
 /* continuous loops */
 .cz-loop-float{animation:czFloat 6s ease-in-out infinite}
 @keyframes czFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)}}
 .cz-loop-pulse{animation:czPulse 4s ease-in-out infinite}
 @keyframes czPulse{0%,100%{transform:scale(1)}50%{transform:scale(1.015)}}
+.cz-loop-sway{animation:czSway 5s ease-in-out infinite}
+@keyframes czSway{0%,100%{transform:rotate(-1.2deg)}50%{transform:rotate(1.2deg)}}
+.cz-loop-breathe{animation:czBreathe 4.5s ease-in-out infinite}
+@keyframes czBreathe{0%,100%{opacity:.82}50%{opacity:1}}
 /* per-block heading animation (reuses czRise/czShim keyframes) */
 .cz-bh-rise h1,.cz-bh-rise h2{animation:czRise .9s cubic-bezier(.2,.7,.2,1) both}
 .cz-bh-shimmer h1,.cz-bh-shimmer h2{background:linear-gradient(100deg,var(--ink) 30%,var(--brand) 50%,var(--ink) 70%);

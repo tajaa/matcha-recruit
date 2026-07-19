@@ -37,10 +37,14 @@ from typing import Any, Optional
 _MOTION_EFFECT = frozenset({
     "none", "fade", "slide-up", "slide-down", "slide-left", "slide-right",
     "zoom", "blur-in", "flip", "rotate", "mask-up", "bounce",
+    "fade-up", "fade-down", "scale-up", "blur-up",
 })
 _MOTION_HEADING = frozenset({"none", "rise", "shimmer"})
-_MOTION_HOVER = frozenset({"none", "lift", "tilt", "glow"})
-_MOTION_LOOP = frozenset({"none", "float", "pulse"})
+_MOTION_HOVER = frozenset({"none", "lift", "tilt", "glow", "grow", "sink"})
+_MOTION_LOOP = frozenset({"none", "float", "pulse", "sway", "breathe"})
+# Reveal-transition easing (motion.easing → --cz-ease). No "none" — clearing is
+# value=null; unset falls back to the renderer's default curve.
+_MOTION_EASING = frozenset({"smooth", "gentle", "spring", "snappy", "linear"})
 _BG_TYPE = frozenset({"none", "color", "gradient", "image", "video"})
 _BG_OVERLAY = frozenset({"none", "light", "medium", "dark"})
 _LAYOUT_ALIGN = frozenset({"default", "left", "center"})
@@ -109,6 +113,7 @@ DESIGN_KEYS: tuple[DesignKey, ...] = (
     DesignKey("motion", "stagger", "bool", note="cz-rv--stagger"),
     DesignKey("motion", "parallax", "bool", note="cz-parallax"),
     DesignKey("motion", "kenburns", "bool", note="cz-kenburns"),
+    DesignKey("motion", "easing", _MOTION_EASING, note="--cz-ease reveal timing-function"),
     # ── background (bespoke: type-dispatched media injection + overlay) ──
     DesignKey("bg", "type", _BG_TYPE),
     DesignKey("bg", "overlay", _BG_OVERLAY),
