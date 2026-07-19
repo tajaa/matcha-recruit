@@ -8,6 +8,8 @@ import { KANBAN_COLUMNS } from '../../utils/kanbanColumns'
 import { useKanbanBoard } from './ProjectKanbanBoard/useKanbanBoard'
 import KanbanColumn from './ProjectKanbanBoard/KanbanColumn'
 import TaskDetailPanel from './ProjectKanbanBoard/TaskDetailPanel'
+import TaskActionSheet from './ProjectKanbanBoard/TaskActionSheet'
+import { useIsDesktop } from '../../hooks/useMediaQuery'
 
 interface ProjectKanbanBoardProps {
   projectId: string
@@ -63,7 +65,13 @@ export default function ProjectKanbanBoard({ projectId }: ProjectKanbanBoardProp
     patchLocal,
     handleAiDraft,
     handleCreateFromPayload,
+    setActionTaskId,
+    actionTask,
+    mobileColumn,
+    setMobileColumn,
+    duplicateTask,
   } = useKanbanBoard(projectId)
+  const isDesktop = useIsDesktop()
 
   if (loading) {
     return (
@@ -143,13 +151,50 @@ export default function ProjectKanbanBoard({ projectId }: ProjectKanbanBoardProp
             acknowledge(t.id)
             setSelectedId(t.id)
           }}
+          onMenu={setActionTaskId}
         />
       ) : (
-        <div className="flex flex-1 gap-2 overflow-x-auto p-2.5 max-md:snap-x max-md:snap-mandatory">
-          {KANBAN_COLUMNS.map((col) => (
+        <>
+        {/* Below `md`, one column at a time behind a pager. Five 85vw columns in
+            a snap-scroller meant hunting sideways for a lane, and cards could
+            not be moved at all (drag-and-drop is HTML5-only — see
+            TaskActionSheet).
+
+            Exactly ONE of the two layouts is mounted, chosen in JS rather than
+            by `hidden md:flex`: two KanbanColumns per lane would share the
+            single `menuRef`, the later one would win it, and the visible
+            column's "+" menu would close on mousedown before its buttons
+            fired. */}
+        {!isDesktop && (
+          <div className="flex shrink-0 gap-1 overflow-x-auto px-2.5 pb-1.5">
+            {KANBAN_COLUMNS.map((col) => {
+              const count = visible.filter((t) => t.board_column === col.key).length
+              const active = mobileColumn === col.key
+              return (
+                <button
+                  key={col.key}
+                  onClick={() => setMobileColumn(col.key)}
+                  className={`flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-medium transition-colors ${
+                    active ? 'bg-w-accent/15 text-w-accent' : 'text-w-dim hover:text-w-text'
+                  }`}
+                >
+                  {col.label}
+                  <span className={`rounded-full px-1.5 text-[10px] ${active ? 'bg-w-accent/20' : 'bg-w-surface2'}`}>
+                    {count}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        )}
+
+        <div className={isDesktop ? 'flex flex-1 gap-2 overflow-x-auto p-2.5' : 'flex min-h-0 flex-1 p-2.5 pt-0'}>
+          {(isDesktop ? KANBAN_COLUMNS : KANBAN_COLUMNS.filter((c) => c.key === mobileColumn)).map((col) => (
             <KanbanColumn
               key={col.key}
               col={col}
+              singleColumn={!isDesktop}
+              onCardMenu={setActionTaskId}
               visible={visible}
               doneExpanded={doneExpanded}
               setDoneExpanded={setDoneExpanded}
@@ -177,15 +222,34 @@ export default function ProjectKanbanBoard({ projectId }: ProjectKanbanBoardProp
             />
           ))}
         </div>
+        </>
+      )}
+
+      {actionTask && (
+        <TaskActionSheet
+          projectId={projectId}
+          task={actionTask}
+          onClose={() => setActionTaskId(null)}
+          onMove={(col) => moveTask(actionTask.id, col)}
+          onDuplicate={() => duplicateTask(actionTask.id)}
+          onDelete={() => handleDelete(actionTask.id)}
+        />
       )}
 
       {selectedTask && (
         <TaskDetailPanel
+          key={selectedTask.id}
           projectId={projectId}
           task={selectedTask}
           onClose={() => setSelectedId(null)}
           onPatched={(updated) => patchLocal(selectedTask.id, updated)}
           onDelete={() => handleDelete(selectedTask.id)}
+          onDuplicate={() => duplicateTask(selectedTask.id)}
+          onAttachmentsChange={(files) =>
+            setTasks((prev) =>
+              prev.map((t) => (t.id === selectedTask.id ? { ...t, attachments: files } : t)),
+            )
+          }
           onSubtaskCountChange={(total, done) =>
             setTasks((prev) =>
               prev.map((t) =>

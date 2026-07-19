@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Loader2, X, Trash2, ListChecks, Undo2, CheckCircle2, Plus } from 'lucide-react'
+import { Loader2, X, Trash2, ListChecks, Undo2, CheckCircle2, Plus, Copy, ClipboardCopy, Check } from 'lucide-react'
 import {
   updateProjectTask,
   rejectProjectTask,
@@ -9,9 +9,11 @@ import {
   updateSubtask,
   deleteSubtask,
 } from '../../../api/matchaWork'
-import type { MWProjectTask, MWSubtask, BoardColumn, TaskPriority } from '../../../types'
+import type { MWProjectTask, MWSubtask, MWTaskAttachment, BoardColumn, TaskPriority } from '../../../types'
+import TaskAttachments from './TaskAttachments'
 import { KANBAN_COLUMNS } from '../../../utils/kanbanColumns'
 import { PRIORITIES } from './constants'
+import { copyTicketToClipboard } from './copyTicket'
 
 interface TaskDetailPanelProps {
   projectId: string
@@ -19,7 +21,11 @@ interface TaskDetailPanelProps {
   onClose: () => void
   onPatched: (updated: MWProjectTask) => void
   onDelete: () => void
+  /** Client-side re-create with "(copy)" appended — see useKanbanBoard.duplicateTask. */
+  onDuplicate?: () => Promise<void>
   onSubtaskCountChange: (total: number, done: number) => void
+  /** Keeps the board card's paperclip count honest after an upload/delete. */
+  onAttachmentsChange?: (files: MWTaskAttachment[]) => void
 }
 
 export default function TaskDetailPanel({
@@ -28,8 +34,16 @@ export default function TaskDetailPanel({
   onClose,
   onPatched,
   onDelete,
+  onDuplicate,
   onSubtaskCountChange,
+  onAttachmentsChange,
 }: TaskDetailPanelProps) {
+  // Mirrored locally so the clipboard export picks up a screenshot attached
+  // seconds ago, without waiting for the board to refetch the task row.
+  const [attachments, setAttachments] = useState<MWTaskAttachment[]>(task.attachments ?? [])
+  const [duplicating, setDuplicating] = useState(false)
+  const [copying, setCopying] = useState(false)
+  const [copied, setCopied] = useState(false)
   const [subtasks, setSubtasks] = useState<MWSubtask[]>([])
   const [subtasksLoading, setSubtasksLoading] = useState(true)
   const [newSubtask, setNewSubtask] = useState('')
@@ -107,6 +121,30 @@ export default function TaskDetailPanel({
     }
   }
 
+  /**
+   * Copy the ticket to the clipboard as one markdown blob tuned for Claude Code
+   * — title, description, progress, checklist, attachments, screenshot URLs,
+   * and (when the card was sent back) the reviewer's changes-requested brief.
+   * Mirrors desktop Werk's Copy button on the task viewer sheet.
+   *
+   * Disabled until the checklist has loaded: copying mid-fetch would export an
+   * empty checklist and, worse, make deriveReviewContext read currentRound as 1
+   * from the empty list — silently mislabelling a round-3 rework brief.
+   */
+  async function handleCopyTicket() {
+    if (copying || subtasksLoading) return
+    setCopying(true)
+    try {
+      await copyTicketToClipboard(projectId, { ...task, attachments }, subtasks)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch {
+      /* clipboard denied — nothing useful to say in the panel */
+    } finally {
+      setCopying(false)
+    }
+  }
+
   async function addSubtask() {
     const title = newSubtask.trim()
     if (!title) return
@@ -155,6 +193,21 @@ export default function TaskDetailPanel({
       <aside className="fixed inset-y-0 right-0 z-50 flex w-full max-w-md flex-col border-l border-w-line bg-w-bg shadow-2xl">
         <div className="flex items-start justify-between gap-3 border-b border-w-line px-5 py-4">
           <h2 className="text-base font-semibold leading-snug text-w-text">{task.title}</h2>
+          <button
+            onClick={handleCopyTicket}
+            disabled={copying || subtasksLoading}
+            title="Copy ticket as text (for Claude Code)"
+            aria-label="Copy ticket as text"
+            className="shrink-0 text-w-dim transition-colors hover:text-w-text disabled:opacity-50"
+          >
+            {copying ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : copied ? (
+              <Check className="h-4 w-4 text-w-accent" />
+            ) : (
+              <ClipboardCopy className="h-4 w-4" />
+            )}
+          </button>
           <button onClick={onClose} className="shrink-0 text-w-dim hover:text-w-text">
             <X className="h-5 w-5" />
           </button>
@@ -344,13 +397,43 @@ export default function TaskDetailPanel({
               </div>
             )}
           </div>
+
+          {/* Attachments */}
+          <TaskAttachments
+            projectId={projectId}
+            taskId={task.id}
+            initial={task.attachments ?? []}
+            onChange={(files) => {
+              setAttachments(files)
+              onAttachmentsChange?.(files)
+            }}
+          />
         </div>
 
         {/* Footer actions */}
-        <div className="border-t border-w-line px-5 py-3">
+        <div className="flex items-center gap-1 border-t border-w-line px-5 py-3">
+          {onDuplicate && (
+            <button
+              onClick={async () => {
+                if (duplicating) return
+                setDuplicating(true)
+                try {
+                  await onDuplicate()
+                  onClose()
+                } finally {
+                  setDuplicating(false)
+                }
+              }}
+              disabled={duplicating}
+              className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm text-w-text transition-colors hover:bg-w-surface2 disabled:opacity-50"
+            >
+              {duplicating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Copy className="h-4 w-4" />}
+              Duplicate
+            </button>
+          )}
           <button
             onClick={onDelete}
-            className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm text-red-400 transition-colors hover:bg-red-950/40"
+            className="ml-auto flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm text-red-400 transition-colors hover:bg-red-950/40"
           >
             <Trash2 className="h-4 w-4" />
             Delete card

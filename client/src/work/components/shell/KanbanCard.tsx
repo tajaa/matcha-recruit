@@ -1,4 +1,4 @@
-import { Paperclip, RefreshCw, Calendar, ListChecks, CheckCircle2, Circle, ChevronRight, Clock } from 'lucide-react'
+import { Paperclip, RefreshCw, Calendar, ListChecks, CheckCircle2, Circle, ChevronRight, Clock, MoreHorizontal } from 'lucide-react'
 import type { MWProjectTask } from '../../types'
 import Avatar from '../../../components/shared/Avatar'
 import { KANBAN_COLUMNS } from '../../utils/kanbanColumns'
@@ -24,6 +24,10 @@ interface KanbanCardProps {
   /** Moved or created since this user last looked at the board — draws a gold
    *  ring, cleared when the card is opened. */
   ringed?: boolean
+  /** Opens the card's action sheet (Move to / Duplicate / Delete). This is the
+   *  ONLY way to move a card on touch — the drag handlers above are HTML5
+   *  drag events, which never fire from a finger. */
+  onMenu?: () => void
 }
 
 /** Human-readable assignee, mirroring the desktop `displayAssignee`: prefer a
@@ -66,7 +70,7 @@ function aging(task: MWProjectTask): 'none' | 'warn' | 'overdue' {
   return 'none'
 }
 
-export default function KanbanCard({ task, onClick, onDragStart, onDragEnd, dragging, ringed }: KanbanCardProps) {
+export default function KanbanCard({ task, onClick, onDragStart, onDragEnd, dragging, ringed, onMenu }: KanbanCardProps) {
   const assignee = displayAssignee(task)
   const completed = task.status === 'completed'
 
@@ -76,7 +80,12 @@ export default function KanbanCard({ task, onClick, onDragStart, onDragEnd, drag
   const subtasksComplete = subtaskTotal > 0 && subtaskDone >= subtaskTotal
 
   const cycles = task.review_cycle_count ?? 0
-  const attachmentCount = task.attachments?.length ?? 0
+  const attachments = task.attachments ?? []
+  const attachmentCount = attachments.length
+  // Thumbnail strip, mirroring the desktop card. Capped at 3 — the card is a
+  // glance surface, and a ticket with a dozen screenshots would push the title
+  // and checklist off the visible height.
+  const imageAttachments = attachments.filter((a) => (a.content_type ?? '').startsWith('image/')).slice(0, 3)
   const reviewNote = task.review_note?.trim()
 
   // Left-edge accent — critical/high only. Medium is the default priority, so
@@ -101,8 +110,26 @@ export default function KanbanCard({ task, onClick, onDragStart, onDragEnd, drag
     >
       {edgeColor && <span className={`absolute inset-y-1.5 left-0 w-[3px] rounded-full ${edgeColor}`} />}
 
-      {/* Title row: completion state (left) + title + creator avatar (right) */}
-      <div className="flex items-start gap-2">
+      {/* Action menu — always visible on touch (where it replaces dragging),
+          hover-only on pointer devices so the card stays clean. */}
+      {onMenu && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            onMenu()
+          }}
+          title="Task actions"
+          aria-label="Task actions"
+          className="absolute right-1 top-1 z-10 rounded p-1.5 text-w-dim transition-colors hover:bg-w-surface2 hover:text-w-text md:opacity-0 md:group-hover:opacity-100"
+        >
+          <MoreHorizontal className="h-4 w-4" />
+        </button>
+      )}
+
+      {/* Title row: completion state (left) + title + creator avatar (right).
+          Reserve room on the right for the absolutely-positioned ⋯ button so it
+          never lands on top of the creator avatar. */}
+      <div className={`flex items-start gap-2 ${onMenu ? 'pr-6' : ''}`}>
         {completed ? (
           <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-w-accent" />
         ) : (
@@ -185,6 +212,22 @@ export default function KanbanCard({ task, onClick, onDragStart, onDragEnd, drag
           <span className="ml-auto text-[10px] font-medium text-w-dim">
             {subtaskDone}/{subtaskTotal}
           </span>
+        </div>
+      )}
+
+      {/* Screenshot strip */}
+      {imageAttachments.length > 0 && (
+        <div className="mt-2 flex gap-1 pl-6">
+          {imageAttachments.map((img) => (
+            <div key={img.id} className="h-10 flex-1 overflow-hidden rounded border border-w-line bg-w-surface2">
+              <img
+                src={img.storage_url}
+                alt={img.filename}
+                loading="lazy"
+                className="h-full w-full object-cover"
+              />
+            </div>
+          ))}
         </div>
       )}
 

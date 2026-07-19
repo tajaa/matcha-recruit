@@ -5,6 +5,8 @@ import type {
   MWProjectTaskPatch,
   MWSubtask,
   MWTaskDraft,
+  MWTaskHistoryEntry,
+  MWTaskAttachment,
 } from '../../types'
 
 // ── Project kanban tasks (collaborative 5-column board) ──
@@ -60,6 +62,41 @@ export function approveProjectTask(projectId: string, taskId: string, note?: str
   return api.post<MWProjectTask>(`/matcha-work/projects/${projectId}/tasks/${taskId}/approve`, {
     note: note?.trim() ? note : null,
   })
+}
+
+// ── Task attachments (files scoped to one card) ──
+//
+// Distinct from the project-wide files in projects.ts (`uploadProjectFile`):
+// these carry `task_id`, so they render on the ticket. Backend caps uploads at
+// 10 MB and whitelists extensions (routes/matcha_work/projects.py:518) — mirror
+// both client-side so a rejected file fails before the round-trip.
+
+export const TASK_FILE_MAX_BYTES = 10 * 1024 * 1024
+export const TASK_FILE_ALLOWED_EXT =
+  /\.(pdf|docx?|txt|csv|xlsx?|png|jpe?g|gif|webp|svg|heic|heif|pptx|md)$/i
+
+export function listTaskFiles(projectId: string, taskId: string) {
+  return api.get<MWTaskAttachment[]>(`/matcha-work/projects/${projectId}/tasks/${taskId}/files`)
+}
+
+export function uploadTaskFile(projectId: string, taskId: string, file: File) {
+  const form = new FormData()
+  form.append('file', file)
+  return api.upload<MWTaskAttachment>(
+    `/matcha-work/projects/${projectId}/tasks/${taskId}/files`,
+    form,
+  )
+}
+
+export function deleteTaskFile(projectId: string, taskId: string, fileId: string) {
+  return api.delete(`/matcha-work/projects/${projectId}/tasks/${taskId}/files/${fileId}`)
+}
+
+/** Audit-trail timeline for one task. Used by the "copy for Claude Code"
+ *  export to tell a rework apart from a fresh ticket (`review_rejected` /
+ *  `subtask_rejected` / `round_started` events). */
+export function getTaskHistory(projectId: string, taskId: string) {
+  return api.get<MWTaskHistoryEntry[]>(`/matcha-work/projects/${projectId}/tasks/${taskId}/history`)
 }
 
 // ── Subtasks (per-card checklist) ──

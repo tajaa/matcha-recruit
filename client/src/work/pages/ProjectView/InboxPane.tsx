@@ -23,7 +23,7 @@ export function InboxPane({ vm }: Props) {
   } = vm.inbox
 
   return (
-    <div className={`flex-1 flex-col min-w-0 min-h-0 bg-w-bg ${activeTab === 'chat' ? 'flex' : 'hidden'}`}>
+    <div className={`flex-1 flex-col min-w-0 min-h-0 bg-w-bg ${activeTab === vm.aiTab ? 'flex' : 'hidden'}`}>
       {inboxActiveConvo ? (
         <MessageThread
           conversation={inboxActiveConvo}

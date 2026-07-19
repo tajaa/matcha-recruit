@@ -66,6 +66,20 @@ export function createProjectChat(projectId: string, title?: string) {
   return api.post<MWThread>(`/matcha-work/projects/${projectId}/chats`, { title })
 }
 
+/**
+ * Get-or-create the collab project's discussion CHANNEL — the real per-project
+ * chat (desktop Werk has used this since day one; the web project view used to
+ * show the AI `mw_threads` list instead, so the actual conversation was only
+ * reachable by hunting through the Channels sidebar).
+ *
+ * Idempotent server-side: returns the existing
+ * `project_data.discussion_channel_id` when set, otherwise creates the private
+ * channel and syncs collaborators as members. 400s for non-collab projects.
+ */
+export function ensureDiscussionChannel(projectId: string) {
+  return api.post<{ channel_id: string }>(`/matcha-work/projects/${projectId}/discussion-channel`, {})
+}
+
 // ── Collaborators ──
 
 export function listCollaborators(projectId: string) {

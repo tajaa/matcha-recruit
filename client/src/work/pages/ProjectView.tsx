@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
-import { ChevronLeft, Loader2, MessageSquare, KanbanSquare, FileText } from 'lucide-react'
+import { ChevronLeft, Loader2, MessageSquare, KanbanSquare, FileText, Hash, Sparkles } from 'lucide-react'
 import ProjectKanbanBoard from '../components/shell/ProjectKanbanBoard'
+import ChannelViewScreen from './ChannelView/ChannelViewScreen'
 import BoardFilesTab from '../components/shell/BoardFilesTab'
 import ProjectTour from '../components/panels/ProjectTour'
 import { useProjectView } from './ProjectView/useProjectView'
@@ -18,13 +19,16 @@ export default function ProjectView() {
     loading,
     error,
     activeTab,
-    setActiveTab,
+    selectTab,
     sidebarMode,
     mobileMenuOpen,
     setMobileMenuOpen,
     projectId,
     showTour,
     dismissTour,
+    isCollab,
+    discussionChannelId,
+    channelError,
   } = vm
 
   if (loading) {
@@ -51,10 +55,21 @@ export default function ProjectView() {
   // sections panel as "Notes": those sections ARE the deliverable, and the panel
   // is their only viewer/exporter on web. Files comes later — its render branch
   // below stays intact, just unreferenced by this tab set.
+  //
+  // Collab is the exception: its "Chat" is the project's discussion CHANNEL
+  // (the thing collaborators actually talk in — previously only reachable via
+  // the Channels sidebar), and the AI mw_threads list moves to its own tab
+  // instead of impersonating the project chat with "Chat 1", "Chat 2", …
   const workspaceTabs = isRecruiting
     ? [
         { key: 'chat' as const, icon: MessageSquare, label: 'Chat' },
         { key: 'panel' as const, icon: FileText, label: 'Pipeline' },
+      ]
+    : isCollab
+    ? [
+        { key: 'chat' as const, icon: Hash, label: 'Chat' },
+        { key: 'ai' as const, icon: Sparkles, label: 'AI' },
+        { key: 'board' as const, icon: KanbanSquare, label: 'Kanban' },
       ]
     : project.project_type === 'presentation'
     ? [
@@ -86,8 +101,10 @@ export default function ProjectView() {
         <ProjectSidebar vm={vm} project={project} isRecruiting={isRecruiting} />
       </div>
 
-      {/* Desktop Chat Sidebar — hidden for recruiting projects (single-chat flow, no list needed) */}
-      {!isRecruiting && (
+      {/* Desktop Chat Sidebar — hidden for recruiting projects (single-chat
+          flow, no list needed) and for collab outside the AI tab (the channel
+          has no thread list to pick from). */}
+      {!isRecruiting && (!isCollab || activeTab === 'ai') && (
         <div className="hidden md:flex flex-col w-[200px] shrink-0 border-r border-w-line bg-w-surface">
           <ProjectSidebar vm={vm} project={project} isRecruiting={isRecruiting} />
         </div>
@@ -109,7 +126,7 @@ export default function ProjectView() {
           {workspaceTabs.map((t) => (
             <button
               key={t.key}
-              onClick={() => setActiveTab(t.key)}
+              onClick={() => selectTab(t.key)}
               className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[13px] font-medium transition-colors border ${
                 activeTab === t.key
                   ? 'bg-w-surface2 border-w-line text-w-accent'
@@ -128,7 +145,39 @@ export default function ProjectView() {
         <InboxPane vm={vm} />
       )}
 
-      {/* Center — chat messages */}
+      {/* Center — the project's real chat (collab): its discussion channel.
+          Reuses the full channel surface (realtime WS, calls, mentions,
+          uploads, members) with the id passed in rather than read from the
+          route — this path has no :channelId.
+
+          Once resolved it stays MOUNTED and hides via CSS (like ChatPane
+          below) rather than unmounting per tab: ChannelViewScreen owns the
+          channel WebSocket, so conditional mounting tore the socket down and
+          rebuilt it — refetching history and dropping the composer draft — on
+          every Chat↔Kanban flip. */}
+      {isCollab && discussionChannelId && (
+        <div
+          className={`flex-1 min-h-0 flex-col bg-w-bg ${
+            activeTab === 'chat' && sidebarMode === 'chats' ? 'flex' : 'hidden'
+          }`}
+        >
+          <ChannelViewScreen channelId={discussionChannelId} embedded />
+        </div>
+      )}
+
+      {/* Loading / failure for that pane, only until an id resolves. */}
+      {isCollab && !discussionChannelId && activeTab === 'chat' && sidebarMode === 'chats' && (
+        <div className="flex-1 min-h-0 flex flex-col items-center justify-center bg-w-bg px-6 text-center">
+          {channelError ? (
+            <p className="text-sm text-red-400">{channelError}</p>
+          ) : (
+            <Loader2 className="animate-spin text-w-dim" size={20} />
+          )}
+        </div>
+      )}
+
+      {/* Center — AI chat messages. Its own tab for collab, the `chat` tab
+          for every other project type. */}
       {sidebarMode === 'chats' && (
         <ChatPane vm={vm} project={project} isRecruiting={isRecruiting} hasPanelTab={hasPanelTab} />
       )}
@@ -160,7 +209,7 @@ export default function ProjectView() {
           return (
             <button
               key={t.key}
-              onClick={() => setActiveTab(t.key)}
+              onClick={() => selectTab(t.key)}
               className={`flex-1 flex flex-col items-center justify-center gap-0.5 py-2 transition-colors ${
                 active ? 'text-w-accent' : 'text-w-dim'
               }`}

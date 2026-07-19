@@ -111,7 +111,10 @@ export function ProjectSidebar({ vm, project, isRecruiting }: Props) {
       {/* Bottom: Inbox + User */}
       <div style={{ borderTop: '1px solid var(--color-w-line)' }} className="shrink-0">
         <button
-          onClick={() => { setSidebarMode(sidebarMode === 'inbox' ? 'chats' : 'inbox'); setActiveTab('chat'); setMobileMenuOpen(false) }}
+          // The inbox pane shares a slot with the AI chat pane, so point the
+          // tab at whichever one owns it (vm.aiTab) — sending collab to 'chat'
+          // would render the discussion channel and the inbox at once.
+          onClick={() => { setSidebarMode(sidebarMode === 'inbox' ? 'chats' : 'inbox'); setActiveTab(vm.aiTab); setMobileMenuOpen(false) }}
           className={`w-full flex items-center gap-1.5 px-3 py-2.5 text-xs transition-colors ${
             sidebarMode === 'inbox' ? 'text-[var(--color-w-text)]' : 'text-[var(--color-w-dim)] hover:text-[var(--color-w-text)]'
           }`}

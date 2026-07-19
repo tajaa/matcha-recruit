@@ -31,6 +31,10 @@ interface KanbanColumnProps {
   setTemplateCompose: Dispatch<SetStateAction<{ template: KanbanTemplate; column: BoardColumn } | null>>
   acknowledge: (taskId: string) => void
   setSelectedId: Dispatch<SetStateAction<string | null>>
+  /** Open a card's action sheet (Move to / Duplicate / Delete). */
+  onCardMenu: (taskId: string) => void
+  /** Mobile pager mode: one full-width column, no empty-collapse, no snap. */
+  singleColumn?: boolean
 }
 
 export default function KanbanColumn({
@@ -59,6 +63,8 @@ export default function KanbanColumn({
   setTemplateCompose,
   acknowledge,
   setSelectedId,
+  onCardMenu,
+  singleColumn = false,
 }: KanbanColumnProps) {
   let colTasks = visible.filter((t) => t.board_column === col.key)
   if (col.key === 'done') {
@@ -68,8 +74,11 @@ export default function KanbanColumn({
   const shownTasks = col.key === 'done' && !doneExpanded && totalInColumn > 5 ? colTasks.slice(0, 5) : colTasks
   const isEmpty = totalInColumn === 0
   const isDropTarget = dragOverColumn === col.key
+  // Empty-column collapse is a horizontal space trick for the multi-column
+  // board; in the mobile pager there's only ever one column and collapsing it
+  // would hide the "add card" affordance behind a hover the phone can't do.
   const collapsed =
-    isEmpty && addingColumn !== col.key && hoveredEmptyColumn !== col.key && !isDropTarget
+    !singleColumn && isEmpty && addingColumn !== col.key && hoveredEmptyColumn !== col.key && !isDropTarget
 
   return (
     <div
@@ -92,9 +101,11 @@ export default function KanbanColumn({
         setDragOverColumn(null)
         if (draggingId) moveTask(draggingId, col.key)
       }}
-      className={`flex shrink-0 flex-col rounded-lg border bg-w-surface transition-[width] duration-150 ease-out max-md:w-[85vw] max-md:snap-center ${
-        collapsed ? 'w-[136px]' : 'w-[240px]'
-      } ${isDropTarget ? 'border-w-accent/60 bg-w-accent/10' : 'border-w-line'}`}
+      className={`flex flex-col rounded-lg border bg-w-surface transition-[width] duration-150 ease-out ${
+        singleColumn ? 'min-h-0 w-full flex-1' : 'shrink-0'
+      } ${singleColumn ? '' : collapsed ? 'w-[136px]' : 'w-[240px]'} ${
+        isDropTarget ? 'border-w-accent/60 bg-w-accent/10' : 'border-w-line'
+      }`}
     >
       {/* Column header */}
       <div className="relative flex items-center justify-between gap-1.5 px-2.5 py-2">
@@ -187,6 +198,7 @@ export default function KanbanColumn({
                 setDraggingId(null)
                 setDragOverColumn(null)
               }}
+              onMenu={() => onCardMenu(task.id)}
             />
           ))}
 

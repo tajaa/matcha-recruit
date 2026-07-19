@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { useMe } from '../../../hooks/useMe'
 import type { MWMessage, MWThreadDetail, MWSendResponse, MWStreamEvent, MWProject } from '../../types'
-import { getProjectDetail, getThread, sendMessageStream, createProjectChat, addProjectSectionNew, updateProjectSectionNew, uploadProjectResumes, syncProjectInterviews, extractPlaceholderValue, fetchUsageSummary, fetchUsageSummary24h, updateTitle, pinThread, getPdfProxyUrl } from '../../api/matchaWork'
+import { getProjectDetail, getThread, sendMessageStream, createProjectChat, ensureDiscussionChannel, addProjectSectionNew, updateProjectSectionNew, uploadProjectResumes, syncProjectInterviews, extractPlaceholderValue, fetchUsageSummary, fetchUsageSummary24h, updateTitle, pinThread, getPdfProxyUrl } from '../../api/matchaWork'
 import type { UsageSummary } from '../../api/matchaWork'
 import { useProjectPresence } from '../../hooks/useProjectPresence'
 import { useWorkBase } from '../../routes/WorkSurfaceContext'
@@ -36,7 +36,20 @@ export function useProjectView() {
   // Which surface of the workspace is showing. Mirrors desktop Werk's collab tab
   // strip (CollabRightPanel): one tab set driving one content pane, rendered as a
   // top strip on desktop and a bottom bar on mobile.
-  const [activeTab, setActiveTab] = useState<'chat' | 'panel' | 'board' | 'files'>('chat')
+  //
+  // 'chat' is the project's PRIMARY chat: for collab that's the discussion
+  // channel, for every other type it's the AI thread. 'ai' is collab-only — the
+  // mw_threads list, which used to masquerade as the project's chat.
+  const [activeTab, setActiveTab] = useState<'chat' | 'ai' | 'panel' | 'board' | 'files'>('chat')
+
+  // ── Collab: the project's real chat is a CHANNEL, not an AI thread ──
+  // Resolved through the idempotent get-or-create endpoint rather than read off
+  // project_data, so a collab project created before the channel existed still
+  // works. The ref guards React StrictMode's double-invoke; the endpoint is
+  // idempotent server-side anyway, this just avoids the duplicate request.
+  const [discussionChannelId, setDiscussionChannelId] = useState<string | null>(null)
+  const [channelError, setChannelError] = useState('')
+  const channelRequestedFor = useRef<string | null>(null)
 
   // Sidebar mode: 'chats' or 'inbox'
   const [sidebarMode, setSidebarMode] = useState<'chats' | 'inbox'>('chats')
@@ -90,9 +103,51 @@ export function useProjectView() {
         ? ['chat', 'panel']
         : type === 'presentation'
         ? ['chat', 'panel', 'board']
+        : type === 'collab'
+        ? ['chat', 'ai', 'board']
         : ['chat', 'board']
     setActiveTab((prev) => (allowed.includes(prev) ? prev : 'chat'))
   }, [projectId, project?.project_type])
+
+  // Which tab owns the pane the AI chat and the inbox share. Derived once here
+  // rather than re-spelled in each pane: for collab the 'chat' tab is the
+  // discussion channel, so the AI thread surface moves to 'ai'.
+  const isCollab = project?.project_type === 'collab'
+  const aiTab: 'chat' | 'ai' = isCollab ? 'ai' : 'chat'
+
+  /**
+   * Pick a workspace tab. Always drops the sidebar back to 'chats', because
+   * inbox mode owns the same slot: leaving sidebarMode='inbox' while switching
+   * to the collab 'chat' tab hid the inbox (it answers to 'ai') AND the channel
+   * (it requires 'chats'), leaving the centre pane blank.
+   */
+  function selectTab(tab: 'chat' | 'ai' | 'panel' | 'board' | 'files') {
+    setActiveTab(tab)
+    setSidebarMode('chats')
+  }
+
+  useEffect(() => {
+    if (!projectId || !isCollab) return
+    if (channelRequestedFor.current === projectId) return
+    channelRequestedFor.current = projectId
+    setDiscussionChannelId(null)
+    setChannelError('')
+    // `active` guards the RESPONSE, the ref only dedupes the REQUEST. This
+    // component stays mounted across `projects/:projectId` changes, so without
+    // it a slow response for project A can land after B's and put A's channel
+    // (its messages, its members) inside B's Chat tab.
+    let active = true
+    ensureDiscussionChannel(projectId)
+      .then(({ channel_id }) => {
+        if (active) setDiscussionChannelId(channel_id)
+      })
+      .catch((e) => {
+        if (active) setChannelError(e instanceof Error ? e.message : 'Failed to open project chat')
+      })
+    return () => {
+      active = false
+    }
+  }, [projectId, isCollab])
 
   // Chat rename/pin
   const [renamingChatId, setRenamingChatId] = useState<string | null>(null)
@@ -386,6 +441,11 @@ export function useProjectView() {
     base,
     project,
     setProject,
+    isCollab,
+    aiTab,
+    selectTab,
+    discussionChannelId,
+    channelError,
     activeChatId,
     setActiveChatId,
     activeThread,

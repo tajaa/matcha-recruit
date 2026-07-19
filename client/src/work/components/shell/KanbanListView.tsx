@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { MoreHorizontal } from 'lucide-react'
 import type { MWProjectTask, TaskPriority } from '../../types'
 import { KANBAN_COLUMNS } from '../../utils/kanbanColumns'
 import { taskMatches } from '../../utils/kanbanSearch'
@@ -9,6 +10,8 @@ interface KanbanListViewProps {
   myUserId: string | null
   changedIds: Set<string>
   onOpen: (task: MWProjectTask) => void
+  /** Opens a row's action sheet (Move to / Duplicate / Delete). */
+  onMenu?: (taskId: string) => void
 }
 
 const PRIORITY_DOT: Record<TaskPriority, string> = {
@@ -27,7 +30,7 @@ function displayAssignee(task: MWProjectTask): string | null {
   return local.replace(/[._]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
-export default function KanbanListView({ tasks, searchTokens, myUserId, changedIds, onOpen }: KanbanListViewProps) {
+export default function KanbanListView({ tasks, searchTokens, myUserId, changedIds, onOpen, onMenu }: KanbanListViewProps) {
   const [mineOnly, setMineOnly] = useState(() => localStorage.getItem('mw-kanban-list-mine') === '1')
 
   function toggleMine(value: boolean) {
@@ -89,12 +92,15 @@ export default function KanbanListView({ tasks, searchTokens, myUserId, changedI
                     const total = task.subtask_total ?? 0
                     const done = task.subtask_done ?? 0
                     return (
-                      <button
+                      <div
                         key={task.id}
-                        onClick={() => onOpen(task)}
-                        className={`flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm transition-colors hover:bg-w-surface ${
+                        className={`group flex items-center transition-colors hover:bg-w-surface ${
                           i > 0 ? 'border-t border-w-line' : ''
                         } ${changedIds.has(task.id) ? 'bg-yellow-500/5' : 'bg-w-bg'}`}
+                      >
+                      <button
+                        onClick={() => onOpen(task)}
+                        className="flex min-w-0 flex-1 items-center gap-2.5 py-2 pl-3 text-left text-sm"
                       >
                         <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${PRIORITY_DOT[task.priority]}`} />
                         <span
@@ -120,6 +126,17 @@ export default function KanbanListView({ tasks, searchTokens, myUserId, changedI
                           </span>
                         )}
                       </button>
+                      {onMenu && (
+                        <button
+                          onClick={() => onMenu(task.id)}
+                          title="Task actions"
+                          aria-label="Task actions"
+                          className="shrink-0 px-2 py-2 text-w-dim transition-colors hover:text-w-text md:opacity-0 md:group-hover:opacity-100"
+                        >
+                          <MoreHorizontal className="h-4 w-4" />
+                        </button>
+                      )}
+                      </div>
                     )
                   })}
                 </div>

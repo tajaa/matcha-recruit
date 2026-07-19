@@ -21,8 +21,18 @@ import { handleFromEmail, detectMentionToken } from './mentions'
 import { useChannelSocket } from './useChannelSocket'
 import type { HeaderAction } from './types'
 
-export function useChannelView() {
-  const { channelId } = useParams<{ channelId: string }>()
+/**
+ * @param channelIdOverride  Render a specific channel instead of the one in the
+ *   route. Used by the collab project view, which embeds the project's own
+ *   discussion channel at `/werk/projects/:projectId` — a path that has no
+ *   `:channelId` param at all.
+ * @param embedded  True when rendered inside another surface (the project view)
+ *   rather than as the `/channels/:id` page. Suppresses actions that only make
+ *   sense for a channel you navigated to on purpose — see `secondaryActions`.
+ */
+export function useChannelView(channelIdOverride?: string | null, embedded = false) {
+  const { channelId: routeChannelId } = useParams<{ channelId: string }>()
+  const channelId = channelIdOverride ?? routeChannelId
   const navigate = useNavigate()
   const { me } = useMe()
   const base = useWorkBase()
@@ -319,7 +329,13 @@ export function useChannelView() {
     isOwner && isPaid && { key: 'analytics', icon: BarChart2, label: 'Channel analytics', active: showAnalytics, onClick: () => { setShowAnalytics(!showAnalytics); setShowSettings(false); setShowJobPostings(false) }, hover: 'hover:text-w-accent' },
     isOwner && isPaid && { key: 'settings', icon: Settings, label: 'Channel settings', active: showSettings, onClick: () => { setShowSettings(!showSettings); setShowAnalytics(false); setShowJobPostings(false) }, hover: 'hover:text-w-accent' },
     !isOwner && isMember && { key: 'tip', icon: Heart, label: 'Send a tip', onClick: () => setShowTip(true), hover: 'hover:text-pink-400' },
-    !isOwner && { key: 'leave', icon: LogOut, label: 'Leave channel', onClick: handleLeave, hover: 'hover:text-red-400' },
+    // NOT offered on the embedded project chat. The discussion channel is
+    // created `visibility='private'`, and join_channel 403s private channels
+    // (werk/routes/channels.py) — members are only ever added at channel
+    // creation or on collaborator-accept. So "Leave", which reads like "close
+    // this chat", would lock a collaborator out of their own project's primary
+    // chat permanently, with no self-serve way back in.
+    !isOwner && !embedded && { key: 'leave', icon: LogOut, label: 'Leave channel', onClick: handleLeave, hover: 'hover:text-red-400' },
   ].filter(Boolean) as HeaderAction[])
 
   return {

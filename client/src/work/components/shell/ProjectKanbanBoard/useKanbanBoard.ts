@@ -6,6 +6,7 @@ import {
   deleteProjectTask,
   draftTaskFromPrompt,
   listCollaborators,
+  listSubtasks,
 } from '../../../api/matchaWork'
 import type {
   MWProjectTask,
@@ -37,6 +38,14 @@ export function useKanbanBoard(projectId: string) {
 
   // Card detail side panel.
   const [selectedId, setSelectedId] = useState<string | null>(null)
+
+  // Per-card action sheet (Move to / Duplicate / Delete) — the touch path for
+  // moving a card, since drag-and-drop is HTML5-only.
+  const [actionTaskId, setActionTaskId] = useState<string | null>(null)
+
+  // Mobile board pager: one full-width column at a time instead of five 85vw
+  // columns in a snap-scroller you had to hunt sideways through.
+  const [mobileColumn, setMobileColumn] = useState<BoardColumn>('todo')
 
   // Search / view mode / done-lane collapse.
   const [searchText, setSearchText] = useState('')
@@ -273,6 +282,46 @@ export function useKanbanBoard(projectId: string) {
     }
   }
 
+  /**
+   * Duplicate a card. Client-side re-create, not a server-side copy — there is
+   * no duplicate endpoint; this mirrors desktop Werk's `duplicateTask`
+   * (ProjectDetailViewModel+Tasks.swift) field for field.
+   *
+   * Checklist items come across as fresh/not-done (that's what the create
+   * endpoint's `subtasks` param does for any new task). Attachments are NOT
+   * copied — same reasoning as desktop: there's no S3 file-copy precedent, and
+   * re-pointing blobs is a separate concern. `progress_note` is dropped because
+   * the create endpoint has no field for it; `due_date` IS carried (desktop
+   * drops it, but losing the date silently breaks the copy's aging/overdue
+   * indicators).
+   */
+  async function duplicateTask(taskId: string) {
+    const task = tasks.find((t) => t.id === taskId)
+    if (!task) return
+    let subtaskTitles: string[] = []
+    try {
+      subtaskTitles = (await listSubtasks(projectId, taskId)).map((s) => s.title)
+    } catch {
+      // Best-effort — a failed checklist fetch shouldn't block the duplicate.
+    }
+    try {
+      const created = await createProjectTask(projectId, {
+        title: `${task.title} (copy)`,
+        board_column: task.board_column,
+        priority: task.priority,
+        description: task.description,
+        assigned_to: task.assigned_to,
+        due_date: task.due_date,
+        category: task.category,
+        element_id: task.element_id,
+        ...(subtaskTitles.length ? { subtasks: subtaskTitles } : {}),
+      })
+      setTasks((prev) => [...prev, created])
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to duplicate task')
+    }
+  }
+
   async function handleDelete(taskId: string) {
     const prev = tasks
     setTasks((p) => p.filter((t) => t.id !== taskId))
@@ -392,6 +441,12 @@ export function useKanbanBoard(projectId: string) {
     ensureCollaborators,
     acknowledge,
     moveTask,
+    actionTaskId,
+    setActionTaskId,
+    actionTask: actionTaskId ? tasks.find((t) => t.id === actionTaskId) ?? null : null,
+    mobileColumn,
+    setMobileColumn,
+    duplicateTask,
     handleCreate,
     handleDelete,
     patchLocal,

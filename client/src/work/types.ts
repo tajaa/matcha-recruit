@@ -201,6 +201,24 @@ export interface MWSubtask {
   updated_at: string | null
 }
 
+/** One row of `GET /projects/{id}/tasks/{taskId}/history` — the task audit
+ *  trail. `metadata` is free-form JSONB whose keys vary by `event_type`
+ *  (`subtask_rejected` carries subtask_id/title/reason/severity, `activity`
+ *  carries body, …), so it stays loosely typed and callers narrow per key. */
+export interface MWTaskHistoryEntry {
+  id: string
+  task_id: string
+  event_type: string
+  from_value: string | null
+  to_value: string | null
+  metadata: Record<string, unknown> | null
+  created_at: string
+  actor_user_id: string | null
+  actor_name: string | null
+  actor_avatar_url: string | null
+  attachment_ids?: string[]
+}
+
 // ── Research Tasks ──
 
 export interface ResearchField {
@@ -240,7 +258,9 @@ export interface ResearchData {
 export interface MWProject {
   id: string
   title: string
-  project_type: 'general' | 'presentation' | 'recruiting'
+  // 'collab' projects carry a real discussion *channel* as their chat (see
+  // ensureDiscussionChannel) — the mw_threads list is AI chat, a separate tab.
+  project_type: 'general' | 'presentation' | 'recruiting' | 'collab'
   sections: ProjectSection[]
   project_data: RecruitingData & ResearchData & Record<string, unknown>
   status: string

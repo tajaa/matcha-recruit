@@ -241,12 +241,18 @@ export default function WorkLayout() {
             {/* Always pass open=true to the sidebar on mobile so it's fully expanded */}
             <SidebarComp open={true} onToggle={() => {}} />
           </div>
-          <button
-            onClick={() => setMobileMenuOpen(false)}
-            className="absolute top-4 -right-12 text-w-dim hover:text-w-text p-2"
-          >
-            <X className="h-6 w-6" />
-          </button>
+          {/* Only mount the close button while the drawer is actually open.
+              It sits OUTSIDE the drawer's box (-right-12), but the drawer only
+              translates by its own width — so when closed the X landed right
+              back on screen, overlapping the header burger. */}
+          {mobileMenuOpen && (
+            <button
+              onClick={() => setMobileMenuOpen(false)}
+              className="absolute top-4 -right-12 text-w-dim hover:text-w-text p-2"
+            >
+              <X className="h-6 w-6" />
+            </button>
+          )}
         </div>
 
         <main className="flex-1 min-w-0 overflow-auto werk-radial">

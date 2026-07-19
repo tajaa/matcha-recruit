@@ -10,7 +10,15 @@ import MessageComposer from './MessageComposer'
 import MembersSidebar from './MembersSidebar'
 import ChannelModals from './ChannelModals'
 
-export default function ChannelViewScreen() {
+interface ChannelViewScreenProps {
+  /** Render this channel instead of the route's `:channelId`. See useChannelView. */
+  channelId?: string | null
+  /** Rendered inside another surface (the collab project view) rather than as
+   *  the `/channels/:id` page. Hides the leave action — see useChannelView. */
+  embedded?: boolean
+}
+
+export default function ChannelViewScreen({ channelId: channelIdOverride, embedded = false }: ChannelViewScreenProps = {}) {
   const {
     channelId,
     navigate,
@@ -67,7 +75,7 @@ export default function ChannelViewScreen() {
     handleJoin,
     typingText,
     secondaryActions,
-  } = useChannelView()
+  } = useChannelView(channelIdOverride, embedded)
 
   if (loading) {
     return <ChannelLoading />

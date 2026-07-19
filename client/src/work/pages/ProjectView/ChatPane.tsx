@@ -50,7 +50,7 @@ export function ChatPane({ vm, project, isRecruiting, hasPanelTab }: Props) {
   } = vm
 
   return (
-    <div className={`flex-1 flex-col min-w-0 min-h-0 ${vm.activeTab === 'chat' ? 'flex' : 'hidden'}`}>
+    <div className={`flex-1 flex-col min-w-0 min-h-0 ${vm.activeTab === vm.aiTab ? 'flex' : 'hidden'}`}>
       {/* Header */}
       <div className="px-4 py-2 flex items-center gap-2" style={{ borderBottom: '1px solid var(--color-w-line)' }}>
         {isRecruiting ? (
@@ -58,7 +58,10 @@ export function ChatPane({ vm, project, isRecruiting, hasPanelTab }: Props) {
             <ArrowLeft size={14} />
           </Link>
         ) : (
-          <button onClick={() => setMobileMenuOpen(true)} className="sm:hidden text-[var(--color-w-dim)] hover:text-[var(--color-w-text)]">
+          // `md:hidden`, matching the app-shell burger in WorkLayout — at the
+          // old `sm:hidden` the shell burger was still showing while this one
+          // had already vanished, so the two never lined up.
+          <button onClick={() => setMobileMenuOpen(true)} className="md:hidden text-[var(--color-w-dim)] hover:text-[var(--color-w-text)]">
             <Menu size={14} />
           </button>
         )}
