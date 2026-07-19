@@ -3,6 +3,7 @@ import { FeatureGate } from '../components/shared/FeatureGate'
 import PortalLayout from '../pages/portal/PortalLayout'
 import PortalDashboard from '../pages/portal/PortalDashboard'
 import PortalSchedule from '../pages/portal/PortalSchedule'
+import AskHR from '../pages/portal/AskHR'
 import EmployeeTakeTraining from '../pages/portal/EmployeeTakeTraining'
 import EmployeeSignDocument from '../pages/portal/EmployeeSignDocument'
 
@@ -16,6 +17,14 @@ export default function PortalRoutes() {
           element={
             <FeatureGate feature="employee_schedule" label="My Schedule">
               <PortalSchedule />
+            </FeatureGate>
+          }
+        />
+        <Route
+          path="ask-hr"
+          element={
+            <FeatureGate feature="ask_hr" label="Ask HR">
+              <AskHR />
             </FeatureGate>
           }
         />

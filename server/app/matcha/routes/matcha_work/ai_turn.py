@@ -5,6 +5,7 @@ and _apply_ai_updates_and_operations (the core AI-response-to-DB-write step).
 No routes in this module. Extracted from the original flat matcha_work.py
 during the package split (2026-07-03). See matcha_work/CLAUDE.md.
 """
+import asyncio
 import json
 import logging
 import os
@@ -104,6 +105,12 @@ def _validate_updates_for_skill(skill: str, updates: dict) -> dict:
     elif skill == "blog":
         from app.matcha.services.matcha_work_ai import BLOG_FIELDS as _BLOG_FIELDS
         valid_fields = set(_BLOG_FIELDS)
+    elif skill == "hr_pilot":
+        # Whitelist to hr_action, then drop any model-emitted hand-off type
+        # (ir_report/er_case) — those are server-staged only. A model can never
+        # mint a hand-off or overwrite the server-captured narrative this way.
+        from app.matcha.services.hr_pilot_actions import filter_model_staged_hr_action
+        return filter_model_staged_hr_action({k: v for k, v in updates.items() if k == "hr_action"})
     else:
         return {}
     return {k: v for k, v in updates.items() if k in valid_fields}
@@ -701,14 +708,27 @@ async def _apply_ai_updates_and_operations(
     current_user_id: Optional[UUID] = None,
     project_id: Optional[UUID] = None,
     project_meta: Optional[dict] = None,
-) -> tuple[dict, int, Optional[str], bool, str]:
+    current_user_role: Optional[str] = None,
+    thread_hr_pilot_mode: bool = False,
+) -> tuple[dict, int, Optional[str], bool, str, list]:
     """Apply structured updates, execute supported operations, and return updated response state.
 
     `project_meta` (when supplied by the caller) contains at least
     `project_type` for the thread's project. We rely on it to drive the
     blog-skill routing below without a redundant DB fetch.
+
+    Returns a 6-tuple; the trailing `post_events` list holds actions the caller
+    must run once the assistant message exists (e.g. HR Pilot compliance-block
+    escalations, which need the persisted message id the dispatcher lacks).
     """
     project_type_hint = (project_meta or {}).get("project_type") if project_id else None
+
+    # Snapshot the HR-action proposal BEFORE Phase A mutates current_state. The
+    # HR Pilot executor only acts on a proposal staged on a PRIOR turn (see the
+    # execute_hr_action branch) — this is the deterministic confirm-first guard.
+    pre_turn_hr_action = (current_state or {}).get("hr_action") if isinstance(current_state, dict) else None
+    hr_action_applied_this_turn = False  # set in Phase A if an hr_action survived staging
+    post_events: list[dict] = []
 
     skill = ai_resp.skill or _infer_skill_from_state(current_state)
     # Blog projects always route to the blog skill — covers both legacy threads
@@ -720,7 +740,7 @@ async def _apply_ai_updates_and_operations(
     # If skill is not a known document type (e.g. "none" or "chat"), fall back to
     # inferring from the update keys themselves so workbook/review/etc. updates
     # created on a fresh thread aren't silently dropped.
-    elif skill not in ("offer_letter", "review", "workbook", "onboarding", "presentation", "handbook", "policy", "resume_batch", "inventory", "project", "blog") and isinstance(ai_resp.structured_update, dict) and ai_resp.structured_update:
+    elif skill not in ("offer_letter", "review", "workbook", "onboarding", "presentation", "handbook", "policy", "resume_batch", "inventory", "project", "blog", "hr_pilot") and isinstance(ai_resp.structured_update, dict) and ai_resp.structured_update:
         skill_from_updates = _infer_skill_from_state(ai_resp.structured_update)
         if skill_from_updates != "chat":
             skill = skill_from_updates
@@ -769,6 +789,10 @@ async def _apply_ai_updates_and_operations(
             for _k in ("project_title", "project_sections", "project_status"):
                 safe_updates.pop(_k, None)
         if safe_updates:
+            # Did an hr_action actually survive staging this turn? (Post model-strip
+            # — a dropped hand-off must NOT count, or the confirm turn traps the
+            # user in a loop.) Drives confirm-first in the execute branch below.
+            hr_action_applied_this_turn = "hr_action" in safe_updates
             result = await doc_svc.apply_update(thread_id, safe_updates)
             current_version = result["version"]
             current_state = result["current_state"]
@@ -947,6 +971,43 @@ async def _apply_ai_updates_and_operations(
                 "[MW-blog] scrubbed phantom outline claim from reply for project %s thread %s",
                 project_id, thread_id,
             )
+
+    # --- HR Pilot propose-time compliance pre-check. When a discipline_draft is
+    # freshly staged, run the deterministic gate NOW so the supervisor sees a
+    # statute-cited block/advisory before confirming (not only at execute time).
+    # A block flips the staged proposal to status="blocked" (which the envelope
+    # treats as un-executable) and escalates. Whole hook degrades to no-op on any
+    # error — the execute-time gate still stands.
+    if (thread_hr_pilot_mode and hr_action_applied_this_turn
+            and isinstance(current_state, dict)):
+        _staged = current_state.get("hr_action")
+        if isinstance(_staged, dict) and _staged.get("type") == "discipline_draft" \
+                and _staged.get("status") == "proposed":
+            try:
+                from app.core.feature_flags import get_company_features
+                from app.matcha.services.hr_pilot_actions import precheck_discipline_proposal
+                _feats = await get_company_features(company_id)
+                if _feats.get("discipline"):
+                    _pre = await precheck_discipline_proposal(company_id=company_id, staged_action=_staged)
+                    if _pre.get("outcome") == "blocked":
+                        _blocked = {**_staged, "status": "blocked",
+                                    "blocked_reason": _pre["message"],
+                                    "compliance": _pre.get("compliance")}
+                        _res = await doc_svc.apply_update(thread_id, {**current_state, "hr_action": _blocked})
+                        current_version = _res["version"]
+                        current_state = _res["current_state"]
+                        changed = True
+                        assistant_reply = _append_action_note(assistant_reply, _pre["message"])
+                        post_events.append({
+                            "kind": "hr_pilot_compliance_block",
+                            "user_query": user_message,
+                            "notice": _pre["message"],
+                            "blocks": (_pre.get("compliance") or {}).get("blocks") or [],
+                        })
+                    elif _pre.get("outcome") == "advisory":
+                        assistant_reply = _append_action_note(assistant_reply, _pre["message"])
+            except Exception:
+                logger.warning("hr_pilot propose-time precheck failed for thread %s", thread_id, exc_info=True)
 
     operation = str(ai_resp.operation or "none").strip().lower()
     if force_send_draft and operation in {"none", "create", "update", "track"}:
@@ -1241,6 +1302,74 @@ async def _apply_ai_updates_and_operations(
                         current_state = result["current_state"]
                         changed = True
                         action_note = "Policy draft generated. Review in the Preview panel, then edit or save."
+            elif operation == "execute_hr_action":
+                # HR Pilot "acting" path. The skill engine gates nothing itself,
+                # so the full safety envelope is re-asserted here (features, role,
+                # thread mode, confirm-first, hard-stop, then the deterministic
+                # discipline compliance gate inside the executor).
+                from app.core.feature_flags import get_company_features
+                from app.matcha.services.hr_pilot_actions import (
+                    evaluate_hr_action, execute_hr_action,
+                )
+
+                features = await get_company_features(company_id)
+                # Confirm-first: count only an hr_action that survived Phase A
+                # staging this turn (not raw model output — a stripped hand-off
+                # must not force a re-stage on the confirm turn).
+                verdict = evaluate_hr_action(
+                    staged_action=pre_turn_hr_action,
+                    features=features,
+                    role=current_user_role,
+                    thread_hr_pilot_mode=thread_hr_pilot_mode,
+                    this_turn_has_new_action=hr_action_applied_this_turn,
+                )
+                if not verdict.ok:
+                    # stage / clarify / refuse / hard_stop all surface as a note;
+                    # no record is written. (The message-level gate owns the
+                    # review-queue escalation; this defense-in-depth trip just
+                    # refuses.)
+                    action_note = verdict.message
+                else:
+                    exec_result = await execute_hr_action(
+                        company_id=company_id,
+                        actor_user_id=current_user_id,
+                        action=verdict.action,
+                    )
+                    if exec_result.get("status") == "created":
+                        executed_action = {
+                            **(pre_turn_hr_action or {}),
+                            "status": "executed",
+                            "record_id": exec_result.get("record_id"),
+                            "record_label": exec_result.get("record_label"),
+                        }
+                        result = await doc_svc.apply_update(
+                            thread_id,
+                            {**current_state, "hr_action": executed_action},
+                            diff_summary=f"HR Pilot filed {verdict.action.get('type')}",
+                        )
+                        current_version = result["version"]
+                        current_state = result["current_state"]
+                        changed = True
+                        # Schedule post-commit enrichment (IR notify/classify, ER
+                        # risk refresh) — same shape as onboarding, held against GC
+                        # via messaging's tracker (lazy import: messaging imports us).
+                        for _bg in (exec_result.get("bg_tasks") or []):
+                            try:
+                                _fn, _args, _kwargs = _bg
+                                from app.matcha.routes.matcha_work.messaging import _track_background_task
+                                _track_background_task(asyncio.create_task(_fn(*_args, **_kwargs)))
+                            except Exception:
+                                logger.warning("hr_pilot: failed to schedule bg task", exc_info=True)
+                    elif exec_result.get("status") in ("blocked",):
+                        # Execute-time statutory block — route to the same review
+                        # queue as the propose-time block for reviewer visibility.
+                        post_events.append({
+                            "kind": "hr_pilot_compliance_block",
+                            "user_query": user_message,
+                            "notice": exec_result.get("message") or "",
+                            "blocks": (exec_result.get("compliance") or {}).get("blocks") or [],
+                        })
+                    action_note = exec_result.get("message")
             else:
                 action_note = f"The action '{operation}' is not supported yet."
         except ValueError as e:
@@ -1259,4 +1388,4 @@ async def _apply_ai_updates_and_operations(
 
     assistant_reply = _scrub_phantom_surface_claims(assistant_reply, project_id)
 
-    return current_state, current_version, pdf_url, changed, assistant_reply
+    return current_state, current_version, pdf_url, changed, assistant_reply, post_events

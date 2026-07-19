@@ -13,6 +13,7 @@ Loose single-file routers sit at top level; related ones are collected into **gr
 | `companies.py` | `/companies` | Company CRUD + admin tooling |
 | `employees/` | `/employees` (+ `/employees/pto`, `/employees/leave`) | Employee CRUD, bulk upload, invitations, onboarding, offboarding, credentials, OIG, leave, incidents, pto/leave admin — **package** (split 2026-05-16; see `employees/CLAUDE.md`) |
 | `employee_portal.py` | `/v1/portal` | Employee-facing self-service portal (incl. `/me/schedule*` — view published shifts + file swap/drop/unavailability requests, gated `employee_schedule`) |
+| `portal_ask_hr.py` | `/v1/portal/ask-hr` | Employee "Ask HR" — grounded, citation-gated policy Q&A (SSE chat + sessions/messages CRUD). Reuses the HR Pilot corpus + the `hr_pilot_escalation` hard stop, which runs **in the route before any model call**. `require_employee_record` per endpoint; `require_feature("ask_hr")` at the mount |
 | `employee_schedule/` | `/employee-schedule` | Employee shift scheduling — shift CRUD + publish + weekly view (`shifts.py`), assignment (`assignments.py`), templates + recurrence generation (`templates.py`), admin request review (`requests.py`). **Package**; `require_feature("employee_schedule")` |
 | `onboarding/new_hire.py` | `/onboarding` | New-hire onboarding tasks + notification settings |
 | `onboarding/invitations.py` | `/invitations` | Token-based invite acceptance |

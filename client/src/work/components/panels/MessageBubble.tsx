@@ -3,6 +3,7 @@ import { FileText, Package, PlusCircle } from 'lucide-react'
 import Markdown from 'react-markdown'
 import type { MWMessage } from '../../types'
 import ComplianceReasoningPanel from './ComplianceReasoningPanel'
+import CitationSources, { numberCitations } from '../../../components/ui/CitationSources'
 import { safeUrl } from './markdownToHtml'
 
 function extractPenalties(reasoning: MWMessage['metadata']): { category: string; summary: string; agency: string }[] {
@@ -40,9 +41,16 @@ const MessageBubble = React.memo(function MessageBubble({ message: m, lightMode,
   isProjectThread?: boolean
   onAddToProject?: (messageId: string, content: string) => void
 }) {
+  // Grounded-answer citations (HR Pilot). The stored message keeps the
+  // verifiable corpus ids; the reader gets `[1]`-style markers matching the
+  // Sources list below.
+  const cited = useMemo(
+    () => numberCitations(m.content, m.metadata?.citations),
+    [m.content, m.metadata?.citations],
+  )
   const markdownContent = useMemo(() => (
-    <Markdown>{m.content}</Markdown>
-  ), [m.content])
+    <Markdown>{cited.text}</Markdown>
+  ), [cited.text])
   const penalties = useMemo(() => extractPenalties(m.metadata), [m.metadata])
 
   const lm = isProjectThread ? false : lightMode
@@ -257,6 +265,11 @@ const MessageBubble = React.memo(function MessageBubble({ message: m, lightMode,
                 </div>
               </div>
             )}
+            <CitationSources
+              citations={cited.ordered}
+              dropped={m.metadata?.dropped_citations}
+              lightMode={isProjectThread ? false : lm}
+            />
           </>
         ) : (
           m.content

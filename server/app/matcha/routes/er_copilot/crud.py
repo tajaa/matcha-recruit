@@ -17,7 +17,7 @@ from ...models.er_case import (
 )
 
 from ._shared import (
-    generate_case_number,
+    create_case_core,
     _queue_risk_assessment_refresh,
     log_audit,
     _verify_case_company,
@@ -45,35 +45,13 @@ async def create_case(
     if company_id is None:
         raise HTTPException(status_code=400, detail="No company found")
 
-    case_number = generate_case_number()
-
     async with get_connection() as conn:
-        row = await conn.fetchrow(
-            """
-            INSERT INTO er_cases (case_number, title, description, intake_context, created_by, company_id, category, involved_employees)
-            VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8::jsonb)
-            RETURNING id, case_number, title, description, intake_context, status, company_id, created_by, assigned_to, created_at, updated_at, closed_at, category, outcome, involved_employees
-            """,
-            case_number,
-            case.title,
-            case.description,
-            json.dumps(case.intake_context) if case.intake_context is not None else None,
-            str(current_user.id),
-            company_id,
-            case.category,
-            json.dumps([e.model_dump(mode="json") for e in case.involved_employees]) if case.involved_employees else "[]",
-        )
-
-        # Log audit
-        await log_audit(
+        row, _bg = await create_case_core(
             conn,
-            str(row["id"]),
-            str(current_user.id),
-            "case_created",
-            "case",
-            str(row["id"]),
-            {"title": case.title},
-            request.client.host if request.client else None,
+            company_id=company_id,
+            created_by=str(current_user.id),
+            case=case,
+            ip_address=request.client.host if request.client else None,
         )
 
         _queue_risk_assessment_refresh(background_tasks, row["company_id"])

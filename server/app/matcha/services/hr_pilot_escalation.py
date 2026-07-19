@@ -1,5 +1,22 @@
-"""HR Pilot escalation gate — decides when a supervisor's question must go to
-corporate HR instead of getting AI-drafted guidance.
+"""HR Pilot escalation gate — decides when a question must go to corporate HR
+instead of getting AI-drafted guidance.
+
+Serves TWO surfaces: the supervisor-facing HR Pilot thread mode, and the
+employee-facing Ask HR portal (`services/ask_hr.py`). The four categories are
+the same either way, but the *phrasing* is not, and the pattern sets are
+therefore split — see `_EMPLOYEE_EXTRA_PATTERNS` for why mixing them breaks the
+supervisor tool. `classify_message(text, surface=...)` picks the set; the
+default is the supervisor set, so existing callers are unaffected.
+
+The split exists because of a real gap: the original patterns were written in
+supervisor vocabulary — third-person and procedural ("a harassment complaint",
+"workers comp", "OSHA recordable") — and an employee describing the identical
+event in the first person uses none of those words. "He keeps making comments
+about my body" and "I slipped and hurt my wrist on shift" both sailed through as
+ordinary questions. When adding a category or a surface, test the phrasing the
+actual person would type, not the term of art for it — and test it against the
+OTHER surface too, because the same words mean different things there ("fell
+behind on targets" is not an injury).
 
 HR Pilot exists so an on-site supervisor has a first-line resource before
 paging corporate HR. But some topics are not "first-line" at all — a
@@ -104,10 +121,82 @@ _HARD_STOP_CATEGORIES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ),
 )
 
-_COMPILED = tuple(
-    (category, notice, tuple(re.compile(p, re.IGNORECASE) for p in patterns))
-    for category, notice, patterns in _HARD_STOP_CATEGORIES
-)
+# Additional patterns applied ONLY to the employee surface (Ask HR).
+#
+# These exist because an employee describing an event in the first person uses
+# none of the vocabulary above — "he keeps making comments about my body" and
+# "I slipped and hurt my wrist on shift" matched nothing at all.
+#
+# They are deliberately NOT in the shared tuples: several of them collide head-on
+# with ordinary supervisor phrasing, and a supervisor tool that hard-stops its
+# own core questions is broken. Specifically, on the supervisor surface —
+#   "employee fell behind on targets"   → would trip workplace_safety
+#   "the team is burned out"            → would trip workplace_safety
+#   "inappropriate clothing / dress code" → would trip harassment
+#   "employee threatened to quit"       → would trip harassment
+# — all of which are exactly what HR Pilot is for. So the asymmetry is
+# intentional: over-trigger for the employee (they get a human, which is always
+# safe), stay precise for the supervisor.
+#
+# Even here, the two loosest verbs are anchored to an object/preposition so they
+# describe a body and not a metric: "slipped ON the wet floor" and "burned MY
+# hand" match, "fell behind" and "burned out" do not.
+_EMPLOYEE_EXTRA_PATTERNS: dict[str, tuple[str, ...]] = {
+    "harassment_discrimination": (
+        r"\btouch(?:ed|ing|es) me\b",
+        r"\bcomments? about my\b",
+        r"\bunwanted\b",
+        r"\binappropriate(?:ly)?\b",
+        r"\bmade me (?:feel )?uncomfortable\b",
+        r"\bcreep(?:y|ed)\b",
+        r"\bbull(?:y|ied|ying)\b",
+        r"\bthreaten(?:ed|ing)?\b",
+    ),
+    "workplace_safety": (
+        r"\b(?:slipped|tripped|fell)\s+(?:on|off|down|over|at|into|and)\b",
+        r"\bhurt (?:my|myself)\b",
+        r"\bgot hurt\b",
+        r"\bburn(?:ed|t)\s+(?:my|his|her|their)\b",
+        r"\bcut my\b",
+        r"\bunsafe\b",
+        r"\bnear[- ]miss\b",
+    ),
+    "leave_and_medical": (
+        r"\bsurgery\b",
+        r"\bdoctor'?s? note\b",
+        r"\bchemo(?:therapy)?\b",
+        r"\bdiagnos(?:ed|is)\b",
+    ),
+}
+
+SUPERVISOR = "supervisor"
+EMPLOYEE = "employee"
+
+
+def _compile(surface: str):
+    return tuple(
+        (
+            category,
+            notice,
+            tuple(
+                re.compile(p, re.IGNORECASE)
+                for p in (
+                    patterns + (_EMPLOYEE_EXTRA_PATTERNS.get(category, ())
+                                if surface == EMPLOYEE else ())
+                )
+            ),
+        )
+        for category, notice, patterns in _HARD_STOP_CATEGORIES
+    )
+
+
+_COMPILED_BY_SURFACE = {
+    SUPERVISOR: _compile(SUPERVISOR),
+    EMPLOYEE: _compile(EMPLOYEE),
+}
+
+# Back-compat alias — the supervisor set is what `_COMPILED` always meant.
+_COMPILED = _COMPILED_BY_SURFACE[SUPERVISOR]
 
 
 @dataclass(frozen=True)
@@ -118,18 +207,25 @@ class EscalationVerdict:
     matched_terms: tuple[str, ...] = field(default_factory=tuple)
 
 
-def classify_message(text: str) -> EscalationVerdict:
-    """Classify a supervisor's HR Pilot message. Pure, DB-free, deterministic.
+def classify_message(text: str, *, surface: str = SUPERVISOR) -> EscalationVerdict:
+    """Classify a message against the hard-stop categories. Pure, DB-free,
+    deterministic.
 
     Returns the first (most severe) category with a match. A message can
     trip multiple categories; only the highest-severity one is reported —
     the notice always says "call corporate HR", so which category matched
-    first doesn't change the action the supervisor takes.
+    first doesn't change the action taken.
+
+    `surface` selects the pattern set: `SUPERVISOR` (default, HR Pilot thread
+    mode) or `EMPLOYEE` (Ask HR portal), which adds the first-person patterns in
+    `_EMPLOYEE_EXTRA_PATTERNS`. The default keeps every existing caller on the
+    supervisor set unchanged.
     """
     if not text or not text.strip():
         return EscalationVerdict(hard_stop=False)
 
-    for category, notice, patterns in _COMPILED:
+    compiled = _COMPILED_BY_SURFACE.get(surface, _COMPILED_BY_SURFACE[SUPERVISOR])
+    for category, notice, patterns in compiled:
         matched = tuple(p.pattern for p in patterns if p.search(text))
         if matched:
             return EscalationVerdict(

@@ -277,6 +277,7 @@ async def create_thread(
             pdf_url,
             changed,
             assistant_reply_text,
+            _post_events,  # HR Pilot mode can't be on for a just-created thread — always empty
         ) = await _apply_ai_updates_and_operations(
             thread_id=thread_id,
             company_id=company_id,

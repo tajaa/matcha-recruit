@@ -1952,6 +1952,8 @@ class EscalatedQueryItem(BaseModel):
     resolved_by: Optional[str] = None
     resolved_at: Optional[datetime] = None
     thread_id: str
+    linked_record_type: Optional[str] = None
+    linked_record_id: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -2004,7 +2006,8 @@ async def list_escalated_queries(
         rows = await conn.fetch(
             f"""SELECT id, status, severity, title, user_query, ai_reply,
                        ai_mode, ai_confidence, missing_fields, resolution_note,
-                       resolved_by::text, resolved_at, thread_id::text, created_at, updated_at
+                       resolved_by::text, resolved_at, thread_id::text,
+                       linked_record_type, linked_record_id::text, created_at, updated_at
                 FROM mw_escalated_queries {where}
                 ORDER BY
                   CASE severity WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END,
@@ -2028,6 +2031,8 @@ async def list_escalated_queries(
             resolved_by=r["resolved_by"],
             resolved_at=r["resolved_at"],
             thread_id=r["thread_id"],
+            linked_record_type=r["linked_record_type"],
+            linked_record_id=r["linked_record_id"],
             created_at=r["created_at"],
             updated_at=r["updated_at"],
         )
@@ -2079,6 +2084,8 @@ async def get_escalated_query(
         resolved_by=str(row["resolved_by"]) if row["resolved_by"] else None,
         resolved_at=row["resolved_at"],
         thread_id=str(row["thread_id"]),
+        linked_record_type=row["linked_record_type"],
+        linked_record_id=str(row["linked_record_id"]) if row["linked_record_id"] else None,
         created_at=row["created_at"],
         updated_at=row["updated_at"],
         thread_title=row["thread_title"],
@@ -2096,18 +2103,48 @@ async def resolve_escalated_query(
     company_id = await get_client_company_id(current_user)
 
     async with get_connection() as conn:
-        result = await conn.execute(
+        row = await conn.fetchrow(
             """UPDATE mw_escalated_queries
                SET status = 'resolved',
                    resolution_note = $3,
                    resolved_by = $4,
                    resolved_at = NOW(),
                    updated_at = NOW()
-               WHERE id = $1 AND company_id = $2 AND status != 'resolved'""",
+               WHERE id = $1 AND company_id = $2 AND status != 'resolved'
+               RETURNING thread_id""",
             query_id, company_id, body.resolution_note, current_user.id,
         )
-        if result == "UPDATE 0":
+        if row is None:
             raise HTTPException(status_code=404, detail="Escalated query not found or already resolved")
+
+    # Close the loop — post HR's resolution back into the originating thread so
+    # the supervisor actually hears the outcome. Best-effort: a write-back
+    # failure must never fail the resolve itself.
+    thread_id = row["thread_id"]
+    note = (body.resolution_note or "").strip()
+    if thread_id and note:
+        try:
+            from app.matcha.services import matcha_work_document as _doc_svc
+            from app.matcha.routes.matcha_work._shared import _row_to_message
+            posted = await _doc_svc.add_message(
+                thread_id,
+                "assistant",
+                f"Update from HR review: {note}",
+                metadata={"escalation_resolution": {
+                    "escalation_id": str(query_id),
+                    "resolved_by": str(current_user.id),
+                }},
+            )
+            try:
+                from app.matcha.routes.work.thread_ws import thread_manager
+                await thread_manager.broadcast_new_message(
+                    str(thread_id),
+                    [_row_to_message(posted).model_dump(mode="json")],
+                )
+            except Exception:
+                logger.warning("escalation resolution WS broadcast failed for thread %s", thread_id)
+        except Exception:
+            logger.warning("escalation resolution write-back failed for query %s", query_id, exc_info=True)
 
     return {"status": "resolved"}
 

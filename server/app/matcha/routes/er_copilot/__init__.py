@@ -18,10 +18,12 @@ from .search import router as _search_router
 from .reports import router as _reports_router
 from .case_views import router as _case_views_router
 
-# Re-exported for tests that import these helpers directly from the package.
+# Re-exported for tests that import these helpers directly from the package,
+# and create_case_core for HR Pilot's warm hand-off executor.
 from ._shared import (
     _build_document_excerpts,
     _queue_risk_assessment_refresh,
+    create_case_core,
     ER_DOC_PER_DOC_CHAR_CAP,
     ER_DOC_TOTAL_CHAR_CAP,
 )
@@ -43,6 +45,7 @@ __all__ = [
     "public_router",
     "_build_document_excerpts",
     "_queue_risk_assessment_refresh",
+    "create_case_core",
     "ER_DOC_PER_DOC_CHAR_CAP",
     "ER_DOC_TOTAL_CHAR_CAP",
 ]

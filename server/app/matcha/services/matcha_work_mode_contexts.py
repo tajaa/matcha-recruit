@@ -518,16 +518,14 @@ async def _build_training_context_uncached(company_id: UUID) -> str:
 # cleared that gate.
 # ---------------------------------------------------------------------------
 
-_MAX_HR_PILOT_SECTIONS = 60
-_MAX_HR_PILOT_POLICIES = 60
 _HR_PILOT_CHAR_CAP = 2000
+# Widened knowledge floor (shared platform knowledge, not the tenant's own docs).
+_MAX_HR_PILOT_PLAYBOOK_SECTIONS = 6
+_MAX_HR_PILOT_COMPLIANCE_CHARS = 8000
 
-_DISCIPLINE_LADDER_SUMMARY = (
-    "Standard progressive-discipline steps: verbal warning -> written warning "
-    "-> final warning -> termination review. A final warning already on file "
-    "means the next step is a termination review — that is a hard-stop topic "
-    "(see above): do not draft it here, route the supervisor to corporate HR."
-)
+# The handbook/policy/requirement fetch caps and the progressive-discipline
+# ladder now live in services/hr_pilot_corpus.py — the ladder as citable
+# `ladder:` records rather than one uncitable prose summary.
 
 
 def _truncate(text: str | None) -> str:
@@ -537,102 +535,192 @@ def _truncate(text: str | None) -> str:
     return text[:_HR_PILOT_CHAR_CAP] + " …[truncated]"
 
 
+def _render_industry_playbook(hb, industry: str | None) -> str:
+    """Render the shared GUIDED_INDUSTRY_PLAYBOOK baseline for the company's
+    industry. Always resolves (falls back to 'general'), so this is generic
+    starting material the tenant's own handbook/policy overrides — never a
+    legal source of truth. Pure; no DB."""
+    try:
+        key = hb._normalize_industry(None, industry)
+        play = hb.GUIDED_INDUSTRY_PLAYBOOK.get(key) or {}
+    except Exception:  # noqa: BLE001
+        return ""
+    if not play:
+        return ""
+    parts: list[str] = []
+    if play.get("summary"):
+        parts.append(str(play["summary"]))
+    for sec in (play.get("sections") or [])[:_MAX_HR_PILOT_PLAYBOOK_SECTIONS]:
+        if isinstance(sec, dict) and sec.get("title"):
+            parts.append(f"[{sec['title']}]\n{_truncate(sec.get('content'))}")
+    return "\n\n".join(parts)
+
+
+_CITATION_INSTRUCTION = (
+    "\nCITING SOURCES — every record above is prefixed with a bracketed corpus ID "
+    "(e.g. [policy:8f3c…], [floor:state-california-meal_rest_breaks]). When you state "
+    "a rule, a threshold, a procedure, or any other claim the supervisor could act on, "
+    "append the ID of the record it comes from. Cite ONLY IDs that appear above, "
+    "copied exactly — an ID that is not in the list above is removed before the "
+    "supervisor sees your answer, which leaves your claim visibly unsupported. If no "
+    "record supports what you want to say, say plainly that the company's material "
+    "does not cover it and tell the supervisor to check with corporate HR. Do not "
+    "invent a policy, and do not attach a nearby ID to a claim it does not actually "
+    "support.\n"
+)
+
+
 async def build_hr_pilot_context(company_id: UUID) -> str:
-    return await cached_context(
-        f"mw:hr_pilot_ctx:{company_id}",
-        lambda: _build_hr_pilot_context_uncached(company_id),
+    """The prompt-side context string. Signature unchanged — the registry
+    dispatch loop in messaging.py calls this and expects a plain string."""
+    bundle = await _hr_pilot_bundle(company_id)
+    return bundle.get("context_text") or ""
+
+
+async def get_hr_pilot_corpus(company_id: UUID) -> dict:
+    """The citation index matching the context string above.
+
+    Both come from ONE build so the ids in the prompt and the ids the audit gate
+    resolves are the same ids. Building them separately would let a cache
+    expiry between the two hand the model a corpus the gate then rejects
+    wholesale."""
+    bundle = await _hr_pilot_bundle(company_id)
+    return bundle.get("corpus") or {"sources": {}, "index": {}, "notes": []}
+
+
+async def _hr_pilot_bundle(company_id: UUID) -> dict:
+    """Cached `{context_text, corpus}` pair.
+
+    Rides the same Redis/local cache as the string builders, but stores a dict
+    (like build_compliance_context does) rather than going through
+    `cached_context`, which is string-only. Note the cache key is versioned
+    (`ctx2`) — a live cache holding the old plain-string value under the old key
+    is simply left to expire rather than being deserialized into the wrong
+    shape."""
+    from .matcha_work_node import _ctx_cache_get, _ctx_cache_set, _get_build_lock
+
+    cache_key = f"mw:hr_pilot_ctx2:{company_id}"
+    cached = await _ctx_cache_get(cache_key)
+    if isinstance(cached, dict) and "context_text" in cached:
+        return cached
+    async with _get_build_lock(cache_key):
+        cached = await _ctx_cache_get(cache_key)
+        if isinstance(cached, dict) and "context_text" in cached:
+            return cached
+        bundle = await _build_hr_pilot_bundle_uncached(company_id)
+        await _ctx_cache_set(cache_key, bundle)
+        return bundle
+
+
+async def _build_hr_pilot_bundle_uncached(company_id: UUID) -> dict:
+    from app.core.services import handbook_service as hb
+    from .hr_pilot_corpus import (
+        build_hr_pilot_corpus,
+        gather_hr_pilot_grounding,
+        render_corpus_block,
     )
 
-
-async def _build_hr_pilot_context_uncached(company_id: UUID) -> str:
-    from app.core.services import handbook_service as hb
-
-    sections: list = []
-    policies: list = []
-    requirements: dict = {}
-
     async with get_connection() as conn:
-        try:
-            sections = await conn.fetch(
-                """
-                SELECT hs.title, hs.section_type, hs.content, h.title AS handbook_title
-                FROM handbook_sections hs
-                JOIN handbook_versions hv ON hv.id = hs.handbook_version_id
-                JOIN handbooks h ON h.id = hv.handbook_id
-                WHERE h.company_id = $1 AND h.status = 'active'
-                  AND hv.version_number = h.active_version
-                ORDER BY hs.section_order
-                LIMIT $2
-                """,
-                company_id, _MAX_HR_PILOT_SECTIONS,
-            )
-        except Exception:  # noqa: BLE001
-            logger.warning("hr_pilot: handbook-section fetch failed for %s", company_id)
+        grounding = await gather_hr_pilot_grounding(conn, company_id)
 
-        try:
-            policies = await conn.fetch(
-                """
-                SELECT title, category, content, description
-                FROM policies
-                WHERE company_id = $1 AND status = 'active'
-                ORDER BY updated_at DESC
-                LIMIT $2
-                """,
-                company_id, _MAX_HR_PILOT_POLICIES,
-            )
-        except Exception:  # noqa: BLE001
-            logger.warning("hr_pilot: policy fetch failed for %s", company_id)
+    # --- Widened knowledge floor: shared platform knowledge so a thin-handbook
+    # tenant still gets grounded, industry-appropriate answers. Both are read
+    # AFTER releasing the connection above: the playbook is a pure in-process
+    # constant, and build_compliance_context manages its own connection + cache
+    # (mw:compliance_ctx:{company_id}), so it is not re-run per turn.
+    playbook_block = _render_industry_playbook(hb, grounding.get("industry"))
 
-        try:
-            scopes = await hb.derive_handbook_scopes_from_employees(conn, str(company_id))
-            if scopes:
-                requirements = await hb._fetch_state_requirements(conn, scopes)
-        except Exception:  # noqa: BLE001
-            logger.warning("hr_pilot: jurisdiction requirement fetch failed for %s", company_id)
+    compliance_block = ""
+    reasoning_chains: list = []
+    try:
+        from app.matcha.services.matcha_work_node import build_compliance_context
+        comp = await build_compliance_context(company_id)
+        if comp:
+            reasoning_chains = comp.reasoning_chains or []
+            if comp.context_text and comp.context_text.strip():
+                compliance_block = comp.context_text.strip()
+    except Exception:  # noqa: BLE001
+        logger.warning("hr_pilot: compliance backdrop fetch failed for %s", company_id)
 
-    if not sections and not policies and not requirements:
-        return ""
+    corpus = build_hr_pilot_corpus(grounding, reasoning_chains)
+
+    if not corpus["index"] and not compliance_block:
+        return {"context_text": "", "corpus": corpus}
 
     lines = [
         "=== HR PILOT MODE: COMPANY HANDBOOK, POLICIES & SUPERVISOR REFERENCE "
-        "(source material — ground every answer in this) ==="
+        "(source material — ground every answer in this, and cite it) ==="
     ]
 
-    if sections:
-        lines.append(f"\n--- ACTIVE HANDBOOK SECTIONS ({len(sections)}) ---")
-        for s in sections:
-            lines.append(f"\n[{s['handbook_title']} — {s['title']}]\n{_truncate(s['content'])}")
+    # The citable record block. Every record carries its corpus ID, so the
+    # model has something exact to cite and the audit gate has something exact
+    # to resolve against.
+    #
+    # The tenant's OWN documents are rendered at full length (capped by
+    # _truncate at 2000 chars, as they were before the corpus rework). The
+    # corpus records themselves keep handbook_pilot's 280-char index summaries —
+    # right for a citation footer, far too short to answer from, and policy
+    # records don't carry the policy body at all. Everything else (law, floor,
+    # playbook, ladder) is already a full summary in the record.
+    _full_text = {
+        **{
+            f"handbook:{s.get('id')}": _truncate(s.get("content"))
+            for s in grounding.get("sections") or []
+        },
+        **{
+            f"policy:{p.get('id')}": _truncate(p.get("content") or p.get("description"))
+            for p in grounding.get("policies") or []
+        },
+    }
+    corpus_block = render_corpus_block(corpus, _full_text)
+    if corpus_block:
+        lines.append(corpus_block)
 
-    if policies:
-        lines.append(f"\n--- ACTIVE POLICIES ({len(policies)}) ---")
-        for p in policies:
-            label = f"{p['title']} ({p['category']})" if p["category"] else p["title"]
-            body = p["content"] or p["description"] or ""
-            lines.append(f"\n[{label}]\n{_truncate(body)}")
+    # Precedence-resolved compliance prose. The governing requirements it
+    # resolves are already citable as `floor:` records above; this block is the
+    # surrounding reasoning (trigger explanations, precedence narrative) that
+    # does not decompose into per-record citations. Kept as backdrop only.
+    if compliance_block:
+        lines.append(
+            "\n--- COMPLIANCE REASONING (background for the floor: records above; "
+            "company policy still leads) ---"
+        )
+        sliced = compliance_block[:_MAX_HR_PILOT_COMPLIANCE_CHARS]
+        if len(compliance_block) > _MAX_HR_PILOT_COMPLIANCE_CHARS:
+            sliced += "\n…[compliance backdrop truncated]"
+        lines.append(sliced)
 
-    if requirements:
-        # Brief per-state backdrop only, not the full requirement text — HR
-        # Pilot answers from written policy first; this keeps the model from
-        # contradicting a state minimum the handbook is silent on.
-        lines.append("\n--- APPLICABLE STATE REQUIREMENTS (backdrop — cite the handbook/policy language above first) ---")
-        for state in sorted(requirements.keys()):
-            reqs = requirements[state] or []
-            if not reqs:
-                continue
-            lines.append(f"\n[{state}]")
-            for r in reqs[:_MAX_LIST_ROWS]:
-                title = r.get("title") or r.get("category") or "requirement"
-                value = r.get("current_value")
-                value_bit = f": {value}" if value else ""
-                lines.append(f"  - {title}{value_bit}")
-            if len(reqs) > _MAX_LIST_ROWS:
-                lines.append(f"  - ...and {len(reqs) - _MAX_LIST_ROWS} more {state} requirements not listed individually.")
+    if playbook_block:
+        # Generic industry starting material — explicitly subordinate to the
+        # company's own written handbook/policy above. The playbook: records in
+        # the corpus block are the citable form; this is the fuller text.
+        lines.append(
+            "\n--- INDUSTRY HR BASELINE (generic starting point — the company's "
+            "own handbook/policy above overrides this) ---"
+        )
+        lines.append(playbook_block)
 
-    lines.append(f"\n--- DISCIPLINE LADDER (company policy) ---\n{_DISCIPLINE_LADDER_SUMMARY}")
+    for note in corpus.get("notes") or []:
+        lines.append(f"\n[grounding gap] {note}")
 
     lines.append(
-        "\nAnswer supervisor questions using the language and procedures above. "
-        "If the handbook/policies don't cover the topic, say so plainly instead "
-        "of inventing a policy — tell the supervisor to check with corporate HR."
+        "\nAnswer supervisor questions using the language and procedures above, in "
+        "this order of authority: (1) the company's own written handbook/policy; "
+        "(2) the compliance/legal floor and state requirements as the minimum the "
+        "law requires; (3) the industry baseline only where the handbook is silent. "
+        "Never contradict the company's written policy. If nothing above covers the "
+        "topic, say so plainly instead of inventing a policy — tell the supervisor "
+        "to check with corporate HR."
     )
-    return "\n".join(lines)
+    lines.append(
+        "\nOPERATIONAL RECORDS vs POLICY — the shift, training and incident records "
+        "above are FACTS about what is currently scheduled, completed or logged. "
+        "Cite them for who, when, and status. They are NOT policy and never "
+        "establish a rule: that someone is scheduled does not make it permitted, "
+        "and that a training is unrecorded does not by itself make the person "
+        "unqualified — it means there is no record. When a fact and a policy "
+        "interact ('can I put an untrained person on that shift?'), answer from the "
+        "policy or legal floor and cite the fact only as the situation it applies to."
+    )
+    lines.append(_CITATION_INSTRUCTION)
+    return {"context_text": "\n".join(lines), "corpus": corpus}

@@ -155,8 +155,12 @@ BLOG_FIELDS = [
     "blog_sections_replace",
 ]
 
+# HR Pilot's single staged-action key. The proposal lives under one nested
+# object so it round-trips through thread state as one whitelisted field.
+HR_PILOT_FIELDS = ["hr_action"]
+
 SUPPORTED_AI_MODES = {"skill", "general", "clarify", "refuse"}
-SUPPORTED_AI_SKILLS = {"chat", "offer_letter", "review", "workbook", "onboarding", "presentation", "handbook", "policy", "resume_batch", "inventory", "project", "blog", "none"}
+SUPPORTED_AI_SKILLS = {"chat", "offer_letter", "review", "workbook", "onboarding", "presentation", "handbook", "policy", "resume_batch", "inventory", "project", "blog", "hr_pilot", "none"}
 SUPPORTED_AI_OPERATIONS = {
     "create",
     "update",
@@ -169,6 +173,7 @@ SUPPORTED_AI_OPERATIONS = {
     "generate_presentation",
     "generate_handbook",
     "generate_policy",
+    "execute_hr_action",
     "none",
 }
 
@@ -502,8 +507,8 @@ Output constraints:
 - JSON format:
 {{
   "mode": "skill|general|clarify|refuse",
-  "skill": "offer_letter|review|workbook|onboarding|presentation|handbook|policy|project|blog|none",
-  "operation": "create|update|save_draft|send_draft|finalize|send_requests|track|create_employees|generate_presentation|generate_handbook|generate_policy|none",
+  "skill": "offer_letter|review|workbook|onboarding|presentation|handbook|policy|project|blog|hr_pilot|none",
+  "operation": "create|update|save_draft|send_draft|finalize|send_requests|track|create_employees|generate_presentation|generate_handbook|generate_policy|execute_hr_action|none",
   "confidence": 0.0,
   "updates": {{}},
   "missing_fields": [],
@@ -665,6 +670,8 @@ def _infer_skill_from_state(current_state: dict) -> str:
     """Infer the active skill from current_state contents."""
     if not current_state:
         return "chat"
+    if "hr_action" in current_state:
+        return "hr_pilot"
     if "language_tutor" in current_state:
         return "language_tutor"
     if any(k in current_state for k in ("candidate_name", "position_title", "salary", "salary_range_min")):
@@ -841,6 +848,7 @@ class MatchaWorkAIProvider:
         blog_mode_state: Optional[str] = None,
         thread_id: Optional[str] = None,
         dynamic_context: str = "",
+        hr_pilot_mode: bool = False,
     ) -> AIResponse:
         raise NotImplementedError
 
@@ -924,6 +932,7 @@ class GeminiProvider(MatchaWorkAIProvider):
         blog_mode_state: Optional[str] = None,
         thread_id: Optional[str] = None,
         dynamic_context: str = "",
+        hr_pilot_mode: bool = False,
     ) -> AIResponse:
         latest_user_msg = next(
             (m["content"] for m in reversed(messages) if m.get("role") == "user"),
@@ -1090,7 +1099,7 @@ class GeminiProvider(MatchaWorkAIProvider):
         static_prompt, dynamic_prompt, contents, valid_fields, inferred_skill = self._build_prompt_and_contents(
             messages, current_state, company_context=company_context, slide_index=slide_index,
             context_summary=context_summary, blog_mode_state=blog_mode_state,
-            dynamic_context=dynamic_context,
+            dynamic_context=dynamic_context, hr_pilot_mode=hr_pilot_mode,
         )
         model = await _get_model(self.settings, model_override, company_id=company_id, user_id=user_id)
 
@@ -1383,6 +1392,7 @@ class GeminiProvider(MatchaWorkAIProvider):
         context_summary: Optional[str] = None,
         blog_mode_state: Optional[str] = None,
         dynamic_context: str = "",
+        hr_pilot_mode: bool = False,
     ) -> tuple[str, str, list, list[str], str]:
         """Returns (static_prompt, dynamic_prompt, contents, valid_fields, skill).
 
@@ -1453,8 +1463,15 @@ class GeminiProvider(MatchaWorkAIProvider):
             valid_fields = PROJECT_FIELDS
         elif current_skill == "blog":
             valid_fields = BLOG_FIELDS
+        elif current_skill == "hr_pilot":
+            valid_fields = HR_PILOT_FIELDS
         else:
             valid_fields = OFFER_LETTER_FIELDS + REVIEW_FIELDS + WORKBOOK_FIELDS + ONBOARDING_FIELDS + PRESENTATION_FIELDS + HANDBOOK_FIELDS + POLICY_FIELDS + PROJECT_FIELDS + BLOG_FIELDS
+            # HR Pilot's action vocabulary is offered only in HR Pilot threads —
+            # otherwise a normal chat could stage an `hr_action` the executor
+            # would then refuse anyway.
+            if hr_pilot_mode:
+                valid_fields = valid_fields + HR_PILOT_FIELDS
 
         # Static part — instructions + company context (cached at Gemini API level)
         static_prompt = MATCHA_WORK_STATIC_PROMPT_TEMPLATE.format(
@@ -1473,6 +1490,48 @@ class GeminiProvider(MatchaWorkAIProvider):
         # of the static prompt or the cache key changes every message.
         if dynamic_context:
             dynamic_prompt += "\n\n" + dynamic_context
+
+        # HR Pilot action vocabulary — injected only for HR Pilot threads, so the
+        # `hr_pilot` skill is invisible everywhere else (execution is gated again
+        # server-side regardless).
+        if hr_pilot_mode:
+            dynamic_prompt += """
+
+HR PILOT ACTIONS:
+Besides answering questions, you may PROPOSE two documented actions, and you may
+CONFIRM any action already staged in current_state. All actions are strictly
+two-step and confirm-first — never propose and execute in the same message.
+
+PROPOSE (mode="skill", skill="hr_pilot", operation="none", with the hr_action in updates):
+- Discipline write-up — when a supervisor asks to write someone up / document an
+  attendance, performance, or policy issue:
+  updates={"hr_action": {"type":"discipline_draft", "employee_name": str,
+  "infraction_type": "attendance|performance|policy_violation",
+  "severity": "minor|moderate|severe", "occurrence_dates": ["YYYY-MM-DD", ...],
+  "description": str, "expected_improvement": str, "status": "proposed"}}
+- Time-off request on an employee's behalf — VACATION or PERSONAL only:
+  updates={"hr_action": {"type":"pto_request", "employee_name": str,
+  "request_type": "vacation|personal", "start_date": "YYYY-MM-DD",
+  "end_date": "YYYY-MM-DD", "hours": number, "reason": str, "status": "proposed"}}
+In "reply", summarize what you drafted and ask the supervisor to confirm.
+
+CONFIRM (mode="skill", skill="hr_pilot", operation="execute_hr_action", updates={}):
+- When current_state.hr_action has status "proposed" (ANY type — including a
+  safety/incident or HR-case report the SYSTEM staged for the supervisor after a
+  hard-stop) and the user confirms (e.g. "yes", "confirm", "file it"), emit the
+  execute operation with an EMPTY updates object. NEVER restate hr_action.
+
+Rules:
+- NEVER claim anything was filed unless you used operation="execute_hr_action".
+- If you're missing the employee, dates, hours, or what happened, ask
+  (mode="clarify") — never invent a name, date, or number for a real record.
+- Do NOT PROPOSE a discipline write-up or PTO request for anything involving
+  safety, injury, harassment, discrimination, sick/medical leave, or termination
+  — those go to corporate HR (and are refused here). This restriction is about
+  PROPOSING; it does NOT stop you from helping the supervisor CONFIRM a
+  system-staged report about such a topic.
+- Never give guidance about the CONTENT of a staged safety/harassment report —
+  only help the supervisor confirm it or cancel it."""
 
         # Recruiting project context — add specific instructions
         # (The route-level _inject_recruiting_project_context provides the primary

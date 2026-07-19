@@ -52,6 +52,7 @@ celery_app = Celery(
         "app.workers.tasks.cba_clause_extraction",
         "app.workers.tasks.grievance_deadline_alerts",
         "app.workers.tasks.ir_deadline_alerts",
+        "app.workers.tasks.hr_proactive_push",
         "app.workers.tasks.scope_registry",
         "app.workers.tasks.source_snapshots",
     ],
@@ -258,6 +259,14 @@ def on_worker_ready(**kwargs):
         run_grievance_deadline_alerts.delay()
     else:
         print("[Worker] Grievance deadline alerts scheduler is disabled, skipping.")
+
+    from app.workers.tasks.hr_proactive_push import run_hr_proactive_push
+
+    if _is_scheduler_enabled("hr_proactive_push"):
+        run_hr_proactive_push.delay()
+        print("[Worker Ready] Dispatched hr_proactive_push")
+    else:
+        print("[Worker Ready] hr_proactive_push disabled, skipping")
 
     from app.workers.tasks.ir_deadline_alerts import run_ir_deadline_alerts
 

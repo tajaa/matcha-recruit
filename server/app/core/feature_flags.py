@@ -195,6 +195,22 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     # router/page — gates the hr_pilot thread-mode toggle only (column
     # mw_threads.hr_pilot_mode). Default off; admin-toggle; NOT bundled.
     "hr_pilot": False,
+    # Employee "Ask HR" — the employee-portal counterpart to HR Pilot. Employees
+    # (role='employee') ask plain policy questions and get answers grounded in
+    # the SAME citation corpus HR Pilot uses (services/hr_pilot_corpus.py:
+    # handbook sections, active policies, the precedence-resolved compliance
+    # floor, the industry baseline), with the shared
+    # legal_defense.validate_citations gate dropping any invented source. The
+    # same deterministic hard-stop gate (services/hr_pilot_escalation.
+    # classify_message) runs BEFORE any AI call: harassment/discrimination,
+    # workplace-safety, leave/medical and termination/legal questions are never
+    # AI-answered — they are refused and auto-filed into the same
+    # mw_escalated_queries review queue (ai_mode='ask_hr_hard_stop') with a
+    # content-free admin notification. Gates /v1/portal/ask-hr/* + the portal
+    # "Ask HR" tab. Separate from `hr_pilot` on purpose: that one is a
+    # supervisor tool, this is a whole-company benefit, and they are sold
+    # independently. Default off; admin-toggle; NOT bundled.
+    "ask_hr": False,
     # Analysis Pilot (full Matcha / Pro). A company-facing, GENERAL-PURPOSE
     # bring-your-own-data analysis engine in a chat UI: the business uploads any
     # dataset (CSV / XLSX / financial-document PDF — 10-Ks, P&Ls, balance sheets,
