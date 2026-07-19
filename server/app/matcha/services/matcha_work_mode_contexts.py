@@ -521,6 +521,9 @@ async def _build_training_context_uncached(company_id: UUID) -> str:
 _MAX_HR_PILOT_SECTIONS = 60
 _MAX_HR_PILOT_POLICIES = 60
 _HR_PILOT_CHAR_CAP = 2000
+# Widened knowledge floor (shared platform knowledge, not the tenant's own docs).
+_MAX_HR_PILOT_PLAYBOOK_SECTIONS = 6
+_MAX_HR_PILOT_COMPLIANCE_CHARS = 8000
 
 _DISCIPLINE_LADDER_SUMMARY = (
     "Standard progressive-discipline steps: verbal warning -> written warning "
@@ -537,6 +540,27 @@ def _truncate(text: str | None) -> str:
     return text[:_HR_PILOT_CHAR_CAP] + " …[truncated]"
 
 
+def _render_industry_playbook(hb, industry: str | None) -> str:
+    """Render the shared GUIDED_INDUSTRY_PLAYBOOK baseline for the company's
+    industry. Always resolves (falls back to 'general'), so this is generic
+    starting material the tenant's own handbook/policy overrides — never a
+    legal source of truth. Pure; no DB."""
+    try:
+        key = hb._normalize_industry(None, industry)
+        play = hb.GUIDED_INDUSTRY_PLAYBOOK.get(key) or {}
+    except Exception:  # noqa: BLE001
+        return ""
+    if not play:
+        return ""
+    parts: list[str] = []
+    if play.get("summary"):
+        parts.append(str(play["summary"]))
+    for sec in (play.get("sections") or [])[:_MAX_HR_PILOT_PLAYBOOK_SECTIONS]:
+        if isinstance(sec, dict) and sec.get("title"):
+            parts.append(f"[{sec['title']}]\n{_truncate(sec.get('content'))}")
+    return "\n\n".join(parts)
+
+
 async def build_hr_pilot_context(company_id: UUID) -> str:
     return await cached_context(
         f"mw:hr_pilot_ctx:{company_id}",
@@ -550,6 +574,7 @@ async def _build_hr_pilot_context_uncached(company_id: UUID) -> str:
     sections: list = []
     policies: list = []
     requirements: dict = {}
+    industry: str | None = None
 
     async with get_connection() as conn:
         try:
@@ -590,7 +615,30 @@ async def _build_hr_pilot_context_uncached(company_id: UUID) -> str:
         except Exception:  # noqa: BLE001
             logger.warning("hr_pilot: jurisdiction requirement fetch failed for %s", company_id)
 
-    if not sections and not policies and not requirements:
+        try:
+            industry = await conn.fetchval(
+                "SELECT industry FROM companies WHERE id = $1", company_id
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning("hr_pilot: industry fetch failed for %s", company_id)
+
+    # --- Widened knowledge floor: shared platform knowledge so a thin-handbook
+    # tenant still gets grounded, industry-appropriate answers. Both are read
+    # AFTER releasing the connection above: the playbook is a pure in-process
+    # constant, and build_compliance_context manages its own connection + cache
+    # (mw:compliance_ctx:{company_id}), so it is not re-run per turn.
+    playbook_block = _render_industry_playbook(hb, industry)
+
+    compliance_block = ""
+    try:
+        from app.matcha.services.matcha_work_node import build_compliance_context
+        comp = await build_compliance_context(company_id)
+        if comp and comp.context_text and comp.context_text.strip():
+            compliance_block = comp.context_text.strip()
+    except Exception:  # noqa: BLE001
+        logger.warning("hr_pilot: compliance backdrop fetch failed for %s", company_id)
+
+    if not any([sections, policies, requirements, playbook_block, compliance_block]):
         return ""
 
     lines = [
@@ -610,7 +658,20 @@ async def _build_hr_pilot_context_uncached(company_id: UUID) -> str:
             body = p["content"] or p["description"] or ""
             lines.append(f"\n[{label}]\n{_truncate(body)}")
 
-    if requirements:
+    # Legal floor — prefer the precedence-resolved, threshold-aware compliance
+    # context (federal→state→local, governing requirement per category); fall
+    # back to the flat per-state list only when that is empty. Same catalog,
+    # richer resolution.
+    if compliance_block:
+        lines.append(
+            "\n--- COMPLIANCE / LEGAL FLOOR (governing federal + state/local "
+            "requirements; company policy still leads) ---"
+        )
+        sliced = compliance_block[:_MAX_HR_PILOT_COMPLIANCE_CHARS]
+        if len(compliance_block) > _MAX_HR_PILOT_COMPLIANCE_CHARS:
+            sliced += "\n…[compliance backdrop truncated]"
+        lines.append(sliced)
+    elif requirements:
         # Brief per-state backdrop only, not the full requirement text — HR
         # Pilot answers from written policy first; this keeps the model from
         # contradicting a state minimum the handbook is silent on.
@@ -628,11 +689,24 @@ async def _build_hr_pilot_context_uncached(company_id: UUID) -> str:
             if len(reqs) > _MAX_LIST_ROWS:
                 lines.append(f"  - ...and {len(reqs) - _MAX_LIST_ROWS} more {state} requirements not listed individually.")
 
+    if playbook_block:
+        # Generic industry starting material — explicitly subordinate to the
+        # company's own written handbook/policy above.
+        lines.append(
+            "\n--- INDUSTRY HR BASELINE (generic starting point — the company's "
+            "own handbook/policy above overrides this) ---"
+        )
+        lines.append(playbook_block)
+
     lines.append(f"\n--- DISCIPLINE LADDER (company policy) ---\n{_DISCIPLINE_LADDER_SUMMARY}")
 
     lines.append(
-        "\nAnswer supervisor questions using the language and procedures above. "
-        "If the handbook/policies don't cover the topic, say so plainly instead "
-        "of inventing a policy — tell the supervisor to check with corporate HR."
+        "\nAnswer supervisor questions using the language and procedures above, in "
+        "this order of authority: (1) the company's own written handbook/policy; "
+        "(2) the compliance/legal floor and state requirements as the minimum the "
+        "law requires; (3) the industry baseline only where the handbook is silent. "
+        "Never contradict the company's written policy. If nothing above covers the "
+        "topic, say so plainly instead of inventing a policy — tell the supervisor "
+        "to check with corporate HR."
     )
     return "\n".join(lines)

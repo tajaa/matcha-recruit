@@ -104,6 +104,8 @@ def _validate_updates_for_skill(skill: str, updates: dict) -> dict:
     elif skill == "blog":
         from app.matcha.services.matcha_work_ai import BLOG_FIELDS as _BLOG_FIELDS
         valid_fields = set(_BLOG_FIELDS)
+    elif skill == "hr_pilot":
+        valid_fields = {"hr_action"}
     else:
         return {}
     return {k: v for k, v in updates.items() if k in valid_fields}
@@ -701,6 +703,8 @@ async def _apply_ai_updates_and_operations(
     current_user_id: Optional[UUID] = None,
     project_id: Optional[UUID] = None,
     project_meta: Optional[dict] = None,
+    current_user_role: Optional[str] = None,
+    thread_hr_pilot_mode: bool = False,
 ) -> tuple[dict, int, Optional[str], bool, str]:
     """Apply structured updates, execute supported operations, and return updated response state.
 
@@ -709,6 +713,11 @@ async def _apply_ai_updates_and_operations(
     blog-skill routing below without a redundant DB fetch.
     """
     project_type_hint = (project_meta or {}).get("project_type") if project_id else None
+
+    # Snapshot the HR-action proposal BEFORE Phase A mutates current_state. The
+    # HR Pilot executor only acts on a proposal staged on a PRIOR turn (see the
+    # execute_hr_action branch) — this is the deterministic confirm-first guard.
+    pre_turn_hr_action = (current_state or {}).get("hr_action") if isinstance(current_state, dict) else None
 
     skill = ai_resp.skill or _infer_skill_from_state(current_state)
     # Blog projects always route to the blog skill — covers both legacy threads
@@ -720,7 +729,7 @@ async def _apply_ai_updates_and_operations(
     # If skill is not a known document type (e.g. "none" or "chat"), fall back to
     # inferring from the update keys themselves so workbook/review/etc. updates
     # created on a fresh thread aren't silently dropped.
-    elif skill not in ("offer_letter", "review", "workbook", "onboarding", "presentation", "handbook", "policy", "resume_batch", "inventory", "project", "blog") and isinstance(ai_resp.structured_update, dict) and ai_resp.structured_update:
+    elif skill not in ("offer_letter", "review", "workbook", "onboarding", "presentation", "handbook", "policy", "resume_batch", "inventory", "project", "blog", "hr_pilot") and isinstance(ai_resp.structured_update, dict) and ai_resp.structured_update:
         skill_from_updates = _infer_skill_from_state(ai_resp.structured_update)
         if skill_from_updates != "chat":
             skill = skill_from_updates
@@ -1241,6 +1250,55 @@ async def _apply_ai_updates_and_operations(
                         current_state = result["current_state"]
                         changed = True
                         action_note = "Policy draft generated. Review in the Preview panel, then edit or save."
+            elif operation == "execute_hr_action":
+                # HR Pilot "acting" path. The skill engine gates nothing itself,
+                # so the full safety envelope is re-asserted here (features, role,
+                # thread mode, confirm-first, hard-stop, then the deterministic
+                # discipline compliance gate inside the executor).
+                from app.core.feature_flags import get_company_features
+                from app.matcha.services.hr_pilot_actions import (
+                    evaluate_hr_action, execute_hr_action,
+                )
+
+                features = await get_company_features(company_id)
+                this_turn_has_new_action = (
+                    isinstance(ai_resp.structured_update, dict)
+                    and "hr_action" in ai_resp.structured_update
+                )
+                verdict = evaluate_hr_action(
+                    staged_action=pre_turn_hr_action,
+                    features=features,
+                    role=current_user_role,
+                    thread_hr_pilot_mode=thread_hr_pilot_mode,
+                    this_turn_has_new_action=this_turn_has_new_action,
+                )
+                if not verdict.ok:
+                    # stage / clarify / refuse / hard_stop all surface as a note;
+                    # no record is written. (The message-level gate owns the
+                    # review-queue escalation; this defense-in-depth trip just
+                    # refuses.)
+                    action_note = verdict.message
+                else:
+                    exec_result = await execute_hr_action(
+                        company_id=company_id,
+                        actor_user_id=current_user_id,
+                        action=verdict.action,
+                    )
+                    if exec_result.get("status") == "created":
+                        executed_action = {
+                            **(pre_turn_hr_action or {}),
+                            "status": "executed",
+                            "record_id": exec_result.get("record_id"),
+                        }
+                        result = await doc_svc.apply_update(
+                            thread_id,
+                            {**current_state, "hr_action": executed_action},
+                            diff_summary="Filed a draft discipline record via HR Pilot",
+                        )
+                        current_version = result["version"]
+                        current_state = result["current_state"]
+                        changed = True
+                    action_note = exec_result.get("message")
             else:
                 action_note = f"The action '{operation}' is not supported yet."
         except ValueError as e:

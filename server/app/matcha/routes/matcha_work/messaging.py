@@ -751,6 +751,9 @@ async def send_message_stream(
                     m for m in _active_modes
                     if not m.required_feature or _features.get(m.required_feature, False)
                 ]
+            # HR Pilot mode active for this turn (column on + feature present).
+            # Gates the model's HR-action vocabulary + server-side execution.
+            hr_pilot_mode_active = any(m.key == "hr_pilot" for m in _active_modes)
             for _mode in _active_modes:
                 yield _sse_data({"type": "status", "message": _mode.status_loading})
                 try:
@@ -888,6 +891,7 @@ async def send_message_stream(
                 grounded_mode=bool(_active_modes),
                 blog_mode_state=stream_blog_mode_state,
                 thread_id=str(thread_id),
+                hr_pilot_mode=hr_pilot_mode_active,
             ))
 
             def _schedule_cancel_finalizer() -> None:
@@ -939,6 +943,8 @@ async def send_message_stream(
                     current_user_id=current_user.id,
                     project_id=thread.get("project_id"),
                     project_meta=stream_project_meta,
+                    current_user_role=getattr(current_user, "role", None),
+                    thread_hr_pilot_mode=hr_pilot_mode_active,
                 )
 
                 # Build metadata from compliance reasoning chains + payer sources
