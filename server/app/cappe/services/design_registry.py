@@ -56,10 +56,16 @@ class RenderRule:
       - kind "hex"    : sanitize value as a hex color; if non-empty emit
                         `{var}:{value}` (+ each of `extra_vars`) and, if set,
                         add `css_class`.
-      - kind "int_px" : clamp value to [lo, hi] (default 0); if the result is
-                        truthy emit `{var}:{n}px` and, if set, add `css_class`.
+      - kind "int_px" : clamp value to [lo, hi]; emit `{var}:{n}px` (+ optional
+                        `css_class`). By default a value that clamps to 0 is
+                        treated as "unset" and emits nothing (safe only for
+                        tokens whose `lo` > 0 — a present 0 clamps up to `lo`,
+                        so 0 never survives to mean "off"). Set `allow_zero=True`
+                        for a token where 0 is a real value (e.g. a spacing/gap
+                        token with `lo=0`): then an absent/non-numeric key is
+                        "unset" (skipped) but an explicit 0 emits `0px`.
 
-    Both emit nothing on a falsy/empty result — the `_BASE_CSS` `var(--x, …)`
+    Both emit nothing on an unset/empty result — the `_BASE_CSS` `var(--x, …)`
     fallback then applies, so an unset key renders byte-identically to before.
     """
     kind: str
@@ -68,6 +74,8 @@ class RenderRule:
     extra_vars: tuple[str, ...] = ()
     lo: int = 0
     hi: int = 0
+    # int_px only: distinguish an explicit 0 from "unset" (see class docstring).
+    allow_zero: bool = False
 
 
 @dataclass(frozen=True)
@@ -138,10 +146,17 @@ DESIGN_KEYS: tuple[DesignKey, ...] = (
 REGISTRY_DRIVEN_GROUPS: frozenset[str] = frozenset({"colors", "type"})
 
 # Emission order per group (only meaningful for REGISTRY_DRIVEN_GROUPS).
-DESIGN_KEYS_BY_GROUP: dict[str, tuple[DesignKey, ...]] = {}
-for _dk in DESIGN_KEYS:
-    DESIGN_KEYS_BY_GROUP.setdefault(_dk.group, ())
-    DESIGN_KEYS_BY_GROUP[_dk.group] += (_dk,)
+def _group_design_keys() -> dict[str, tuple[DesignKey, ...]]:
+    """Group DESIGN_KEYS by `group`, preserving declaration order (= renderer
+    emission order). A function so the loop variable doesn't leak into the
+    module namespace."""
+    grouped: dict[str, tuple[DesignKey, ...]] = {}
+    for dk in DESIGN_KEYS:
+        grouped[dk.group] = grouped.get(dk.group, ()) + (dk,)
+    return grouped
+
+
+DESIGN_KEYS_BY_GROUP: dict[str, tuple[DesignKey, ...]] = _group_design_keys()
 
 
 def build_design_groups() -> dict[str, dict[str, Any]]:

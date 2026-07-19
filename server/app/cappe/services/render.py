@@ -211,11 +211,26 @@ def _emit_design_group(group: str, values: dict, classes: list, cssvars: list) -
                 if rule.css_class:
                     classes.append(rule.css_class)
         elif rule.kind == "int_px":
-            n = _clampi(raw, rule.lo, rule.hi, 0)
-            if n:
-                cssvars.append(f"{rule.var}:{n}px")
-                if rule.css_class:
-                    classes.append(rule.css_class)
+            if rule.allow_zero:
+                # A token where 0 is a real value: an absent/null/non-numeric key
+                # is "unset" (skip → var-fallback), an explicit clamped value —
+                # including 0 — emits. The sentinel default (lo-1) is below the
+                # range, so `_clampi` returning it means the input wasn't numeric.
+                if raw is None:
+                    continue
+                n = _clampi(raw, rule.lo, rule.hi, rule.lo - 1)
+                if n < rule.lo:
+                    continue
+            else:
+                # Legacy skip-on-zero (byte-identical to the former inline
+                # blocks): a value that clamps to 0 means "unset" for tokens
+                # whose min is > 0, so a present 0 clamps up to lo and survives.
+                n = _clampi(raw, rule.lo, rule.hi, 0)
+                if not n:
+                    continue
+            cssvars.append(f"{rule.var}:{n}px")
+            if rule.css_class:
+                classes.append(rule.css_class)
 
 
 def _apply_design(html_str: str, design: Any, *, block_index: Any = None, editable: bool = False) -> str:

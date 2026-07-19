@@ -16,12 +16,15 @@ os.environ.setdefault("LIVE_API", "test-key")
 os.environ.setdefault("DATABASE_URL", "postgresql://test:test@localhost/test")
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret-key-cappe")
 
+import app.cappe.services.design_registry as design_registry  # noqa: E402
 from app.cappe.services.design_registry import (  # noqa: E402
     DESIGN_KEYS,
+    DesignKey,
+    RenderRule,
     build_design_groups,
 )
 from app.cappe.services.merlin_catalog import DESIGN_GROUPS  # noqa: E402
-from app.cappe.services.render import render_site_html  # noqa: E402
+from app.cappe.services.render import _emit_design_group, render_site_html  # noqa: E402
 
 # The historical, hand-written AI surface. If a real change to what Merlin may
 # set is intended, update BOTH the registry and this expectation deliberately.
@@ -99,6 +102,38 @@ def test_registry_driven_type_emission_reaches_html():
     html = _render_with_design({"type": {"headingSize": 48, "bodySize": 18}})
     assert "--cz-h-size:48px" in html and "cz-has-hsize" in html
     assert "--cz-p-size:18px" in html and "cz-has-psize" in html
+
+
+def test_int_px_legacy_skip_on_zero_is_byte_identical():
+    """Default int_px (allow_zero=False) keeps the historical behavior: an
+    absent key emits nothing, and a present 0 clamps UP to `lo` (so 0 never
+    survives to mean 'off' for the min>0 tokens). This is the byte-identity the
+    colors/type registry migration must preserve."""
+    css: list = []
+    _emit_design_group("type", {"headingSize": 0}, [], css)
+    assert "--cz-h-size:16px" in css          # present 0 → clamped to lo=16
+    css = []
+    _emit_design_group("type", {}, [], css)
+    assert not any(c.startswith("--cz-h-size") for c in css)  # absent → skip
+
+
+def test_int_px_allow_zero_distinguishes_explicit_zero_from_unset():
+    """allow_zero=True lets a token whose 0 is a real value (e.g. a gap/spacing
+    token with lo=0) emit `0px`, while an absent or non-numeric key is still
+    'unset' and skipped. This is what the type-scale / responsive lanes need."""
+    probe = DesignKey("__probe__", "gap", None,
+                      render=RenderRule("int_px", "--cz-probe", lo=0, hi=80, allow_zero=True))
+    design_registry.DESIGN_KEYS_BY_GROUP["__probe__"] = (probe,)
+    try:
+        cases = {0: "--cz-probe:0px", 40: "--cz-probe:40px", None: None, "junk": None}
+        for raw, expect in cases.items():
+            values = {} if raw is None else {"gap": raw}  # None → absent key (unset)
+            css: list = []
+            _emit_design_group("__probe__", values, [], css)
+            got = css[0] if css else None
+            assert got == expect, (raw, got, expect)
+    finally:
+        design_registry.DESIGN_KEYS_BY_GROUP.pop("__probe__", None)
 
 
 def test_unset_design_keys_emit_no_assignment():

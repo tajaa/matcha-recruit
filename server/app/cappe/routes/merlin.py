@@ -32,8 +32,10 @@ router = APIRouter()
 
 # The registry-derived op/block/design/theme vocabulary as one JSON document —
 # the single source of truth the editor can read instead of hand-mirroring it in
-# blockSchemas.ts. Static per deploy; cheap to build, so no caching needed.
-_MERLIN_SCHEMA = build_merlin_schema()
+# blockSchemas.ts. Built once on first request and cached: static per deploy, but
+# built lazily (not at import) so a registry-data error degrades to a 500 on this
+# one endpoint rather than failing the whole cappe router's import at boot.
+_merlin_schema_cache: dict | None = None
 
 
 @router.get("/merlin/schema")
@@ -41,7 +43,10 @@ async def merlin_schema(account: CappeAccount = Depends(require_cappe_account)):
     """The Merlin vocabulary (ops, block fields, design keys, theme keys, limits)
     generated from the server registries. Read-only; account-gated for parity
     with the chat route."""
-    return _MERLIN_SCHEMA
+    global _merlin_schema_cache
+    if _merlin_schema_cache is None:
+        _merlin_schema_cache = build_merlin_schema()
+    return _merlin_schema_cache
 
 # Turns per account per hour. Paid plans buy headroom; free is a taste.
 _FREE_HOURLY_LIMIT = 10

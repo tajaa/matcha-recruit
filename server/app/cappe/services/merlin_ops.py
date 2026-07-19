@@ -410,8 +410,11 @@ MERLIN_OPS: tuple[MerlinOp, ...] = (
         name="set_design",
         validate=_v_set_design,
         prompt_shape=(
+            # Group order is the registry's declaration order (motion first — the
+            # most-requested), NOT alphabetical, so the shape leads the model with
+            # the common case. DESIGN_GROUPS preserves that insertion order.
             '{"op":"set_design","block":"<id>","group":"'
-            + '"|"'.join(sorted(DESIGN_GROUPS))
+            + '"|"'.join(DESIGN_GROUPS)
             + '","key":"<setting>","value":<any>}'
         ),
         prompt_rules=(
