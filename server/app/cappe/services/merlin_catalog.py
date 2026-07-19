@@ -181,13 +181,15 @@ DESIGN_REQUIRES_PREMIUM = True
 # importing a heavy service module).
 #
 # `lite` is the default and is available on every plan — it's cheap enough to
-# absorb as a funnel into upgrades. `regular`/`pro` need a paid plan; the server
+# absorb as a funnel into upgrades. `regular` needs a paid plan; the server
 # CLAMPS rather than 403s (mirroring matcha_work_ai._get_model), so a stale
-# client that asks for pro silently gets what it's entitled to instead of an error.
+# client asking for a tier it can't have silently gets what it's entitled to
+# instead of an error. A pro/heavy tier is deliberately NOT offered — page
+# editing is a structured-op task that flash handles well, and the cost is not
+# metered yet (no token wallet), so the expensive model has no guard rail.
 MODEL_TIERS: dict[str, str] = {
     "lite": "gemini-3.1-flash-lite",
     "regular": "gemini-3-flash-preview",
-    "pro": "gemini-3.1-pro-preview",
 }
 DEFAULT_MODEL_TIER = "lite"
 # Tiers a non-premium (free / hosting) plan may use.

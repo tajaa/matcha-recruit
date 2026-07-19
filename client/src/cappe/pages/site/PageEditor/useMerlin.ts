@@ -3,7 +3,7 @@ import { cappeApi } from '../../../api'
 import type { CappeBlock } from '../../../types'
 import { applyMerlinOps, type MerlinOp, type MerlinOpResult } from './merlinOps'
 
-export type MerlinTier = 'lite' | 'regular' | 'pro'
+export type MerlinTier = 'lite' | 'regular'
 
 /** Mirrors MODEL_TIERS in server/app/cappe/services/merlin_catalog.py.
  *  `premium` marks the tiers that need a Pro/Business plan — the server
@@ -11,7 +11,6 @@ export type MerlinTier = 'lite' | 'regular' | 'pro'
 export const MERLIN_TIERS: { id: MerlinTier; label: string; hint: string; premium: boolean }[] = [
   { id: 'lite', label: 'Lite', hint: 'Fastest, best for small edits', premium: false },
   { id: 'regular', label: 'Regular', hint: 'Balanced — good for most changes', premium: true },
-  { id: 'pro', label: 'Pro', hint: 'Most capable, slowest', premium: true },
 ]
 
 export type MerlinMessage = {
@@ -70,9 +69,11 @@ export function useMerlin(
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   // Lite by default; persisted across pages/sessions like werk's 'mw-model'.
+  // Validated against the current tier list, so a value saved before a tier
+  // was retired (e.g. the old 'pro') falls back instead of being sent on.
   const [tier, setTierState] = useState<MerlinTier>(() => {
     const saved = localStorage.getItem(TIER_KEY)
-    return saved === 'regular' || saved === 'pro' ? saved : 'lite'
+    return MERLIN_TIERS.some((t) => t.id === saved) ? (saved as MerlinTier) : 'lite'
   })
   const setTier = (t: MerlinTier) => {
     setTierState(t)

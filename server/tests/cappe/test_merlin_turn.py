@@ -145,23 +145,27 @@ async def test_invalid_ops_are_reported_not_raised(monkeypatch):
 
 # --- model tier clamp ---------------------------------------------------------
 
+# NOTE: plan names and tier names overlap but are different things — plan "pro"
+# is a paid Cappe plan; there is deliberately no "pro" model TIER (retired: the
+# heavy model has no cost guard until the token wallet exists).
 @pytest.mark.parametrize("plan,requested,expected", [
     # Lite is open to every plan — the upgrade funnel.
     ("free", "lite", "lite"),
     ("hosting", "lite", "lite"),
     # Paid tiers clamp DOWN on a non-premium plan rather than 403ing.
     ("free", "regular", "lite"),
-    ("free", "pro", "lite"),
-    ("hosting", "pro", "lite"),
+    ("hosting", "regular", "lite"),
     # Premium plans get what they asked for.
     ("pro", "regular", "regular"),
-    ("pro", "pro", "pro"),
-    ("business", "pro", "pro"),
+    ("business", "regular", "regular"),
+    # A retired tier is junk now — must not resolve to a real model.
+    ("business", "pro", "lite"),
+    ("pro", "pro", "lite"),
     # Junk / missing degrades to the default.
     ("business", "bogus", "lite"),
     ("business", None, "lite"),
     ("business", {"a": 1}, "lite"),
-    (None, "pro", "lite"),
+    (None, "regular", "lite"),
 ])
 def test_resolve_model_tier_clamps_to_plan(plan, requested, expected):
     from app.cappe.services.merlin import resolve_model_tier
@@ -173,9 +177,16 @@ async def test_turn_reports_the_tier_it_used(monkeypatch):
     payload = '{"message": "Done.", "ops": []}'
     monkeypatch.setattr(merlin, "get_genai_client", lambda **kw: _FakeClient(payload))
     result = await run_merlin_turn(
-        message="hi", history=[], blocks=_BLOCKS, theme={}, model_tier="pro",
+        message="hi", history=[], blocks=_BLOCKS, theme={}, model_tier="regular",
     )
-    assert result["tier"] == "pro"
+    assert result["tier"] == "regular"
+
+
+def test_no_heavy_pro_tier_is_offered():
+    """Guard against re-adding an unmetered expensive model by accident."""
+    from app.cappe.services.merlin_catalog import MODEL_TIERS
+    assert set(MODEL_TIERS) == {"lite", "regular"}
+    assert not any("pro-" in m for m in MODEL_TIERS.values())
 
 
 @pytest.mark.asyncio
