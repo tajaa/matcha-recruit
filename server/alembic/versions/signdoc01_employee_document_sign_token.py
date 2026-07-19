@@ -41,11 +41,14 @@ def upgrade() -> None:
     )
     # Backfill existing pending/signed rows so already-distributed handbooks
     # (sent before this migration, currently only reachable via portal login)
-    # get a working public link too.
+    # get a working public link too. Two concatenated UUIDs (dashes stripped) =
+    # 64 hex chars, unique per row, and NO pgcrypto dependency — gen_random_uuid()
+    # is core in PG13+ (used as a column default throughout this schema) whereas
+    # gen_random_bytes() would require the pgcrypto extension, which is not enabled.
     op.execute(
         """
         UPDATE employee_documents
-        SET sign_token = encode(gen_random_bytes(32), 'hex')
+        SET sign_token = replace(gen_random_uuid()::text || gen_random_uuid()::text, '-', '')
         WHERE sign_token IS NULL
         """
     )
