@@ -542,3 +542,96 @@ def test_operational_records_render_into_the_prompt_block(grounding):
     assert "Ana Ruiz" in block
     for cid in corpus["index"]:
         assert f"[{cid}]" in block
+
+
+# --------------------------------------------------------------------------- #
+# Review fixes — employee redaction, declined assignees, unknown-feature state
+# --------------------------------------------------------------------------- #
+
+from app.matcha.services.hr_pilot_corpus import (  # noqa: E402
+    _SUPERVISOR_ONLY_SOURCES,
+    redact_for_employee,
+)
+
+
+def test_redaction_removes_operational_groups(grounding):
+    """Employee Ask HR shares this corpus. Schedule/training/incident records
+    name coworkers — an employee asking about PTO must not be able to pull a
+    roster or a list of who failed a training out of it."""
+    corpus = build_hr_pilot_corpus(_ops(grounding), [])
+    assert any(k in corpus["sources"] for k in _SUPERVISOR_ONLY_SOURCES)
+
+    safe = redact_for_employee(corpus)
+    for key in _SUPERVISOR_ONLY_SOURCES:
+        assert key not in safe["sources"]
+    # Policy material survives — that IS the employee's answer.
+    assert "existing_policies" in safe["sources"]
+    assert "compliance_floor" in safe["sources"]
+
+
+def test_redaction_strips_cids_from_the_index_too(grounding):
+    """Removing the group but leaving its cids indexed would let a guessed
+    citation resolve, laundering a record the model was never shown."""
+    safe = redact_for_employee(build_hr_pilot_corpus(_ops(grounding), []))
+    assert not [c for c in safe["index"] if c.startswith(("schedule:", "training:", "incident:"))]
+    assert any(c.startswith("policy:") for c in safe["index"])
+
+
+def test_redacted_corpus_drops_coworker_names(grounding):
+    """The actual leak: a name in a training record."""
+    corpus = build_hr_pilot_corpus(_ops(grounding), [])
+    assert "Ana Ruiz" in repr(corpus)
+    assert "Ana Ruiz" not in repr(redact_for_employee(corpus))
+
+
+def test_redaction_gate_rejects_operational_citations(grounding):
+    """End-to-end: the audit gate run against a redacted index must drop a
+    schedule citation, not resolve it."""
+    safe = redact_for_employee(build_hr_pilot_corpus(_ops(grounding), []))
+    _, cites, dropped = audit_citations(
+        "Ana works Saturday [schedule:aaaaaaaa-0000-0000-0000-000000000001].", safe["index"])
+    assert cites == []
+    assert dropped == ["schedule:aaaaaaaa-0000-0000-0000-000000000001"]
+
+
+def test_redaction_tolerates_empty_corpus():
+    out = redact_for_employee({})
+    assert out == {"sources": {}, "index": {}, "notes": []}
+
+
+def test_declined_assignees_are_not_counted_as_staffed():
+    """A declined assignment rendered as 'assigned … fully staffed' answers
+    'is Saturday covered?' with a confident, cited, wrong yes."""
+    s = _shift(names=("Ana Ruiz", "Bo Lee"), required=2)
+    s["assignees"][1]["status"] = "declined"
+    rec = _schedule_records([s])[0]
+    assert "Bo Lee" not in rec["summary"]
+    assert "SHORT BY 1" in rec["summary"]
+
+
+def test_unknown_features_do_not_claim_modules_are_off(grounding):
+    """A failed feature lookup leaves the operational keys ABSENT. Reporting
+    that as 'not enabled' tells a paying customer they lost a product."""
+    g = dict(grounding)
+    g["features_known"] = False
+    corpus = build_hr_pilot_corpus(g, [])
+    notes = " ".join(corpus["notes"])
+    assert "not enabled" not in notes
+    assert "temporarily" in notes.lower() or "briefly unavailable" in notes.lower()
+
+
+def test_module_off_still_says_not_enabled(grounding):
+    """The explicit-None path must keep its original behaviour."""
+    g = _ops(grounding, shifts=None)
+    g["features_known"] = True
+    assert any("Shift scheduling is not enabled" in n
+               for n in build_hr_pilot_corpus(g, [])["notes"])
+
+
+def test_training_program_cap_note(grounding):
+    from app.matcha.services.hr_pilot_corpus import _MAX_TRAINING_PROGRAMS
+    t = _training_fixture()
+    t["programs"] = [dict(t["programs"][0], id=f"bbbbbbbb-0000-0000-0000-{i:012d}")
+                     for i in range(_MAX_TRAINING_PROGRAMS)]
+    corpus = build_hr_pilot_corpus(_ops(grounding, training=t), [])
+    assert any("training programs are listed" in n for n in corpus["notes"])

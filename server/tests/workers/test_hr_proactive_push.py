@@ -237,3 +237,125 @@ def test_overlay_granted_flag_resolves_without_being_stored():
 
 def test_hr_pilot_tolerates_null_column():
     assert hr_pilot_enabled(None, None) is False
+
+
+# --------------------------------------------------------------------------- #
+# Review fixes — digest count, budget, per-event isolation
+# --------------------------------------------------------------------------- #
+
+from app.workers.tasks.hr_proactive_push import _AlreadyStamped, _deliver  # noqa: E402
+
+
+def test_digest_reports_true_total_not_listed_count():
+    """The names are capped; the COUNT is not. Reporting len(rows) is how a
+    company with 30 outstanding acknowledgements gets told it has 4."""
+    title, body = build_signature_digest_briefing(_docs(4), 7, total=30)
+    assert title.startswith("30 unreturned")
+    assert "**30**" in body
+    assert body.count("- E") == 4
+
+
+def test_digest_total_defaults_to_row_count():
+    title, _ = build_signature_digest_briefing(_docs(3), 7)
+    assert title.startswith("3 unreturned")
+
+
+def test_digest_singular_with_explicit_total():
+    title, body = build_signature_digest_briefing(_docs(1), 7, total=1)
+    assert title == "1 unreturned acknowledgement"
+    assert " has been" in body
+
+
+class _FakeConn:
+    """Minimal stand-in: _deliver's DB calls are all funnelled through helpers
+    we monkeypatch, so the connection is never actually used."""
+
+
+@pytest.mark.asyncio
+async def test_deliver_respects_exhausted_budget(monkeypatch):
+    called = {"pushed": False}
+
+    async def _never(*a, **k):
+        called["pushed"] = True
+        return False
+
+    monkeypatch.setattr("app.workers.tasks.hr_proactive_push._already_pushed", _never)
+    budget = {"remaining": 0}
+    out = await _deliver(_FakeConn(), company_id="c", employee_id=None,
+                         trigger_kind="leave_return", subject_id="s",
+                         title="t", body="b", today=TODAY,
+                         budget=budget, clients_cache={})
+    assert out is False
+    assert called["pushed"] is False, "budget check must short-circuit before any query"
+
+
+@pytest.mark.asyncio
+async def test_deliver_decrements_budget_on_success(monkeypatch):
+    async def _not_pushed(*a, **k):
+        return False
+
+    async def _recipients(*a, **k):
+        return "owner", ["owner"]
+
+    async def _open(*a, **k):
+        return "thread-1"
+
+    monkeypatch.setattr("app.workers.tasks.hr_proactive_push._already_pushed", _not_pushed)
+    monkeypatch.setattr("app.workers.tasks.hr_proactive_push._resolve_recipients", _recipients)
+    monkeypatch.setattr("app.workers.tasks.hr_proactive_push._open_thread", _open)
+
+    budget = {"remaining": 2}
+    assert await _deliver(_FakeConn(), company_id="c", employee_id=None,
+                          trigger_kind="leave_return", subject_id="s",
+                          title="t", body="b", today=TODAY,
+                          budget=budget, clients_cache={}) is True
+    assert budget["remaining"] == 1
+
+
+@pytest.mark.asyncio
+async def test_one_failing_event_does_not_abort_the_sweep(monkeypatch):
+    """Without isolation a single bad row kills the run, and the retry
+    re-attempts the same row first — stranding everything behind it forever."""
+    async def _not_pushed(*a, **k):
+        return False
+
+    async def _recipients(*a, **k):
+        return "owner", ["owner"]
+
+    async def _boom(*a, **k):
+        raise RuntimeError("constraint hiccup")
+
+    monkeypatch.setattr("app.workers.tasks.hr_proactive_push._already_pushed", _not_pushed)
+    monkeypatch.setattr("app.workers.tasks.hr_proactive_push._resolve_recipients", _recipients)
+    monkeypatch.setattr("app.workers.tasks.hr_proactive_push._open_thread", _boom)
+
+    budget = {"remaining": 5}
+    out = await _deliver(_FakeConn(), company_id="c", employee_id=None,
+                         trigger_kind="leave_return", subject_id="s",
+                         title="t", body="b", today=TODAY,
+                         budget=budget, clients_cache={})
+    assert out is False
+    assert budget["remaining"] == 5, "a failed event must not consume budget"
+
+
+@pytest.mark.asyncio
+async def test_concurrent_stamp_is_not_counted_as_opened(monkeypatch):
+    async def _not_pushed(*a, **k):
+        return False
+
+    async def _recipients(*a, **k):
+        return "owner", ["owner"]
+
+    async def _raced(*a, **k):
+        raise _AlreadyStamped("leave_return", "s")
+
+    monkeypatch.setattr("app.workers.tasks.hr_proactive_push._already_pushed", _not_pushed)
+    monkeypatch.setattr("app.workers.tasks.hr_proactive_push._resolve_recipients", _recipients)
+    monkeypatch.setattr("app.workers.tasks.hr_proactive_push._open_thread", _raced)
+
+    budget = {"remaining": 3}
+    assert await _deliver(_FakeConn(), company_id="c", employee_id=None,
+                          trigger_kind="leave_return", subject_id="s",
+                          title="t", body="b", today=TODAY,
+                          budget=budget, clients_cache={}) is False
+    assert budget["remaining"] == 3

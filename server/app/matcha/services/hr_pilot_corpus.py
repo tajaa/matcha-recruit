@@ -56,6 +56,10 @@ _MAX_HR_PILOT_POLICIES = 60
 # clipped list as the complete picture.
 _SCHEDULE_LOOKAHEAD_DAYS = 7
 _MAX_SCHEDULE_SHIFTS = 40
+# Jurisdiction research can generate per-state training requirements, so a
+# company's program list is not inherently small — it needs a cap like every
+# other fetch here.
+_MAX_TRAINING_PROGRAMS = 40
 _MAX_TRAINING_DETAIL = 15
 _MAX_RECENT_INCIDENTS = 15
 _INCIDENT_LOOKBACK_DAYS = 90
@@ -161,6 +165,12 @@ async def gather_hr_pilot_grounding(conn, company_id) -> dict:
     # so a SQL-side check would hide a module the company actually has.
     industry = None
     features: dict = {}
+    # Whether we actually LEARNED the feature set. A failed fetch leaves
+    # `features` empty, which is indistinguishable from "every module off" —
+    # and reporting that to the supervisor tells a paying customer they don't
+    # have a module they bought, cached for the context TTL. Tracked separately
+    # so the corpus can say "temporarily unavailable" instead.
+    features_known = False
     try:
         row = await conn.fetchrow(
             "SELECT industry, enabled_features, signup_source FROM companies WHERE id = $1",
@@ -172,6 +182,7 @@ async def gather_hr_pilot_grounding(conn, company_id) -> dict:
             # tier overlay — pass the raw column straight through.
             from app.core.feature_flags import merge_company_features
             features = merge_company_features(row["enabled_features"], row["signup_source"])
+            features_known = True
     except Exception:  # noqa: BLE001
         logger.warning("hr_pilot_corpus: company/feature fetch failed for %s", company_id)
 
@@ -184,16 +195,13 @@ async def gather_hr_pilot_grounding(conn, company_id) -> dict:
         logger.warning("hr_pilot_corpus: profile fetch failed for %s", company_id)
 
     # --- Operational facts (Supervisor Copilot) ---------------------------------
-    # Each rides its own product's feature flag, and the distinction between
-    # "off" and "on but empty" is load-bearing: `None` means the company doesn't
-    # have the module (the corpus emits a note so the model says so plainly
-    # instead of implying nobody is scheduled), `[]` means it has it and there is
-    # genuinely nothing in the window.
-    shifts = await _fetch_shifts(conn, company_id) if features.get("employee_schedule") else None
-    training = await _fetch_training(conn, company_id) if features.get("training") else None
-    incidents = await _fetch_incidents(conn, company_id) if features.get("incidents") else None
-
-    return {
+    # Each rides its own product's feature flag. Three states, not two:
+    #   [] / {...}  → module on (empty means nothing in the window)
+    #   None        → module off for this company
+    #   unset key   → we could not determine it (feature fetch failed)
+    # The corpus renders a different note for each; conflating the last two is
+    # how a transient DB error becomes "you don't have scheduling".
+    out = {
         "scopes": scopes,
         "profile": dict(profile) if profile else None,
         "requirements": requirements,
@@ -201,22 +209,38 @@ async def gather_hr_pilot_grounding(conn, company_id) -> dict:
         "policies": [dict(r) for r in policies],
         "industry": industry,
         "features": features,
-        "shifts": shifts,
-        "training": training,
-        "incidents": incidents,
+        "features_known": features_known,
     }
+    if features_known:
+        out["shifts"] = (
+            await _fetch_shifts(conn, company_id) if features.get("employee_schedule") else None
+        )
+        out["training"] = (
+            await _fetch_training(conn, company_id) if features.get("training") else None
+        )
+        out["incidents"] = (
+            await _fetch_incidents(conn, company_id) if features.get("incidents") else None
+        )
+    return out
 
 
 async def _fetch_shifts(conn, company_id) -> list[dict]:
-    """Published shifts starting in the next `_SCHEDULE_LOOKAHEAD_DAYS`, each with
+    """Published shifts OVERLAPPING the next `_SCHEDULE_LOOKAHEAD_DAYS`, each with
     its assignees.
 
     Deliberately does NOT import `routes/employee_schedule/_shared.fetch_shifts`
     — a service reaching into a route package inverts the layering every other
-    service here respects. The query is small enough to own.
+    service here respects. The query is small enough to own, but it uses that
+    module's OVERLAP predicate (`ends_at > now AND starts_at < horizon`) rather
+    than a start-time window: "who is on right now?" is a core supervisor
+    question, and a shift that started two hours ago and runs another six is the
+    answer to it. Filtering on `starts_at >= NOW()` drops exactly the shift being
+    asked about.
 
     Only PUBLISHED shifts: a draft schedule is not something a supervisor should
-    be told is happening."""
+    be told is happening. Declined assignments are excluded from the roster —
+    counting them as staffed is how "is Saturday covered?" gets a confident wrong
+    answer."""
     try:
         rows = await conn.fetch(
             """
@@ -233,10 +257,12 @@ async def _fetch_shifts(conn, company_id) -> list[dict]:
                        '[]'::json
                    ) AS assignees
             FROM schedule_shifts s
-            LEFT JOIN schedule_shift_assignments a ON a.shift_id = s.id
-            LEFT JOIN employees e ON e.id = a.employee_id
+            LEFT JOIN schedule_shift_assignments a
+                   ON a.shift_id = s.id AND a.status <> 'declined'
+            LEFT JOIN employees e
+                   ON e.id = a.employee_id AND e.termination_date IS NULL
             WHERE s.company_id = $1 AND s.status = 'published'
-              AND s.starts_at >= NOW()
+              AND s.ends_at > NOW()
               AND s.starts_at < NOW() + ($2 || ' days')::interval
             GROUP BY s.id
             ORDER BY s.starts_at
@@ -271,8 +297,9 @@ async def _fetch_training(conn, company_id) -> dict:
             WHERE r.company_id=$1 AND r.is_active
             GROUP BY r.id
             ORDER BY overdue DESC, r.title
+            LIMIT $2
             """,
-            company_id,
+            company_id, _MAX_TRAINING_PROGRAMS,
         )]
     except Exception:  # noqa: BLE001
         logger.warning("hr_pilot_corpus: training-program fetch failed for %s", company_id)
@@ -286,6 +313,7 @@ async def _fetch_training(conn, company_id) -> dict:
             FROM training_records tr
             JOIN employees e ON e.id = tr.employee_id
             WHERE tr.company_id=$1 AND tr.status IN ('assigned','in_progress')
+              AND e.termination_date IS NULL
               AND tr.due_date < CURRENT_DATE
             ORDER BY tr.due_date ASC
             LIMIT $2
@@ -302,6 +330,7 @@ async def _fetch_training(conn, company_id) -> dict:
             FROM training_records tr
             JOIN employees e ON e.id = tr.employee_id
             WHERE tr.company_id=$1 AND tr.status='completed'
+              AND e.termination_date IS NULL
               AND tr.expiration_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '60 days'
             ORDER BY tr.expiration_date ASC
             LIMIT $2
@@ -458,7 +487,13 @@ def _schedule_records(shifts: list | None) -> list[dict]:
                 assignees = _json.loads(assignees)
             except (ValueError, TypeError):
                 assignees = []
-        assignees = [a for a in (assignees or []) if isinstance(a, dict)]
+        # Declined assignments are already excluded by the fetch; re-filter here
+        # so the pure minter is correct on any input. Counting a declined person
+        # as staffed answers "is Saturday covered?" with a confident yes.
+        assignees = [
+            a for a in (assignees or [])
+            if isinstance(a, dict) and a.get("status") != "declined"
+        ]
 
         names = [str(a.get("name") or "").strip() for a in assignees]
         names = [n for n in names if n]
@@ -627,17 +662,17 @@ def build_hr_pilot_corpus(grounding: dict, reasoning_chains: list | None = None)
     # Module-off notes. Absence of data and absence of the module are different
     # answers to "who's on Saturday?" — one is "nobody", the other is "this
     # company doesn't schedule here".
-    if grounding.get("shifts") is None:
+    if "shifts" in grounding and grounding.get("shifts") is None:
         notes.append(
             "Shift scheduling is not enabled for this company — no schedule data is "
             "available. Say so if asked about shifts; do not infer who is working."
         )
-    if grounding.get("training") is None:
+    if "training" in grounding and grounding.get("training") is None:
         notes.append(
             "Training records are not enabled for this company — say so if asked "
             "whether someone is trained or current."
         )
-    if grounding.get("incidents") is None:
+    if "incidents" in grounding and grounding.get("incidents") is None:
         notes.append(
             "Incident reporting is not enabled for this company — say so if asked "
             "about past incidents."
@@ -662,7 +697,65 @@ def build_hr_pilot_corpus(grounding: dict, reasoning_chains: list | None = None)
             f"Training detail is capped at {_MAX_TRAINING_DETAIL} rows per list — "
             "the per-program counts above are the complete figures."
         )
+    if len(_training.get("programs") or []) >= _MAX_TRAINING_PROGRAMS:
+        notes.append(
+            f"Only {_MAX_TRAINING_PROGRAMS} training programs are listed — there may "
+            "be more; do not treat the list as the company's full program set."
+        )
 
+    # Could-not-determine. Distinct from "off": the keys are absent entirely
+    # because the feature lookup itself failed, and reporting that as "you don't
+    # have this module" would tell a paying customer they lost a product.
+    if not grounding.get("features_known", True):
+        notes.append(
+            "Operational data (shifts, training, incidents) could not be loaded just "
+            "now — this is a temporary system issue, NOT a statement that the company "
+            "lacks those modules. If asked about them, say the data is briefly "
+            "unavailable and to try again shortly."
+        )
+
+    return {"sources": sources, "index": index, "notes": notes}
+
+
+# Source groups that describe OTHER PEOPLE rather than company policy. A
+# supervisor is entitled to them — knowing who is on shift and who is overdue on
+# training is the job. An employee is not: these name coworkers, their training
+# failures, and incidents at their site.
+_SUPERVISOR_ONLY_SOURCES = ("schedule", "training_status", "recent_incidents")
+
+
+def redact_for_employee(corpus: dict) -> dict:
+    """Strip supervisor-only source groups from a corpus. Pure.
+
+    Employee Ask HR (`routes/portal_ask_hr.py`) reuses this exact corpus by
+    design — same build, same cache, zero extra cost. That sharing is safe only
+    while every group is company-policy material. The Supervisor Copilot groups
+    are not: `schedule:` names who works when, `training:` names individuals who
+    have not completed a requirement, `incident:` describes site events. Serving
+    those to an employee turns "what's the PTO policy?" into a roster and a list
+    of coworkers' compliance failures.
+
+    Both the group AND its records' cids leave the index, so the citation gate
+    drops any attempt to cite them — the model cannot reference what it was
+    never shown, and could not smuggle a cid through if it guessed one."""
+    corpus = corpus or {}
+    sources = {
+        key: group for key, group in (corpus.get("sources") or {}).items()
+        if key not in _SUPERVISOR_ONLY_SOURCES
+    }
+    index = {
+        cid: rec for cid, rec in (corpus.get("index") or {}).items()
+        if rec.get("source") not in _SUPERVISOR_ONLY_SOURCES
+    }
+    # The dropped groups' notes ("shift scheduling is not enabled…") describe
+    # modules the employee was never going to be told about; keeping them would
+    # invite the model to volunteer that the company lacks scheduling.
+    notes = [
+        n for n in (corpus.get("notes") or [])
+        if not any(w in n for w in ("Shift scheduling", "Training records",
+                                    "Incident reporting", "shifts", "incidents",
+                                    "training programs", "Training detail"))
+    ]
     return {"sources": sources, "index": index, "notes": notes}
 
 

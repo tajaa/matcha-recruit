@@ -56,6 +56,11 @@ MAX_DIGEST_NAMES = 15
 _ONE_SHOT_KINDS = ("leave_return", "discipline_expiry", "discipline_review")
 
 
+class _AlreadyStamped(Exception):
+    """Raised inside the open-thread transaction when the ledger row already
+    exists, to roll back a thread a concurrent run already delivered."""
+
+
 # --------------------------------------------------------------------------- #
 # Pure helpers — no DB, unit-tested.
 # --------------------------------------------------------------------------- #
@@ -157,9 +162,15 @@ def build_discipline_briefing(row: dict, kind: str) -> tuple[str, str]:
     return title, "\n".join(body)
 
 
-def build_signature_digest_briefing(rows: list[dict], stale_days: int) -> tuple[str, str]:
-    """Digest for handbook/policy acknowledgements left unreturned."""
-    n = len(rows)
+def build_signature_digest_briefing(rows: list[dict], stale_days: int,
+                                    total: int | None = None) -> tuple[str, str]:
+    """Digest for handbook/policy acknowledgements left unreturned.
+
+    `total` is the true backlog size, which can exceed `len(rows)` when the
+    caller passes only the names it intends to list. Reporting `len(rows)` as
+    the count is how a company with 30 outstanding acknowledgements gets told it
+    has 4."""
+    n = total if total is not None else len(rows)
     title = f"{n} unreturned acknowledgement{'s' if n != 1 else ''}"
     body = [
         f"**{n}** handbook or policy acknowledgement{'s have' if n != 1 else ' has'} been "
@@ -253,10 +264,14 @@ async def _already_pushed(conn, company_id, trigger_kind: str, subject_id, today
 # Recipients + thread creation
 # --------------------------------------------------------------------------- #
 
-async def _company_client_users(conn, company_id) -> list:
+async def _company_client_users(conn, company_id, cache: dict | None = None) -> list:
     """Every active business-admin user for the company, oldest first.
 
-    Deterministic ORDER BY so `created_by` doesn't shuffle between runs."""
+    Deterministic ORDER BY so `created_by` doesn't shuffle between runs.
+    `cache` is a per-run dict: without it this is an N+1, re-running the same
+    join for every event in a company."""
+    if cache is not None and company_id in cache:
+        return cache[company_id]
     rows = await conn.fetch(
         """
         SELECT DISTINCT u.id, u.created_at
@@ -266,10 +281,13 @@ async def _company_client_users(conn, company_id) -> list:
         """,
         company_id,
     )
-    return [r["id"] for r in rows]
+    users = [r["id"] for r in rows]
+    if cache is not None:
+        cache[company_id] = users
+    return users
 
 
-async def _resolve_recipients(conn, company_id, employee_id) -> tuple:
+async def _resolve_recipients(conn, company_id, employee_id, cache: dict | None = None) -> tuple:
     """(owner_user_id, [notify_user_ids]).
 
     Prefers the employee's own manager, who is the person actually holding the
@@ -294,7 +312,7 @@ async def _resolve_recipients(conn, company_id, employee_id) -> tuple:
         except Exception:  # noqa: BLE001
             manager_user_id = None
 
-    clients = await _company_client_users(conn, company_id)
+    clients = await _company_client_users(conn, company_id, cache)
     if manager_user_id:
         notify = [manager_user_id] + [c for c in clients if c != manager_user_id]
         return manager_user_id, notify
@@ -346,23 +364,72 @@ async def _open_thread(conn, *, company_id, owner_user_id, notify_user_ids, titl
                 f"/work/{thread_id}",
                 json.dumps({"thread_id": str(thread_id), "trigger": trigger_kind}),
             )
-        await conn.execute(
+        stamped = await conn.fetchval(
             """
             INSERT INTO hr_proactive_push_log
                 (company_id, trigger_kind, subject_id, thread_id, sent_on)
             VALUES ($1, $2, $3, $4, $5)
             ON CONFLICT (company_id, trigger_kind, subject_id, sent_on) DO NOTHING
+            RETURNING id
             """,
             company_id, trigger_kind, subject_id, thread_id, today,
         )
+        if stamped is None:
+            # Another run beat us to this subject between our _already_pushed
+            # check and here. DO NOTHING would otherwise leave the thread and
+            # its notifications committed with no ledger row to suppress the
+            # next run — a duplicate thread every cycle. Roll the whole unit
+            # back instead; the winning run already delivered it.
+            raise _AlreadyStamped(trigger_kind, subject_id)
     return str(thread_id)
 
 
 # --------------------------------------------------------------------------- #
 # Sweeps
+#
+# Each sweep shares one `budget` (max_per_cycle) counting THREADS OPENED, not
+# rows scanned: a discipline row can fire two triggers, so a row-based cap would
+# let one sweep write twice its stated limit. Each event is also isolated — a
+# single bad row must not abort the run and strand every event behind it, which
+# a retry would then re-attempt in the same order, forever.
 # --------------------------------------------------------------------------- #
 
-async def _sweep_leave_returns(conn, enabled_companies, today, limit) -> dict:
+async def _deliver(conn, *, company_id, employee_id, trigger_kind, subject_id,
+                   title, body, today, budget, clients_cache) -> bool:
+    """Dedupe-check, resolve recipients, open the thread. Best-effort.
+
+    Returns True if a thread was opened. Every failure mode is contained here:
+    a row that raises is logged and skipped, and the sweep continues."""
+    if budget["remaining"] <= 0:
+        return False
+    try:
+        if await _already_pushed(conn, company_id, trigger_kind, subject_id, today):
+            return False
+        owner, notify = await _resolve_recipients(conn, company_id, employee_id, clients_cache)
+        if not owner:
+            return False
+        await _open_thread(
+            conn, company_id=company_id, owner_user_id=owner, notify_user_ids=notify,
+            title=title, body=body, trigger_kind=trigger_kind, subject_id=subject_id,
+            today=today,
+        )
+    except _AlreadyStamped:
+        # Concurrent run delivered it; its transaction rolled back cleanly.
+        return False
+    except Exception:  # noqa: BLE001
+        print(f"[HR Proactive Push] {trigger_kind} failed for subject {subject_id}")
+        return False
+    budget["remaining"] -= 1
+    return True
+
+
+async def _sweep_leave_returns(conn, enabled_companies, today, budget, clients_cache) -> dict:
+    """Employees returning from leave inside the lookahead window.
+
+    `NOT EXISTS` against the ledger lives in the SQL, not just in `_deliver`:
+    one-shot triggers keep matching the WHERE clause after they have been
+    pushed, so filtering them only in Python would let already-delivered rows
+    consume the whole LIMIT and starve everything behind them."""
     rows = await conn.fetch(
         """
         SELECT lr.id, lr.org_id AS company_id, lr.employee_id, lr.leave_type,
@@ -372,30 +439,31 @@ async def _sweep_leave_returns(conn, enabled_companies, today, limit) -> dict:
         JOIN employees e ON e.id = lr.employee_id
         WHERE lr.status IN ('approved', 'active')
           AND lr.actual_return_date IS NULL
+          AND e.termination_date IS NULL
           AND COALESCE(lr.expected_return_date, lr.end_date)
               BETWEEN $1 AND $1 + ($2 || ' days')::interval
           AND lr.org_id = ANY($3::uuid[])
+          AND NOT EXISTS (
+                SELECT 1 FROM hr_proactive_push_log l
+                WHERE l.trigger_kind = 'leave_return' AND l.subject_id = lr.id
+          )
         ORDER BY COALESCE(lr.expected_return_date, lr.end_date)
         LIMIT $4
         """,
-        today, str(LEAVE_LOOKAHEAD_DAYS), enabled_companies, limit,
+        today, str(LEAVE_LOOKAHEAD_DAYS), enabled_companies, budget["remaining"],
     )
     opened = 0
     for r in rows:
-        if await _already_pushed(conn, r["company_id"], "leave_return", r["id"], today):
-            continue
-        owner, notify = await _resolve_recipients(conn, r["company_id"], r["employee_id"])
-        if not owner:
-            continue
         title, body = build_leave_return_briefing(dict(r))
-        if await _open_thread(conn, company_id=r["company_id"], owner_user_id=owner,
-                              notify_user_ids=notify, title=title, body=body,
-                              trigger_kind="leave_return", subject_id=r["id"], today=today):
+        if await _deliver(conn, company_id=r["company_id"], employee_id=r["employee_id"],
+                          trigger_kind="leave_return", subject_id=r["id"],
+                          title=title, body=body, today=today,
+                          budget=budget, clients_cache=clients_cache):
             opened += 1
     return {"leave_returns_checked": len(rows), "leave_returns_opened": opened}
 
 
-async def _sweep_discipline(conn, enabled_companies, today, limit) -> dict:
+async def _sweep_discipline(conn, enabled_companies, today, budget, clients_cache) -> dict:
     horizon = today + timedelta(days=DISCIPLINE_LOOKAHEAD_DAYS)
     rows = await conn.fetch(
         """
@@ -406,65 +474,91 @@ async def _sweep_discipline(conn, enabled_companies, today, limit) -> dict:
         JOIN employees e ON e.id = pd.employee_id
         WHERE pd.status = 'active'
           AND pd.company_id = ANY($3::uuid[])
+          AND e.termination_date IS NULL
           AND (
                 (pd.expires_at IS NOT NULL AND pd.expires_at::date BETWEEN $1 AND $2)
              OR (pd.review_date IS NOT NULL AND pd.review_date::date BETWEEN $1 AND $2)
           )
+          AND NOT (
+                EXISTS (SELECT 1 FROM hr_proactive_push_log l
+                        WHERE l.trigger_kind = 'discipline_review' AND l.subject_id = pd.id)
+            AND EXISTS (SELECT 1 FROM hr_proactive_push_log l
+                        WHERE l.trigger_kind = 'discipline_expiry' AND l.subject_id = pd.id)
+          )
         ORDER BY COALESCE(pd.review_date::date, pd.expires_at::date)
         LIMIT $4
         """,
-        today, horizon, enabled_companies, limit,
+        today, horizon, enabled_companies, budget["remaining"],
     )
     opened = 0
     for r in rows:
         for kind in discipline_kinds_in_window(dict(r), today, horizon):
-            if await _already_pushed(conn, r["company_id"], kind, r["id"], today):
-                continue
-            owner, notify = await _resolve_recipients(conn, r["company_id"], r["employee_id"])
-            if not owner:
-                continue
             title, body = build_discipline_briefing(dict(r), kind)
-            if await _open_thread(conn, company_id=r["company_id"], owner_user_id=owner,
-                                  notify_user_ids=notify, title=title, body=body,
-                                  trigger_kind=kind, subject_id=r["id"], today=today):
+            if await _deliver(conn, company_id=r["company_id"], employee_id=r["employee_id"],
+                              trigger_kind=kind, subject_id=r["id"],
+                              title=title, body=body, today=today,
+                              budget=budget, clients_cache=clients_cache):
                 opened += 1
     return {"discipline_checked": len(rows), "discipline_opened": opened}
 
 
-async def _sweep_pending_signatures(conn, enabled_companies, today, limit) -> dict:
+async def _sweep_pending_signatures(conn, enabled_companies, today, budget,
+                                    clients_cache) -> dict:
+    """One digest per company with a signature backlog.
+
+    Aggregated in SQL rather than by LIMITing rows and grouping in Python: a row
+    cap truncates mid-company, so the digest would report "4 outstanding" for a
+    company that has 30, and companies sorting after the cutoff would get no
+    digest at all while their dedupe stayed cold. The count here is the true
+    count; only the NAMES are capped, and the briefing says so."""
     rows = await conn.fetch(
         """
-        SELECT ed.org_id AS company_id, ed.title, e.first_name, e.last_name
+        SELECT ed.org_id AS company_id,
+               -- COUNT is the true backlog size the briefing reports; the agg
+               -- only supplies the names it lists, and is sliced in Python to
+               -- MAX_DIGEST_NAMES before rendering.
+               COUNT(*) AS total,
+               json_agg(
+                    json_build_object(
+                        'first_name', e.first_name,
+                        'last_name', e.last_name,
+                        'title', ed.title
+                    ) ORDER BY ed.created_at
+               ) AS docs
         FROM employee_documents ed
         JOIN employees e ON e.id = ed.employee_id
         WHERE ed.status = 'pending_signature'
           AND ed.created_at < NOW() - ($1 || ' days')::interval
+          AND e.termination_date IS NULL
           AND ed.org_id = ANY($2::uuid[])
-        ORDER BY ed.org_id, ed.created_at
-        LIMIT $3
+          AND NOT EXISTS (
+                SELECT 1 FROM hr_proactive_push_log l
+                WHERE l.company_id = ed.org_id
+                  AND l.trigger_kind = 'pending_signatures'
+                  AND l.subject_id = ed.org_id
+                  AND l.sent_on > CURRENT_DATE - ($3 || ' days')::interval
+          )
+        GROUP BY ed.org_id
+        ORDER BY ed.org_id
+        LIMIT $4
         """,
-        str(SIGNATURE_STALE_DAYS), enabled_companies, limit,
+        str(SIGNATURE_STALE_DAYS), enabled_companies,
+        str(SIGNATURE_RENOTIFY_DAYS), budget["remaining"],
     )
-    by_company: dict = {}
-    for r in rows:
-        by_company.setdefault(r["company_id"], []).append(dict(r))
-
     opened = 0
-    for company_id, docs in by_company.items():
-        # subject_id is the company: this is one digest about a backlog, not a
-        # push about one document.
-        if await _already_pushed(conn, company_id, "pending_signatures", company_id, today):
-            continue
-        owner, notify = await _resolve_recipients(conn, company_id, None)
-        if not owner:
-            continue
-        title, body = build_signature_digest_briefing(docs, SIGNATURE_STALE_DAYS)
-        if await _open_thread(conn, company_id=company_id, owner_user_id=owner,
-                              notify_user_ids=notify, title=title, body=body,
-                              trigger_kind="pending_signatures", subject_id=company_id,
-                              today=today):
+    for r in rows:
+        docs = r["docs"]
+        if isinstance(docs, str):
+            docs = json.loads(docs)
+        title, body = build_signature_digest_briefing(
+            docs or [], SIGNATURE_STALE_DAYS, total=r["total"],
+        )
+        if await _deliver(conn, company_id=r["company_id"], employee_id=None,
+                          trigger_kind="pending_signatures", subject_id=r["company_id"],
+                          title=title, body=body, today=today,
+                          budget=budget, clients_cache=clients_cache):
             opened += 1
-    return {"signature_companies_checked": len(by_company), "signature_digests_opened": opened}
+    return {"signature_companies_checked": len(rows), "signature_digests_opened": opened}
 
 
 # --------------------------------------------------------------------------- #
@@ -501,10 +595,17 @@ async def _run_hr_proactive_push() -> dict:
         if not enabled:
             return {"skipped": True, "reason": "no_hr_pilot_companies"}
 
+        # One budget across all three sweeps, counting threads opened. Each
+        # sweep also uses the remaining budget as its LIMIT, so a run can never
+        # write more than max_per_cycle threads no matter how the events split.
+        budget = {"remaining": limit}
+        clients_cache: dict = {}
+
         result = {"hr_pilot_companies": len(enabled)}
-        result.update(await _sweep_leave_returns(conn, enabled, today, limit))
-        result.update(await _sweep_discipline(conn, enabled, today, limit))
-        result.update(await _sweep_pending_signatures(conn, enabled, today, limit))
+        result.update(await _sweep_leave_returns(conn, enabled, today, budget, clients_cache))
+        result.update(await _sweep_discipline(conn, enabled, today, budget, clients_cache))
+        result.update(await _sweep_pending_signatures(conn, enabled, today, budget, clients_cache))
+        result["threads_opened"] = limit - budget["remaining"]
         return result
     finally:
         await conn.close()

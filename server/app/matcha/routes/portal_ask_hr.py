@@ -167,8 +167,14 @@ async def chat(session_id: UUID, body: AskHrChatIn, employee=Depends(require_emp
         )
 
     # ---- Grounded answer -----------------------------------------------------
+    # Same corpus HR Pilot uses (one build, one cache) — but redacted. The
+    # supervisor-only groups name coworkers: who is on shift, who is overdue on
+    # a training, what happened at the site. An employee asking about PTO must
+    # not be able to pull those out, so they are removed from BOTH the prompt
+    # and the citation index before the turn runs.
+    from app.matcha.services.hr_pilot_corpus import redact_for_employee
     from app.matcha.services.matcha_work_mode_contexts import get_hr_pilot_corpus
-    corpus = await get_hr_pilot_corpus(company_id)
+    corpus = redact_for_employee(await get_hr_pilot_corpus(company_id))
     subject = {**employee, "job_title": job_title}
 
     async def _persist(payload: dict) -> None:
