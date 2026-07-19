@@ -4269,9 +4269,15 @@ class HandbookService:
                         skipped += 1
                         continue
 
-                    record = {"employee_id": employee["id"]}
+                    sign_token = secrets.token_urlsafe(32)
+                    record = {"employee_id": employee["id"], "sign_token": sign_token}
                     record.update(insertable)
                     cols = [col for col in record.keys() if col in columns]
+                    # Only advertise the public link if the column that stores it
+                    # actually exists (migration signdoc01 applied). Pre-migration
+                    # the token is filtered out of the INSERT above and stored NULL,
+                    # so emailing it would 404 — fall the email back to the portal.
+                    token_persisted = "sign_token" in cols
                     values = [record[col] for col in cols]
                     placeholders = ", ".join(f"${idx}" for idx in range(1, len(cols) + 1))
                     col_sql = ", ".join(cols)
@@ -4285,7 +4291,13 @@ class HandbookService:
                     )
                     if result == "INSERT 0 1":
                         assigned += 1
-                        notify_rows.append(dict(employee))
+                        # Carries the public sign link's token — no login required to
+                        # acknowledge — but only when it was actually persisted, so the
+                        # email can never link to a token the DB doesn't hold.
+                        notify_rows.append({
+                            **dict(employee),
+                            "sign_token": sign_token if token_persisted else None,
+                        })
                     else:
                         skipped += 1
 
@@ -4359,6 +4371,7 @@ class HandbookService:
                         to_name=name or None,
                         company_name=company_name or "Your employer",
                         handbook_title=handbook_title,
+                        sign_token=row.get("sign_token"),
                     )
                 except Exception as exc:  # one bad address must not stop the rest
                     logger.warning(

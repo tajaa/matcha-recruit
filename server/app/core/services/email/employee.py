@@ -282,16 +282,34 @@ Questions? Contact your HR administrator.
         to_name: Optional[str],
         company_name: str,
         handbook_title: str,
+        sign_token: Optional[str] = None,
     ) -> bool:
         """Tell an employee a handbook is waiting for their acknowledgement.
 
         Without this, a distributed handbook only surfaces on the employee's
         next portal login — which for most of the roster is never.
+
+        `sign_token` links straight to the public, no-login signature page
+        (`/sign-document/{token}`) so the recipient can acknowledge without
+        creating or logging into a portal account. Falls back to the portal
+        URL only for the rare case no token was minted (pre-migration rows).
         """
         import html as _html
 
         app_base_url = self.settings.app_base_url
-        portal_url = f"{app_base_url}/portal"
+        if sign_token:
+            sign_url = f"{app_base_url}/sign-document/{sign_token}"
+        else:
+            # No public token → the recipient must log into the portal to sign,
+            # i.e. the login-wall this flow exists to avoid. Only expected before
+            # migration signdoc01 is applied; log it so a persistent fallback is
+            # visible rather than a silent regression.
+            sign_url = f"{app_base_url}/portal"
+            logger.warning(
+                "Handbook acknowledgement email for %s has no sign_token; "
+                "falling back to portal login link.",
+                to_email,
+            )
         title_safe = _html.escape(handbook_title)
         html_content = f"""<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><style>
@@ -309,14 +327,14 @@ Questions? Contact your HR administrator.
     <h1>Please review and acknowledge</h1>
     <p>Hi {_html.escape(to_name or '')},</p>
     <p>{_html.escape(company_name)} has shared the <strong>{title_safe}</strong> with you.
-    Please read it and sign your acknowledgement in your employee portal.</p>
-    <p><a class="btn" href="{portal_url}">Review &amp; sign</a></p>
+    Please read it and sign your acknowledgement below — no account needed.</p>
+    <p><a class="btn" href="{sign_url}">Review &amp; sign</a></p>
     <div class="footer">If you have questions, reply to this email or contact your HR administrator.</div>
   </div>
 </body></html>"""
         text_content = (
             f"{company_name} has shared the {handbook_title} with you.\n\n"
-            f"Please read it and sign your acknowledgement: {portal_url}\n"
+            f"Please read it and sign your acknowledgement: {sign_url}\n"
         )
         return await self._send_with_fallback(
             to_email,

@@ -11,6 +11,7 @@ from .policies import router as policies_router
 from .handbooks import router as handbooks_router
 from .handbooks import public_router as handbooks_public_router
 from .public_signatures import router as public_signatures_router
+from .public_employee_documents import router as public_employee_documents_router
 from .compliance import (
     router as compliance_router,
     lite_router as compliance_lite_router,
@@ -63,6 +64,9 @@ core_router.include_router(handbooks_router, tags=["handbooks"],
 core_router.include_router(handbooks_public_router, prefix="/shared/handbook",
                            tags=["handbooks-public"])
 core_router.include_router(public_signatures_router, tags=["public-signatures"])
+# Public, no-login handbook/employee-document signature link — no auth, no
+# feature gate (the sign_token is the credential; see migration signdoc01).
+core_router.include_router(public_employee_documents_router, tags=["public-employee-documents"])
 # Lite-friendly subset (calendar, locations-read, alert read/dismiss) is mounted
 # with a broad gate — any of compliance / compliance_lite / incidents (matcha-lite's
 # paid flag) — so matcha-lite tenants can use the Compliance Calendar even though
@@ -125,6 +129,7 @@ __all__ = [
     "policies_router",
     "handbooks_router",
     "public_signatures_router",
+    "public_employee_documents_router",
     "compliance_router",
     "bulk_import_router",
     "chat_router",
