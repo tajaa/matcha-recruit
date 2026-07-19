@@ -127,6 +127,17 @@ DESIGN_KEYS: tuple[DesignKey, ...] = (
     DesignKey("layout", "minHeight", _LAYOUT_MINH, note="--cz-minh + cz-has-minh"),
     DesignKey("layout", "padTop", "text", note="_PAD_SCALE enum or padTopPx override"),
     DesignKey("layout", "padBottom", "text", note="_PAD_SCALE enum or padBottomPx override"),
+    # Per-breakpoint responsive overrides (tablet Md ≤1024, mobile Sm ≤640),
+    # emitted as a scoped <style> by render._responsive_layout_style. AI-settable
+    # for exactly the base layout keys that are AI-settable (padTop/padBottom/
+    # align); `columns` responsive is renderer+inspector-only, mirroring how base
+    # `columns` is renderer-only (not in the AI surface).
+    DesignKey("layout", "padTopMd", "text", note="responsive padding-top (tablet)"),
+    DesignKey("layout", "padTopSm", "text", note="responsive padding-top (mobile)"),
+    DesignKey("layout", "padBottomMd", "text", note="responsive padding-bottom (tablet)"),
+    DesignKey("layout", "padBottomSm", "text", note="responsive padding-bottom (mobile)"),
+    DesignKey("layout", "alignMd", _LAYOUT_ALIGN, note="responsive text-align (tablet)"),
+    DesignKey("layout", "alignSm", _LAYOUT_ALIGN, note="responsive text-align (mobile)"),
     # ── colors (self-contained: registry-driven emission) ──
     DesignKey("colors", "text", "color", render=RenderRule("hex", "--cz-text")),
     DesignKey("colors", "heading", "color", render=RenderRule("hex", "--cz-heading")),

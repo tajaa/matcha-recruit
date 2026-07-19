@@ -99,6 +99,23 @@ export function DesignInspector({ blockType, design, onChange }: { blockType?: s
                   <DNum label="Item gap (px)" value={Number(layout.gap) || 0} min={0} max={80} step={2} onChange={(v) => numPatch('layout', 'gap', v)} />
                 </div>
                 <p className="text-[10px] text-zinc-600">px overrides win over the presets above; 0 = use default.</p>
+                <div className="space-y-2 rounded-md border border-zinc-800/60 p-2">
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">Responsive overrides</p>
+                  {([['Md', 'Tablet ≤1024'], ['Sm', 'Mobile ≤640']] as const).map(([bp, label]) => (
+                    <div key={bp} className="space-y-1.5">
+                      <p className="text-[10px] text-zinc-500">{label}</p>
+                      <div className="grid grid-cols-2 gap-2">
+                        <DSelect label="Padding top" value={str(layout['padTop' + bp]) || 'default'} onChange={(v) => patch('layout', 'padTop' + bp, v)} options={padOpts} />
+                        <DSelect label="Padding bottom" value={str(layout['padBottom' + bp]) || 'default'} onChange={(v) => patch('layout', 'padBottom' + bp, v)} options={padOpts} />
+                        <DSelect label="Align" value={str(layout['align' + bp]) || 'default'} onChange={(v) => patch('layout', 'align' + bp, v)} options={[['default', 'Default'], ['left', 'Left'], ['center', 'Center']]} />
+                        {COLUMN_BLOCKS.has(blockType || '') && (
+                          <DNum label="Columns" value={Number(layout['columns' + bp]) || 0} min={0} max={6} onChange={(v) => numPatch('layout', 'columns' + bp, v)} />
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                  <p className="text-[10px] text-zinc-600">Default = inherit desktop. Mobile wins over tablet.</p>
+                </div>
               </section>
 
               <section className="space-y-2">

@@ -244,6 +244,42 @@ def _emit_design_group(group: str, values: dict, classes: list, cssvars: list) -
                 classes.append(rule.css_class)
 
 
+# Responsive layout: per-breakpoint overrides of the layout keys. `md` (tablet)
+# then `sm` (mobile) — sm is authored last so it wins where both max-widths match.
+_RESP_BREAKPOINTS = (("Md", "1024px"), ("Sm", "640px"))
+
+
+def _responsive_layout_style(layout: dict, cls: str) -> str:
+    """Per-breakpoint layout overrides as a scoped ``<style>`` — the responsive
+    layer over the base (desktop) layout emission.
+
+    The base layout emits inline CSS vars, and a stylesheet rule cannot override
+    an inline custom property, so every breakpoint declaration is ``!important``
+    and scoped to the section's own class ``cls`` (no global bleed). Section-level
+    keys (padding/align) are set as direct properties; ``columns`` is a
+    ``--cz-cols`` var override because it is consumed by the section's child grid.
+    Returns ``""`` when no ``*Md``/``*Sm`` key is present, so a non-responsive
+    section renders byte-identically to before this feature existed."""
+    blocks: list[str] = []
+    for suffix, mq in _RESP_BREAKPOINTS:
+        decls: list[str] = []
+        pt = _PAD_SCALE.get(layout.get("padTop" + suffix))
+        if pt is not None:
+            decls.append(f"padding-top:{pt}!important")
+        pb = _PAD_SCALE.get(layout.get("padBottom" + suffix))
+        if pb is not None:
+            decls.append(f"padding-bottom:{pb}!important")
+        al = layout.get("align" + suffix)
+        if al in ("left", "center"):
+            decls.append(f"text-align:{al}!important")
+        cols = _clampi(layout.get("columns" + suffix), 1, 6, 0)
+        if cols:
+            decls.append(f"--cz-cols:repeat({cols},minmax(0,1fr))!important")
+        if decls:
+            blocks.append(f"@media(max-width:{mq}){{.{cls}{{{';'.join(decls)}}}}}")
+    return f"<style>{''.join(blocks)}</style>" if blocks else ""
+
+
 def _apply_design(html_str: str, design: Any, *, block_index: Any = None, editable: bool = False) -> str:
     """Post-process a block's HTML: merge designer classes/attrs/style into its
     first <section> tag and inject background media layers. When `editable`, also
@@ -261,6 +297,7 @@ def _apply_design(html_str: str, design: Any, *, block_index: Any = None, editab
     attrs: list[str] = []
     cssvars: list[str] = []
     bg_media = ""
+    resp_style = ""  # scoped <style> for per-breakpoint layout overrides
 
     if has_design:
         motion = design.get("motion") if isinstance(design.get("motion"), dict) else {}
@@ -366,6 +403,17 @@ def _apply_design(html_str: str, design: Any, *, block_index: Any = None, editab
         align = layout.get("align")
         if align in ("left", "center"):
             classes.append(f"cz-al-{align}")
+        # ── responsive layout (opt-in per breakpoint; scoped <style>) ───────
+        # Base emission above is unchanged, so a section with no *Md/*Sm key is
+        # byte-identical; a responsive one gains a stable per-block scope class
+        # + an injected media-query style block. Needs the block index for the
+        # deterministic class, so skip if it wasn't provided.
+        if block_index is not None:
+            _rcls = f"cz-rb{int(block_index)}"
+            _resp = _responsive_layout_style(layout, _rcls)
+            if _resp:
+                classes.append(_rcls)
+                resp_style = _resp
 
         # ── per-section color overrides + type sizes (registry-driven) ──────
         # These two groups are self-contained (each key → a css-var, no coupling
@@ -418,8 +466,10 @@ def _apply_design(html_str: str, design: Any, *, block_index: Any = None, editab
     if attrs:
         new_attrs += " " + " ".join(attrs)
     open_tag = f"<section{new_attrs}>"
-    # Inject bg media as the section's first children (content .cz-wrap follows).
-    return html_str[:m.start()] + open_tag + bg_media + html_str[m.end():]
+    # Inject the responsive scoped <style> + bg media as the section's first
+    # children (content .cz-wrap follows). resp_style is "" unless a *Md/*Sm key
+    # was set, so non-responsive output is unchanged.
+    return html_str[:m.start()] + open_tag + resp_style + bg_media + html_str[m.end():]
 
 
 def _design_gradient(g: Any) -> str:

@@ -60,6 +60,13 @@ _EXPECTED_DESIGN_GROUPS = {
         "minHeight": frozenset({"default", "tall", "screen"}),
         "padTop": "text",
         "padBottom": "text",
+        # responsive (Phase 3) — AI-settable variants of the AI-settable base keys
+        "padTopMd": "text",
+        "padTopSm": "text",
+        "padBottomMd": "text",
+        "padBottomSm": "text",
+        "alignMd": frozenset({"default", "left", "center"}),
+        "alignSm": frozenset({"default", "left", "center"}),
     },
     "colors": {"heading": "color", "text": "color", "accent": "color"},
     "border": {"top": "bool", "bottom": "bool", "width": (0, 20), "color": "color"},
