@@ -665,6 +665,7 @@ async def send_message_stream(
             # company must not keep gating either.
             if thread.get("hr_pilot_mode") and (body.content or "").strip():
                 hr_pilot_active = True
+                hr_pilot_features: dict = {}
                 if MODES_BY_KEY["hr_pilot"].required_feature:
                     hr_pilot_features = await get_company_features(company_id)
                     hr_pilot_active = hr_pilot_features.get("hr_pilot", False)
@@ -675,21 +676,68 @@ async def send_message_stream(
                     )
                     verdict = classify_message(body.content)
                     if verdict.hard_stop:
-                        notice = verdict.notice or CORPORATE_HR_ESCALATION_NOTICE
-                        assistant_msg = await doc_svc.add_message(
-                            thread_id,
-                            "assistant",
-                            notice,
-                            metadata={
-                                "hr_pilot_escalation": {
-                                    "category": verdict.category,
-                                    "matched_terms": list(verdict.matched_terms),
-                                }
-                            },
+                        from app.matcha.services.hr_pilot_actions import should_stage_handoff
+                        _feats = hr_pilot_features if isinstance(hr_pilot_features, dict) else {}
+                        existing_action = (thread.get("current_state") or {}).get("hr_action")
+                        handoff_type = should_stage_handoff(existing_action, verdict.category, _feats)
+                        handoff_already_staged = (
+                            isinstance(existing_action, dict)
+                            and existing_action.get("type") in ("ir_report", "er_case")
+                            and existing_action.get("status") == "proposed"
                         )
+
+                        base_notice = verdict.notice or CORPORATE_HR_ESCALATION_NOTICE
+                        if handoff_type == "ir_report":
+                            notice = base_notice + (
+                                " If you'd like, I can log this as a formal incident report from your "
+                                "description so it's on record — reply \"confirm\" to file it, or \"cancel\" to skip."
+                            )
+                        elif handoff_type == "er_case":
+                            notice = base_notice + (
+                                " If you'd like, I can open a confidential HR case from your description so "
+                                "it's formally on record — reply \"confirm\" to file it, or \"cancel\" to skip."
+                            )
+                        elif handoff_already_staged:
+                            notice = base_notice + (
+                                " You already have a report staged from your earlier description — reply just "
+                                "\"confirm\" to file it, or \"cancel\" to discard it."
+                            )
+                        else:
+                            notice = base_notice
+
+                        _msg_meta = {
+                            "hr_pilot_escalation": {
+                                "category": verdict.category,
+                                "matched_terms": list(verdict.matched_terms),
+                            }
+                        }
+                        if handoff_type:
+                            _msg_meta["hr_pilot_handoff"] = {"type": handoff_type, "category": verdict.category}
+                        assistant_msg = await doc_svc.add_message(
+                            thread_id, "assistant", notice, metadata=_msg_meta,
+                        )
+
+                        # Dedupe the admin email: notify only on the FIRST open
+                        # escalation for this thread+category (before inserting this one).
+                        _esc_title = f"HR Pilot escalation: {verdict.category or 'policy'}"
+                        _notify_admins = False
+                        try:
+                            async with get_connection() as _dedupe_conn:
+                                _prior = await _dedupe_conn.fetchval(
+                                    """SELECT COUNT(*) FROM mw_escalated_queries
+                                       WHERE company_id = $1 AND thread_id = $2
+                                         AND ai_mode = 'hr_pilot_hard_stop' AND title = $3
+                                         AND status IN ('open','in_review')""",
+                                    company_id, thread_id, _esc_title,
+                                )
+                            _notify_admins = (_prior or 0) == 0
+                        except Exception:
+                            logger.warning("hr_pilot notify dedupe check failed for thread %s", thread_id)
+
+                        escalation_row = None
                         try:
                             from app.matcha.services.escalation_service import create_hr_pilot_escalation
-                            await create_hr_pilot_escalation(
+                            escalation_row = await create_hr_pilot_escalation(
                                 company_id=company_id,
                                 thread_id=thread_id,
                                 user_message_id=user_msg["id"],
@@ -703,6 +751,43 @@ async def send_message_stream(
                             logger.warning(
                                 "hr_pilot escalation log failed for thread %s", thread_id, exc_info=True
                             )
+
+                        # Stage the warm hand-off — server-authored, carries the
+                        # supervisor's real narrative + the source marker the
+                        # executor requires. Only the server can mint these.
+                        stage_state = thread["current_state"]
+                        stage_version = thread["version"]
+                        if handoff_type:
+                            try:
+                                staged = {
+                                    "type": handoff_type,
+                                    "status": "proposed",
+                                    "source": "hard_stop_handoff",
+                                    "narrative": body.content,
+                                    "category": verdict.category,
+                                    "escalation_id": str(escalation_row["id"]) if escalation_row else None,
+                                    "thread_id": str(thread_id),
+                                }
+                                _sres = await doc_svc.apply_update(thread_id, {"hr_action": staged})
+                                stage_state = _sres["current_state"]
+                                stage_version = _sres["version"]
+                            except Exception:
+                                logger.warning("hr_pilot hand-off staging failed for thread %s", thread_id, exc_info=True)
+
+                        if _notify_admins:
+                            try:
+                                from app.matcha.services.escalation_service import send_hr_pilot_hard_stop_notifications
+                                _track_background_task(asyncio.create_task(
+                                    send_hr_pilot_hard_stop_notifications(
+                                        company_id=company_id,
+                                        category=verdict.category,
+                                        thread_id=thread_id,
+                                        thread_title=thread.get("title"),
+                                    )
+                                ))
+                            except Exception:
+                                logger.warning("hr_pilot admin notify failed for thread %s", thread_id)
+
                         try:
                             from app.matcha.routes.work.thread_ws import thread_manager
                             _track_background_task(asyncio.create_task(
@@ -719,9 +804,9 @@ async def send_message_stream(
                         guard_response = SendMessageResponse(
                             user_message=_row_to_message(user_msg),
                             assistant_message=_row_to_message(assistant_msg),
-                            current_state=thread["current_state"],
-                            version=thread["version"],
-                            task_type=_infer_skill_from_state(thread["current_state"]),
+                            current_state=stage_state,
+                            version=stage_version,
+                            task_type=_infer_skill_from_state(stage_state),
                             pdf_url=None,
                             token_usage=None,
                         )
@@ -933,6 +1018,7 @@ async def send_message_stream(
                     pdf_url,
                     changed,
                     assistant_reply_text,
+                    post_events,
                 ) = await _apply_ai_updates_and_operations(
                     thread_id=thread_id,
                     company_id=company_id,
@@ -998,6 +1084,27 @@ async def send_message_stream(
                     version_created=current_version if changed else None,
                     metadata=msg_metadata,
                 )
+
+                # Deferred events from the dispatcher that need the persisted
+                # message id (HR Pilot compliance-block escalations — the message
+                # id doesn't exist inside _apply_ai_updates_and_operations).
+                for _evt in (post_events or []):
+                    if _evt.get("kind") == "hr_pilot_compliance_block":
+                        try:
+                            from app.matcha.services.escalation_service import (
+                                create_hr_pilot_compliance_escalation,
+                            )
+                            await create_hr_pilot_compliance_escalation(
+                                company_id=company_id,
+                                thread_id=thread_id,
+                                user_message_id=user_msg["id"],
+                                assistant_message_id=assistant_msg["id"],
+                                user_query=_evt.get("user_query") or body.content,
+                                notice=_evt.get("notice") or "",
+                                blocks=_evt.get("blocks") or [],
+                            )
+                        except Exception:
+                            logger.warning("hr_pilot compliance escalation failed for thread %s", thread_id, exc_info=True)
 
                 # Broadcast new messages to collaborators via WS — fire-and-forget so
                 # a CancelledError inside the lock doesn't kill the SSE generator before

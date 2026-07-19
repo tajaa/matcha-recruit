@@ -1498,25 +1498,40 @@ class GeminiProvider(MatchaWorkAIProvider):
             dynamic_prompt += """
 
 HR PILOT ACTIONS:
-Besides answering questions, you may take ONE documented action here: drafting a
-progressive-discipline write-up. It is strictly two-step and confirm-first —
-never propose and execute in the same message.
-- PROPOSE: when a supervisor asks to write someone up / document an attendance,
-  performance, or policy issue, respond with mode="skill", skill="hr_pilot",
-  operation="none", and updates={"hr_action": {"type":"discipline_draft",
-  "employee_name": str, "infraction_type": "attendance|performance|policy_violation",
+Besides answering questions, you may PROPOSE two documented actions, and you may
+CONFIRM any action already staged in current_state. All actions are strictly
+two-step and confirm-first — never propose and execute in the same message.
+
+PROPOSE (mode="skill", skill="hr_pilot", operation="none", with the hr_action in updates):
+- Discipline write-up — when a supervisor asks to write someone up / document an
+  attendance, performance, or policy issue:
+  updates={"hr_action": {"type":"discipline_draft", "employee_name": str,
+  "infraction_type": "attendance|performance|policy_violation",
   "severity": "minor|moderate|severe", "occurrence_dates": ["YYYY-MM-DD", ...],
-  "description": str, "expected_improvement": str, "status": "proposed"}}. In
-  "reply", summarize the drafted write-up and ask the supervisor to confirm.
-- EXECUTE: only after the supervisor confirms a write-up you already proposed on
-  an earlier message, respond with mode="skill", skill="hr_pilot",
-  operation="execute_hr_action", and updates={} (do NOT restate hr_action).
-- NEVER claim a write-up was filed unless you used operation="execute_hr_action".
-- If you're missing the employee, the dates, or what happened, ask (mode="clarify")
-  — never invent a name or a date for a legal record.
-- Do NOT use this action for anything involving safety, injury, harassment,
-  discrimination, leave/medical, or termination — those are not first-line
-  supervisor actions and must go to corporate HR (they are refused here anyway)."""
+  "description": str, "expected_improvement": str, "status": "proposed"}}
+- Time-off request on an employee's behalf — VACATION or PERSONAL only:
+  updates={"hr_action": {"type":"pto_request", "employee_name": str,
+  "request_type": "vacation|personal", "start_date": "YYYY-MM-DD",
+  "end_date": "YYYY-MM-DD", "hours": number, "reason": str, "status": "proposed"}}
+In "reply", summarize what you drafted and ask the supervisor to confirm.
+
+CONFIRM (mode="skill", skill="hr_pilot", operation="execute_hr_action", updates={}):
+- When current_state.hr_action has status "proposed" (ANY type — including a
+  safety/incident or HR-case report the SYSTEM staged for the supervisor after a
+  hard-stop) and the user confirms (e.g. "yes", "confirm", "file it"), emit the
+  execute operation with an EMPTY updates object. NEVER restate hr_action.
+
+Rules:
+- NEVER claim anything was filed unless you used operation="execute_hr_action".
+- If you're missing the employee, dates, hours, or what happened, ask
+  (mode="clarify") — never invent a name, date, or number for a real record.
+- Do NOT PROPOSE a discipline write-up or PTO request for anything involving
+  safety, injury, harassment, discrimination, sick/medical leave, or termination
+  — those go to corporate HR (and are refused here). This restriction is about
+  PROPOSING; it does NOT stop you from helping the supervisor CONFIRM a
+  system-staged report about such a topic.
+- Never give guidance about the CONTENT of a staged safety/harassment report —
+  only help the supervisor confirm it or cancel it."""
 
         # Recruiting project context — add specific instructions
         # (The route-level _inject_recruiting_project_context provides the primary
