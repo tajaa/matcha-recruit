@@ -266,6 +266,13 @@ def pay_equity_verdict(review: Optional[Dict[str, Any]]) -> Tuple[str, str]:
     gap = review.get("gap_pct")
     if gap is not None and float(gap) > 5 and not (review.get("remediation") or "").strip():
         return "non_compliant", f"pay-equity study shows a {float(gap):.1f}% unremediated gap"
+    if gap is None:
+        # A dispersion-only study satisfies the "have a current study" obligation, but
+        # says nothing about a protected-class gap — the thing the statute is about.
+        # Named here so this doesn't read as a clean bill of health, and so it doesn't
+        # contradict workforce_compliance.derive_pay_equity, which scores loud spread
+        # down on the same row.
+        return "compliant", "current pay-equity study on file (dispersion screen only — no measured gap)"
     return "compliant", "current pay-equity study on file"
 
 
@@ -398,7 +405,11 @@ async def _build_context(conn, company_id: UUID, features: Dict[str, Any]) -> Di
         ctx["locations"] = {
             r["id"]: r["state"]
             for r in await conn.fetch(
-                "SELECT id, state FROM business_locations WHERE company_id = $1", company_id,
+                # Active only — a deactivated location must not go on driving a
+                # per-location pay-transparency verdict. Mirrors the same filter in
+                # matcha/services/workforce_requirement_gate.
+                "SELECT id, state FROM business_locations "
+                "WHERE company_id = $1 AND COALESCE(is_active, true) = true", company_id,
             )
         }
         ctx["pay_transparency"] = {
