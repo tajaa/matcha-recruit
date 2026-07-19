@@ -132,6 +132,20 @@ _EASING = {
     "linear": "linear",
 }
 _OVERLAYS = {"light", "medium", "dark"}
+# Decorative lane (Phase 5). Filters/patterns are class-toggled CSS; dividers
+# are enum-keyed inline-SVG paths injected like bg_media (all values enum/clamp/
+# hex — nothing user-authored reaches the SVG sink).
+_IMG_FILTER_FX = {"mono", "warm", "cool", "soft", "punch"}
+_BG_PATTERNS = {"dots", "grid", "diagonal"}
+# Paths are authored for a TOP divider (shape hangs from the top edge, filled
+# with the neighbouring/page background); the bottom variant is scaleY-flipped
+# in CSS. viewBox is 0 0 1440 96, preserveAspectRatio=none stretches to fit.
+_DIVIDER_PATHS = {
+    "wave": "M0,0 L1440,0 L1440,40 C1200,88 960,8 720,48 C480,88 240,16 0,56 Z",
+    "slant": "M0,0 L1440,0 L1440,8 L0,88 Z",
+    "curve": "M0,0 L1440,0 L1440,48 Q720,120 0,48 Z",
+    "peaks": "M0,0 L1440,0 L1440,56 L1200,24 L960,64 L720,20 L480,60 L240,28 L0,56 Z",
+}
 
 # ── global style system (theme_config.style → extra :root vars) ─────────────
 # Each value is an enum-dict constant or a `_clampi` int emitted with a unit —
@@ -298,6 +312,7 @@ def _apply_design(html_str: str, design: Any, *, block_index: Any = None, editab
     cssvars: list[str] = []
     bg_media = ""
     resp_style = ""  # scoped <style> for per-breakpoint layout overrides
+    divider_html = ""  # injected SVG shape dividers (Phase 5c)
 
     if has_design:
         motion = design.get("motion") if isinstance(design.get("motion"), dict) else {}
@@ -307,6 +322,8 @@ def _apply_design(html_str: str, design: Any, *, block_index: Any = None, editab
         typ = design.get("type") if isinstance(design.get("type"), dict) else {}
         border = design.get("border") if isinstance(design.get("border"), dict) else {}
         anchor = design.get("anchor") if isinstance(design.get("anchor"), dict) else {}
+        image = design.get("image") if isinstance(design.get("image"), dict) else {}
+        divider = design.get("divider") if isinstance(design.get("divider"), dict) else {}
         classes.append("cz-design")
 
         # ── motion ──────────────────────────────────────────────────────────
@@ -370,6 +387,13 @@ def _apply_design(html_str: str, design: Any, *, block_index: Any = None, editab
             if blur:
                 cssvars.append(f"--cz-blur:{blur}px")
                 classes.append("cz-bg--blur")
+        # decorative pattern — independent of bg type (background-image layers
+        # over background-color, so it combines with a solid bg fill).
+        if bg.get("pattern") in _BG_PATTERNS:
+            classes.append(f"cz-pat-{bg['pattern']}")
+            pcol = _hexonly(bg.get("patternColor"))
+            if pcol:
+                cssvars.append(f"--cz-pat-col:{pcol}")
 
         # ── layout ──────────────────────────────────────────────────────────
         # Numeric px override wins over the enum step; -1 default distinguishes
@@ -423,6 +447,23 @@ def _apply_design(html_str: str, design: Any, *, block_index: Any = None, editab
         _emit_design_group("colors", colors, classes, cssvars)
         _emit_design_group("type", typ, classes, cssvars)
 
+        # ── image filter preset (curated CSS filter chains) ─────────────────
+        if image.get("filter") in _IMG_FILTER_FX:
+            classes.append(f"cz-imgf-{image['filter']}")
+
+        # ── shape dividers (enum-keyed inline SVG, injected like bg_media) ──
+        if divider.get("top") in _DIVIDER_PATHS or divider.get("bottom") in _DIVIDER_PATHS:
+            dh = _clampi(divider.get("height"), 20, 160, 64)
+            dcol = _hexonly(divider.get("color")) or "var(--bg)"
+            for edge in ("top", "bottom"):
+                shape = divider.get(edge)
+                if shape in _DIVIDER_PATHS:
+                    divider_html += (
+                        f'<div class="cz-div cz-div--{edge}" style="height:{dh}px" aria-hidden="true">'
+                        f'<svg viewBox="0 0 1440 96" preserveAspectRatio="none">'
+                        f'<path d="{_DIVIDER_PATHS[shape]}" style="fill:{dcol}"/></svg></div>'
+                    )
+
         # ── per-section border / divider ────────────────────────────────────
         if border.get("top") or border.get("bottom"):
             bw = _clampi(border.get("width"), 1, 8, 1)
@@ -466,10 +507,10 @@ def _apply_design(html_str: str, design: Any, *, block_index: Any = None, editab
     if attrs:
         new_attrs += " " + " ".join(attrs)
     open_tag = f"<section{new_attrs}>"
-    # Inject the responsive scoped <style> + bg media as the section's first
-    # children (content .cz-wrap follows). resp_style is "" unless a *Md/*Sm key
-    # was set, so non-responsive output is unchanged.
-    return html_str[:m.start()] + open_tag + resp_style + bg_media + html_str[m.end():]
+    # Inject the responsive scoped <style> + bg media + shape dividers as the
+    # section's first children (content .cz-wrap follows). Each is "" unless its
+    # keys were set, so untouched output is unchanged.
+    return html_str[:m.start()] + open_tag + resp_style + bg_media + divider_html + html_str[m.end():]
 
 
 def _design_gradient(g: Any) -> str:
@@ -962,8 +1003,26 @@ section{position:relative}
 .cz-bg>.cz-bg-ov.cz-ov-light{background:linear-gradient(180deg,rgba(0,0,0,.1),rgba(0,0,0,.3) 60%,rgba(0,0,0,.5))}
 .cz-bg>.cz-bg-ov.cz-ov-medium{background:linear-gradient(180deg,rgba(0,0,0,.28),rgba(0,0,0,.5) 55%,rgba(0,0,0,.72))}
 .cz-bg>.cz-bg-ov.cz-ov-dark{background:linear-gradient(180deg,rgba(0,0,0,.46),rgba(0,0,0,.62) 55%,rgba(0,0,0,.78))}
-.cz-bg>.cz-wrap,.cz-bg>.cz-narrow,.cz-bg>*:not(.cz-bg-media):not(.cz-bg-ov){position:relative;z-index:2}
+.cz-bg>.cz-wrap,.cz-bg>.cz-narrow,.cz-bg>*:not(.cz-bg-media):not(.cz-bg-ov):not(.cz-div){position:relative;z-index:2}
 .cz-bg--blur>.cz-bg-media{filter:blur(var(--cz-blur))}
+/* ── decorative lane (Phase 5): patterns, image filters, shape dividers ──── */
+/* patterns: background-image layers over background-color, so they combine
+   with a solid bg fill; placed after .cz-bg--* so the image layer wins. */
+.cz-pat-dots{background-image:radial-gradient(var(--cz-pat-col,color-mix(in srgb,var(--ink) 14%,transparent)) 1px,transparent 1.5px);background-size:22px 22px}
+.cz-pat-grid{background-image:linear-gradient(var(--cz-pat-col,color-mix(in srgb,var(--ink) 10%,transparent)) 1px,transparent 1px),linear-gradient(90deg,var(--cz-pat-col,color-mix(in srgb,var(--ink) 10%,transparent)) 1px,transparent 1px);background-size:44px 44px}
+.cz-pat-diagonal{background-image:repeating-linear-gradient(45deg,var(--cz-pat-col,color-mix(in srgb,var(--ink) 9%,transparent)) 0 1px,transparent 1px 16px)}
+/* image filter presets: applied to the section's bg media + content images */
+.cz-imgf-mono .cz-bg-media,.cz-imgf-mono img{filter:grayscale(1)}
+.cz-imgf-warm .cz-bg-media,.cz-imgf-warm img{filter:sepia(.28) saturate(1.18) contrast(1.02)}
+.cz-imgf-cool .cz-bg-media,.cz-imgf-cool img{filter:saturate(.85) hue-rotate(-12deg) brightness(1.03)}
+.cz-imgf-soft .cz-bg-media,.cz-imgf-soft img{filter:contrast(.92) brightness(1.06) saturate(.88)}
+.cz-imgf-punch .cz-bg-media,.cz-imgf-punch img{filter:contrast(1.12) saturate(1.28)}
+/* shape dividers: inline SVG anchored inside the section's own box, filled
+   with the neighbouring/page background (default var(--bg)); bottom flips. */
+.cz-div{position:absolute;left:0;right:0;z-index:1;pointer-events:none;line-height:0}
+.cz-div svg{display:block;width:100%;height:100%}
+.cz-div--top{top:0}
+.cz-div--bottom{bottom:0;transform:scaleY(-1)}
 .cz-kenburns>.cz-bg-media{animation:czKen 18s ease-in-out infinite alternate}
 @keyframes czKen{from{transform:scale(1)}to{transform:scale(1.12)}}
 /* motion reveal — gated by body.cz-motion.cz-js (runtime present + JS available) */

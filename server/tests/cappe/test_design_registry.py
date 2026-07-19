@@ -53,6 +53,9 @@ _EXPECTED_DESIGN_GROUPS = {
         "image": "text",
         "video": "text",
         "blur": "bool",
+        # decorative (Phase 5b)
+        "pattern": frozenset({"none", "dots", "grid", "diagonal"}),
+        "patternColor": "color",
     },
     "layout": {
         "align": frozenset({"default", "left", "center"}),
@@ -71,6 +74,14 @@ _EXPECTED_DESIGN_GROUPS = {
     "colors": {"heading": "color", "text": "color", "accent": "color"},
     "border": {"top": "bool", "bottom": "bool", "width": (0, 20), "color": "color"},
     "anchor": {"id": "text"},
+    # decorative lane (Phase 5a/5c)
+    "image": {"filter": frozenset({"none", "mono", "warm", "cool", "soft", "punch"})},
+    "divider": {
+        "top": frozenset({"none", "wave", "slant", "curve", "peaks"}),
+        "bottom": frozenset({"none", "wave", "slant", "curve", "peaks"}),
+        "height": (20, 160),
+        "color": "color",
+    },
 }
 
 

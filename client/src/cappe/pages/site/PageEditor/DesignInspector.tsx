@@ -18,6 +18,7 @@ export function DesignInspector({ blockType, design, onChange }: { blockType?: s
   const d = obj(design)
   const motion = obj(d.motion), bg = obj(d.bg), layout = obj(d.layout), colors = obj(d.colors)
   const type = obj(d.type), border = obj(d.border), anchor = obj(d.anchor)
+  const image = obj(d.image), divider = obj(d.divider)
   const fx = str(motion.effect) || 'none'
   const hover = str(motion.hover) || 'none'
   const loop = str(motion.loop) || 'none'
@@ -79,6 +80,28 @@ export function DesignInspector({ blockType, design, onChange }: { blockType?: s
                     <DNum label="Blur (px)" value={Number(bg.blur) || 0} min={0} max={40} onChange={(v) => patch('bg', 'blur', v)} />
                   </div>
                 )}
+                <div className="grid grid-cols-2 gap-2">
+                  <DSelect label="Pattern" value={str(bg.pattern) || 'none'} onChange={(v) => patch('bg', 'pattern', v)} options={[['none', 'None'], ['dots', 'Dots'], ['grid', 'Grid'], ['diagonal', 'Diagonal lines']]} />
+                  <DSelect label="Image filter" value={str(image.filter) || 'none'} onChange={(v) => patch('image', 'filter', v)} options={[['none', 'None'], ['mono', 'Mono'], ['warm', 'Warm'], ['cool', 'Cool'], ['soft', 'Soft'], ['punch', 'Punch']]} />
+                </div>
+                {str(bg.pattern) && str(bg.pattern) !== 'none' && (
+                  <DColor label="Pattern color" value={str(bg.patternColor)} onChange={(v) => patch('bg', 'patternColor', v)} />
+                )}
+              </section>
+
+              <section className="space-y-2">
+                <p className={dHead}>Dividers</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <DSelect label="Top shape" value={str(divider.top) || 'none'} onChange={(v) => patch('divider', 'top', v)} options={[['none', 'None'], ['wave', 'Wave'], ['slant', 'Slant'], ['curve', 'Curve'], ['peaks', 'Peaks']]} />
+                  <DSelect label="Bottom shape" value={str(divider.bottom) || 'none'} onChange={(v) => patch('divider', 'bottom', v)} options={[['none', 'None'], ['wave', 'Wave'], ['slant', 'Slant'], ['curve', 'Curve'], ['peaks', 'Peaks']]} />
+                </div>
+                {((str(divider.top) && str(divider.top) !== 'none') || (str(divider.bottom) && str(divider.bottom) !== 'none')) && (
+                  <div className="grid grid-cols-2 gap-2">
+                    <DNum label="Height (px)" value={Number(divider.height) || 64} min={20} max={160} step={4} onChange={(v) => patch('divider', 'height', v)} />
+                    <DColor label="Fill color" value={str(divider.color)} onChange={(v) => patch('divider', 'color', v)} />
+                  </div>
+                )}
+                <p className="text-[10px] text-zinc-600">Fill defaults to the page background — matches the neighboring section.</p>
               </section>
 
               <section className="space-y-2">

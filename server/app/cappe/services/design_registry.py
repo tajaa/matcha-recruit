@@ -47,6 +47,11 @@ _MOTION_LOOP = frozenset({"none", "float", "pulse", "sway", "breathe"})
 _MOTION_EASING = frozenset({"smooth", "gentle", "spring", "snappy", "linear"})
 _BG_TYPE = frozenset({"none", "color", "gradient", "image", "video"})
 _BG_OVERLAY = frozenset({"none", "light", "medium", "dark"})
+# Decorative lane (Phase 5): CSS-gradient pattern backgrounds, curated image
+# filter chains, and SVG shape dividers — all enum'd, no new value kinds.
+_BG_PATTERN = frozenset({"none", "dots", "grid", "diagonal"})
+_IMAGE_FILTER = frozenset({"none", "mono", "warm", "cool", "soft", "punch"})
+_DIVIDER_SHAPE = frozenset({"none", "wave", "slant", "curve", "peaks"})
 _LAYOUT_ALIGN = frozenset({"default", "left", "center"})
 _LAYOUT_MAXW = frozenset({"default", "narrow", "wide", "full"})
 _LAYOUT_MINH = frozenset({"default", "tall", "screen"})
@@ -121,6 +126,8 @@ DESIGN_KEYS: tuple[DesignKey, ...] = (
     DesignKey("bg", "image", "text"),
     DesignKey("bg", "video", "text"),
     DesignKey("bg", "blur", "bool", note="AI sees bool; renderer clamps 0-40"),
+    DesignKey("bg", "pattern", _BG_PATTERN, note="cz-pat-{v} CSS-gradient pattern; combines with bg color"),
+    DesignKey("bg", "patternColor", "color", note="--cz-pat-col (default: faded ink)"),
     # ── layout (bespoke: px-override sentinel, columns→repeat template) ──
     DesignKey("layout", "align", _LAYOUT_ALIGN, note="cz-al-{left|center}"),
     DesignKey("layout", "maxWidth", _LAYOUT_MAXW, note="--cz-maxw + cz-has-maxw"),
@@ -155,6 +162,13 @@ DESIGN_KEYS: tuple[DesignKey, ...] = (
     DesignKey("border", "color", "color"),
     # ── anchor (bespoke: id-collision guard on the section tag) ──
     DesignKey("anchor", "id", "text"),
+    # ── image (Phase 5a): curated filter chains over section images + bg media ──
+    DesignKey("image", "filter", _IMAGE_FILTER, note="cz-imgf-{v} filter chain"),
+    # ── divider (Phase 5c): SVG shape dividers injected like bg_media ──
+    DesignKey("divider", "top", _DIVIDER_SHAPE, note="top-edge shape, filled with `color`"),
+    DesignKey("divider", "bottom", _DIVIDER_SHAPE, note="bottom-edge shape (scaleY-flipped)"),
+    DesignKey("divider", "height", (20, 160), note="divider px height, default 64"),
+    DesignKey("divider", "color", "color", note="fill; default var(--bg) — the page background"),
 )
 
 # Groups whose emission `_apply_design` delegates to the registry (all keys in
