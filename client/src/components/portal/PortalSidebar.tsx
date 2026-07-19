@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router-dom'
-import { LayoutDashboard, CalendarClock } from 'lucide-react'
+import { LayoutDashboard, CalendarClock, MessageCircleQuestion } from 'lucide-react'
 import { useMe } from '../../hooks/useMe'
 import { resetAuthCaches } from '../../api/authReset'
 import { useState } from 'react'
@@ -14,6 +14,7 @@ interface NavItem {
 const NAV: NavItem[] = [
   { to: '/portal', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/portal/schedule', icon: CalendarClock, label: 'My Schedule', feature: 'employee_schedule' },
+  { to: '/portal/ask-hr', icon: MessageCircleQuestion, label: 'Ask HR', feature: 'ask_hr' },
 ]
 
 export default function PortalSidebar() {

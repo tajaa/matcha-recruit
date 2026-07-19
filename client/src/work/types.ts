@@ -454,6 +454,20 @@ export interface PayerAffectedStaff {
   payers: string[]
 }
 
+/** One HR Pilot corpus record the answer cited. Server-side audit guarantees
+ *  every entry here resolved against the corpus the prompt was built from. */
+export interface HrPilotCitation {
+  cid: string
+  ref: string
+  summary: string
+  when?: string
+  source?: string
+  source_label?: string
+  source_url?: string | null
+  category?: string
+  jurisdiction?: string
+}
+
 export interface MWMessageMetadata {
   compliance_reasoning?: ComplianceReasoningLocation[]
   ai_reasoning_steps?: AIReasoningStep[]
@@ -464,6 +478,9 @@ export interface MWMessageMetadata {
   compliance_gaps?: ComplianceGap[]
   threshold_status?: ThresholdStatus[]
   payer_affected_staff?: PayerAffectedStaff[]
+  /** HR Pilot cited answers — sources that resolved, and the ids that didn't. */
+  citations?: HrPilotCitation[]
+  dropped_citations?: string[]
 }
 
 export interface MWMessage {

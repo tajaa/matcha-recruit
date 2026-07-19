@@ -6,6 +6,7 @@ from .companies import router as companies_router
 from .interviews import router as interviews_router
 from .employees import router as employees_router, pto_admin_router, leave_admin_router
 from .employee_portal import router as employee_portal_router
+from .portal_ask_hr import router as portal_ask_hr_router
 from .employee_lifecycle import (
     accommodations_router,
     cobra_router,
@@ -97,6 +98,10 @@ matcha_router.include_router(pto_admin_router, prefix="/employees/pto", tags=["p
 matcha_router.include_router(leave_admin_router, prefix="/employees/leave", tags=["leave-admin"],
                              dependencies=[Depends(require_feature("time_off"))])
 matcha_router.include_router(employee_portal_router, prefix="/v1/portal", tags=["employee-portal"])
+# Employee "Ask HR" — grounded, citation-gated policy Q&A for employees. Mounted
+# under the portal prefix but gated separately (sold apart from the portal).
+matcha_router.include_router(portal_ask_hr_router, prefix="/v1/portal/ask-hr", tags=["ask-hr"],
+                             dependencies=[Depends(require_feature("ask_hr"))])
 matcha_router.include_router(onboarding_router, prefix="/onboarding", tags=["onboarding"])
 matcha_router.include_router(invitations_router, prefix="/invitations", tags=["invitations"])
 matcha_router.include_router(offer_letters_router, prefix="/offer-letters", tags=["offer-letters"],

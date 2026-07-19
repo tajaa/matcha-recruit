@@ -1033,8 +1033,50 @@ async def send_message_stream(
                     thread_hr_pilot_mode=hr_pilot_mode_active,
                 )
 
+                # HR Pilot citation gate. The corpus rendered into the prompt is
+                # the only thing the model may cite; anything else it brackets is
+                # invented and is stripped here, BEFORE the reply is persisted or
+                # broadcast — so no supervisor ever sees a fabricated source, and
+                # a stored message can't carry one either.
+                #
+                # This is the same corpus the prompt was built from (one cached
+                # build — see get_hr_pilot_corpus), so a cache expiry between
+                # prompt and gate can't reject every citation wholesale.
+                hr_pilot_citations: list[dict] = []
+                hr_pilot_dropped: list[str] = []
+                if hr_pilot_mode_active and assistant_reply_text:
+                    try:
+                        from app.matcha.services.hr_pilot_corpus import audit_citations
+                        from app.matcha.services.matcha_work_mode_contexts import (
+                            get_hr_pilot_corpus,
+                        )
+                        _corpus = await get_hr_pilot_corpus(company_id)
+                        (
+                            assistant_reply_text,
+                            hr_pilot_citations,
+                            hr_pilot_dropped,
+                        ) = audit_citations(assistant_reply_text, _corpus.get("index") or {})
+                        if hr_pilot_dropped:
+                            logger.warning(
+                                "hr_pilot: dropped %d uncorroborated citation(s) on thread %s: %s",
+                                len(hr_pilot_dropped), thread_id, hr_pilot_dropped[:10],
+                            )
+                    except Exception:
+                        # A failed audit must not swallow the turn — but it must
+                        # not pass unaudited citations off as audited either, so
+                        # the reply is emitted with no citation metadata at all.
+                        logger.exception("hr_pilot citation audit failed for thread %s", thread_id)
+                        hr_pilot_citations, hr_pilot_dropped = [], []
+
                 # Build metadata from compliance reasoning chains + payer sources
                 msg_metadata = _build_compliance_metadata(compliance_result, ai_resp)
+                if hr_pilot_citations or hr_pilot_dropped:
+                    if msg_metadata is None:
+                        msg_metadata = {}
+                    if hr_pilot_citations:
+                        msg_metadata["citations"] = hr_pilot_citations
+                    if hr_pilot_dropped:
+                        msg_metadata["dropped_citations"] = hr_pilot_dropped
                 if ai_resp and getattr(ai_resp, "attachments", None):
                     if msg_metadata is None:
                         msg_metadata = {}
