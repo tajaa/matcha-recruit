@@ -729,6 +729,33 @@ nothing from `_shared` (pulls the two `PRIVACY_CASE_*` constants straight from
 **Verification:** `venv` py_compile clean; **446 IR + copilot-smoke tests pass** (0 failures);
 app boots at **1858 routes, unchanged** before/after; `copilot`/`crud`/`osha` all import clean.
 
+### L6 — matcha_work_document sub-package (DONE, leaf extraction)
+`matcha/services/matcha_work_document.py` (2,786 lines) → package
+`matcha_work_document/`. The file became `__init__.py` (its relative imports
+converted to **absolute**, per the package convention, so the move is location-safe),
+and the four clean **leaf** concern groups were extracted into submodules:
+- `_coerce.py` — jsonb/date/bool/int/float coercion, email normalization, review-status shaping (18 defs)
+- `_storage.py` — company-scoped storage prefixes + asset-scope migration (8 defs)
+- `_email_html.py` — review-request / offer-letter email HTML renderers (3 defs)
+- `_tokens.py` — token-usage logging + quota + usage summary (5 defs)
+
+`__init__.py` (the coupled core: thread CRUD, profile/context, versioning, PDF
+generation, offer-letter + review-request workflow) drops 2786 → 2055 lines and
+**re-imports every extracted name**, so all 16 importers — which reference it as
+`doc_svc.X` — are untouched. The layering is one-way (leaves → core; `_email_html`
+and `_tokens` import from `_coerce`), no cycles. Three now-unused imports
+(`mimetypes`/`posixpath`/`urlparse`) were dropped from the core.
+
+**Deliberately stopped at the leaf boundary.** The remaining core (thread lifecycle
++ document generation + offer/review workflow) is densely coupled — offer-letter →
+PDF → storage → email chains — so carving it adds real risk to a product-critical
+service for diminishing return. That deeper split is a documented follow-up; the
+utility/business-logic boundary is the high-confidence, high-value cut and it's done.
+
+**Verification** (via `server/venv`): compile clean; **241 matcha_work tests pass**
+(same 7 pre-existing mock failures as baseline, at untouched lines); app boots at
+**1858 routes unchanged**; all 16 importer modules load.
+
 **NOT done — L2's HTML-builder dedup.** The `REGISTER_PDF_CSS` / `esc()` / `stat_cells()`
 consolidation (the ×8 `_esc()` redefinition and the shared register `<style>` block) is a
 cosmetic dedup of the HTML *builders*, not the render path — its verification is "render one

@@ -3,29 +3,68 @@ import asyncio
 import html
 import json
 import logging
-import mimetypes
-import posixpath
 import re
 import secrets
 import time
 from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Optional
-from urllib.parse import urlparse
 from uuid import UUID
 
-from ...database import get_connection
-from ...config import get_settings
-from ...core.services.compliance_service import codified_gate_sql, get_locations
-from ...core.services.email import EmailService
-from ...core.services.storage import get_storage
-from .matcha_work_modes import MODE_COLUMNS_SQL, MODES_BY_KEY
+from app.database import get_connection
+from app.config import get_settings
+from app.core.services.compliance_service import codified_gate_sql, get_locations
+from app.core.services.email import EmailService
+from app.core.services.storage import get_storage
+from app.matcha.services.matcha_work_modes import MODE_COLUMNS_SQL, MODES_BY_KEY
+
+# Leaf helpers extracted to submodules (L6). Re-imported so this module's own
+# code + external `doc_svc.X` callers keep working.
+from app.matcha.services.matcha_work_document._coerce import (  # noqa: F401
+    EMAIL_REGEX,
+    VALID_REVIEW_REQUEST_STATUSES,
+    _parse_jsonb,
+    _infer_skill_from_state,
+    _strip_markdown_text,
+    _extract_slide_bullets,
+    _build_workbook_presentation_state,
+    _parse_date_str,
+    _coerce_bool,
+    _coerce_int,
+    _coerce_float,
+    _coerce_datetime,
+    _normalize_email,
+    normalize_recipient_emails,
+    _coerce_state_recipient_emails,
+    _coerce_offer_draft_recipient_emails,
+    _row_to_review_request_status,
+    _build_review_request_state_update,
+)
+from app.matcha.services.matcha_work_document._storage import (  # noqa: F401
+    MATCHA_WORK_STORAGE_ROOT,
+    _should_enforce_company_scoped_matcha_work_storage,
+    build_matcha_work_thread_storage_prefix,
+    _storage_key_from_path,
+    _storage_path_has_prefix,
+    _storage_filename,
+    _migrate_matcha_work_asset_to_scope,
+    ensure_matcha_work_thread_storage_scope,
+)
+from app.matcha.services.matcha_work_document._email_html import (  # noqa: F401
+    _render_review_request_email_html,
+    _render_offer_letter_draft_email_html,
+    _build_offer_letter_payload,
+)
+from app.matcha.services.matcha_work_document._tokens import (  # noqa: F401
+    _DEFAULT_TOKEN_LIMIT,
+    _DEFAULT_WINDOW_HOURS,
+    log_token_usage_event,
+    check_token_quota,
+    get_token_usage_summary,
+)
 
 logger = logging.getLogger(__name__)
 
-EMAIL_REGEX = re.compile(r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b")
-VALID_REVIEW_REQUEST_STATUSES = {"pending", "sent", "failed", "submitted"}
-MATCHA_WORK_STORAGE_ROOT = "matcha-work"
 
 # TTL+LRU cache for company profiles — avoids re-fetching on every message.
 # Bounded size prevents unbounded growth on a long-running server. cachetools
@@ -37,621 +76,56 @@ _PROFILE_CACHE_MAX = 1000  # caps memory at ~companies × profile size
 _company_profile_cache: TTLCache = TTLCache(maxsize=_PROFILE_CACHE_MAX, ttl=_PROFILE_CACHE_TTL)
 
 
-def _should_enforce_company_scoped_matcha_work_storage() -> bool:
-    storage = get_storage()
-    return bool(storage.s3_client and storage.bucket)
-
-
-def build_matcha_work_thread_storage_prefix(company_id: UUID, thread_id: UUID, asset_kind: str) -> str:
-    return f"{MATCHA_WORK_STORAGE_ROOT}/companies/{company_id}/threads/{thread_id}/{asset_kind}"
-
-
-def _storage_key_from_path(path: Optional[str]) -> Optional[str]:
-    if not path or not isinstance(path, str):
-        return None
-
-    storage = get_storage()
-    if storage.cloudfront_domain:
-        cloudfront_prefix = f"https://{storage.cloudfront_domain}/"
-        if path.startswith(cloudfront_prefix):
-            return path[len(cloudfront_prefix):]
-
-    if path.startswith("s3://"):
-        parts = path[5:].split("/", 1)
-        return parts[1] if len(parts) > 1 else ""
-
-    return None
-
-
-def _storage_path_has_prefix(path: Optional[str], prefix: str) -> bool:
-    key = _storage_key_from_path(path)
-    return bool(key and key.startswith(f"{prefix}/"))
-
-
-def _storage_filename(path: Optional[str], default_filename: str) -> str:
-    key = _storage_key_from_path(path)
-    if key:
-        filename = posixpath.basename(key)
-        if filename:
-            return filename
-
-    if path:
-        filename = posixpath.basename(urlparse(path).path)
-        if filename:
-            return filename
-
-    return default_filename
-
-
-async def _migrate_matcha_work_asset_to_scope(
-    path: str,
-    *,
-    company_id: UUID,
-    thread_id: UUID,
-    asset_kind: str,
-    default_filename: str,
-) -> str:
-    if not _should_enforce_company_scoped_matcha_work_storage():
-        return path
-
-    expected_prefix = build_matcha_work_thread_storage_prefix(company_id, thread_id, asset_kind)
-    if _storage_path_has_prefix(path, expected_prefix):
-        return path
-
-    storage = get_storage()
-    if not storage.is_supported_storage_path(path):
-        return path
-
-    file_bytes = await storage.download_file(path)
-    filename = _storage_filename(path, default_filename)
-    content_type = mimetypes.guess_type(filename)[0]
-    scoped_path = await storage.upload_file(
-        file_bytes,
-        filename,
-        prefix=expected_prefix,
-        content_type=content_type,
-    )
-
-    if scoped_path != path:
-        try:
-            await storage.delete_file(path)
-        except Exception as exc:
-            logger.warning("Failed to delete legacy Matcha Work asset %s after migration: %s", path, exc)
-
-    return scoped_path
-
-
-async def ensure_matcha_work_thread_storage_scope(
-    thread_id: UUID,
-    company_id: UUID,
-    current_state: dict,
-) -> dict:
-    if not _should_enforce_company_scoped_matcha_work_storage():
-        return current_state
-    if not isinstance(current_state, dict) or not current_state:
-        return current_state
-
-    normalized_state = dict(current_state)
-    changed = False
-
-    top_level_cover = normalized_state.get("cover_image_url")
-    if isinstance(top_level_cover, str) and top_level_cover:
-        scoped_cover = await _migrate_matcha_work_asset_to_scope(
-            top_level_cover,
-            company_id=company_id,
-            thread_id=thread_id,
-            asset_kind="covers",
-            default_filename="cover.png",
-        )
-        if scoped_cover != top_level_cover:
-            normalized_state["cover_image_url"] = scoped_cover
-            changed = True
-
-    presentation = normalized_state.get("presentation")
-    if isinstance(presentation, dict):
-        normalized_presentation = dict(presentation)
-        presentation_cover = normalized_presentation.get("cover_image_url")
-        if isinstance(presentation_cover, str) and presentation_cover:
-            scoped_cover = await _migrate_matcha_work_asset_to_scope(
-                presentation_cover,
-                company_id=company_id,
-                thread_id=thread_id,
-                asset_kind="covers",
-                default_filename="cover.png",
-            )
-            if scoped_cover != presentation_cover:
-                normalized_presentation["cover_image_url"] = scoped_cover
-                normalized_state["presentation"] = normalized_presentation
-                changed = True
-
-    images = normalized_state.get("images")
-    if isinstance(images, list) and images:
-        scoped_images: list[str] = []
-        image_changed = False
-        for index, image_path in enumerate(images):
-            if not isinstance(image_path, str) or not image_path:
-                scoped_images.append(image_path)
-                continue
-            scoped_image = await _migrate_matcha_work_asset_to_scope(
-                image_path,
-                company_id=company_id,
-                thread_id=thread_id,
-                asset_kind="images",
-                default_filename=f"image-{index + 1}.jpg",
-            )
-            scoped_images.append(scoped_image)
-            image_changed = image_changed or scoped_image != image_path
-        if image_changed:
-            normalized_state["images"] = scoped_images
-            changed = True
-
-    if changed:
-        async with get_connection() as conn:
-            async with conn.transaction():
-                row = await conn.fetchrow(
-                    """
-                    SELECT current_state
-                    FROM mw_threads
-                    WHERE id=$1 AND company_id=$2
-                    FOR UPDATE
-                    """,
-                    thread_id,
-                    company_id,
-                )
-                if row is not None:
-                    latest_state = _parse_jsonb(row["current_state"])
-                    merged_state = dict(latest_state)
-
-                    if "cover_image_url" in normalized_state:
-                        merged_state["cover_image_url"] = normalized_state["cover_image_url"]
-                    if "images" in normalized_state:
-                        merged_state["images"] = normalized_state["images"]
-                    if isinstance(normalized_state.get("presentation"), dict):
-                        latest_presentation = latest_state.get("presentation")
-                        merged_presentation = dict(latest_presentation) if isinstance(latest_presentation, dict) else {}
-                        if "cover_image_url" in normalized_state["presentation"]:
-                            merged_presentation["cover_image_url"] = normalized_state["presentation"]["cover_image_url"]
-                        merged_state["presentation"] = merged_presentation
-
-                    await conn.execute(
-                        """
-                        UPDATE mw_threads
-                        SET current_state=$1
-                        WHERE id=$2 AND company_id=$3
-                        """,
-                        json.dumps(merged_state),
-                        thread_id,
-                        company_id,
-                    )
-                    normalized_state = merged_state
-
-    return normalized_state
-
-
-def _parse_jsonb(value) -> dict:
-    """Parse a JSONB value from asyncpg (may be str or dict)."""
-    if isinstance(value, str):
-        return json.loads(value)
-    if isinstance(value, dict):
-        return value
-    return {}
-
-
-def _infer_skill_from_state(current_state: dict) -> str:
-    """Infer the active skill from current_state contents."""
-    if not current_state:
-        return "chat"
-    if any(k in current_state for k in ("candidate_name", "position_title", "salary", "salary_range_min")):
-        return "offer_letter"
-    if any(k in current_state for k in ("overall_rating", "review_title", "review_request_statuses", "review_expected_responses")):
-        return "review"
-    if any(k.startswith("handbook_") for k in current_state):
-        return "handbook"
-    if any(k.startswith("policy_") for k in current_state):
-        return "policy"
-    if "sections" in current_state or "workbook_title" in current_state:
-        return "workbook"
-    if any(k in current_state for k in ("employees", "batch_status")):
-        return "onboarding"
-    if any(k in current_state for k in ("presentation_title", "slides")):
-        return "presentation"
-    return "chat"
-
-
-def _strip_markdown_text(value: str) -> str:
-    """Lightweight markdown stripping for slide bullet extraction."""
-    text = value or ""
-    text = re.sub(r"`{1,3}([^`]+)`{1,3}", r"\1", text)
-    text = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r"\1", text)
-    text = re.sub(r"^\s{0,3}#{1,6}\s*", "", text, flags=re.MULTILINE)
-    text = re.sub(r"\*\*([^*]+)\*\*", r"\1", text)
-    text = re.sub(r"\*([^*]+)\*", r"\1", text)
-    return text.strip()
-
-
-def _extract_slide_bullets(content: str, max_points: int = 5) -> list[str]:
-    cleaned = _strip_markdown_text(content)
-    if not cleaned:
-        return []
-
-    bullets: list[str] = []
-    for raw_line in cleaned.splitlines():
-        line = re.sub(r"^\s*(?:[-*•]+|\d+[.)])\s*", "", raw_line).strip()
-        if not line:
-            continue
-        if len(line) > 180:
-            line = line[:177].rstrip() + "..."
-        bullets.append(line)
-        if len(bullets) >= max_points:
-            break
-
-    if bullets:
-        return bullets
-
-    sentence_chunks = re.split(r"(?<=[.!?])\s+", cleaned)
-    for chunk in sentence_chunks:
-        line = chunk.strip()
-        if not line:
-            continue
-        if len(line) > 180:
-            line = line[:177].rstrip() + "..."
-        bullets.append(line)
-        if len(bullets) >= max_points:
-            break
-    return bullets
-
-
-def _build_workbook_presentation_state(state: dict) -> dict:
-    workbook_title = str(state.get("workbook_title") or "").strip() or "HR Workbook"
-    company_name = str(state.get("company_name") or "").strip()
-    objective = str(state.get("objective") or "").strip()
-    sections = state.get("sections")
-    if not isinstance(sections, list):
-        sections = []
-
-    slides: list[dict] = []
-    title_bullets = []
-    if company_name:
-        title_bullets.append(company_name)
-    if objective:
-        title_bullets.append(objective)
-    if not title_bullets:
-        title_bullets.append("Generated by Matcha Work")
-
-    slides.append(
-        {
-            "title": workbook_title,
-            "bullets": title_bullets,
-            "speaker_notes": "Opening context and presentation goals.",
-        }
-    )
-
-    agenda_titles = []
-    for section in sections:
-        if not isinstance(section, dict):
-            continue
-        section_title = str(section.get("title") or "").strip()
-        if section_title:
-            agenda_titles.append(section_title)
-
-    if agenda_titles:
-        slides.append(
-            {
-                "title": "Agenda",
-                "bullets": agenda_titles[:8],
-                "speaker_notes": "Walk through section flow.",
-            }
-        )
-
-    for section in sections:
-        if not isinstance(section, dict):
-            continue
-        section_title = str(section.get("title") or "").strip() or "Section"
-        content = str(section.get("content") or "").strip()
-        bullets = _extract_slide_bullets(content)
-        if not bullets:
-            continue
-        slides.append(
-            {
-                "title": section_title,
-                "bullets": bullets,
-                "speaker_notes": f"Discuss key points for {section_title.lower()}.",
-            }
-        )
-
-    if len(slides) == 1:
-        slides.append(
-            {
-                "title": "Key Points",
-                "bullets": [
-                    "Add workbook sections to generate richer slides.",
-                    "Use clear section headings and concise guidance.",
-                    "Regenerate after updating workbook content.",
-                ],
-                "speaker_notes": "Placeholder slide until workbook sections are available.",
-            }
-        )
-
-    slides.append(
-        {
-            "title": "Next Steps",
-            "bullets": [
-                "Confirm owners for each policy/process area.",
-                "Set rollout timeline and communication plan.",
-                "Track follow-up actions in Matcha Work.",
-            ],
-            "speaker_notes": "Close with implementation steps.",
-        }
-    )
-
-    generated_at = datetime.now(timezone.utc).isoformat()
-    presentation_title = f"{workbook_title} - Presentation"
-    presentation_subtitle = company_name or objective or None
-
-    return {
-        "title": presentation_title,
-        "subtitle": presentation_subtitle,
-        "generated_at": generated_at,
-        "slides": slides,
-        "slide_count": len(slides),
-    }
-
-
-def _parse_date_str(date_str: str) -> Optional[datetime]:
-    """Try common date formats."""
-    formats = [
-        "%Y-%m-%d",
-        "%B %d, %Y",
-        "%b %d, %Y",
-        "%m/%d/%Y",
-        "%Y-%m-%dT%H:%M:%S",
-        "%Y-%m-%dT%H:%M:%SZ",
-        "%Y-%m-%dT%H:%M:%S.%f",
-    ]
-    for fmt in formats:
-        try:
-            return datetime.strptime(date_str, fmt)
-        except ValueError:
-            continue
-    return None
-
-
-def _coerce_bool(value, default: bool = False) -> bool:
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)):
-        return bool(value)
-    if isinstance(value, str):
-        normalized = value.strip().lower()
-        if normalized in {"true", "1", "yes", "y"}:
-            return True
-        if normalized in {"false", "0", "no", "n", ""}:
-            return False
-    return default
-
-
-def _coerce_int(value) -> Optional[int]:
-    if value is None:
-        return None
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def _coerce_float(value) -> Optional[float]:
-    if value is None:
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def _coerce_datetime(value) -> Optional[datetime]:
-    if isinstance(value, datetime):
-        return value
-    if isinstance(value, str):
-        return _parse_date_str(value)
-    return None
-
-
-def _normalize_email(email: str) -> Optional[str]:
-    normalized = (email or "").strip().lower()
-    if not normalized:
-        return None
-    if not EMAIL_REGEX.fullmatch(normalized):
-        return None
-    return normalized
-
-
-def normalize_recipient_emails(values: list[str]) -> list[str]:
-    deduped: list[str] = []
-    seen: set[str] = set()
-    for raw in values:
-        email = _normalize_email(raw)
-        if not email or email in seen:
-            continue
-        seen.add(email)
-        deduped.append(email)
-    return deduped
-
-
-def _coerce_state_recipient_emails(state: dict) -> list[str]:
-    raw = state.get("recipient_emails")
-    if not isinstance(raw, list):
-        return []
-    return normalize_recipient_emails([str(item) for item in raw])
-
-
-def _coerce_offer_draft_recipient_emails(state: dict) -> list[str]:
-    values: list[str] = []
-    raw_recipients = state.get("recipient_emails")
-    if isinstance(raw_recipients, list):
-        values.extend(str(item) for item in raw_recipients if str(item).strip())
-    candidate_email = state.get("candidate_email")
-    if isinstance(candidate_email, str) and candidate_email.strip():
-        values.append(candidate_email)
-    return normalize_recipient_emails(values)
-
-
-def _row_to_review_request_status(row: dict) -> dict:
-    status = str(row.get("status") or "pending")
-    if status not in VALID_REVIEW_REQUEST_STATUSES:
-        status = "pending"
-    return {
-        "email": str(row.get("recipient_email") or "").strip().lower(),
-        "status": status,
-        "sent_at": row.get("sent_at"),
-        "submitted_at": row.get("submitted_at"),
-        "last_error": row.get("last_error"),
-    }
-
-
-def _build_review_request_state_update(status_rows: list[dict]) -> dict:
-    recipient_emails = [str(row.get("email") or "").strip().lower() for row in status_rows if row.get("email")]
-    expected = len(recipient_emails)
-    received = sum(1 for row in status_rows if row.get("status") == "submitted")
-    pending = max(expected - received, 0)
-
-    latest_sent_at = None
-    for row in status_rows:
-        sent_at = row.get("sent_at")
-        if isinstance(sent_at, datetime):
-            if latest_sent_at is None or sent_at > latest_sent_at:
-                latest_sent_at = sent_at
-
-    serialized_status_rows = []
-    for row in status_rows:
-        serialized_status_rows.append(
-            {
-                "email": row.get("email"),
-                "status": row.get("status"),
-                "sent_at": row.get("sent_at").isoformat() if isinstance(row.get("sent_at"), datetime) else None,
-                "submitted_at": (
-                    row.get("submitted_at").isoformat()
-                    if isinstance(row.get("submitted_at"), datetime)
-                    else None
-                ),
-                "last_error": row.get("last_error"),
-            }
-        )
-
-    return {
-        "recipient_emails": recipient_emails,
-        "review_request_statuses": serialized_status_rows,
-        "review_expected_responses": expected,
-        "review_received_responses": received,
-        "review_pending_responses": pending,
-        "review_last_sent_at": latest_sent_at.isoformat() if latest_sent_at else None,
-    }
-
-
-def _render_review_request_email_html(
-    review_title: str,
-    company_name: str,
-    response_url: str,
-    custom_message: Optional[str],
-) -> str:
-    escaped_title = html.escape(review_title.strip() or "Anonymous Performance Review")
-    escaped_company = html.escape(company_name.strip() or "Your HR Team")
-    message_block = (
-        f"<p>{html.escape(custom_message.strip())}</p>"
-        if custom_message and custom_message.strip()
-        else ""
-    )
-    return f"""
-<!DOCTYPE html>
-<html>
-  <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #111827; line-height: 1.5;">
-    <div style="max-width: 560px; margin: 0 auto; padding: 20px;">
-      <h2 style="margin: 0 0 12px;">Anonymous Review Request</h2>
-      <p style="margin: 0 0 12px;">{escaped_company} is requesting your feedback for: <strong>{escaped_title}</strong>.</p>
-      {message_block}
-      <p style="margin: 0 0 16px;">Use the secure link below to submit your review response:</p>
-      <p style="margin: 0 0 18px;">
-        <a href="{response_url}" style="display: inline-block; background: #16a34a; color: white; padding: 10px 16px; text-decoration: none; border-radius: 6px;">
-          Submit Anonymous Review
-        </a>
-      </p>
-      <p style="margin: 0; color: #6b7280; font-size: 12px;">
-        If the button does not work, open this link directly: {response_url}
-      </p>
-    </div>
-  </body>
-</html>
-"""
-
-
-def _render_offer_letter_draft_email_html(
-    *,
-    company_name: str,
-    candidate_name: str,
-    position_title: str,
-    custom_message: Optional[str],
-) -> str:
-    safe_company_name = html.escape(company_name.strip() or "Your HR Team")
-    safe_candidate_name = html.escape(candidate_name.strip() or "Candidate")
-    safe_position_title = html.escape(position_title.strip() or "Position")
-    message_block = (
-        f"<p>{html.escape(custom_message.strip())}</p>"
-        if custom_message and custom_message.strip()
-        else ""
-    )
-    return f"""
-<!DOCTYPE html>
-<html>
-  <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #111827; line-height: 1.5;">
-    <div style="max-width: 560px; margin: 0 auto; padding: 20px;">
-      <h2 style="margin: 0 0 12px;">Offer Letter Draft for Review</h2>
-      <p style="margin: 0 0 12px;">{safe_company_name} shared an offer letter draft for <strong>{safe_candidate_name}</strong> (<strong>{safe_position_title}</strong>).</p>
-      {message_block}
-      <p style="margin: 0 0 12px;">The draft PDF is attached to this email for your review.</p>
-      <p style="margin: 0; color: #6b7280; font-size: 12px;">
-        Sent from Matcha Work.
-      </p>
-    </div>
-  </body>
-</html>
-"""
-
-
-def _build_offer_letter_payload(state: dict, fallback_company_name: str) -> dict:
-    company_name = (state.get("company_name") or fallback_company_name or "").strip()
-    return {
-        "candidate_name": (state.get("candidate_name") or "").strip(),
-        "position_title": (state.get("position_title") or "").strip(),
-        "company_name": company_name,
-        "salary": state.get("salary"),
-        "bonus": state.get("bonus"),
-        "stock_options": state.get("stock_options"),
-        "start_date": _coerce_datetime(state.get("start_date")),
-        "employment_type": state.get("employment_type"),
-        "location": state.get("location"),
-        "benefits": state.get("benefits"),
-        "manager_name": state.get("manager_name"),
-        "manager_title": state.get("manager_title"),
-        "expiration_date": _coerce_datetime(state.get("expiration_date")),
-        "benefits_medical": _coerce_bool(state.get("benefits_medical"), False),
-        "benefits_medical_coverage": _coerce_int(state.get("benefits_medical_coverage")),
-        "benefits_medical_waiting_days": _coerce_int(state.get("benefits_medical_waiting_days")) or 0,
-        "benefits_dental": _coerce_bool(state.get("benefits_dental"), False),
-        "benefits_vision": _coerce_bool(state.get("benefits_vision"), False),
-        "benefits_401k": _coerce_bool(state.get("benefits_401k"), False),
-        "benefits_401k_match": state.get("benefits_401k_match"),
-        "benefits_wellness": state.get("benefits_wellness"),
-        "benefits_pto_vacation": _coerce_bool(state.get("benefits_pto_vacation"), False),
-        "benefits_pto_sick": _coerce_bool(state.get("benefits_pto_sick"), False),
-        "benefits_holidays": _coerce_bool(state.get("benefits_holidays"), False),
-        "benefits_other": state.get("benefits_other"),
-        "contingency_background_check": _coerce_bool(state.get("contingency_background_check"), False),
-        "contingency_credit_check": _coerce_bool(state.get("contingency_credit_check"), False),
-        "contingency_drug_screening": _coerce_bool(state.get("contingency_drug_screening"), False),
-        "company_logo_url": state.get("company_logo_url"),
-        "salary_range_min": _coerce_float(state.get("salary_range_min")),
-        "salary_range_max": _coerce_float(state.get("salary_range_max")),
-        "candidate_email": state.get("candidate_email"),
-    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 def invalidate_company_profile_cache(company_id: UUID) -> None:
@@ -1274,217 +748,12 @@ async def add_message(
         return dict(row)
 
 
-async def log_token_usage_event(
-    company_id: UUID,
-    user_id: UUID,
-    thread_id: UUID,
-    token_usage: Optional[dict],
-    operation: str = "send_message",
-    cost_dollars: float | None = None,
-) -> None:
-    if not token_usage:
-        return
-
-    model = str(token_usage.get("model") or "unknown").strip() or "unknown"
-    prompt_tokens = _coerce_int(token_usage.get("prompt_tokens"))
-    completion_tokens = _coerce_int(token_usage.get("completion_tokens"))
-    total_tokens = _coerce_int(token_usage.get("total_tokens"))
-    if total_tokens is None and (prompt_tokens is not None or completion_tokens is not None):
-        total_tokens = (prompt_tokens or 0) + (completion_tokens or 0)
-
-    estimated = _coerce_bool(token_usage.get("estimated"), False)
-
-    async with get_connection() as conn:
-        await conn.execute(
-            """
-            INSERT INTO mw_token_usage_events(
-                company_id, user_id, thread_id, model,
-                prompt_tokens, completion_tokens, total_tokens,
-                estimated, operation, cost_dollars
-            )
-            VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-            """,
-            company_id,
-            user_id,
-            thread_id,
-            model,
-            prompt_tokens,
-            completion_tokens,
-            total_tokens,
-            estimated,
-            operation,
-            cost_dollars,
-        )
 
 
-# Last-resort fallback if no mw_token_quotas row exists AND plan resolution
-# (incl. the entitlements_service import) fails — normally the per-plan defaults
-# in entitlements_service.PLAN_QUOTAS apply. Set to the FREE-tier budget so the
-# ultimate failure mode never grants a paid quota (fail closed). Keep in sync
-# with entitlements_service.PLAN_QUOTAS[PLAN_FREE].
-_DEFAULT_TOKEN_LIMIT = 25_000
-_DEFAULT_WINDOW_HOURS = 12
 
 
-async def check_token_quota(user_id: UUID, company_id: Optional[UUID] = None) -> dict:
-    """Check if the user is within their token quota.
-
-    Limit resolution: explicit mw_token_quotas row (user > company > global)
-    stays authoritative — admin grants keep working; otherwise the default
-    comes from the user's plan (free taste / lite / pro / business).
-
-    Returns dict with: allowed, used, limit, window_hours, resets_at
-    """
-    async with get_connection() as conn:
-        # Get quota: user-specific > company-level > global default
-        quota_row = await conn.fetchrow(
-            """
-            SELECT token_limit, window_hours FROM mw_token_quotas
-            WHERE is_active = true
-              AND (user_id = $1 OR user_id IS NULL)
-              AND (company_id = $2 OR company_id IS NULL)
-            ORDER BY user_id NULLS LAST, company_id NULLS LAST
-            LIMIT 1
-            """,
-            user_id, company_id,
-        )
-
-    if quota_row:
-        token_limit = quota_row["token_limit"]
-        window_hours = quota_row["window_hours"]
-    else:
-        # Plan-based default (resolved outside the connection block — the
-        # resolver opens its own connection; don't hold two pool slots).
-        # Fail CLOSED: if plan resolution throws, fall back to the FREE-tier
-        # quota, never the higher _DEFAULT_TOKEN_LIMIT — a transient resolver
-        # error must not hand a free user a paid budget.
-        try:
-            from . import entitlements_service
-
-            token_limit, window_hours = entitlements_service.PLAN_QUOTAS[
-                entitlements_service.PLAN_FREE
-            ]
-            plan = await entitlements_service.resolve_plan_for_user(user_id)
-            token_limit, window_hours = entitlements_service.PLAN_QUOTAS[plan]
-        except Exception:
-            token_limit, window_hours = _DEFAULT_TOKEN_LIMIT, _DEFAULT_WINDOW_HOURS
-            logger.warning(
-                "Plan quota resolution failed for user %s; using free-tier quota",
-                user_id,
-                exc_info=True,
-            )
-
-    async with get_connection() as conn:
-        # Sum tokens used within the window
-        row = await conn.fetchrow(
-            """
-            SELECT COALESCE(SUM(total_tokens), 0) AS used
-            FROM mw_token_usage_events
-            WHERE user_id = $1 AND created_at > NOW() - make_interval(hours => $2)
-            """,
-            user_id, window_hours,
-        )
-        used = int(row["used"])
-
-        # Calculate when the oldest usage in the window expires
-        oldest = await conn.fetchval(
-            """
-            SELECT MIN(created_at) FROM mw_token_usage_events
-            WHERE user_id = $1 AND created_at > NOW() - make_interval(hours => $2)
-            """,
-            user_id, window_hours,
-        )
-        from datetime import timedelta, timezone, datetime
-        if oldest:
-            resets_at = oldest + timedelta(hours=window_hours)
-        else:
-            resets_at = datetime.now(timezone.utc) + timedelta(hours=window_hours)
-
-    return {
-        "allowed": used < token_limit,
-        "used": used,
-        "limit": token_limit,
-        "window_hours": window_hours,
-        "remaining": max(0, token_limit - used),
-        "resets_at": resets_at.isoformat(),
-    }
 
 
-async def get_token_usage_summary(
-    company_id: UUID,
-    user_id: UUID,
-    period_days: int = 30,
-) -> dict:
-    async with get_connection() as conn:
-        by_model_rows = await conn.fetch(
-            """
-            SELECT
-                model,
-                COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
-                COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
-                COALESCE(SUM(total_tokens), 0) AS total_tokens,
-                COUNT(*) AS operation_count,
-                COUNT(*) FILTER (WHERE estimated) AS estimated_operations,
-                COALESCE(SUM(cost_dollars), 0) AS total_cost_dollars,
-                MIN(created_at) AS first_seen_at,
-                MAX(created_at) AS last_seen_at
-            FROM mw_token_usage_events
-            WHERE company_id=$1
-              AND user_id=$2
-              AND created_at >= NOW() - ($3::int * INTERVAL '1 day')
-            GROUP BY model
-            ORDER BY total_tokens DESC, model ASC
-            """,
-            company_id,
-            user_id,
-            period_days,
-        )
-
-        totals_row = await conn.fetchrow(
-            """
-            SELECT
-                COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
-                COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
-                COALESCE(SUM(total_tokens), 0) AS total_tokens,
-                COUNT(*) AS operation_count,
-                COUNT(*) FILTER (WHERE estimated) AS estimated_operations,
-                COALESCE(SUM(cost_dollars), 0) AS total_cost_dollars
-            FROM mw_token_usage_events
-            WHERE company_id=$1
-              AND user_id=$2
-              AND created_at >= NOW() - ($3::int * INTERVAL '1 day')
-            """,
-            company_id,
-            user_id,
-            period_days,
-        )
-
-    return {
-        "period_days": period_days,
-        "generated_at": datetime.now(timezone.utc),
-        "totals": {
-            "prompt_tokens": totals_row["prompt_tokens"] if totals_row else 0,
-            "completion_tokens": totals_row["completion_tokens"] if totals_row else 0,
-            "total_tokens": totals_row["total_tokens"] if totals_row else 0,
-            "operation_count": totals_row["operation_count"] if totals_row else 0,
-            "estimated_operations": totals_row["estimated_operations"] if totals_row else 0,
-            "total_cost_dollars": float(totals_row["total_cost_dollars"]) if totals_row else 0,
-        },
-        "by_model": [
-            {
-                "model": row["model"],
-                "prompt_tokens": row["prompt_tokens"],
-                "completion_tokens": row["completion_tokens"],
-                "total_tokens": row["total_tokens"],
-                "operation_count": row["operation_count"],
-                "estimated_operations": row["estimated_operations"],
-                "total_cost_dollars": float(row["total_cost_dollars"]),
-                "first_seen_at": row["first_seen_at"],
-                "last_seen_at": row["last_seen_at"],
-            }
-            for row in by_model_rows
-        ],
-    }
 
 
 async def apply_update(
@@ -1912,7 +1181,7 @@ async def generate_cover_image(
     try:
         from app.core.services.genai_client import get_genai_client
         from google.genai import types as _genai_types
-        from ...config import get_settings
+        from app.config import get_settings
         settings = get_settings()
         api_key = os.getenv("GEMINI_API_KEY") or settings.gemini_api_key
         if not api_key:
