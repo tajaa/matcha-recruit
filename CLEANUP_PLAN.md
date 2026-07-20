@@ -753,3 +753,22 @@ Second tranche of clean single-fetch migrations: `broker/BrokerPropertyPortfolio
   DefenseTab (not clean single-fetch).
 
 **Verification:** tsc clean, 154 tests pass, build clean.
+
+### C rollout — running total 30 migrations (2026-07-20, one session)
+Further tranches after the first 12 (each its own commit, all tsc + 154 tests + build clean):
+- risk-assessment {Anomalies,Benchmarks,CohortAnalysis,MonteCarlo}Panel, property/Property,
+  broker/client-detail/{LossRatioTab,EplTab}
+- admin/GapOverview, marketing/BlogComments, work/channels/JobPostingsPanel
+- broker/BrokerExternalClients, admin/jurisdiction/KeyIndexTab, profile/ProfileResumeSection,
+  ir/risk/IRIncidentTrendChart, broker/client-detail/LossTriangleTab, admin/Features
+- admin/jurisdiction/{IntegrityTab,KeyCoverageDrawer}
+
+**Skipped, each for a real reason** (the remaining pool is increasingly these): multi-fetch
+under Promise.all/allSettled (BrokerDashboard, ResidentCare, CompliancePostersTab, WerkLiteHome,
+RiskProfile, DefenseTab); parameterized `load(refresh)` that `reload()` can't express
+(OutreachDrawer); a `catch` that routes errors to other state (BrokerPipeline →
+`setNeedsTerms`); a shared `error` state spanning load + mutations, where useAsync would drop
+the load-error into a channel the UI doesn't show (HiringClientPickerModal, InviteManager);
+and fetch-then-populate-a-form effects (MatchaLitePricingPanel, MatchaXOnboardingWizard).
+The clean single-fetch quadruplet is largely exhausted; what's left needs the god-component /
+E2 hook-extraction pass, not a mechanical sweep.
