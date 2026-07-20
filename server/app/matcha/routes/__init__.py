@@ -51,6 +51,7 @@ from ...core.dependencies import require_admin
 # Create main Matcha router
 from .broker import (
     brokers_router,
+    broker_chat_router,
     broker_external_router,
     broker_insurance_router,
     broker_loss_runs_router,
@@ -58,6 +59,7 @@ from .broker import (
     broker_portfolio_router,
     broker_submission_router,
 )
+from .broker_chat_company import router as broker_chat_company_router
 from .insurance import (
     acord_router,
     coi_router,
@@ -154,6 +156,10 @@ matcha_router.include_router(broker_pilot_router, prefix="/broker", tags=["broke
 # Broker carrier hub — quote/present/bind + claims bridge + risk-to-rate (per-endpoint
 # require_broker / _pro; carrier data features capability-gated in coterie_service).
 matcha_router.include_router(broker_insurance_router, prefix="/broker", tags=["broker-insurance"])
+# Broker↔company chat — broker side (require_broker per-endpoint, no feature gate,
+# matching the other broker surfaces). Company side is mounted at /broker-chat below.
+matcha_router.include_router(broker_chat_router, prefix="/broker", tags=["broker-chat"])
+matcha_router.include_router(broker_chat_company_router, prefix="/broker-chat", tags=["broker-chat-company"])
 # Workforce Compliance — business-first EPL risk trackers (pay transparency, AI-audit, biometric).
 matcha_router.include_router(workforce_compliance_router, prefix="/workforce-compliance",
                              tags=["workforce-compliance"],
@@ -324,6 +330,8 @@ __all__ = [
     "dashboard_router",
     "accommodations_router",
     "brokers_router",
+    "broker_chat_router",
+    "broker_chat_company_router",
     "provisioning_router",
     "matcha_work_router",
     "matcha_work_public_router",

@@ -5,10 +5,12 @@ import {
   GraduationCap, TrendingUp, ClipboardList, ShieldAlert, MessagesSquare, Handshake, ShieldCheck, Gauge, HeartPulse, FileCheck, Car, Link2, Activity,
   Coins, FileSignature, CalendarClock,
 } from 'lucide-react'
+import { useEffect, useState } from 'react'
 import SidebarShell from './SidebarShell'
 import type { NavGroup, NavItem } from './SidebarShell'
 import { useMe } from '../../hooks/useMe'
 import { useSidebarBadges } from '../../hooks/useSidebarBadges'
+import { fetchCompanyBrokerChatSummary } from '../../api/broker-chat/brokerChat'
 
 const nav: (NavItem | NavGroup)[] = [
   { to: '/app', icon: LayoutDashboard, label: 'Dashboard' },
@@ -103,6 +105,40 @@ const personalNav: (NavItem | NavGroup)[] = [
 export default function ClientSidebar() {
   const { me, loading, isPersonal, hasFeature } = useMe()
   const { badges, markSeen } = useSidebarBadges()
+  // Broker chat is offered only when this company is actively linked to a broker
+  // (not a feature flag). Fetched once; the entry is injected into Communication.
+  const [brokerChat, setBrokerChat] = useState<{ show: boolean; unread: number }>({
+    show: false,
+    unread: 0,
+  })
+
+  useEffect(() => {
+    if (isPersonal) return
+    fetchCompanyBrokerChatSummary()
+      .then((s) => setBrokerChat({ show: s.has_active_broker, unread: s.unread }))
+      .catch(() => {})
+  }, [isPersonal])
+
+  function withBrokerChat(items: (NavItem | NavGroup)[]): (NavItem | NavGroup)[] {
+    if (!brokerChat.show) return items
+    return items.map((item) => {
+      if ('items' in item && item.label === 'Communication') {
+        return {
+          ...item,
+          items: [
+            ...item.items,
+            {
+              to: '/app/broker-chat',
+              icon: Handshake,
+              label: 'Broker Chat',
+              badge: brokerChat.unread || undefined,
+            } as NavItem,
+          ],
+        }
+      }
+      return item
+    })
+  }
 
   function filterByFeatures(items: (NavItem | NavGroup)[]): (NavItem | NavGroup)[] {
     const out: (NavItem | NavGroup)[] = []
@@ -150,7 +186,7 @@ export default function ClientSidebar() {
     <SidebarShell
       logoTo={isPersonal ? '/werk' : '/app'}
       logoLabel="Matcha"
-      nav={loading ? [] : isPersonal ? personalNav : withBadges(filterByFeatures(nav))}
+      nav={loading ? [] : isPersonal ? personalNav : withBadges(withBrokerChat(filterByFeatures(nav)))}
       user={footerName ? {
         name: footerName,
         avatarUrl: me?.user?.avatar_url,

@@ -5,6 +5,7 @@ parent ``routes/__init__.py``; this package only re-exports them under their his
 """
 
 from .brokers import router as brokers_router
+from .chat import router as broker_chat_router
 from .external import router as broker_external_router
 from .loss_runs import router as broker_loss_runs_router
 from .pilot import router as broker_pilot_router
@@ -14,6 +15,7 @@ from .insurance import router as broker_insurance_router
 
 __all__ = [
     "brokers_router",
+    "broker_chat_router",
     "broker_external_router",
     "broker_loss_runs_router",
     "broker_pilot_router",

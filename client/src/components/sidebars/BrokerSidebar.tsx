@@ -1,17 +1,20 @@
 import { useState, useEffect } from 'react'
-import { LayoutDashboard, Building2, Settings, Zap, Globe, Activity, Warehouse, Sparkles, ShieldCheck } from 'lucide-react'
+import { LayoutDashboard, Building2, Settings, Zap, Globe, Activity, Warehouse, Sparkles, ShieldCheck, MessageSquare } from 'lucide-react'
 import SidebarShell, { type NavItem } from './SidebarShell'
 import ThemeToggle from '../shared/ThemeToggle'
 import { fetchBrokerRiskAlerts } from '../../api/broker/broker'
+import { fetchBrokerChatUnread } from '../../api/broker/brokerChat'
 import { useMe } from '../../hooks/useMe'
 
 export default function BrokerSidebar() {
   const { me } = useMe()
   const isPro = me?.profile?.plan === 'pro'
   const [actionCount, setActionCount] = useState(0)
+  const [messageCount, setMessageCount] = useState(0)
 
   useEffect(() => {
-    fetchBrokerRiskAlerts().then((alerts) => setActionCount(alerts.active_unread))
+    fetchBrokerRiskAlerts().then((alerts) => setActionCount(alerts.active_unread)).catch(() => {})
+    fetchBrokerChatUnread().then((r) => setMessageCount(r.unread)).catch(() => {})
   }, [])
 
   const nav: NavItem[] = [
@@ -27,6 +30,7 @@ export default function BrokerSidebar() {
     ...(isPro ? [{ to: '/broker/pilot', icon: Sparkles, label: 'Broker Pilot' } as NavItem] : []),
     // Clients hub (onboarding · pipeline · seats · referrals) + Account hub (team · settings).
     { to: '/broker/clients', icon: Building2, label: 'Clients' },
+    { to: '/broker/messages', icon: MessageSquare, label: 'Messages', badge: messageCount },
     { to: '/broker/account', icon: Settings, label: 'Account' },
   ]
 

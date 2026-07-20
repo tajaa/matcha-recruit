@@ -7,6 +7,7 @@ import BrokerClientsHub from '../pages/broker/BrokerClientsHub'
 import BrokerAccount from '../pages/broker/BrokerAccount'
 import BrokerClientDetail from '../pages/broker/client-detail'
 import BrokerActionCenter from '../pages/broker/BrokerActionCenter'
+import BrokerMessages from '../pages/broker/BrokerMessages'
 import BrokerRiskCurve from '../pages/broker/BrokerRiskCurve'
 import BrokerPropertyPortfolio from '../pages/broker/BrokerPropertyPortfolio'
 import BrokerExternalClients from '../pages/broker/BrokerExternalClients'
@@ -37,6 +38,9 @@ export default function BrokerRoutes() {
         {/* Module 3 — Clients hub (tabbed: onboarding / pipeline / seats / referrals) */}
         <Route path="clients" element={<BrokerClientsHub />} />
         <Route path="clients/:companyId" element={<BrokerClientDetail />} />
+
+        {/* Client messaging — private broker↔company chat (flagged data, claims, docs) */}
+        <Route path="messages" element={<BrokerMessages />} />
 
         {/* Module 4 — Account hub (tabbed: team / settings) */}
         <Route path="account" element={<BrokerAccount />} />

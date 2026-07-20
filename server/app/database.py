@@ -4235,6 +4235,75 @@ async def init_db():
         await conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_broker_company_links_status ON broker_company_links(status)
         """)
+
+        # Broker↔company chat (migration brokerchat01). Private messaging between
+        # a broker and one of its linked client companies. Threads may anchor to a
+        # specific shared record (claim / loss run / document / incident).
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS broker_company_conversations (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                broker_id UUID NOT NULL REFERENCES brokers(id) ON DELETE CASCADE,
+                company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+                subject TEXT,
+                status VARCHAR(20) NOT NULL DEFAULT 'open'
+                    CHECK (status IN ('open', 'archived')),
+                reference_type VARCHAR(40),
+                reference_id UUID,
+                reference_label TEXT,
+                created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+                created_by_side VARCHAR(10) NOT NULL
+                    CHECK (created_by_side IN ('broker', 'company')),
+                last_message_at TIMESTAMPTZ,
+                last_message_preview TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_bc_conversations_broker
+            ON broker_company_conversations(broker_id, last_message_at DESC)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_bc_conversations_company
+            ON broker_company_conversations(company_id, last_message_at DESC)
+        """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS broker_company_messages (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                conversation_id UUID NOT NULL
+                    REFERENCES broker_company_conversations(id) ON DELETE CASCADE,
+                sender_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                sender_side VARCHAR(10) NOT NULL
+                    CHECK (sender_side IN ('broker', 'company')),
+                body TEXT NOT NULL,
+                reference_type VARCHAR(40),
+                reference_id UUID,
+                reference_label TEXT,
+                client_message_id UUID,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                edited_at TIMESTAMPTZ,
+                deleted_at TIMESTAMPTZ
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_bc_messages_conversation
+            ON broker_company_messages(conversation_id, created_at)
+        """)
+        await conn.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_bc_messages_sender_cmid
+            ON broker_company_messages(sender_user_id, client_message_id)
+            WHERE client_message_id IS NOT NULL
+        """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS broker_company_conversation_reads (
+                conversation_id UUID NOT NULL
+                    REFERENCES broker_company_conversations(id) ON DELETE CASCADE,
+                user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                last_read_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                last_read_message_id UUID,
+                PRIMARY KEY (conversation_id, user_id)
+            )
+        """)
         await conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_broker_company_links_broker_status ON broker_company_links(broker_id, status)
         """)
