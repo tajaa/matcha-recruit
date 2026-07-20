@@ -1,4 +1,5 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useMemo } from 'react'
+import { useAsync } from '../../../hooks/useAsync'
 import { Link } from 'react-router-dom'
 import { fetchKeyCoverage } from '../../../api/compliance/compliance'
 import type { CategoryKeyCoverage, RegulationKeyCoverage } from '../../../api/compliance/compliance'
@@ -54,20 +55,12 @@ function KeyRow({ k, expanded, onToggle }: { k: RegulationKeyCoverage; expanded:
 }
 
 export default function KeyIndexTab() {
-  const [data, setData] = useState<{ summary: any; by_category: CategoryKeyCoverage[] } | null>(null)
-  const [loading, setLoading] = useState(true)
+  const { data, loading } = useAsync(() => fetchKeyCoverage(), [], null)
   const [search, setSearch] = useState('')
   const [groupFilter, setGroupFilter] = useState<GroupFilter>('all')
   const [stalenessFilter, setStalenessFilter] = useState<StalenessFilter>('all')
   const [expandedKey, setExpandedKey] = useState<string | null>(null)
   const [collapsedCats, setCollapsedCats] = useState<Set<string>>(new Set())
-
-  useEffect(() => {
-    fetchKeyCoverage()
-      .then(setData)
-      .catch(() => {})
-      .finally(() => setLoading(false))
-  }, [])
 
   const filtered = useMemo(() => {
     if (!data) return []

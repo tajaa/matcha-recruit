@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
+import { useAsync } from '../../hooks/useAsync'
 import { FileText, Loader2, Trash2, Upload, Check } from 'lucide-react'
 import { getMyResume, uploadMyResume, deleteMyResume } from '../../api/profileResume'
 import type { ProfileResume } from '../../api/profileResume'
@@ -8,19 +9,11 @@ const MAX_BYTES = 10 * 1024 * 1024
 
 export default function ProfileResumeSection() {
   const fileRef = useRef<HTMLInputElement>(null)
-  const [resume, setResume] = useState<ProfileResume | null>(null)
-  const [loading, setLoading] = useState(true)
+  const { data: resume, loading, setData: setResume } = useAsync(() => getMyResume(), [], null)
   const [uploading, setUploading] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
-
-  useEffect(() => {
-    getMyResume()
-      .then((r) => setResume(r))
-      .catch(() => {})
-      .finally(() => setLoading(false))
-  }, [])
 
   async function handleFile(file: File) {
     const lower = file.name.toLowerCase()

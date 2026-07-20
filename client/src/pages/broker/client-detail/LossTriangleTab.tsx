@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useRef } from 'react'
+import { useAsync } from '../../../hooks/useAsync'
 import { Plus, FileDown, Loader2, Upload, Trash2 } from 'lucide-react'
 import { Card } from '../../../components/ui'
 import {
@@ -28,16 +29,9 @@ const TENANT_LOSS_DEV_API: LossDevApi = {
 }
 
 export function LossTriangleTab({ companyId, api = TENANT_LOSS_DEV_API }: { companyId: string; api?: LossDevApi }) {
-  const [dev, setDev] = useState<LossDevelopment | null>(null)
-  const [loading, setLoading] = useState(true)
+  const { data: dev, loading, setData: setDev } = useAsync(() => api.fetch(companyId), [companyId], null)
   const [dl, setDl] = useState(false)
   const [adding, setAdding] = useState(false)
-
-  function load() {
-    setLoading(true)
-    api.fetch(companyId).then(setDev).catch(() => setDev(null)).finally(() => setLoading(false))
-  }
-  useEffect(load, [companyId])
 
   if (loading) return <Loader2 className="h-5 w-5 text-zinc-500 animate-spin" />
   if (!dev) return <Card className="p-5"><p className="text-sm text-zinc-500">No loss-development data.</p></Card>
