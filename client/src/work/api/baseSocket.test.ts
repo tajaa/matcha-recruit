@@ -196,6 +196,55 @@ describe('BaseSocket', () => {
     expect(ws.sent.length).toBe(count)
   })
 
+  it('is idempotent: a second connect() does not orphan the open socket', () => {
+    // getSharedChannelSocket's comment always claimed this; the code never did,
+    // so a stray connect() left a live socket nobody read frames from.
+    const s = new TestSocket()
+    s.connect()
+    latest().open()
+    s.connect()
+    s.connect()
+    expect(FakeWebSocket.instances).toHaveLength(1)
+  })
+
+  it('a manual connect() cancels a scheduled reconnect instead of racing it', () => {
+    const s = new TestSocket()
+    s.connect()
+    latest().serverClose(1006) // arms a 3s retry
+    s.connect()                // supersedes it
+    expect(FakeWebSocket.instances).toHaveLength(2)
+    vi.advanceTimersByTime(10_000)
+    expect(FakeWebSocket.instances).toHaveLength(2) // the armed retry did not also fire
+  })
+
+  it('fans connect/disconnect out to every listener, and unsubscribes only its own', () => {
+    // The shared channel socket has three consumers; single-slot handlers meant
+    // the last one to mount silently replaced the others.
+    const s = new TestSocket()
+    const a: string[] = []
+    const offA = s.addConnectedListener(() => a.push('a'))
+    s.addConnectedListener(() => a.push('b'))
+    s.connect()
+    latest().open()
+    expect(a).toEqual(['a', 'b'])
+
+    offA()
+    latest().serverClose(1006)
+    vi.advanceTimersByTime(3000)
+    latest().open()
+    expect(a).toEqual(['a', 'b', 'b'])
+  })
+
+  it('a throwing listener does not stop the others', () => {
+    const s = new TestSocket()
+    const seen: string[] = []
+    s.addConnectedListener(() => { throw new Error('boom') })
+    s.addConnectedListener(() => seen.push('ran'))
+    s.connect()
+    expect(() => latest().open()).not.toThrow()
+    expect(seen).toEqual(['ran'])
+  })
+
   it('drops sends when the socket is not open', () => {
     const s = new TestSocket()
     s.connect()

@@ -19,7 +19,6 @@ const TYPE_ICONS: Record<string, typeof Bell> = {
   inbox_message: Mail,
 }
 
-
 export default function NotificationBell() {
   const navigate = useNavigate()
   const [open, setOpen] = useState(false)

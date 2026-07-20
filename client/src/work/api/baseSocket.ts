@@ -40,8 +40,33 @@ export abstract class BaseSocket {
   private _closed = false
   private _reconnectAttempts = 0
 
-  onConnected: (() => void) | null = null
-  onDisconnected: (() => void) | null = null
+  // Listener SETS, not single slots. The channel socket is a process-wide
+  // singleton shared by useChannelSocket, useChannelNotifications and
+  // useLiveKitCall; with one slot each, the last hook to mount silently
+  // clobbered the others' handler and nulled it on unmount. channelSocket had
+  // already learned this for messages (addMessageListener) — this is the same
+  // fix for the lifecycle callbacks.
+  private connectedListeners = new Set<() => void>()
+  private disconnectedListeners = new Set<() => void>()
+
+  /** Returns an unsubscribe function, so a hook's cleanup is one call. */
+  addConnectedListener(fn: () => void): () => void {
+    this.connectedListeners.add(fn)
+    return () => this.connectedListeners.delete(fn)
+  }
+
+  addDisconnectedListener(fn: () => void): () => void {
+    this.disconnectedListeners.add(fn)
+    return () => this.disconnectedListeners.delete(fn)
+  }
+
+  private _emit(listeners: Set<() => void>) {
+    // One throwing listener must not stop the others, and must not escape into
+    // the WebSocket event handler.
+    for (const fn of listeners) {
+      try { fn() } catch { /* isolated */ }
+    }
+  }
 
   get isOpen(): boolean {
     return this.ws?.readyState === WebSocket.OPEN
@@ -80,6 +105,20 @@ export abstract class BaseSocket {
 
   connect() {
     this._closed = false
+    // Genuinely idempotent, which getSharedChannelSocket's comment has always
+    // claimed and this has never done: without the guard a second connect()
+    // overwrote this.ws and orphaned a still-open socket that kept receiving
+    // frames nobody read. CONNECTING counts as in-flight — the open handler
+    // will fire.
+    if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
+      return
+    }
+    // A manual connect() supersedes a scheduled retry; leaving it armed builds
+    // a second socket a few seconds later.
+    if (this.reconnectTimeout) {
+      clearTimeout(this.reconnectTimeout)
+      this.reconnectTimeout = null
+    }
     const token = localStorage.getItem('matcha_access_token')
     if (!token) return
 
@@ -94,7 +133,7 @@ export abstract class BaseSocket {
 
     this.ws.onopen = () => {
       this._reconnectAttempts = 0
-      this.onConnected?.()
+      this._emit(this.connectedListeners)
       this._startPing()
       this.rejoin()
     }
@@ -115,7 +154,7 @@ export abstract class BaseSocket {
 
     this.ws.onclose = (event) => {
       this._stopPing()
-      this.onDisconnected?.()
+      this._emit(this.disconnectedListeners)
       if (this._closed) return
       // Don't reconnect with a token the server just rejected — try one refresh
       // and reconnect only if it produced a genuinely new one.

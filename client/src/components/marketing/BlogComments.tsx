@@ -1,5 +1,15 @@
 import { useEffect, useState } from 'react'
-import { relativeTime as formatRelative } from '../../utils/format'
+import { relativeTime, shortDateWithYear } from '../../utils/format'
+
+// Public page: an absolute date after a week (a dated comment is more useful
+// than "23d ago"), and echo an unparseable timestamp rather than rendering a
+// bare em dash to a visitor.
+const formatRelative = (iso: string) =>
+  relativeTime(iso, {
+    maxRelativeDays: 7,
+    absolute: shortDateWithYear,
+    onInvalid: (raw) => String(raw),
+  })
 import { api } from '../../api/client'
 
 const INK = 'var(--color-ivory-ink)'

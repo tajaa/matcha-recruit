@@ -32,7 +32,6 @@ const STATUS_BADGE: Record<string, 'warning' | 'neutral' | 'success' | 'danger'>
   dismissed: 'danger',
 }
 
-
 export default function EscalatedQueries() {
   const [tab, setTab] = useState<StatusTab>('all')
   const [items, setItems] = useState<EscalatedQuery[]>([])

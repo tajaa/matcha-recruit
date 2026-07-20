@@ -1,5 +1,10 @@
 import { useState, useEffect } from 'react'
-import { relativeTime } from '../../../utils/format'
+import { relativeTime as baseRelativeTime } from '../../../utils/format'
+
+// Analytics counts days indefinitely — "412d ago" is meaningful here because
+// the reader is comparing channel ages, not scanning a feed.
+const relativeTime = (iso: string) =>
+  baseRelativeTime(iso, { yesterdayLabel: 'yesterday', maxRelativeDays: Infinity })
 import { X, Users, DollarSign, MessageSquare, TrendingUp, Heart, AlertTriangle, UserMinus } from 'lucide-react'
 import { getChannelAnalytics } from '../../api/channels'
 import type { ChannelAnalytics as ChannelAnalyticsData } from '../../api/channels'
@@ -13,7 +18,6 @@ interface Props {
 function formatCents(cents: number): string {
   return `$${(cents / 100).toFixed(2)}`
 }
-
 
 export default function ChannelAnalytics({ channelId, channelName, onClose }: Props) {
   const [data, setData] = useState<ChannelAnalyticsData | null>(null)

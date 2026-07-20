@@ -1,5 +1,14 @@
 import { useEffect, useState, useCallback } from 'react'
-import { relativeTime } from '../../../utils/format'
+import { relativeTime as baseRelativeTime, shortDate } from '../../../utils/format'
+
+// Sentence-cased to match the surrounding labels, and a narrow absolute format
+// because this renders inside a dropdown.
+const relativeTime = (iso: string) =>
+  baseRelativeTime(iso, {
+    justNowLabel: 'Just now',
+    yesterdayLabel: 'Yesterday',
+    absolute: shortDate,
+  })
 import { useNavigate } from 'react-router-dom'
 import { Loader2, Bell } from 'lucide-react'
 import { api } from '../../../api/client'
@@ -42,7 +51,6 @@ const TYPE_LABEL: Record<string, { text: string; color: string }> = {
   job_application_received: { text: 'Application', color: 'bg-blue-900/30 text-blue-400 border-blue-800/40' },
   job_application_status_changed: { text: 'Status Update', color: 'bg-purple-900/30 text-purple-400 border-purple-800/40' },
 }
-
 
 export default function Notifications() {
   const navigate = useNavigate()

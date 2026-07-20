@@ -436,19 +436,35 @@ redirect) and no automated check in this repo covers them.
   rejoin. 742 LOC across three files → 413 + a 195-line base. **This normalized real drift**:
   only `channelSocket` answered the server's `server_ping` with a `pong`, so thread and project
   connections looked unresponsive to the server's liveness probe. Now in the base for all three.
-  Covered by `work/api/baseSocket.test.ts` (13 tests, fake WebSocket) — backoff schedule and
+  Covered by `work/api/baseSocket.test.ts` (17 tests, fake WebSocket) — backoff schedule and
   cap, backoff reset on clean open, no-reconnect on 4001/4003, rejoin-on-reconnect, leave-frame
   ordering, ping lifecycle, token-not-in-URL.
+  Two further fixes came out of review: `connect()` is now **genuinely idempotent** (it bails on
+  an OPEN/CONNECTING socket and cancels a pending retry) — `getSharedChannelSocket`'s comment had
+  claimed this for as long as it has existed while the code happily overwrote `this.ws` and
+  orphaned a still-open socket; and `onConnected`/`onDisconnected` became **listener sets**
+  (`addConnectedListener` returning an unsubscribe) rather than single slots. The channel socket
+  is a process-wide singleton shared by three hooks, so `socket.onConnected = fn` had the last
+  hook to mount silently clobber the others, and `= null` on unmount removed whichever handler
+  happened to be registered. `channelSocket` had already solved exactly this for messages with
+  `addMessageListener`; lifting the single-slot version into the base generalized the wrong one
+  of the two patterns.
 - **H3 / H4 / H5 not started** — mechanical but large; H3 extends D4's tranche system, which is
   itself only 2 of 10 done.
 
 ### Phase I — I2 + I3 done
-- **I2** new `utils/format.ts` (`relativeTime`, `formatMoney`, `formatBytes`) + 13 tests; the 10
-  local relative-time copies migrated. **Not just dedup — the copies had diverged**:
+- **I2** new `utils/format.ts` (`relativeTime`, `formatMoney`, `formatBytes`) + 21 tests; the 10
+  local relative-time copies migrated. Some of what looked like duplication was genuine drift —
   `components/dashboard/FlagsTable.tsx` never rolled over past hours, so a 30-day-old flag read
-  "720h ago", and several never fell back to an absolute date ("412d ago"). The shared version
-  rolls over and falls back past 30 days, and clamps future timestamps to "just now" instead of
-  rendering a negative count on ordinary clock skew.
+  "720h ago". **But some of it was not drift, and the first version of this change wrongly
+  flattened it** (caught in review): an inbox list rendered '' for a conversation with no
+  messages and jumped straight to a bare "Mar 5", a notification dropdown used a sentence-cased
+  "Just now" and a narrow absolute format, channel analytics counted days forever, blog comments
+  went absolute after 7 days and echoed an unparseable timestamp rather than showing a visitor an
+  em dash. Those are per-surface presentation decisions, not accidents.
+  So `relativeTime` takes named options (`empty`, `justNowLabel`, `yesterdayLabel`,
+  `maxRelativeDays`, `absolute`, `onInvalid`) — every one of which exists because a real call
+  site needed it — and each has its own test. Defaults match what the majority of sites did.
 - **I3** new `components/ui/badgeMaps.ts` (severity/priority/confidence/determination); the
   ER panels' local copies removed. Domain-specific status maps stay put — same shape, different
   meaning. `ERTimelinePanel`'s `confidenceVariant` keeps its own map: it maps low → `danger`

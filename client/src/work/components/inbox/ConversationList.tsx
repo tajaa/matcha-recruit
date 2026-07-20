@@ -1,5 +1,16 @@
 import { useState } from 'react'
-import { relativeTime } from '../../../utils/format'
+import { relativeTime, shortDate } from '../../../utils/format'
+
+// Inbox list timestamps: blank (not an em dash) for a conversation with no
+// messages yet, and a bare date rather than a day count once it's older than
+// yesterday — the column is narrow and "Mar 5" reads faster than "12d ago".
+const CONVO_TIME = {
+  empty: '',
+  justNowLabel: 'Just now',
+  yesterdayLabel: 'Yesterday',
+  maxRelativeDays: 1,
+  absolute: shortDate,
+} as const
 import { Search, Plus, Menu } from 'lucide-react'
 import type { ConversationSummary } from '../../api/inbox'
 import Avatar from '../../../components/shared/Avatar'
@@ -12,7 +23,6 @@ type Props = {
   onCompose: () => void
   onMenuToggle?: () => void
 }
-
 
 function displayName(convo: ConversationSummary, currentUserId: string): string {
   if (convo.title) return convo.title
@@ -120,7 +130,7 @@ export function ConversationList({ conversations, selectedId, currentUserId, onS
                       {displayName(convo, currentUserId)}
                     </span>
                     <span className="text-xs text-zinc-500 shrink-0">
-                      {relativeTime(convo.last_message_at)}
+                      {relativeTime(convo.last_message_at, CONVO_TIME)}
                     </span>
                   </div>
 
