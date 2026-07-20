@@ -54,7 +54,7 @@ client/src/
 │   │                        instance: ErrorBoundary, FeatureGate, UpgradeUpsellCard,
 │   │                        ThemeToggle, RouteTracker, Avatar, HelpAssistant
 │   ├── widgets/             Content widgets a page drops into its own body:
-│   │                        AiSuggest, NoteThread, PinButton, PinnedResourcesPanel
+│   │                        AiSuggest, NoteThread, PinButton
 │   ├── marketing/           Public widgets: BlogComments, NewsletterSignup, PricingContactModal
 │   ├── ir/ compliance/ employees/ dashboard/ handbook/ broker/ er/ discipline/
 │   │   matcha-x/ …          domain modules; onboarding flows live in <domain>/onboarding/
