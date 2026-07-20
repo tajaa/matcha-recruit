@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef } from 'react'
-import { api, authStreamHeaders } from '../../api/client'
+import { api } from '../../api/client'
+import { postSSE } from '../../api/sse'
 import { Badge, Button } from '../ui'
 import type { SimilarCasesAnalysis, SimilarCaseMatch } from '../../types/er'
 import { categoryLabel, outcomeLabel, statusLabel } from '../../types/er'
 
-const BASE = import.meta.env.VITE_API_URL ?? '/api'
 
 type Props = { caseId: string }
 
@@ -23,48 +23,25 @@ export function ERSimilarCasesPanel({ caseId }: Props) {
     const ctrl = new AbortController()
     abortRef.current = ctrl
 
-    const url = `${BASE}/er/cases/${caseId}/analysis/similar-cases${refresh ? '?refresh=true' : ''}`
-
-    authStreamHeaders({ 'Content-Type': 'application/json' }).then((headers) =>
-      fetch(url, {
-        method: 'POST',
-        headers,
-        signal: ctrl.signal,
-      }),
+    postSSE(
+      `/er/cases/${caseId}/analysis/similar-cases${refresh ? '?refresh=true' : ''}`,
+      undefined,
+      (raw) => {
+        const msg = raw as { type?: string; message?: string; result?: SimilarCasesAnalysis }
+        if (msg.type === 'phase') setPhase(msg.message ?? '')
+        if (msg.type === 'complete' || msg.type === 'cached') {
+          setData(msg.result ?? null)
+          return true
+        }
+      },
+      { signal: ctrl.signal },
     )
-      .then(async (res) => {
-        if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
-        const reader = res.body?.getReader()
-        if (!reader) throw new Error('No response body')
-        const decoder = new TextDecoder()
-        let buf = ''
-
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
-          buf += decoder.decode(value, { stream: true })
-
-          const lines = buf.split('\n')
-          buf = lines.pop() ?? ''
-
-          for (const line of lines) {
-            if (!line.startsWith('data: ')) continue
-            const raw = line.slice(6).trim()
-            if (raw === '[DONE]') { setLoading(false); return }
-            try {
-              const msg = JSON.parse(raw)
-              if (msg.type === 'phase') setPhase(msg.message ?? '')
-              if (msg.type === 'complete' || msg.type === 'cached') { setData(msg.result); setLoading(false); return }
-            } catch { /* skip malformed */ }
-          }
-        }
-        setLoading(false)
-      })
       .catch((e) => {
-        if (e.name !== 'AbortError') {
-          setError(e instanceof Error ? e.message : 'Failed to find similar cases')
-          setLoading(false)
-        }
+        if (ctrl.signal.aborted) return
+        setError(e instanceof Error ? e.message : 'Failed to find similar cases')
+      })
+      .finally(() => {
+        if (!ctrl.signal.aborted) setLoading(false)
       })
   }
 

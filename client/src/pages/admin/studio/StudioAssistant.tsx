@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Loader2, Send, X } from 'lucide-react'
-import { authStreamHeaders } from '../../../api/client'
+import { postSSE } from '../../../api/sse'
 import type { GotoParams, StudioView, Worklist, WorklistAction } from './types'
 
 type Message = { role: 'user' | 'assistant'; text: string; action?: WorklistAction['kind'] }
@@ -61,43 +61,27 @@ export default function StudioAssistant({
     setStreaming(true)
     setMessages((prev) => [...prev, { role: 'assistant', text: '' }])
 
-    const base = import.meta.env.VITE_API_URL || '/api'
     try {
-      const headers = await authStreamHeaders()
-      const res = await fetch(`${base}/admin/studio/assistant`, {
-        method: 'POST',
-        headers: { ...headers, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question, worklist: trimWorklist(worklist) }),
-      })
-      const reader = res.body?.getReader()
-      const decoder = new TextDecoder()
-      if (!reader) { setStreaming(false); return }
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        for (const line of decoder.decode(value).split('\n')) {
-          if (!line.startsWith('data: ')) continue
-          const data = line.slice(6)
-          if (data === '[DONE]') { setStreaming(false); return }
-          try {
-            const ev = JSON.parse(data)
-            if (ev.type === 'content' && ev.text) {
-              setMessages((prev) => {
-                const next = [...prev]
-                next[next.length - 1] = { ...next[next.length - 1], text: next[next.length - 1].text + ev.text }
-                return next
-              })
-            } else if (ev.type === 'error') {
-              setMessages((prev) => {
-                const next = [...prev]
-                next[next.length - 1] = { role: 'assistant', text: `Error: ${ev.message}` }
-                return next
-              })
-              setStreaming(false)
-            }
-          } catch {}
-        }
-      }
+      await postSSE(
+        '/admin/studio/assistant',
+        { question, worklist: trimWorklist(worklist) },
+        (data) => {
+          const ev = data as { type?: string; text?: string; message?: string }
+          if (ev.type === 'content' && ev.text) {
+            setMessages((prev) => {
+              const next = [...prev]
+              next[next.length - 1] = { ...next[next.length - 1], text: next[next.length - 1].text + ev.text }
+              return next
+            })
+          } else if (ev.type === 'error') {
+            setMessages((prev) => {
+              const next = [...prev]
+              next[next.length - 1] = { role: 'assistant', text: `Error: ${ev.message}` }
+              return next
+            })
+          }
+        },
+      )
     } catch (e) {
       setMessages((prev) => {
         const next = [...prev]

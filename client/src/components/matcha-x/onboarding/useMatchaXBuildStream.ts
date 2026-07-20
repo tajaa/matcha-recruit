@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { getMatchaXBuildStreamUrl } from '../../../api/matcha-x/matchaXOnboarding'
-import { ensureFreshToken } from '../../../api/client'
+import { getMatchaXBuildStreamPath } from '../../../api/matcha-x/matchaXOnboarding'
+import { postSSE } from '../../../api/sse'
 
 /**
  * Consumes the Matcha-X onboarding build SSE stream
@@ -92,58 +92,28 @@ export function useMatchaXBuildStream() {
     setDone(null)
     setError(null)
 
-    const token = await ensureFreshToken()
-
     try {
-      const res = await fetch(getMatchaXBuildStreamUrl(), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      await postSSE(
+        getMatchaXBuildStreamPath(),
+        { handbook_url: handbookUrl || null },
+        (data) => {
+          const ev = data as BuildEvent
+          if (ev.type === 'complete') setDone(ev)
+          // Only the orchestrator's own (un-tagged) error is fatal; per-location
+          // hiccups are downgraded to warnings server-side and carry a
+          // `location_id` — shown in the feed only.
+          if (ev.type === 'error' && !ev.location_id) {
+            setError(ev.message ?? 'Compliance build failed')
+          }
+          setEvents((prev) => [...prev, ev])
         },
-        body: JSON.stringify({ handbook_url: handbookUrl || null }),
-        signal: ctrl.signal,
-      })
-      if (!res.ok) throw new Error(`Build failed (${res.status})`)
-      const reader = res.body?.getReader()
-      if (!reader) throw new Error('No response body')
-      const decoder = new TextDecoder()
-      let buf = ''
-
-      while (true) {
-        const { done: streamDone, value } = await reader.read()
-        if (streamDone) break
-        buf += decoder.decode(value, { stream: true })
-        const lines = buf.split('\n')
-        buf = lines.pop() ?? ''
-
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue
-          const data = line.slice(6).trim()
-          if (data === '[DONE]') {
-            setRunning(false)
-            return
-          }
-          try {
-            const ev = JSON.parse(data) as BuildEvent
-            if (ev.type === 'complete') setDone(ev)
-            // Only the orchestrator's own (un-tagged) error is fatal; per-location
-            // hiccups are downgraded to warnings server-side and carry a
-            // `location_id` — shown in the feed only.
-            if (ev.type === 'error' && !ev.location_id) {
-              setError(ev.message ?? 'Compliance build failed')
-            }
-            setEvents((prev) => [...prev, ev])
-          } catch {
-            /* skip malformed */
-          }
-        }
-      }
-      setRunning(false)
+        { signal: ctrl.signal },
+      )
     } catch (e) {
-      if ((e as Error).name !== 'AbortError') {
+      if (!ctrl.signal.aborted) {
         setError(e instanceof Error ? e.message : 'Build stream failed')
       }
+    } finally {
       setRunning(false)
     }
   }, [])

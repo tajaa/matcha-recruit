@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Loader2, ShieldCheck, EyeOff, AlertTriangle, Layers, Check, Search, RefreshCw, ExternalLink } from 'lucide-react'
 import { Link } from 'react-router-dom'
-import { api, ensureFreshToken } from '../../../api/client'
-import { adminOnboarding, getLocationCheckUrl } from '../../../api/admin/adminOnboarding'
+import { api } from '../../../api/client'
+import { postSSE } from '../../../api/sse'
+import { adminOnboarding, getLocationCheckPath } from '../../../api/admin/adminOnboarding'
 import type { FitGatedRow, FitMapResponse, FitMissing, FitReason } from '../../../api/admin/adminOnboarding'
 import { useResearchGaps } from '../../../hooks/admin/useResearchGaps'
 
@@ -159,25 +160,15 @@ export default function StatutoryFitPanel({ companyId, onCodifyGated, refreshKey
    *  This endpoint answers with SSE, not JSON — `api.post` would choke parsing
    *  `data: {...}`. And the stream is the WORK: the server projects as it
    *  yields, so the body has to be drained to completion or the check is
-   *  abandoned half-done. Same fetch+reader shape useResearchGaps uses. */
+   *  abandoned half-done. The frames themselves are of no interest here — only
+   *  draining them is — hence the no-op handler. */
   const runCheck = useCallback(async (items: FitMissing[]) => {
     const locs = [...new Set(items.flatMap((m) => m.location_ids ?? []))]
     if (!locs.length) return
     setBusy('check'); setNote(null)
     try {
-      const token = await ensureFreshToken()
       for (const id of locs) {
-        const res = await fetch(
-          getLocationCheckUrl(id, companyId),
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-            body: '{}',
-          },
-        )
-        if (!res.ok) throw new Error(String(res.status))
-        const reader = res.body?.getReader()
-        while (reader) { const { done } = await reader.read(); if (done) break }
+        await postSSE(getLocationCheckPath(id, companyId), {}, () => {})
       }
       setNote(`Re-checked ${locs.length} location${locs.length === 1 ? '' : 's'}.`)
       await load()

@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef } from 'react'
-import { api, authStreamHeaders } from '../../api/client'
+import { api } from '../../api/client'
+import { postSSE } from '../../api/sse'
 import { Badge, Button, LABEL, type BadgeVariant } from '../ui'
 import type { SuggestedGuidanceResponse, SuggestedGuidanceCard, ERCaseOutcome, OutcomeOption, OutcomeAnalysisResponse, ERDocument } from '../../types/er'
 import { ComplianceGrounding } from './ComplianceGrounding'
 
-const BASE = import.meta.env.VITE_API_URL ?? '/api'
 
 // Document-processing poll cadence. The cap (~45s) bounds the wait for a
 // document that never finishes parsing; the server-side sweep marks such rows
@@ -173,46 +173,25 @@ export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, onGuidance
     const ctrl = new AbortController()
     abortRef.current = ctrl
 
-    authStreamHeaders({ 'Content-Type': 'application/json' }).then((headers) =>
-      fetch(`${BASE}/er/cases/${caseId}/guidance/outcomes/stream`, {
-        method: 'POST',
-        headers,
-        signal: ctrl.signal,
-      }),
+    postSSE(
+      `/er/cases/${caseId}/guidance/outcomes/stream`,
+      undefined,
+      (data) => {
+        const msg = data as { type?: string; message?: string; data?: OutcomeAnalysisResponse }
+        if (msg.type === 'phase') setOutcomePhase(msg.message ?? '')
+        if (msg.type === 'complete' || msg.type === 'result') {
+          setOutcomeData(msg.data ?? null)
+          return true
+        }
+      },
+      { signal: ctrl.signal },
     )
-      .then(async (res) => {
-        if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
-        const reader = res.body?.getReader()
-        if (!reader) throw new Error('No response body')
-        const decoder = new TextDecoder()
-        let buf = ''
-
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
-          buf += decoder.decode(value, { stream: true })
-
-          const lines = buf.split('\n')
-          buf = lines.pop() ?? ''
-
-          for (const line of lines) {
-            if (!line.startsWith('data: ')) continue
-            const raw = line.slice(6).trim()
-            if (raw === '[DONE]') { setOutcomeLoading(false); return }
-            try {
-              const msg = JSON.parse(raw)
-              if (msg.type === 'phase') setOutcomePhase(msg.message ?? '')
-              if (msg.type === 'complete' || msg.type === 'result') { setOutcomeData(msg.data); setOutcomeLoading(false); return }
-            } catch { /* skip malformed */ }
-          }
-        }
-        setOutcomeLoading(false)
-      })
       .catch((e) => {
-        if (e.name !== 'AbortError') {
-          setOutcomeError(e instanceof Error ? e.message : 'Failed to generate outcomes')
-          setOutcomeLoading(false)
-        }
+        if (ctrl.signal.aborted) return
+        setOutcomeError(e instanceof Error ? e.message : 'Failed to generate outcomes')
+      })
+      .finally(() => {
+        if (!ctrl.signal.aborted) setOutcomeLoading(false)
       })
   }
 

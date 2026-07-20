@@ -1,10 +1,10 @@
 import { useState, useRef } from 'react'
-import { api, authStreamHeaders } from '../../api/client'
+import { api } from '../../api/client'
+import { postSSE } from '../../api/sse'
 import { Badge, Button, type BadgeVariant } from '../ui'
 import type { OutcomeAnalysisResponse, OutcomeOption, ERCaseOutcome } from '../../types/er'
 import { ComplianceGrounding } from './ComplianceGrounding'
 
-const BASE = import.meta.env.VITE_API_URL ?? '/api'
 
 const determinationVariant: Record<string, BadgeVariant> = {
   substantiated: 'danger',
@@ -41,47 +41,26 @@ export function EROutcomePanel({ caseId, onApplyOutcome }: Props) {
     const ctrl = new AbortController()
     abortRef.current = ctrl
 
-    authStreamHeaders({ 'Content-Type': 'application/json' }).then((headers) =>
-      fetch(`${BASE}/er/cases/${caseId}/guidance/outcomes/stream`, {
-        method: 'POST',
-        headers,
-        signal: ctrl.signal,
-      }),
+    postSSE(
+      `/er/cases/${caseId}/guidance/outcomes/stream`,
+      undefined,
+      (raw) => {
+        const msg = raw as { type?: string; message?: string; data?: OutcomeAnalysisResponse }
+        // Backend emits 'status'/'result'; older paths used 'phase'/'complete' — accept both.
+        if (msg.type === 'phase' || msg.type === 'status') setPhase(msg.message ?? '')
+        if (msg.type === 'complete' || msg.type === 'result') {
+          setData(msg.data ?? null)
+          return true
+        }
+      },
+      { signal: ctrl.signal },
     )
-      .then(async (res) => {
-        if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
-        const reader = res.body?.getReader()
-        if (!reader) throw new Error('No response body')
-        const decoder = new TextDecoder()
-        let buf = ''
-
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
-          buf += decoder.decode(value, { stream: true })
-
-          const lines = buf.split('\n')
-          buf = lines.pop() ?? ''
-
-          for (const line of lines) {
-            if (!line.startsWith('data: ')) continue
-            const raw = line.slice(6).trim()
-            if (raw === '[DONE]') { setLoading(false); return }
-            try {
-              const msg = JSON.parse(raw)
-              // Backend emits 'status'/'result'; older paths used 'phase'/'complete' — accept both.
-              if (msg.type === 'phase' || msg.type === 'status') setPhase(msg.message ?? '')
-              if (msg.type === 'complete' || msg.type === 'result') { setData(msg.data); setLoading(false); return }
-            } catch { /* skip malformed */ }
-          }
-        }
-        setLoading(false)
-      })
       .catch((e) => {
-        if (e.name !== 'AbortError') {
-          setError(e instanceof Error ? e.message : 'Failed to generate outcomes')
-          setLoading(false)
-        }
+        if (ctrl.signal.aborted) return
+        setError(e instanceof Error ? e.message : 'Failed to generate outcomes')
+      })
+      .finally(() => {
+        if (!ctrl.signal.aborted) setLoading(false)
       })
   }
 

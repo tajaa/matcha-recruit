@@ -1,6 +1,5 @@
 import type { LaborScopeResponse } from './types'
 
-export const BASE = import.meta.env.VITE_API_URL ?? '/api'
 
 // Research model tier (ported from the retired Specialization Research page).
 export const MODEL_LABELS: Record<string, { label: string; model: string; color: string }> = {

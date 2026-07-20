@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import { ChevronDown, ChevronRight, Globe2, Landmark, MapPin } from 'lucide-react'
-import { api, authStreamHeaders } from '../../../api/client'
+import { api } from '../../../api/client'
+import { postSSE } from '../../../api/sse'
 import { Button, Input, Modal } from '../../../components/ui'
 import JurisdictionDetailPanel from '../../../components/admin/JurisdictionDetailPanel'
 import { fmtDate } from './utils'
@@ -131,58 +132,36 @@ export default function LibraryTab({ initialState, initialCity, initialIndustry,
 
   function startResearch(item: ResearchItem) {
     setResearchingId(item.jurisdiction_id); setResearchMessages([])
-    const base = import.meta.env.VITE_API_URL || '/api'
-    authStreamHeaders().then((headers) => fetch(`${base}/admin/research-queue/${item.jurisdiction_id}/research`, {
-      method: 'POST', headers,
-    })).then(async (res) => {
-      const reader = res.body?.getReader()
-      const decoder = new TextDecoder()
-      if (!reader) return
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        for (const line of decoder.decode(value).split('\n')) {
-          if (line.startsWith(': ')) continue
-          if (!line.startsWith('data: ')) continue
-          const data = line.slice(6)
-          if (data === '[DONE]') { setResearchingId(null); fetchResearchQueue(); fetchTree(); return }
-          try {
-            const ev = JSON.parse(data)
-            if (ev.type === 'error') { setResearchMessages((p) => [...p, `Error: ${ev.message}`]); setResearchingId(null); return }
-            if (ev.message) setResearchMessages((p) => [...p, ev.message])
-          } catch {}
-        }
-      }
-      setResearchingId(null)
-    }).catch(() => setResearchingId(null))
+    postSSE(
+      `/admin/research-queue/${item.jurisdiction_id}/research`,
+      undefined,
+      (data) => {
+        const ev = data as { type?: string; message?: string }
+        if (ev.type === 'error') { setResearchMessages((p) => [...p, `Error: ${ev.message}`]); return true }
+        const msg = ev.message
+        if (msg) setResearchMessages((p) => [...p, msg])
+      },
+    )
+      .then(() => { fetchResearchQueue(); fetchTree() })
+      .catch(() => {})
+      .finally(() => setResearchingId(null))
   }
 
   function handleRunTopMetros() {
     setTopMetroRunning(true); setTopMetroMessages([])
-    const base = import.meta.env.VITE_API_URL || '/api'
-    authStreamHeaders().then((headers) => fetch(`${base}/admin/jurisdictions/top-metros/check`, {
-      method: 'POST', headers,
-    })).then(async (res) => {
-      const reader = res.body?.getReader()
-      const decoder = new TextDecoder()
-      if (!reader) return
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        for (const line of decoder.decode(value).split('\n')) {
-          if (line.startsWith(': ')) continue
-          if (!line.startsWith('data: ')) continue
-          const data = line.slice(6)
-          if (data === '[DONE]') { setTopMetroRunning(false); fetchTree(); return }
-          try {
-            const ev = JSON.parse(data)
-            if (ev.type === 'error') { setTopMetroMessages((p) => [...p, `Error: ${ev.message}`]); setTopMetroRunning(false); return }
-            if (ev.message) setTopMetroMessages((p) => [...p, ev.message])
-          } catch {}
-        }
-      }
-      setTopMetroRunning(false)
-    }).catch(() => setTopMetroRunning(false))
+    postSSE(
+      '/admin/jurisdictions/top-metros/check',
+      undefined,
+      (data) => {
+        const ev = data as { type?: string; message?: string }
+        if (ev.type === 'error') { setTopMetroMessages((p) => [...p, `Error: ${ev.message}`]); return true }
+        const msg = ev.message
+        if (msg) setTopMetroMessages((p) => [...p, msg])
+      },
+    )
+      .then(() => fetchTree())
+      .catch(() => {})
+      .finally(() => setTopMetroRunning(false))
   }
 
   const totals = tree?.totals ?? null

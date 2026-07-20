@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback, useMemo } from 'react'
-import { api, authStreamHeaders } from '../../api/client'
+import { api } from '../../api/client'
+import { postSSE } from '../../api/sse'
 import { Button } from '../../components/ui'
 import JurisdictionDetailPanel from '../../components/admin/JurisdictionDetailPanel'
 import ExplorerTab from '../../components/admin/jurisdiction/ExplorerTab'
@@ -83,33 +84,20 @@ export default function JurisdictionData() {
 
   function startMetroCheck() {
     setMetroScanning(true); setMetroMessages([])
-    const base = import.meta.env.VITE_API_URL || '/api'
-    authStreamHeaders().then((headers) => fetch(`${base}/admin/jurisdictions/top-metros/check`, {
-      method: 'POST', headers,
-    })).then(async (res) => {
-      const reader = res.body?.getReader()
-      const decoder = new TextDecoder()
-      if (!reader) return
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        for (const line of decoder.decode(value).split('\n')) {
-          if (line.startsWith(': ')) continue
-          if (!line.startsWith('data: ')) continue
-          const data = line.slice(6)
-          if (data === '[DONE]') { setMetroScanning(false); fetchOverview(); return }
-          try {
-            const ev = JSON.parse(data)
-            if (ev.type === 'run_completed') { setMetroScanning(false); fetchOverview(); return }
-            const msg = ev.message || (ev.city && `${ev.city}, ${ev.state}`) || null
-            if (msg) setMetroMessages((p) => [...p, msg])
-          } catch {}
-        }
-      }
-      setMetroScanning(false)
-    }).catch(() => setMetroScanning(false))
+    postSSE(
+      '/admin/jurisdictions/top-metros/check',
+      undefined,
+      (data) => {
+        const ev = data as { type?: string; message?: string; city?: string; state?: string }
+        if (ev.type === 'run_completed') return true
+        const msg = ev.message || (ev.city && `${ev.city}, ${ev.state}`) || null
+        if (msg) setMetroMessages((p) => [...p, msg])
+      },
+    )
+      .then(() => fetchOverview())
+      .catch(() => {})
+      .finally(() => setMetroScanning(false))
   }
-
   async function toggleBookmark(reqId: string) {
     await api.post(`/admin/jurisdictions/requirements/${reqId}/bookmark`, {})
     setBookmarks((prev) => prev.filter((b) => b.id !== reqId))

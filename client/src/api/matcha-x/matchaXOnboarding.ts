@@ -19,10 +19,10 @@ export type MatchaXOnboardingStatus = {
 
 // Absolute URL for the SSE build stream — POSTed with a JSON body and read via
 // fetch + ReadableStream (not EventSource) so the Authorization header attaches.
-// Mirrors getEnrichStreamUrl in api/adminOnboarding.ts.
-export function getMatchaXBuildStreamUrl(): string {
-  const base = import.meta.env.VITE_API_URL || '/api'
-  return `${base}/matcha-x-onboarding/build/stream`
+// Mirrors getEnrichStreamPath in api/admin/adminOnboarding/urls.ts. A path, not
+// an absolute URL — postSSE prepends the API base.
+export function getMatchaXBuildStreamPath(): string {
+  return '/matcha-x-onboarding/build/stream'
 }
 
 export const matchaXOnboarding = {

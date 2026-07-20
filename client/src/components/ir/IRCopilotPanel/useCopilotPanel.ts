@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { type CopilotCard, type AcceptPayload } from '../IRCopilotCard'
 import { api, ensureFreshToken } from '../../../api/client'
+import { consumeSSE } from '../../../api/sse'
 import { reportApiError } from '../../../api/errorReporter'
 import { useIRInfoRequests } from '../../../hooks/ir/useIRInfoRequests'
 import { BASE } from './helpers'
@@ -175,36 +176,22 @@ export function useCopilotPanel({
         }])
       }
 
-      const reader = res.body.getReader()
-      const decoder = new TextDecoder()
-      let buf = ''
       const newCards: CopilotCard[] = []
       const newOpenQuestions: string[] = []
 
-      while (true) {
-        const { value, done } = await reader.read()
-        if (done) break
-        buf += decoder.decode(value, { stream: true })
-        const events = buf.split('\n\n')
-        buf = events.pop() || ''
-        for (const ev of events) {
-          if (!ev.startsWith('data: ')) continue
-          try {
-            const data = JSON.parse(ev.slice(6))
-            if (data.type === 'open_question') {
-              newOpenQuestions.push(data.text)
-              setOpenQuestions([...newOpenQuestions])
-            } else if (data.type === 'card') {
-              newCards.push(data.card)
-              setCurrentCards([...newCards])
-            } else if (data.type === 'error') {
-              setError(data.detail)
-            }
-          } catch {
-            // Ignore malformed chunks
-          }
+      await consumeSSE(res, (data) => {
+        const ev = data as { type?: string; text?: string; card?: CopilotCard; detail?: string }
+        if (ev.type === 'open_question') {
+          newOpenQuestions.push(ev.text ?? '')
+          setOpenQuestions([...newOpenQuestions])
+        } else if (ev.type === 'card' && ev.card) {
+          newCards.push(ev.card)
+          setCurrentCards([...newCards])
+        } else if (ev.type === 'error') {
+          setError(ev.detail ?? 'Stream failed')
         }
-      }
+      })
+
       // After the stream, fetch authoritative transcript so we have real DB IDs.
       await refresh()
       return true
@@ -290,50 +277,38 @@ export function useCopilotPanel({
         throw new Error(`Accept failed (${res.status})`)
       }
 
-      const reader = res.body.getReader()
-      const decoder = new TextDecoder()
-      let buf = ''
       let didMutateIncident = false
-      while (true) {
-        const { value, done } = await reader.read()
-        if (done) break
-        buf += decoder.decode(value, { stream: true })
-        const events = buf.split('\n\n')
-        buf = events.pop() || ''
-        for (const ev of events) {
-          if (!ev.startsWith('data: ')) continue
-          try {
-            const data = JSON.parse(ev.slice(6))
-            if (data.type === 'status') {
-              if (data.stage === 'starting') setBusyStage('Starting…')
-              else if (data.stage === 'running_analysis') setBusyStage(data.label || `Running ${data.analysis_type || 'analysis'}…`)
-              else if (data.stage === 'analysis_complete') setBusyStage('Analysis complete — generating guidance…')
-              else if (data.stage === 'thinking') setBusyStage('Generating next steps…')
-            } else if (data.type === 'event') {
-              setBusyStage(data.text)
-              // Any action that writes to ir_incidents columns should bubble
-              // up so the parent re-fetches the incident header (severity
-              // badge, status pill, OSHA recordable indicator, etc.).
-              if (
-                data.action === 'set_field' ||
-                data.action === 'close_incident' ||
-                data.action === 'quick_reply' ||
-                data.action === 'numeric_input' ||
-                data.action === 'text_input' ||
-                data.action === 'osha_emergency_alert'
-              ) {
-                didMutateIncident = true
-              }
-            } else if (data.type === 'error') {
-              setError(data.detail || 'Action failed')
-            }
-            // We don't render cards/summary inline here — refresh below
-            // pulls authoritative transcript with proper IDs.
-          } catch {
-            // ignore
-          }
+      await consumeSSE(res, (raw) => {
+        const data = raw as {
+          type?: string; stage?: string; label?: string; analysis_type?: string
+          text?: string; action?: string; detail?: string
         }
-      }
+        if (data.type === 'status') {
+          if (data.stage === 'starting') setBusyStage('Starting…')
+          else if (data.stage === 'running_analysis') setBusyStage(data.label || `Running ${data.analysis_type || 'analysis'}…`)
+          else if (data.stage === 'analysis_complete') setBusyStage('Analysis complete — generating guidance…')
+          else if (data.stage === 'thinking') setBusyStage('Generating next steps…')
+        } else if (data.type === 'event') {
+          setBusyStage(data.text ?? null)
+          // Any action that writes to ir_incidents columns should bubble up so
+          // the parent re-fetches the incident header (severity badge, status
+          // pill, OSHA recordable indicator, etc.).
+          if (
+            data.action === 'set_field' ||
+            data.action === 'close_incident' ||
+            data.action === 'quick_reply' ||
+            data.action === 'numeric_input' ||
+            data.action === 'text_input' ||
+            data.action === 'osha_emergency_alert'
+          ) {
+            didMutateIncident = true
+          }
+        } else if (data.type === 'error') {
+          setError(data.detail || 'Action failed')
+        }
+        // Cards/summary aren't rendered inline here — the refresh below pulls
+        // the authoritative transcript with proper IDs.
+      })
       await refresh()
       if (didMutateIncident) onIncidentChanged?.()
     } catch (e) {

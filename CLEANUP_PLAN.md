@@ -29,64 +29,53 @@ Verify: tsc; `grep -rn "IrAnalysisPanel\|TimelineConstructor\|ComplianceOverview
 
 ## Phase B — SSE helper `api/sse.ts` (~600 LOC across 26 files)
 
-> **STATUS 2026-07-20 — B1 done, B2 partially done. Resume here.**
+> **STATUS 2026-07-20 — Phase B COMPLETE.**
 >
-> Done and committed:
-> - `api/sse.ts` exists — `consumeSSE` / `postSSE` / `streamPilotChat` / `SSEHttpError`,
->   plus the E1 shared types (`SessionStatus`, `PilotMessage<TMeta>`, `ChatHandlers<TResult>`).
->   `PilotSession` was NOT hoisted — its shape genuinely differs per pilot, the plan
->   was wrong to list it.
-> - **B1 complete** — all 5 pilot api files migrated (`handbookPilot`, `analysisPilot`,
->   `legalDefense`, `brokerPilot`, `compliancePilot`). Broker's 409
->   `missing_required_documents` gate survives via the `onHttpError` escape hatch.
-> - **B2 6 of 22 files**: `api/portal/portalAskHr.ts` (also dropped its direct
->   localStorage token read), `api/labor/laborClient.ts`,
->   `work/api/matchaWork/{research,messaging,candidates}.ts`, and a new shared
->   `work/api/matchaWork/_base.ts:uploadFilesStream` that the three multipart
->   uploaders now share (messaging.ts went 368 → 118 lines).
+> `api/sse.ts` is now the only file in `client/src` that calls `getReader()` or
+> parses `data: ` lines — verified by grep. It exports `consumeSSE` / `postSSE` /
+> `streamPilotChat` / `SSEHttpError`, plus the E1 shared types (`SessionStatus`,
+> `PilotMessage<TMeta>`, `ChatHandlers<TResult>`).
 >
-> **Remaining B2 (16 files)** — enumerate live with
-> `grep -rln "getReader()" client/src --include='*.ts' --include='*.tsx'`:
-> `components/shared/HelpAssistant.tsx` (**fixes the real cross-chunk bug** — it
-> calls `decoder.decode(value)` with no `{stream:true}` AND keeps no buffer, so
-> the trailing partial line of every chunk is discarded outright),
-> `components/er/{ERGuidancePanel,EROutcomePanel,ERSimilarCasesPanel}.tsx`,
-> `hooks/admin/{useEnrichStream,useResearchGaps}.ts`,
-> `hooks/compliance/useComplianceCheck.ts`,
-> `pages/admin/studio/{StudioAssistant,LibraryTab,CoverageTab/useCoverage,PipelineTab/usePipeline}`,
-> `pages/admin/JurisdictionData.tsx`,
-> `components/admin/JurisdictionDetailPanel/helpers.ts`,
-> `components/admin/onboarding/StatutoryFitPanel.tsx`,
-> `components/matcha-x/onboarding/useMatchaXBuildStream.ts`.
-> The two anon streams (`hooks/ir/useIRAnalysisStream.ts`,
-> `components/ir/IRCopilotPanel/useCopilotPanel.ts`) keep their own unauthenticated
-> fetch and should call `consumeSSE` directly rather than `postSSE`.
+> Deviations from the plan as written, for whoever reads this next:
+> - **`PilotSession` was NOT hoisted.** Its shape genuinely differs per pilot
+>   (`company_id` vs `broker_id`, different counters). The plan was wrong to list it
+>   alongside `PilotMessage`/`SessionStatus`.
+> - **The plan understated the pilots' divergence.** The read loop was byte-identical,
+>   but only 2 of 5 had a try/catch, only 2 took a `signal`, only 1 extracted `detail`.
+>   The shared helper is the union, so three pilots gained abort handling.
+> - **23 loops across 22 files, not 26 files.** `useCopilotPanel.ts` carried *two*
+>   (stream + accept). Four URL helpers (`getEnrichStreamUrl`, `getResearchGapsUrl`,
+>   `getLocationCheckUrl`, `getComplianceCheckUrl`, `getMatchaXBuildStreamUrl`)
+>   existed only to prepend the API base and became `…Path` helpers, since postSSE
+>   prepends it.
+> - **Two dedupes fell out that the plan didn't anticipate**: a shared
+>   `work/api/matchaWork/_base.ts:uploadFilesStream` behind the three multipart
+>   uploaders (messaging.ts 368 → 118 lines), and one `runScan` driver behind the
+>   five near-identical jurisdiction scans in `useJurisdictionDetail.ts`.
+> - **`JurisdictionDetailPanel/helpers.ts:readSSEStream` was deleted** — it was an
+>   already-correct buffered parser someone had written to fix this exact bug
+>   locally. `consumeSSE` supersedes it.
 >
-> **Migration gotcha worth repeating:** before collapsing a loop, check whether it
-> treats a bare `[DONE]` as an *error*. `sendMessageStream` does — a `[DONE]` with
-> no preceding complete/error means the turn never settled and the composer stays
-> stuck on "Thinking…" with the input disabled. `consumeSSE` returns silently on
-> `[DONE]`, so that case needs an explicit `settled` flag checked after the await
-> (see `messaging.ts`). Losing this is silent and only shows up as a frozen UI.
-
-Two frame families confirmed:
-1. **Pilot family** (`{type:'status'|'result'|'error'}` + `data: [DONE]`): handbookPilot, analysisPilot, legalDefense, brokerPilot, compliancePilot — line-identical except URL/body/error handling.
-2. **Raw-event family** (`\n` split, per-file event vocab): portalAskHr, laborClient, HelpAssistant, ER panels, studio pages, admin hooks, matcha-x build stream, `work/api/matchaWork/*` (FormData + early-return on `complete`/`error`).
-
-Splitting on `\n` + filtering `data:` lines subsumes both → one parser.
-
-New `api/sse.ts` (next to `client.ts`, builds on `authStreamHeaders`/`ApiError`):
-- `consumeSSE(res, onFrame)` — buffers across chunk boundaries, skips malformed JSON, ends on stream end or `[DONE]`; `onFrame` returning `true` stops early (reader cancelled).
-- `postSSE(path, body, onFrame, {signal, auth})` — JSON or FormData, auth default on, extracts `detail` from non-ok JSON.
-- `streamPilotChat<TResult>(path, body, {onStatus,onResult,onError}, signal)` — standard pilot turn; aborted turns resolve quietly.
-
-Migration:
-- **B1** — 5 pilot api files: `api/handbook-pilot/handbookPilot.ts`, `api/analysis-pilot/analysisPilot.ts`, `api/legal-defense/legalDefense.ts`, `api/broker/brokerPilot.ts`, `api/admin/compliancePilot.ts`. Each `streamChat` shrinks ~55→~8 lines, public signatures unchanged (no console edits).
-- **B2** — raw-event consumers → `postSSE`/`consumeSSE`: `api/portal/portalAskHr.ts` (also removes its direct localStorage token read), `api/labor/laborClient.ts`, `components/shared/HelpAssistant.tsx`, `components/er/{ERGuidancePanel,EROutcomePanel,ERSimilarCasesPanel}.tsx`, `pages/admin/studio/*`, `pages/admin/JurisdictionData.tsx`, `hooks/admin/{useEnrichStream,useResearchGaps}.ts`, `hooks/compliance/useComplianceCheck.ts`, `components/admin/onboarding/StatutoryFitPanel.tsx`, `components/admin/JurisdictionDetailPanel/helpers.ts`, `components/matcha-x/onboarding/useMatchaXBuildStream.ts`, `work/api/matchaWork/{candidates,messaging,research}.ts`. Anon streams (`hooks/ir/useIRAnalysisStream.ts`, `components/ir/IRCopilotPanel/useCopilotPanel.ts`) keep own fetch, call `consumeSSE` directly. `candidates.ts` keeps its timeout/FormData wrapper, early-stops via `return true`.
-
-Behavior deltas (flag in PR): analysisPilot's `detail` extraction becomes shared default (better errors for other 4 pilots); fixes `HelpAssistant.tsx:45` latent bug (`decoder.decode` without `{stream:true}`, no cross-chunk buffer — frames split across network chunks are silently dropped); portalAskHr now returns on `[DONE]` (terminal server-side, safe).
-
-Verify: tsc; one turn each in Handbook/Analysis/Broker Pilot, Legal Defense chat, portal Ask HR, help widget, ER outcome gen; abort via session-switch mid-stream.
+> **Bugs fixed in passing** (all were silent):
+> - `HelpAssistant.tsx`, `StudioAssistant.tsx`, `LibraryTab.tsx` (×2),
+>   `usePipeline.ts`, `JurisdictionData.tsx` called `decoder.decode(value)` with no
+>   `{stream:true}` **and** kept no cross-chunk buffer, so the trailing partial line
+>   of every chunk was discarded — including a `data: [DONE]` that landed on a
+>   boundary, which is why some post-stream refetches never fired.
+> - `HelpAssistant.tsx` never checked `res.ok`, so a 500 rendered as an empty reply.
+> - `portalAskHr.ts` read `matcha_access_token` straight from localStorage, bypassing
+>   the proactive refresh — against the house rule in `client/CLAUDE.md`.
+> - `consumeSSE` cancels the reader in a `finally`, releasing the body lock on the
+>   early-return (`[DONE]`) path that every hand-rolled loop leaked.
+>
+> **Gotcha to preserve if you touch this again:** check whether a loop treats a bare
+> `[DONE]` as an *error*. `sendMessageStream` does — `[DONE]` with no preceding
+> complete/error means the turn never settled and the composer stays stuck on
+> "Thinking…" with the input disabled. `consumeSSE` returns silently on `[DONE]`, so
+> that case needs an explicit `settled` flag checked after the await.
+>
+> **Still owed:** the plan's manual click-through (one turn per pilot console, portal
+> Ask HR, help widget, ER outcome gen, abort via session-switch). tsc + build only so far.
 
 ## Phase C — `hooks/useAsync.ts` (hook + 15-file tranche; ~250 now, 1,500+ full rollout)
 

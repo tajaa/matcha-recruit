@@ -1,11 +1,11 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { getEnrichStreamUrl } from '../../api/admin/adminOnboarding'
-import { ensureFreshToken } from '../../api/client'
+import { getEnrichStreamPath } from '../../api/admin/adminOnboarding'
+import { postSSE } from '../../api/sse'
 
 /**
  * Consumes the master-admin gap-analysis enrichment SSE stream
- * (POST /admin/onboarding/enrich/{companyId}/stream) via fetch + ReadableStream
- * so the Authorization header can be attached (EventSource can't). Mirrors
+ * (POST /admin/onboarding/enrich/{companyId}/stream) via postSSE (api/sse.ts) so the
+ * Authorization header can be attached (EventSource can't). Mirrors
  * hooks/compliance/useComplianceCheck.
  */
 export type EnrichEvent = {
@@ -61,52 +61,26 @@ export function useEnrichStream() {
     setDone(null)
     setError(null)
 
-    const token = await ensureFreshToken()
-
     try {
-      const res = await fetch(getEnrichStreamUrl(companyId), {
-        method: 'POST',
-        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-        signal: ctrl.signal,
-      })
-      if (!res.ok) throw new Error(`Stream failed (${res.status})`)
-      const reader = res.body?.getReader()
-      if (!reader) throw new Error('No response body')
-      const decoder = new TextDecoder()
-      let buf = ''
-
-      while (true) {
-        const { done: streamDone, value } = await reader.read()
-        if (streamDone) break
-        buf += decoder.decode(value, { stream: true })
-        const lines = buf.split('\n')
-        buf = lines.pop() ?? ''
-
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue
-          const data = line.slice(6).trim()
-          if (data === '[DONE]') {
-            setRunning(false)
-            return
-          }
-          try {
-            const ev = JSON.parse(data) as EnrichEvent
-            if (ev.type === 'complete') setDone(ev)
-            // Only the orchestrator's own (un-namespaced) error is fatal.
-            // Per-jurisdiction research errors are downgraded to warnings
-            // server-side and carry a `jurisdiction` — shown in the feed only.
-            if (ev.type === 'error' && !ev.jurisdiction) setError(ev.message ?? 'Gap analysis failed')
-            setEvents((prev) => [...prev, ev])
-          } catch {
-            /* skip malformed */
-          }
-        }
-      }
-      setRunning(false)
+      await postSSE(
+        getEnrichStreamPath(companyId),
+        undefined,
+        (data) => {
+          const ev = data as EnrichEvent
+          if (ev.type === 'complete') setDone(ev)
+          // Only the orchestrator's own (un-namespaced) error is fatal.
+          // Per-jurisdiction research errors are downgraded to warnings
+          // server-side and carry a `jurisdiction` — shown in the feed only.
+          if (ev.type === 'error' && !ev.jurisdiction) setError(ev.message ?? 'Gap analysis failed')
+          setEvents((prev) => [...prev, ev])
+        },
+        { signal: ctrl.signal },
+      )
     } catch (e) {
-      if ((e as Error).name !== 'AbortError') {
+      if (!ctrl.signal.aborted) {
         setError(e instanceof Error ? e.message : 'Gap analysis stream failed')
       }
+    } finally {
       setRunning(false)
     }
   }, [])
