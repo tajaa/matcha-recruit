@@ -111,7 +111,7 @@ export default function ServerErrors() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [copied, setCopied] = useState<string | null>(null)
 
-  const { data, loading, reload: refresh } = useAsync(
+  const { data, loading, error, reload: refresh } = useAsync(
     async () => {
       const params = new URLSearchParams()
       if (kindFilter) params.set('kind', kindFilter)
@@ -270,6 +270,13 @@ export default function ServerErrors() {
       <div className="rounded-xl border border-zinc-800 overflow-hidden">
         {loading && items.length === 0 ? (
           <p className="p-8 text-center text-sm text-zinc-500">Loading...</p>
+        ) : error && items.length === 0 ? (
+          // Never fall through to the celebratory empty state on a failed
+          // fetch — on THIS page of all pages, "no errors 🎉" when the request
+          // died is the most dangerous thing we could say.
+          <p className="p-8 text-center text-sm text-red-400">
+            Couldn’t load server errors: {error}
+          </p>
         ) : items.length === 0 ? (
           <p className="p-8 text-center text-sm text-zinc-500">
             No errors in the selected window. 🎉

@@ -5,18 +5,20 @@ import { statusBadge } from './helpers'
 
 type BrokerTableProps = {
   loading: boolean
+  error?: string | null
   filtered: Broker[]
   onViewBook: (b: Broker) => void
   onLinkCompany: (b: Broker) => void
   onEdit: (b: Broker) => void
 }
 
-export function BrokerTable({ loading, filtered, onViewBook, onLinkCompany, onEdit }: BrokerTableProps) {
+export function BrokerTable({ loading, error, filtered, onViewBook, onLinkCompany, onEdit }: BrokerTableProps) {
   return (
     <DataTable
       rows={filtered}
       rowKey={(b) => b.id}
       loading={loading}
+      error={error}
       emptyText="No brokers found."
       columns={[
         {

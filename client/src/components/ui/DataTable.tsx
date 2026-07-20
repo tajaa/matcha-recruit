@@ -29,6 +29,9 @@ type Props<T> = {
   loading?: boolean
   loadingText?: string
   emptyText?: string
+  /** Failure from the last fetch. Rendered instead of `emptyText` so a failed
+   *  load never reads as "there is nothing here". */
+  error?: string | null
   onRowClick?: (row: T) => void
 }
 
@@ -41,12 +44,20 @@ export function DataTable<T>({
   loading = false,
   loadingText = 'Loading...',
   emptyText = 'No results.',
+  error = null,
   onRowClick,
 }: Props<T>) {
-  // Loading and empty are the table's job: every hand-rolled copy re-implemented
-  // this ladder, and several disagreed about whether an in-flight reload should
-  // blank the rows. It should not — useAsync keeps the previous page visible.
+  // Loading, error and empty are the table's job: every hand-rolled copy
+  // re-implemented this ladder, and several disagreed about whether an in-flight
+  // reload should blank the rows. It should not — useAsync keeps the previous
+  // page visible.
   if (loading && rows.length === 0) return <p className="text-sm text-zinc-500">{loadingText}</p>
+  // Error outranks empty. A failed fetch leaves rows empty, and rendering the
+  // empty copy there tells the reader "there is nothing here" when the truth is
+  // "we don't know" — the single most misleading thing a table can say.
+  if (error && rows.length === 0) {
+    return <p className="text-sm text-red-400">{error}</p>
+  }
   if (rows.length === 0) return <p className="text-sm text-zinc-500">{emptyText}</p>
 
   return (

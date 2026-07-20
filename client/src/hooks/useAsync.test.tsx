@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
+import { StrictMode } from 'react'
 import { renderHook, act, waitFor } from '@testing-library/react'
 import { useAsync, useAsyncAction } from './useAsync'
 
@@ -214,6 +215,104 @@ describe('useAsync with an initial value', () => {
     act(() => { result.current.reload() })
     await act(async () => { d2.reject(new Error('nope')) })
     expect(result.current.data).toEqual(['a'])
+    expect(result.current.error).toBe('nope')
+  })
+})
+
+// StrictMode dev-mounts every component twice (mount → cleanup → mount). A
+// mounted-guard that is only ever set false in cleanup latches off for the
+// component's whole life, so every response is discarded and the page hangs on
+// its loading state. These run under StrictMode because renderHook does not
+// apply it by default — which is exactly why the original suite missed it.
+describe('under StrictMode (double mount)', () => {
+  it('useAsync still delivers data after the simulated remount', async () => {
+    const { result } = renderHook(() => useAsync(() => Promise.resolve('hello'), []), {
+      wrapper: StrictMode,
+    })
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.data).toBe('hello')
+  })
+
+  it('useAsync still surfaces errors after the simulated remount', async () => {
+    const { result } = renderHook(
+      () => useAsync(() => Promise.reject(new Error('boom')), []),
+      { wrapper: StrictMode },
+    )
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.error).toBe('boom')
+  })
+
+  it('useAsync reload works after the simulated remount', async () => {
+    const fn = vi.fn().mockResolvedValue('x')
+    const { result } = renderHook(() => useAsync(fn, []), { wrapper: StrictMode })
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    const before = fn.mock.calls.length
+    act(() => { result.current.reload() })
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(fn.mock.calls.length).toBeGreaterThan(before)
+    expect(result.current.data).toBe('x')
+  })
+
+  it('useAsyncAction still reports busy/error after the simulated remount', async () => {
+    const { result } = renderHook(
+      () => useAsyncAction(async () => { throw new Error('save failed') }),
+      { wrapper: StrictMode },
+    )
+    await act(async () => { await result.current.run() })
+    expect(result.current.error).toBe('save failed')
+    expect(result.current.busy).toBe(false)
+  })
+})
+
+describe('useAsync error lifecycle', () => {
+  it('clears a stale error as soon as the next run starts, not when it lands', async () => {
+    const d1 = deferred<string>()
+    const d2 = deferred<string>()
+    let call = 0
+    const { result } = renderHook(() => useAsync(() => (++call === 1 ? d1.promise : d2.promise), []))
+    await act(async () => { d1.reject(new Error('network')) })
+    expect(result.current.error).toBe('network')
+
+    act(() => { result.current.reload() })
+    // Still in flight — the banner must not show the previous failure alongside
+    // the spinner.
+    expect(result.current.loading).toBe(true)
+    expect(result.current.error).toBeNull()
+
+    await act(async () => { d2.resolve('ok') })
+    expect(result.current.data).toBe('ok')
+  })
+})
+
+describe('reload is awaitable', () => {
+  it('resolves only after the run settles, so callers can sequence on it', async () => {
+    const d1 = deferred<string>()
+    const d2 = deferred<string>()
+    let call = 0
+    const { result } = renderHook(() => useAsync(() => (++call === 1 ? d1.promise : d2.promise), []))
+    await act(async () => { d1.resolve('first') })
+
+    let settled = false
+    await act(async () => {
+      const p = result.current.reload().then(() => { settled = true })
+      expect(settled).toBe(false) // still in flight
+      d2.resolve('second')
+      await p
+    })
+    expect(settled).toBe(true)
+    expect(result.current.data).toBe('second')
+  })
+
+  it('resolves rather than rejecting when the run fails', async () => {
+    const d = deferred<string>()
+    let call = 0
+    const { result } = renderHook(() => useAsync(() => (++call === 1 ? Promise.resolve('ok') : d.promise), []))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    await act(async () => {
+      const p = result.current.reload()
+      d.reject(new Error('nope'))
+      await expect(p).resolves.toBeUndefined() // caller need not try/catch
+    })
     expect(result.current.error).toBe('nope')
   })
 })

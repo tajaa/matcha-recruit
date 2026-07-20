@@ -124,7 +124,10 @@ export default function Individuals() {
         tokens: amount,
         description: `Admin grant to individual: ${grantTarget.email}`,
       })
-      fetchUsers()
+      // Await the refetch before dismissing: closing first leaves the row
+      // showing its pre-grant token count for the length of the round-trip,
+      // which reads as "the grant didn't work".
+      await fetchUsers()
       setGrantTarget(null)
       setGrantAmount('')
     } catch {}

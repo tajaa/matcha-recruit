@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Button, Input } from '../../components/ui'
 import { api } from '../../api/client'
+import { useAsync } from '../../hooks/useAsync'
 import {
   EMPTY_FORM,
   type Broker,
@@ -18,8 +19,6 @@ import { LinkCompanyModal } from './Brokers/LinkCompanyModal'
 import { BrokerCreatedModal } from './Brokers/BrokerCreatedModal'
 
 export default function Brokers() {
-  const [brokers, setBrokers] = useState<Broker[]>([])
-  const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [showAdd, setShowAdd] = useState(false)
   const [form, setForm] = useState<CreateForm>(EMPTY_FORM)
@@ -57,15 +56,16 @@ export default function Brokers() {
   const [linkError, setLinkError] = useState('')
   const [linkSuccess, setLinkSuccess] = useState('')
 
-  function fetchBrokers() {
-    setLoading(true)
-    api.get<BrokerListResponse>('/admin/brokers')
-      .then((res) => setBrokers(res.brokers))
-      .catch(() => setBrokers([]))
-      .finally(() => setLoading(false))
-  }
-
-  useEffect(() => { fetchBrokers() }, [])
+  const {
+    data: brokers,
+    loading,
+    error,
+    reload: fetchBrokers,
+  } = useAsync(
+    () => api.get<BrokerListResponse>('/admin/brokers').then((res) => res.brokers),
+    [],
+    [],
+  )
 
   const filtered = brokers.filter((b) =>
     b.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -204,6 +204,7 @@ export default function Brokers() {
       <div className="mt-6">
         <BrokerTable
           loading={loading}
+          error={error}
           filtered={filtered}
           onViewBook={viewBook}
           onLinkCompany={openLinkCompany}

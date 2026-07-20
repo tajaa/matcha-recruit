@@ -126,6 +126,7 @@ export default function Companies() {
   const {
     data: companies,
     loading,
+    error,
     setData: setCompanies,
     reload: fetchCompanies,
   } = useAsync(
@@ -269,6 +270,7 @@ export default function Companies() {
           rows={filtered}
           rowKey={(c) => c.id}
           loading={loading}
+          error={error}
           emptyText="No companies found."
           columns={[
             {

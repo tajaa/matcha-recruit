@@ -21,8 +21,9 @@ export type AsyncState<D> = {
   loading: boolean
   /** `e.message`, or null when the last run succeeded. */
   error: string | null
-  /** Re-run `fn` without clearing `data`. */
-  reload: () => void
+  /** Re-run `fn` without clearing `data`. Resolves when the run settles, so a
+   *  caller that must not proceed until the list is fresh can await it. */
+  reload: () => Promise<void>
   /** Escape hatch for optimistic updates — write `data` without a fetch. */
   setData: (updater: D | ((prev: D) => D)) => void
 }
@@ -35,6 +36,11 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e))
  * `fn` is held in a ref, so an inline closure over component state is fine and
  * does not need memoising — only `deps` decides when a refetch happens, exactly
  * like the `useEffect` it replaces.
+ *
+ * `deps` is spread into that effect, so it carries the same rule React applies:
+ * its LENGTH must not change between renders. `useAsync(fn, cond ? [a] : [a, b])`
+ * throws "the final argument changed size between renders". Pass a fixed-length
+ * array and vary the values.
  *
  * For a fetch that should wait on a value, guard inside `fn` rather than
  * branching at the call site:
@@ -63,12 +69,22 @@ export function useAsync<T>(
   // it belongs to a request a newer one has already superseded.
   const runIdRef = useRef(0)
   const mountedRef = useRef(true)
-  useEffect(() => () => { mountedRef.current = false }, [])
+  // Setting the flag on the way IN is load-bearing, not symmetry. StrictMode
+  // dev-mounts every component twice (mount → cleanup → mount), so a cleanup
+  // that only ever sets `false` latches the guard off for the component's whole
+  // life: every response is then discarded and the page hangs on its loading
+  // state. Tests must wrap in <StrictMode> to catch this — renderHook does not
+  // apply it by default.
+  useEffect(() => {
+    mountedRef.current = true
+    return () => { mountedRef.current = false }
+  }, [])
 
-  const run = useCallback(() => {
+  const run = useCallback((): Promise<void> => {
     const runId = ++runIdRef.current
     setLoading(true)
-    fnRef.current()
+    setError(null)
+    return fnRef.current()
       .then((result) => {
         if (!mountedRef.current || runId !== runIdRef.current) return
         setData(result)
@@ -117,7 +133,12 @@ export function useAsyncAction<A extends unknown[], R>(
   fnRef.current = fn
 
   const mountedRef = useRef(true)
-  useEffect(() => () => { mountedRef.current = false }, [])
+  // See the note in useAsync: the `true` on mount is what keeps StrictMode's
+  // double-mount from latching this guard off permanently.
+  useEffect(() => {
+    mountedRef.current = true
+    return () => { mountedRef.current = false }
+  }, [])
 
   const run = useCallback(async (...args: A): Promise<R | undefined> => {
     setBusy(true)
