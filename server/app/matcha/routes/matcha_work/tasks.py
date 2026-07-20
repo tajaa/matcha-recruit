@@ -16,8 +16,10 @@ from app.database import get_connection
 from app.matcha.dependencies import require_admin_or_client, require_company_member
 from app.matcha.routes.matcha_work._shared import (
     _can_edit_project,
+    _parse_task_attachment_ids,
     _resolve_file_urls,
     _verify_project_access,
+    _verify_task_belongs_to_project,
 )
 
 logger = logging.getLogger(__name__)
@@ -617,22 +619,7 @@ async def start_task_round_endpoint(
 
     kickoff_body = (body.get("body") or "").strip() or None
 
-    raw_attachments = body.get("attachment_ids") or []
-    attachment_ids: list[UUID] = []
-    if raw_attachments:
-        if not isinstance(raw_attachments, list):
-            raise HTTPException(status_code=400, detail="attachment_ids must be a list")
-        try:
-            attachment_ids = [UUID(str(x)) for x in raw_attachments]
-        except (ValueError, TypeError):
-            raise HTTPException(status_code=400, detail="attachment_ids contains invalid UUID")
-        async with get_connection() as conn:
-            found = await conn.fetch(
-                "SELECT id FROM mw_project_files WHERE task_id = $1 AND id = ANY($2::uuid[])",
-                task_id, attachment_ids,
-            )
-        if len(found) != len(attachment_ids):
-            raise HTTPException(status_code=400, detail="attachment not found on this task")
+    attachment_ids = await _parse_task_attachment_ids(task_id, body.get("attachment_ids") or [])
 
     # 1. Open the round boundary AND re-scope the checklist, atomically —
     #    see project_subtask_service.start_new_round for the ordering rules.

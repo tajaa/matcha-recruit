@@ -1,6 +1,16 @@
 # Matcha Work Routes Package
 
-Backend routes for Matcha Work (collaborative AI workspace — projects, threads, tasks, recruiting, AI turns). Package was split from an 11,572-line flat `matcha_work.py` into per-domain submodules on 2026-07-03. URL surface unchanged at the split (204 routes; 203 since the 2026-07-09 deletion of the dead non-streaming `POST /threads/{id}/messages` — see `messaging.py`'s module docstring); external import path `app.matcha.routes.matcha_work` stable.
+Backend routes for Matcha Work (collaborative AI workspace — projects, threads, tasks, recruiting, AI turns). Package was split from an 11,572-line flat `matcha_work.py` into per-domain submodules on 2026-07-03. URL surface unchanged at the split; external import path `app.matcha.routes.matcha_work` stable.
+
+**Route count (recounted 2026-07-19, from source):** **202** gated routes on `router` + **4** on `public_router` = 206 endpoints. Reproduce with:
+
+```bash
+cd server && grep -c "^@router\."        app/matcha/routes/matcha_work/*.py   # per file
+cd server && grep -h "^@router\." app/matcha/routes/matcha_work/*.py | wc -l  # 202
+cd server && grep -h "^@public_router\." app/matcha/routes/matcha_work/*.py | wc -l  # 4
+```
+
+The "204 routes / 203 after the 2026-07-09 deletion of the dead non-streaming `POST /threads/{id}/messages`" figure this doc previously carried was **wrong, and was wrong before the 2026-07-19 `tasks.py` split** — the old `tasks.py | 37` row was an undercount of the same era, so the aggregate and the rows were never reconcilable. Nothing was removed to get from 203 to 202; the counts here are measured, not carried forward. The `messaging.py` deletion is real (see its module docstring) — only the arithmetic around it was bad. The **Routes** column below counts `@router.` decorators only; `public_router` routes are called out separately as "+ N public".
 
 ## Layout
 
@@ -14,10 +24,10 @@ Backend routes for Matcha Work (collaborative AI workspace — projects, threads
 | `thread_uploads.py` | Thread images/files/resume-batch/inventory uploads + batch interview send/sync | 7 |
 | `projects.py` | Project CRUD/pin/archive/bundle, discipline lifecycle (**owns `public_router`** for the signature webhook), blog, project files/folders/links, project completion | 30 + 1 public |
 | `sections.py` | Project sections (CRUD/reorder/revision/email/comments), AI diagram editing, legacy thread-scoped project endpoints. **Holds 2 order-sensitive route pairs** (see below) | 20 |
-| `tasks.py` | Project kanban tasks + subtasks, pipeline-mode, task CRUD/reject/approve/ai-draft, review rounds, task summarize | 15 |
+| `tasks.py` | Project kanban tasks + subtasks, pipeline-mode, done-count, task CRUD/reject/approve/ai-draft, review rounds, task summarize. **Ticket drafts, history/activity feeds, task attachments and research tasks all moved out on 2026-07-19** — see the four rows below | 15 |
 | `ticket_drafts.py` | Ticket drafts — repo-grounded chat that promotes into a kanban task (split from `tasks.py` 2026-07-19) | 9 |
 | `task_history.py` | Task history timeline, weekly board replay, project activity feed (+ `_serialize_history_row` / `_serialize_activity_row`) | 4 |
-| `task_files.py` | Attachments scoped to one kanban task (+ `_verify_task_belongs_to_project`) | 3 |
+| `task_files.py` | Attachments scoped to one kanban task (ownership via `_shared._verify_task_belongs_to_project`) | 3 |
 | `research_tasks.py` | Research tasks — HTTP shape + the 3 SSE streams. **Persistence lives in `services/research_task_service.py`**; storage is a list under the `research_tasks` key of the `mw_projects.project_data` JSONB blob (no table, no migration) — response shapes are consumed directly by `client/src/work/api/matchaWork/research.ts`, so they are byte-frozen | 9 |
 | `workspace.py` | Cross-project home surface: open-tasks/recent-activity feeds, per-user Gmail email agent, entitlements/usage, global (non-project) manual task board. **Holds 1 order-sensitive route pair** (see below) | 17 |
 | `elements.py` | Project elements (context-repo bindings) CRUD + repo-snapshot sync + files/folders/notes | 12 |
@@ -27,7 +37,7 @@ Backend routes for Matcha Work (collaborative AI workspace — projects, threads
 | `tutor.py` | Language tutor voice sessions (Gemini Live) + EN/ES/FR utterance-check prompts | 3 |
 | `messaging.py` | The core AI-turn surface: `send_message_stream` (the biggest handler; its non-streaming twin was deleted 2026-07-09 — quota-bypass/wrong-tenant/crash-after-billing drift, zero callers) + RAG-context/compliance-gap-detection/thread-file-attachment-meta helpers. Mode dispatch is registry-driven: a generic loop over `services/matcha_work_modes.THREAD_MODES` injects each active mode's context (node, benefits, legal, risk, training); compliance + payer are `custom_dispatch=True` and keep bespoke blocks (reasoning-chain statuses + conditional RAG; payer prompt-swap path) | 1 |
 | `threads.py` | Remainder: create/logo/handbook-upload, list/get, versions/revert/finalize/save-draft, PDF/proxy, archive/unarchive, review-requests + signatures + presentation, title/pin, mode toggles — the registry-driven `POST /threads/{id}/modes/{mode_key}` + 3 legacy aliases (`/node-mode`, `/compliance-mode`, `/payer-mode`) (**owns `public_router`** for public review routes) | 25 + 2 public |
-| **Total** | | **204 routes** |
+| **Total** | | **202 routes** (+ 4 public) |
 
 ## Three routers
 
@@ -51,7 +61,7 @@ Three same-method overlapping route pairs exist. Each pair lives entirely within
 2. `PUT /threads/{thread_id}/project/sections/reorder` **before** `PUT /threads/{thread_id}/project/sections/{section_id}` — both in `sections.py` (the legacy thread-scoped project group).
 3. `DELETE /tasks/{task_id}` **before** `DELETE /tasks/dismiss` — both in `workspace.py`. **`task_id` uses a plain (non-UUID-converter) path param, so `DELETE /tasks/dismiss` is already shadowed today** — any `/tasks/dismiss` DELETE matches `/tasks/{task_id}` first and 422s on UUID coercion. This is pre-existing behavior from before the split; not fixed here.
 
-**Don't reorder within a submodule** if it changes the relative position of either pair. Include order **between** submodules in `__init__.py` is free — no other route shares both method and an overlapping path pattern with anything in a different submodule (verified exhaustively against the full 204-route dump at every phase of the split).
+**Don't reorder within a submodule** if it changes the relative position of either pair. Include order **between** submodules in `__init__.py` is free — no other route shares both method and an overlapping path pattern with anything in a different submodule (verified exhaustively against the full route dump at every phase of the split).
 
 ## Adding a new endpoint
 
@@ -97,6 +107,6 @@ Two lazy in-function imports (`from .dashboard import ...` in `threads.py`'s glo
 
 ## Tests
 
-Full suite: `cd server && ./venv/bin/python -m pytest tests/matcha_work/ -q` — expect 12 failed / 126 passed / 8 skipped. The 12 failures are pre-existing (unrelated to the split — `TestRenderProjectPdf` PDF-rendering assertions, `test_non_image_requests_normal_flow`, `test_project_task_toggle` response-shape checks). Verified identical failure set at every phase of the split.
+Full suite: `cd server && ./venv/bin/python -m pytest tests/matcha_work/ -q` — expect **6 failed / 242 passed / 8 skipped** (measured 2026-07-19). The 6 failures are all `test_blog_pdf_export.py` (`TestRenderProjectPdf` PDF-rendering assertions) and are pre-existing — unrelated to either the 2026-07-03 package split or the 2026-07-19 `tasks.py` split. (The older "12 failed / 126 passed" figure this doc carried predates a good deal of test growth; re-measure rather than trusting a remembered number.)
 
 `pytest tests/` (the whole server suite) hits unrelated pre-existing collection errors in other packages (documented in `employees/CLAUDE.md`) plus a GUSTO-OAuth-env-var collection-order fragility — `test_language_tutor.py`'s module-level prompt-constant import triggers `app.matcha.routes.integrations.provisioning`'s startup check, which only succeeds if an earlier-collected file (`test_journal_isolation.py`, alphabetically first) has already called `os.environ.setdefault("GUSTO_OAUTH_*", ...)`. Pre-existing, not introduced by this split — scope `pytest` to `tests/matcha_work/` (or set the GUSTO env vars / load `.env` first) to avoid it.

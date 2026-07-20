@@ -3,7 +3,6 @@
 Split out of `tasks.py` (2026-07-19). Handlers moved verbatim -- no path,
 signature, or response-shape change.
 """
-import logging
 from datetime import datetime, timedelta
 from typing import Optional
 from uuid import UUID
@@ -13,9 +12,11 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from app.core.models.auth import CurrentUser
 from app.database import get_connection
 from app.matcha.dependencies import require_company_member
-from app.matcha.routes.matcha_work._shared import _verify_project_access
+from app.matcha.routes.matcha_work._shared import (
+    _parse_task_attachment_ids,
+    _verify_project_access,
+)
 
-logger = logging.getLogger(__name__)
 router = APIRouter()
 
 def _serialize_history_row(r) -> dict:
@@ -211,24 +212,9 @@ async def log_task_activity_endpoint(
 
     await _verify_project_access(project_id, current_user)
 
-    raw_attachments = body.get("attachment_ids") or []
-    attachment_ids: list[UUID] = []
-    if raw_attachments:
-        if not isinstance(raw_attachments, list):
-            raise HTTPException(status_code=400, detail="attachment_ids must be a list")
-        try:
-            attachment_ids = [UUID(str(x)) for x in raw_attachments]
-        except (ValueError, TypeError):
-            raise HTTPException(status_code=400, detail="attachment_ids contains invalid UUID")
-        # All ids must belong to mw_project_files rows for THIS task — never
-        # store a dangling or cross-task ref.
-        async with get_connection() as conn:
-            found = await conn.fetch(
-                "SELECT id FROM mw_project_files WHERE task_id = $1 AND id = ANY($2::uuid[])",
-                task_id, attachment_ids,
-            )
-        if len(found) != len(attachment_ids):
-            raise HTTPException(status_code=400, detail="attachment not found on this task")
+    # All ids must belong to mw_project_files rows for THIS task — never
+    # store a dangling or cross-task ref.
+    attachment_ids = await _parse_task_attachment_ids(task_id, body.get("attachment_ids") or [])
 
     reply_to: Optional[UUID] = None
     raw_reply = body.get("reply_to")

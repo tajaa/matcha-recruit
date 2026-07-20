@@ -219,6 +219,44 @@ def _resolve_file_urls(files: list[dict]) -> list[dict]:
 def _project_company_id(project: dict):
     return project.get("company_id")
 
+async def _parse_task_attachment_ids(task_id: UUID, raw_attachments) -> list[UUID]:
+    """Validate client-supplied `attachment_ids` for a task-scoped write.
+
+    Each id must parse as a UUID and must already own an `mw_project_files`
+    row whose `task_id` is this task — never store a dangling or cross-task
+    ref. Any mismatch is a 400 (the whole list is rejected, nothing is
+    silently filtered out). Returns the parsed ids; `[]` when none were sent.
+    """
+    if not raw_attachments:
+        return []
+    if not isinstance(raw_attachments, list):
+        raise HTTPException(status_code=400, detail="attachment_ids must be a list")
+    try:
+        attachment_ids = [UUID(str(x)) for x in raw_attachments]
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="attachment_ids contains invalid UUID")
+    async with get_connection() as conn:
+        found = await conn.fetch(
+            "SELECT id FROM mw_project_files WHERE task_id = $1 AND id = ANY($2::uuid[])",
+            task_id, attachment_ids,
+        )
+    if len(found) != len(attachment_ids):
+        raise HTTPException(status_code=400, detail="attachment not found on this task")
+    return attachment_ids
+
+async def _verify_task_belongs_to_project(project_id: UUID, task_id: UUID) -> None:
+    """Ownership guard for task-scoped routes: the task must live in this project.
+
+    404 (not 403) so a task id in another project isn't confirmed to exist.
+    """
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            "SELECT id FROM mw_tasks WHERE id = $1 AND project_id = $2",
+            task_id, project_id,
+        )
+    if not row:
+        raise HTTPException(status_code=404, detail="Task not found")
+
 async def _verify_element_in_project(conn, project_id: UUID, element_id: str) -> None:
     owns = await conn.fetchval(
         "SELECT 1 FROM mw_project_elements WHERE id = $1 AND project_id = $2",
