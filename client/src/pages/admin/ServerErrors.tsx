@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { AlertTriangle, RefreshCw, Search, ChevronDown, ChevronRight, Copy, Check } from 'lucide-react'
 import { api } from '../../api/client'
 import { useAsync } from '../../hooks/useAsync'
+import { useDebounced } from '../../hooks/useDebounced'
 
 type Kind =
   | 'exception'
@@ -108,6 +109,9 @@ export default function ServerErrors() {
   const [showResolved, setShowResolved] = useState(false)
   const [searchFilter, setSearchFilter] = useState('')
   const [sinceHours, setSinceHours] = useState(24)
+  // The search box refetches, so debounce the TRIGGER — otherwise typing
+  // "database" fires eight list+stats request pairs at the admin API.
+  const debouncedSearch = useDebounced(searchFilter)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [copied, setCopied] = useState<string | null>(null)
 
@@ -127,7 +131,7 @@ export default function ServerErrors() {
       ])
       return { items: listRes.items, total: listRes.total, stats: statsRes }
     },
-    [kindFilter, sourceFilter, searchFilter, showResolved, sinceHours],
+    [kindFilter, sourceFilter, debouncedSearch, showResolved, sinceHours],
     { items: [] as ErrorItem[], total: 0, stats: null as StatsResponse | null },
   )
   const { items, total, stats } = data

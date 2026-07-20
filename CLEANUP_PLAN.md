@@ -620,3 +620,35 @@ docstrings, where `ast.parse` happily accepts them and the name is never bound) 
 round ends with a real `importlib.import_module` of every touched module — **44 modules, 0
 failures** — rather than a syntax check. Server suite: 98 failed / 3302 passed → **98 failed /
 3317 passed**, 20 collection errors → 19. Identical failures, +15 passes.
+
+### Pre-merge review fixes (2026-07-20)
+
+A whole-branch pass before merge caught three instances of the same mistake: reasoning
+carefully about a failure mode, fixing it in one place, and not applying it to the siblings.
+
+- **The forced-logout fix reached only 3 of 5 route guards.** `PortalLayout` and
+  `RequireBusinessAccount` still redirected on `!me`, so the *employee portal* — the surface
+  most likely to be hit by a non-admin — still logged users out on a transient `/auth/me`
+  failure. All five now gate on `authFailed` and render a recoverable "could not verify your
+  session" state for the unknown case.
+- **`uploadFilesStream` had no `settled` guard**, though `sendMessageStream` (which shares its
+  transport) documents at length why silence is unacceptable. A proxy cutting a 200 mid-stream
+  left the resume/inventory upload spinner running forever with no message.
+- **Timeout detection no longer relies on `AbortSignal.reason`.** Where the reason is not
+  populated, a timeout was misread as a user cancel and reported silently — reintroducing the
+  stuck-composer state the `settled` flag exists to prevent. Both call sites now track an
+  explicit local `timedOut`.
+
+Also fixed:
+- `<Modal>` gains `dismissible` (default true). Dialogs migrated in D4 previously had an X
+  button ONLY; adopting the shared modal handed them Escape-and-click-outside for free, which
+  is right for a form and wrong for a newsletter **mid-send**. `SendModal` and `CsvImportModal`
+  pass `dismissible={!busy}`.
+- `<Modal>` Escape now closes only the **topmost** dialog. Each instance registered its own
+  document listener, so one Escape collapsed a whole stack. 6 tests; verified by reverting.
+- `postSSE` treats a `null` body as empty (`body == null`) rather than sending the literal
+  string `"null"`, which FastAPI 422s against a Pydantic model.
+- New `hooks/useDebounced`; `ServerErrors`' search box no longer fires a list+stats request
+  pair per keystroke. (Pre-existing on main, but now a one-line fix at a single call site.)
+
+**Verification:** tsc clean, **154 client tests** (up from 148), build clean.

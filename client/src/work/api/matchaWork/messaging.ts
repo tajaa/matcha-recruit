@@ -34,7 +34,12 @@ export function sendMessageStream(
 ): AbortController {
   const endpoint = `/matcha-work/threads/${threadId}/messages/stream`
   const ctrl = new AbortController()
-  const timeout = setTimeout(() => ctrl.abort('timeout'), 180_000)
+  // Tracked locally, not read off ctrl.signal.reason — abort-reason is not
+  // universally populated, and a missing one turns a timeout into a silent
+  // "user cancelled", leaving the composer stuck on "Thinking…". That is the
+  // exact state the `settled` flag below exists to prevent.
+  let timedOut = false
+  const timeout = setTimeout(() => { timedOut = true; ctrl.abort('timeout') }, 180_000)
 
   // A turn is only "settled" once complete or error fires. Anything else that
   // ends the stream — [DONE] with no result, a drained reader, a proxy cutting
@@ -70,7 +75,7 @@ export function sendMessageStream(
       }
     } catch (e) {
       if (ctrl.signal.aborted) {
-        if (ctrl.signal.reason === 'timeout') {
+        if (timedOut) {
           reportApiError({ endpoint, status: 0, message: 'SSE stream timed out after 180s' })
           callbacks.onError('Request timed out. Please try again.')
         }

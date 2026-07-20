@@ -31,7 +31,19 @@ export function uploadFilesStream(
   callbacks: UploadStreamCallbacks,
 ): AbortController {
   const ctrl = new AbortController()
-  const timeout = setTimeout(() => ctrl.abort('timeout'), UPLOAD_TIMEOUT_MS)
+  // Tracked locally rather than read back off `ctrl.signal.reason`: abort-reason
+  // is not universally populated, and where it is missing a timeout would be
+  // misread as a user cancel and reported as silence — the one outcome this
+  // function must never produce.
+  let timedOut = false
+  const timeout = setTimeout(() => { timedOut = true; ctrl.abort('timeout') }, UPLOAD_TIMEOUT_MS)
+
+  // A stream is only "settled" once complete or error fires. Anything else that
+  // ends it — [DONE] with no result, a drained reader, a proxy cutting a 200
+  // mid-flight — leaves the upload spinner running forever with no message. The
+  // same guard exists in sendMessageStream; it belongs on every path that drives
+  // one of these streams, not just the chat one.
+  let settled = false
 
   const form = new FormData()
   files.forEach((f) => form.append('files', f))
@@ -45,20 +57,25 @@ export function uploadFilesStream(
           const event = data as MWStreamEvent
           callbacks.onEvent(event)
           if (event.type === 'complete') {
+            settled = true
             callbacks.onComplete(event.data)
             return true // stop consuming
           }
           if (event.type === 'error') {
+            settled = true
             callbacks.onError(event.message)
             return true
           }
         },
         { signal: ctrl.signal },
       )
+      if (!settled && !ctrl.signal.aborted) {
+        callbacks.onError('The upload stream ended unexpectedly. Please try again.')
+      }
     } catch (e) {
       if (ctrl.signal.aborted) {
         // A user cancel is silent; only a timeout is worth reporting.
-        if (ctrl.signal.reason === 'timeout') callbacks.onError('Request timed out. Please try again.')
+        if (timedOut) callbacks.onError('Request timed out. Please try again.')
         return
       }
       if (e instanceof SSEHttpError) callbacks.onError(`${e.status}: ${e.message}`)

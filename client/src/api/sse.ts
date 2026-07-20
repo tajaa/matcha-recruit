@@ -167,7 +167,10 @@ export async function postSSE(
   const res = await fetch(`${BASE}${path}`, {
     method: opts.method ?? 'POST',
     headers,
-    body: isForm ? (body as FormData) : body === undefined ? undefined : JSON.stringify(body),
+    // `body == null` covers null as well as undefined: JSON.stringify(null)
+    // sends the four-byte body "null", which FastAPI rejects with a 422 against
+    // a Pydantic model rather than treating it as an empty body.
+    body: isForm ? (body as FormData) : body == null ? undefined : JSON.stringify(body),
     signal: opts.signal,
   })
 

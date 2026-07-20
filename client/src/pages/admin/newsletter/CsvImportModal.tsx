@@ -63,7 +63,7 @@ export function CsvImportModal({ onClose, onDone }: { onClose: () => void; onDon
   }
 
   return (
-    <Modal open onClose={onClose} title="Import subscribers" width="lg">
+    <Modal open onClose={onClose} title="Import subscribers" width="lg" dismissible={!busy}>
         <p className="text-xs text-zinc-500 mb-3">
           Paste CSV. First column = email, optional second column = name. Header row optional. Up to 500 rows per import.
         </p>

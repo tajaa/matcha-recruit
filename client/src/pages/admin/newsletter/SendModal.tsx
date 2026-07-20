@@ -23,7 +23,7 @@ export function SendModal({
       : 'Schedule send'
 
   return (
-    <Modal open onClose={() => setSendModal(null)} title={title} width="sm">
+    <Modal open onClose={() => setSendModal(null)} title={title} width="sm" dismissible={!sending}>
         {sendModal.kind === 'segment' && (
           <div className="space-y-2 max-h-64 overflow-auto">
             <p className="text-xs text-zinc-500 mb-2">Pick one or more tags. Leave all unchecked to send to everyone.</p>
