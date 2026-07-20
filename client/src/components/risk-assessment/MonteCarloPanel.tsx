@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
+import { useAsync } from '../../hooks/useAsync'
 import { api } from '../../api/client'
 import { Play, Loader2 } from 'lucide-react'
 import { fmtCompact } from '../../types/riskAssessment'
@@ -11,18 +12,9 @@ type Props = {
 }
 
 export function MonteCarloPanel({ qs, isAdmin, companyId }: Props) {
-  const [mc, setMc] = useState<MonteCarloResult | null>(null)
-  const [loading, setLoading] = useState(true)
+  const { data: mc, loading, setData: setMc } = useAsync(() => api.get<MonteCarloResult>(`/risk-assessment/monte-carlo${qs}`), [qs], null)
   const [running, setRunning] = useState(false)
   const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    setLoading(true)
-    api.get<MonteCarloResult>(`/risk-assessment/monte-carlo${qs}`)
-      .then(setMc)
-      .catch(() => setMc(null))
-      .finally(() => setLoading(false))
-  }, [qs])
 
   async function handleRun() {
     if (!companyId) return

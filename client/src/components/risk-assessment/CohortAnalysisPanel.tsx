@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
+import { useAsync } from '../../hooks/useAsync'
 import { api } from '../../api/client'
 import type { CohortResult } from '../../types/riskAssessment'
 
@@ -9,18 +10,11 @@ type Props = {
 }
 
 export function CohortAnalysisPanel({ qs }: Props) {
-  const [cohorts, setCohorts] = useState<CohortResult[]>([])
-  const [loading, setLoading] = useState(true)
   const [dim, setDim] = useState<CohortDimension>('department')
-
-  useEffect(() => {
-    setLoading(true)
+  const { data: cohorts, loading } = useAsync(() => {
     const sep = qs ? '&' : '?'
-    api.get<CohortResult[]>(`/risk-assessment/cohorts${qs}${sep}dimension=${dim}`)
-      .then(setCohorts)
-      .catch(() => setCohorts([]))
-      .finally(() => setLoading(false))
-  }, [dim, qs])
+    return api.get<CohortResult[]>(`/risk-assessment/cohorts${qs}${sep}dimension=${dim}`)
+  }, [dim, qs], [])
 
   return (
     <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6 space-y-4">

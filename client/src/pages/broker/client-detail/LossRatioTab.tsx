@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
+import { useAsync } from '../../../hooks/useAsync'
 import { Loader2 } from 'lucide-react'
 import { Card } from '../../../components/ui'
 import type { LossRatioData, LossRatioRow, LossPremiumBody } from '../../../types/lossDevelopment'
@@ -12,16 +13,9 @@ export function LossRatioTab({ subjectId, fetchData, savePremium }: {
   fetchData: () => Promise<LossRatioData>
   savePremium: (b: LossPremiumBody) => Promise<LossRatioData>
 }) {
-  const [data, setData] = useState<LossRatioData | null>(null)
-  const [loading, setLoading] = useState(true)
+  const { data, loading, setData } = useAsync(() => fetchData(), [subjectId], null)
   const [edits, setEdits] = useState<Record<string, string>>({})
   const [savingKey, setSavingKey] = useState<string | null>(null)
-
-  useEffect(() => {
-    setLoading(true)
-    fetchData().then(setData).catch(() => setData(null)).finally(() => setLoading(false))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [subjectId])
 
   async function save(line: string, period: string) {
     const key = `${line}:${period}`

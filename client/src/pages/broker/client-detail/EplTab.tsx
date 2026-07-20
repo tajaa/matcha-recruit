@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
+import { useAsync } from '../../../hooks/useAsync'
 import { Shield, AlertTriangle, Loader2 } from 'lucide-react'
 import { Card } from '../../../components/ui'
 import { fetchEplClientDetail, recordEplAttestation } from '../../../api/broker/broker'
-import type { EplReadiness, EplFactor, EplAttestationStatus } from '../../../types/broker'
+import type { EplFactor, EplAttestationStatus } from '../../../types/broker'
 
 const EPL_BAND_TONE: Record<string, string> = {
   strong: 'text-emerald-400',
@@ -71,19 +72,8 @@ function EplAttestedRow({ f, saving, onSet }: {
 }
 
 export function EplTab({ companyId }: { companyId: string }) {
-  const [data, setData] = useState<EplReadiness | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(false)
+  const { data, loading, error, setData } = useAsync(() => fetchEplClientDetail(companyId), [companyId], null)
   const [savingKey, setSavingKey] = useState<string | null>(null)
-
-  useEffect(() => {
-    setLoading(true)
-    setError(false)
-    fetchEplClientDetail(companyId)
-      .then(setData)
-      .catch(() => setError(true))
-      .finally(() => setLoading(false))
-  }, [companyId])
 
   async function setAttestation(key: string, status: EplAttestationStatus) {
     setSavingKey(key)

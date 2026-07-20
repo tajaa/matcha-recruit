@@ -1,26 +1,19 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
+import { useAsync } from '../../../hooks/useAsync'
 import { Building2, Plus, Loader2, AlertCircle, Upload } from 'lucide-react'
 import { SovImportModal } from '../../../components/property/SovImportModal'
 import { fetchPropertySov, deleteBuilding } from '../../../api/property/property'
-import type { PropertySov, PropertyBuilding } from '../../../types/property'
+import type { PropertyBuilding } from '../../../types/property'
 import { RiskScoreCard, RollupCards, ExposureCard, ReadinessCard, PlanCard } from './sections'
 import { BuildingsTable } from './BuildingsTable'
 import { BuildingModal } from './BuildingModal'
 
 export default function Property() {
-  const [data, setData] = useState<PropertySov | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(false)
+  const { data, loading, error, reload: load, setData } = useAsync(() => fetchPropertySov(), [], null)
   const [editing, setEditing] = useState<PropertyBuilding | null>(null)
   const [showForm, setShowForm] = useState(false)
   const [showImport, setShowImport] = useState(false)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
-
-  const load = () => {
-    setLoading(true); setError(false)
-    fetchPropertySov().then(setData).catch(() => setError(true)).finally(() => setLoading(false))
-  }
-  useEffect(load, [])
 
   function openAdd() { setEditing(null); setShowForm(true) }
   function openEdit(b: PropertyBuilding) { setEditing(b); setShowForm(true) }
