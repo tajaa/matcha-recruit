@@ -6,11 +6,11 @@
  * → that company's live gap dashboard. "Open any company" reaches un-analyzed
  * companies via the shared CompanyPicker.
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
+import { useAsync } from '../../hooks/useAsync'
 import { useNavigate } from 'react-router-dom'
 import { Loader2, Search, Building2, AlertTriangle, CheckCircle2, ChevronDown } from 'lucide-react'
 import { adminOnboarding } from '../../api/admin/adminOnboarding'
-import type { GapOverviewRow } from '../../api/admin/adminOnboarding'
 import { CompanyPicker } from './AdminOnboarding'
 
 type SortKey = 'attention' | 'name' | 'coverage' | 'gaps' | 'complexity'
@@ -45,15 +45,10 @@ function StatCard({ label, value, tone }: { label: string; value: number | strin
 
 export default function GapOverview() {
   const navigate = useNavigate()
-  const [rows, setRows] = useState<GapOverviewRow[]>([])
-  const [loading, setLoading] = useState(true)
+  const { data: rows, loading } = useAsync(() => adminOnboarding.getGapOverview(), [], [])
   const [q, setQ] = useState('')
   const [sort, setSort] = useState<SortKey>('attention')
   const [pickerOpen, setPickerOpen] = useState(false)
-
-  useEffect(() => {
-    adminOnboarding.getGapOverview().then(setRows).catch(() => {}).finally(() => setLoading(false))
-  }, [])
 
   const view = useMemo(() => {
     const v = rows.filter((r) => (r.company_name || '').toLowerCase().includes(q.toLowerCase()))

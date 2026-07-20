@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
+import { useAsync } from '../../hooks/useAsync'
 import { relativeTime, shortDateWithYear } from '../../utils/format'
 
 // Public page: an absolute date after a week (a dated comment is more useful
@@ -24,22 +25,16 @@ type Comment = {
 }
 
 export default function BlogComments({ slug }: { slug: string }) {
-  const [comments, setComments] = useState<Comment[]>([])
-  const [loading, setLoading] = useState(true)
+  const { data: comments, loading } = useAsync(
+    () => (slug ? api.get<Comment[]>(`/blogs/${slug}/comments`) : Promise.resolve([])),
+    [slug],
+    [],
+  )
   const [authorName, setAuthorName] = useState('')
   const [content, setContent] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [submitted, setSubmitted] = useState(false)
   const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (!slug) return
-    setLoading(true)
-    api.get<Comment[]>(`/blogs/${slug}/comments`)
-      .then(setComments)
-      .catch(() => setComments([]))
-      .finally(() => setLoading(false))
-  }, [slug])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
