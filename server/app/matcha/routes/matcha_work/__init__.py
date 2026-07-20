@@ -45,6 +45,22 @@ from .tasks import router as _tasks_router
 
 router.include_router(_tasks_router)
 
+from .ticket_drafts import router as _ticket_drafts_router
+
+router.include_router(_ticket_drafts_router)
+
+from .task_history import router as _task_history_router
+
+router.include_router(_task_history_router)
+
+from .task_files import router as _task_files_router
+
+router.include_router(_task_files_router)
+
+from .research_tasks import router as _research_tasks_router
+
+router.include_router(_research_tasks_router)
+
 from .workspace import router as _workspace_router
 
 router.include_router(_workspace_router)

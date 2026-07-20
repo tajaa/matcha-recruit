@@ -53,6 +53,59 @@ async def _current_round(conn, task_id: UUID) -> int:
     return int(started or 0) + 1
 
 
+async def start_new_round(
+    conn,
+    *,
+    task_id: UUID,
+    project_id: UUID,
+    actor_user_id: Optional[UUID],
+    title: str,
+) -> int:
+    """Open the next round on a task and re-scope its checklist. Returns the
+    new round index.
+
+    Three steps, in this order (the order is load-bearing):
+      1. log the `round_started` boundary row — the client groups every event
+         between two consecutive `round_started` rows into one round, so
+         anything logged after this call falls inside the NEW round,
+      2. recompute the current round (`_current_round`), which is now the new
+         one because the boundary row above is counted,
+      3. carry every UNFINISHED (`is_done = false`) checklist item forward into
+         the new round. Completed items keep their old `round_index` so they
+         archive out of the live checklist and only resurface in that round's
+         "Fixed in Round N" rollup.
+
+    **The caller owns the transaction** — this opens none. Both call sites
+    (the reject/send-back flow in `project_task_service` and the explicit
+    `POST .../rounds` endpoint) already run inside `async with conn.transaction()`
+    and need the boundary row, the round recount and the carry-forward to land
+    atomically with their own writes.
+    """
+    # Lazy import dodges the services→services circular at module load.
+    from .project_task_service import _log_task_history
+
+    await _log_task_history(
+        conn,
+        task_id=task_id,
+        project_id=project_id,
+        actor_user_id=actor_user_id,
+        event_type="round_started",
+        # Keep metadata string-only — the desktop client decodes
+        # mw_task_history.metadata as [String: String], so a non-string value
+        # (e.g. a bool) fails the whole history decode and the ticket's notes
+        # + rounds silently vanish.
+        metadata={"title": title},
+    )
+    # round_started is now logged, so the current round IS the new round.
+    new_round = await _current_round(conn, task_id)
+    await conn.execute(
+        "UPDATE mw_subtasks SET round_index = $2, updated_at = NOW() "
+        "WHERE task_id = $1 AND is_done = false",
+        task_id, new_round,
+    )
+    return new_round
+
+
 async def list_subtasks(project_id: UUID, task_id: UUID) -> Optional[list[dict]]:
     """Ordered checklist for a task, or None if the task isn't in the project."""
     async with get_connection() as conn:

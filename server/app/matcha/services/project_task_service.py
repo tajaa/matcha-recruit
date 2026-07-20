@@ -975,23 +975,14 @@ async def reject_project_task(
             # round's work.
             from . import project_subtask_service as st_svc
             round_title = note[:80] if note else "Reviewer requested changes"
-            await _log_task_history(
+            # Shared with the explicit POST .../rounds endpoint. Runs inside
+            # this transaction — start_new_round opens none of its own.
+            await st_svc.start_new_round(
                 conn,
                 task_id=task_id,
                 project_id=project_id,
                 actor_user_id=actor_user_id,
-                event_type="round_started",
-                # Keep metadata string-only — the desktop client decodes
-                # mw_task_history.metadata as [String: String], so a non-string
-                # value (e.g. a bool) fails the whole history decode and the
-                # ticket's notes + rounds silently vanish.
-                metadata={"title": round_title},
-            )
-            new_round = await st_svc._current_round(conn, task_id)
-            await conn.execute(
-                "UPDATE mw_subtasks SET round_index = $2, updated_at = NOW() "
-                "WHERE task_id = $1 AND is_done = false",
-                task_id, new_round,
+                title=round_title,
             )
             # The bounce event lands AFTER round_started so it falls inside the
             # new round on the history feed ("Round N · sent back · <note>").

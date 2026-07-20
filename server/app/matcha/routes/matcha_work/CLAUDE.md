@@ -14,7 +14,11 @@ Backend routes for Matcha Work (collaborative AI workspace — projects, threads
 | `thread_uploads.py` | Thread images/files/resume-batch/inventory uploads + batch interview send/sync | 7 |
 | `projects.py` | Project CRUD/pin/archive/bundle, discipline lifecycle (**owns `public_router`** for the signature webhook), blog, project files/folders/links, project completion | 30 + 1 public |
 | `sections.py` | Project sections (CRUD/reorder/revision/email/comments), AI diagram editing, legacy thread-scoped project endpoints. **Holds 2 order-sensitive route pairs** (see below) | 20 |
-| `tasks.py` | Project kanban tasks + subtasks, pipeline-mode, ticket drafts, task history/rounds/activity/files, research tasks | 37 |
+| `tasks.py` | Project kanban tasks + subtasks, pipeline-mode, task CRUD/reject/approve/ai-draft, review rounds, task summarize | 15 |
+| `ticket_drafts.py` | Ticket drafts — repo-grounded chat that promotes into a kanban task (split from `tasks.py` 2026-07-19) | 9 |
+| `task_history.py` | Task history timeline, weekly board replay, project activity feed (+ `_serialize_history_row` / `_serialize_activity_row`) | 4 |
+| `task_files.py` | Attachments scoped to one kanban task (+ `_verify_task_belongs_to_project`) | 3 |
+| `research_tasks.py` | Research tasks — HTTP shape + the 3 SSE streams. **Persistence lives in `services/research_task_service.py`**; storage is a list under the `research_tasks` key of the `mw_projects.project_data` JSONB blob (no table, no migration) — response shapes are consumed directly by `client/src/work/api/matchaWork/research.ts`, so they are byte-frozen | 9 |
 | `workspace.py` | Cross-project home surface: open-tasks/recent-activity feeds, per-user Gmail email agent, entitlements/usage, global (non-project) manual task board. **Holds 1 order-sensitive route pair** (see below) | 17 |
 | `elements.py` | Project elements (context-repo bindings) CRUD + repo-snapshot sync + files/folders/notes | 12 |
 | `github.py` | Commit scan/suggestions, GitHub connection/sync/scan-commits (**owns `public_router`** for the push webhook) | 10 + 1 public |
