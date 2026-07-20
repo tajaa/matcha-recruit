@@ -21,7 +21,7 @@ import asyncio
 from datetime import date, timedelta
 
 from ..celery_app import celery_app
-from ..utils import get_db_connection
+from ..utils import get_db_connection, scheduler_settings_row
 from app.core.services.company_contacts import get_company_admin_contacts
 
 # CAPA: how many days ahead of due_date to start nudging.
@@ -46,8 +46,6 @@ def _next_ita_deadline(today: date) -> date:
     """The upcoming March 2 (OSHA ITA electronic submission deadline)."""
     this_year = date(today.year, 3, 2)
     return this_year if today <= this_year else date(today.year + 1, 3, 2)
-
-
 
 
 async def _already_sent(conn, incident_id, alert_kind, today) -> bool:
@@ -347,12 +345,7 @@ async def _run_ir_deadline_alerts() -> dict:
 
     conn = await get_db_connection()
     try:
-        try:
-            sched_row = await conn.fetchrow(
-                "SELECT enabled, max_per_cycle FROM scheduler_settings WHERE task_key = 'ir_deadline_alerts'"
-            )
-        except Exception:
-            sched_row = None
+        sched_row = await scheduler_settings_row(conn, "ir_deadline_alerts")
 
         if not sched_row:
             return {"skipped": True, "reason": "scheduler_not_registered"}

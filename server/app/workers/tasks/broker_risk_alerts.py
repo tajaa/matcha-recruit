@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from ..celery_app import celery_app
-from ..utils import get_db_connection
+from ..utils import get_db_connection, scheduler_settings_row
 
 # ── Tunables (code constants per design; no per-broker settings UI) ──────────
 COOLDOWN_DAYS = 1               # re-email once per day until broker marks viewed
@@ -214,12 +214,7 @@ async def _run_broker_risk_alerts() -> dict:
 
     conn = await get_db_connection()
     try:
-        try:
-            sched = await conn.fetchrow(
-                "SELECT enabled, max_per_cycle FROM scheduler_settings WHERE task_key = 'broker_risk_alerts'"
-            )
-        except Exception:
-            sched = None
+        sched = await scheduler_settings_row(conn, "broker_risk_alerts")
         if not sched:
             return {"skipped": True, "reason": "scheduler_not_registered"}
         if not sched["enabled"]:

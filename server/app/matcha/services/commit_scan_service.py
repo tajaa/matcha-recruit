@@ -20,7 +20,6 @@ import fnmatch
 import json
 import logging
 import os
-import re
 from typing import Optional
 from uuid import UUID
 
@@ -148,8 +147,6 @@ def _get_client() -> genai.Client:
         api_key = os.getenv("GEMINI_API_KEY") or settings.gemini_api_key
         _client = genai.Client(api_key=api_key)
     return _client
-
-
 
 
 def _build_prompt(commit: dict, candidates: list[dict]) -> str:

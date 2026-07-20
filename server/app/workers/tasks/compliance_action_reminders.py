@@ -8,7 +8,7 @@ import asyncio
 from datetime import date, timedelta
 
 from ..celery_app import celery_app
-from ..utils import get_db_connection
+from ..utils import get_db_connection, scheduler_settings_row
 
 # How many days ahead to look for upcoming deadlines
 REMINDER_LOOKAHEAD_DAYS = 2
@@ -20,12 +20,7 @@ async def _run_compliance_action_reminders() -> dict:
 
     conn = await get_db_connection()
     try:
-        try:
-            sched_row = await conn.fetchrow(
-                "SELECT enabled, max_per_cycle FROM scheduler_settings WHERE task_key = 'compliance_action_reminders'"
-            )
-        except Exception:
-            sched_row = None
+        sched_row = await scheduler_settings_row(conn, "compliance_action_reminders")
 
         if not sched_row:
             return {"skipped": True, "reason": "scheduler_not_registered"}

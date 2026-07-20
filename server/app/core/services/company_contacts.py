@@ -45,7 +45,15 @@ async def get_company_admin_contacts(conn: Any, company_id: UUID) -> List[Dict[s
 async def get_company_name_and_contacts(
     company_id: UUID,
 ) -> Tuple[str, List[Dict[str, str]]]:
-    """Company display name plus its admin contacts, acquiring its own connection."""
+    """Company display name plus its admin contacts, acquiring its own connection.
+
+    Uses ``connection_or_direct`` rather than ``get_connection`` (which the
+    compliance_service copy used) so this is callable from a Celery worker as
+    well as a request: workers are pool-free, and ``get_connection`` hard-requires
+    the pool. That is a deliberate widening, not an accident — but it is only
+    safe because this function touches nothing request-scoped. Keep it that way;
+    anything that needs request context belongs at the call site, not in here.
+    """
     from app.database import connection_or_direct
 
     async with connection_or_direct() as conn:

@@ -393,8 +393,6 @@ def _gemini_client():
     return genai.Client(api_key=api_key)
 
 
-
-
 async def _extract_sections_from_pdf(pdf_bytes: bytes) -> list[dict[str, Any]]:
     """One Gemini multimodal call: extract handbook sections."""
     try:

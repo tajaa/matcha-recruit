@@ -13,7 +13,7 @@ import json
 from datetime import date
 
 from ..celery_app import celery_app
-from ..utils import get_db_connection
+from ..utils import get_db_connection, scheduler_settings_row
 
 # "Within N days" buckets, narrowest first. One reminder per bucket per
 # matter: a matter due in 6 days gets the 7-day nudge (even if the worker
@@ -38,12 +38,7 @@ async def _run_legal_deadline_reminders() -> dict:
 
     conn = await get_db_connection()
     try:
-        try:
-            sched_row = await conn.fetchrow(
-                "SELECT enabled, max_per_cycle FROM scheduler_settings WHERE task_key = 'legal_deadline_reminders'"
-            )
-        except Exception:
-            sched_row = None
+        sched_row = await scheduler_settings_row(conn, "legal_deadline_reminders")
 
         if not sched_row:
             return {"skipped": True, "reason": "scheduler_not_registered"}

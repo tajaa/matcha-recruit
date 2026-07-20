@@ -12,7 +12,7 @@ import asyncio
 import html as html_lib
 
 from ..celery_app import celery_app
-from ..utils import get_db_connection
+from ..utils import get_db_connection, scheduler_settings_row
 
 
 async def _resolve_recipients(conn, row) -> list[tuple[str, str]]:
@@ -53,13 +53,7 @@ async def _resolve_recipients(conn, row) -> list[tuple[str, str]]:
 async def _dispatch() -> dict:
     conn = await get_db_connection()
     try:
-        try:
-            sched = await conn.fetchrow(
-                "SELECT enabled, max_per_cycle FROM scheduler_settings "
-                "WHERE task_key = 'grievance_deadline_alerts'"
-            )
-        except Exception:
-            sched = None
+        sched = await scheduler_settings_row(conn, "grievance_deadline_alerts")
         if not sched or not sched["enabled"]:
             print("[Grievance Deadlines] Scheduler disabled, skipping.")
             return {"alerts": 0, "skipped": True}

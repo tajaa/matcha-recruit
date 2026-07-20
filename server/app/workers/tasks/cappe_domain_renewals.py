@@ -14,7 +14,7 @@ Gated on `scheduler_settings.task_key = 'cappe_domain_renewals'`. Idempotent:
 import asyncio
 
 from ..celery_app import celery_app
-from ..utils import get_db_connection
+from ..utils import get_db_connection, scheduler_enabled
 
 # Start attempting renewal this many days before expiry (the dunning window).
 _RENEW_WINDOW_DAYS = 14
@@ -23,13 +23,7 @@ _RENEW_WINDOW_DAYS = 14
 async def _dispatch_cappe_domain_renewals() -> dict:
     conn = await get_db_connection()
     try:
-        try:
-            sched = await conn.fetchrow(
-                "SELECT enabled FROM scheduler_settings WHERE task_key = 'cappe_domain_renewals'"
-            )
-        except Exception:
-            sched = None
-        if not sched or not sched["enabled"]:
+        if not await scheduler_enabled(conn, "cappe_domain_renewals", default=False):
             print("[Cappe Renewals] Scheduler disabled, skipping.")
             return {"renewed": 0, "skipped": True}
 

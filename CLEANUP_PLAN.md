@@ -536,11 +536,18 @@ mixed commit.
   query from `ir_deadline_alerts`, `leave_agent` and `compliance_service`. The connection-taking
   form is primary because workers are pool-free; `get_company_name_and_contacts` uses
   `connection_or_direct` for the one caller with no connection in hand.
-- **L3 (4 of 18)** `workers/utils.py:scheduler_enabled(conn, task_key)`. Only migrated the
-  tasks matching the exact gate shape. The helper returns a **bool, not an early return**:
-  each task answers a disabled scheduler with its own payload (`{"checked": 0}`,
-  `{"status": "disabled"}`, …) and flattening those would change what every caller reports.
-  Fails **open**, matching the code it replaces.
+- **L3 (all 21, zero inline gates left)** `workers/utils.py` gains `scheduler_settings_row`
+  + `scheduler_enabled`. The helper returns a **bool/row, not an early return**: each task
+  answers a disabled scheduler with its own payload (`{"checked": 0}`, `{"status": "disabled"}`,
+  …) and flattening those would change what every caller reports. Most tasks (15) need
+  `max_per_cycle` alongside `enabled`, hence the row form.
+  **The fail policy is an explicit `default` argument, not a house convention**, because the
+  tasks genuinely disagree and getting it backwards is expensive one way: `auto_archive` and
+  friends fail **open** (idempotent bookkeeping; a DB hiccup silently disabling them is worse
+  than an extra run), while `cappe_domain_renewals` (buys domain renewals) and
+  `vertical_coverage_sweep` (live Gemini calls, seeded disabled on purpose) fail **closed**.
+  A naive sweep would have flipped those two to fail-open and started them spending.
+  10 tests cover both directions.
 - **M1/M2** new `core/services/scoped_auth.py:make_token_helpers(scope)`; `cappe/services/auth.py`
   and `tellus/services/auth.py` drop from 98 lines each to 28. This is the security-weighted one:
   the decode path's scope check is the *only* thing stopping a Cappe token authenticating
@@ -580,3 +587,36 @@ suite goes from **98 failed / 3277 passed → 97 / 3278** (the one flipped failu
 None-token test, which fails without the AttributeError fix and passes with it). The 97
 remaining failures and 48 collection errors are pre-existing and environmental — missing local
 deps (`audioop`, `segno`) — identical before and after.
+
+### Review fixes on the K/L/M batch (2026-07-20)
+
+- **`clean_model_json` was corrupting string data.** The colon-anchored regex every local copy
+  used (`re.sub(r":\s*True\b", ": true")`) does not confine matches to JSON value positions,
+  because string values contain colons: `{"note": "Status: True positive"}` became
+  `"Status: true positive"`. The model's own words were edited on the way to the parser,
+  invisibly. Replaced with a single-pass scanner that tracks string state and backslash
+  escapes and substitutes only outside strings. It also fixes a second latent bug the regex
+  had: literals in **array positions** (`[True, False, None]`) have no preceding colon and were
+  never converted at all.
+- **`clean_model_json` no longer narrows to arrays by default** (`allow_array=False`). The
+  widening was a real bug: its three callers expect an object and call `data.get(...)` OUTSIDE
+  the try that wraps `json.loads` (`ticket_draft_service.py:286`, `commit_scan_service.py:215`),
+  so a model returning `[...]` parsed fine and then died on an uncaught AttributeError, where
+  before `json.loads` raised inside the try and the fail-closed path handled it.
+  `parse_model_json` opts in, since a top-level array is legitimate there.
+- **`parse_model_json` has a caller now** — `labor_relations_ai._parse_json_block` (returns
+  None on failure, caller does `or {}`) was an exact contract match. `risk_assessment_service`
+  was re-examined and left alone: its `raw_decode` fallback still raises, so it is not a match.
+- Import placement fixed in `compliance_service.py` (was ~5,100 lines below its use — the AST
+  heuristic took a file-wide `max()` over top-level imports and this file has a stray
+  `import hashlib` near the end; now it targets the contiguous header block). Unused `import re`
+  removed from two files. Leftover blank runs collapsed at every removal site.
+- `get_company_name_and_contacts`'s switch from `get_connection` to `connection_or_direct` is
+  now documented as a deliberate widening (makes it worker-callable) with the constraint that
+  keeps it safe: it must touch nothing request-scoped.
+
+**Verification note:** the earlier docstring-import bug (imports landing inside module
+docstrings, where `ast.parse` happily accepts them and the name is never bound) is why this
+round ends with a real `importlib.import_module` of every touched module — **44 modules, 0
+failures** — rather than a syntax check. Server suite: 98 failed / 3302 passed → **98 failed /
+3317 passed**, 20 collection errors → 19. Identical failures, +15 passes.

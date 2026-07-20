@@ -20,7 +20,7 @@ import logging
 from typing import Any, Dict
 
 from ..celery_app import celery_app
-from ..utils import get_db_connection
+from ..utils import get_db_connection, scheduler_settings_row
 
 logger = logging.getLogger(__name__)
 
@@ -41,13 +41,7 @@ async def _backfill(force: bool = False) -> Dict[str, Any]:
     try:
         batch = DEFAULT_BATCH
         if not force:
-            try:
-                sched = await conn.fetchrow(
-                    "SELECT enabled, max_per_cycle FROM scheduler_settings "
-                    "WHERE task_key = 'location_fips_backfill'"
-                )
-            except Exception:
-                sched = None
+            sched = await scheduler_settings_row(conn, "location_fips_backfill")
             if not sched or not sched["enabled"]:
                 return {"status": "disabled"}
             batch = int(sched["max_per_cycle"] or DEFAULT_BATCH)

@@ -19,6 +19,7 @@ import re
 from typing import Any, AsyncIterator, Optional
 
 from app.matcha.services.er_analyzer import ERAnalyzer
+from app.core.services.model_json import parse_model_json
 
 logger = logging.getLogger(__name__)
 
@@ -45,30 +46,6 @@ def get_labor_analyzer() -> ERAnalyzer:
         settings = get_settings()
         _analyzer = ERAnalyzer(api_key=settings.gemini_api_key)
     return _analyzer
-
-
-def _parse_json_block(text: str) -> Any:
-    """Best-effort JSON extraction from a model response (handles ``` fences)."""
-    if not text:
-        return None
-    cleaned = text.strip()
-    # Strip ```json ... ``` or ``` ... ``` fences.
-    fence = re.match(r"^```(?:json)?\s*(.*?)\s*```$", cleaned, re.DOTALL)
-    if fence:
-        cleaned = fence.group(1).strip()
-    try:
-        return json.loads(cleaned)
-    except (json.JSONDecodeError, TypeError):
-        # Fall back to the first balanced {...} or [...] span.
-        for opener, closer in (("{", "}"), ("[", "]")):
-            start = cleaned.find(opener)
-            end = cleaned.rfind(closer)
-            if start != -1 and end > start:
-                try:
-                    return json.loads(cleaned[start:end + 1])
-                except (json.JSONDecodeError, TypeError):
-                    continue
-    return None
 
 
 async def extract_clauses_from_cba(extracted_text: str) -> dict[str, Any]:
@@ -111,7 +88,7 @@ CBA TEXT:
 """
     analyzer = get_labor_analyzer()
     raw = await analyzer._generate_content_async(prompt)
-    parsed = _parse_json_block(raw) or {}
+    parsed = parse_model_json(raw) or {}
 
     clauses = parsed.get("clauses") if isinstance(parsed, dict) else None
     steps = parsed.get("grievance_step_config") if isinstance(parsed, dict) else None

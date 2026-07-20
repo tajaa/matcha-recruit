@@ -37,13 +37,64 @@ from typing import Any, Optional
 
 __all__ = ["strip_json_fence", "clean_model_json", "parse_model_json"]
 
-# `True`/`False`/`None` as a JSON *value* — anchored on the colon so a literal
-# occurrence inside a string ("Nothing to report") is not rewritten.
-_PY_TRUE = re.compile(r":\s*True\b")
-_PY_FALSE = re.compile(r":\s*False\b")
-_PY_NONE = re.compile(r":\s*None\b")
+_PY_LITERALS = {"True": "true", "False": "false", "None": "null"}
+_WORD_RE = re.compile(r"\b(?:True|False|None)\b")
 
-_FENCE_RE = re.compile(r"^```(?:json)?\s*(.*?)\s*```$", re.DOTALL)
+
+def _rewrite_python_literals(text: str) -> str:
+    """Rewrite bare ``True``/``False``/``None`` to JSON, OUTSIDE string values.
+
+    The obvious implementation — ``re.sub(r":\\s*True\\b", ": true", text)`` — is
+    what every local copy used, and it silently corrupts data. Anchoring on a
+    colon does not confine the match to a JSON value position, because string
+    values contain colons too::
+
+        {"note": "Status: True positive"}  ->  {"note": "Status: true positive"}
+
+    The model's own words get edited on the way to the parser and the corruption
+    is invisible downstream. A regex cannot decide this: "am I inside a string?"
+    is not a property of the local neighbourhood. So scan once, tracking string
+    state and backslash escapes, and only substitute outside strings.
+    """
+    if not text:
+        return text
+
+    out: list[str] = []
+    i = 0
+    n = len(text)
+    in_string = False
+    escaped = False
+
+    while i < n:
+        ch = text[i]
+
+        if in_string:
+            out.append(ch)
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+            i += 1
+            continue
+
+        if ch == '"':
+            in_string = True
+            out.append(ch)
+            i += 1
+            continue
+
+        m = _WORD_RE.match(text, i)
+        if m:
+            out.append(_PY_LITERALS[m.group(0)])
+            i = m.end()
+            continue
+
+        out.append(ch)
+        i += 1
+
+    return "".join(out)
 
 
 def strip_json_fence(text: str) -> str:
@@ -62,28 +113,36 @@ def strip_json_fence(text: str) -> str:
     return text.strip()
 
 
-def clean_model_json(text: str) -> str:
+def clean_model_json(text: str, *, allow_array: bool = False) -> str:
     """Fence-strip, then narrow to the outermost JSON value, then fix literals.
 
-    The brace/bracket narrowing is what rescues a response wrapped in prose
-    ("Here is the JSON you asked for: {...}"). Objects are preferred over
-    arrays when both appear, matching what every local copy did.
+    The brace narrowing is what rescues a response wrapped in prose ("Here is
+    the JSON you asked for: {...}").
+
+    ``allow_array`` defaults to **False**, matching every local copy this
+    replaced: they narrowed on ``{``/``}`` only. Widening it silently was a real
+    bug — callers of this helper expect an object and do ``data.get(...)``
+    *outside* the try that wraps ``json.loads`` (see
+    ``ticket_draft_service.py:286``, ``commit_scan_service.py:215``). With array
+    narrowing on, a model returning ``[...]`` parses successfully and then dies
+    on ``.get`` with an uncaught AttributeError — whereas before, ``json.loads``
+    raised inside the try and the caller's fail-closed path handled it.
+    ``parse_model_json`` enables it, because it returns a parsed value and a
+    top-level array is a legitimate response there.
     """
     text = strip_json_fence(text)
     if not text:
         return text
 
     obj_start, obj_end = text.find("{"), text.rfind("}")
-    arr_start, arr_end = text.find("["), text.rfind("]")
     if obj_start != -1 and obj_end > obj_start:
         text = text[obj_start : obj_end + 1]
-    elif arr_start != -1 and arr_end > arr_start:
-        text = text[arr_start : arr_end + 1]
+    elif allow_array:
+        arr_start, arr_end = text.find("["), text.rfind("]")
+        if arr_start != -1 and arr_end > arr_start:
+            text = text[arr_start : arr_end + 1]
 
-    text = _PY_TRUE.sub(": true", text)
-    text = _PY_FALSE.sub(": false", text)
-    text = _PY_NONE.sub(": null", text)
-    return text.strip()
+    return _rewrite_python_literals(text).strip()
 
 
 def parse_model_json(text: str, default: Optional[Any] = None) -> Any:
@@ -97,7 +156,7 @@ def parse_model_json(text: str, default: Optional[Any] = None) -> Any:
         return default
 
     fenced = strip_json_fence(text)
-    for candidate in (fenced, clean_model_json(text)):
+    for candidate in (fenced, clean_model_json(text, allow_array=True)):
         if not candidate:
             continue
         try:

@@ -11,6 +11,7 @@ import httpx
 from fastapi import HTTPException
 
 from .scope_registry.codify import codified_sql
+from app.core.services.company_contacts import get_company_name_and_contacts
 
 logger = logging.getLogger(__name__)
 
@@ -9434,7 +9435,6 @@ async def get_pinned_requirements(company_id: UUID) -> list[dict]:
 
 import hashlib
 import unicodedata
-from app.core.services.company_contacts import get_company_name_and_contacts
 
 
 def normalize_and_hash(raw_content: str) -> str:

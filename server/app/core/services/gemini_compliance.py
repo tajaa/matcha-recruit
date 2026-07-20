@@ -369,8 +369,6 @@ class GeminiExhaustedError(Exception):
         self.last_raw = last_raw
 
 
-
-
 def _validate_requirement(req: dict) -> Optional[str]:
     """Validate a single requirement dict. Returns error string or None if valid."""
     cat = req.get("category")

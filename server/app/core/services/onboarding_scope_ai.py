@@ -288,8 +288,6 @@ def _gemini_client():
     return genai.Client(api_key=api_key)
 
 
-
-
 async def _fetch_category_slugs(conn) -> list[str]:
     """Live enum: the AI may only emit categories that exist in the bank."""
     rows = await conn.fetch("SELECT slug FROM compliance_categories ORDER BY slug")

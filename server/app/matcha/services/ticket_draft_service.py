@@ -8,7 +8,6 @@ commit_scan_service) rather than the entangled matcha_work_ai.generate()."""
 import json
 import logging
 import os
-import re
 from typing import Optional
 from uuid import UUID
 
@@ -36,8 +35,6 @@ def _get_client() -> genai.Client:
         settings = get_settings()
         _client = genai.Client(api_key=os.getenv("GEMINI_API_KEY") or settings.gemini_api_key)
     return _client
-
-
 
 
 # ---------------------------------------------------------------------------

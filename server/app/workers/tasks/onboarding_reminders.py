@@ -21,7 +21,7 @@ from app.matcha.services.onboarding_reminder_logic import (
 )
 from ..celery_app import celery_app
 from ..notifications import publish_task_complete, publish_task_error
-from ..utils import get_db_connection
+from ..utils import get_db_connection, scheduler_settings_row
 
 LOOKAHEAD_DAYS = 30
 
@@ -105,12 +105,7 @@ async def _run_onboarding_reminders() -> dict:
 
     conn = await get_db_connection()
     try:
-        try:
-            scheduler_row = await conn.fetchrow(
-                "SELECT enabled, max_per_cycle FROM scheduler_settings WHERE task_key = 'onboarding_reminders'"
-            )
-        except Exception:
-            scheduler_row = None
+        scheduler_row = await scheduler_settings_row(conn, "onboarding_reminders")
 
         if not scheduler_row:
             return {"skipped": True, "reason": "scheduler_not_registered"}

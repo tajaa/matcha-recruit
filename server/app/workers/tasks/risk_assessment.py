@@ -14,7 +14,7 @@ from typing import Optional
 
 from ..celery_app import celery_app
 from ..notifications import publish_task_complete, publish_task_error
-from ..utils import get_db_connection
+from ..utils import get_db_connection, scheduler_settings_row
 
 
 async def _get_weights(conn) -> dict[str, float]:
@@ -99,12 +99,7 @@ async def _enqueue_due_assessments() -> dict:
     try:
         # Check if risk_assessment scheduler is enabled and get max_per_cycle
         # Guard against scheduler_settings table not existing yet (deploy ordering)
-        try:
-            sched_row = await conn.fetchrow(
-                "SELECT enabled, max_per_cycle FROM scheduler_settings WHERE task_key = 'risk_assessment'"
-            )
-        except Exception:
-            sched_row = None
+        sched_row = await scheduler_settings_row(conn, "risk_assessment")
 
         if sched_row and not sched_row["enabled"]:
             print("[Risk Assessment Scheduler] Scheduler disabled, skipping.")

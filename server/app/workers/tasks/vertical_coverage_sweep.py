@@ -37,7 +37,7 @@ from typing import Any, Dict, List
 
 from ..celery_app import celery_app
 from ..notifications import publish_task_complete, publish_task_error
-from ..utils import get_db_connection
+from ..utils import get_db_connection, scheduler_enabled
 
 CHANNEL = "vertical_coverage"
 
@@ -272,13 +272,7 @@ async def _dispatch(force: bool = False) -> Dict[str, Any]:
     conn = await get_db_connection()
     try:
         if not force:
-            try:
-                sched = await conn.fetchrow(
-                    "SELECT enabled FROM scheduler_settings WHERE task_key = 'vertical_coverage_sweep'"
-                )
-            except Exception:
-                sched = None
-            if not sched or not sched["enabled"]:
+            if not await scheduler_enabled(conn, "vertical_coverage_sweep", default=False):
                 print("[Vertical Sweep] Scheduler disabled, skipping.")
                 return {"status": "disabled"}
 

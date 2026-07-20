@@ -35,7 +35,7 @@ import json
 from datetime import date, timedelta
 
 from ..celery_app import celery_app
-from ..utils import get_db_connection
+from ..utils import get_db_connection, scheduler_settings_row
 from .leave_deadline_checks import FMLA_LEAVE_TYPES
 
 # How far ahead of each deadline to open the thread. A week is long enough to
@@ -568,13 +568,7 @@ async def _sweep_pending_signatures(conn, enabled_companies, today, budget,
 async def _run_hr_proactive_push() -> dict:
     conn = await get_db_connection()
     try:
-        try:
-            sched_row = await conn.fetchrow(
-                "SELECT enabled, max_per_cycle FROM scheduler_settings "
-                "WHERE task_key = 'hr_proactive_push'"
-            )
-        except Exception:
-            sched_row = None
+        sched_row = await scheduler_settings_row(conn, "hr_proactive_push")
 
         if not sched_row:
             return {"skipped": True, "reason": "scheduler_not_registered"}
