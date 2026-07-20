@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { X } from 'lucide-react'
 import { api } from '../../../api/client'
+import { Modal } from '../../../components/ui'
 
 export function CsvImportModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
   const [csv, setCsv] = useState('')
@@ -63,12 +63,7 @@ export function CsvImportModal({ onClose, onDone }: { onClose: () => void; onDon
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
-      <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 w-full max-w-2xl">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-sm font-semibold text-zinc-100">Import subscribers</h3>
-          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300"><X size={16} /></button>
-        </div>
+    <Modal open onClose={onClose} title="Import subscribers" width="lg">
         <p className="text-xs text-zinc-500 mb-3">
           Paste CSV. First column = email, optional second column = name. Header row optional. Up to 500 rows per import.
         </p>
@@ -86,7 +81,6 @@ export function CsvImportModal({ onClose, onDone }: { onClose: () => void; onDon
             {busy ? 'Importing…' : 'Import'}
           </button>
         </div>
-      </div>
-    </div>
+    </Modal>
   )
 }
