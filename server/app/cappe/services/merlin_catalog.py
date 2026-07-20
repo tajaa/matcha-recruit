@@ -122,6 +122,14 @@ CANVAS_PATCH_KEYS: frozenset[str] = frozenset({"text", "src", "alt", "href", "d"
 
 MAX_OPS_PER_TURN = 20
 
+# AI image-generation aspect ratios Merlin's generate_image op may request.
+# Mirror of `core/services/image_gen.py:ASPECT_RATIOS` — kept here (pure, no
+# google SDK) so op validation/prompt/schema don't drag the SDK into merlin_ops
+# (which the whole pure-test suite imports). The service re-normalizes anyway,
+# so drift degrades to "defaulted", never a crash.
+AI_ASPECT_RATIOS: frozenset[str] = frozenset({"1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"})
+AI_IMAGE_PROMPT_MAX = 1000  # matches CappeImageGenRequest.prompt max_length
+
 # --- Per-block design bag (`_design`) -----------------------------------------
 # The per-section inspector's vocabulary (motion/bg/layout/colors/type/border/
 # anchor) — where ALL motion and animation lives, so without it Merlin can't

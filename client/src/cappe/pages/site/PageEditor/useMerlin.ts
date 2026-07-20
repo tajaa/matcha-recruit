@@ -92,6 +92,46 @@ export function useMerlin(
   const pageIdRef = useRef(pageId)
   pageIdRef.current = pageId
 
+  // Execute generate_image ops sequentially: generate via the endpoint, then
+  // apply the returned URL as a follow-up set_field to LIVE state (a second
+  // onApply → its own undo step). Each result is reported as an assistant note.
+  // Failures (quota 429, model 502, navigation) degrade to a note, never throw.
+  const runImageOps = async (
+    sid: string,
+    ops: Extract<MerlinOp, { op: 'generate_image' }>[],
+    sentForPageId: string,
+  ) => {
+    for (const g of ops) {
+      try {
+        const gen = await cappeApi.post<{ url: string }>(
+          `/sites/${sid}/generate-image`,
+          { prompt: g.prompt, aspect_ratio: g.aspect || '16:9' },
+        )
+        if (sentForPageId !== pageIdRef.current) return
+        const cur = getSnapshot()
+        const applied = applyMerlinOps(cur.blocks, cur.theme, [
+          { op: 'set_field', block: g.block, path: g.field, value: gen.url },
+        ])
+        const changed = applied.blocks !== cur.blocks
+        if (changed) {
+          onApply({ blocks: applied.blocks, theme: applied.theme, blocksChanged: true, themeChanged: false })
+        }
+        setMessages((m) => [...m, {
+          role: 'assistant',
+          content: changed ? 'Generated and placed the image.' : 'Generated the image, but its target section is gone.',
+          results: [{ ok: changed, summary: changed ? `Image → ${g.field}` : 'Target section not found' }],
+          noChanges: !changed,
+        }])
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'Image generation failed'
+        setMessages((m) => [...m, {
+          role: 'assistant', content: `Image generation failed: ${msg}`,
+          results: [{ ok: false, summary: 'Generation failed' }], noChanges: true,
+        }])
+      }
+    }
+  }
+
   const send = async (text: string) => {
     const trimmed = text.trim()
     if (!siteId || !pageId || !trimmed || sending) return
@@ -126,9 +166,18 @@ export function useMerlin(
       // overwrite THAT page's content with this one's blocks.
       if (sentForPageId !== pageIdRef.current) return
 
+      // generate_image ops are server-validated but CLIENT-executed: generation
+      // is a slow async round-trip and applyMerlinOps is a synchronous fold, so
+      // they're split out and handled after the sync ops land.
+      const allOps = res.ops || []
+      const genOps = allOps.filter(
+        (o): o is Extract<MerlinOp, { op: 'generate_image' }> => o.op === 'generate_image',
+      )
+      const syncOps = allOps.filter((o) => o.op !== 'generate_image')
+
       // Re-read: apply to live state, not the pre-flight snapshot.
       const cur = getSnapshot()
-      const applied = applyMerlinOps(cur.blocks, cur.theme, res.ops || [])
+      const applied = applyMerlinOps(cur.blocks, cur.theme, syncOps)
       const blocksChanged = applied.blocks !== cur.blocks
       const themeChanged = applied.theme !== cur.theme
       if (blocksChanged || themeChanged) {
@@ -138,8 +187,13 @@ export function useMerlin(
       const results = [...applied.results, ...skippedFromServer]
       setMessages((m) => [...m, {
         role: 'assistant', content: res.message, tier: res.tier, results,
-        noChanges: !results.some((r) => r.ok),
+        // An image is still generating — don't declare "no changes" yet.
+        noChanges: genOps.length === 0 && !results.some((r) => r.ok),
       }])
+
+      // Kept inside `send`'s try so `sending` (and the panel spinner) stays true
+      // across the slow generation; a per-image assistant note reports each one.
+      if (genOps.length) await runImageOps(siteId, genOps, sentForPageId)
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Merlin failed to respond'
       setError(msg)

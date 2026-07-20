@@ -26,6 +26,7 @@ _EXPECTED_OPS = {
     "set_field", "set_design", "add_block", "remove_block", "move_block",
     "set_theme", "canvas_add", "canvas_update", "canvas_remove",
     "apply_section_preset",  # Phase 4 — server-expanded into add_block
+    "generate_image",        # Phase 6 — server-validated, client-executed (async)
 }
 
 

@@ -39,6 +39,10 @@ export type MerlinOp =
   | { op: 'canvas_add'; block: string; element: MerlinCanvasElementInput }
   | { op: 'canvas_update'; block: string; el: string; patch: Partial<CappeCanvasElement> }
   | { op: 'canvas_remove'; block: string; el: string }
+  // Server-validated, CLIENT-executed asynchronously: useMerlin generates the
+  // image via the endpoint, then applies the URL as a follow-up set_field.
+  // applyMerlinOps (a synchronous fold) never mutates state for it.
+  | { op: 'generate_image'; block: string; field: string; prompt: string; aspect?: string }
 
 export type MerlinOpResult = { ok: boolean; summary: string }
 export type MerlinApplyResult = {
@@ -246,6 +250,11 @@ export function applyMerlinOps(
         results.push({ ok: true, summary: 'Removed canvas element' })
         break
       }
+      case 'generate_image':
+        // Handled out-of-band by useMerlin (async endpoint call → follow-up
+        // set_field). Defensive no-op here so it isn't mislabeled "unrecognized"
+        // if one ever reaches the synchronous fold.
+        break
       default:
         results.push({ ok: false, summary: 'Skipped — unrecognized op' })
     }

@@ -25,6 +25,8 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
 from .merlin_catalog import (
+    AI_ASPECT_RATIOS,
+    AI_IMAGE_PROMPT_MAX,
     BLOCK_FIELDS,
     BLOCK_TYPES,
     CANVAS_ELEMENT_KINDS,
@@ -336,6 +338,39 @@ def _v_apply_section_preset(raw: dict[str, Any], ctx: ValidationCtx) -> Optional
     return _v_add_block(raw, ctx)
 
 
+def _v_generate_image(raw: dict[str, Any], ctx: ValidationCtx) -> Optional[str]:
+    """AI image generation targeting an existing block's image field. Validated
+    server-side (block/field/prompt/aspect) but EXECUTED CLIENT-SIDE: generation
+    is a slow async round-trip, and applyMerlinOps is a synchronous pure fold, so
+    the client generates via POST /sites/{id}/generate-image then applies the URL
+    as a follow-up set_field. Not premium-gated here — the endpoint's daily quota
+    (free taste + paid headroom) is the cost guard, same as the editor button.
+
+    v1 targets an EXISTING block (validated against the snapshot); a same-turn
+    add_block + generate_image on the new block isn't supported (the new block's
+    id doesn't exist yet server-side) — it degrades to 'block id not found'."""
+    block = ctx.by_id.get(_sid(raw.get("block")))
+    if block is None:
+        return "block id not found"
+    btype = block.get("type")
+    fields = BLOCK_FIELDS.get(btype) if isinstance(btype, str) else None
+    if fields is None:
+        return f"unknown block type '{btype}'"
+    field = _sid(raw.get("field")) or "image"
+    if fields.get(field) != "image":
+        return f"'{field}' is not an image field on a {btype} block"
+    raw["field"] = field  # normalize the default so the client sees an explicit target
+    prompt = raw.get("prompt")
+    if not isinstance(prompt, str) or not prompt.strip():
+        return "missing image prompt"
+    if len(prompt) > AI_IMAGE_PROMPT_MAX:
+        return f"image prompt too long (max {AI_IMAGE_PROMPT_MAX} chars)"
+    aspect = _sid(raw.get("aspect"))
+    if aspect is not None and aspect not in AI_ASPECT_RATIOS:
+        raw.pop("aspect", None)  # unknown → let the service default it
+    return None
+
+
 def _v_remove_block(raw: dict[str, Any], ctx: ValidationCtx) -> Optional[str]:
     if _sid(raw.get("block")) not in ctx.by_id:
         return "block id not found"
@@ -492,6 +527,18 @@ MERLIN_OPS: tuple[MerlinOp, ...] = (
         ),
     ),
     MerlinOp(
+        name="generate_image",
+        validate=_v_generate_image,
+        prompt_shape='{"op":"generate_image","block":"<id>","field":"<imageField>","prompt":"<what to depict>","aspect":"16:9"}',
+        prompt_rules=(
+            "generate_image creates an AI image and places it in an existing block's image field "
+            "(field defaults to \"image\"; on a hero that's the full-bleed background). Use it when the "
+            "user asks to generate/create/imagine a photo or background — NOT for stock the user will "
+            "supply. Only target a block that already exists (not one you're adding in the same turn). "
+            "aspect is one of: " + ", ".join(sorted(AI_ASPECT_RATIOS)) + ".",
+        ),
+    ),
+    MerlinOp(
         name="remove_block",
         validate=_v_remove_block,
         prompt_shape='{"op":"remove_block","block":"<id>"}',
@@ -604,6 +651,10 @@ def build_merlin_schema() -> dict[str, Any]:
             {"name": p.key, "label": p.label, "blurb": p.blurb, "blockType": p.block_type}
             for p in SECTION_PRESETS
         ],
+        "imageGen": {
+            "aspectRatios": sorted(AI_ASPECT_RATIOS),
+            "promptMax": AI_IMAGE_PROMPT_MAX,
+        },
         "limits": {
             "maxOpsPerTurn": MAX_OPS_PER_TURN,
             "canvas": {
