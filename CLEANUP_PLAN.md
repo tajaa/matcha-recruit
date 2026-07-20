@@ -79,6 +79,30 @@ Verify: tsc; `grep -rn "IrAnalysisPanel\|TimelineConstructor\|ComplianceOverview
 
 ## Phase C — `hooks/useAsync.ts` (hook + 15-file tranche; ~250 now, 1,500+ full rollout)
 
+> **STATUS 2026-07-20 — hook landed, tranche 1 partial (7 of 15).**
+>
+> `hooks/useAsync.ts` exists with `useAsync` + `useAsyncAction`, 17 tests.
+> One addition beyond the spec: an optional third `initial` argument (typed via
+> overload, so `data` is `T` when supplied and `T | undefined` otherwise).
+> Without it every list migration needed `?? []` at the read site and
+> `(prev ?? [])` inside each optimistic update — most of the boilerplate the
+> hook exists to remove.
+>
+> Migrated: `admin/Individuals`, `admin/Companies`, `admin/ServerErrors`,
+> `broker/BrokerExternalClientDetail`, `app/risk/Tcor`, `app/risk/DriverRisk`,
+> `app/risk/ControlsEvidence`.
+>
+> **Migration hazard, hit once:** `ControlsEvidence` kept a `useEffect(load, [])`
+> after its `load` became `useAsync`'s `reload` — a silent double fetch on every
+> mount. When converting, grep the file for a leftover mount effect; `useAsync`
+> already runs on mount.
+>
+> **Remaining ~76 candidates** — re-enumerate with the plan's grep:
+> `grep -rln "finally(() => setLoading(false))" pages components | xargs grep -ln "useState(true)"`.
+> `admin/PayerData` and `admin/DealFlow` (both named as seeds) were skipped: each
+> has 3+ interacting fetch effects and deserves its own diff rather than riding a
+> mechanical sweep.
+
 No shared async hook exists: 213 files carry the `try/catch/finally` + `setLoading`/`setError` triad, 287 combine `useState`+`useEffect`. A hand-rolled hook stays compatible with the house rule against React Query/SWR.
 
 New `hooks/useAsync.ts` (~90 LOC):
@@ -90,6 +114,32 @@ Tranche rule: a file qualifies with the full quadruplet (data `useState`, `useSt
 Verify: tsc; each converted page renders, a filter change refetches, one mutation (token grant on Individuals) refreshes.
 
 ## Phase D — UI consolidation
+
+> **STATUS 2026-07-20 — D2 and D4 partial. D1 and D3 NOT started.**
+>
+> - **D2**: `components/ui/DataTable.tsx` exists (chrome lifted verbatim from
+>   Companies.tsx) and `Companies.tsx` + `Brokers/BrokerTable.tsx` are migrated.
+>   **`FilterPills` was deliberately NOT built** — `components/ui/PillTabs.tsx`
+>   already is that component (same `{options, value, onChange}` shape, 6
+>   existing consumers). The admin filter rows the plan wanted it for are
+>   `<Button variant={active ? 'primary' : 'ghost'}>` loops, which look different
+>   from PillTabs' joined segmented control, so swapping them is a visual change
+>   to admin pages, not a refactor. Decide that with eyes on it.
+>   **LOC estimate was wrong**: the plan said ~300 across 5 pages; Companies saved
+>   6 lines. Rich cells relocate into `render` closures unchanged, so the JSX
+>   moves rather than disappearing. The real win is that the table chrome and the
+>   loading/empty ladder stop being copied 29 times.
+> - **D4**: `newsletter/SendModal` + `newsletter/CsvImportModal` migrated. Both
+>   GAINED Escape-to-close and click-outside — neither had them. Remaining tranche-1
+>   files (`PolicyDetailPage`, `AdminOnboarding`, `Individuals`, `MatchaWork`,
+>   `BlogEditModal`, `SpecialtyReviewModal`, `LifecycleActions`, `SubscribersTab`)
+>   are untouched. Enumerate the rest with
+>   `grep -rln "fixed inset-0" pages components --include="*.tsx"` minus
+>   `ui/Modal.tsx`/`Drawer.tsx`.
+> - **D1 (tier signup) and D3 (pilot chat hook) are NOT started.** Both are
+>   substantial and neither is mechanical: D1 touches the revenue path (three
+>   signup pages → Stripe checkout) and D3 rewires all four pilot consoles.
+>   Each wants its own PR and its own manual click-through.
 
 ### D1. Tier signup (~380 LOC; medium risk — revenue path)
 
