@@ -132,34 +132,38 @@ export default function LibraryTab({ initialState, initialCity, initialIndustry,
 
   function startResearch(item: ResearchItem) {
     setResearchingId(item.jurisdiction_id); setResearchMessages([])
+    // An error frame stops the stream but resolves the promise, so the refetches
+    // below need an explicit guard or a failed run refreshes as if it succeeded.
+    let failed = false
     postSSE(
       `/admin/research-queue/${item.jurisdiction_id}/research`,
       undefined,
       (data) => {
         const ev = data as { type?: string; message?: string }
-        if (ev.type === 'error') { setResearchMessages((p) => [...p, `Error: ${ev.message}`]); return true }
+        if (ev.type === 'error') { setResearchMessages((p) => [...p, `Error: ${ev.message}`]); failed = true; return true }
         const msg = ev.message
         if (msg) setResearchMessages((p) => [...p, msg])
       },
     )
-      .then(() => { fetchResearchQueue(); fetchTree() })
+      .then(() => { if (!failed) { fetchResearchQueue(); fetchTree() } })
       .catch(() => {})
       .finally(() => setResearchingId(null))
   }
 
   function handleRunTopMetros() {
     setTopMetroRunning(true); setTopMetroMessages([])
+    let failed = false
     postSSE(
       '/admin/jurisdictions/top-metros/check',
       undefined,
       (data) => {
         const ev = data as { type?: string; message?: string }
-        if (ev.type === 'error') { setTopMetroMessages((p) => [...p, `Error: ${ev.message}`]); return true }
+        if (ev.type === 'error') { setTopMetroMessages((p) => [...p, `Error: ${ev.message}`]); failed = true; return true }
         const msg = ev.message
         if (msg) setTopMetroMessages((p) => [...p, msg])
       },
     )
-      .then(() => fetchTree())
+      .then(() => { if (!failed) fetchTree() })
       .catch(() => {})
       .finally(() => setTopMetroRunning(false))
   }

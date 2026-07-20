@@ -64,6 +64,23 @@ export async function consumeSSE(res: Response, onFrame: FrameHandler): Promise<
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
   let buf = ''
+
+  /** Feed one complete line. Returns true if the caller should stop consuming. */
+  const flush = (line: string): boolean => {
+    if (!line.startsWith('data: ')) return false
+    // .trim() also strips the '\r' of a CRLF stream — SSE permits either ending.
+    const payload = line.slice(6).trim()
+    if (!payload) return false
+    if (payload === '[DONE]') return true
+    let data: unknown
+    try {
+      data = JSON.parse(payload)
+    } catch {
+      return false // partial or non-JSON frame
+    }
+    return onFrame(data) === true
+  }
+
   try {
     for (;;) {
       const { value, done } = await reader.read()
@@ -75,19 +92,16 @@ export async function consumeSSE(res: Response, onFrame: FrameHandler): Promise<
       // Keep the trailing partial line for the next chunk.
       buf = lines.pop() ?? ''
       for (const line of lines) {
-        if (!line.startsWith('data: ')) continue
-        const payload = line.slice(6).trim()
-        if (!payload) continue
-        if (payload === '[DONE]') return
-        let data: unknown
-        try {
-          data = JSON.parse(payload)
-        } catch {
-          continue // partial or non-JSON frame
-        }
-        if (onFrame(data) === true) return
+        if (flush(line)) return
       }
     }
+    // The stream ended. Anything still buffered is a final line the server sent
+    // without a trailing newline — dropping it loses a real frame, and when that
+    // frame is the terminal `complete` the caller waits forever for a result
+    // that already arrived. decoder.decode() with no argument flushes any
+    // pending multi-byte sequence at the same time.
+    const tail = (buf + decoder.decode()).trim()
+    if (tail) flush(tail)
   } finally {
     // Releases the lock whether we finished, early-returned or threw. Without
     // this an early return leaves the body locked and un-collectable.
@@ -157,10 +171,12 @@ export async function postSSE(
     signal: opts.signal,
   })
 
-  if (!res.ok || !res.body) {
+  if (!res.ok) {
     const { detail, body: parsed } = await _readDetail(res)
     throw new SSEHttpError(detail || `Request failed (${res.status})`, res.status, parsed)
   }
+  // A 2xx with no body is an EMPTY stream, not a failure — throwing here would
+  // surface a nonsensical "Request failed (200)". consumeSSE no-ops on it.
   await consumeSSE(res, onFrame)
 }
 

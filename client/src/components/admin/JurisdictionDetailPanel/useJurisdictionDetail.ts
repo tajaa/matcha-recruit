@@ -7,6 +7,17 @@ import type { SpecialtyFilter } from '../jurisdiction/types'
 import type { JurisdictionDetail, JurisdictionReq, ViewMode, EditForm } from './types'
 import { getCategoryLabel, reqAnchor, sectionAnchor } from './helpers'
 
+/** A frame from any of the five jurisdiction scan streams. Every scan emits
+ *  `status`/`message` progress and a possible `error`; only check-federal-sources
+ *  additionally emits a `preview` carrying the rows it proposes to apply. */
+type ScanEvent = {
+  type?: string
+  message?: string
+  results?: unknown[]
+  by_category?: Record<string, unknown[]>
+  total?: number
+}
+
 type HookArgs = {
   id: string
   state: string
@@ -51,14 +62,14 @@ export function useJurisdictionDetail({ id, state, preemptionRules, selectedProf
   const runScan = useCallback((
     endpoint: string,
     setRunning: (v: boolean) => void,
-    opts: { refetch?: boolean; onEvent?: (ev: any) => void } = {},
+    opts: { refetch?: boolean; onEvent?: (ev: ScanEvent) => void } = {},
   ) => {
     setRunning(true); setScanMessages([])
     postSSE(
       `/admin/jurisdictions/${id}/${endpoint}`,
       undefined,
       (data) => {
-        const ev = data as { type?: string; message?: string }
+        const ev = data as ScanEvent
         if (ev.type === 'error') { setScanMessages((p) => [...p, `Error: ${ev.message}`]); return }
         opts.onEvent?.(ev)
         const msg = ev.message
@@ -82,9 +93,12 @@ export function useJurisdictionDetail({ id, state, preemptionRules, selectedProf
     runScan('check-federal-sources', setFedSourcesRunning, {
       refetch: false,
       onEvent: (ev) => {
-        if (ev.type === 'preview') {
-          setFedPreview({ results: ev.results, by_category: ev.by_category, total: ev.total })
-        }
+        if (ev.type !== 'preview') return
+        setFedPreview({
+          results: ev.results ?? [],
+          by_category: ev.by_category ?? {},
+          total: ev.total ?? 0,
+        })
       },
     })
   }
