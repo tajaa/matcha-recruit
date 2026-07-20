@@ -14,9 +14,8 @@ from datetime import date, datetime
 from typing import Optional
 from uuid import UUID, uuid4
 
-from weasyprint import HTML
 
-from ...core.services.pdf import safe_url_fetcher
+from ...core.services.pdf import render_pdf
 from ...core.services.storage import get_storage
 
 logger = logging.getLogger(__name__)
@@ -149,7 +148,7 @@ async def render_certificate_pdf(
         certificate_id=certificate_id,
     )
     return await asyncio.wait_for(
-        asyncio.to_thread(lambda: HTML(string=full_html, url_fetcher=safe_url_fetcher).write_pdf()),
+        asyncio.to_thread(lambda: render_pdf(full_html)),
         timeout=60.0,
     )
 

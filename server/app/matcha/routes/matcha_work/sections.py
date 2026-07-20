@@ -445,12 +445,12 @@ async def edit_diagram_ai(
     region = body.get("region")  # { x, y, width, height } in %
 
     # Call Gemini to modify the SVG
-    import google.genai as genai
+    from app.core.services.genai_client import get_genai_client
     import re as _re_vb
     from app.config import get_settings
     settings = get_settings()
 
-    client = genai.Client(api_key=settings.gemini_api_key)
+    client = get_genai_client(api_key=settings.gemini_api_key)
 
     # Build prompt — region-constrained or full edit
     if region and isinstance(region, dict):

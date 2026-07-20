@@ -263,14 +263,13 @@ async def render_discipline_letter(
     full_html = _render_html(record, employee, company, issuer, logo_src=logo_src)
 
     try:
-        from weasyprint import HTML
-        from ...core.services.pdf import safe_url_fetcher
+        from ...core.services.pdf import render_pdf
     except ImportError:
         raise HTTPException(status_code=500, detail="PDF generation not available (weasyprint missing)")
 
     try:
         return await asyncio.wait_for(
-            asyncio.to_thread(lambda: HTML(string=full_html, url_fetcher=safe_url_fetcher).write_pdf()),
+            asyncio.to_thread(lambda: render_pdf(full_html)),
             timeout=timeout_seconds,
         )
     except asyncio.TimeoutError:

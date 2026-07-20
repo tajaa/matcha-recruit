@@ -23,7 +23,7 @@ import logging
 from typing import Optional
 from uuid import UUID
 
-from app.core.services.pdf import safe_url_fetcher
+from app.core.services.pdf import render_pdf
 
 logger = logging.getLogger(__name__)
 
@@ -536,8 +536,7 @@ def _limits_html(company_name: str, review: dict) -> str:
 
 async def render_review_pdf(company_name: str, review: dict) -> bytes:
     def _render() -> bytes:
-        from weasyprint import HTML
 
-        return HTML(string=_limits_html(company_name, review), url_fetcher=safe_url_fetcher).write_pdf()
+        return render_pdf(_limits_html(company_name, review))
 
     return await asyncio.to_thread(_render)

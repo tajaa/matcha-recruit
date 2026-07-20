@@ -90,6 +90,7 @@ async def _browse_and_extract(
 ) -> dict:
     """Browse a URL using Gemini Computer Use and extract structured data."""
     from google import genai
+    from app.core.services.genai_client import get_genai_client
     from google.genai import types
     from app.config import load_settings
 
@@ -97,7 +98,7 @@ async def _browse_and_extract(
     api_key = os.getenv("GEMINI_API_KEY") or settings.gemini_api_key
     use_model = model or settings.analysis_model
 
-    client = genai.Client(api_key=api_key)
+    client = get_genai_client(api_key=api_key)
 
     config = types.GenerateContentConfig(
         tools=[

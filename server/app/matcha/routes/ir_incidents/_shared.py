@@ -264,18 +264,19 @@ async def log_audit(
     ip_address: Optional[str] = None,
 ):
     """Log an action to the audit trail."""
-    await conn.execute(
-        """
-        INSERT INTO ir_audit_log (incident_id, user_id, action, entity_type, entity_id, details, ip_address)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
-        """,
-        incident_id,
-        user_id,
-        action,
-        entity_type,
-        entity_id,
-        json.dumps(details) if details else None,
-        ip_address,
+    from app.core.services.audit_log import insert_audit_log
+
+    await insert_audit_log(
+        conn,
+        table="ir_audit_log",
+        id_column="incident_id",
+        id_value=incident_id,
+        user_id=user_id,
+        action=action,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        details=details,
+        ip_address=ip_address,
     )
 
 

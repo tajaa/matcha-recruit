@@ -71,6 +71,7 @@ async def help_assistant(body: HelpAssistantRequest):
     import os
 
     from google import genai
+    from app.core.services.genai_client import get_genai_client
     from google.genai import types as genai_types
 
     from app.config import get_settings
@@ -113,7 +114,7 @@ async def help_assistant(body: HelpAssistantRequest):
                 yield f"data: {json.dumps({'type': 'error', 'message': 'Assistant not configured'})}\n\n"
                 yield "data: [DONE]\n\n"
                 return
-            client = genai.Client(api_key=api_key)
+            client = get_genai_client(api_key=api_key)
             await limiter.record_call("help_assistant")
             # Low-stakes narration — always flash-lite, like the studio guide.
             response = await client.aio.models.generate_content_stream(

@@ -11,7 +11,7 @@ import logging
 from typing import Any, Optional
 from uuid import UUID
 
-from google import genai
+from app.core.services.genai_client import get_genai_client
 
 from ...config import get_settings
 
@@ -165,7 +165,7 @@ async def analyze_protocol(
     if not settings.gemini_api_key:
         raise RuntimeError("Gemini API key not configured")
 
-    client = genai.Client(api_key=settings.gemini_api_key)
+    client = get_genai_client(api_key=settings.gemini_api_key)
 
     requirements_text = _build_requirements_text(requirements)
     context_section = (

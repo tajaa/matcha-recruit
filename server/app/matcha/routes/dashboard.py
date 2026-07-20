@@ -782,6 +782,7 @@ async def _analyze_with_ai(patterns: dict) -> list[dict] | None:
 
     try:
         import google.genai as genai
+        from app.core.services.genai_client import get_genai_client
         from ...config import get_settings
         settings = get_settings()
 
@@ -789,7 +790,7 @@ async def _analyze_with_ai(patterns: dict) -> list[dict] | None:
         if not api_key:
             return None
 
-        client = genai.Client(api_key=api_key)
+        client = get_genai_client(api_key=api_key)
         prompt = _RISK_ANALYSIS_PROMPT.format(patterns=_json.dumps(patterns, default=str))
 
         response = await _asyncio.to_thread(

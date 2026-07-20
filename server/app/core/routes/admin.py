@@ -11069,6 +11069,7 @@ async def studio_assistant(body: StudioAssistantRequest):
     """
     import os
     from google import genai
+    from app.core.services.genai_client import get_genai_client
     from google.genai import types as genai_types
     from ..services.rate_limiter import get_rate_limiter, RateLimitExceeded
     from ..services.gemini_compliance import DEFAULT_LITE_MODEL
@@ -11116,7 +11117,7 @@ async def studio_assistant(body: StudioAssistantRequest):
                 yield f"data: {json.dumps({'type': 'error', 'message': 'Gemini not configured'})}\n\n"
                 yield "data: [DONE]\n\n"
                 return
-            client = genai.Client(api_key=api_key)
+            client = get_genai_client(api_key=api_key)
             await limiter.record_call("studio_assistant")
             response = await client.aio.models.generate_content_stream(
                 model=model, contents=prompt,
@@ -12727,8 +12728,7 @@ async def deal_flow_proposal(inp: DealInputs):
         html_str = render_proposal_html(inp, quotes)
 
     try:
-        from weasyprint import HTML
-        from ..services.pdf import safe_url_fetcher
+        from ..services.pdf import render_pdf
     except ImportError as ie:
         logger.error("weasyprint import failed: %s", ie)
         raise HTTPException(
@@ -12737,7 +12737,7 @@ async def deal_flow_proposal(inp: DealInputs):
         )
     try:
         pdf_bytes = await asyncio.wait_for(
-            asyncio.to_thread(lambda: HTML(string=html_str, url_fetcher=safe_url_fetcher).write_pdf()),
+            asyncio.to_thread(lambda: render_pdf(html_str)),
             timeout=60,
         )
     except asyncio.TimeoutError:
@@ -12777,14 +12777,13 @@ async def deal_flow_broker_proposal(inp: BrokerInputs):
 
     html_str = render_broker_proposal_html(inp, compute_broker_quote(inp))
     try:
-        from weasyprint import HTML
-        from ..services.pdf import safe_url_fetcher
+        from ..services.pdf import render_pdf
     except ImportError as ie:
         logger.error("weasyprint import failed: %s", ie)
         raise HTTPException(status_code=501, detail="PDF generation not available — install weasyprint on the server.")
     try:
         pdf_bytes = await asyncio.wait_for(
-            asyncio.to_thread(lambda: HTML(string=html_str, url_fetcher=safe_url_fetcher).write_pdf()), timeout=60,
+            asyncio.to_thread(lambda: render_pdf(html_str)), timeout=60,
         )
     except asyncio.TimeoutError:
         raise HTTPException(status_code=504, detail="PDF render timed out.")
@@ -12822,14 +12821,13 @@ async def deal_flow_book_proposal(inp: BookInputs):
 
     html_str = render_book_proposal_html(inp, compute_book_quote(inp))
     try:
-        from weasyprint import HTML
-        from ..services.pdf import safe_url_fetcher
+        from ..services.pdf import render_pdf
     except ImportError as ie:
         logger.error("weasyprint import failed: %s", ie)
         raise HTTPException(status_code=501, detail="PDF generation not available — install weasyprint on the server.")
     try:
         pdf_bytes = await asyncio.wait_for(
-            asyncio.to_thread(lambda: HTML(string=html_str, url_fetcher=safe_url_fetcher).write_pdf()), timeout=60,
+            asyncio.to_thread(lambda: render_pdf(html_str)), timeout=60,
         )
     except asyncio.TimeoutError:
         raise HTTPException(status_code=504, detail="PDF render timed out.")
@@ -12892,8 +12890,7 @@ async def deal_flow_full_proposal(inp: FullDealInputs):
     html_str = render_full_proposal_html(inp, q)
 
     try:
-        from weasyprint import HTML
-        from ..services.pdf import safe_url_fetcher
+        from ..services.pdf import render_pdf
     except ImportError as ie:
         logger.error("weasyprint import failed: %s", ie)
         raise HTTPException(
@@ -12902,7 +12899,7 @@ async def deal_flow_full_proposal(inp: FullDealInputs):
         )
     try:
         pdf_bytes = await asyncio.wait_for(
-            asyncio.to_thread(lambda: HTML(string=html_str, url_fetcher=safe_url_fetcher).write_pdf()),
+            asyncio.to_thread(lambda: render_pdf(html_str)),
             timeout=90,
         )
     except asyncio.TimeoutError:

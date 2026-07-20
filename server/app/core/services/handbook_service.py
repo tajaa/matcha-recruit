@@ -2601,6 +2601,7 @@ class HandbookService:
 
         try:
             from google import genai
+            from app.core.services.genai_client import get_genai_client
         except Exception:
             return None
 
@@ -2661,7 +2662,7 @@ class HandbookService:
         )
 
         try:
-            client = genai.Client(api_key=settings.gemini_api_key)
+            client = get_genai_client(api_key=settings.gemini_api_key)
         except Exception:
             return None
 
@@ -4792,12 +4793,11 @@ class HandbookService:
         """
 
         try:
-            from weasyprint import HTML
-            from .pdf import safe_url_fetcher
+            from .pdf import render_pdf
         except ImportError as exc:
             raise RuntimeError("PDF generation is not available because WeasyPrint is not installed") from exc
 
-        pdf_bytes = HTML(string=html_content, url_fetcher=safe_url_fetcher).write_pdf()
+        pdf_bytes = render_pdf(html_content)
         filename = _handbook_filename(handbook.title, handbook.active_version)
         return pdf_bytes, filename
 

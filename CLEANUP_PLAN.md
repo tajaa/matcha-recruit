@@ -652,3 +652,104 @@ Also fixed:
   pair per keystroke. (Pre-existing on main, but now a one-line fix at a single call site.)
 
 **Verification:** tsc clean, **154 client tests** (up from 148), build clean.
+
+---
+
+## STATUS — J2 + J3 + L2 conformance (2026-07-20)
+
+The server conformance PR. Mechanical, security-weighted, and unblocks L7.
+
+### J2 — genai factory sweep (DONE)
+All **44** `genai.Client(...)` / `_genai.Client(...)` call sites across **39 files** now
+route through `core/services/genai_client.py:get_genai_client()`. Zero raw instantiations
+remain (grep-verified). Safe pre-cutover — the factory returns the consumer client while
+`USE_VERTEX_AI` is off, so this is a no-op today and turns the eventual Vertex/BAA cutover
+into a real flag flip.
+- The one non-trivial site (`gemini_session.py`, `**client_kwargs`) works unchanged — the
+  factory forwards `**kwargs`.
+- Import placement anchored on each file's existing genai import line (module-level or
+  in-function), never a docstring — the hazard the L1 round hit. Confirmed by `importlib`
+  of the factory sites: 10/10 clean, 0 failures.
+- **A substring bug was caught and fixed mid-sweep**: replacing `genai.Client(` before
+  `_genai.Client(` turned the latter into `_get_genai_client(` (the `genai.Client(`
+  substring matched first) at 6 sites. Corrected; grep confirms none left.
+- Dead imports cleaned: 7 top-level + 6 in-function `from google import genai` lines that
+  the swap orphaned were removed (types-only imports kept).
+
+### J3 + L2 — render_pdf conformance (DONE, minus the CSS/stat-cell dedup)
+All **37** inline `HTML(string=..., url_fetcher=...).write_pdf()` sites now go through
+`core/services/pdf.py`. Zero raw `.write_pdf(` outside `pdf.py`; zero `safe_url_fetcher`
+imports outside `pdf.py` (grep-verified).
+- New `render_pdf_async()` in `pdf.py` folds the `asyncio.to_thread` wrapper + the SSRF-safe
+  fetcher into one call. The four hand-rolled async renderers (`resident_care`,
+  `submission_packet`, `benefits_eligibility`, and the `WeasyHTML`-aliased `er_copilot/
+  export`) adopt it or `render_pdf`.
+- **The two `_no_net` fetcher clones are gone** — `resident_care` and `submission_packet`
+  each defined their own local SSRF guard instead of the shared `safe_url_fetcher`. This was
+  the security-weight part: one place to audit the fetcher now, not three.
+- `to_thread`/`wait_for(timeout=...)` wrappers were preserved (the inner lambda body was
+  swapped to `render_pdf`), so no async timeout semantics changed.
+- `matcha_work_document`'s one `stylesheets=[CSS(...)]` kwargs site → `render_pdf(html,
+  stylesheets=...)`; the `CSS` import stays. `pdf.py` is the only file still importing
+  `HTML` from weasyprint. `importlib` of 10 PDF services: clean.
+
+### J4 — log_audit helper (DONE, scoped to the identical-shape trio)
+New `core/services/audit_log.py:insert_audit_log(conn, *, table, id_column, id_value, ...)`
+holds the shared write body. The three helpers that were byte-identical modulo table name +
+FK column — `ir_incidents/_shared.py`, `er_copilot/_shared.py`,
+`employee_lifecycle/accommodations.py` — are now thin wrappers calling it, **signatures
+unchanged**, so every call site is untouched. `table`/`id_column` are hardcoded literals at
+each wrapper (never user input), so interpolating them is safe under the SQL rule; every
+value still binds as a parameter. 3 DB-free tests (fake conn) assert the SQL column order and
+the `details or {} → NULL` rule match the old bodies exactly.
+- **`schedule_audit_log` and `fractional_audit_log` deliberately NOT folded in** — different
+  column set/order (`schedule`: `company_id`-first, `actor_user_id`, no `ip_address`, `::jsonb`
+  cast; `fractional`: 4 columns, singular `detail`). A shared helper flexible enough for both
+  would be worse than two small honest functions.
+- **The 18 raw `INSERT INTO *_audit_log` sites NOT swept** — they span 13 tables
+  (pilot/provisioning/legal_matter/discipline/…), each a distinct column shape, not the shared
+  7-column one. Converting them needs per-site mapping and full-suite verification, which the
+  local env can't run (missing `audioop`/`segno`). Left for a DB-capable follow-up.
+
+**NOT done — L2's HTML-builder dedup.** The `REGISTER_PDF_CSS` / `esc()` / `stat_cells()`
+consolidation (the ×8 `_esc()` redefinition and the shared register `<style>` block) is a
+cosmetic dedup of the HTML *builders*, not the render path — its verification is "render one
+PDF per family and diff visually", which can't be done headless here. Left for a follow-up
+that can eyeball the output. The render-path conformance (the security-relevant half) is complete.
+
+**Verification:** all touched files `py_compile` clean; invariant greps green (0 raw
+genai.Client, 0 raw write_pdf, 0 stray safe_url_fetcher imports); `importlib` of 20 touched
+modules across both sweeps → 0 failures. Full pytest not re-run here (env missing local deps
+`audioop`/`segno` — same pre-existing baseline).
+
+### C rollout — 5 more (2026-07-20)
+Continued the useAsync sweep with 5 clean single-fetch pages (12 → 7 remaining after the
+earlier tranche is not the count — this is the broader ~90-candidate pool): `risk/Acord`,
+`risk/Coi`, `risk/ManagementLiability`, `broker/client-detail/ControlsTab`,
+`broker/client-detail/LimitsTab`. Each dropped its `useState(data)` + `useState(true)` +
+fetch-`useEffect` + `.finally(setLoading)` quadruplet for a single `useAsync(fn, deps,
+initial)` line; optimistic writers keep working via the hook's `setData`, and `LimitsTab`'s
+child `reload` prop is now the hook's `reload`.
+- **`broker/client-detail/DefenseTab` deliberately skipped** — it runs two parallel fetches
+  under `Promise.allSettled` (each survives the other failing). Folding that into one
+  `useAsync` would either lose the independent-failure behavior (`Promise.all`) or need more
+  code than it removes. Not a clean single-fetch; left for the god-component pass.
+
+**Verification:** `tsc -p tsconfig.app.json` clean, 154 client tests pass, `npm run build`
+clean. These pages have no unit tests (unchanged count); tsc + build is the guard.
+
+### C rollout — 7 more (2026-07-20, same session)
+Second tranche of clean single-fetch migrations: `broker/BrokerPropertyPortfolio`,
+`widgets/NoteThread`, `er/ERDocumentList`, `admin/company-detail/TokensTab`,
+`landing/resources/StateGuides`, `landing/BlogIndex`, `ir/risk/IRLocationScorecards`.
+12 useAsync migrations total this session.
+- Optimistic writers preserved via `setData` (NoteThread append, ERDocumentList
+  append/filter — the hook's `setData` takes a functional updater); `TokensTab`'s
+  post-grant refetch is the hook's `reload`; `BrokerPropertyPortfolio`'s bool `error`
+  folds into the hook's `error`.
+- `StateGuides` kept its `document.title` side effect in its own tiny `useEffect` — only
+  the fetch moved to useAsync.
+- **`broker/BrokerDashboard` skipped** — 5 parallel fetches into 5 states, same class as
+  DefenseTab (not clean single-fetch).
+
+**Verification:** tsc clean, 154 tests pass, build clean.

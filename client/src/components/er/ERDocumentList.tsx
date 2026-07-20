@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useState } from 'react'
+import { useAsync } from '../../hooks/useAsync'
 import { api } from '../../api/client'
 import { Badge, Button, Select, FileUpload, type BadgeVariant } from '../ui'
 import type { ERDocument, ERDocumentUploadResponse, ERDocumentType } from '../../types/er'
@@ -24,20 +25,14 @@ type ERDocumentListProps = {
 }
 
 export function ERDocumentList({ caseId, onUploadComplete }: ERDocumentListProps) {
-  const [docs, setDocs] = useState<ERDocument[]>([])
-  const [loading, setLoading] = useState(true)
+  const { data: docs, loading, setData: setDocs } = useAsync(
+    () => api.get<ERDocument[]>(`/er/cases/${caseId}/documents`),
+    [caseId],
+    [],
+  )
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState('')
   const [docType, setDocType] = useState<ERDocumentType>('other')
-
-  const fetchDocs = useCallback(() => {
-    api.get<ERDocument[]>(`/er/cases/${caseId}/documents`)
-      .then(setDocs)
-      .catch(() => setDocs([]))
-      .finally(() => setLoading(false))
-  }, [caseId])
-
-  useEffect(() => { fetchDocs() }, [fetchDocs])
 
   async function handleFiles(files: File[]) {
     setUploading(true)

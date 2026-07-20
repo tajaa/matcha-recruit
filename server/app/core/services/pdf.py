@@ -13,6 +13,8 @@ that need them, so legitimate assets are unaffected. This mirrors the original
 one-off guard in `matcha/services/benefits_eligibility.py`.
 """
 
+import asyncio
+
 from weasyprint import HTML, default_url_fetcher
 
 
@@ -38,3 +40,14 @@ def render_pdf(html_string: str, **write_pdf_kwargs) -> bytes:
     return HTML(string=html_string, url_fetcher=safe_url_fetcher).write_pdf(
         **write_pdf_kwargs
     )
+
+
+async def render_pdf_async(html_string: str, **write_pdf_kwargs) -> bytes:
+    """`render_pdf` off the event loop.
+
+    WeasyPrint render is CPU-bound and blocking; the desktop client awaits the
+    bytes inline (see the root CLAUDE.md note on why PDF render stays in the
+    request path), so every async caller wrapped it in `asyncio.to_thread`. This
+    folds that wrapper — and the SSRF-safe fetcher — into one call.
+    """
+    return await asyncio.to_thread(render_pdf, html_string, **write_pdf_kwargs)

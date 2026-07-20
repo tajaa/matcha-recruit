@@ -158,6 +158,7 @@ async def infer_from_gemini(job_title: str) -> list[CredentialRequirement]:
     """Use Gemini to determine required credentials for an unrecognized job title."""
     try:
         from google import genai
+        from app.core.services.genai_client import get_genai_client
         from google.genai import types
 
         api_key = os.getenv("GEMINI_API_KEY")
@@ -165,7 +166,7 @@ async def infer_from_gemini(job_title: str) -> list[CredentialRequirement]:
             logger.warning("GEMINI_API_KEY not set, cannot infer credentials for: %s", job_title)
             return []
 
-        client = genai.Client(api_key=api_key)
+        client = get_genai_client(api_key=api_key)
 
         prompt = f"""You are a healthcare HR compliance expert. Given the job title below, determine which credential documents are typically required in the US healthcare industry.
 

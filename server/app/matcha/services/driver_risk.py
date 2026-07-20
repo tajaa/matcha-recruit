@@ -20,7 +20,7 @@ from uuid import UUID
 
 import asyncpg
 
-from app.core.services.pdf import safe_url_fetcher
+from app.core.services.pdf import render_pdf
 
 logger = logging.getLogger(__name__)
 
@@ -218,8 +218,7 @@ def _fleet_html(company_name: str, fleet: dict) -> str:
 
 async def render_fleet_pdf(company_name: str, fleet: dict) -> bytes:
     def _render() -> bytes:
-        from weasyprint import HTML
 
-        return HTML(string=_fleet_html(company_name, fleet), url_fetcher=safe_url_fetcher).write_pdf()
+        return render_pdf(_fleet_html(company_name, fleet))
 
     return await asyncio.to_thread(_render)

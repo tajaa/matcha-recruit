@@ -32,7 +32,7 @@ import re
 from datetime import datetime, timezone
 
 from app.core.services.genai_client import get_genai_client
-from app.core.services.pdf import safe_url_fetcher
+from app.core.services.pdf import render_pdf
 
 from .claims_readiness import _PDF_CSS, _esc, _fmt_dt
 from .legal_defense import validate_citations, _parse_json  # pure, unit-tested
@@ -1507,8 +1507,7 @@ def _memo_html(session: dict, subject_name: str, corpus: dict, memo: dict,
 
 async def _render_pdf(html_str: str) -> bytes:
     def _r() -> bytes:
-        from weasyprint import HTML
-        return HTML(string=html_str, url_fetcher=safe_url_fetcher).write_pdf()
+        return render_pdf(html_str)
     return await asyncio.to_thread(_r)
 
 

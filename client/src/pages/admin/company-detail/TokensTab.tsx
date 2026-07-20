@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
+import { useAsync } from '../../../hooks/useAsync'
 import { Zap, Loader2 } from 'lucide-react'
 import { api } from '../../../api/client'
 import { relTime } from './shared'
@@ -11,20 +12,14 @@ function fmtTokens(n: number): string {
 }
 
 export function TokensTab({ companyId }: { companyId: string }) {
-  const [detail, setDetail] = useState<TokenDetail | null>(null)
-  const [loading, setLoading] = useState(true)
+  const { data: detail, loading, reload: load } = useAsync(
+    () => api.get<TokenDetail>(`/matcha-work/admin/companies/${companyId}/token-usage`),
+    [companyId],
+    null,
+  )
   const [grantAmount, setGrantAmount] = useState('')
   const [grantDesc, setGrantDesc] = useState('')
   const [granting, setGranting] = useState(false)
-
-  function load() {
-    api.get<TokenDetail>(`/matcha-work/admin/companies/${companyId}/token-usage`)
-      .then(setDetail)
-      .catch(() => setDetail(null))
-      .finally(() => setLoading(false))
-  }
-
-  useEffect(() => { load() }, [companyId])
 
   async function handleGrant() {
     const tokens = parseInt(grantAmount)

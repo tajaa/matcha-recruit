@@ -1,7 +1,7 @@
 import json
 from typing import Optional, Any
 
-from google import genai
+from app.core.services.genai_client import get_genai_client
 
 
 CULTURE_EXTRACTION_PROMPT = """Analyze this interview transcript where an AI interviewer asked an HR representative about their company culture.
@@ -50,7 +50,7 @@ class CultureAnalyzer:
         model: str = "gemini-3-flash-preview",
     ):
         self.model = model
-        self.client = genai.Client(api_key=api_key)
+        self.client = get_genai_client(api_key=api_key)
 
     async def extract_culture_from_transcript(self, transcript: str) -> dict[str, Any]:
         """Extract structured culture data from an interview transcript."""

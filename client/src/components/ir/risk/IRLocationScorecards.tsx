@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
 import { Loader2 } from 'lucide-react'
+import { useAsync } from '../../../hooks/useAsync'
 import { api } from '../../../api/client'
 import type { WcMetrics } from './IRWcMetricsCard'
 
@@ -24,15 +24,7 @@ type ByLocationResponse = {
  * can't. Renders only when there's more than one location. Best-effort.
  */
 export function IRLocationScorecards() {
-  const [data, setData] = useState<ByLocationResponse | null>(null)
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    api.get<ByLocationResponse>('/ir/incidents/analytics/wc-metrics/by-location')
-      .then(setData)
-      .catch(() => setData(null))
-      .finally(() => setLoading(false))
-  }, [])
+  const { data, loading } = useAsync(() => api.get<ByLocationResponse>('/ir/incidents/analytics/wc-metrics/by-location'), [], null)
 
   if (loading) {
     return (

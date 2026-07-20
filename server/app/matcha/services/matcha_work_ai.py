@@ -10,6 +10,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Optional, Any
 
 from google import genai
+from app.core.services.genai_client import get_genai_client
 from google.genai import types
 
 # Google Search grounding tool — used only for payer mode (real-world coverage data).
@@ -862,7 +863,7 @@ class GeminiProvider(MatchaWorkAIProvider):
     def client(self) -> genai.Client:
         if self._client is None:
             api_key = os.getenv("GEMINI_API_KEY")
-            self._client = genai.Client(api_key=api_key or self.settings.gemini_api_key)
+            self._client = get_genai_client(api_key=api_key or self.settings.gemini_api_key)
         return self._client
 
     def _get_or_create_cache(self, model: str, static_prompt: str, company_id: str = "") -> Optional[str]:

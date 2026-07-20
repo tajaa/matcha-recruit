@@ -120,8 +120,7 @@ async def _render_project_pdf(project: dict) -> bytes:
 </body></html>"""
 
     try:
-        from weasyprint import HTML
-        from app.core.services.pdf import safe_url_fetcher
+        from app.core.services.pdf import render_pdf
     except ImportError as ie:
         # Surface the real installation hint instead of an opaque 500 so
         # the desktop alert tells the operator what to do.
@@ -133,7 +132,7 @@ async def _render_project_pdf(project: dict) -> bytes:
 
     try:
         return await asyncio.wait_for(
-            asyncio.to_thread(lambda: HTML(string=full_html, url_fetcher=safe_url_fetcher).write_pdf()),
+            asyncio.to_thread(lambda: render_pdf(full_html)),
             timeout=60.0,
         )
     except asyncio.TimeoutError:
@@ -253,14 +252,13 @@ async def export_project_endpoint(
 </body></html>"""
 
         try:
-            from weasyprint import HTML
-            from app.core.services.pdf import safe_url_fetcher
+            from app.core.services.pdf import render_pdf
         except ImportError:
             raise HTTPException(status_code=500, detail="PDF generation not available")
 
         try:
             pdf_bytes = await asyncio.wait_for(
-                asyncio.to_thread(lambda: HTML(string=full_html, url_fetcher=safe_url_fetcher).write_pdf()),
+                asyncio.to_thread(lambda: render_pdf(full_html)),
                 timeout=60.0,
             )
         except asyncio.TimeoutError:
@@ -457,12 +455,11 @@ async def _html_to_pdf_bytes(full_html: str) -> bytes:
     non-storage image URLs are intentionally left for the fetcher to block.
     """
     try:
-        from weasyprint import HTML
-        from app.core.services.pdf import safe_url_fetcher
+        from app.core.services.pdf import render_pdf
     except ImportError:
         raise HTTPException(status_code=501, detail="PDF generation not available — install weasyprint")
     full_html = await get_storage().inline_storage_images(full_html)
-    return await asyncio.to_thread(lambda: HTML(string=full_html, url_fetcher=safe_url_fetcher).write_pdf())
+    return await asyncio.to_thread(lambda: render_pdf(full_html))
 
 def _pdf_title_from_markdown(content: str, fallback: str = "Deal Memo") -> str:
     """First markdown heading (# / ## / ###) becomes the document title."""

@@ -503,14 +503,6 @@ def _packet_html(ctx: dict) -> str:
 
 
 async def render_submission_pdf(context: dict) -> bytes:
-    def _render() -> bytes:
-        from weasyprint import HTML, default_url_fetcher
+    from app.core.services.pdf import render_pdf_async
 
-        def _no_net(url: str):
-            if url.startswith("data:"):
-                return default_url_fetcher(url)
-            raise ValueError("network fetching disabled for submission PDF")
-
-        return HTML(string=_packet_html(context), url_fetcher=_no_net).write_pdf()
-
-    return await asyncio.to_thread(_render)
+    return await render_pdf_async(_packet_html(context))

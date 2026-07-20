@@ -275,8 +275,7 @@ async def render_300a_pdf(summary: dict) -> bytes:
     full_html = _build_300a_html(summary)
 
     try:
-        from weasyprint import HTML
-        from ....core.services.pdf import safe_url_fetcher
+        from ....core.services.pdf import render_pdf
     except ImportError as ie:
         logger.error("weasyprint import failed: %s", ie)
         raise HTTPException(
@@ -286,7 +285,7 @@ async def render_300a_pdf(summary: dict) -> bytes:
 
     try:
         return await asyncio.wait_for(
-            asyncio.to_thread(lambda: HTML(string=full_html, url_fetcher=safe_url_fetcher).write_pdf()),
+            asyncio.to_thread(lambda: render_pdf(full_html)),
             timeout=60.0,
         )
     except asyncio.TimeoutError:

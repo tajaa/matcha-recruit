@@ -78,6 +78,7 @@ async def _classify_role_via_gemini(
     """Use Gemini to classify an unrecognized job title into a role category."""
     try:
         from google import genai
+        from app.core.services.genai_client import get_genai_client
         from google.genai import types
 
         api_key = os.getenv("GEMINI_API_KEY")
@@ -92,7 +93,7 @@ async def _classify_role_via_gemini(
             f"If none fit, return \"non_clinical\"."
         )
 
-        client = genai.Client(api_key=api_key)
+        client = get_genai_client(api_key=api_key)
         response = client.models.generate_content(
             model="gemini-3-flash-preview",
             contents=[types.Content(parts=[types.Part.from_text(text=prompt)])],
@@ -326,6 +327,7 @@ async def research_credential_requirements(
     Creates credential_requirement_templates and returns the raw result list.
     """
     from google import genai
+    from app.core.services.genai_client import get_genai_client
     from google.genai import types
 
     api_key = os.getenv("GEMINI_API_KEY")
@@ -394,7 +396,7 @@ Return ONLY a JSON object: {{"requirements": [...]}}
 Do NOT include requirements that don't apply to this role.
 Do NOT fabricate requirements — if unsure, omit."""
 
-        client = genai.Client(api_key=api_key)
+        client = get_genai_client(api_key=api_key)
         response = client.models.generate_content(
             model="gemini-3-flash-preview",
             contents=[types.Content(parts=[types.Part.from_text(text=prompt)])],

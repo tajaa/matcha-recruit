@@ -1628,8 +1628,7 @@ async def get_session_report_pdf(
 
     full_html = _dossier_to_html(dossier)
     try:
-        from weasyprint import HTML
-        from ..services.pdf import safe_url_fetcher
+        from ..services.pdf import render_pdf
     except ImportError as ie:
         logger.error("weasyprint import failed: %s", ie)
         raise HTTPException(
@@ -1638,7 +1637,7 @@ async def get_session_report_pdf(
         )
     try:
         pdf_bytes = await asyncio.wait_for(
-            asyncio.to_thread(lambda: HTML(string=full_html, url_fetcher=safe_url_fetcher).write_pdf()),
+            asyncio.to_thread(lambda: render_pdf(full_html)),
             timeout=60,
         )
     except asyncio.TimeoutError:

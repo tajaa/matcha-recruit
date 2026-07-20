@@ -384,13 +384,14 @@ def _gemini_client():
     version needed.
     """
     from google import genai
+    from app.core.services.genai_client import get_genai_client
     from app.config import get_settings
 
     settings = get_settings()
     api_key = os.getenv("GEMINI_API_KEY") or settings.gemini_api_key
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY not configured")
-    return genai.Client(api_key=api_key)
+    return get_genai_client(api_key=api_key)
 
 
 async def _extract_sections_from_pdf(pdf_bytes: bytes) -> list[dict[str, Any]]:

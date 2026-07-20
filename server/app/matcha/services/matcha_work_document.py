@@ -1698,10 +1698,9 @@ async def generate_pdf(
                 }
                 """
                 html_content = html_content.replace("</style>", watermark_css + "</style>")
-            from weasyprint import HTML
-            from ...core.services.pdf import safe_url_fetcher
+            from ...core.services.pdf import render_pdf
 
-            return HTML(string=html_content, url_fetcher=safe_url_fetcher).write_pdf()
+            return render_pdf(html_content)
         except ImportError:
             logger.error("WeasyPrint not installed — PDF generation skipped")
             return None
@@ -1867,11 +1866,12 @@ async def generate_presentation_pdf(
 
     def _render() -> Optional[bytes]:
         try:
-            from weasyprint import HTML, CSS
-            from ...core.services.pdf import safe_url_fetcher
+            from weasyprint import CSS
+            from ...core.services.pdf import render_pdf
             html_content = _render_presentation_html(render_state)
-            return HTML(string=html_content, url_fetcher=safe_url_fetcher).write_pdf(
-                stylesheets=[CSS(string="@page { size: 1280px 720px; margin: 0; }")]
+            return render_pdf(
+                html_content,
+                stylesheets=[CSS(string="@page { size: 1280px 720px; margin: 0; }")],
             )
         except ImportError:
             logger.error("WeasyPrint not installed — presentation PDF skipped")
@@ -1910,14 +1910,14 @@ async def generate_cover_image(
     """Generate a cover image via Gemini 3.1 Flash Image and upload to S3."""
     import os
     try:
-        from google import genai as _genai
+        from app.core.services.genai_client import get_genai_client
         from google.genai import types as _genai_types
         from ...config import get_settings
         settings = get_settings()
         api_key = os.getenv("GEMINI_API_KEY") or settings.gemini_api_key
         if not api_key:
             return None
-        client = _genai.Client(api_key=api_key)
+        client = get_genai_client(api_key=api_key)
         prompt_parts = [f"Professional corporate presentation cover slide illustration for: {presentation_title}"]
         if subtitle:
             prompt_parts.append(f"Subtitle: {subtitle}")

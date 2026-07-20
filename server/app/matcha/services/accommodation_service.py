@@ -10,7 +10,7 @@ import json
 from datetime import datetime, timezone
 from typing import Optional, Any
 
-from google import genai
+from app.core.services.genai_client import get_genai_client
 
 
 # ===========================================
@@ -156,7 +156,7 @@ class AccommodationAnalyzer:
         model: str = "gemini-3-flash-preview",
     ):
         self.model = model
-        self.client = genai.Client(api_key=api_key)
+        self.client = get_genai_client(api_key=api_key)
 
     def _parse_json_response(self, text: str) -> dict[str, Any]:
         """Parse JSON from LLM response, handling markdown code blocks."""

@@ -12,6 +12,7 @@ from typing import Any, Optional
 from uuid import UUID
 
 from google import genai
+from app.core.services.genai_client import get_genai_client
 from google.genai import types
 
 from ...config import get_settings
@@ -115,7 +116,7 @@ async def generate_impact_summary(
         if not api_key:
             return _fallback_summary(change_info, location)
 
-        client = genai.Client(api_key=api_key)
+        client = get_genai_client(api_key=api_key)
         response = await asyncio.wait_for(
             client.aio.models.generate_content(
                 model=LITE_MODEL,

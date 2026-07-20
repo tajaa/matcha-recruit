@@ -1,19 +1,17 @@
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { FileText, Loader2, Upload, Trash2 } from 'lucide-react'
 import { Card } from '../../../components/ui'
-import { listCois, uploadCoi, deleteCoi, type CoiList, type CoiStatus } from '../../../api/risk/coi'
+import { useAsync } from '../../../hooks/useAsync'
+import { listCois, uploadCoi, deleteCoi, type CoiStatus } from '../../../api/risk/coi'
 
 const STATUS_TONE: Record<CoiStatus, string> = {
   active: 'text-emerald-400', expiring: 'text-amber-400', expired: 'text-rose-400', unknown: 'text-zinc-500',
 }
 
 export default function Coi() {
-  const [data, setData] = useState<CoiList | null>(null)
-  const [loading, setLoading] = useState(true)
+  const { data, loading, setData } = useAsync(() => listCois(), [], null)
   const [uploading, setUploading] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
-
-  useEffect(() => { listCois().then(setData).finally(() => setLoading(false)) }, [])
 
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]

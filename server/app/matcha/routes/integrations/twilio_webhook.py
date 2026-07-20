@@ -192,10 +192,11 @@ async def _extract_findings_from_transcript(transcript: str, missing_info: list[
         return {}
 
     from google import genai
+    from app.core.services.genai_client import get_genai_client
 
     settings = get_settings()
     api_key = os.getenv("GEMINI_API_KEY") or settings.gemini_api_key
-    client = genai.Client(api_key=api_key)
+    client = get_genai_client(api_key=api_key)
 
     prompt = (
         f"Extract the following information from this phone call transcript "

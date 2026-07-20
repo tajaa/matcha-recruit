@@ -16,7 +16,7 @@ from datetime import date, datetime, timezone, timedelta
 from typing import Any, Optional
 from uuid import UUID
 
-from google import genai
+from app.core.services.genai_client import get_genai_client
 
 from ...database import get_connection
 
@@ -1273,7 +1273,7 @@ async def generate_recommendations(result: RiskAssessmentResult, settings) -> di
         if not api_key:
             logger.warning("No Gemini API key configured — skipping recommendations")
             return empty
-        client = genai.Client(api_key=api_key)
+        client = get_genai_client(api_key=api_key)
 
         assessment_dict = {
             "overall_score": result.overall_score,

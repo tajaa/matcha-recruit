@@ -97,6 +97,7 @@ async def _browse_and_extract_inner(
     on_status=None, capture_screenshot: bool = False, company_id: str | None = None,
 ) -> dict:
     from google import genai
+    from app.core.services.genai_client import get_genai_client
     from google.genai import types
     from ...config import get_settings
 
@@ -104,7 +105,7 @@ async def _browse_and_extract_inner(
     api_key = os.getenv("GEMINI_API_KEY") or settings.gemini_api_key
     use_model = model or settings.analysis_model
 
-    client = genai.Client(api_key=api_key)
+    client = get_genai_client(api_key=api_key)
 
     config = types.GenerateContentConfig(
         tools=[

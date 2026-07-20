@@ -7,7 +7,7 @@ import json
 import logging
 from typing import Optional, Any
 
-from google import genai
+from app.core.services.genai_client import get_genai_client
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +76,7 @@ async def generate_investigation_questions(
     """
     # Prefer GEMINI_API_KEY (direct API) per-service override.
     import os
-    client = genai.Client(api_key=os.getenv("GEMINI_API_KEY") or api_key)
+    client = get_genai_client(api_key=os.getenv("GEMINI_API_KEY") or api_key)
 
     incident_summary = (
         f"Title: {incident.get('title', 'N/A')}\n"

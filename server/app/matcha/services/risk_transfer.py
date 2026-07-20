@@ -41,7 +41,7 @@ from typing import Optional, get_args
 from fastapi import HTTPException, UploadFile
 
 from app.config import get_settings
-from app.core.services.pdf import safe_url_fetcher
+from app.core.services.pdf import render_pdf
 from app.core.services.storage import get_storage
 from app.matcha.models import limit_adequacy as _models
 
@@ -730,8 +730,7 @@ def _contract_review_html(review: dict) -> str:
 
 async def render_contract_review_pdf(review: dict) -> bytes:
     def _render() -> bytes:
-        from weasyprint import HTML
 
-        return HTML(string=_contract_review_html(review), url_fetcher=safe_url_fetcher).write_pdf()
+        return render_pdf(_contract_review_html(review))
 
     return await asyncio.to_thread(_render)

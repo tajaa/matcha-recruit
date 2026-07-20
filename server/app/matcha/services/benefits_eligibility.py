@@ -567,25 +567,12 @@ def _kit_html(company_name: str, detail: dict) -> str:
 
 async def render_stabilization_kit_pdf(company_name: str, detail: dict) -> bytes:
     """Render the kit to PDF off the event loop (WeasyPrint, like the rest of the app)."""
-    import asyncio
+    # Defense-in-depth against SSRF: the kit is built from semi-trusted
+    # (broker-uploaded) data. render_pdf_async applies the shared safe fetcher
+    # that refuses every remote/file scheme — only inline data: URIs resolve.
+    from app.core.services.pdf import render_pdf_async
 
-    def _render() -> bytes:
-        from weasyprint import HTML, default_url_fetcher
-
-        # Defense-in-depth against SSRF: the kit is built from semi-trusted
-        # (broker-uploaded) data, so refuse every remote/file scheme. Only
-        # inline data: URIs resolve — there are no legit external assets here.
-        def _no_network_fetcher(url: str):
-            if url.startswith("data:"):
-                return default_url_fetcher(url)
-            raise ValueError("network fetching disabled for stabilization-kit PDF")
-
-        return HTML(
-            string=_kit_html(company_name, detail),
-            url_fetcher=_no_network_fetcher,
-        ).write_pdf()
-
-    return await asyncio.to_thread(_render)
+    return await render_pdf_async(_kit_html(company_name, detail))
 
 
 def build_recommendation(detail_dimensions: list[dict]) -> str:

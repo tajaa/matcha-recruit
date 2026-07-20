@@ -1,14 +1,12 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { FileDown, Loader2, FileText } from 'lucide-react'
 import { Card } from '../../../components/ui'
-import { listAcordForms, downloadAcord, type AcordForm } from '../../../api/risk/acord'
+import { useAsync } from '../../../hooks/useAsync'
+import { listAcordForms, downloadAcord } from '../../../api/risk/acord'
 
 export default function Acord() {
-  const [forms, setForms] = useState<AcordForm[] | null>(null)
-  const [loading, setLoading] = useState(true)
+  const { data: forms, loading } = useAsync(() => listAcordForms().then((r) => r.forms), [], [])
   const [dl, setDl] = useState<string | null>(null)
-
-  useEffect(() => { listAcordForms().then((r) => setForms(r.forms)).finally(() => setLoading(false)) }, [])
 
   async function download(form: string) {
     setDl(form)

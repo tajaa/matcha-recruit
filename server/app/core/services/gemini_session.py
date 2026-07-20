@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from typing import AsyncIterator, Optional
 
 from google import genai
+from app.core.services.genai_client import get_genai_client
 from google.genai import types
 
 from .rate_limiter import get_rate_limiter, RateLimitExceeded
@@ -591,7 +592,7 @@ class GeminiLiveSession:
         if use_alpha_api:
             client_kwargs["http_options"] = {"api_version": "v1alpha"}
 
-        self.client = genai.Client(api_key=api_key, **client_kwargs)
+        self.client = get_genai_client(api_key=api_key, **client_kwargs)
 
         self.session = None
         self._session_context = None

@@ -303,9 +303,10 @@ async def enrich_with_semantics(
     Returns dict with 'scores' list and 'pattern_summary'.
     """
     from google import genai
+    from app.core.services.genai_client import get_genai_client
     from ...core.services.rate_limiter import get_rate_limiter
 
-    client = genai.Client(api_key=api_key)
+    client = get_genai_client(api_key=api_key)
 
     # Rate limit check
     rate_limiter = get_rate_limiter()

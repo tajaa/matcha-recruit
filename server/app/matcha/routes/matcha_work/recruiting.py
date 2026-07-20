@@ -359,11 +359,11 @@ async def upload_project_resumes(
 
     async def event_stream():
         try:
-            from google import genai as _genai
+            from app.core.services.genai_client import get_genai_client
             from google.genai import types as _types
 
             api_key = os.getenv("GEMINI_API_KEY") or get_settings().gemini_api_key
-            client = _genai.Client(api_key=api_key)
+            client = get_genai_client(api_key=api_key)
             extract_model = "gemini-3.1-flash-lite"
             parser = ERDocumentParser()
             new_candidates = []
@@ -444,11 +444,11 @@ async def generate_placeholder_questions(
     )
 
     try:
-        from google import genai as _genai
+        from app.core.services.genai_client import get_genai_client
         from google.genai import types as _types
 
         api_key = os.getenv("GEMINI_API_KEY") or get_settings().gemini_api_key
-        client = _genai.Client(api_key=api_key)
+        client = get_genai_client(api_key=api_key)
         resp = await asyncio.to_thread(
             lambda: client.models.generate_content(
                 model="gemini-3.1-flash-lite",
@@ -492,11 +492,11 @@ async def extract_placeholder_value(
 
     # Complex input: use Gemini flash lite to extract the actual value
     try:
-        from google import genai as _genai
+        from app.core.services.genai_client import get_genai_client
         from google.genai import types as _types
 
         api_key = os.getenv("GEMINI_API_KEY") or get_settings().gemini_api_key
-        client = _genai.Client(api_key=api_key)
+        client = get_genai_client(api_key=api_key)
         resp = await asyncio.to_thread(
             lambda: client.models.generate_content(
                 model="gemini-3.1-flash-lite",
@@ -569,11 +569,11 @@ async def analyze_project_candidates(
         raise HTTPException(status_code=400, detail="No analyzed candidates to rank")
 
     try:
-        from google import genai as _genai
+        from app.core.services.genai_client import get_genai_client
         from google.genai import types as _types
 
         api_key = os.getenv("GEMINI_API_KEY") or get_settings().gemini_api_key
-        client = _genai.Client(api_key=api_key)
+        client = get_genai_client(api_key=api_key)
 
         prompt = (
             "You are a recruiting analyst. Given the job posting and candidate profiles below, "

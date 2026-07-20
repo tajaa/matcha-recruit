@@ -7,6 +7,7 @@ from typing import List, Optional, Dict, Any, Callable
 from datetime import datetime, date
 
 from google import genai
+from app.core.services.genai_client import get_genai_client
 from google.genai import types
 
 from ...config import get_settings
@@ -634,7 +635,7 @@ class GeminiComplianceService:
             # Check for specific API key for this service first
             api_key = os.getenv("GEMINI_API_KEY")
 
-            self._client = genai.Client(api_key=api_key or self.settings.gemini_api_key)
+            self._client = get_genai_client(api_key=api_key or self.settings.gemini_api_key)
         return self._client
 
     def _has_api_key(self) -> bool:
