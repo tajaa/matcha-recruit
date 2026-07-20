@@ -126,11 +126,8 @@ def _coerce_voice_fields(
 # workplace-incident account would plausibly trip.
 #
 # Categories/threshold are given as their plain string names rather than via
-# ``types.HarmCategory`` / ``types.HarmBlockThreshold``. The SDK coerces these to
-# the same enums, and it keeps this module-level constant from depending on
-# attributes whose presence varies across google-genai releases (and which the
-# test suite's ``google.genai`` stubs do not define) — a missing attribute here
-# is an import-time AttributeError that takes the entire route tree down with it.
+# ``types.HarmCategory`` / ``types.HarmBlockThreshold``; the SDK coerces these to
+# the same enums.
 _VOICE_PARSE_SAFETY_CATEGORIES = (
     "HARM_CATEGORY_HARASSMENT",
     "HARM_CATEGORY_HATE_SPEECH",
@@ -138,18 +135,10 @@ _VOICE_PARSE_SAFETY_CATEGORIES = (
     "HARM_CATEGORY_DANGEROUS_CONTENT",
 )
 
-_SafetySetting = getattr(types, "SafetySetting", None)
-if _SafetySetting is not None:
-    _VOICE_PARSE_SAFETY_SETTINGS = [
-        _SafetySetting(category=category, threshold="BLOCK_NONE")
-        for category in _VOICE_PARSE_SAFETY_CATEGORIES
-    ]
-else:
-    # Stubbed/unexpected SDK surface — the SDK also accepts plain dicts here.
-    _VOICE_PARSE_SAFETY_SETTINGS = [
-        {"category": category, "threshold": "BLOCK_NONE"}
-        for category in _VOICE_PARSE_SAFETY_CATEGORIES
-    ]
+_VOICE_PARSE_SAFETY_SETTINGS = [
+    types.SafetySetting(category=category, threshold="BLOCK_NONE")
+    for category in _VOICE_PARSE_SAFETY_CATEGORIES
+]
 
 
 async def parse_voice_incident(audio_bytes: bytes, mime_type: str, *, location_options: list[dict]) -> dict:

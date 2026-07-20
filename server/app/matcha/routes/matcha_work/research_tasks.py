@@ -13,7 +13,6 @@ Storage note: research tasks are lists inside `mw_projects.project_data` JSONB,
 not their own table — see the service module docstring.
 """
 import asyncio
-import logging
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
@@ -22,7 +21,6 @@ from app.core.models.auth import CurrentUser
 from app.matcha.dependencies import require_admin_or_client, get_client_company_id
 from app.matcha.routes.matcha_work._shared import _sse_data, _verify_project_access
 
-logger = logging.getLogger(__name__)
 router = APIRouter()
 
 

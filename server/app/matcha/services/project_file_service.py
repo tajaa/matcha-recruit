@@ -8,10 +8,79 @@ so the Files tab doesn't surface task-scoped attachments.
 from __future__ import annotations
 
 import json
+import os
 from typing import Any, Optional
 from uuid import UUID
 
+from fastapi import HTTPException, UploadFile
+
+from ...core.services.storage import get_storage
 from ...database import get_connection
+
+# The upload policy for project-scoped files (project root, element repos, and
+# kanban-task attachments). Kept here — not in a route module — so every call
+# site enforces one whitelist/limit/sink. Thread uploads and recruiting resume
+# uploads deliberately use their OWN (different) whitelists and limits.
+ALLOWED_PROJECT_FILE_EXTENSIONS = {
+    ".pdf", ".docx", ".doc", ".txt", ".csv", ".xlsx", ".xls",
+    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".heic", ".heif",
+    ".pptx", ".md",
+}
+
+PROJECT_FILE_MAX_BYTES = 10 * 1024 * 1024  # 10 MB
+
+
+async def validate_and_store_project_upload(
+    file: UploadFile,
+    *,
+    project_id: UUID,
+    uploaded_by: UUID,
+    prefix: str,
+    task_id: Optional[UUID] = None,
+    element_id: Optional[str] = None,
+    folder_id: Optional[str] = None,
+) -> dict[str, Any]:
+    """Validate an uploaded project file, push it to storage, and record it.
+
+    One implementation of the project-file upload policy: extension whitelist →
+    size limit → storage upload under `prefix` → `add_project_file` row. Raises
+    HTTPException(400) on a rejected extension / oversize body / unparseable
+    `folder_id`. `folder_id` is parsed AFTER the storage upload, preserving the
+    original inline ordering at the project-files call site.
+    """
+    fname = file.filename or "file"
+    ext = os.path.splitext(fname)[1].lower()
+    if ext not in ALLOWED_PROJECT_FILE_EXTENSIONS:
+        raise HTTPException(status_code=400, detail=f"Unsupported file type: {ext}")
+
+    content = await file.read()
+    if len(content) > PROJECT_FILE_MAX_BYTES:
+        raise HTTPException(status_code=400, detail="File exceeds 10 MB limit")
+
+    storage_url = await get_storage().upload_file(
+        content, fname,
+        prefix=prefix,
+        content_type=file.content_type,
+    )
+
+    folder_uuid: Optional[UUID] = None
+    if folder_id:
+        try:
+            folder_uuid = UUID(folder_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid folder_id")
+
+    return await add_project_file(
+        project_id=project_id,
+        uploaded_by=uploaded_by,
+        filename=fname,
+        storage_url=storage_url,
+        content_type=file.content_type,
+        file_size=len(content),
+        task_id=task_id,
+        element_id=element_id or None,
+        folder_id=folder_uuid,
+    )
 
 
 async def list_project_files(project_id: UUID) -> list[dict[str, Any]]:

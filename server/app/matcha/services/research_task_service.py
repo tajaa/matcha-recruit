@@ -40,10 +40,19 @@ class ResearchTaskError(Exception):
 
 
 def _load(row) -> dict:
-    """Normalize the project_data blob — asyncpg may hand back str or dict."""
+    """Normalize the project_data blob — asyncpg may hand back str or dict.
+
+    A corrupt/non-JSON blob degrades to `{}` rather than raising, matching the
+    sibling normalizers (`routes/matcha_work/_shared.py:_json_object` and the
+    guarded `json.loads` sites in `project_service.py`). Well-formed input is
+    unaffected.
+    """
     data = row["project_data"] if row else {}
     if isinstance(data, str):
-        data = json.loads(data)
+        try:
+            data = json.loads(data)
+        except (json.JSONDecodeError, ValueError):
+            data = {}
     return data or {}
 
 

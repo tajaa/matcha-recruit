@@ -3,7 +3,6 @@
 Split out of `tasks.py` (2026-07-19). Handlers moved verbatim -- no path,
 signature, or response-shape change.
 """
-import logging
 from typing import Optional
 from uuid import UUID
 
@@ -17,7 +16,6 @@ from app.matcha.routes.matcha_work._shared import (
     _verify_project_access,
 )
 
-logger = logging.getLogger(__name__)
 router = APIRouter()
 
 @router.get("/projects/{project_id}/ticket-drafts")

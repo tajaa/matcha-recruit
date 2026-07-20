@@ -515,13 +515,12 @@ async def transition_blog_status_endpoint(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-ALLOWED_PROJECT_FILE_EXTENSIONS = {
-    ".pdf", ".docx", ".doc", ".txt", ".csv", ".xlsx", ".xls",
-    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".heic", ".heif",
-    ".pptx", ".md",
-}
-
-PROJECT_FILE_MAX_BYTES = 10 * 1024 * 1024  # 10 MB
+# Re-exported from the service (the single owner of the project-file upload
+# policy) — `tasks.py` and `threads.py` import these names from here.
+from app.matcha.services.project_file_service import (  # noqa: E402
+    ALLOWED_PROJECT_FILE_EXTENSIONS,
+    PROJECT_FILE_MAX_BYTES,
+)
 
 ALLOWED_BLOG_MEDIA_EXTENSIONS = {
     ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".heic",
@@ -557,39 +556,14 @@ async def upload_project_file(
         async with get_connection() as conn:
             await _verify_element_in_project(conn, project_id, element_id)
 
-    fname = file.filename or "file"
-    ext = os.path.splitext(fname)[1].lower()
-    if ext not in ALLOWED_PROJECT_FILE_EXTENSIONS:
-        raise HTTPException(status_code=400, detail=f"Unsupported file type: {ext}")
-
-    content = await file.read()
-    if len(content) > PROJECT_FILE_MAX_BYTES:
-        raise HTTPException(status_code=400, detail="File exceeds 10 MB limit")
-
-    storage_url = await get_storage().upload_file(
-        content, fname,
-        prefix=f"matcha-work/{company_id}/{project_id}/files",
-        content_type=file.content_type,
-    )
-
-    folder_uuid: Optional[UUID] = None
-    if folder_id:
-        try:
-            folder_uuid = UUID(folder_id)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid folder_id")
-
-    record = await project_file_service.add_project_file(
+    return await project_file_service.validate_and_store_project_upload(
+        file,
         project_id=project_id,
         uploaded_by=current_user.id,
-        filename=fname,
-        storage_url=storage_url,
-        content_type=file.content_type,
-        file_size=len(content),
-        element_id=element_id or None,
-        folder_id=folder_uuid,
+        prefix=f"matcha-work/{company_id}/{project_id}/files",
+        element_id=element_id,
+        folder_id=folder_id,
     )
-    return record
 
 @router.get("/projects/{project_id}/files")
 async def list_project_files_endpoint(

@@ -12,6 +12,7 @@ These tests pin down the sync rules in
 sync logic (board_column ↔ status invariants) doesn't slip through silently.
 """
 
+import json
 import sys
 from datetime import datetime, timezone
 from types import ModuleType
@@ -62,6 +63,44 @@ class _FakeConn:
         # test (it logged "no attribute 'execute'" as a WARNING and moved on).
         self.executed.append((query, args))
         return "INSERT 0 1"
+
+    def history_rows(self) -> list:
+        """Decode the mw_task_history INSERTs captured off `executed`.
+
+        Mirrors the arg order in `project_task_service._log_task_history`:
+        ($1 task_id, $2 task_id_text, $3 project_id, $4 actor_user_id,
+         $5 event_type, $6 from_value, $7 to_value, $8 metadata::jsonb).
+        Returns [(event_type, metadata_dict)].
+        """
+        rows = []
+        for query, args in self.executed:
+            if "INSERT INTO mw_task_history" not in query:
+                continue
+            rows.append((args[4], json.loads(args[7])))
+        return rows
+
+
+def _assert_metadata_is_string_only(rows: list) -> None:
+    """mw_task_history.metadata must be a flat [String: String] map.
+
+    The macOS client decodes that column as `[String: String]`; a single
+    non-string value (int, UUID, None, nested dict/list) fails the decode for
+    the WHOLE history payload, so notes and rounds silently vanish from the
+    ticket timeline rather than erroring. `project_subtask_service.start_new_round`
+    and `project_task_service.reject_project_task` both carry the same warning
+    in-line — this is the automated version of it.
+    """
+    for event_type, metadata in rows:
+        assert isinstance(metadata, dict), (
+            f"{event_type}: metadata must encode to a JSON object, got {type(metadata)}"
+        )
+        for key, value in metadata.items():
+            assert isinstance(key, str), f"{event_type}: metadata key {key!r} is not a string"
+            assert isinstance(value, str), (
+                f"{event_type}: metadata[{key!r}] is {type(value).__name__} "
+                f"({value!r}) — the desktop decodes metadata as [String: String], "
+                "so this silently breaks the entire history decode. Stringify it."
+            )
 
 
 class _FakeCtx:
@@ -232,6 +271,67 @@ async def test_response_shape_matches_swift_decoder(monkeypatch):
     assert "T" in result["completed_at"], "expected ISO datetime"
     assert isinstance(result["created_at"], str)
     assert isinstance(result["updated_at"], str)
+
+
+@pytest.mark.asyncio
+async def test_toggle_logs_column_change_history_row(monkeypatch):
+    """The move must actually reach mw_task_history.
+
+    `_log_task_history` swallows every exception it raises, so a broken INSERT
+    (missing column, bad cast) shows up as a silently empty ticket timeline and
+    nothing else. Assert the row is written and carries the real transition.
+    """
+    from app.matcha.services import project_task_service as svc
+
+    conn = _FakeConn(
+        current=_make_current(board_column="todo", status="pending"),
+        returning=_make_returning(board_column="done", status="completed"),
+    )
+    monkeypatch.setattr(svc, "get_connection", lambda: _FakeCtx(conn))
+
+    await svc.update_project_task(
+        uuid4(), uuid4(),
+        {"board_column": "done", "status": "completed"},
+    )
+
+    rows = conn.history_rows()
+    assert rows, "no mw_task_history INSERT was issued for a column move"
+    events = [event_type for event_type, _ in rows]
+    assert "column_change" in events, f"expected a column_change row, got {events}"
+    _assert_metadata_is_string_only(rows)
+
+
+@pytest.mark.asyncio
+async def test_history_metadata_values_are_all_strings(monkeypatch):
+    """Edits that DO carry metadata must carry string-only values.
+
+    Description / progress-note edits are the paths that populate metadata on
+    this endpoint, so they're the ones that can regress a non-string in. If
+    someone writes an int, a UUID, a None, or a nested dict here, the desktop's
+    [String: String] decode of mw_task_history fails wholesale.
+    """
+    from app.matcha.services import project_task_service as svc
+
+    conn = _FakeConn(
+        current=_make_current(board_column="todo", status="pending"),
+        returning=_make_returning(board_column="todo", status="pending"),
+    )
+    monkeypatch.setattr(svc, "get_connection", lambda: _FakeCtx(conn))
+
+    await svc.update_project_task(
+        uuid4(), uuid4(),
+        {"description": "Rewired the intake form", "progress_note": "Halfway"},
+    )
+
+    rows = conn.history_rows()
+    events = [event_type for event_type, _ in rows]
+    assert "description_change" in events, f"expected description_change, got {events}"
+    assert "progress_note_change" in events, f"expected progress_note_change, got {events}"
+
+    # These rows must not be empty, or the string check below proves nothing.
+    populated = [(e, m) for e, m in rows if m]
+    assert populated, "expected at least one history row carrying metadata"
+    _assert_metadata_is_string_only(rows)
 
 
 @pytest.mark.asyncio

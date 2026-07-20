@@ -17,20 +17,12 @@ from fastapi import HTTPException
 # ── Stub heavyweight optional deps before importing app code — importing
 # app.core.routes.matcha_lite_pricing_admin pulls in app.core.routes.__init__,
 # which imports every other router (incl. Gemini-backed ones). ──
-for _name in ("google", "google.genai", "google.genai.types", "bleach",
+for _name in ("bleach",
               "audioop_lts", "audioop", "stripe"):
     if _name not in sys.modules:
         sys.modules[_name] = ModuleType(_name)
 
-_genai = sys.modules["google.genai"]
-_genai.Client = object
-_genai.types = sys.modules["google.genai.types"]
-_gt = sys.modules["google.genai.types"]
-_gt.Tool = lambda **kw: None
-_gt.GoogleSearch = lambda **kw: None
-_gt.GenerateContentConfig = lambda **kw: None
-_gt.Content = lambda **kw: None
-_gt.Part = type("Part", (), {"from_text": staticmethod(lambda **kw: None)})
+# google.genai is handled suite-wide in tests/conftest.py — never mutate it here.
 _bleach = sys.modules["bleach"]
 _bleach.clean = lambda text, **kw: text
 _bleach.linkify = lambda text, **kw: text

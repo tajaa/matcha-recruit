@@ -1,65 +1,10 @@
-import sys
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
-from types import ModuleType
 
 # Mock the Google GenAI SDK before importing service modules
-google_module = ModuleType("google")
-genai_module = ModuleType("google.genai")
-types_module = ModuleType("google.genai.types")
-
-class MockTool:
-    def __init__(self, *args, **kwargs):
-        pass
-
-class MockGoogleSearch:
-    def __init__(self, *args, **kwargs):
-        pass
-
-class MockPartClass:
-    def __init__(self, text=None, *args, **kwargs):
-        self.text = text
-    
-    @classmethod
-    def from_bytes(cls, data, mime_type):
-        return cls()
-
-    @classmethod
-    def from_text(cls, text):
-        return cls(text=text)
-
-class MockContentClass:
-    def __init__(self, role=None, parts=None, *args, **kwargs):
-        self.role = role
-        self.parts = parts
-
-class MockGenerateContentConfig:
-    def __init__(self, *args, **kwargs):
-        pass
-
-class MockImageConfig:
-    def __init__(self, *args, **kwargs):
-        pass
-
-class MockThinkingConfig:
-    def __init__(self, *args, **kwargs):
-        pass
-
-types_module.Tool = MockTool
-types_module.GoogleSearch = MockGoogleSearch
-types_module.Part = MockPartClass
-types_module.Content = MockContentClass
-types_module.ThinkingConfig = MockThinkingConfig
-types_module.GenerateContentConfig = MockGenerateContentConfig
-types_module.ImageConfig = MockImageConfig
-
-genai_module.Client = object
-genai_module.types = types_module
-google_module.genai = genai_module
-
-sys.modules["google"] = google_module
-sys.modules["google.genai"] = genai_module
-sys.modules["google.genai.types"] = types_module
+# google.genai comes from tests/conftest.py (real SDK when installed, one
+# permissive stub otherwise). Never override sys.modules for it here — the
+# override leaks process-wide and breaks whichever test imports next.
 
 from app.config import load_settings
 from app.matcha.services.matcha_work_ai import GeminiProvider, AIResponse

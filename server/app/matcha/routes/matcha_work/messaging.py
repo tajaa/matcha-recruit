@@ -488,15 +488,11 @@ class TurnContext:
     ctx: str = ""
     dyn_ctx: str = ""
     msg_dicts: list = field(default_factory=list)
-    file_context_parts: list = field(default_factory=list)
     context_summary: str | None = None
     summary_at_count: int | None = None
     project_meta: dict | None = None
 
     # Attachments
-    attach_urls: list = field(default_factory=list)
-    file_atts: list = field(default_factory=list)
-    user_meta: dict | None = None
     is_file_only: bool = False
     user_msg: dict | None = None
 
@@ -512,6 +508,13 @@ class TurnContext:
     ai_task: "asyncio.Task | None" = None
     ai_resp: object = None
     generate_started_at: float = 0.0
+    # Single-fire guard for _schedule_cancel_finalizer. Running the finalizer
+    # twice would record + deduct the same turn's usage twice (double-billing),
+    # and there are now three call sites (two CancelledError handlers + the
+    # generator-teardown finally). Flipped synchronously, on the single-
+    # threaded event loop, before the task is created — so no interleaving can
+    # observe it False twice.
+    cancel_finalized: bool = False
 
     # Persistence results
     assistant_msg: dict | None = None
@@ -563,21 +566,20 @@ async def _prepare_attachments(tc: TurnContext) -> None:
     attach_urls: list[str] = []
     if body.image_urls:
         attach_urls = [u for u in body.image_urls if isinstance(u, str) and u]
-    tc.attach_urls = attach_urls
     image_atts = [{"url": u, "kind": "image"} for u in attach_urls]
     # Non-image files: extract capped text now so it persists on the message
     # and feeds the AI on this turn AND on follow-ups (read back from metadata).
-    tc.file_atts = await _build_thread_file_attachment_meta(body.attachments)
-    all_atts = image_atts + tc.file_atts
-    tc.user_meta = {"attachments": all_atts} if all_atts else None
+    file_atts = await _build_thread_file_attachment_meta(body.attachments)
+    all_atts = image_atts + file_atts
+    user_meta = {"attachments": all_atts} if all_atts else None
 
     # File-only send (attachments, no instruction) → don't analyze; ask what
     # they want. The file + its extracted text are persisted, so the follow-up
     # ("summarize it") has full context.
-    tc.is_file_only = bool(tc.file_atts) and not (body.content or "").strip()
+    tc.is_file_only = bool(file_atts) and not (body.content or "").strip()
 
     # Save user message before streaming
-    tc.user_msg = await doc_svc.add_message(tc.thread_id, "user", body.content, metadata=tc.user_meta)
+    tc.user_msg = await doc_svc.add_message(tc.thread_id, "user", body.content, metadata=user_meta)
 
     # Once the attachments are persisted on the message itself, clear them from
     # thread state so they don't leak into the next send or get re-consumed by
@@ -663,8 +665,8 @@ async def _run_hard_stop_gates(tc: TurnContext):
     # complaint, an injury, a leave/medical situation, or a
     # termination must never get AI-drafted conversational guidance,
     # only "stop, call corporate HR". Re-checks the feature flag the
-    # same way the generic mode loop does below — a downgraded
-    # company must not keep gating either.
+    # same way the generic mode loop in _inject_mode_contexts does — a
+    # downgraded company must not keep gating either.
     if thread.get("hr_pilot_mode") and (body.content or "").strip():
         hr_pilot_active = True
         hr_pilot_features: dict = {}
@@ -952,6 +954,13 @@ def _schedule_cancel_finalizer(tc: TurnContext) -> None:
     # already committed — so detach a finalizer that awaits it and
     # records + deducts the real usage. Without this, every "stop"
     # click was a fully-paid, entirely-unbilled turn.
+    #
+    # BILLING: this must fire at most once per turn — the finalizer deducts
+    # tokens, so a second run double-charges the customer. All three call
+    # sites go through this guard rather than scheduling directly.
+    if tc.cancel_finalized or tc.ai_task is None:
+        return
+    tc.cancel_finalized = True
     _track_background_task(asyncio.create_task(_finalize_cancelled_turn(
         tc.ai_task,
         thread_id=tc.thread_id,
@@ -1023,6 +1032,18 @@ async def _generate_turn(tc: TurnContext):
         tc.ai_resp = await tc.ai_task
     except asyncio.CancelledError:
         _schedule_cancel_finalizer(tc)
+        raise
+    except GeneratorExit:
+        # The other half of the same disconnect: closing the tab tears the
+        # generator down by throwing GeneratorExit at the keepalive `yield`,
+        # which never reaches the CancelledError handler above. Left unhandled
+        # the already-paid Gemini call is never billed and its task orphaned.
+        #
+        # BILLING: caught here rather than in a bare `finally` on purpose. A
+        # `finally` also fires when OUR code raises, which would charge the
+        # customer for our bug. Only the two disconnect signals bill.
+        if tc.ai_task is not None and not tc.ai_task.done():
+            _schedule_cancel_finalizer(tc)
         raise
 
 
@@ -1305,7 +1326,6 @@ async def send_message_stream(
                     )
         msg_dicts.append(entry)
     tc.msg_dicts = msg_dicts
-    tc.file_context_parts = file_context_parts
 
     # Inject selected slide content into the AI-facing message (not saved to DB)
     _inject_slide_context(msg_dicts, thread["current_state"], body.slide_index)
