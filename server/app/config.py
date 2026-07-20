@@ -146,7 +146,6 @@ class Settings:
     error_alert_email: str = "aaron@hey-matcha.com"
 
     # Jina AI Reader API (for job scraping)
-    jina_api_key: Optional[str] = None
 
     # Contact Finder APIs (for Leads Agent)
     hunter_api_key: Optional[str] = None      # Hunter.io - email finder
@@ -338,7 +337,6 @@ def load_settings() -> Settings:
         app_base_url=os.getenv("APP_BASE_URL", "http://localhost:5173"),
         contact_email=os.getenv("CONTACT_EMAIL", "aaron@hey-matcha.com"),
         error_alert_email=os.getenv("ERROR_ALERT_EMAIL", "aaron@hey-matcha.com"),
-        jina_api_key=os.getenv("JINA_API_KEY"),
         hunter_api_key=os.getenv("HUNTER_API_KEY"),
         apollo_api_key=os.getenv("APOLLO_API_KEY"),
         clearbit_api_key=os.getenv("CLEARBIT_API_KEY"),

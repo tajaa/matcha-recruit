@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
+import { relativeTime } from '../../../utils/format'
 import { useNavigate } from 'react-router-dom'
 import { Loader2, Bell } from 'lucide-react'
 import { api } from '../../../api/client'
@@ -42,18 +43,6 @@ const TYPE_LABEL: Record<string, { text: string; color: string }> = {
   job_application_status_changed: { text: 'Status Update', color: 'bg-purple-900/30 text-purple-400 border-purple-800/40' },
 }
 
-function relativeTime(iso: string): string {
-  const now = Date.now()
-  const then = new Date(iso).getTime()
-  const diffSec = Math.floor((now - then) / 1000)
-  if (diffSec < 60) return 'Just now'
-  if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m ago`
-  if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h ago`
-  const days = Math.floor(diffSec / 86400)
-  if (days === 1) return 'Yesterday'
-  if (days < 30) return `${days}d ago`
-  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-}
 
 export default function Notifications() {
   const navigate = useNavigate()

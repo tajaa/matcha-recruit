@@ -17,7 +17,7 @@ import { useMe } from '../../hooks/useMe'
 // below enforces the `werk_lite` company entitlement (admins + employees alike,
 // since /auth/me carries company enabled_features for both roles).
 function WerkLiteAuthGuard() {
-  const { me, loading } = useMe()
+  const { me, loading, authFailed } = useMe()
   const location = useLocation()
   if (loading) {
     return (
@@ -26,9 +26,19 @@ function WerkLiteAuthGuard() {
       </div>
     )
   }
-  if (!me) {
+  // authFailed, not `!me`: useMe reports a null user for ANY /auth/me failure,
+  // so redirecting on that would bounce a signed-in user to the login page over
+  // a transient 502. Same fix as AppLayout / RequireRole.
+  if (authFailed) {
     const next = encodeURIComponent(location.pathname + location.search)
     return <Navigate to={`/werk-lite/login?next=${next}`} replace />
+  }
+  if (!me) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-zinc-950 text-sm text-zinc-500">
+        Could not verify your session. Check your connection and reload.
+      </div>
+    )
   }
   return <Outlet />
 }

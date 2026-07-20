@@ -1,22 +1,13 @@
 import { useState, useRef } from 'react'
+import { confidenceVariant, determinationVariant } from '../ui/badgeMaps'
 import { api } from '../../api/client'
 import { postSSE } from '../../api/sse'
-import { Badge, Button, type BadgeVariant } from '../ui'
+import { Badge, Button } from '../ui'
 import type { OutcomeAnalysisResponse, OutcomeOption, ERCaseOutcome } from '../../types/er'
 import { ComplianceGrounding } from './ComplianceGrounding'
 
 
-const determinationVariant: Record<string, BadgeVariant> = {
-  substantiated: 'danger',
-  unsubstantiated: 'success',
-  inconclusive: 'warning',
-}
 
-const confidenceVariant: Record<string, BadgeVariant> = {
-  high: 'success',
-  medium: 'warning',
-  low: 'neutral',
-}
 
 type Props = {
   caseId: string

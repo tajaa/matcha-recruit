@@ -1,30 +1,14 @@
 import type { ChannelMessage, ChannelReaction } from './channels'
+import { BaseSocket } from './baseSocket'
 
 type MessageHandler = (msg: ChannelMessage) => void
 type TypingHandler = (user: { id: string; name: string }) => void
 type OnlineHandler = (users: { id: string; name: string; avatar_url: string | null }[]) => void
 type UserEventHandler = (user: { id: string; name: string }) => void
 
-function getWsBase(): string {
-  const base = import.meta.env.VITE_API_URL ?? '/api'
-  if (base.startsWith('http')) {
-    return base.replace(/^http/, 'ws').replace(/\/api$/, '')
-  }
-  // Relative URL — build from window.location
-  const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  return `${proto}//${window.location.host}`
-}
-
-const WS_BASE = getWsBase()
-
-export class ChannelSocket {
-  private ws: WebSocket | null = null
-  private pingInterval: ReturnType<typeof setInterval> | null = null
-  private reconnectTimeout: ReturnType<typeof setTimeout> | null = null
+export class ChannelSocket extends BaseSocket {
   private joinedRooms: Set<string> = new Set()
   private messageListeners: Set<MessageHandler> = new Set()
-  private _closed = false
-  private _reconnectAttempts = 0
 
   // Deprecated single-handler; kept for backward compat. Setting this adds
   // the handler to the multi-listener set. Prefer addMessageListener.
@@ -56,9 +40,6 @@ export class ChannelSocket {
   onMessageDeleted: ((data: { channel_id: string; message_id: string; deleted_by: string }) => void) | null = null
   onMessageEdited: ((data: { channel_id: string; message_id: string; content: string; edited_at: string | null }) => void) | null = null
   onReactionUpdate: ((data: { channel_id: string; message_id: string; reactions: ChannelReaction[] }) => void) | null = null
-  onConnected: (() => void) | null = null
-  onDisconnected: (() => void) | null = null
-
   // LiveKit SFU call lifecycle callbacks (werk-lite). The server fans these out
   // over the same /ws/channels socket as the call's roster changes; the
   // useLiveKitCall hook drives the join banner + auto-teardown off them.
@@ -67,139 +48,84 @@ export class ChannelSocket {
   onCallParticipantsChanged: ((data: { channel_id: string; call_id: string; participant_ids: string[]; count: number; max_participants: number }) => void) | null = null
   onCallInvited: ((data: { channel_id: string; call_id: string; invited_by: string }) => void) | null = null
 
-  get isOpen(): boolean {
-    return this.ws?.readyState === WebSocket.OPEN
+  protected path() {
+    return '/ws/channels'
   }
 
-  get hasSocket(): boolean {
-    return this.ws !== null
-  }
-
-  connect() {
-    this._closed = false
-    const token = localStorage.getItem('matcha_access_token')
-    if (!token) return
-
-    try {
-      // Token rides the Sec-WebSocket-Protocol header, not the URL — query
-      // strings land in nginx/proxy access logs. Server echoes 'bearer'.
-      this.ws = new WebSocket(`${WS_BASE}/ws/channels`, ['bearer', token])
-    } catch {
-      this._scheduleReconnect()
-      return
-    }
-
-    this.ws.onopen = () => {
-      this._reconnectAttempts = 0
-      this.onConnected?.()
-      this._startPing()
-      // Rejoin all rooms we were in
-      for (const room of this.joinedRooms) {
-        this._send({ type: 'join_room', channel_id: room })
-      }
-    }
-
-    this.ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data)
-        switch (data.type) {
-          case 'server_ping':
-            // Server-initiated keepalive. Echo a pong so the server's send
-            // doesn't fail and drop us from active_connections.
-            this._send({ type: 'pong' })
-            break
-          case 'message':
-            this._dispatchMessage(data.message)
-            break
-          case 'message_deleted':
-            this.onMessageDeleted?.({
-              channel_id: data.room,
-              message_id: data.message_id,
-              deleted_by: data.deleted_by,
-            })
-            break
-          case 'message_edited':
-            this.onMessageEdited?.({
-              channel_id: data.room,
-              message_id: data.message_id,
-              content: data.content,
-              edited_at: data.edited_at ?? null,
-            })
-            break
-          case 'reaction_update':
-            this.onReactionUpdate?.({
-              channel_id: data.room,
-              message_id: data.message_id,
-              reactions: data.reactions,
-            })
-            break
-          case 'typing':
-            this.onTyping?.(data.user)
-            break
-          case 'online_users':
-            this.onOnlineUsers?.(data.users)
-            break
-          case 'user_joined':
-            this.onUserJoined?.(data.user)
-            break
-          case 'user_left':
-            this.onUserLeft?.(data.user)
-            break
-          case 'call.started':
-            this.onCallStarted?.(data)
-            break
-          case 'call.ended':
-            this.onCallEnded?.(data)
-            break
-          case 'call.participants_changed':
-            this.onCallParticipantsChanged?.(data)
-            break
-          case 'call.invited':
-            this.onCallInvited?.(data)
-            break
-        }
-      } catch { /* ignore malformed messages */ }
-    }
-
-    this.ws.onclose = (event) => {
-      this._stopPing()
-      this.onDisconnected?.()
-      if (this._closed) return
-      // 4001/4003 are the backend's auth-rejection close codes (invalid token /
-      // not authorized). Don't reconnect with the same dead token — try one
-      // refresh and reconnect only if it produced a genuinely new token.
-      if (event.code === 4001 || event.code === 4003) {
-        void this._reconnectAfterAuthFailure()
-      } else {
-        this._scheduleReconnect()
-      }
-    }
-
-    this.ws.onerror = () => {
-      this.ws?.close()
+  protected rejoin() {
+    // Rejoin every room we were in. The set survives a reconnect precisely so
+    // this can replay it; it's only cleared on an explicit disconnect().
+    for (const room of this.joinedRooms) {
+      this.send({ type: 'join_room', channel_id: room })
     }
   }
 
-  disconnect() {
-    this._closed = true
-    this._stopPing()
-    if (this.reconnectTimeout) {
-      clearTimeout(this.reconnectTimeout)
-      this.reconnectTimeout = null
-    }
-    this.ws?.close()
-    this.ws = null
+  protected clearState() {
     this.joinedRooms.clear()
+  }
+
+  protected handleMessage(data: Record<string, unknown>) {
+    switch (data.type) {
+      case 'message':
+        this._dispatchMessage(data.message as ChannelMessage)
+        break
+      case 'message_deleted':
+        this.onMessageDeleted?.({
+          channel_id: data.room as string,
+          message_id: data.message_id as string,
+          deleted_by: data.deleted_by as string,
+        })
+        break
+      case 'message_edited':
+        this.onMessageEdited?.({
+          channel_id: data.room as string,
+          message_id: data.message_id as string,
+          content: data.content as string,
+          edited_at: (data.edited_at as string) ?? null,
+        })
+        break
+      case 'reaction_update':
+        this.onReactionUpdate?.({
+          channel_id: data.room as string,
+          message_id: data.message_id as string,
+          reactions: data.reactions as ChannelReaction[],
+        })
+        break
+      case 'typing':
+        this.onTyping?.(data.user as { id: string; name: string })
+        break
+      case 'online_users':
+        this.onOnlineUsers?.(data.users as { id: string; name: string; avatar_url: string | null }[])
+        break
+      case 'user_joined':
+        this.onUserJoined?.(data.user as { id: string; name: string })
+        break
+      case 'user_left':
+        this.onUserLeft?.(data.user as { id: string; name: string })
+        break
+      case 'call.started':
+        this.onCallStarted?.(data as never)
+        break
+      case 'call.ended':
+        this.onCallEnded?.(data as never)
+        break
+      case 'call.participants_changed':
+        this.onCallParticipantsChanged?.(data as never)
+        break
+      case 'call.invited':
+        this.onCallInvited?.(data as never)
+        break
+    }
   }
 
   joinRoom(channelId: string) {
     if (this.joinedRooms.has(channelId)) return
     this.joinedRooms.add(channelId)
-    this._send({ type: 'join_room', channel_id: channelId })
+    this.send({ type: 'join_room', channel_id: channelId })
   }
 
   leaveRoom(channelId: string) {
-    this._send({ type: 'leave_room', channel_id: channelId })
+    this.send({ type: 'leave_room', channel_id: channelId })
     this.joinedRooms.delete(channelId)
   }
 
@@ -209,7 +135,7 @@ export class ChannelSocket {
     attachments?: { url: string; filename: string; content_type: string; size: number }[],
     clientMessageId?: string,
   ) {
-    this._send({
+    this.send({
       type: 'message',
       channel_id: channelId,
       content,
@@ -219,55 +145,9 @@ export class ChannelSocket {
   }
 
   sendTyping(channelId: string) {
-    this._send({ type: 'typing', channel_id: channelId })
+    this.send({ type: 'typing', channel_id: channelId })
   }
 
-  private _send(data: Record<string, unknown>) {
-    if (this.ws?.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify(data))
-    }
-  }
-
-  private _startPing() {
-    this._stopPing()
-    this.pingInterval = setInterval(() => {
-      this._send({ type: 'ping' })
-    }, 30000)
-  }
-
-  private _stopPing() {
-    if (this.pingInterval) {
-      clearInterval(this.pingInterval)
-      this.pingInterval = null
-    }
-  }
-
-  private _scheduleReconnect() {
-    if (this._closed) return
-    // Capped exponential backoff (3s, 6s, 12s, 24s, … max 30s) so a downed
-    // server isn't hammered every 3s indefinitely. Reset to 0 on a clean open.
-    const delay = Math.min(30000, 3000 * 2 ** this._reconnectAttempts)
-    this._reconnectAttempts++
-    this.reconnectTimeout = setTimeout(() => {
-      this.connect()
-    }, delay)
-  }
-
-  // After an auth-class close (4001/4003): refresh the token once and reconnect
-  // only if a genuinely new token was obtained. If the token is unchanged the
-  // server would just reject it again; if refresh failed, ensureFreshToken has
-  // already triggered logout — either way, stop the loop.
-  private async _reconnectAfterAuthFailure() {
-    if (this._closed) return
-    const before = localStorage.getItem('matcha_access_token')
-    const { ensureFreshToken } = await import('../../api/client')
-    const after = await ensureFreshToken()
-    if (this._closed) return
-    if (after && after !== before) {
-      this._reconnectAttempts = 0
-      this._scheduleReconnect()
-    }
-  }
 }
 
 // Process-wide singleton so the global notification listener and individual

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { relativeTime as formatRelative } from '../../utils/format'
 import { api } from '../../api/client'
 
 const INK = 'var(--color-ivory-ink)'
@@ -120,17 +121,3 @@ export default function BlogComments({ slug }: { slug: string }) {
   )
 }
 
-function formatRelative(iso: string): string {
-  try {
-    const then = new Date(iso).getTime()
-    const diff = Date.now() - then
-    const day = 24 * 60 * 60 * 1000
-    if (diff < 60 * 1000) return 'just now'
-    if (diff < 60 * 60 * 1000) return `${Math.floor(diff / (60 * 1000))}m ago`
-    if (diff < day) return `${Math.floor(diff / (60 * 60 * 1000))}h ago`
-    if (diff < 7 * day) return `${Math.floor(diff / day)}d ago`
-    return new Date(iso).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
-  } catch {
-    return iso
-  }
-}

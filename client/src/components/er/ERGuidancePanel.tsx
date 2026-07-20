@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
+import { confidenceVariant, determinationVariant, priorityVariant } from '../ui/badgeMaps'
 import { api } from '../../api/client'
 import { postSSE } from '../../api/sse'
-import { Badge, Button, LABEL, type BadgeVariant } from '../ui'
+import { Badge, Button, LABEL } from '../ui'
 import type { SuggestedGuidanceResponse, SuggestedGuidanceCard, ERCaseOutcome, OutcomeOption, OutcomeAnalysisResponse, ERDocument } from '../../types/er'
 import { ComplianceGrounding } from './ComplianceGrounding'
 
@@ -12,23 +13,8 @@ import { ComplianceGrounding } from './ComplianceGrounding'
 const DOC_POLL_INTERVAL_MS = 3000
 const MAX_DOC_POLL_ATTEMPTS = 15
 
-const priorityVariant: Record<string, BadgeVariant> = {
-  high: 'danger',
-  medium: 'warning',
-  low: 'neutral',
-}
 
-const determinationVariant: Record<string, BadgeVariant> = {
-  substantiated: 'danger',
-  unsubstantiated: 'success',
-  inconclusive: 'warning',
-}
 
-const confidenceVariant: Record<string, BadgeVariant> = {
-  high: 'success',
-  medium: 'warning',
-  low: 'neutral',
-}
 
 type ERGuidancePanelProps = {
   caseId: string

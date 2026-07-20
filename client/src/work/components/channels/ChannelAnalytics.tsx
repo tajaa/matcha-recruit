@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { relativeTime } from '../../../utils/format'
 import { X, Users, DollarSign, MessageSquare, TrendingUp, Heart, AlertTriangle, UserMinus } from 'lucide-react'
 import { getChannelAnalytics } from '../../api/channels'
 import type { ChannelAnalytics as ChannelAnalyticsData } from '../../api/channels'
@@ -13,17 +14,6 @@ function formatCents(cents: number): string {
   return `$${(cents / 100).toFixed(2)}`
 }
 
-function relativeTime(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime()
-  const mins = Math.floor(diff / 60000)
-  if (mins < 1) return 'just now'
-  if (mins < 60) return `${mins}m ago`
-  const hours = Math.floor(mins / 60)
-  if (hours < 24) return `${hours}h ago`
-  const days = Math.floor(hours / 24)
-  if (days === 1) return 'yesterday'
-  return `${days}d ago`
-}
 
 export default function ChannelAnalytics({ channelId, channelName, onClose }: Props) {
   const [data, setData] = useState<ChannelAnalyticsData | null>(null)

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { relativeTime } from '../../../utils/format'
 import { X, Hash } from 'lucide-react'
 import InviteManager from './InviteManager'
 import {
@@ -17,13 +18,6 @@ interface Props {
   onClose: () => void
 }
 
-function relativeTime(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime()
-  const days = Math.floor(diff / 86400000)
-  if (days === 0) return 'today'
-  if (days === 1) return 'yesterday'
-  return `${days}d ago`
-}
 
 const statusColors: Record<string, string> = {
   active: 'bg-emerald-500',

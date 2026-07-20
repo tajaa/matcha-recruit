@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { relativeTime } from '../../../utils/format'
 import { Search, Plus, Menu } from 'lucide-react'
 import type { ConversationSummary } from '../../api/inbox'
 import Avatar from '../../../components/shared/Avatar'
@@ -12,32 +13,6 @@ type Props = {
   onMenuToggle?: () => void
 }
 
-function relativeTime(iso: string | null): string {
-  if (!iso) return ''
-  const now = Date.now()
-  const then = new Date(iso).getTime()
-  const diffSec = Math.floor((now - then) / 1000)
-
-  if (diffSec < 60) return 'Just now'
-  if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m ago`
-  if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h ago`
-
-  const today = new Date()
-  const date = new Date(iso)
-
-  // Yesterday check
-  const yesterday = new Date(today)
-  yesterday.setDate(yesterday.getDate() - 1)
-  if (
-    date.getFullYear() === yesterday.getFullYear() &&
-    date.getMonth() === yesterday.getMonth() &&
-    date.getDate() === yesterday.getDate()
-  ) {
-    return 'Yesterday'
-  }
-
-  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-}
 
 function displayName(convo: ConversationSummary, currentUserId: string): string {
   if (convo.title) return convo.title

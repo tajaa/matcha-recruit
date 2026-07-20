@@ -422,3 +422,74 @@ their own route chunks and are not visible in this entry number.
 tsc + tests + build only. F1–F4 in particular are visual/behavioural (do the deal previews
 still render sandboxed, do citation links still open, does a logged-out `/app/*` hit
 redirect) and no automated check in this repo covers them.
+
+---
+
+## STATUS — Phases H, I, J (2026-07-20)
+
+### Phase H — H1 + H2 done
+- **H1** `WorkRoutes`/`WerkRoutes` merged into `WorkRouteTree({ surface })`; entries are 8-line
+  wrappers. `WerkLiteRoutes` deliberately NOT merged — it has its own login route, auth guard,
+  `werk_lite` FeatureGate and a narrower route set; folding it in means re-adding all of that
+  as conditionals.
+- **H2** `BaseSocket` extracted; thread/project/channel sockets shrink to path + dispatch +
+  rejoin. 742 LOC across three files → 413 + a 195-line base. **This normalized real drift**:
+  only `channelSocket` answered the server's `server_ping` with a `pong`, so thread and project
+  connections looked unresponsive to the server's liveness probe. Now in the base for all three.
+  Covered by `work/api/baseSocket.test.ts` (13 tests, fake WebSocket) — backoff schedule and
+  cap, backoff reset on clean open, no-reconnect on 4001/4003, rejoin-on-reconnect, leave-frame
+  ordering, ping lifecycle, token-not-in-URL.
+- **H3 / H4 / H5 not started** — mechanical but large; H3 extends D4's tranche system, which is
+  itself only 2 of 10 done.
+
+### Phase I — I2 + I3 done
+- **I2** new `utils/format.ts` (`relativeTime`, `formatMoney`, `formatBytes`) + 13 tests; the 10
+  local relative-time copies migrated. **Not just dedup — the copies had diverged**:
+  `components/dashboard/FlagsTable.tsx` never rolled over past hours, so a 30-day-old flag read
+  "720h ago", and several never fell back to an absolute date ("412d ago"). The shared version
+  rolls over and falls back past 30 days, and clamps future timestamps to "just now" instead of
+  rendering a negative count on ordinary clock skew.
+- **I3** new `components/ui/badgeMaps.ts` (severity/priority/confidence/determination); the
+  ER panels' local copies removed. Domain-specific status maps stay put — same shape, different
+  meaning. `ERTimelinePanel`'s `confidenceVariant` keeps its own map: it maps low → `danger`
+  where the others use `neutral`, and that may be intentional for a legal timeline, so it is
+  flagged rather than silently flattened.
+- **I1 / I4 / I5 not started** — I1 is the pilot surface scaffold and pairs with D3, which is
+  still unbuilt; doing the chrome before the behavior means touching the four consoles twice.
+
+### Phase J — J1 + J9 done; J8 rejected on inspection
+- **J1** deleted `matcha/services/pre_termination_service.py` (1,891), its test (550), and
+  `core/services/jina_reader.py` (128) + the `jina_api_key` config. Verified before deleting:
+  the service's only importer was its own test, and the mounted `/pre-termination` router never
+  imports it.
+  **⚠️ This surfaced a live product issue, not just dead code.** That service was the SOLE
+  writer of `pre_termination_checks` and was unreachable — no route, worker, or frontend called
+  it. So the table cannot have been written for as long as that has been true, while
+  `GET /pre-termination/checks/analytics` still serves it and `components/risk-assessment/
+  SeparationRiskCard.tsx` still renders the result to users. The card is showing analytics over
+  a table nothing can fill. **Left in place deliberately** — removing a user-visible card is a
+  product call, not a cleanup one. Decide: rebuild the writer, or retire the card + endpoint.
+- **J9** `AuditLogEntry`/`AuditLogResponse` (byte-identical in `er_case.py` and
+  `accommodation.py`) → `models/audit_log.py`, re-exported from both so importers are untouched.
+  `IRAuditLogEntry` NOT folded in — different field set, and IR's audit log is a compliance
+  artifact that shouldn't track two unrelated domains' schema churn.
+- **J8 NOT DONE — the plan's premise doesn't hold.** Reading all six "EVIDENCE CORPUS" preambles,
+  they are not copy-paste: each names its own id namespaces (`metric:`/`ratio:` vs `clause:`/
+  `jur:` vs `law:`/`playbook:`) and its own domain-specific "NEVER invent" list, and `ask_hr`'s
+  is written in a different voice entirely (employee-facing, explains the consequence of a
+  dropped citation). The only genuinely shared text is the one-line corpus header. Extracting a
+  constant would either be trivial or would force a parameterized template that flattens
+  deliberate differences. Recommend dropping J8 from the plan.
+- **J2 / J3 / J4 / J5 / J6 / J7 not started.** J3 (render_pdf conformance, ~25 sites) is the one
+  with security weight and should be its own PR. J5 (13,085-line `admin.py`) and J6 (10,703-line
+  `compliance_service.py`) are import-graph refactors that need the boot + route-count check the
+  plan specifies — not something to bundle into a mixed commit.
+
+**Verification:** tsc clean, 136 client tests (up from 110; +13 socket, +13 format), build clean.
+Server: `python3 -m pytest` shows the same 19 pre-existing collection errors before and after
+these changes (missing local deps — `audioop_lts` and friends), so the delete broke nothing;
+the deselected count drops by exactly the 60 pre-termination tests removed.
+
+**Still owed:** the manual click-through, now including a socket smoke test — send/receive in a
+channel, kill the dev server briefly, confirm reconnect and rejoin. The socket tests cover the
+state machine but not a real server handshake.
