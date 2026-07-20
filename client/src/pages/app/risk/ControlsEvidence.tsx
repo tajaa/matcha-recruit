@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { ShieldCheck, FileDown, Loader2, Check, ChevronDown } from 'lucide-react'
 import { Card } from '../../../components/ui'
+import { useAsync } from '../../../hooks/useAsync'
 import { fetchControlsRegister, updateControl, downloadControlsPacket } from '../../../api/risk/controlsEvidence'
-import type { ControlsRegister, ControlEntry, ControlStatus } from '../../../types/controlsEvidence'
+import type { ControlEntry, ControlStatus } from '../../../types/controlsEvidence'
 
 const STATUS_TONE: Record<ControlStatus, string> = {
   strong: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20',
@@ -13,15 +14,12 @@ const STATUS_TONE: Record<ControlStatus, string> = {
 const STATUS_LABEL: Record<ControlStatus, string> = { strong: 'Strong', partial: 'Partial', gap: 'Gap', na: 'N/A' }
 
 export default function ControlsEvidence() {
-  const [reg, setReg] = useState<ControlsRegister | null>(null)
-  const [loading, setLoading] = useState(true)
   const [downloading, setDownloading] = useState(false)
 
-  function load() {
-    setLoading(true)
-    fetchControlsRegister().then(setReg).finally(() => setLoading(false))
-  }
-  useEffect(load, [])
+  const { data: reg, loading, reload: load } = useAsync(
+    () => fetchControlsRegister(),
+    [],
+  )
 
   async function download() {
     setDownloading(true)

@@ -192,3 +192,28 @@ describe('useAsyncAction', () => {
     expect(result.current.busy).toBe(false)
   })
 })
+
+describe('useAsync with an initial value', () => {
+  it('exposes the initial value before the first response, then replaces it', async () => {
+    const d = deferred<string[]>()
+    const { result } = renderHook(() => useAsync(() => d.promise, [], [] as string[]))
+    expect(result.current.data).toEqual([]) // never undefined
+    expect(result.current.loading).toBe(true)
+    await act(async () => { d.resolve(['a']) })
+    expect(result.current.data).toEqual(['a'])
+  })
+
+  it('keeps the last good data on a failed reload rather than reverting to initial', async () => {
+    const d1 = deferred<string[]>()
+    const d2 = deferred<string[]>()
+    let call = 0
+    const { result } = renderHook(() =>
+      useAsync(() => (++call === 1 ? d1.promise : d2.promise), [], [] as string[]),
+    )
+    await act(async () => { d1.resolve(['a']) })
+    act(() => { result.current.reload() })
+    await act(async () => { d2.reject(new Error('nope')) })
+    expect(result.current.data).toEqual(['a'])
+    expect(result.current.error).toBe('nope')
+  })
+})

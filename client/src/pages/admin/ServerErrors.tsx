@@ -1,6 +1,7 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useState } from 'react'
 import { AlertTriangle, RefreshCw, Search, ChevronDown, ChevronRight, Copy, Check } from 'lucide-react'
 import { api } from '../../api/client'
+import { useAsync } from '../../hooks/useAsync'
 
 type Kind =
   | 'exception'
@@ -102,21 +103,16 @@ function relTime(iso: string | null): string {
 }
 
 export default function ServerErrors() {
-  const [items, setItems] = useState<ErrorItem[]>([])
-  const [stats, setStats] = useState<StatsResponse | null>(null)
-  const [loading, setLoading] = useState(true)
   const [kindFilter, setKindFilter] = useState<Kind | ''>('')
   const [sourceFilter, setSourceFilter] = useState<Source | ''>('')
   const [showResolved, setShowResolved] = useState(false)
   const [searchFilter, setSearchFilter] = useState('')
   const [sinceHours, setSinceHours] = useState(24)
-  const [total, setTotal] = useState(0)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [copied, setCopied] = useState<string | null>(null)
 
-  const refresh = useCallback(async () => {
-    setLoading(true)
-    try {
+  const { data, loading, reload: refresh } = useAsync(
+    async () => {
       const params = new URLSearchParams()
       if (kindFilter) params.set('kind', kindFilter)
       if (sourceFilter) params.set('source', sourceFilter)
@@ -129,19 +125,12 @@ export default function ServerErrors() {
         api.get<ListResponse>(`/admin/server-errors?${params.toString()}`),
         api.get<StatsResponse>(`/admin/server-errors/stats?since_hours=${sinceHours}`),
       ])
-      setItems(listRes.items)
-      setTotal(listRes.total)
-      setStats(statsRes)
-    } catch (err) {
-      console.error('Failed to load server errors', err)
-    } finally {
-      setLoading(false)
-    }
-  }, [kindFilter, sourceFilter, searchFilter, showResolved, sinceHours])
-
-  useEffect(() => {
-    refresh()
-  }, [refresh])
+      return { items: listRes.items, total: listRes.total, stats: statsRes }
+    },
+    [kindFilter, sourceFilter, searchFilter, showResolved, sinceHours],
+    { items: [] as ErrorItem[], total: 0, stats: null as StatsResponse | null },
+  )
+  const { items, total, stats } = data
 
   function toggleExpand(id: string) {
     setExpanded((prev) => {

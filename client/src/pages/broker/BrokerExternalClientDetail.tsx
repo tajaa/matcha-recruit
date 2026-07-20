@@ -1,7 +1,8 @@
-import { useState, useEffect, type FormEvent, type ChangeEvent, type ReactNode } from 'react'
+import { useState, type FormEvent, type ChangeEvent, type ReactNode } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { ArrowLeft, Loader2, AlertCircle, Gauge, Shield, Upload, Link2 as LinkIcon, CheckCircle2, Clock, CircleDashed, Building2, Sparkles, ShieldCheck } from 'lucide-react'
 import { Card } from '../../components/ui'
+import { useAsync } from '../../hooks/useAsync'
 import { HelpHint } from '../../components/broker/HelpHint'
 import { SubmissionPanel } from '../../components/broker/SubmissionPanel'
 import { QuotingDeskPanel } from '../../components/broker/QuotingDeskPanel'
@@ -100,9 +101,6 @@ function IntakeStatusBadge({ intake }: { intake: ExternalClientDetail['intake'] 
 
 export default function BrokerExternalClientDetail() {
   const { clientId } = useParams<{ clientId: string }>()
-  const [data, setData] = useState<ExternalClientDetail | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(false)
   const [editWc, setEditWc] = useState(false)
   const [wcForm, setWcForm] = useState<Record<string, string>>({})
   const [savingWc, setSavingWc] = useState(false)
@@ -113,11 +111,10 @@ export default function BrokerExternalClientDetail() {
   const [intakeBusy, setIntakeBusy] = useState(false)
   const [copied, setCopied] = useState(false)
 
-  useEffect(() => {
-    if (!clientId) return
-    setLoading(true); setError(false)
-    fetchExternalClientDetail(clientId).then(setData).catch(() => setError(true)).finally(() => setLoading(false))
-  }, [clientId])
+  const { data, loading, error, setData } = useAsync(
+    () => (clientId ? fetchExternalClientDetail(clientId) : Promise.resolve(null)),
+    [clientId],
+  )
 
   function openWcEditor() {
     if (!data) return

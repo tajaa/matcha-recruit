@@ -16,15 +16,15 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 //     two filters quickly issues overlapping requests, and the slower one used
 //     to win by landing last. Only the newest run may write state.
 
-export type AsyncState<T> = {
-  data: T | undefined
+export type AsyncState<D> = {
+  data: D
   loading: boolean
   /** `e.message`, or null when the last run succeeded. */
   error: string | null
   /** Re-run `fn` without clearing `data`. */
   reload: () => void
   /** Escape hatch for optimistic updates — write `data` without a fetch. */
-  setData: (updater: T | undefined | ((prev: T | undefined) => T | undefined)) => void
+  setData: (updater: D | ((prev: D) => D)) => void
 }
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e))
@@ -40,9 +40,19 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e))
  * branching at the call site:
  *
  *     const { data } = useAsync(() => (id ? getThing(id) : Promise.resolve(null)), [id])
+ *
+ * Pass `initial` when the caller wants a non-undefined value before the first
+ * response — almost always `[]` for a list. It only sets the starting value; a
+ * failed run leaves the last-known data in place rather than reverting to it.
  */
-export function useAsync<T>(fn: () => Promise<T>, deps: unknown[]): AsyncState<T> {
-  const [data, setData] = useState<T | undefined>(undefined)
+export function useAsync<T>(fn: () => Promise<T>, deps: unknown[]): AsyncState<T | undefined>
+export function useAsync<T>(fn: () => Promise<T>, deps: unknown[], initial: T): AsyncState<T>
+export function useAsync<T>(
+  fn: () => Promise<T>,
+  deps: unknown[],
+  initial?: T,
+): AsyncState<T | undefined> {
+  const [data, setData] = useState<T | undefined>(initial)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 

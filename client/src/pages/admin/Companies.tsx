@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Badge, Button, Input, Modal } from '../../components/ui'
 import { api } from '../../api/client'
+import { useAsync } from '../../hooks/useAsync'
 import {
   INDUSTRY_OPTIONS,
   HEALTHCARE_SPECIALTIES,
@@ -113,30 +114,33 @@ function industryLabel(value: string | null) {
 }
 
 export default function Companies() {
-  const [companies, setCompanies] = useState<Company[]>([])
   const [filter, setFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all')
   const [tier, setTier] = useState<Tier>('all')
   const [search, setSearch] = useState('')
-  const [loading, setLoading] = useState(true)
   const [showAdd, setShowAdd] = useState(false)
   const [form, setForm] = useState<RegisterForm>(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
   const [addError, setAddError] = useState('')
   const [runningAssessment, setRunningAssessment] = useState<string | null>(null)
 
-  function fetchCompanies() {
-    setLoading(true)
-    const qs = new URLSearchParams()
-    if (filter !== 'all') qs.set('status', filter)
-    if (tier !== 'all') qs.set('tier', tier)
-    const params = qs.toString() ? `?${qs.toString()}` : ''
-    api.get<CompanyListResponse>(`/admin/business-registrations${params}`)
-      .then((res) => setCompanies(res.registrations))
-      .catch(() => setCompanies([]))
-      .finally(() => setLoading(false))
-  }
-
-  useEffect(() => { fetchCompanies() }, [filter, tier])
+  const {
+    data: companies,
+    loading,
+    setData: setCompanies,
+    reload: fetchCompanies,
+  } = useAsync(
+    () => {
+      const qs = new URLSearchParams()
+      if (filter !== 'all') qs.set('status', filter)
+      if (tier !== 'all') qs.set('tier', tier)
+      const params = qs.toString() ? `?${qs.toString()}` : ''
+      return api
+        .get<CompanyListResponse>(`/admin/business-registrations${params}`)
+        .then((res) => res.registrations)
+    },
+    [filter, tier],
+    [],
+  )
 
   const filtered = companies.filter((c) =>
     c.company_name.toLowerCase().includes(search.toLowerCase())

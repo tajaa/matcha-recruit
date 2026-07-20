@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Car, FileDown, Loader2, Plus, Trash2, ChevronDown, Check, AlertTriangle } from 'lucide-react'
 import { Card } from '../../../components/ui'
+import { useAsync } from '../../../hooks/useAsync'
 import { fetchFleet, createDriver, updateDriver, deleteDriver, downloadFleetPdf } from '../../../api/risk/driverRisk'
 import type { Fleet, DriverRow, DriverPayload, DriverTier, LicenseStatus, ReviewType, MvrStatus } from '../../../types/driverRisk'
 import { TIER_TONE, TIER_LABEL, GRADE_TONE } from '../../../types/driverRisk'
@@ -10,12 +11,10 @@ const RTYPE: ReviewType[] = ['hire', 'annual', 'post_incident', 'periodic']
 const STATUS: MvrStatus[] = ['clear', 'flagged', 'pending']
 
 export default function DriverRisk() {
-  const [fleet, setFleet] = useState<Fleet | null>(null)
-  const [loading, setLoading] = useState(true)
   const [dl, setDl] = useState(false)
   const [adding, setAdding] = useState(false)
 
-  useEffect(() => { fetchFleet().then(setFleet).finally(() => setLoading(false)) }, [])
+  const { data: fleet, loading, setData: setFleet } = useAsync(() => fetchFleet(), [])
 
   async function download() {
     setDl(true)
