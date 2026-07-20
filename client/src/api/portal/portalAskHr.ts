@@ -1,4 +1,5 @@
 import { api } from '../client'
+import { postSSE, SSEHttpError } from '../sse'
 import type { Citation } from '../../components/ui/CitationSources'
 
 // Employee "Ask HR" — grounded policy Q&A for the signed-in employee.
@@ -57,52 +58,28 @@ export const portalAskHrApi = {
   listMessages: (id: string) =>
     api.get<AskHrMessage[]>(`/v1/portal/ask-hr/sessions/${id}/messages`),
 
-  /** SSE stream. Uses bare fetch rather than the `api` helper because the helper
-   *  buffers a JSON body; the token is attached by hand for the same reason
-   *  (see the IRCopilotPanel stream handler for the established pattern). */
+  /** SSE stream via postSSE — the `api` helper buffers a JSON body and so can't
+   *  stream. Auth rides authStreamHeaders (proactive refresh), not a hand-read
+   *  token: a stream can't replay a mid-flight 401. */
   async chat(
     sessionId: string,
     message: string,
     onEvent: (ev: AskHrEvent) => void,
     signal?: AbortSignal,
   ): Promise<void> {
-    const base = import.meta.env.VITE_API_URL || '/api'
-    const res = await fetch(`${base}/v1/portal/ask-hr/sessions/${sessionId}/chat`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${localStorage.getItem('matcha_access_token') ?? ''}`,
-      },
-      body: JSON.stringify({ message }),
-      signal,
-    })
-    if (!res.ok || !res.body) {
-      onEvent({ type: 'error', message: res.status === 429
+    try {
+      await postSSE(
+        `/v1/portal/ask-hr/sessions/${sessionId}/chat`,
+        { message },
+        (data) => { onEvent(data as AskHrEvent) },
+        { signal },
+      )
+    } catch (e) {
+      if (signal?.aborted) return
+      const status = e instanceof SSEHttpError ? e.status : 0
+      onEvent({ type: 'error', message: status === 429
         ? 'You have asked a lot of questions in a short time — try again in a little while.'
         : 'Something went wrong. Please try again.' })
-      return
-    }
-
-    const reader = res.body.getReader()
-    const decoder = new TextDecoder()
-    let buffer = ''
-    for (;;) {
-      const { done, value } = await reader.read()
-      if (done) break
-      buffer += decoder.decode(value, { stream: true })
-      // Frames are newline-delimited `data: ` lines; keep the trailing partial.
-      const lines = buffer.split('\n')
-      buffer = lines.pop() ?? ''
-      for (const line of lines) {
-        if (!line.startsWith('data: ')) continue
-        const payload = line.slice(6).trim()
-        if (!payload || payload === '[DONE]') continue
-        try {
-          onEvent(JSON.parse(payload) as AskHrEvent)
-        } catch {
-          // A malformed frame is not worth failing the whole turn over.
-        }
-      }
     }
   },
 }

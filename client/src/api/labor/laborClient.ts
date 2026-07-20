@@ -1,9 +1,8 @@
 // Labor Relations API client — CBA store, clause library, grievance workflow.
 // Typed wrappers over the `/labor/*` backend (gated by `labor_relations`).
 
-import { api, authStreamHeaders } from '../client'
-
-const BASE = (import.meta.env.VITE_API_URL as string | undefined) || '/api'
+import { api } from '../client'
+import { postSSE, SSEHttpError } from '../sse'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -225,37 +224,20 @@ export async function streamGrievanceMerit(
   grievanceId: string,
   handlers: { onDelta: (text: string) => void; onError?: (msg: string) => void; signal?: AbortSignal },
 ): Promise<void> {
-  // Streams can't replay a 401 refresh-and-retry — refresh proactively.
-  const res = await fetch(`${BASE}/labor/grievances/${grievanceId}/assess-merit`, {
-    method: 'POST',
-    headers: await authStreamHeaders({ 'Content-Type': 'application/json' }),
-    signal: handlers.signal,
-  })
-  if (!res.ok || !res.body) {
-    handlers.onError?.(`Assessment failed (${res.status})`)
-    return
-  }
-  const reader = res.body.getReader()
-  const decoder = new TextDecoder()
-  let buffer = ''
-  for (;;) {
-    const { done, value } = await reader.read()
-    if (done) break
-    buffer += decoder.decode(value, { stream: true })
-    const events = buffer.split('\n\n')
-    buffer = events.pop() ?? ''
-    for (const ev of events) {
-      const line = ev.trim()
-      if (!line.startsWith('data: ')) continue
-      const payload = line.slice(6)
-      if (payload === '[DONE]') return
-      try {
-        const obj = JSON.parse(payload) as { delta?: string; error?: string }
+  try {
+    await postSSE(
+      `/labor/grievances/${grievanceId}/assess-merit`,
+      undefined,
+      (data) => {
+        const obj = data as { delta?: string; error?: string }
         if (obj.error) handlers.onError?.(obj.error)
         else if (obj.delta) handlers.onDelta(obj.delta)
-      } catch {
-        // ignore malformed keep-alive lines
-      }
-    }
+      },
+      { signal: handlers.signal },
+    )
+  } catch (e) {
+    if (handlers.signal?.aborted) return
+    const status = e instanceof SSEHttpError ? e.status : 0
+    handlers.onError?.(status ? `Assessment failed (${status})` : 'Assessment connection dropped.')
   }
 }

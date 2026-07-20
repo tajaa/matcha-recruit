@@ -1,6 +1,6 @@
-import { api, ensureFreshToken } from '../../../api/client'
+import { api } from '../../../api/client'
+import { postSSE } from '../../../api/sse'
 import type { ResearchTask, ResearchInput } from '../../types'
-import { BASE } from './_base'
 
 // ── Research tasks ──
 
@@ -26,67 +26,44 @@ export function deleteResearchInput(projectId: string, taskId: string, inputId: 
   return api.delete(`/matcha-work/projects/${projectId}/research-tasks/${taskId}/inputs/${inputId}`)
 }
 
+/** A research SSE event. `run` carries findings/summary; retry and follow-up
+ *  report progress only. */
+export type ResearchStreamEvent = {
+  type: string
+  input_id?: string
+  message?: string
+  findings?: Record<string, unknown>
+  summary?: string
+  error?: string | null
+}
+
 export async function runResearchStream(
   projectId: string,
   taskId: string,
-  onEvent: (event: { type: string; input_id?: string; message?: string; findings?: Record<string, unknown>; summary?: string; error?: string | null }) => void,
+  onEvent: (event: ResearchStreamEvent) => void,
   signal?: AbortSignal,
   captureScreenshot?: boolean,
 ) {
-  const token = await ensureFreshToken()
   const qs = captureScreenshot ? '?capture_screenshot=true' : ''
-  const res = await fetch(`${BASE}/matcha-work/projects/${projectId}/research-tasks/${taskId}/run${qs}`, {
-    method: 'POST',
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-    signal,
-  })
-  if (!res.ok) throw new Error(`${res.status}`)
-  const reader = res.body?.getReader()
-  if (!reader) return
-  const decoder = new TextDecoder()
-  let buf = ''
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    buf += decoder.decode(value, { stream: true })
-    const lines = buf.split('\n')
-    buf = lines.pop() || ''
-    for (const line of lines) {
-      if (line.startsWith('data: ')) {
-        try { onEvent(JSON.parse(line.slice(6))) } catch {}
-      }
-    }
-  }
+  await postSSE(
+    `/matcha-work/projects/${projectId}/research-tasks/${taskId}/run${qs}`,
+    undefined,
+    (data) => { onEvent(data as ResearchStreamEvent) },
+    { signal },
+  )
 }
 
 export async function retryResearchStream(
   projectId: string,
   taskId: string,
   inputId: string,
-  onEvent: (event: { type: string; input_id?: string; message?: string }) => void,
+  onEvent: (event: ResearchStreamEvent) => void,
 ) {
-  const token = await ensureFreshToken()
-  const res = await fetch(`${BASE}/matcha-work/projects/${projectId}/research-tasks/${taskId}/inputs/${inputId}/retry`, {
-    method: 'POST',
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-  })
-  if (!res.ok) throw new Error(`${res.status}`)
-  const reader = res.body?.getReader()
-  if (!reader) return
-  const decoder = new TextDecoder()
-  let buf = ''
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    buf += decoder.decode(value, { stream: true })
-    const lines = buf.split('\n')
-    buf = lines.pop() || ''
-    for (const line of lines) {
-      if (line.startsWith('data: ')) {
-        try { onEvent(JSON.parse(line.slice(6))) } catch {}
-      }
-    }
-  }
+  await postSSE(
+    `/matcha-work/projects/${projectId}/research-tasks/${taskId}/inputs/${inputId}/retry`,
+    undefined,
+    (data) => { onEvent(data as ResearchStreamEvent) },
+  )
 }
 
 export async function followUpResearchStream(
@@ -94,35 +71,17 @@ export async function followUpResearchStream(
   taskId: string,
   inputId: string,
   followUp: string,
-  onEvent: (event: { type: string; input_id?: string; message?: string }) => void,
+  onEvent: (event: ResearchStreamEvent) => void,
   signal?: AbortSignal,
   captureScreenshot?: boolean,
 ) {
-  const token = await ensureFreshToken()
   const qs = captureScreenshot ? '?capture_screenshot=true' : ''
-  const res = await fetch(`${BASE}/matcha-work/projects/${projectId}/research-tasks/${taskId}/inputs/${inputId}/follow-up${qs}`, {
-    method: 'POST',
-    headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), 'Content-Type': 'application/json' },
-    body: JSON.stringify({ follow_up: followUp }),
-    signal,
-  })
-  if (!res.ok) throw new Error(`${res.status}`)
-  const reader = res.body?.getReader()
-  if (!reader) return
-  const decoder = new TextDecoder()
-  let buf = ''
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    buf += decoder.decode(value, { stream: true })
-    const lines = buf.split('\n')
-    buf = lines.pop() || ''
-    for (const line of lines) {
-      if (line.startsWith('data: ')) {
-        try { onEvent(JSON.parse(line.slice(6))) } catch {}
-      }
-    }
-  }
+  await postSSE(
+    `/matcha-work/projects/${projectId}/research-tasks/${taskId}/inputs/${inputId}/follow-up${qs}`,
+    { follow_up: followUp },
+    (data) => { onEvent(data as ResearchStreamEvent) },
+    { signal },
+  )
 }
 
 export function stopResearch(projectId: string, taskId: string) {
