@@ -780,6 +780,29 @@ unchanged**; the **29 provisioning route (method, path) pairs are byte-identical
 original's decorators (AST-diffed); **49 HRIS tests pass**; routes mount at the correct
 `/api/provisioning/*` paths.
 
+### J6 (part 1) — handbook_service.py sub-package (DONE)
+`core/services/handbook_service.py` (5,147) → package `handbook_service/` (name kept so the
+4 external importers are untouched). Split by the class boundary, not by concern:
+- `_constants.py` (600) — the 20 static-data blocks (`STATE_NAMES`, `MANDATORY_STATE_*`,
+  the 324-line `GUIDED_INDUSTRY_PLAYBOOK`, operational-hook patterns, …), `__all__`-gated
+- `_helpers.py` (1637) — all 56 module-level functions + `GuidedDraftRateLimitError`,
+  imports `_constants`, `__all__`-gated
+- `__init__.py` (3050) — the 2,869-line `HandbookService` class; re-imports both submodules
+  so the class + external callers see every name. One-way `_constants ← _helpers ← class`
+  (verified no module func references the class → no cycle). External surface (exactly 4):
+  `HandbookService`, `derive_handbook_scopes_from_employees`, `_fetch_state_requirements`,
+  `GUIDED_INDUSTRY_PLAYBOOK`.
+- **Gotcha the tests caught**: relative imports aren't only in the preamble — **in-method**
+  `from .rate_limiter/.email/.pdf/.compliance_service/.gemini_compliance import` (6 sites)
+  shift a level when a `.py` becomes a package. Converted all to absolute. (This is the
+  service analog of J7's decorator/stray-import gotchas — always grep the whole file for
+  `from \.` before a package conversion, not just the header.)
+
+**Verification** (via `server/venv`): compile clean; app boots at **1858 routes**; the 4
+external names import; `tests/handbook{,_pilot,_audit}` = **2 failed / 90 passed, byte-identical
+to pre-split HEAD** (confirmed via a `git worktree` at HEAD — the 2 failures are pre-existing
+`pdf_bytes_escapes` + `rate_limit` mock tests, unchanged by this).
+
 **NOT done — L2's HTML-builder dedup.** The `REGISTER_PDF_CSS` / `esc()` / `stat_cells()`
 consolidation (the ×8 `_esc()` redefinition and the shared register `<style>` block) is a
 cosmetic dedup of the HTML *builders*, not the render path — its verification is "render one
