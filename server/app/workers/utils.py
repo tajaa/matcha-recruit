@@ -41,3 +41,29 @@ def parse_jsonb(value: Any) -> Any:
     if isinstance(value, str):
         return json.loads(value)
     return value
+
+
+async def scheduler_enabled(conn, task_key: str) -> bool:
+    """Is the `scheduler_settings` row for this task enabled?
+
+    Every scheduled task inlines this same fetch + swallow-and-default. The
+    helper deliberately returns only a bool rather than owning the early return:
+    each task answers a disabled scheduler with its OWN result payload
+    (`{"checked": 0}`, `{"threads": 0, "projects": 0, "skipped": True}`,
+    `{"status": "disabled"}`, …), and flattening those would change what every
+    caller reports.
+
+    Fails OPEN, matching the behaviour it replaces: a missing row (task never
+    configured) or a failed query means enabled. The tasks are idempotent and a
+    transient DB hiccup silently disabling the scheduler would be far worse than
+    one extra run. Takes an open connection — workers are pool-free.
+    """
+    try:
+        row = await conn.fetchrow(
+            "SELECT enabled FROM scheduler_settings WHERE task_key = $1", task_key
+        )
+    except Exception:
+        return True
+    if row is None:
+        return True
+    return bool(row["enabled"])

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { WizardStepper } from '../../ui/WizardStepper'
 import { useNavigate } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import { api } from '../../../api/client'
@@ -130,37 +131,11 @@ export default function IrOnboardingWizard() {
 }
 
 function Stepper({ current }: { current: WizardStep }) {
-  const steps: { key: WizardStep; label: string }[] = [
+  const steps = [
     { key: 'company_info', label: 'Locations' },
     { key: 'employees', label: 'Employees' },
     { key: 'anonymous', label: 'Anonymous reports' },
     { key: 'ready', label: 'Done' },
   ]
-  const activeIdx = steps.findIndex((s) => s.key === current)
-  return (
-    <ol className="flex items-center gap-2 text-xs text-zinc-500">
-      {steps.map((s, i) => {
-        const done = i < activeIdx
-        const active = i === activeIdx
-        return (
-          <li key={s.key} className="flex items-center gap-2">
-            <span
-              className={
-                'w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-medium ' +
-                (done
-                  ? 'bg-emerald-700 text-white'
-                  : active
-                    ? 'bg-zinc-800 text-zinc-100 ring-1 ring-emerald-700'
-                    : 'bg-zinc-900 text-zinc-600')
-              }
-            >
-              {i + 1}
-            </span>
-            <span className={active ? 'text-zinc-200' : ''}>{s.label}</span>
-            {i < steps.length - 1 && <span className="text-zinc-700">→</span>}
-          </li>
-        )
-      })}
-    </ol>
-  )
+  return <WizardStepper steps={steps} activeIndex={steps.findIndex((s) => s.key === current)} />
 }

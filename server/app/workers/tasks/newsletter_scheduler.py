@@ -15,20 +15,13 @@ import asyncio
 from uuid import UUID
 
 from ..celery_app import celery_app
-from ..utils import get_db_connection
+from ..utils import get_db_connection, scheduler_enabled
 
 
 async def _dispatch_newsletter_scheduler() -> dict:
     conn = await get_db_connection()
     try:
-        try:
-            sched_row = await conn.fetchrow(
-                "SELECT enabled FROM scheduler_settings WHERE task_key = 'newsletter_scheduler'"
-            )
-        except Exception:
-            sched_row = None
-
-        if sched_row and not sched_row["enabled"]:
+        if not await scheduler_enabled(conn, "newsletter_scheduler"):
             print("[Newsletter Scheduler] Scheduler disabled, skipping.")
             return {"sent": 0, "skipped": True}
     finally:

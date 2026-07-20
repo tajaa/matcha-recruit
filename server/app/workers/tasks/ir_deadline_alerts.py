@@ -22,6 +22,7 @@ from datetime import date, timedelta
 
 from ..celery_app import celery_app
 from ..utils import get_db_connection
+from app.core.services.company_contacts import get_company_admin_contacts
 
 # CAPA: how many days ahead of due_date to start nudging.
 CAPA_LOOKAHEAD_DAYS = 2
@@ -47,21 +48,6 @@ def _next_ita_deadline(today: date) -> date:
     return this_year if today <= this_year else date(today.year + 1, 3, 2)
 
 
-async def _admin_contacts(conn, company_id) -> list[dict]:
-    """Company-admin/client email recipients (worker-connection variant)."""
-    rows = await conn.fetch(
-        """
-        SELECT DISTINCT
-            u.email,
-            COALESCE(NULLIF(c.name, ''), split_part(u.email, '@', 1)) AS name
-        FROM clients c
-        JOIN users u ON u.id = c.user_id
-        WHERE c.company_id = $1 AND u.is_active = true AND u.email IS NOT NULL
-        ORDER BY u.email
-        """,
-        company_id,
-    )
-    return [{"email": r["email"], "name": r["name"] or r["email"]} for r in rows]
 
 
 async def _already_sent(conn, incident_id, alert_kind, today) -> bool:
@@ -142,7 +128,7 @@ async def _sweep_capa(conn, email_service, today, limit) -> dict:
         if r["owner_email"]:
             recipients = [{"email": r["owner_email"], "name": r["owner_name"] or r["owner_email"]}]
         else:
-            recipients = await _admin_contacts(conn, r["company_id"])
+            recipients = await get_company_admin_contacts(conn, r["company_id"])
         if not recipients:
             continue
 
@@ -208,7 +194,7 @@ async def _sweep_stale_incidents(conn, email_service, today, limit) -> dict:
     for r in rows:
         if await _already_sent(conn, r["incident_id"], "stale_critical", today):
             continue
-        recipients = await _admin_contacts(conn, r["company_id"])
+        recipients = await get_company_admin_contacts(conn, r["company_id"])
         if not recipients:
             continue
         detail = [
@@ -273,7 +259,7 @@ async def _sweep_unclassified_recordable(conn, email_service, today, limit) -> d
     for r in rows:
         if await _already_sent(conn, r["incident_id"], "unclassified_recordable", today):
             continue
-        recipients = await _admin_contacts(conn, r["company_id"])
+        recipients = await get_company_admin_contacts(conn, r["company_id"])
         if not recipients:
             continue
         detail = [
@@ -324,7 +310,7 @@ async def _sweep_osha_emergency(conn, email_service, today, limit) -> dict:
     for r in rows:
         if await _already_sent(conn, r["incident_id"], "osha_emergency", today):
             continue
-        recipients = await _admin_contacts(conn, r["company_id"])
+        recipients = await get_company_admin_contacts(conn, r["company_id"])
         if not recipients:
             continue
         detail = [

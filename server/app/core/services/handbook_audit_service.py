@@ -30,6 +30,7 @@ import os
 from typing import Any, Optional
 
 from app.database import get_connection
+from app.core.services.model_json import strip_json_fence as _strip_json_fence
 
 logger = logging.getLogger(__name__)
 
@@ -392,15 +393,6 @@ def _gemini_client():
     return genai.Client(api_key=api_key)
 
 
-def _strip_json_fence(text: str) -> str:
-    text = (text or "").strip()
-    if text.startswith("```json"):
-        text = text[7:]
-    elif text.startswith("```"):
-        text = text[3:]
-    if text.endswith("```"):
-        text = text[:-3]
-    return text.strip()
 
 
 async def _extract_sections_from_pdf(pdf_bytes: bytes) -> list[dict[str, Any]]:

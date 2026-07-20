@@ -10,19 +10,13 @@ enabled_features value is the merged value — safe to filter in SQL.
 import asyncio
 
 from ..celery_app import celery_app
-from ..utils import get_db_connection
+from ..utils import get_db_connection, scheduler_enabled
 
 
 async def _dispatch_coi_expiry() -> dict:
     conn = await get_db_connection()
     try:
-        try:
-            sched_row = await conn.fetchrow(
-                "SELECT enabled FROM scheduler_settings WHERE task_key = 'coi_expiry'"
-            )
-        except Exception:
-            sched_row = None
-        if sched_row and not sched_row["enabled"]:
+        if not await scheduler_enabled(conn, "coi_expiry"):
             print("[COI Expiry] Scheduler disabled, skipping.")
             return {"checked": 0}
 

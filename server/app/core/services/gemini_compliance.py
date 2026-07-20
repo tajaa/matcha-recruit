@@ -25,6 +25,7 @@ from ..compliance_registry import (
     MEDICAL_COMPLIANCE_CATEGORIES as _MC_CATS,
     INDUSTRY_TAGS as _MC_INDUSTRY_TAGS,
 )
+from app.core.services.model_json import clean_model_json as _clean_json_text
 
 logger = logging.getLogger(__name__)
 
@@ -368,34 +369,6 @@ class GeminiExhaustedError(Exception):
         self.last_raw = last_raw
 
 
-def _clean_json_text(text: str) -> str:
-    """Clean JSON text by removing markdown fences and fixing Python booleans."""
-    text = text.strip()
-
-    # Strip markdown fences (handles unclosed blocks)
-    if text.startswith("```json"):
-        text = text[7:]
-    elif text.startswith("```"):
-        text = text[3:]
-
-    if text.endswith("```"):
-        text = text[:-3]
-
-    text = text.strip()
-
-    # Find the first '{' and last '}' to extract JSON from surrounding text
-    start = text.find("{")
-    end = text.rfind("}")
-
-    if start != -1 and end != -1:
-        text = text[start : end + 1]
-
-    # Fix common LLM JSON errors (Python booleans/None)
-    text = re.sub(r":\s*True\b", ": true", text)
-    text = re.sub(r":\s*False\b", ": false", text)
-    text = re.sub(r":\s*None\b", ": null", text)
-
-    return text
 
 
 def _validate_requirement(req: dict) -> Optional[str]:

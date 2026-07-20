@@ -509,3 +509,74 @@ the deselected count drops by exactly the 60 pre-termination tests removed.
 **Still owed:** the manual click-through, now including a socket smoke test — send/receive in a
 channel, kill the dev server briefly, confirm reconnect and rejoin. The socket tests cover the
 state machine but not a real server handshake.
+
+---
+
+## STATUS — Phases K, L, M (2026-07-20)
+
+Done: **L1, L3 (partial), L4, L8, M1, M2, K3**. The rest is deferred with reasons below —
+this batch stuck to work that is mechanical, independently verifiable, and safe to land in a
+mixed commit.
+
+### Landed
+- **L4** deleted `matcha/models/benefits.py` — all 10 classes verified zero-reference
+  individually before deleting (the router of the same name is unrelated and stays).
+- **L1** new `core/services/model_json.py` (`strip_json_fence` / `clean_model_json` /
+  `parse_model_json`) + 20 tests. **The plan's premise was wrong**: it describes ~10
+  byte-identical copies; there are 15 helpers and, normalising names and indentation, only
+  TWO are actually identical. They differ in *robustness*, which is the real finding — the
+  model emits the same malformed output to everyone but only some callers recover.
+  `gemini_compliance` and `commit_scan_service` rewrite Python literals (`True`/`None`),
+  which Gemini emits regularly; `ticket_draft_service`, otherwise the same helper, does not
+  and so simply failed to parse those responses. Migrated the 5 sites whose contract matches.
+  **Deliberately NOT migrated:** `protocol_analysis_service` and `accommodation_service` let
+  `json.loads` raise so their caller can react — swapping in `parse_model_json` would convert
+  a loud failure into a silent default. The remaining sites need per-site judgment, not a sweep.
+- **L8** new `core/services/company_contacts.py` — the identical DISTINCT clients-join-users
+  query from `ir_deadline_alerts`, `leave_agent` and `compliance_service`. The connection-taking
+  form is primary because workers are pool-free; `get_company_name_and_contacts` uses
+  `connection_or_direct` for the one caller with no connection in hand.
+- **L3 (4 of 18)** `workers/utils.py:scheduler_enabled(conn, task_key)`. Only migrated the
+  tasks matching the exact gate shape. The helper returns a **bool, not an early return**:
+  each task answers a disabled scheduler with its own payload (`{"checked": 0}`,
+  `{"status": "disabled"}`, …) and flattening those would change what every caller reports.
+  Fails **open**, matching the code it replaces.
+- **M1/M2** new `core/services/scoped_auth.py:make_token_helpers(scope)`; `cappe/services/auth.py`
+  and `tellus/services/auth.py` drop from 98 lines each to 28. This is the security-weighted one:
+  the decode path's scope check is the *only* thing stopping a Cappe token authenticating
+  against Tell-Us (all products sign with the same `jwt_secret_key`), and two copies meant a
+  fix to one silently left the other exposed. 18 tests, including every cross-scope
+  rejection direction.
+  **Writing those tests found a live latent bug**: python-jose calls `token.rsplit(...)` with
+  no type check, so `decode_*_token(None)` raised `AttributeError` — which neither copy's
+  `except (JWTError, KeyError, TypeError)` caught. No caller passes None today, but a function
+  documented to return None for anything invalid must not raise for ANY input, or the first
+  caller that forwards a missing header turns a 401 into a 500. Now caught.
+- **K3** `components/ui/WizardStepper.tsx`; IR + Matcha-X wizards use it. Their render bodies
+  were identical but the plan's "byte-identical" is again not quite right — Matcha-X has a
+  terminal `done` state past the last step. The shared component takes `activeIndex` already
+  computed rather than a step key, so it needn't know either wizard's step union.
+
+### Deferred, with reasons
+- **J2** (~40 files, `genai.Client` → factory), **J3 + L2** (~25 `render_pdf` sites + the
+  shared PDF scaffold). J3 carries security weight and L2 rides with it; together they are a
+  focused conformance PR whose verification is "render one PDF per family and diff visually" —
+  that does not belong bundled with unrelated work.
+- **J5** (`admin.py`, 13,085 lines / 172 routes), **J6** (`compliance_service.py` 10,703 +
+  `handbook_service.py` 5,147), **L5**, **L6** (`matcha_work_document.py` 2,786), **L9**.
+  Import-graph refactors; the plan's own verification is "server boots + `/api/openapi.json`
+  route count unchanged before/after", which needs a clean tree to be meaningful.
+- **L7** explicitly sequenced after J2.
+- **K1, K2, K4, K5** — the register/public-token/metric-strip/attestation shells. Real payoff
+  (~700–1,000 LOC) but each is a multi-page visual refactor whose verification is a click-
+  through of pages this branch already owes one for. K2 in particular rewrites two public
+  token-gated signing pages — worth its own PR and a real token test.
+- **D1** (tier signup → Stripe), **D3** (four pilot consoles), **I1** (pilot chrome, pairs
+  with D3), **H3/H4/H5**, **I4/I5** — unchanged from earlier notes.
+- **J8** rejected on inspection (see the H/I/J status block).
+
+**Verification:** client tsc clean, 148 tests, build clean. Server: 38 new tests pass; full
+suite goes from **98 failed / 3277 passed → 97 / 3278** (the one flipped failure is the
+None-token test, which fails without the AttributeError fix and passes with it). The 97
+remaining failures and 48 collection errors are pre-existing and environmental — missing local
+deps (`audioop`, `segno`) — identical before and after.

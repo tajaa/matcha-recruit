@@ -29,6 +29,7 @@ from google.genai import types
 
 from ...config import get_settings
 from ...database import get_connection
+from app.core.services.model_json import clean_model_json as _clean_json_text
 
 logger = logging.getLogger(__name__)
 
@@ -149,22 +150,6 @@ def _get_client() -> genai.Client:
     return _client
 
 
-def _clean_json_text(text: str) -> str:
-    text = (text or "").strip()
-    if text.startswith("```json"):
-        text = text[7:]
-    elif text.startswith("```"):
-        text = text[3:]
-    if text.endswith("```"):
-        text = text[:-3]
-    text = text.strip()
-    start, end = text.find("{"), text.rfind("}")
-    if start != -1 and end != -1:
-        text = text[start:end + 1]
-    text = re.sub(r":\s*True\b", ": true", text)
-    text = re.sub(r":\s*False\b", ": false", text)
-    text = re.sub(r":\s*None\b", ": null", text)
-    return text
 
 
 def _build_prompt(commit: dict, candidates: list[dict]) -> str:

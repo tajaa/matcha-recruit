@@ -4319,37 +4319,8 @@ def _record_change_notification_item(
 async def _get_company_admin_contacts(
     company_id: UUID,
 ) -> tuple[str, List[Dict[str, str]]]:
-    """Get company name and business admin/client email contacts."""
-    from ...database import get_connection
-
-    async with get_connection() as conn:
-        company_name = (
-            await conn.fetchval(
-                "SELECT name FROM companies WHERE id = $1",
-                company_id,
-            )
-            or "Your company"
-        )
-
-        rows = await conn.fetch(
-            """
-            SELECT DISTINCT
-                u.email,
-                COALESCE(NULLIF(c.name, ''), split_part(u.email, '@', 1)) AS name
-            FROM clients c
-            JOIN users u ON u.id = c.user_id
-            WHERE c.company_id = $1
-              AND u.is_active = true
-              AND u.email IS NOT NULL
-            ORDER BY u.email
-            """,
-            company_id,
-        )
-
-    contacts = [
-        {"email": row["email"], "name": row["name"] or row["email"]} for row in rows
-    ]
-    return company_name, contacts
+    """Company name + admin contacts. Delegates to the shared helper."""
+    return await get_company_name_and_contacts(company_id)
 
 
 async def _notify_company_admins_of_compliance_changes(
@@ -9463,6 +9434,7 @@ async def get_pinned_requirements(company_id: UUID) -> list[dict]:
 
 import hashlib
 import unicodedata
+from app.core.services.company_contacts import get_company_name_and_contacts
 
 
 def normalize_and_hash(raw_content: str) -> str:
