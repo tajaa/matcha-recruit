@@ -9,7 +9,7 @@ import { resolvePageHelp } from '../data/pageHelp'
 const PERSONAL_ALLOWED = new Set(['/app/settings'])
 
 export default function AppLayout({ sidebar, variant }: { sidebar: ReactNode; logoLabel?: string; variant?: 'admin' }) {
-  const { me, loading, isPersonal } = useMe()
+  const { loading, authFailed, isPersonal } = useMe()
   const { pathname, search } = useLocation()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() =>
@@ -34,7 +34,13 @@ export default function AppLayout({ sidebar, variant }: { sidebar: ReactNode; lo
   // this, a /app/* route with no <FeatureGate> mounts its whole shell for a
   // logged-out visitor and only blanks once a fetch 401s. The backend is still
   // the authz boundary — this is consistency, not the lock.
-  if (!loading && !me) {
+  //
+  // Gated on authFailed, NOT `!me`: this layout wraps the entire tenant surface,
+  // and useMe reports `me === null` for any /auth/me failure including a 502 or
+  // a dropped connection. Redirecting on that would evict a signed-in admin
+  // mid-form on one network blip. authFailed is only true for 401/403, which
+  // api/client.ts has already tried to refresh.
+  if (!loading && authFailed) {
     const next = encodeURIComponent(pathname + search)
     return <Navigate to={`/login?next=${next}`} replace />
   }

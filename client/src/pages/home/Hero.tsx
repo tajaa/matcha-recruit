@@ -2,6 +2,8 @@ import { lazy, Suspense, useEffect, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { AMBER, ASH, BONE, DISPLAY, LEAF, LINE_D, MATCHA } from "./theme";
 import { useReducedMotion } from "./instruments/shared";
+import { StartCapture } from "./StartCapture";
+
 // The carousel and its four instruments are the ONLY framer-motion importers on
 // the apex route (~60-110 KB gz), and it renders below the fold behind a
 // CAROUSEL_DELAY_S animation delay. Lazy-loading it keeps framer out of the
@@ -10,7 +12,6 @@ import { useReducedMotion } from "./instruments/shared";
 const ProductCarousel = lazy(() =>
   import("./ProductCarousel").then((m) => ({ default: m.ProductCarousel })),
 );
-import { StartCapture } from "./StartCapture";
 
 // The headline types itself out like a terminal. Segments keep the per-word
 // styling (italic accents) that the old static markup had.

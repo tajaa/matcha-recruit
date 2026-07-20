@@ -10,15 +10,21 @@ import {
   type BetaInvitation,
 } from '../../api/admin/platformSettings'
 
+// Mirrors the backend's fallback when platform_settings has no row yet.
+const DEFAULT_RESEARCH_MODE = 'light'
+
 const RESEARCH_MODELS = [
   { id: 'lite', label: 'Lite', model: 'Gemini 3.1 Flash Lite', description: 'Fastest, lowest cost — good for bulk research' },
   { id: 'light', label: 'Light', model: 'Gemini 3 Flash', description: 'Balanced speed and quality (default)' },
   { id: 'heavy', label: 'Pro', model: 'Gemini 3.1 Pro', description: 'Highest quality, slower — best for targeted research' },
 ]
 
+const errText = (e: unknown) => (e instanceof Error ? e.message : String(e))
+
 export default function Settings() {
   const [pendingMode, setPendingMode] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
 
   // Token quotas & usage
   const [showAddQuota, setShowAddQuota] = useState(false)
@@ -30,11 +36,15 @@ export default function Settings() {
   const [betaSending, setBetaSending] = useState(false)
   const [betaResult, setBetaResult] = useState<string | null>(null)
 
-  // 'light' is the documented default when the row is unset. The old code also
-  // fell back to it on a FAILED fetch, which quietly told the admin the mode was
-  // Light when it might be anything — useAsync keeps failure as `error` instead.
+  // Two different nulls, deliberately kept apart. An UNSET row means the backend
+  // is using its documented 'light' default, so show Light selected. A FAILED
+  // lookup means we don't know, and the old code's `catch -> 'light'` displayed
+  // Light with total confidence while the real mode might be anything — that
+  // case is now settings.error and renders as an error, not as a selection.
   const settings = useAsync(() => adminSettingsApi.getPlatformSettings(), [])
-  const researchMode = settings.data?.jurisdiction_research_model_mode ?? null
+  const researchMode = settings.data
+    ? (settings.data.jurisdiction_research_model_mode ?? DEFAULT_RESEARCH_MODE)
+    : null
 
   // Seed the pending selection once the saved value arrives, without clobbering
   // a choice the admin has already made while it was in flight.
@@ -63,19 +73,39 @@ export default function Settings() {
   async function handleSave() {
     if (!pendingMode || pendingMode === researchMode) return
     setSaving(true)
+    setSaveError(null)
     try {
       await adminSettingsApi.setResearchModelMode(pendingMode)
       settings.setData({ jurisdiction_research_model_mode: pendingMode })
+    } catch (e) {
+      // api/client.ts throws on non-2xx. Uncaught, this was an unhandled
+      // rejection: the button returned to "Saved" and the admin had no way to
+      // know the mode had not changed.
+      setSaveError(errText(e))
     } finally { setSaving(false) }
   }
 
   async function handleUpdateQuota(id: string, updates: Record<string, unknown>) {
-    await adminSettingsApi.updateQuota(id, updates)
+    setQuotaError('')
+    try {
+      await adminSettingsApi.updateQuota(id, updates)
+    } catch (e) {
+      setQuotaError(errText(e))
+      return
+    }
     await quotaState.reload()
   }
 
   async function handleDeleteQuota(id: string) {
-    await adminSettingsApi.deleteQuota(id)
+    setQuotaError('')
+    try {
+      await adminSettingsApi.deleteQuota(id)
+    } catch (e) {
+      // Without this a failed delete left the row on screen with no message —
+      // indistinguishable from a delete that worked but hadn't refreshed yet.
+      setQuotaError(errText(e))
+      return
+    }
     await quotaState.reload()
   }
 
@@ -103,7 +133,7 @@ export default function Settings() {
     } catch (e) {
       // Previously `if (res.ok)` — a rejected quota just did nothing and left
       // the form open with no explanation.
-      setQuotaError(e instanceof Error ? e.message : String(e))
+      setQuotaError(errText(e))
       return
     }
     setShowAddQuota(false)
@@ -125,14 +155,20 @@ export default function Settings() {
       setBetaEmails('')
       await beta.reload()
     } catch (e) {
-      setBetaResult(e instanceof Error ? e.message : String(e))
+      setBetaResult(errText(e))
     } finally {
       setBetaSending(false)
     }
   }
 
   async function handleRevokeBetaInvite(id: string) {
-    await adminSettingsApi.revokeBetaInvitation(id)
+    setBetaResult(null)
+    try {
+      await adminSettingsApi.revokeBetaInvitation(id)
+    } catch (e) {
+      setBetaResult(errText(e))
+      return
+    }
     await beta.reload()
   }
 
@@ -184,6 +220,7 @@ export default function Settings() {
           <Button onClick={handleSave} disabled={!hasChanges || saving}>
             {saving ? 'Saving...' : hasChanges ? 'Save changes' : 'Saved'}
           </Button>
+          {saveError && <p className="mt-2 text-xs text-red-400">{saveError}</p>}
         </div>
       </div>
 
@@ -251,6 +288,11 @@ export default function Settings() {
           <div className="flex items-center gap-2 py-4 text-sm text-zinc-500">
             <Loader2 className="w-4 h-4 animate-spin" /> Loading quotas...
           </div>
+        ) : quotaState.error ? (
+          /* An error must outrank the list: rendering an empty quota list on a
+             failed load reads as "no quotas configured", and an admin acting on
+             that creates a duplicate. */
+          <p className="py-4 text-sm text-red-400">{quotaState.error}</p>
         ) : (
           <div className="space-y-2">
             {quotas.map((q) => (
@@ -302,6 +344,8 @@ export default function Settings() {
           <div className="flex items-center gap-2 py-4 text-sm text-zinc-500">
             <Loader2 className="w-4 h-4 animate-spin" /> Loading...
           </div>
+        ) : quotaState.error ? (
+          <p className="py-4 text-sm text-red-400">{quotaState.error}</p>
         ) : usage.length === 0 ? (
           <p className="text-xs text-zinc-500 py-4">No token usage in the last 12 hours.</p>
         ) : (
@@ -378,6 +422,8 @@ export default function Settings() {
           <div className="flex items-center gap-2 py-4 text-sm text-zinc-500">
             <Loader2 className="w-4 h-4 animate-spin" /> Loading invitations...
           </div>
+        ) : beta.error ? (
+          <p className="py-4 text-sm text-red-400">{beta.error}</p>
         ) : betaInvites.length === 0 ? (
           <p className="text-xs text-zinc-500 py-4">No invitations sent yet.</p>
         ) : (

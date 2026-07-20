@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { onAuthReset } from '../api/authReset'
-import { api } from '../api/client'
+import { ApiError, api } from '../api/client'
 import type { MeResponse } from '../types/dashboard'
 
 let _cache: MeResponse | null = null
@@ -47,25 +47,53 @@ export function getMeCacheAgeMs(): number {
   return _cacheAt === 0 ? Number.POSITIVE_INFINITY : Date.now() - _cacheAt
 }
 
+/**
+ * Did the /auth/me lookup fail because there is no session, or because we
+ * couldn't reach the server?
+ *
+ * `me === null` collapses both, and that is fine for feature checks (no user →
+ * no features either way) but NOT for route guards: a guard that redirects on
+ * `!me` turns one flaky /auth/me response into a forced logout, dropping a
+ * signed-in user out of whatever they were doing. api/client.ts already
+ * refreshes and retries a 401, so a 401/403 reaching here really is "no valid
+ * session"; anything else (5xx, network failure, CORS) is unknown, and the safe
+ * reading of unknown is "leave them where they are".
+ */
+function isNoSession(err: unknown): boolean {
+  const status = err instanceof ApiError ? err.status : undefined
+  return status === 401 || status === 403
+}
+
 export function useMe() {
   const [me, setMe] = useState<MeResponse | null>(_cache)
   const [loading, setLoading] = useState(!_cache)
+  const [authFailed, setAuthFailed] = useState(false)
+
+  const apply = useCallback((data: MeResponse) => {
+    setMe(data)
+    setAuthFailed(false)
+  }, [])
+
+  const fail = useCallback((err: unknown) => {
+    setMe(null)
+    setAuthFailed(isNoSession(err))
+  }, [])
 
   const refresh = useCallback(() => {
     invalidateMeCache()
     setLoading(true)
     _fetch()
-      .then(setMe)
-      .catch(() => setMe(null))
+      .then(apply)
+      .catch(fail)
       .finally(() => setLoading(false))
-  }, [])
+  }, [apply, fail])
 
   useEffect(() => {
     _fetch()
-      .then(setMe)
-      .catch(() => setMe(null))
+      .then(apply)
+      .catch(fail)
       .finally(() => setLoading(false))
-  }, [])
+  }, [apply, fail])
 
   const hasFeature = useCallback(
     (f: string): boolean => !!me?.profile?.enabled_features?.[f],
@@ -81,5 +109,18 @@ export function useMe() {
   const mwBetaLite = bf['matcha_work_beta_lite'] === true || bf['matcha_work_beta_full'] === true
   const mwBetaFull = bf['matcha_work_beta_full'] === true
 
-  return { me, loading, hasFeature, isHealthcare, isPersonal, mwBetaLite, mwBetaFull, refresh }
+  return {
+    me,
+    loading,
+    /** True only when /auth/me answered 401/403 — i.e. there is genuinely no
+     *  session. False when the lookup merely failed; see isNoSession. Route
+     *  guards must redirect on THIS, not on `!me`. */
+    authFailed,
+    hasFeature,
+    isHealthcare,
+    isPersonal,
+    mwBetaLite,
+    mwBetaFull,
+    refresh,
+  }
 }

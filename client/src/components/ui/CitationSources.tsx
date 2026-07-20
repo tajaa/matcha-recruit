@@ -80,7 +80,12 @@ export default function CitationSources({
           </button>
           {open && (
             <ol className="mt-1.5 space-y-1.5">
-              {citations.map(c => (
+              {citations.map(c => {
+                // The corpus `source_url` is server-side but model-adjacent, and
+                // MessageBubble gates the same field — a `javascript:` href here
+                // would run in the reader's session.
+                const href = safeUrl(c.source_url)
+                return (
                 <li key={c.cid} className={`flex gap-1.5 text-[11px] ${lm ? 'text-zinc-600' : 'text-zinc-400'}`}>
                   <span className={`shrink-0 px-1 rounded ${chip} font-medium`}>
                     {c.n ?? '·'}
@@ -90,12 +95,9 @@ export default function CitationSources({
                     {c.source_label && (
                       <span className={`ml-1 ${metaText}`}>· {c.source_label}</span>
                     )}
-                    {/* The corpus `source_url` is server-side but model-adjacent,
-                        and MessageBubble already gates the same field — a
-                        `javascript:` href here would run in the admin's session. */}
-                    {safeUrl(c.source_url) && (
+                    {href && (
                       <a
-                        href={safeUrl(c.source_url)!}
+                        href={href}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="ml-1 inline-flex items-center text-emerald-500 hover:text-emerald-400"
@@ -106,7 +108,8 @@ export default function CitationSources({
                     {c.summary && <span className="block opacity-70">{c.summary}</span>}
                   </span>
                 </li>
-              ))}
+                )
+              })}
             </ol>
           )}
         </>

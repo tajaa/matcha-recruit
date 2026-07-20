@@ -1,13 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import MarketingNav from "../landing/MarketingNav";
 import MarketingFooter from "../landing/MarketingFooter";
-// Second framer-motion importer on the apex route, and it renders nothing until
-// the visitor clicks a demo CTA — so it has no business in the eager chunk.
-const PricingContactModal = lazy(() =>
-  import("../../components/marketing/PricingContactModal").then((m) => ({
-    default: m.PricingContactModal,
-  })),
-);
 import { useSEO } from "../../hooks/useSEO";
 import { HOME_JSON_LD } from "./data";
 import { BONE, NOIR } from "./theme";
@@ -16,6 +9,14 @@ import { Hero } from "./Hero";
 import { ProductIndex } from "./ProductIndex";
 import { Manifesto } from "./Manifesto";
 import { CTABand } from "./CTABand";
+
+// Second framer-motion importer on the apex route, and it renders nothing until
+// the visitor clicks a demo CTA — so it has no business in the eager chunk.
+const PricingContactModal = lazy(() =>
+  import("../../components/marketing/PricingContactModal").then((m) => ({
+    default: m.PricingContactModal,
+  })),
+);
 
 export default function Home() {
   const [isPricingOpen, setIsPricingOpen] = useState(false);
@@ -53,9 +54,26 @@ export default function Home() {
           keyed on isOpen, so unmounting the moment it closes would cut its exit
           animation. Mount on first open, then leave it mounted and let isOpen
           drive it — the lazy chunk still never loads for a visitor who never
-          clicks a demo CTA, which is the whole point. */}
+          clicks a demo CTA, which is the whole point.
+
+          The Suspense fallback is not null: this is the apex conversion path,
+          and on a slow connection a null fallback means the demo CTA visibly
+          does nothing until the chunk lands. A backdrop + spinner shows the
+          click registered. */}
       {hasOpenedPricing && (
-        <Suspense fallback={null}>
+        <Suspense
+          fallback={
+            isPricingOpen ? (
+              <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60">
+                <div
+                  className="h-8 w-8 animate-spin rounded-full border-2 border-white/25 border-t-white/90"
+                  role="status"
+                  aria-label="Loading"
+                />
+              </div>
+            ) : null
+          }
+        >
           <PricingContactModal
             isOpen={isPricingOpen}
             onClose={() => setIsPricingOpen(false)}

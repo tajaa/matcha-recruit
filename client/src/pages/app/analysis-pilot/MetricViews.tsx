@@ -13,9 +13,18 @@ function Chart({ svg }: { svg: string }) {
   // Rendered as an <img> data-URI instead: identical pixels, but the SVG is a
   // passive image — browsers refuse to run script in one, so no escaping bug
   // upstream can become XSS here.
+  // An <img> renders the SVG as its own isolated document, so it no longer
+  // inherits the page font — and charts.py sets font-size but never
+  // font-family, which would drop every axis label to the browser default
+  // serif. Inject a font-family on the root <svg> to keep the rendering the
+  // inline version had.
+  const styled = svg.replace(
+    /^\s*<svg\b/,
+    '<svg font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif"',
+  )
   return (
     <div className="overflow-x-auto">
-      <img src={`data:image/svg+xml;utf8,${encodeURIComponent(svg)}`} alt="" className="max-w-full" />
+      <img src={`data:image/svg+xml;utf8,${encodeURIComponent(styled)}`} alt="" className="max-w-full" />
     </div>
   )
 }
