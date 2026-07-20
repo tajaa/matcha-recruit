@@ -756,6 +756,30 @@ utility/business-logic boundary is the high-confidence, high-value cut and it's 
 (same 7 pre-existing mock failures as baseline, at untouched lines); app boots at
 **1858 routes unchanged**; all 16 importer modules load.
 
+### J7 — provisioning.py router split (DONE)
+`integrations/provisioning.py` (2,388 lines) → split-router package
+`integrations/provisioning/`. The file is actually **three** domains (Google Workspace,
+Slack, and the HRIS-dominant Gusto/Finch), all on distinct path prefixes (no shadowing):
+- `_models.py` — the 16 inline Pydantic models (fold-out, per the plan)
+- `_shared.py` — `_json_object` / `_coerce_bool` / `_split_comma_list` / `_run_payload`
+- `google.py` / `slack.py` / `runs.py` / `hris.py` — per-domain `APIRouter()`s
+- `__init__.py` — aggregates the four sub-routers into one `router`, re-exported unchanged
+  so `integrations/__init__.py:from .provisioning import router` is untouched.
+
+Layering `_models` ← `_shared` ← domains; no cycles. Models import the three
+`PROVIDER_*` constants they use as field defaults.
+- **Two AST-extraction bugs the boot check caught** (loud, not silent): (1) the first
+  span used the `def` line, so **route functions lost their `@router.post(...)`
+  decorators** — routes silently vanished (boot showed 1829, not 1858) until span was
+  fixed to start at the first decorator; (2) a stray module-level `import logging as
+  _logging` (an Import node, not a def/assign) was dropped, NameError'ing `_whlog`.
+  Both are exactly why a router split needs a boot + route-count + path-diff, not compile.
+
+**Verification** (via `server/venv`): compile clean; app boots at **1858 routes,
+unchanged**; the **29 provisioning route (method, path) pairs are byte-identical** to the
+original's decorators (AST-diffed); **49 HRIS tests pass**; routes mount at the correct
+`/api/provisioning/*` paths.
+
 **NOT done — L2's HTML-builder dedup.** The `REGISTER_PDF_CSS` / `esc()` / `stat_cells()`
 consolidation (the ×8 `_esc()` redefinition and the shared register `<style>` block) is a
 cosmetic dedup of the HTML *builders*, not the render path — its verification is "render one
