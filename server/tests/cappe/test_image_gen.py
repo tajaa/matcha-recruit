@@ -64,6 +64,14 @@ def test_generate_image_drops_unknown_aspect_for_service_default():
     assert len(v) == 1 and not r and "aspect" not in v[0]  # dropped → service defaults
 
 
+def test_generate_image_drops_non_string_aspect():
+    """A non-string aspect hallucination (16, {}, True) must be dropped, not left
+    to 422 the client's str-typed request. Regression for the _sid-only check."""
+    for bad in (16, 1.5, True, {"x": 1}, ["16:9"]):
+        v, r = _op(block="hero1", prompt="x", aspect=bad)
+        assert len(v) == 1 and not r and "aspect" not in v[0], bad
+
+
 def test_generate_image_keeps_valid_aspects():
     for a in AI_ASPECT_RATIOS:
         v, r = _op(block="hero1", prompt="x", aspect=a)

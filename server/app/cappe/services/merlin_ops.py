@@ -365,9 +365,12 @@ def _v_generate_image(raw: dict[str, Any], ctx: ValidationCtx) -> Optional[str]:
         return "missing image prompt"
     if len(prompt) > AI_IMAGE_PROMPT_MAX:
         return f"image prompt too long (max {AI_IMAGE_PROMPT_MAX} chars)"
-    aspect = _sid(raw.get("aspect"))
-    if aspect is not None and aspect not in AI_ASPECT_RATIOS:
-        raw.pop("aspect", None)  # unknown → let the service default it
+    # Drop any present-but-invalid aspect (a non-string hallucination — 16, {} —
+    # or an unknown ratio) so the service defaults it. Checking `_sid` alone
+    # missed non-strings: they'd survive and 422 the client's typed request.
+    aspect = raw.get("aspect")
+    if aspect is not None and not (isinstance(aspect, str) and aspect in AI_ASPECT_RATIOS):
+        raw.pop("aspect", None)
     return None
 
 

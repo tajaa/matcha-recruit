@@ -83,7 +83,10 @@ export function useMerlin(
   // PageEditor is NOT remounted when the route's :pageId changes (no `key` on
   // the route), so without this the transcript — and its ops_summary context —
   // would bleed from one page into the next.
-  useEffect(() => { setMessages([]); setError(null) }, [pageId])
+  // Also clear `sending`: an in-flight turn (esp. a slow image generation)
+  // belongs to the page it was started on — its apply is pageId-guarded — so
+  // don't leave the destination page's panel spinning + re-entry-locked.
+  useEffect(() => { setMessages([]); setError(null); setSending(false) }, [pageId])
 
   // Live pageId for the in-flight check in `send`. It MUST be a ref: `send` is
   // recreated each render, so an in-flight call and the `pageId` param it can
@@ -123,6 +126,9 @@ export function useMerlin(
           noChanges: !changed,
         }])
       } catch (e) {
+        // Same navigation guard as the success path — don't drop a failure note
+        // into a page the user navigated to during the ~10-30s generation.
+        if (sentForPageId !== pageIdRef.current) return
         const msg = e instanceof Error ? e.message : 'Image generation failed'
         setMessages((m) => [...m, {
           role: 'assistant', content: `Image generation failed: ${msg}`,

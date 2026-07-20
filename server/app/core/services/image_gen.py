@@ -8,8 +8,12 @@ SDK plumbing.
 Two deliberate improvements over the matcha-work inline version:
   * uses the central ``get_genai_client()`` factory (Vertex-aware) instead of a
     hand-rolled ``genai.Client``;
-  * wraps the blocking call in ``asyncio.wait_for`` — matcha-work's has NO
-    timeout, so a hung image call pins a request worker indefinitely.
+  * imposes BOTH an SDK-level HTTP request timeout (``_HTTP_TIMEOUT_MS``) and an
+    outer ``asyncio.wait_for``. matcha-work's has neither. The outer wait_for
+    alone only frees the awaiting coroutine — the blocking SDK call keeps running
+    on its shared thread-pool thread (Python threads can't be cancelled), so a
+    hung endpoint would leak threads across the whole backend. The SDK timeout is
+    what actually deadlines the thread; wait_for is the backstop.
 
 Never raises a bare SDK error to the caller: any failure (no image, safety
 block, timeout, API error) surfaces as ``ImageGenError``, which callers turn
@@ -27,7 +31,11 @@ from .storage import get_storage
 logger = logging.getLogger(__name__)
 
 IMAGE_MODEL = "gemini-3.1-flash-image-preview"  # matches matcha_work_ai._IMAGE_MODEL
-IMAGE_GEN_TIMEOUT = 60  # seconds — image gen is slower than text; cap so a hang can't pin a worker
+IMAGE_GEN_TIMEOUT = 60  # seconds — outer backstop on the awaited coroutine
+# SDK request timeout in MILLISECONDS — set below IMAGE_GEN_TIMEOUT so the SDK
+# (httpx) aborts the request, unblocking the worker thread, before the outer
+# wait_for gives up. Without this a stalled endpoint pins a shared pool thread.
+_HTTP_TIMEOUT_MS = 55_000
 # Aspect ratios the model accepts. The AI-op validator keeps a mirror of these
 # keys in `cappe/services/merlin_catalog.py:AI_ASPECT_RATIOS` (that module must
 # stay import-light — no google SDK — so it can't import this one).
@@ -43,7 +51,7 @@ class ImageGenError(Exception):
 def _generate_sync(prompt: str, aspect_ratio: str) -> tuple[bytes, str]:
     """Blocking Gemini image call → (image_bytes, mime). Raises ImageGenError
     if the response carries no inline image data."""
-    client = get_genai_client()
+    client = get_genai_client(http_options=genai_types.HttpOptions(timeout=_HTTP_TIMEOUT_MS))
     response = client.models.generate_content(
         model=IMAGE_MODEL,
         contents=prompt,
@@ -79,4 +87,11 @@ async def generate_image(prompt: str, *, prefix: str, aspect_ratio: str = DEFAUL
 
     ext = "png" if "png" in mime else "jpg"
     filename = f"gen_{secrets.token_hex(8)}.{ext}"
-    return await get_storage().upload_file(image_bytes, filename, prefix=prefix, content_type=mime)
+    # Upload is a distinct failure mode from generation — storage.upload_file
+    # raises a bare RuntimeError on S3 error, which would otherwise escape as a
+    # 500 and break the "never a bare error / never a 500" contract above.
+    try:
+        return await get_storage().upload_file(image_bytes, filename, prefix=prefix, content_type=mime)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("generated image upload failed: %s", exc)
+        raise ImageGenError("failed to store generated image") from exc
