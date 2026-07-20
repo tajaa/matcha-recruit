@@ -27,7 +27,6 @@
     "@tiptap/react": "^3.21.0",
     "@tiptap/starter-kit": "^3.21.0",
     "@types/react-simple-maps": "^3.0.6",
-    "@types/three": "^0.182.0",
     "@xyflow/react": "^12.10.1",
     "date-fns": "^4.1.0",
     "framer-motion": "^12.24.0",
@@ -43,8 +42,7 @@
     "react-simple-maps": "^3.0.0",
     "recharts": "^3.7.0",
     "rehype-raw": "^7.0.0",
-    "remark-gfm": "^4.0.1",
-    "three": "^0.182.0"
+    "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

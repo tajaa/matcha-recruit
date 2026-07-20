@@ -440,7 +440,7 @@ export default function DealFlow() {
                   <Loader2 className="h-3 w-3 animate-spin" /> Rendering…
                 </div>
               )}
-              <iframe title="proposal preview" srcDoc={previewHtml} className="h-[80vh] w-full bg-white" />
+              <iframe title="proposal preview" sandbox="" srcDoc={previewHtml} className="h-[80vh] w-full bg-white" />
             </div>
           ) : !validHeadcount ? (
             <p className="text-sm text-zinc-500">Enter a headcount to see pricing.</p>

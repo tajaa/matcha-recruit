@@ -238,7 +238,7 @@ export default function BrokerTab() {
                   <Loader2 className="h-3 w-3 animate-spin" /> Rendering…
                 </div>
               )}
-              <iframe title="broker preview" srcDoc={previewHtml} className="h-[80vh] w-full bg-white" />
+              <iframe title="broker preview" sandbox="" srcDoc={previewHtml} className="h-[80vh] w-full bg-white" />
             </div>
           ) : !blocks ? (
             <p className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" /> Loading template…</p>

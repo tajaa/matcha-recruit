@@ -1,6 +1,14 @@
+import { lazy, Suspense } from 'react'
 import { Link } from 'react-router-dom'
 
-import { RiskInsightsHero } from '../../../components/landing/RiskInsightsHero'
+// Decorative only, and it drags recharts (~100-150 KB gz, bundles d3) plus
+// framer-motion onto a public marketing page. Lazy so the copy above the fold
+// paints without waiting on a chart nobody navigated here to read.
+const RiskInsightsHero = lazy(() =>
+  import('../../../components/landing/RiskInsightsHero').then((m) => ({
+    default: m.RiskInsightsHero,
+  })),
+)
 import { BG, DISPLAY, GREEN, INK, MUTED } from './constants'
 
 // ── Hero — clean centered statement, with a compact live intake instrument ──
@@ -71,7 +79,11 @@ export function Hero({ onContactClick }: { onContactClick: () => void }) {
             className="relative rounded-lg sm:rounded-xl overflow-hidden ring-1 shadow-2xl"
             style={{ boxShadow: '0 40px 80px -25px rgba(31, 29, 26, 0.3)', borderColor: 'rgba(0,0,0,0.08)' }}
           >
-            <RiskInsightsHero />
+            {/* Reserve the height so the lazy chunk landing doesn't shove the
+                page down mid-read (CLS). */}
+            <Suspense fallback={<div className="min-h-[420px]" />}>
+              <RiskInsightsHero />
+            </Suspense>
           </div>
         </div>
       </div>

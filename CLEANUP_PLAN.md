@@ -367,3 +367,58 @@ Client first wave ≈ 4,200 LOC removed against ~700 LOC of new shared code; ful
 ## Doc drift noted during the audit
 
 Root `CLAUDE.md` says React 18; `client/package.json` pins `react ^19.2.0` (and vite.config's comment references React 19). Worth correcting when next editing that section.
+
+---
+
+## STATUS — Phases E, F, G (2026-07-20)
+
+### Phase E — partial
+- **E1** already landed in Phase B (`api/sse.ts` exports the shared pilot types).
+- **E3 done for the real outlier.** `pages/admin/Settings.tsx`'s 10 raw `fetch()` calls →
+  new `api/admin/platformSettings.ts` + `useAsync`. This was not just tidying: the page's
+  own `authHeaders()` read `matcha_access_token` from localStorage and so **bypassed
+  `api/client.ts`'s 401-refresh-and-retry**. With an aged-out access token every call on
+  the page failed, and because the page swallowed errors (`catch {}` / `if (res.ok)`) it
+  rendered as an empty settings screen. Error branches added where the UI had nowhere to
+  put a failure.
+  Still open: `components/admin/JurisdictionDetailPanel/useJurisdictionDetail.ts` (5 calls).
+- **E2 / E4 not started** — E2 is explicitly opportunistic ("when Phase C/D touches a
+  >450-LOC file"), E4 is marked deferred in `client/CLAUDE.md`.
+
+### Phase F — done except F6
+- **F1** `sandbox=""` on all 5 admin `srcDoc` preview iframes.
+- **F2** analysis-pilot chart SVG now renders as an `<img>` data-URI instead of
+  `dangerouslySetInnerHTML` — a passive image cannot script, so an escaping bug upstream
+  can't become XSS.
+- **F3** `CitationSources` gates `source_url` through `safeUrl`. **`safeUrl` moved to
+  `utils/safeUrl.ts`** — it lived in `work/components/panels/markdownToHtml.ts`, and a
+  `components/ui` file importing from `work/` would break the cross-app boundary rule in
+  `client/CLAUDE.md`. `markdownToHtml` re-exports it, so existing importers are unchanged.
+- **F4** `AppLayout` fails closed on `!me` (matches `RequireRole` / `PortalLayout`).
+- **F5 skipped deliberately** — the plan scopes `externalRedirect` adoption to D1's
+  `registerAndCheckout`, and D1 isn't built yet. Doing it now means touching ~15 sites
+  twice.
+- **F7** `three` + `@types/three` removed (zero import sites); lockfile synced.
+
+### Phase G — done except G5/G6
+- **G1** `ProductCarousel` (+ its 4 instruments) and `PricingContactModal` lazy on the apex.
+  The modal is **latched mounted after first open**, not `isOpen &&` — it owns an
+  `<AnimatePresence>` keyed on `isOpen`, so unmounting on close would cut its exit animation.
+- **G2** `RiskInsightsHero` (recharts + d3) lazy on the Lite marketing page, with a
+  reserved-height fallback so the late chunk doesn't cause layout shift.
+- **G3** Cappe's 12 `site/*` pages incl. the ~1.5k-LOC `PageEditor` are lazy behind one
+  `<Suspense>`; `/cappe/login` no longer downloads the site builder.
+- **G4** `ToastProvider` context value memoised.
+- **G5 / G6 not done** — G5 is marked deferred (needs a windowing dependency); G6 is a
+  ~2k-LOC marketing-page consolidation that wants its own PR.
+
+**Measured, not assumed:** eager entry chunk **463,885 → 432,772 bytes raw, 147,362 →
+140,106 gz (−7.3 KB gz)**. That is real but well short of the plan's "~60–110 KB gz"
+estimate for G1 — most of framer-motion was evidently not in the entry chunk to begin
+with, so the estimate was wrong, not the change. The Cappe (G3) and Lite (G2) wins are on
+their own route chunks and are not visible in this entry number.
+
+**Still owed:** the manual click-through. Everything since Phase B has been verified by
+tsc + tests + build only. F1–F4 in particular are visual/behavioural (do the deal previews
+still render sandboxed, do citation links still open, does a logged-out `/app/*` hit
+redirect) and no automated check in this repo covers them.

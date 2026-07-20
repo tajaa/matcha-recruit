@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { BookOpen, ChevronDown, ChevronRight, AlertTriangle, ExternalLink } from 'lucide-react'
+import { safeUrl } from '../../utils/safeUrl'
 
 /** A grounded-answer citation. Shape matches the server corpus record emitted by
  *  `services/hr_pilot_corpus.py` (HR Pilot threads today, employee Ask HR next) —
@@ -89,9 +90,12 @@ export default function CitationSources({
                     {c.source_label && (
                       <span className={`ml-1 ${metaText}`}>· {c.source_label}</span>
                     )}
-                    {c.source_url && (
+                    {/* The corpus `source_url` is server-side but model-adjacent,
+                        and MessageBubble already gates the same field — a
+                        `javascript:` href here would run in the admin's session. */}
+                    {safeUrl(c.source_url) && (
                       <a
-                        href={c.source_url}
+                        href={safeUrl(c.source_url)!}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="ml-1 inline-flex items-center text-emerald-500 hover:text-emerald-400"

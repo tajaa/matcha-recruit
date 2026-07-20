@@ -8,8 +8,16 @@ import { slugify, type FocusChip } from './shared'
 // --------------------------------------------------------------------------- //
 
 function Chart({ svg }: { svg: string }) {
-  // Server-generated, escaped inline SVG from our own backend.
-  return <div className="overflow-x-auto" dangerouslySetInnerHTML={{ __html: svg }} />
+  // Server-generated SVG, but its axis/series labels come from user-uploaded
+  // datasets, and inline SVG is a scripting context (`<script>`, `onload=`).
+  // Rendered as an <img> data-URI instead: identical pixels, but the SVG is a
+  // passive image — browsers refuse to run script in one, so no escaping bug
+  // upstream can become XSS here.
+  return (
+    <div className="overflow-x-auto">
+      <img src={`data:image/svg+xml;utf8,${encodeURIComponent(svg)}`} alt="" className="max-w-full" />
+    </div>
+  )
 }
 
 export function BlockView({ block, onFocus }: { block: MetricBlock; onFocus?: (chip: FocusChip) => void }) {

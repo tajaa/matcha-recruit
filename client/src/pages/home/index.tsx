@@ -1,7 +1,13 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import MarketingNav from "../landing/MarketingNav";
 import MarketingFooter from "../landing/MarketingFooter";
-import { PricingContactModal } from "../../components/marketing/PricingContactModal";
+// Second framer-motion importer on the apex route, and it renders nothing until
+// the visitor clicks a demo CTA — so it has no business in the eager chunk.
+const PricingContactModal = lazy(() =>
+  import("../../components/marketing/PricingContactModal").then((m) => ({
+    default: m.PricingContactModal,
+  })),
+);
 import { useSEO } from "../../hooks/useSEO";
 import { HOME_JSON_LD } from "./data";
 import { BONE, NOIR } from "./theme";
@@ -13,6 +19,12 @@ import { CTABand } from "./CTABand";
 
 export default function Home() {
   const [isPricingOpen, setIsPricingOpen] = useState(false);
+  // One-way latch: true from the first open onward. See the mount note below.
+  const [hasOpenedPricing, setHasOpenedPricing] = useState(false);
+  const openPricing = () => {
+    setHasOpenedPricing(true);
+    setIsPricingOpen(true);
+  };
 
   // Noir page chrome while mounted (see index.css) — overscroll bounce stays
   // noir instead of flashing white, and anchor scrolls glide.
@@ -37,19 +49,28 @@ export default function Home() {
       <PageStyle />
       <GrainOverlay />
 
-      <PricingContactModal
-        isOpen={isPricingOpen}
-        onClose={() => setIsPricingOpen(false)}
-      />
+      {/* Latched, not `isPricingOpen &&`: the modal owns an <AnimatePresence>
+          keyed on isOpen, so unmounting the moment it closes would cut its exit
+          animation. Mount on first open, then leave it mounted and let isOpen
+          drive it — the lazy chunk still never loads for a visitor who never
+          clicks a demo CTA, which is the whole point. */}
+      {hasOpenedPricing && (
+        <Suspense fallback={null}>
+          <PricingContactModal
+            isOpen={isPricingOpen}
+            onClose={() => setIsPricingOpen(false)}
+          />
+        </Suspense>
+      )}
       <MarketingNav
-        onDemoClick={() => setIsPricingOpen(true)}
+        onDemoClick={openPricing}
         transparentAtTop
       />
 
       <Hero />
       <ProductIndex />
       <Manifesto />
-      <CTABand onDemoClick={() => setIsPricingOpen(true)} />
+      <CTABand onDemoClick={openPricing} />
 
       <div style={{ backgroundColor: BONE, color: "var(--color-ivory-ink)" }}>
         <MarketingFooter newsletterVariant="matcha" />

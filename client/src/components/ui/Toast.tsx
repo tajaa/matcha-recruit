@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useState } from 'react'
+import { createContext, useCallback, useContext, useMemo, useState } from 'react'
 import { CheckCircle, AlertCircle, Info, X } from 'lucide-react'
 
 type ToastType = 'success' | 'error' | 'info'
@@ -45,6 +45,11 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     setToasts(prev => prev.filter(t => t.id !== id))
   }, [])
 
+  // `toast` is stable (useCallback with no deps), but a fresh `{ toast }` object
+  // each render invalidated the context for every consumer in the app — and this
+  // provider re-renders on every toast shown or dismissed.
+  const ctx = useMemo(() => ({ toast }), [toast])
+
   const icons = { success: CheckCircle, error: AlertCircle, info: Info }
   const colors = {
     success: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300',
@@ -53,7 +58,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <ToastContext.Provider value={{ toast }}>
+    <ToastContext.Provider value={ctx}>
       {children}
       <div className="fixed bottom-4 right-4 z-[9999] flex flex-col gap-2 pointer-events-none">
         {toasts.map(t => {

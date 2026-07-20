@@ -9,8 +9,8 @@ import { resolvePageHelp } from '../data/pageHelp'
 const PERSONAL_ALLOWED = new Set(['/app/settings'])
 
 export default function AppLayout({ sidebar, variant }: { sidebar: ReactNode; logoLabel?: string; variant?: 'admin' }) {
-  const { loading, isPersonal } = useMe()
-  const { pathname } = useLocation()
+  const { me, loading, isPersonal } = useMe()
+  const { pathname, search } = useLocation()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() =>
     localStorage.getItem('sidebar_collapsed') === 'true'
@@ -29,6 +29,15 @@ export default function AppLayout({ sidebar, variant }: { sidebar: ReactNode; lo
   useEffect(() => {
     localStorage.setItem('sidebar_collapsed', String(sidebarCollapsed))
   }, [sidebarCollapsed])
+
+  // Fail closed, matching RequireRole (/admin, /broker) and PortalLayout. Without
+  // this, a /app/* route with no <FeatureGate> mounts its whole shell for a
+  // logged-out visitor and only blanks once a fetch 401s. The backend is still
+  // the authz boundary — this is consistency, not the lock.
+  if (!loading && !me) {
+    const next = encodeURIComponent(pathname + search)
+    return <Navigate to={`/login?next=${next}`} replace />
+  }
 
   if (!loading && isPersonal && !PERSONAL_ALLOWED.has(pathname)) {
     return <Navigate to="/werk" replace />
