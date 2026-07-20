@@ -1,13 +1,15 @@
 // Handbook Pilot API client (Pro + Matcha-X). Sessions CRUD + grounded
 // generation chat (SSE) + draft review/edit + promotion into the real
-// handbooks / policies tables. The chat stream is a raw fetch (like
-// legalDefense.ts / brokerPilot.ts / IRCopilotPanel) since api/client.ts
-// doesn't stream; everything else goes through the typed `api` helper.
-import { api, authStreamHeaders } from '../client'
+// handbooks / policies tables. The chat stream goes through api/sse.ts (which
+// api/client.ts can't do); everything else uses the typed `api` helper.
+import { api } from '../client'
+import {
+  streamPilotChat as sharedStreamPilotChat,
+  type ChatHandlers as SharedChatHandlers,
+  type SessionStatus,
+} from '../sse'
 
-const BASE = import.meta.env.VITE_API_URL ?? '/api'
-
-export type SessionStatus = 'active' | 'closed'
+export type { SessionStatus } from '../sse'
 export type DraftKind = 'handbook_section' | 'policy'
 export type DraftStatus = 'pending' | 'promoted' | 'discarded'
 
@@ -210,65 +212,21 @@ export type ChatResult = {
   open_questions: string[]
   dropped_citations?: string[]
 }
-export type ChatHandlers = {
-  onStatus?: (message: string) => void
-  onResult?: (data: ChatResult) => void
-  onError?: (message: string) => void
-}
+export type ChatHandlers = SharedChatHandlers<ChatResult>
 
-// Grounded drafting turn over SSE — raw fetch + ReadableStream (api/client.ts
-// can't stream). Mirrors the brokerPilot.ts / legalDefense.ts pattern. Pass a
-// `signal` to abort the turn (e.g. when the user switches sessions mid-stream);
-// an aborted turn resolves quietly rather than surfacing an error.
+// Grounded drafting turn over SSE. Pass a `signal` to abort the turn (e.g. when
+// the user switches sessions mid-stream); an aborted turn resolves quietly
+// rather than surfacing an error.
 export async function streamChat(
   sessionId: string,
   message: string,
   h: ChatHandlers,
   signal?: AbortSignal,
 ): Promise<void> {
-  let res: Response
-  try {
-    res = await fetch(`${BASE}/handbook-pilot/pilot/sessions/${sessionId}/chat`, {
-      method: 'POST',
-      headers: await authStreamHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({ message }),
-      signal,
-    })
-  } catch (e) {
-    if (signal?.aborted) return
-    h.onError?.('Chat failed — please try again.')
-    return
-  }
-  if (!res.ok || !res.body) {
-    h.onError?.(`Chat failed (${res.status})`)
-    return
-  }
-  const reader = res.body.getReader()
-  const decoder = new TextDecoder()
-  let buf = ''
-  try {
-    while (true) {
-      const { value, done } = await reader.read()
-      if (done) break
-      buf += decoder.decode(value, { stream: true })
-      const events = buf.split('\n\n')
-      buf = events.pop() || ''
-      for (const ev of events) {
-        if (!ev.startsWith('data: ')) continue
-        const payload = ev.slice(6)
-        if (payload === '[DONE]') return
-        try {
-          const data = JSON.parse(payload)
-          if (data.type === 'status') h.onStatus?.(data.message)
-          else if (data.type === 'result') h.onResult?.(data.data)
-          else if (data.type === 'error') h.onError?.(data.message)
-        } catch {
-          /* ignore partial/non-JSON frames */
-        }
-      }
-    }
-  } catch (e) {
-    if (signal?.aborted) return
-    h.onError?.('Chat connection dropped — please try again.')
-  }
+  await sharedStreamPilotChat<ChatResult>(
+    `/handbook-pilot/pilot/sessions/${sessionId}/chat`,
+    { message },
+    h,
+    { signal },
+  )
 }

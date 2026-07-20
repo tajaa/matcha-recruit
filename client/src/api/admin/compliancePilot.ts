@@ -1,9 +1,11 @@
 // Compliance Pilot API client (admin). Sessions CRUD + grounded chat (SSE) +
-// action run/poll/approve. Chat is a raw fetch (api/client.ts can't stream);
-// everything else goes through the typed `api` helper.
-import { api, authStreamHeaders } from '../client'
-
-const BASE = import.meta.env.VITE_API_URL ?? '/api'
+// action run/poll/approve. Chat streams via api/sse.ts (api/client.ts can't
+// stream); everything else goes through the typed `api` helper.
+import { api } from '../client'
+import {
+  streamPilotChat as sharedStreamPilotChat,
+  type ChatHandlers as SharedChatHandlers,
+} from '../sse'
 
 export type PilotMode = 'research' | 'ask' | 'check_sources' | 'scope'
 
@@ -137,44 +139,14 @@ export const approveAction = (id: string, ids?: string[]) =>
              already_live: number; results: ApproveRowResult[] }>(
     `/admin/pilot/actions/${id}/approve`, ids ? { ids } : {})
 
-export type ChatHandlers = {
-  onStatus?: (msg: string) => void
-  onResult?: (data: { assistant_text: string; citations: Citation[];
-                      proposal: Proposal | null; proposal_errors?: string[] }) => void
-  onError?: (msg: string) => void
+export type ChatResult = {
+  assistant_text: string
+  citations: Citation[]
+  proposal: Proposal | null
+  proposal_errors?: string[]
 }
+export type ChatHandlers = SharedChatHandlers<ChatResult>
 
 export async function streamPilotChat(sessionId: string, message: string, h: ChatHandlers): Promise<void> {
-  const res = await fetch(`${BASE}/admin/pilot/sessions/${sessionId}/chat`, {
-    method: 'POST',
-    headers: await authStreamHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({ message }),
-  })
-  if (!res.ok || !res.body) {
-    h.onError?.(`Chat failed (${res.status})`)
-    return
-  }
-  const reader = res.body.getReader()
-  const decoder = new TextDecoder()
-  let buf = ''
-  while (true) {
-    const { value, done } = await reader.read()
-    if (done) break
-    buf += decoder.decode(value, { stream: true })
-    const events = buf.split('\n\n')
-    buf = events.pop() || ''
-    for (const ev of events) {
-      if (!ev.startsWith('data: ')) continue
-      const payload = ev.slice(6)
-      if (payload === '[DONE]') return
-      try {
-        const data = JSON.parse(payload)
-        if (data.type === 'status') h.onStatus?.(data.message)
-        else if (data.type === 'result') h.onResult?.(data.data)
-        else if (data.type === 'error') h.onError?.(data.message)
-      } catch {
-        /* ignore partial/non-JSON frames */
-      }
-    }
-  }
+  await sharedStreamPilotChat<ChatResult>(`/admin/pilot/sessions/${sessionId}/chat`, { message }, h)
 }
