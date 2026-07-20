@@ -455,7 +455,7 @@ async def load_incident_state(
     )
     messages = await conn.fetch(
         "SELECT id, role, message_type, content, metadata, created_by, created_at "
-        "FROM ir_incident_ai_messages WHERE incident_id = $1 ORDER BY created_at",
+        "FROM ir_incident_ai_messages WHERE incident_id = $1 ORDER BY created_at, id",
         incident_id,
     )
     incident_dict = dict(incident)
@@ -990,11 +990,19 @@ async def append_message(
     created_by: Optional[UUID] = None,
 ) -> dict[str, Any]:
     """Insert a message row and return it as a dict."""
+    # created_at is set explicitly to clock_timestamp() rather than leaning on
+    # the column's NOW() default: NOW() is transaction_timestamp(), constant for
+    # a whole transaction, so a round persisted inside one transaction (the
+    # resume-after-info-request path) gave every row an identical timestamp.
+    # Reads order by created_at, and _extract_current_cards resets its card list
+    # on the assistant text row — with a tie, the cards could sort first and the
+    # entire round's cards vanished from the panel. clock_timestamp() advances
+    # within the transaction, so insertion order is recoverable.
     row = await conn.fetchrow(
         """
         INSERT INTO ir_incident_ai_messages
-          (incident_id, role, message_type, content, metadata, created_by)
-        VALUES ($1, $2, $3, $4, $5::jsonb, $6)
+          (incident_id, role, message_type, content, metadata, created_by, created_at)
+        VALUES ($1, $2, $3, $4, $5::jsonb, $6, clock_timestamp())
         RETURNING id, role, message_type, content, metadata, created_by, created_at
         """,
         incident_id, role, message_type, content,
@@ -1067,12 +1075,26 @@ async def persist_assistant_round(
         ))
 
     assistant_summary = guidance_payload.get("summary") or ""
+    raw_cards = guidance_payload.get("cards") or []
+
+    # A round that produced nothing is a failure, not a state transition.
+    # generate_guidance swallows Gemini timeouts/parse errors into payload={},
+    # which lands here as empty summary + no cards. Falling through would write
+    # a blank assistant row AND run the supersede sweep below, silently wiping
+    # every open recommendation the admin still had to act on. Persist the user's
+    # message (it was really said) and leave the rest of the thread untouched.
+    if not assistant_summary.strip() and not raw_cards and not (guidance_payload.get("open_questions") or []):
+        logger.warning(
+            "IR copilot round produced no summary/cards for incident %s — "
+            "leaving existing cards intact", incident_id,
+        )
+        return inserted
 
     last_assistant_text = await conn.fetchval(
         """
         SELECT content FROM ir_incident_ai_messages
         WHERE incident_id = $1 AND role = 'assistant' AND message_type = 'text'
-        ORDER BY created_at DESC
+        ORDER BY created_at DESC, id DESC
         LIMIT 1
         """,
         incident_id,
@@ -1095,37 +1117,13 @@ async def persist_assistant_round(
             },
         ))
 
-    # Supersede every prior unaccepted/non-skipped card row before persisting
-    # the new round's cards. Without this, _extract_current_cards keeps
-    # surfacing prior-round cards alongside the new ones whenever the
-    # assistant-text suppression path fires (no fresh text → no reset point),
-    # producing the "3× same card" bug.
-    await conn.execute(
-        """
-        UPDATE ir_incident_ai_messages
-        SET metadata = jsonb_set(
-                COALESCE(metadata, '{}'::jsonb),
-                '{superseded}',
-                'true'::jsonb,
-                true
-            )
-        WHERE incident_id = $1
-          AND role = 'assistant'
-          AND message_type = 'card'
-          AND COALESCE((metadata->>'accepted')::boolean, false) IS NOT TRUE
-          AND COALESCE((metadata->>'superseded')::boolean, false) IS NOT TRUE
-          AND COALESCE((metadata->>'skipped')::boolean, false) IS NOT TRUE
-        """,
-        incident_id,
-    )
-
     # Dedupe within the new round: if the AI emits two cards with the same id
     # OR the same (action.type, field_name, field_value) signature, keep only
     # the first. Belt-and-suspenders against AI repeats.
     seen_ids: set[str] = set()
     seen_signatures: set[tuple] = set()
     deduped_cards: list[dict[str, Any]] = []
-    for card in guidance_payload.get("cards") or []:
+    for card in raw_cards:
         if not isinstance(card, dict):
             continue
         cid = card.get("id")
@@ -1147,6 +1145,40 @@ async def persist_assistant_round(
         if any(sig):
             seen_signatures.add(sig)
         deduped_cards.append(card)
+
+    # Supersede every prior unaccepted/non-skipped card row before persisting
+    # the new round's cards. Without this, _extract_current_cards keeps
+    # surfacing prior-round cards alongside the new ones whenever the
+    # assistant-text suppression path fires (no fresh text → no reset point),
+    # producing the "3× same card" bug.
+    #
+    # Deliberately NOT gated on the new round having cards. Gating it looks like
+    # it would protect a summary-only round's predecessors, but it does not:
+    # _extract_current_cards resets its accumulator on *any* assistant text row,
+    # so those cards disappear from the panel regardless. Skipping the sweep only
+    # leaves them un-superseded in the DB while invisible in the UI — and the
+    # _close_incident_via_copilot idempotency probes then find those stale rows
+    # and hand back a message_id for a card the user cannot see. The round that
+    # genuinely must not clear anything (a failed/empty payload) is already
+    # handled by the early return above, which writes no text row at all.
+    await conn.execute(
+        """
+        UPDATE ir_incident_ai_messages
+        SET metadata = jsonb_set(
+                COALESCE(metadata, '{}'::jsonb),
+                '{superseded}',
+                'true'::jsonb,
+                true
+            )
+        WHERE incident_id = $1
+          AND role = 'assistant'
+          AND message_type = 'card'
+          AND COALESCE((metadata->>'accepted')::boolean, false) IS NOT TRUE
+          AND COALESCE((metadata->>'superseded')::boolean, false) IS NOT TRUE
+          AND COALESCE((metadata->>'skipped')::boolean, false) IS NOT TRUE
+        """,
+        incident_id,
+    )
 
     for card in deduped_cards:
         inserted.append(await append_message(

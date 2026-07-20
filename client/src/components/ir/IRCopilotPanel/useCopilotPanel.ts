@@ -20,6 +20,7 @@ export function useCopilotPanel({
   const [busyStage, setBusyStage] = useState<string | null>(null)
   const [input, setInput] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [loadFailed, setLoadFailed] = useState(false)
   const [closingIncident, setClosingIncident] = useState(false)
   const [requestInfoOpen, setRequestInfoOpen] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -27,22 +28,63 @@ export function useCopilotPanel({
   const { requests: infoRequests, refresh: refreshInfoRequests, resend: resendInfoRequest, revoke: revokeInfoRequest } =
     useIRInfoRequests(incidentId)
 
+  // Monotonic request id. Transcript fetches come from five places (mount, the
+  // 15s poll, post-stream, post-accept, post-skip) and they overtake each
+  // other: a slow poll issued before a round can land *after* that round's
+  // refresh and repaint the pre-turn transcript, making the new turn visibly
+  // disappear until the next poll. Only the newest request may write state.
+  // Same pattern as hooks/ir/useIRIncident.ts.
+  const reqId = useRef(0)
+  useEffect(() => () => { reqId.current++ }, [])
+
   // `silent` suppresses the error banner: a background poll that fails is not
   // something the admin asked for, so it must not paint an error over a
   // transcript that is still perfectly readable. The next poll retries anyway.
   const refresh = useCallback(async (opts?: { silent?: boolean }) => {
+    const id = ++reqId.current
     try {
       const t = await api.get<Transcript>(`/ir/incidents/${incidentId}/copilot`)
+      if (id !== reqId.current) return
       setMessages(t.messages)
       setCurrentCards(t.current_cards)
       setOpenQuestions(t.open_questions)
       setProgress(t.progress ?? null)
       setEvidence(t.evidence ?? null)
+      setLoadFailed(false)
     } catch (e) {
+      if (id !== reqId.current) return
+      // Tracked separately from `error` so the cold-start effect can tell "this
+      // incident really has no transcript" from "we never managed to load it".
+      setLoadFailed(true)
       if (!opts?.silent) setError(e instanceof Error ? e.message : 'Failed to load copilot')
     } finally {
-      setLoading(false)
+      if (id === reqId.current) setLoading(false)
     }
+  }, [incidentId])
+
+  // Switching incidents must clear the previous incident's thread synchronously.
+  // Leaving it up meant the cold-start effect below saw a non-empty `messages`
+  // for the *new* incident and skipped, so an incident with no transcript opened
+  // to a dead panel. Bumping reqId also invalidates any refresh still in flight
+  // for the old incident so it can't paint into the new one.
+  // Every slice belongs here — a leftover busyCardMessageId paints a spinner on
+  // a card id that doesn't exist in the new incident, and a leftover `input`
+  // carries a half-typed draft across incidents.
+  useEffect(() => {
+    reqId.current++
+    setMessages([])
+    setCurrentCards([])
+    setOpenQuestions([])
+    setProgress(null)
+    setEvidence(null)
+    setError(null)
+    setLoadFailed(false)
+    setBusyCardMessageId(null)
+    setBusyStage(null)
+    setClosingIncident(false)
+    setRequestInfoOpen(false)
+    setInput('')
+    setLoading(true)
   }, [incidentId])
 
   useEffect(() => {
@@ -90,8 +132,10 @@ export function useCopilotPanel({
     bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
   }, [messages.length, currentCards.length])
 
-  // Stream a guidance round (cold start or follow-up message)
-  const streamRound = useCallback(async (userMessage: string | null) => {
+  // Stream a guidance round (cold start or follow-up message).
+  // Returns whether the round landed — errors are handled here (banner) rather
+  // than thrown, so the cold-start caller has no other way to know it failed.
+  const streamRound = useCallback(async (userMessage: string | null): Promise<boolean> => {
     setStreaming(true)
     setError(null)
     try {
@@ -163,24 +207,48 @@ export function useCopilotPanel({
       }
       // After the stream, fetch authoritative transcript so we have real DB IDs.
       await refresh()
+      return true
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Stream failed')
+      return false
     } finally {
       setStreaming(false)
     }
   }, [incidentId, refresh])
 
-  // Cold start once if no prior messages.
+  // Cold start once if no prior messages. The ref — not the `streaming` state —
+  // is what makes this once-per-incident: `streaming` is a render-time value, so
+  // a second run of this effect before setStreaming(true) commits would fire a
+  // duplicate LLM round (StrictMode double-invoke, or any remount of the panel).
+  const coldStartedRef = useRef<string | null>(null)
   useEffect(() => {
     if (loading) return
+    // An empty transcript because the fetch FAILED is not an incident that needs
+    // cold-starting — kicking off a billed LLM round on a network blip was the
+    // spurious-trigger half of this bug.
+    if (loadFailed) return
+    // A closed incident has nothing left to advise on. The poll effect already
+    // treats closed as terminal; before the incident-switch reset above this was
+    // masked by stale messages happening to be non-empty.
+    if (incidentIsClosed) return
+    if (coldStartedRef.current === incidentId) return
     if (messages.length === 0 && currentCards.length === 0 && !streaming) {
-      void streamRound(null)
+      const startedFor = incidentId
+      coldStartedRef.current = startedFor
+      // Clear the marker if the round never landed, or a transient 503 would
+      // leave this incident permanently without a cold start — IRDetail no
+      // longer remounts the panel, so nothing else would retry it. Guarded on
+      // the id so a late failure from the previous incident can't unlock the
+      // current one into a duplicate round.
+      void streamRound(null).then((ok) => {
+        if (!ok && coldStartedRef.current === startedFor) coldStartedRef.current = null
+      })
     }
     // streamRound is intentionally omitted (it would re-fire every render);
     // incidentId IS included so switching incidents cold-starts the new one
     // instead of closing over the previous incident's streamRound.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, incidentId])
+  }, [loading, loadFailed, incidentIsClosed, incidentId])
 
   async function handleSubmitInput() {
     const text = input.trim()

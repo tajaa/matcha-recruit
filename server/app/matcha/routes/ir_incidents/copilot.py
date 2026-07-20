@@ -153,7 +153,7 @@ async def get_copilot_transcript(
         )
         rows = await conn.fetch(
             "SELECT id, role, message_type, content, metadata, created_by, created_at "
-            "FROM ir_incident_ai_messages WHERE incident_id = $1 ORDER BY created_at",
+            "FROM ir_incident_ai_messages WHERE incident_id = $1 ORDER BY created_at, id",
             incident_id,
         )
         # Single round trip for the evidence-tracker counts — cheaper than one
@@ -851,7 +851,7 @@ async def _close_incident_via_copilot(
               AND COALESCE((metadata->>'accepted')::boolean, FALSE) = FALSE
               AND COALESCE((metadata->>'superseded')::boolean, FALSE) = FALSE
               AND COALESCE((metadata->>'skipped')::boolean, FALSE) = FALSE
-            ORDER BY created_at DESC
+            ORDER BY created_at DESC, id DESC
             LIMIT 1
             """,
             incident_id, card["id"],
@@ -893,7 +893,7 @@ async def _close_incident_via_copilot(
               AND COALESCE((metadata->>'accepted')::boolean, FALSE) = FALSE
               AND COALESCE((metadata->>'superseded')::boolean, FALSE) = FALSE
               AND COALESCE((metadata->>'skipped')::boolean, FALSE) = FALSE
-            ORDER BY created_at DESC
+            ORDER BY created_at DESC, id DESC
             LIMIT 1
             """,
             incident_id, card["id"],

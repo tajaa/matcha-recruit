@@ -147,12 +147,29 @@ export default function IRDetail() {
       .catch(() => {})
   }
 
-  if (loading) return <p className="text-sm text-zinc-500">Loading incident...</p>
-  if (error) return <p className="text-sm text-red-400">{error}</p>
+  // Only blank the page on the FIRST load. `refetch` (passed to the copilot
+  // panel as onIncidentChanged) sets loading=true, so an unqualified check here
+  // tore down the whole page — and with it the copilot panel — every time an
+  // accepted card mutated a field. That destroyed the in-memory thread and let
+  // the panel's cold-start effect fire a fresh LLM round on remount.
+  if (loading && !incident) return <p className="text-sm text-zinc-500">Loading incident...</p>
+  // Same reasoning: a failed *refetch* must not tear the page down around a
+  // still-usable incident. Header data goes stale; the thread survives.
+  if (error && !incident) return <p className="text-sm text-red-400">{error}</p>
   if (!incident) return <p className="text-sm text-zinc-500">Incident not found.</p>
 
   return (
     <div className="flex h-[calc(100vh-4rem)] flex-col overflow-hidden rounded-xl border border-white/[0.06] bg-zinc-950">
+      {/* A refetch that failed while an incident is already on screen no longer
+          replaces the page (that unmounted the copilot thread), so it needs a
+          non-blocking surface here or it would be swallowed entirely — the
+          header would silently keep showing pre-mutation values. */}
+      {error && (
+        <div className="shrink-0 border-b border-amber-500/20 bg-amber-500/10 px-5 py-2 text-xs text-amber-300">
+          Couldn't refresh this incident — details below may be out of date. ({error})
+        </div>
+      )}
+
       {/* Header */}
       <div className="shrink-0 border-b border-white/[0.06] px-5 pt-4 pb-3">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
