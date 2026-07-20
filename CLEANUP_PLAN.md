@@ -711,6 +711,24 @@ the `details or {} → NULL` rule match the old bodies exactly.
   7-column one. Converting them needs per-site mapping and full-suite verification, which the
   local env can't run (missing `audioop`/`segno`). Left for a DB-capable follow-up.
 
+### L5 — ir_incidents/_shared.py card split (DONE)
+The venv (`server/venv`) has the deps the system python3 lacked (`audioop`/`segno`), so the
+server **boots and the full test suite runs** — which unblocked this. New
+`ir_incidents/_cards.py` (477 lines) holds the ~15 pure `build_*_card` factories +
+`compose_root_cause_text` + their constants (`OSHA_INJURY_TYPES/_LABELS`, `OSHA_EMERGENCY_*`,
+`ROOT_CAUSE_*`, `ROOT_CAUSE_INTERVIEW_STEPS`). `_shared.py` drops 1878 → 1475 lines and
+**re-exports every moved name**, so `copilot.py` and the DB-backed dispatchers that stay in
+`_shared` (`next_case_step`, `_persist_osha_emergency_alert`) are untouched. `_cards` imports
+nothing from `_shared` (pulls the two `PRIVACY_CASE_*` constants straight from
+`osha_privacy`), so the re-export is a clean one-way `_shared → _cards` with no cycle.
+- Extracted by AST (nodes + leading comments), not line ranges. **One miss caught by the test
+  suite**: `compose_root_cause_text`/`build_root_cause_text_card` also read
+  `ROOT_CAUSE_INTERVIEW_STEPS`, which wasn't in the first move list — 8 root-cause tests failed
+  until it moved too. This is exactly why the split needs a bootable test run, not just compile.
+
+**Verification:** `venv` py_compile clean; **446 IR + copilot-smoke tests pass** (0 failures);
+app boots at **1858 routes, unchanged** before/after; `copilot`/`crud`/`osha` all import clean.
+
 **NOT done — L2's HTML-builder dedup.** The `REGISTER_PDF_CSS` / `esc()` / `stat_cells()`
 consolidation (the ×8 `_esc()` redefinition and the shared register `<style>` block) is a
 cosmetic dedup of the HTML *builders*, not the render path — its verification is "render one
