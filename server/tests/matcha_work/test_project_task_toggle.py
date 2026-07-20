@@ -46,6 +46,7 @@ class _FakeConn:
         self._current = current
         self._returning = returning
         self.update_args: tuple = ()
+        self.executed: list = []
 
     async def fetchrow(self, query, *args):
         if "SELECT board_column, status" in query:
@@ -55,11 +56,38 @@ class _FakeConn:
             return self._returning
         raise AssertionError(f"Unexpected query: {query}")
 
+    async def execute(self, query, *args):
+        # `_log_task_history` writes via execute() and swallows its own
+        # exceptions. Without this the history path silently never ran under
+        # test (it logged "no attribute 'execute'" as a WARNING and moved on).
+        self.executed.append((query, args))
+        return "INSERT 0 1"
+
 
 class _FakeCtx:
     def __init__(self, conn): self.conn = conn
     async def __aenter__(self): return self.conn
     async def __aexit__(self, *a): return False
+
+
+def _make_current(*, board_column: str, status: str) -> dict:
+    """Shape that mirrors the pre-UPDATE SELECT in update_project_task.
+
+    Must stay in sync with the column list at
+    `project_task_service.update_project_task` (SELECT board_column, status,
+    assigned_to, company_id, description, progress_note) — the task-history
+    and column-transition notification blocks read every one of these off the
+    row, so a short fixture raises KeyError *after* the UPDATE and makes every
+    later assertion unreachable.
+    """
+    return {
+        "board_column": board_column,
+        "status": status,
+        "assigned_to": None,
+        "company_id": uuid4(),
+        "description": None,
+        "progress_note": None,
+    }
 
 
 def _make_returning(*, board_column: str, status: str) -> dict:
@@ -91,7 +119,7 @@ async def test_toggle_to_done_sends_completed_status_and_done_column(monkeypatch
     from app.matcha.services import project_task_service as svc
 
     conn = _FakeConn(
-        current={"board_column": "todo", "status": "pending"},
+        current=_make_current(board_column="todo", status="pending"),
         returning=_make_returning(board_column="done", status="completed"),
     )
     monkeypatch.setattr(svc, "get_connection", lambda: _FakeCtx(conn))
@@ -115,7 +143,7 @@ async def test_toggle_to_done_with_only_status_in_patch(monkeypatch):
     from app.matcha.services import project_task_service as svc
 
     conn = _FakeConn(
-        current={"board_column": "todo", "status": "pending"},
+        current=_make_current(board_column="todo", status="pending"),
         returning=_make_returning(board_column="done", status="completed"),
     )
     monkeypatch.setattr(svc, "get_connection", lambda: _FakeCtx(conn))
@@ -136,7 +164,7 @@ async def test_toggle_to_pending_sends_todo_column(monkeypatch):
     from app.matcha.services import project_task_service as svc
 
     conn = _FakeConn(
-        current={"board_column": "done", "status": "completed"},
+        current=_make_current(board_column="done", status="completed"),
         returning=_make_returning(board_column="todo", status="pending"),
     )
     monkeypatch.setattr(svc, "get_connection", lambda: _FakeCtx(conn))
@@ -158,7 +186,7 @@ async def test_drag_to_done_only_board_column_in_patch(monkeypatch):
     from app.matcha.services import project_task_service as svc
 
     conn = _FakeConn(
-        current={"board_column": "in_progress", "status": "pending"},
+        current=_make_current(board_column="in_progress", status="pending"),
         returning=_make_returning(board_column="done", status="completed"),
     )
     monkeypatch.setattr(svc, "get_connection", lambda: _FakeCtx(conn))
@@ -181,7 +209,7 @@ async def test_response_shape_matches_swift_decoder(monkeypatch):
     from app.matcha.services import project_task_service as svc
 
     conn = _FakeConn(
-        current={"board_column": "todo", "status": "pending"},
+        current=_make_current(board_column="todo", status="pending"),
         returning=_make_returning(board_column="done", status="completed"),
     )
     monkeypatch.setattr(svc, "get_connection", lambda: _FakeCtx(conn))
@@ -214,7 +242,7 @@ async def test_invalid_board_column_raises_valueerror(monkeypatch):
     from app.matcha.services import project_task_service as svc
 
     conn = _FakeConn(
-        current={"board_column": "todo", "status": "pending"},
+        current=_make_current(board_column="todo", status="pending"),
         returning=_make_returning(board_column="todo", status="pending"),
     )
     monkeypatch.setattr(svc, "get_connection", lambda: _FakeCtx(conn))
