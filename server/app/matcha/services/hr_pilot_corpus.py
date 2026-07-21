@@ -43,7 +43,7 @@ only `gather_hr_pilot_grounding` touches the DB.
 import logging
 import re
 
-from .handbook_pilot import _slug, build_corpus
+from .handbook_pilot import _slug, _floor_records, build_corpus
 
 logger = logging.getLogger(__name__)
 
@@ -373,68 +373,11 @@ async def _fetch_incidents(conn, company_id) -> list[dict]:
 # Corpus build — pure. Extends handbook_pilot's five source groups with two.
 # --------------------------------------------------------------------------- #
 
-def _floor_records(reasoning_chains: list | None) -> list[dict]:
-    """One record per GOVERNING compliance requirement, deduped across
-    locations. `reasoning_chains` is the structured list from
-    `matcha_work_node.build_compliance_context`.
-
-    The cid keys on what makes the obligation unique — governing level,
-    jurisdiction, category — never on the location that surfaced it, so the same
-    state rule reached from three offices is one citable record whose
-    `applies_to` names all three."""
-    by_cid: dict[str, dict] = {}
-    for chain in reasoning_chains or []:
-        if not isinstance(chain, dict):
-            continue
-        label = str(chain.get("location_label") or "").strip()
-        for cat in chain.get("categories") or []:
-            if not isinstance(cat, dict) or not cat.get("category"):
-                continue
-            category = str(cat["category"])
-            level = str(cat.get("governing_level") or "unknown")
-
-            governing = next(
-                (lv for lv in (cat.get("all_levels") or [])
-                 if isinstance(lv, dict) and lv.get("is_governing")),
-                None,
-            )
-            juris = str((governing or {}).get("jurisdiction_name") or level)
-            cid = f"floor:{_slug(level)}-{_slug(juris)}-{_slug(category)}"
-
-            existing = by_cid.get(cid)
-            if existing is not None:
-                # Same obligation reached from another location — widen the
-                # scope note, don't mint a second cid.
-                if label and label not in existing["applies_to"]:
-                    existing["applies_to"].append(label)
-                continue
-
-            title = str((governing or {}).get("title") or _hum(category))
-            bits = [title]
-            value = (governing or {}).get("current_value")
-            if value:
-                bits.append(f"requirement: {value}")
-            if cat.get("precedence_type"):
-                bits.append(f"precedence {cat['precedence_type']}")
-            citation = cat.get("legal_citation") or (governing or {}).get("statute_citation")
-            if citation:
-                bits.append(f"cite {citation}")
-            if cat.get("reasoning_text"):
-                bits.append(str(cat["reasoning_text"])[:280])
-
-            by_cid[cid] = {
-                "cid": cid,
-                "ref": f"{_hum(level)} · {juris}: {title}",
-                "summary": " — ".join(bits) + ".",
-                "when": str((governing or {}).get("effective_date") or "current"),
-                # Structured fields so the client can group without parsing `ref`.
-                "category": category,
-                "governing_level": level,
-                "jurisdiction": juris,
-                "source_url": (governing or {}).get("source_url"),
-                "applies_to": [label] if label else [],
-            }
-    return list(by_cid.values())
+# NOTE: `_floor_records` now lives in `handbook_pilot` and is imported at the top
+# of this module. It moved DOWN the dependency arrow (this module already imports
+# handbook_pilot; the reverse would be circular) once Handbook Pilot needed the
+# same precedence-resolved floor. It stays importable from here — callers and
+# tests that reach for `hr_pilot_corpus._floor_records` are unaffected.
 
 
 def _ladder_records() -> list[dict]:
@@ -620,13 +563,16 @@ def build_hr_pilot_corpus(grounding: dict, reasoning_chains: list | None = None)
     nothing there" (`[]`) — an absent module gets a note telling the model to
     say so, because silence would otherwise read as "nobody is scheduled"."""
     grounding = grounding or {}
+    if reasoning_chains is not None:
+        # `build_corpus` mints the compliance_floor group itself now, off
+        # `grounding["reasoning_chains"]`. The explicit parameter stays for the
+        # existing callers (and their tests) and simply feeds that key; minting
+        # the group again here would render every floor record twice in the
+        # prompt block (the index dedupes on cid, the prompt does not).
+        grounding = {**grounding, "reasoning_chains": reasoning_chains}
     corpus = build_corpus(grounding)
     sources = corpus["sources"]
 
-    sources["compliance_floor"] = {
-        "label": "Governing compliance requirements",
-        "records": _floor_records(reasoning_chains),
-    }
     sources["discipline_ladder"] = {
         "label": "Progressive discipline ladder",
         "records": _ladder_records(),
@@ -652,12 +598,9 @@ def build_hr_pilot_corpus(grounding: dict, reasoning_chains: list | None = None)
         for record in source["records"]:
             index[record["cid"]] = {**record, "source": key, "source_label": source["label"]}
 
+    # The "no compliance floor" note now comes from `build_corpus` with the
+    # group itself — appending it again here would state it twice.
     notes = list(corpus.get("notes") or [])
-    if not sources["compliance_floor"]["records"]:
-        notes.append(
-            "No precedence-resolved compliance floor available — answers ground on "
-            "the flat per-state requirement list only."
-        )
 
     # Module-off notes. Absence of data and absence of the module are different
     # answers to "who's on Saturday?" — one is "nobody", the other is "this

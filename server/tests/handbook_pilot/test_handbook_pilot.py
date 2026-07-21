@@ -487,3 +487,191 @@ def test_dedupe_matched_keeps_first_per_key():
     ])
     assert len(matched) == 1
     assert matched[0]["state"] == "CA" and matched[0]["matched_section_title"] == "Sec1"
+
+
+# --- compliance floor (C1) ----------------------------------------------------
+
+def _chain(location_label="Main Office", category="meal_rest_breaks"):
+    """Shape of one `matcha_work_node.build_compliance_context` reasoning chain."""
+    return {
+        "location_id": "loc-1",
+        "location_label": location_label,
+        "categories": [{
+            "category": category,
+            "governing_level": "state",
+            "precedence_type": "floor",
+            "legal_citation": "Cal. Lab. Code § 512",
+            "reasoning_text": "State floor exceeds the federal baseline.",
+            "all_levels": [
+                {"jurisdiction_level": "federal", "jurisdiction_name": "Federal",
+                 "title": "No federal meal requirement", "is_governing": False},
+                {"jurisdiction_level": "state", "jurisdiction_name": "California",
+                 "title": "Meal and rest breaks", "current_value": "30 min unpaid after 5 hrs",
+                 "is_governing": True, "statute_citation": "Cal. Lab. Code § 512",
+                 "effective_date": "2024-01-01"},
+            ],
+        }],
+    }
+
+
+def test_corpus_carries_the_governing_floor_alongside_the_flat_law_list():
+    corpus = hp.build_corpus({**_grounding(), "reasoning_chains": [_chain()]})
+    floor = [c for c in corpus["index"] if c.startswith("floor:")]
+    assert floor, "expected a floor: record"
+    assert corpus["index"][floor[0]]["source"] == "compliance_floor"
+    # the flat per-state list is still there — the floor supplements it
+    assert any(c.startswith("law:") for c in corpus["index"])
+    assert not any("No precedence-resolved compliance floor" in n for n in corpus["notes"])
+
+
+def test_no_chains_says_so_rather_than_reading_as_resolved():
+    corpus = hp.build_corpus(_grounding())
+    assert corpus["sources"]["compliance_floor"]["records"] == []
+    assert any("No precedence-resolved compliance floor" in n for n in corpus["notes"])
+
+
+def test_floor_records_dedupe_across_locations():
+    # same state rule reached from three offices = one citable record naming all
+    corpus = hp.build_corpus({"reasoning_chains": [
+        _chain("Main Office"), _chain("Warehouse"), _chain("Satellite")]})
+    recs = corpus["sources"]["compliance_floor"]["records"]
+    assert len(recs) == 1
+    assert recs[0]["applies_to"] == ["Main Office", "Warehouse", "Satellite"]
+
+
+def test_hr_pilot_corpus_mints_the_floor_exactly_once():
+    """`build_hr_pilot_corpus` delegates the shared groups to `build_corpus`,
+    which now owns compliance_floor. Minting it again there would render every
+    floor record twice in the prompt (the index dedupes on cid; the prompt does
+    not) and state the no-floor note twice."""
+    from app.matcha.services.hr_pilot_corpus import build_hr_pilot_corpus
+
+    corpus = build_hr_pilot_corpus(_grounding(), [_chain()])
+    groups = [k for k in corpus["sources"] if k == "compliance_floor"]
+    assert groups == ["compliance_floor"]
+    assert len(corpus["sources"]["compliance_floor"]["records"]) == 1
+
+    empty = build_hr_pilot_corpus(_grounding(), [])
+    notes = [n for n in empty["notes"] if "No precedence-resolved compliance floor" in n]
+    assert len(notes) == 1
+
+
+def test_hr_pilot_corpus_still_accepts_chains_only_via_the_parameter():
+    """Back-compat: the caller in matcha_work_mode_contexts passes chains as a
+    positional argument, not inside grounding."""
+    from app.matcha.services.hr_pilot_corpus import build_hr_pilot_corpus
+
+    corpus = build_hr_pilot_corpus({"scopes": [], "industry": "general"}, [_chain()])
+    assert corpus["sources"]["compliance_floor"]["records"]
+
+
+# --- full-text drafting (C2) --------------------------------------------------
+
+def test_full_text_map_caps_each_record_and_marks_the_truncation():
+    long_body = "x" * (hp._FULL_TEXT_PER_RECORD + 500)
+    grounding = {"sections": [{"id": "s1", "content": long_body}],
+                 "policies": [{"id": "pol1", "content": "short policy body"}]}
+    full_text, overflow = hp._full_text_map(grounding)
+    assert overflow == 0
+    assert full_text["policy:pol1"] == "short policy body"
+    assert full_text["handbook:s1"].startswith("x" * 100)
+    assert "(body truncated)" in full_text["handbook:s1"]
+    assert len(full_text["handbook:s1"]) <= hp._FULL_TEXT_PER_RECORD + 40
+
+
+def test_full_text_budget_overflows_to_summaries_with_a_note():
+    body = "y" * hp._FULL_TEXT_PER_RECORD
+    n = hp._FULL_TEXT_BUDGET // hp._FULL_TEXT_PER_RECORD + 3
+    grounding = {**_grounding(),
+                 "sections": [{"id": f"s{i}", "title": f"S{i}", "content": body}
+                              for i in range(n)],
+                 "policies": []}
+    corpus = hp.build_corpus(grounding)
+    assert len(corpus["full_text"]) < n                      # overflow dropped
+    assert any("full-text budget" in note for note in corpus["notes"])
+    # every section is still CITABLE — only its body fell back to the summary
+    assert all(f"handbook:s{i}" in corpus["index"] for i in range(n))
+
+
+def test_prompt_renders_full_bodies_and_falls_back_to_summaries():
+    grounding = {**_grounding(),
+                 "sections": [{"id": "s1", "title": "Attendance",
+                               "content": "Full attendance policy body. " * 20}],
+                 "policies": [{"id": "pol1", "title": "PTO Policy", "category": "hr",
+                               "status": "active", "content": "PTO accrues at 1.5 days/month."}]}
+    corpus = hp.build_corpus(grounding)
+    text = hp._corpus_text(corpus)
+    assert "PTO accrues at 1.5 days/month." in text          # policy body, absent before
+    assert "Full attendance policy body." in text
+    # a record with no body still renders its index summary
+    assert "Acme Inc" in text
+
+
+def test_full_text_is_not_folded_into_the_stored_records():
+    """Records ride in message/draft metadata — they stay index-sized."""
+    grounding = {**_grounding(),
+                 "sections": [{"id": "s1", "title": "Attendance", "content": "z" * 5_000}]}
+    corpus = hp.build_corpus(grounding)
+    rec = corpus["index"]["handbook:s1"]
+    assert len(rec["summary"]) <= 290
+    assert "full_text" not in rec
+
+
+# --- floor citations count as legal grounding ---------------------------------
+
+def _floor_index(category="meal_rest_breaks", level="state", juris="California"):
+    return {
+        "cid": f"floor:{level}-{juris.lower()}-{category}",
+        "ref": f"{level} · {juris}: Meal and rest breaks",
+        "summary": "Meal and rest breaks — requirement: 30 min unpaid.",
+        "source": "compliance_floor", "source_label": "Governing compliance requirements",
+        "category": category, "governing_level": level, "jurisdiction": juris,
+    }
+
+
+def test_a_draft_citing_only_the_floor_still_reads_as_grounded():
+    """The drafting prompt tells the model to prefer the governing `floor:`
+    record over the flat `law:` list — counting only `law:` would mark exactly
+    the best-grounded drafts ungrounded."""
+    floor = _floor_index()
+    corpus = {"index": {**_corpus()["index"], floor["cid"]: floor}}
+    drafts = [{"id": "d1", "kind": "handbook_section", "title": "Meal & Rest",
+               "section_key": "meal_rest", "content": "body", "status": "pending",
+               "promoted_ref": None, "citations": [floor["cid"]]}]
+    asm = hp.assemble_handbook({}, drafts, corpus)
+    assert asm["sections"][0]["grounded"] is True
+    assert asm["sections"][0]["law_citation_count"] == 1
+
+
+def test_floor_citation_covers_the_flat_requirement_for_the_same_category():
+    floor = _floor_index()
+    corpus = {"index": {**_corpus()["index"], floor["cid"]: floor}}
+    drafts = [{"id": "d1", "kind": "handbook_section", "title": "Meal & Rest",
+               "section_key": "meal_rest", "content": "body", "status": "pending",
+               "promoted_ref": None, "citations": [floor["cid"]]}]
+    asm = hp.assemble_handbook({}, drafts, corpus)
+    covered = {c["cid"]: c for c in asm["coverage"]["covered"]}
+    uncovered = {u["cid"] for u in asm["coverage"]["uncovered"]}
+    assert "law:ca-meal-0" in covered              # matched through the floor
+    assert covered["law:ca-meal-0"]["cited_by"] == ["d1"]
+    assert "law:ca-osha-1" in uncovered            # different category — still a gap
+
+
+def test_a_floor_from_another_state_does_not_cover_this_states_requirement():
+    floor = _floor_index(juris="Texas")
+    corpus = {"index": {**_corpus()["index"], floor["cid"]: floor}}
+    drafts = [{"id": "d1", "kind": "handbook_section", "title": "Meal & Rest",
+               "section_key": "meal_rest", "content": "body", "status": "pending",
+               "promoted_ref": None, "citations": [floor["cid"]]}]
+    asm = hp.assemble_handbook({}, drafts, corpus)
+    assert "law:ca-meal-0" in {u["cid"] for u in asm["coverage"]["uncovered"]}
+
+
+def test_a_federal_floor_covers_the_category_in_every_state():
+    floor = _floor_index(level="federal", juris="Federal")
+    corpus = {"index": {**_corpus()["index"], floor["cid"]: floor}}
+    drafts = [{"id": "d1", "kind": "handbook_section", "title": "Meal & Rest",
+               "section_key": "meal_rest", "content": "body", "status": "pending",
+               "promoted_ref": None, "citations": [floor["cid"]]}]
+    asm = hp.assemble_handbook({}, drafts, corpus)
+    assert "law:ca-meal-0" in {c["cid"] for c in asm["coverage"]["covered"]}

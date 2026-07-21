@@ -28,6 +28,13 @@ import RequirementsPanel, { SEVERITY_STYLE } from './RequirementsPanel'
 // Placeholder tokens the pilot leaves for the admin to resolve, e.g.
 // [HR_CONTACT_EMAIL]. Wrap them in inline-code so prose styling makes them pop,
 // but never touch markdown link syntax like [text](url).
+/** Sources that carry legal force: the flat jurisdiction requirements (`law`)
+ *  and the precedence-resolved governing requirement per category
+ *  (`compliance_floor`) the pilot is told to prefer over them. */
+function isLegalSource(source: string): boolean {
+  return source === 'law' || source === 'compliance_floor'
+}
+
 function highlightPlaceholders(md: string): string {
   return (md || '').replace(/\[([A-Z0-9_]{2,})\](?!\()/g, '`[$1]`')
 }
@@ -385,11 +392,11 @@ function CompliancePanel({
                 <div className="space-y-1.5">
                   {selected.citations.map((c) => (
                     <div key={c.cid} className={`rounded-lg border px-2.5 py-1.5 ${
-                      c.source === 'law' ? 'border-emerald-500/25 bg-emerald-500/[0.05]'
+                      isLegalSource(c.source) ? 'border-emerald-500/25 bg-emerald-500/[0.05]'
                         : c.source === 'unknown' ? 'border-amber-500/25 bg-amber-500/[0.05]'
                         : 'border-zinc-800 bg-zinc-900/40'}`}>
                       <div className="flex items-center gap-1.5">
-                        {c.source === 'law' && <Scale className="h-3 w-3 text-emerald-400 shrink-0" />}
+                        {isLegalSource(c.source) && <Scale className="h-3 w-3 text-emerald-400 shrink-0" />}
                         <span className="text-[12px] text-zinc-200 truncate flex-1">{c.ref}</span>
                       </div>
                       {c.summary && <p className="text-[11px] text-zinc-500 mt-0.5 line-clamp-2">{c.summary}</p>}
