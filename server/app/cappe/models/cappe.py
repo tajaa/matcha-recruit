@@ -1296,3 +1296,11 @@ class CappeMerlinChatResponse(BaseModel):
 
 class CappeUploadResponse(BaseModel):
     url: str
+
+
+class CappeImageGenRequest(BaseModel):
+    """AI image generation for a site (see routes/uploads.py). prompt is length-
+    capped (abuse guard); aspect_ratio is normalized against image_gen's
+    whitelist server-side, so an unknown value degrades to the default."""
+    prompt: str = Field(min_length=1, max_length=1000)
+    aspect_ratio: str = Field(default="16:9", max_length=8)

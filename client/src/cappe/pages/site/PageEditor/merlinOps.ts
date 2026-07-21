@@ -28,13 +28,21 @@ export type MerlinDesignGroup = 'motion' | 'bg' | 'layout' | 'colors' | 'border'
 export type MerlinOp =
   | { op: 'set_field'; block: string; path: string; value: unknown }
   | { op: 'set_design'; block: string; group: MerlinDesignGroup; key: string; value: unknown }
-  | { op: 'add_block'; type: string; at: number; content?: Record<string, unknown> }
+  // `design` is a server-validated per-section design bag applied as `_design`
+  // (lets one op create a fully styled section). `preset` is provenance from a
+  // server-expanded apply_section_preset — the client treats it as a plain
+  // add_block either way.
+  | { op: 'add_block'; type: string; at: number; content?: Record<string, unknown>; design?: Record<string, Record<string, unknown>>; preset?: string }
   | { op: 'remove_block'; block: string }
   | { op: 'move_block'; block: string; to: number }
   | { op: 'set_theme'; key: string; value: unknown }
   | { op: 'canvas_add'; block: string; element: MerlinCanvasElementInput }
   | { op: 'canvas_update'; block: string; el: string; patch: Partial<CappeCanvasElement> }
   | { op: 'canvas_remove'; block: string; el: string }
+  // Server-validated, CLIENT-executed asynchronously: useMerlin generates the
+  // image via the endpoint, then applies the URL as a follow-up set_field.
+  // applyMerlinOps (a synchronous fold) never mutates state for it.
+  | { op: 'generate_image'; block: string; field: string; prompt: string; aspect?: string }
 
 export type MerlinOpResult = { ok: boolean; summary: string }
 export type MerlinApplyResult = {
@@ -169,9 +177,10 @@ export function applyMerlinOps(
         const schema = BLOCK_SCHEMAS[op.type]
         if (!schema) { results.push({ ok: false, summary: `Skipped — unknown block type "${op.type}"` }); break }
         const nb: CappeBlock = { ...schema.make(), ...(op.content || {}), _k: genKey() }
+        if (op.design && Object.keys(op.design).length > 0) nb._design = op.design
         const at = Math.max(0, Math.min(op.at, nextBlocks.length))
         nextBlocks = [...nextBlocks.slice(0, at), nb, ...nextBlocks.slice(at)]
-        results.push({ ok: true, summary: `Added ${schema.label}` })
+        results.push({ ok: true, summary: op.preset ? `Added ${schema.label} (${op.preset} preset)` : `Added ${schema.label}` })
         break
       }
       case 'remove_block': {
@@ -241,6 +250,11 @@ export function applyMerlinOps(
         results.push({ ok: true, summary: 'Removed canvas element' })
         break
       }
+      case 'generate_image':
+        // Handled out-of-band by useMerlin (async endpoint call → follow-up
+        // set_field). Defensive no-op here so it isn't mislabeled "unrecognized"
+        // if one ever reaches the synchronous fold.
+        break
       default:
         results.push({ ok: false, summary: 'Skipped — unrecognized op' })
     }

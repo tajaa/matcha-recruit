@@ -18,6 +18,7 @@ export function DesignInspector({ blockType, design, onChange }: { blockType?: s
   const d = obj(design)
   const motion = obj(d.motion), bg = obj(d.bg), layout = obj(d.layout), colors = obj(d.colors)
   const type = obj(d.type), border = obj(d.border), anchor = obj(d.anchor)
+  const image = obj(d.image), divider = obj(d.divider)
   const fx = str(motion.effect) || 'none'
   const hover = str(motion.hover) || 'none'
   const loop = str(motion.loop) || 'none'
@@ -43,16 +44,19 @@ export function DesignInspector({ blockType, design, onChange }: { blockType?: s
             <>
               <section className="space-y-2">
                 <p className={dHead}>Motion</p>
-                <DSelect label="Reveal on scroll" value={fx} onChange={(v) => patch('motion', 'effect', v)} options={[['none', 'None'], ['fade', 'Fade'], ['slide-up', 'Slide up'], ['slide-down', 'Slide down'], ['slide-left', 'Slide left'], ['slide-right', 'Slide right'], ['zoom', 'Zoom'], ['blur-in', 'Blur in'], ['flip', 'Flip'], ['rotate', 'Rotate in'], ['mask-up', 'Mask up'], ['bounce', 'Bounce']]} />
+                <DSelect label="Reveal on scroll" value={fx} onChange={(v) => patch('motion', 'effect', v)} options={[['none', 'None'], ['fade', 'Fade'], ['fade-up', 'Fade up'], ['fade-down', 'Fade down'], ['slide-up', 'Slide up'], ['slide-down', 'Slide down'], ['slide-left', 'Slide left'], ['slide-right', 'Slide right'], ['zoom', 'Zoom'], ['scale-up', 'Scale up'], ['blur-in', 'Blur in'], ['blur-up', 'Blur up'], ['flip', 'Flip'], ['rotate', 'Rotate in'], ['mask-up', 'Mask up'], ['bounce', 'Bounce']]} />
                 {fx !== 'none' && (
-                  <div className="grid grid-cols-2 gap-2">
-                    <DNum label="Delay (ms)" value={Number(motion.delay) || 0} min={0} max={2000} step={50} onChange={(v) => patch('motion', 'delay', v)} />
-                    <DNum label="Duration (ms)" value={Number(motion.duration) || 700} min={100} max={2000} step={50} onChange={(v) => patch('motion', 'duration', v)} />
-                  </div>
+                  <>
+                    <div className="grid grid-cols-2 gap-2">
+                      <DNum label="Delay (ms)" value={Number(motion.delay) || 0} min={0} max={2000} step={50} onChange={(v) => patch('motion', 'delay', v)} />
+                      <DNum label="Duration (ms)" value={Number(motion.duration) || 700} min={100} max={2000} step={50} onChange={(v) => patch('motion', 'duration', v)} />
+                    </div>
+                    <DSelect label="Easing" value={str(motion.easing) || 'smooth'} onChange={(v) => patch('motion', 'easing', v)} options={[['smooth', 'Smooth (default)'], ['gentle', 'Gentle'], ['spring', 'Spring'], ['snappy', 'Snappy'], ['linear', 'Linear']]} />
+                  </>
                 )}
                 <div className="grid grid-cols-2 gap-2">
-                  <DSelect label="Hover effect" value={hover} onChange={(v) => patch('motion', 'hover', v)} options={[['none', 'None'], ['lift', 'Lift'], ['tilt', 'Tilt 3D'], ['glow', 'Glow']]} />
-                  <DSelect label="Continuous loop" value={loop} onChange={(v) => patch('motion', 'loop', v)} options={[['none', 'None'], ['float', 'Float'], ['pulse', 'Pulse']]} />
+                  <DSelect label="Hover effect" value={hover} onChange={(v) => patch('motion', 'hover', v)} options={[['none', 'None'], ['lift', 'Lift'], ['tilt', 'Tilt 3D'], ['glow', 'Glow'], ['grow', 'Grow'], ['sink', 'Sink']]} />
+                  <DSelect label="Continuous loop" value={loop} onChange={(v) => patch('motion', 'loop', v)} options={[['none', 'None'], ['float', 'Float'], ['pulse', 'Pulse'], ['sway', 'Sway'], ['breathe', 'Breathe']]} />
                 </div>
                 <DSelect label="Heading animation" value={headingFx} onChange={(v) => patch('motion', 'heading', v)} options={[['none', 'None'], ['rise', 'Rise in'], ['shimmer', 'Shimmer']]} />
                 <div className="flex flex-wrap gap-x-4 gap-y-1.5">
@@ -76,6 +80,28 @@ export function DesignInspector({ blockType, design, onChange }: { blockType?: s
                     <DNum label="Blur (px)" value={Number(bg.blur) || 0} min={0} max={40} onChange={(v) => patch('bg', 'blur', v)} />
                   </div>
                 )}
+                <div className="grid grid-cols-2 gap-2">
+                  <DSelect label="Pattern" value={str(bg.pattern) || 'none'} onChange={(v) => patch('bg', 'pattern', v)} options={[['none', 'None'], ['dots', 'Dots'], ['grid', 'Grid'], ['diagonal', 'Diagonal lines']]} />
+                  <DSelect label="Image filter" value={str(image.filter) || 'none'} onChange={(v) => patch('image', 'filter', v)} options={[['none', 'None'], ['mono', 'Mono'], ['warm', 'Warm'], ['cool', 'Cool'], ['soft', 'Soft'], ['punch', 'Punch']]} />
+                </div>
+                {str(bg.pattern) && str(bg.pattern) !== 'none' && (
+                  <DColor label="Pattern color" value={str(bg.patternColor)} onChange={(v) => patch('bg', 'patternColor', v)} />
+                )}
+              </section>
+
+              <section className="space-y-2">
+                <p className={dHead}>Dividers</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <DSelect label="Top shape" value={str(divider.top) || 'none'} onChange={(v) => patch('divider', 'top', v)} options={[['none', 'None'], ['wave', 'Wave'], ['slant', 'Slant'], ['curve', 'Curve'], ['peaks', 'Peaks']]} />
+                  <DSelect label="Bottom shape" value={str(divider.bottom) || 'none'} onChange={(v) => patch('divider', 'bottom', v)} options={[['none', 'None'], ['wave', 'Wave'], ['slant', 'Slant'], ['curve', 'Curve'], ['peaks', 'Peaks']]} />
+                </div>
+                {((str(divider.top) && str(divider.top) !== 'none') || (str(divider.bottom) && str(divider.bottom) !== 'none')) && (
+                  <div className="grid grid-cols-2 gap-2">
+                    <DNum label="Height (px)" value={Number(divider.height) || 64} min={20} max={160} step={4} onChange={(v) => patch('divider', 'height', v)} />
+                    <DColor label="Fill color" value={str(divider.color)} onChange={(v) => patch('divider', 'color', v)} />
+                  </div>
+                )}
+                <p className="text-[10px] text-zinc-600">Fill defaults to the page background — matches the neighboring section.</p>
               </section>
 
               <section className="space-y-2">
@@ -96,6 +122,23 @@ export function DesignInspector({ blockType, design, onChange }: { blockType?: s
                   <DNum label="Item gap (px)" value={Number(layout.gap) || 0} min={0} max={80} step={2} onChange={(v) => numPatch('layout', 'gap', v)} />
                 </div>
                 <p className="text-[10px] text-zinc-600">px overrides win over the presets above; 0 = use default.</p>
+                <div className="space-y-2 rounded-md border border-zinc-800/60 p-2">
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">Responsive overrides</p>
+                  {([['Md', 'Tablet ≤1024'], ['Sm', 'Mobile ≤640']] as const).map(([bp, label]) => (
+                    <div key={bp} className="space-y-1.5">
+                      <p className="text-[10px] text-zinc-500">{label}</p>
+                      <div className="grid grid-cols-2 gap-2">
+                        <DSelect label="Padding top" value={str(layout['padTop' + bp]) || 'default'} onChange={(v) => patch('layout', 'padTop' + bp, v)} options={padOpts} />
+                        <DSelect label="Padding bottom" value={str(layout['padBottom' + bp]) || 'default'} onChange={(v) => patch('layout', 'padBottom' + bp, v)} options={padOpts} />
+                        <DSelect label="Align" value={str(layout['align' + bp]) || 'default'} onChange={(v) => patch('layout', 'align' + bp, v)} options={[['default', 'Default'], ['left', 'Left'], ['center', 'Center']]} />
+                        {COLUMN_BLOCKS.has(blockType || '') && (
+                          <DNum label="Columns" value={Number(layout['columns' + bp]) || 0} min={0} max={6} onChange={(v) => numPatch('layout', 'columns' + bp, v)} />
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                  <p className="text-[10px] text-zinc-600">Default = inherit desktop. Mobile wins over tablet.</p>
+                </div>
               </section>
 
               <section className="space-y-2">

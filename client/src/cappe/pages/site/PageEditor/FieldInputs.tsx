@@ -1,5 +1,5 @@
 import { useContext, useRef, useState } from 'react'
-import { ChevronDown, ChevronUp, Film, ImagePlus, Loader2, Plus, Trash2 } from 'lucide-react'
+import { ChevronDown, ChevronUp, Film, ImagePlus, Loader2, Plus, Sparkles, Trash2 } from 'lucide-react'
 import { cappeApi } from '../../../api'
 import { useCappeMe } from '../../../hooks/useCappeMe'
 import { SiteCtx } from './context'
@@ -7,9 +7,19 @@ import { inputCls } from './styles'
 import type { Field } from './types'
 import { arr, isOn, obj, str } from './valueHelpers'
 
+const AI_ASPECTS: [string, string][] = [
+  ['16:9', 'Wide 16:9'], ['1:1', 'Square'], ['4:3', 'Landscape 4:3'],
+  ['3:4', 'Portrait 3:4'], ['9:16', 'Tall 9:16'], ['3:2', '3:2'], ['2:3', '2:3'],
+]
+
 export function ImageInput({ value, onChange }: { value: unknown; onChange: (v: string) => void }) {
   const siteId = useContext(SiteCtx)
   const [busy, setBusy] = useState(false)
+  const [genOpen, setGenOpen] = useState(false)
+  const [prompt, setPrompt] = useState('')
+  const [aspect, setAspect] = useState('16:9')
+  const [genBusy, setGenBusy] = useState(false)
+  const [genErr, setGenErr] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const url = str(value)
 
@@ -27,25 +37,82 @@ export function ImageInput({ value, onChange }: { value: unknown; onChange: (v: 
     }
   }
 
+  async function generate() {
+    const p = prompt.trim()
+    if (!p || genBusy) return
+    setGenBusy(true)
+    setGenErr(null)
+    try {
+      const res = await cappeApi.post<{ url: string }>(`/sites/${siteId}/generate-image`, { prompt: p, aspect_ratio: aspect })
+      onChange(res.url)
+      setGenOpen(false)
+      setPrompt('')
+    } catch (e) {
+      // Surfaces the server detail — 429 (daily quota) or 502 (bad prompt).
+      setGenErr(e instanceof Error ? e.message : 'Generation failed')
+    } finally {
+      setGenBusy(false)
+    }
+  }
+
   return (
-    <div className="flex items-center gap-2">
-      <input value={url} onChange={(e) => onChange(e.target.value)} placeholder="Image URL" className={inputCls} />
-      {url && <img src={url} alt="" className="h-9 w-9 shrink-0 rounded object-cover" />}
-      <button
-        type="button"
-        onClick={() => fileRef.current?.click()}
-        disabled={busy}
-        className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-zinc-700 px-2.5 py-2 text-xs font-medium text-zinc-300 hover:bg-zinc-800 disabled:opacity-60"
-      >
-        {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ImagePlus className="h-3.5 w-3.5" />}
-      </button>
-      <input
-        ref={fileRef}
-        type="file"
-        accept="image/*"
-        className="hidden"
-        onChange={(e) => { const f = e.target.files?.[0]; if (f) upload(f); e.target.value = '' }}
-      />
+    <div>
+      <div className="flex items-center gap-2">
+        <input value={url} onChange={(e) => onChange(e.target.value)} placeholder="Image URL" className={inputCls} />
+        {url && <img src={url} alt="" className="h-9 w-9 shrink-0 rounded object-cover" />}
+        <button
+          type="button"
+          onClick={() => setGenOpen((o) => !o)}
+          className={`inline-flex shrink-0 items-center gap-1 rounded-lg border px-2.5 py-2 text-xs font-medium ${genOpen ? 'border-emerald-500 text-emerald-400' : 'border-zinc-700 text-zinc-300 hover:bg-zinc-800'}`}
+          title="Generate with AI"
+        >
+          <Sparkles className="h-3.5 w-3.5" />
+        </button>
+        <button
+          type="button"
+          onClick={() => fileRef.current?.click()}
+          disabled={busy}
+          className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-zinc-700 px-2.5 py-2 text-xs font-medium text-zinc-300 hover:bg-zinc-800 disabled:opacity-60"
+          title="Upload"
+        >
+          {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ImagePlus className="h-3.5 w-3.5" />}
+        </button>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={(e) => { const f = e.target.files?.[0]; if (f) upload(f); e.target.value = '' }}
+        />
+      </div>
+      {genOpen && (
+        <div className="mt-2 space-y-2 rounded-lg border border-zinc-800 bg-zinc-950/60 p-2.5">
+          <textarea
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            rows={2}
+            maxLength={1000}
+            placeholder="Describe the image — e.g. 'sunlit artisan bakery interior, warm tones'"
+            className={inputCls}
+          />
+          <div className="flex items-center gap-2">
+            <select value={aspect} onChange={(e) => setAspect(e.target.value)} className={inputCls}>
+              {AI_ASPECTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
+            <button
+              type="button"
+              onClick={generate}
+              disabled={genBusy || !prompt.trim()}
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
+            >
+              {genBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+              {genBusy ? 'Generating…' : 'Generate'}
+            </button>
+          </div>
+          {genErr && <p className="text-xs text-red-400">{genErr}</p>}
+          <p className="text-[10px] text-zinc-600">AI-generated; daily limit applies. Review before publishing.</p>
+        </div>
+      )}
     </div>
   )
 }

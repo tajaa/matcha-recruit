@@ -22,6 +22,8 @@ import re
 from typing import Any
 from urllib.parse import quote
 
+from .design_registry import DESIGN_KEYS_BY_GROUP
+
 _uid_counter = itertools.count(1)
 
 
@@ -114,11 +116,36 @@ _PAD_SCALE = {"none": "0rem", "sm": "2rem", "lg": "6rem", "xl": "9rem"}
 _MAXW = {"narrow": "44rem", "wide": "84rem", "full": "100%"}
 _MINH = {"tall": "70vh", "screen": "100vh"}
 _MOTION_FX = {"fade", "slide-up", "slide-down", "slide-left", "slide-right", "zoom", "blur-in",
-              "flip", "rotate", "mask-up", "bounce"}
-_HOVER_FX = {"lift", "tilt", "glow"}
-_LOOP_FX = {"float", "pulse"}
+              "flip", "rotate", "mask-up", "bounce",
+              "fade-up", "fade-down", "scale-up", "blur-up"}
+_HOVER_FX = {"lift", "tilt", "glow", "grow", "sink"}
+_LOOP_FX = {"float", "pulse", "sway", "breathe"}
 _HEADING_FX = {"rise", "shimmer"}
+# Reveal easing (motion.easing → the transition timing-function on .cz-rv).
+# `smooth` == the historical hardcoded default, so setting it is a no-op and an
+# unset section keeps `var(--cz-ease, cubic-bezier(.2,.7,.2,1))`'s fallback.
+_EASING = {
+    "smooth": "cubic-bezier(.2,.7,.2,1)",
+    "gentle": "cubic-bezier(.16,1,.3,1)",
+    "spring": "cubic-bezier(.34,1.56,.64,1)",
+    "snappy": "cubic-bezier(.65,0,.35,1)",
+    "linear": "linear",
+}
 _OVERLAYS = {"light", "medium", "dark"}
+# Decorative lane (Phase 5). Filters/patterns are class-toggled CSS; dividers
+# are enum-keyed inline-SVG paths injected like bg_media (all values enum/clamp/
+# hex — nothing user-authored reaches the SVG sink).
+_IMG_FILTER_FX = {"mono", "warm", "cool", "soft", "punch"}
+_BG_PATTERNS = {"dots", "grid", "diagonal"}
+# Paths are authored for a TOP divider (shape hangs from the top edge, filled
+# with the neighbouring/page background); the bottom variant is scaleY-flipped
+# in CSS. viewBox is 0 0 1440 96, preserveAspectRatio=none stretches to fit.
+_DIVIDER_PATHS = {
+    "wave": "M0,0 L1440,0 L1440,40 C1200,88 960,8 720,48 C480,88 240,16 0,56 Z",
+    "slant": "M0,0 L1440,0 L1440,8 L0,88 Z",
+    "curve": "M0,0 L1440,0 L1440,48 Q720,120 0,48 Z",
+    "peaks": "M0,0 L1440,0 L1440,56 L1200,24 L960,64 L720,20 L480,60 L240,28 L0,56 Z",
+}
 
 # ── global style system (theme_config.style → extra :root vars) ─────────────
 # Each value is an enum-dict constant or a `_clampi` int emitted with a unit —
@@ -187,6 +214,86 @@ def _safe_url_css(url: Any) -> str:
     return _esc(u).replace("'", "%27").replace("(", "%28").replace(")", "%29")
 
 
+def _emit_design_group(group: str, values: dict, classes: list, cssvars: list) -> None:
+    """Registry-driven emission for a self-contained design group (colors/type).
+
+    Executes each key's declarative `RenderRule` (from `design_registry`) with
+    this module's own sanitizers (`_hexonly`/`_clampi`) — byte-identical to the
+    former inline blocks, so an unset key emits nothing and the `_BASE_CSS`
+    var-fallback applies. New self-contained tokens become one registry entry
+    rather than a hand-added branch here."""
+    for dk in DESIGN_KEYS_BY_GROUP.get(group, ()):
+        rule = dk.render
+        if rule is None:
+            continue
+        raw = values.get(dk.key)
+        if rule.kind == "hex":
+            v = _hexonly(raw)
+            if v:
+                cssvars.append(f"{rule.var}:{v}")
+                for ev in rule.extra_vars:
+                    cssvars.append(f"{ev}:{v}")
+                if rule.css_class:
+                    classes.append(rule.css_class)
+        elif rule.kind == "int_px":
+            if rule.allow_zero:
+                # A token where 0 is a real value: an absent/null/non-numeric key
+                # is "unset" (skip → var-fallback), an explicit clamped value —
+                # including 0 — emits. The sentinel default (lo-1) is below the
+                # range, so `_clampi` returning it means the input wasn't numeric.
+                if raw is None:
+                    continue
+                n = _clampi(raw, rule.lo, rule.hi, rule.lo - 1)
+                if n < rule.lo:
+                    continue
+            else:
+                # Legacy skip-on-zero (byte-identical to the former inline
+                # blocks): a value that clamps to 0 means "unset" for tokens
+                # whose min is > 0, so a present 0 clamps up to lo and survives.
+                n = _clampi(raw, rule.lo, rule.hi, 0)
+                if not n:
+                    continue
+            cssvars.append(f"{rule.var}:{n}px")
+            if rule.css_class:
+                classes.append(rule.css_class)
+
+
+# Responsive layout: per-breakpoint overrides of the layout keys. `md` (tablet)
+# then `sm` (mobile) — sm is authored last so it wins where both max-widths match.
+_RESP_BREAKPOINTS = (("Md", "1024px"), ("Sm", "640px"))
+
+
+def _responsive_layout_style(layout: dict, cls: str) -> str:
+    """Per-breakpoint layout overrides as a scoped ``<style>`` — the responsive
+    layer over the base (desktop) layout emission.
+
+    The base layout emits inline CSS vars, and a stylesheet rule cannot override
+    an inline custom property, so every breakpoint declaration is ``!important``
+    and scoped to the section's own class ``cls`` (no global bleed). Section-level
+    keys (padding/align) are set as direct properties; ``columns`` is a
+    ``--cz-cols`` var override because it is consumed by the section's child grid.
+    Returns ``""`` when no ``*Md``/``*Sm`` key is present, so a non-responsive
+    section renders byte-identically to before this feature existed."""
+    blocks: list[str] = []
+    for suffix, mq in _RESP_BREAKPOINTS:
+        decls: list[str] = []
+        pt = _PAD_SCALE.get(layout.get("padTop" + suffix))
+        if pt is not None:
+            decls.append(f"padding-top:{pt}!important")
+        pb = _PAD_SCALE.get(layout.get("padBottom" + suffix))
+        if pb is not None:
+            decls.append(f"padding-bottom:{pb}!important")
+        al = layout.get("align" + suffix)
+        if al in ("left", "center"):
+            decls.append(f"text-align:{al}!important")
+        cols = _clampi(layout.get("columns" + suffix), 1, 6, 0)
+        if cols:
+            decls.append(f"--cz-cols:repeat({cols},minmax(0,1fr))!important")
+        if decls:
+            blocks.append(f"@media(max-width:{mq}){{.{cls}{{{';'.join(decls)}}}}}")
+    return f"<style>{''.join(blocks)}</style>" if blocks else ""
+
+
 def _apply_design(html_str: str, design: Any, *, block_index: Any = None, editable: bool = False) -> str:
     """Post-process a block's HTML: merge designer classes/attrs/style into its
     first <section> tag and inject background media layers. When `editable`, also
@@ -204,6 +311,8 @@ def _apply_design(html_str: str, design: Any, *, block_index: Any = None, editab
     attrs: list[str] = []
     cssvars: list[str] = []
     bg_media = ""
+    resp_style = ""  # scoped <style> for per-breakpoint layout overrides
+    divider_html = ""  # injected SVG shape dividers (Phase 5c)
 
     if has_design:
         motion = design.get("motion") if isinstance(design.get("motion"), dict) else {}
@@ -213,6 +322,8 @@ def _apply_design(html_str: str, design: Any, *, block_index: Any = None, editab
         typ = design.get("type") if isinstance(design.get("type"), dict) else {}
         border = design.get("border") if isinstance(design.get("border"), dict) else {}
         anchor = design.get("anchor") if isinstance(design.get("anchor"), dict) else {}
+        image = design.get("image") if isinstance(design.get("image"), dict) else {}
+        divider = design.get("divider") if isinstance(design.get("divider"), dict) else {}
         classes.append("cz-design")
 
         # ── motion ──────────────────────────────────────────────────────────
@@ -223,6 +334,11 @@ def _apply_design(html_str: str, design: Any, *, block_index: Any = None, editab
             attrs.append(f'data-cz-dur="{_clampi(motion.get("duration"), 100, 2000, 700)}"')
             if motion.get("stagger"):
                 classes.append("cz-rv--stagger")
+            # Reveal easing — a static inline var the .cz-rv transition consumes.
+            # Unset → the CSS `var(--cz-ease, <default>)` fallback keeps today's curve.
+            ease = _EASING.get(motion.get("easing"))
+            if ease:
+                cssvars.append(f"--cz-ease:{ease}")
         if motion.get("parallax"):
             classes.append("cz-parallax")
             attrs.append(f'data-cz-parallax="{_clampi(motion.get("parallaxStrength"), 0, 80, 20)}"')
@@ -271,6 +387,13 @@ def _apply_design(html_str: str, design: Any, *, block_index: Any = None, editab
             if blur:
                 cssvars.append(f"--cz-blur:{blur}px")
                 classes.append("cz-bg--blur")
+        # decorative pattern — independent of bg type (background-image layers
+        # over background-color, so it combines with a solid bg fill).
+        if bg.get("pattern") in _BG_PATTERNS:
+            classes.append(f"cz-pat-{bg['pattern']}")
+            pcol = _hexonly(bg.get("patternColor"))
+            if pcol:
+                cssvars.append(f"--cz-pat-col:{pcol}")
 
         # ── layout ──────────────────────────────────────────────────────────
         # Numeric px override wins over the enum step; -1 default distinguishes
@@ -304,26 +427,42 @@ def _apply_design(html_str: str, design: Any, *, block_index: Any = None, editab
         align = layout.get("align")
         if align in ("left", "center"):
             classes.append(f"cz-al-{align}")
+        # ── responsive layout (opt-in per breakpoint; scoped <style>) ───────
+        # Base emission above is unchanged, so a section with no *Md/*Sm key is
+        # byte-identical; a responsive one gains a stable per-block scope class
+        # + an injected media-query style block. Needs the block index for the
+        # deterministic class, so skip if it wasn't provided.
+        if block_index is not None:
+            _rcls = f"cz-rb{int(block_index)}"
+            _resp = _responsive_layout_style(layout, _rcls)
+            if _resp:
+                classes.append(_rcls)
+                resp_style = _resp
 
-        # ── per-section color overrides ─────────────────────────────────────
-        ctext, chead, cacc = _hexonly(colors.get("text")), _hexonly(colors.get("heading")), _hexonly(colors.get("accent"))
-        if ctext:
-            cssvars.append(f"--cz-text:{ctext}")
-        if chead:
-            cssvars.append(f"--cz-heading:{chead}")
-        if cacc:
-            cssvars += [f"--cz-brand:{cacc}", f"--cz-accent:{cacc}"]
-            classes.append("cz-acc")
+        # ── per-section color overrides + type sizes (registry-driven) ──────
+        # These two groups are self-contained (each key → a css-var, no coupling
+        # to siblings), so their emission is declared in `design_registry` and
+        # executed by `_emit_design_group`. The coupled groups (motion effects,
+        # background media, layout px-override, border) stay bespoke below/above.
+        _emit_design_group("colors", colors, classes, cssvars)
+        _emit_design_group("type", typ, classes, cssvars)
 
-        # ── per-section type sizes ──────────────────────────────────────────
-        hsize = _clampi(typ.get("headingSize"), 16, 96, 0)
-        if hsize:
-            cssvars.append(f"--cz-h-size:{hsize}px")
-            classes.append("cz-has-hsize")
-        psize = _clampi(typ.get("bodySize"), 12, 28, 0)
-        if psize:
-            cssvars.append(f"--cz-p-size:{psize}px")
-            classes.append("cz-has-psize")
+        # ── image filter preset (curated CSS filter chains) ─────────────────
+        if image.get("filter") in _IMG_FILTER_FX:
+            classes.append(f"cz-imgf-{image['filter']}")
+
+        # ── shape dividers (enum-keyed inline SVG, injected like bg_media) ──
+        if divider.get("top") in _DIVIDER_PATHS or divider.get("bottom") in _DIVIDER_PATHS:
+            dh = _clampi(divider.get("height"), 20, 160, 64)
+            dcol = _hexonly(divider.get("color")) or "var(--bg)"
+            for edge in ("top", "bottom"):
+                shape = divider.get(edge)
+                if shape in _DIVIDER_PATHS:
+                    divider_html += (
+                        f'<div class="cz-div cz-div--{edge}" style="height:{dh}px" aria-hidden="true">'
+                        f'<svg viewBox="0 0 1440 96" preserveAspectRatio="none">'
+                        f'<path d="{_DIVIDER_PATHS[shape]}" style="fill:{dcol}"/></svg></div>'
+                    )
 
         # ── per-section border / divider ────────────────────────────────────
         if border.get("top") or border.get("bottom"):
@@ -368,8 +507,10 @@ def _apply_design(html_str: str, design: Any, *, block_index: Any = None, editab
     if attrs:
         new_attrs += " " + " ".join(attrs)
     open_tag = f"<section{new_attrs}>"
-    # Inject bg media as the section's first children (content .cz-wrap follows).
-    return html_str[:m.start()] + open_tag + bg_media + html_str[m.end():]
+    # Inject the responsive scoped <style> + bg media + shape dividers as the
+    # section's first children (content .cz-wrap follows). Each is "" unless its
+    # keys were set, so untouched output is unchanged.
+    return html_str[:m.start()] + open_tag + resp_style + bg_media + divider_html + html_str[m.end():]
 
 
 def _design_gradient(g: Any) -> str:
@@ -468,14 +609,14 @@ p{margin:0}
 /* sections + section headings */
 section{position:relative}
 .cz-head{text-align:center;max-width:42rem;margin:0 auto 3rem}
-.cz-head h2{font-size:clamp(1.8rem,4vw,2.6rem)}
+.cz-head h2{font-size:calc(var(--cz-h-scale,100)/100*clamp(1.8rem,4vw,2.6rem))}
 .cz-head p{margin-top:.75rem;color:var(--muted)}
 .cz-eyebrow{font-size:.72rem;font-weight:700;letter-spacing:.18em;text-transform:uppercase;color:var(--brand)}
 
 /* hero */
 .cz-hero{padding:clamp(3.5rem,9vw,7rem) 0}
 .cz-hero--centered{text-align:center;background:linear-gradient(180deg,var(--surface),var(--bg))}
-.cz-hero__title{font-size:clamp(2.4rem,6vw,4.4rem)}
+.cz-hero__title{font-size:calc(var(--cz-h-scale,100)/100*clamp(2.4rem,6vw,4.4rem))}
 .cz-hero--centered .cz-hero__title,.cz-hero--centered .cz-hero__lead{margin-left:auto;margin-right:auto}
 .cz-hero__title{max-width:18ch}
 .cz-hero__eyebrow{margin-bottom:1rem}
@@ -551,7 +692,7 @@ section{position:relative}
 
 /* cta band */
 .cz-band{background:var(--brand);color:var(--brand-fg);text-align:center;padding:var(--sec-pad,clamp(3rem,7vw,5rem)) 0}
-.cz-band h2{font-size:clamp(1.8rem,4vw,2.6rem)}
+.cz-band h2{font-size:calc(var(--cz-h-scale,100)/100*clamp(1.8rem,4vw,2.6rem))}
 .cz-band p{margin:.75rem auto 0;max-width:34rem;opacity:.9}
 .cz-band .cz-btn{margin-top:1.75rem;background:rgba(255,255,255,.16);color:#fff}
 .cz-band .cz-btn:hover{background:rgba(255,255,255,.26)}
@@ -578,7 +719,7 @@ section{position:relative}
 /* text */
 .cz-text{padding:clamp(2.5rem,6vw,4rem) 0}
 .cz-text .cz-narrow>*+*{margin-top:1rem}
-.cz-text h2{font-size:clamp(1.6rem,3.5vw,2.2rem);margin-bottom:1rem}
+.cz-text h2{font-size:calc(var(--cz-h-scale,100)/100*clamp(1.6rem,3.5vw,2.2rem));margin-bottom:1rem}
 .cz-text p{font-size:1.12rem;color:var(--muted);line-height:1.75}
 
 /* forms / widgets */
@@ -633,7 +774,7 @@ section{position:relative}
 .cz-pd__media{display:flex;background:color-mix(in srgb,var(--ink) 6%,transparent)}
 .cz-pd__media img,.cz-pd__noimg{width:100%;aspect-ratio:1;object-fit:cover;display:block}
 .cz-pd__info{padding:clamp(1.4rem,4vw,2.4rem);display:flex;flex-direction:column;gap:.45rem}
-.cz-pd__name{font-size:clamp(1.6rem,3.4vw,2.2rem);line-height:1.05;margin:.1rem 0 0}
+.cz-pd__name{font-size:calc(var(--cz-h-scale,100)/100*clamp(1.6rem,3.4vw,2.2rem));line-height:1.05;margin:.1rem 0 0}
 .cz-pd__price{font-family:var(--font-h);font-weight:700;font-size:1.5rem;margin:.15rem 0 .4rem}
 .cz-pd__was{text-decoration:line-through;opacity:.5;margin-right:.4rem;font-weight:400}
 .cz-pd__off{color:var(--brand);font-size:.62em;margin-left:.3rem}
@@ -667,7 +808,7 @@ section{position:relative}
 .cz-stats-grid{display:grid;gap:var(--cz-gap,var(--grid-gap,1.5rem));grid-template-columns:var(--cz-cols,repeat(auto-fit,minmax(150px,1fr)));max-width:62rem;margin:0 auto;text-align:center}
 .cz-stat{padding:1rem .5rem;position:relative}
 .cz-stat+.cz-stat::before{content:"";position:absolute;left:0;top:18%;bottom:18%;width:1px;background:var(--line)}
-.cz-stat__num{font-family:var(--font-h);font-weight:700;font-size:clamp(2.4rem,5vw,3.4rem);line-height:1;
+.cz-stat__num{font-family:var(--font-h);font-weight:700;font-size:calc(var(--cz-h-scale,100)/100*clamp(2.4rem,5vw,3.4rem));line-height:1;
   background:linear-gradient(135deg,var(--brand),var(--accent));-webkit-background-clip:text;background-clip:text;color:transparent}
 .cz-stat__label{margin-top:.55rem;color:var(--muted);font-size:.92rem;letter-spacing:.01em}
 
@@ -710,7 +851,7 @@ section{position:relative}
 .cz-split__grid{display:grid;gap:2.5rem;align-items:center}
 .cz-split__art{aspect-ratio:4/3;border-radius:var(--radius);overflow:hidden;background:linear-gradient(135deg,var(--brand),var(--accent))}
 .cz-split__art img{width:100%;height:100%;object-fit:cover}
-.cz-split__body h2{font-size:clamp(1.6rem,3.5vw,2.4rem);margin-bottom:1rem}
+.cz-split__body h2{font-size:calc(var(--cz-h-scale,100)/100*clamp(1.6rem,3.5vw,2.4rem));margin-bottom:1rem}
 .cz-split__body>.cz-eyebrow{margin-bottom:.9rem}
 .cz-split__body p{color:var(--muted);font-size:1.08rem;line-height:1.7}
 .cz-split__bullets{list-style:none;padding:0;margin:1.25rem 0 0;display:flex;flex-direction:column;gap:.7rem}
@@ -862,15 +1003,33 @@ section{position:relative}
 .cz-bg>.cz-bg-ov.cz-ov-light{background:linear-gradient(180deg,rgba(0,0,0,.1),rgba(0,0,0,.3) 60%,rgba(0,0,0,.5))}
 .cz-bg>.cz-bg-ov.cz-ov-medium{background:linear-gradient(180deg,rgba(0,0,0,.28),rgba(0,0,0,.5) 55%,rgba(0,0,0,.72))}
 .cz-bg>.cz-bg-ov.cz-ov-dark{background:linear-gradient(180deg,rgba(0,0,0,.46),rgba(0,0,0,.62) 55%,rgba(0,0,0,.78))}
-.cz-bg>.cz-wrap,.cz-bg>.cz-narrow,.cz-bg>*:not(.cz-bg-media):not(.cz-bg-ov){position:relative;z-index:2}
+.cz-bg>.cz-wrap,.cz-bg>.cz-narrow,.cz-bg>*:not(.cz-bg-media):not(.cz-bg-ov):not(.cz-div){position:relative;z-index:2}
 .cz-bg--blur>.cz-bg-media{filter:blur(var(--cz-blur))}
+/* ── decorative lane (Phase 5): patterns, image filters, shape dividers ──── */
+/* patterns: background-image layers over background-color, so they combine
+   with a solid bg fill; placed after .cz-bg--* so the image layer wins. */
+.cz-pat-dots{background-image:radial-gradient(var(--cz-pat-col,color-mix(in srgb,var(--ink) 14%,transparent)) 1px,transparent 1.5px);background-size:22px 22px}
+.cz-pat-grid{background-image:linear-gradient(var(--cz-pat-col,color-mix(in srgb,var(--ink) 10%,transparent)) 1px,transparent 1px),linear-gradient(90deg,var(--cz-pat-col,color-mix(in srgb,var(--ink) 10%,transparent)) 1px,transparent 1px);background-size:44px 44px}
+.cz-pat-diagonal{background-image:repeating-linear-gradient(45deg,var(--cz-pat-col,color-mix(in srgb,var(--ink) 9%,transparent)) 0 1px,transparent 1px 16px)}
+/* image filter presets: applied to the section's bg media + content images */
+.cz-imgf-mono .cz-bg-media,.cz-imgf-mono img{filter:grayscale(1)}
+.cz-imgf-warm .cz-bg-media,.cz-imgf-warm img{filter:sepia(.28) saturate(1.18) contrast(1.02)}
+.cz-imgf-cool .cz-bg-media,.cz-imgf-cool img{filter:saturate(.85) hue-rotate(-12deg) brightness(1.03)}
+.cz-imgf-soft .cz-bg-media,.cz-imgf-soft img{filter:contrast(.92) brightness(1.06) saturate(.88)}
+.cz-imgf-punch .cz-bg-media,.cz-imgf-punch img{filter:contrast(1.12) saturate(1.28)}
+/* shape dividers: inline SVG anchored inside the section's own box, filled
+   with the neighbouring/page background (default var(--bg)); bottom flips. */
+.cz-div{position:absolute;left:0;right:0;z-index:1;pointer-events:none;line-height:0}
+.cz-div svg{display:block;width:100%;height:100%}
+.cz-div--top{top:0}
+.cz-div--bottom{bottom:0;transform:scaleY(-1)}
 .cz-kenburns>.cz-bg-media{animation:czKen 18s ease-in-out infinite alternate}
 @keyframes czKen{from{transform:scale(1)}to{transform:scale(1.12)}}
 /* motion reveal — gated by body.cz-motion.cz-js (runtime present + JS available) */
 .cz-motion.cz-js .cz-rv{opacity:0;
-  transition:opacity var(--cz-dur,700ms) cubic-bezier(.2,.7,.2,1),
-    transform var(--cz-dur,700ms) cubic-bezier(.2,.7,.2,1),
-    filter var(--cz-dur,700ms) cubic-bezier(.2,.7,.2,1);
+  transition:opacity var(--cz-dur,700ms) var(--cz-ease,cubic-bezier(.2,.7,.2,1)),
+    transform var(--cz-dur,700ms) var(--cz-ease,cubic-bezier(.2,.7,.2,1)),
+    filter var(--cz-dur,700ms) var(--cz-ease,cubic-bezier(.2,.7,.2,1));
   transition-delay:var(--cz-delay,0ms)}
 .cz-motion.cz-js .cz-rv--slide-up{transform:translateY(28px)}
 .cz-motion.cz-js .cz-rv--slide-left{transform:translateX(28px)}
@@ -913,8 +1072,13 @@ section{position:relative}
 .cz-motion.cz-js .cz-rv--bounce.cz-in{animation:czBounce .8s cubic-bezier(.2,1.3,.4,1) both}
 @keyframes czBounce{from{transform:translateY(34px)}60%{transform:translateY(-8px)}to{transform:none}}
 .cz-motion.cz-js .cz-rv--mask-up{clip-path:inset(100% 0 0 0);opacity:1;
-  transition:clip-path var(--cz-dur,700ms) cubic-bezier(.2,.7,.2,1);transition-delay:var(--cz-delay,0ms)}
+  transition:clip-path var(--cz-dur,700ms) var(--cz-ease,cubic-bezier(.2,.7,.2,1));transition-delay:var(--cz-delay,0ms)}
 .cz-motion.cz-js .cz-rv--mask-up.cz-in{clip-path:inset(0 0 0 0)}
+/* softer reveals (all reset by .cz-rv.cz-in's transform:none;filter:none) */
+.cz-motion.cz-js .cz-rv--fade-up{transform:translateY(14px)}
+.cz-motion.cz-js .cz-rv--fade-down{transform:translateY(-14px)}
+.cz-motion.cz-js .cz-rv--scale-up{transform:scale(.98)}
+.cz-motion.cz-js .cz-rv--blur-up{filter:blur(8px);transform:translateY(16px)}
 /* hover effects (whole-section, CSS-only) */
 .cz-hover-lift{transition:transform .35s cubic-bezier(.2,.7,.2,1),box-shadow .35s}
 .cz-hover-lift:hover{transform:translateY(-6px);box-shadow:0 30px 60px -34px color-mix(in srgb,var(--brand) 50%,transparent)}
@@ -922,11 +1086,19 @@ section{position:relative}
 .cz-hover-tilt:hover{transform:perspective(900px) rotateX(3deg) rotateY(-3deg) scale(1.01)}
 .cz-hover-glow{transition:box-shadow .4s}
 .cz-hover-glow:hover{box-shadow:0 0 0 1px color-mix(in srgb,var(--brand) 40%,transparent),0 24px 60px -30px color-mix(in srgb,var(--brand) 55%,transparent)}
+.cz-hover-grow{transition:transform .35s cubic-bezier(.2,.7,.2,1)}
+.cz-hover-grow:hover{transform:scale(1.02)}
+.cz-hover-sink{transition:transform .3s cubic-bezier(.2,.7,.2,1)}
+.cz-hover-sink:hover{transform:translateY(4px) scale(.99)}
 /* continuous loops */
 .cz-loop-float{animation:czFloat 6s ease-in-out infinite}
 @keyframes czFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)}}
 .cz-loop-pulse{animation:czPulse 4s ease-in-out infinite}
 @keyframes czPulse{0%,100%{transform:scale(1)}50%{transform:scale(1.015)}}
+.cz-loop-sway{animation:czSway 5s ease-in-out infinite}
+@keyframes czSway{0%,100%{transform:rotate(-1.2deg)}50%{transform:rotate(1.2deg)}}
+.cz-loop-breathe{animation:czBreathe 4.5s ease-in-out infinite}
+@keyframes czBreathe{0%,100%{opacity:.82}50%{opacity:1}}
 /* per-block heading animation (reuses czRise/czShim keyframes) */
 .cz-bh-rise h1,.cz-bh-rise h2{animation:czRise .9s cubic-bezier(.2,.7,.2,1) both}
 .cz-bh-shimmer h1,.cz-bh-shimmer h2{background:linear-gradient(100deg,var(--ink) 30%,var(--brand) 50%,var(--ink) 70%);
@@ -970,7 +1142,8 @@ section{position:relative}
   .cz-motion.cz-js .cz-rv--stagger .cz-plans>*{opacity:1!important;transform:none!important;filter:none!important;transition:none}
   .cz-rv--mask-up{clip-path:none!important}
   .cz-kenburns>.cz-bg-media,.cz-parallax>.cz-bg-media,.cz-h-rise .cz-hero__title,.cz-h-shimmer .cz-hero__title,
-  .cz-loop-float,.cz-loop-pulse,.cz-bh-rise h1,.cz-bh-rise h2,.cz-bh-shimmer h1,.cz-bh-shimmer h2{animation:none!important}
+  .cz-loop-float,.cz-loop-pulse,.cz-loop-sway,.cz-loop-breathe,
+  .cz-bh-rise h1,.cz-bh-rise h2,.cz-bh-shimmer h1,.cz-bh-shimmer h2{animation:none!important}
   .cz-h-shimmer .cz-hero__title,.cz-bh-shimmer h1,.cz-bh-shimmer h2{color:var(--ink);-webkit-text-fill-color:var(--ink)}
   .cz-modal__scrim,.cz-modal__card{transition:none}}
 """
@@ -2300,6 +2473,13 @@ def render_site_html(site: dict, page: dict, nav_pages: list[dict], preview: boo
     _ls = str(typ.get("headingSpacing") or "").strip()
     if re.match(r"^-?[0-9]*\.?[0-9]+(em|px)$", _ls):
         _extra.append(f"--ls-h:{_ls}")
+    # Global heading-size scale (percent, 70-140). Consumed by the heading rules
+    # as `calc(var(--cz-h-scale,100)/100*<clamp>)`, so unset (or 100) computes to
+    # the original clamp — identical to today. Emitted only when it actually
+    # differs from the 100 default. Divide-in-CSS keeps the token a clean int.
+    _hscale = _clampi(typ.get("headingScale"), 70, 140, 0)
+    if _hscale and _hscale != 100:
+        _extra.append(f"--cz-h-scale:{_hscale}")
     _grad = _design_gradient(tc_colors.get("brandGradient"))
     if _grad:
         _extra.append(f"--brand-grad:{_grad}")

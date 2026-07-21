@@ -34,6 +34,11 @@ export const FONT_PAIRINGS: { id: string; label: string; heading: string; body: 
   { id: 'jakarta', label: 'Plus Jakarta / Plus Jakarta', heading: 'Plus Jakarta Sans', body: 'Plus Jakarta Sans' },
   { id: 'marcellus', label: 'Marcellus / Libre Franklin', heading: 'Marcellus', body: 'Libre Franklin' },
   { id: 'instrument', label: 'Instrument Serif / Inter', heading: 'Instrument Serif', body: 'Inter' },
+  { id: 'ebgaramond', label: 'EB Garamond / Public Sans', heading: 'EB Garamond', body: 'Public Sans' },
+  { id: 'newsreader', label: 'Newsreader / Inter', heading: 'Newsreader', body: 'Inter' },
+  { id: 'gloock', label: 'Gloock / Work Sans', heading: 'Gloock', body: 'Work Sans' },
+  { id: 'anton', label: 'Anton / Hanken Grotesk', heading: 'Anton', body: 'Hanken Grotesk' },
+  { id: 'archivoblack', label: 'Archivo Black / Libre Franklin', heading: 'Archivo Black', body: 'Libre Franklin' },
 ]
 
 // Granular font catalog for the premium designer (independent heading/body),
@@ -201,6 +206,64 @@ export const CAPPE_THEMES: CappeThemePreset[] = [
       mode: 'light', fonts: { heading: 'Sora', body: 'Inter' }, radius: '2xl',
       heroStyle: 'centered', navStyle: 'simple', premium: true,
       colors: { bg: '#fff8f3', surface: '#ffeee3', text: '#2a1d18', muted: '#7a6258', border: '#f6ddcd', brand: '#f0603a', brandText: '#ffffff', accent: '#f0603a' },
+    },
+  },
+  {
+    id: 'terra',
+    name: 'Terra',
+    blurb: 'Warm sand canvas, terracotta brand, Garamond headlines. Grounded & editorial.',
+    premium: true,
+    swatch: { bg: '#faf6f0', surface: '#f0e8db', brand: '#a86b3c', text: '#241f19' },
+    font: 'EB Garamond',
+    config: {
+      mode: 'light', fonts: { heading: 'EB Garamond', body: 'Public Sans' }, radius: 'md',
+      heroStyle: 'split', navStyle: 'simple', premium: true,
+      // Garamond sets small on screen — scale the headings up for presence.
+      type: { headingScale: 115 },
+      colors: { bg: '#faf6f0', surface: '#f0e8db', text: '#241f19', muted: '#6f6353', border: '#e4d8c6', brand: '#a86b3c', brandText: '#ffffff', accent: '#a86b3c' },
+    },
+  },
+  {
+    id: 'cobalt',
+    name: 'Cobalt',
+    blurb: 'Crisp white, deep-blue brand, Space Grotesk. Confident SaaS/tech.',
+    premium: true,
+    swatch: { bg: '#ffffff', surface: '#eef2fb', brand: '#2563eb', text: '#0f1729' },
+    font: 'Space Grotesk',
+    config: {
+      mode: 'light', fonts: { heading: 'Space Grotesk', body: 'Inter' }, radius: 'md',
+      heroStyle: 'centered', navStyle: 'simple', premium: true,
+      type: { headingScale: 108 },
+      colors: { bg: '#ffffff', surface: '#f2f5fb', text: '#0f1729', muted: '#556077', border: '#e0e6f0', brand: '#2563eb', brandText: '#ffffff', accent: '#2563eb' },
+    },
+  },
+  {
+    id: 'bloom',
+    name: 'Bloom',
+    blurb: 'Blush canvas, rose brand, airy Cormorant display. Elegant & soft.',
+    premium: true,
+    swatch: { bg: '#fef7f6', surface: '#fbe9ea', brand: '#c1466a', text: '#2b1f22' },
+    font: 'Cormorant Garamond',
+    config: {
+      mode: 'light', fonts: { heading: 'Cormorant Garamond', body: 'DM Sans' }, radius: '2xl',
+      heroStyle: 'centered', navStyle: 'centered', premium: true,
+      // Cormorant is delicate; larger scale gives the display headlines impact.
+      type: { headingScale: 122 },
+      colors: { bg: '#fef7f6', surface: '#fbe9ea', text: '#2b1f22', muted: '#7d6367', border: '#f3d9dc', brand: '#c1466a', brandText: '#ffffff', accent: '#c1466a' },
+    },
+  },
+  {
+    id: 'press',
+    name: 'Press',
+    blurb: 'Near-black canvas, amber brand, Anton display. Bold, loud, headline-first.',
+    premium: true,
+    swatch: { bg: '#0f0f10', surface: '#1a1a1c', brand: '#f5c518', text: '#f4f4f2' },
+    font: 'Anton',
+    config: {
+      mode: 'dark', fonts: { heading: 'Anton', body: 'Hanken Grotesk' }, radius: 'none',
+      heroStyle: 'centered', navStyle: 'centered', premium: true,
+      type: { headingScale: 118 },
+      colors: { bg: '#0f0f10', surface: '#1a1a1c', text: '#f4f4f2', muted: '#9a9a97', border: '#2a2a2d', brand: '#f5c518', brandText: '#0f0f10', accent: '#f5c518' },
     },
   },
 ]
