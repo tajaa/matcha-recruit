@@ -842,17 +842,15 @@ def _hum_acronym(v) -> str:
     return _ACRONYM_LABELS.get(v, _hum(v))
 
 
-def _person(r) -> str:
-    """Employee display name from a row carrying first_name/last_name."""
-    name = f"{r['first_name'] or ''} {r['last_name'] or ''}".strip()
-    return name or "an employee"
-
-
 def _money(v) -> str:
+    """Currency for an attorney-facing record: cents are shown when they exist.
+    A settlement of 45000.50 rendered as "$45,000" is a wrong figure, not a
+    tidier one."""
     try:
-        return f"${float(v):,.0f}"
+        f = float(v)
     except (TypeError, ValueError):
         return "—"
+    return f"${f:,.0f}" if f == int(f) else f"${f:,.2f}"
 
 
 async def _src_leave(conn, company_id, start, end, loc_id, state, topic=_BROAD) -> list[dict]:
@@ -867,7 +865,13 @@ async def _src_leave(conn, company_id, start, end, loc_id, state, topic=_BROAD) 
     #
     # NOTE: leave_requests keys on `org_id`, not `company_id` (d0a8f93f3fd0).
     # Window on the leave's span, not its creation: a leave that started before
-    # the window but ran into it is in scope.
+    # the window but ran into it is in scope. `end_date` is NULL for an
+    # open-ended leave, so it falls back to the return date and then to today —
+    # collapsing to `start_date` would drop the still-running leave that began
+    # before the window, which on an interference matter is the whole subject.
+    # Over-inclusive for a denied/cancelled request with no end date; that is the
+    # module's standing trade (a record wrongly absent from a legal corpus is
+    # worse than one wrongly present).
     rows = await conn.fetch(
         f"""
         SELECT lr.id, lr.leave_type, lr.status, lr.start_date, lr.end_date,
@@ -876,7 +880,7 @@ async def _src_leave(conn, company_id, start, end, loc_id, state, topic=_BROAD) 
         FROM leave_requests lr
         JOIN employees e ON e.id = lr.employee_id
         WHERE lr.org_id = $1
-          AND ($2::date IS NULL OR COALESCE(lr.end_date, lr.start_date) >= $2)
+          AND ($2::date IS NULL OR COALESCE(lr.end_date, lr.actual_return_date, CURRENT_DATE) >= $2)
           AND ($3::date IS NULL OR lr.start_date < ($3::date + 1))
           {_scope_employee(4)}
         ORDER BY lr.start_date DESC NULLS LAST
@@ -886,7 +890,7 @@ async def _src_leave(conn, company_id, start, end, loc_id, state, topic=_BROAD) 
     return [{
         "cid": f"leave:{r['id']}",
         "ref": f"{_hum_acronym(r['leave_type'])} leave",
-        "summary": f"{_hum_acronym(r['leave_type'])} leave for {_person(r)} — status {_hum(r['status'])}"
+        "summary": f"{_hum_acronym(r['leave_type'])} leave for {_emp_name(r, 'an employee')} — status {_hum(r['status'])}"
                    + f", {_dt(r['start_date'])} to "
                    + (_dt(r["end_date"]) if r["end_date"] else "open-ended")
                    + (", intermittent" if r["intermittent"] else "")
@@ -923,7 +927,7 @@ async def _src_agency_charges(conn, company_id, start, end, loc_id, state, topic
         "ref": r["charge_number"] or r["agency_name"] or f"{_hum_acronym(r['charge_type'])} charge",
         "summary": f"{_hum_acronym(r['charge_type'])} charge"
                    + (f" filed with {r['agency_name']}" if r["agency_name"] else "")
-                   + f" naming {_person(r)} — status {_hum(r['status'])}"
+                   + f" naming {_emp_name(r, 'an employee')} — status {_hum(r['status'])}"
                    + (f", resolved {_dt(r['resolution_date'])}" if r["resolution_date"] else "")
                    + (f" for {_money(r['resolution_amount'])}"
                       if r["resolution_amount"] is not None else ""),
@@ -953,7 +957,7 @@ async def _src_pre_termination(conn, company_id, start, end, loc_id, state, topi
     return [{
         "cid": f"preterm:{r['id']}",
         "ref": "Pre-termination review",
-        "summary": f"Pre-termination risk review for {_person(r)} — risk band "
+        "summary": f"Pre-termination risk review for {_emp_name(r, 'an employee')} — risk band "
                    f"{_hum(r['overall_band'])} (score {r['overall_score']})"
                    + (f", outcome {_hum(r['outcome'])}" if r["outcome"] else "")
                    + (", recorded as a voluntary separation" if r["is_voluntary"]
@@ -973,7 +977,8 @@ async def _src_separations(conn, company_id, start, end, loc_id, state, topic=_B
         SELECT sa.id, sa.status, sa.severance_weeks, sa.severance_amount,
                sa.is_adea_applicable, sa.is_group_layoff, sa.consideration_period_days,
                sa.revocation_period_days, sa.presented_date, sa.signed_date,
-               sa.effective_date, sa.revoked_date, e.first_name, e.last_name
+               sa.effective_date, sa.revoked_date, sa.created_at,
+               e.first_name, e.last_name
         FROM separation_agreements sa
         JOIN employees e ON e.id = sa.employee_id
         WHERE sa.company_id = $1
@@ -1002,12 +1007,19 @@ async def _src_separations(conn, company_id, start, end, loc_id, state, topic=_B
             bits.append(f"signed {_dt(r['signed_date'])}")
         if r["revoked_date"]:
             bits.append(f"revoked {_dt(r['revoked_date'])}")
+        # Date the record the same way the query windows and orders it. Keying
+        # `when` on presented_date alone left a drafted-but-never-presented
+        # agreement dateless — dropped from the chronology, "—" in the evidence
+        # index — even though it was selected on its created_at.
+        dated = r["presented_date"] or r["created_at"]
+        if not r["presented_date"]:
+            bits.append("not presented; drafted " + _dt(r["created_at"]))
         out.append({
             "cid": f"separation:{r['id']}",
             "ref": "Separation agreement",
-            "summary": f"Separation agreement with {_person(r)} — " + ", ".join(bits),
-            "when": _dt(r["presented_date"]),
-            "when_iso": _iso(r["presented_date"]),
+            "summary": f"Separation agreement with {_emp_name(r, 'an employee')} — " + ", ".join(bits),
+            "when": _dt(dated),
+            "when_iso": _iso(dated),
         })
     return out
 
@@ -1030,7 +1042,7 @@ async def _src_post_term_claims(conn, company_id, start, end, loc_id, state, top
     return [{
         "cid": f"ptclaim:{r['id']}",
         "ref": _hum(r["claim_type"]) or "Post-termination claim",
-        "summary": f"{_hum(r['claim_type'])} claim by {_person(r)} after separation — "
+        "summary": f"{_hum(r['claim_type'])} claim by {_emp_name(r, 'an employee')} after separation — "
                    f"status {_hum(r['status'])}"
                    + (f", resolved {_dt(r['resolution_date'])}" if r["resolution_date"] else "")
                    + (f" for {_money(r['resolution_amount'])}"
@@ -1754,7 +1766,13 @@ _AUDIT_ACTION_LABELS = {
 }
 
 
-def _describe_audit(row: dict) -> str:
+def _describe_audit(row: dict, labels: dict | None = _AUDIT_ACTION_LABELS) -> str:
+    """Human phrase for one audit row. ``labels`` is the MATTER vocabulary by
+    default; pass None for a foreign trail (ER, discipline), whose action names
+    are its own — 'update' there means the record was updated, and rendering it
+    through this map would assert 'Matter updated' in an attorney packet."""
+    if labels is None:
+        return _hum(row.get("action")) or "—"
     action = row.get("action") or ""
     details = row.get("details") or {}
     if isinstance(details, str):
@@ -1762,7 +1780,7 @@ def _describe_audit(row: dict) -> str:
             details = json.loads(details)
         except Exception:
             details = {}
-    label = _AUDIT_ACTION_LABELS.get(action, _hum(action))
+    label = labels.get(action, _hum(action))
     if action == "message":
         return label.format(role=_hum(details.get("role", "")) or "—")
     if action == "generate_packet":
@@ -2228,28 +2246,44 @@ async def _detail_accommodation(conn, acc_id: str, company_id) -> dict | None:
 _AUDIT_ROW_CAP = 30
 
 
-async def _detail_er_audit(conn, case_id: str) -> list[dict]:
+def _group_audit(rows, key: str) -> dict[str, list[dict]]:
+    out: dict[str, list[dict]] = {}
+    for r in rows:
+        out.setdefault(str(r[key]), []).append(dict(r))
+    return out
+
+
+async def _er_audit_by_case(conn, case_ids: list[str]) -> dict[str, list[dict]]:
+    """One query for the whole packet, not one per case. The appendix covers
+    every in-scope ER case (the deliberate case-file dump), so per-record fetches
+    would add up to _PER_SOURCE_CAP sequential round-trips to an already-slow
+    packet build."""
+    if not case_ids:
+        return {}
     rows = await conn.fetch(
-        """SELECT al.action, al.details, al.created_at, u.email AS user_email
+        """SELECT al.case_id, al.action, al.details, al.created_at, u.email AS user_email
              FROM er_audit_log al
              LEFT JOIN users u ON u.id = al.user_id
-            WHERE al.case_id = $1
+            WHERE al.case_id = ANY($1::uuid[])
             ORDER BY al.created_at""",
-        case_id,
+        case_ids,
     )
-    return [dict(r) for r in rows]
+    return _group_audit(rows, "case_id")
 
 
-async def _detail_discipline_audit(conn, disc_id: str) -> list[dict]:
+async def _discipline_audit_by_record(conn, disc_ids: list[str]) -> dict[str, list[dict]]:
+    if not disc_ids:
+        return {}
     rows = await conn.fetch(
-        """SELECT al.action, al.details, al.created_at, u.email AS user_email
+        """SELECT al.discipline_id, al.action, al.details, al.created_at,
+                  u.email AS user_email
              FROM discipline_audit_log al
              LEFT JOIN users u ON u.id = al.actor_user_id
-            WHERE al.discipline_id = $1
+            WHERE al.discipline_id = ANY($1::uuid[])
             ORDER BY al.created_at""",
-        disc_id,
+        disc_ids,
     )
-    return [dict(r) for r in rows]
+    return _group_audit(rows, "discipline_id")
 
 
 def _custody_table(rows: list[dict] | None, empty: str) -> str:
@@ -2268,7 +2302,7 @@ def _custody_table(rows: list[dict] | None, empty: str) -> str:
     body = "".join(
         f"<tr><td>{_fmt_dt(r.get('created_at'))}</td>"
         f"<td>{_esc(r.get('user_email') or 'System')}</td>"
-        f"<td>{_esc(_describe_audit(r))}</td></tr>"
+        f"<td>{_esc(_describe_audit(r, labels=None))}</td></tr>"
         for r in rows
     )
     if elided:
@@ -2278,9 +2312,11 @@ def _custody_table(rows: list[dict] | None, empty: str) -> str:
             f"<tbody>{body}</tbody></table>")
 
 
-def _emp_name(d: dict) -> str:
+def _emp_name(d, fallback: str = "—") -> str:
+    """Employee display name from anything carrying first_name/last_name — a
+    detail dict (which may not have the keys at all) or an asyncpg Record."""
     name = f"{d.get('first_name') or ''} {d.get('last_name') or ''}".strip()
-    return name or "—"
+    return name or fallback
 
 
 def _discipline_section(cid: str, d: dict) -> str:
@@ -2458,6 +2494,15 @@ async def build_defense_packet(conn, matter: dict, corpus: dict, memo: dict,
     ]
     appendix_ids = cited + [c for c in case_file_ids if c not in cited_set]
 
+    # Chain-of-custody trails for every ER case / discipline record the appendix
+    # will render — two queries for the whole packet, keyed back onto each record
+    # inside the loop below. `_safe_detail` keeps a missing table or a failed
+    # fetch from sinking the packet: the sections degrade to "no entries".
+    er_audit = await _safe_detail(_er_audit_by_case(
+        conn, [c.split(":", 1)[1] for c in appendix_ids if c.startswith("er_case:")])) or {}
+    disc_audit = await _safe_detail(_discipline_audit_by_record(
+        conn, [c.split(":", 1)[1] for c in appendix_ids if c.startswith("discipline:")])) or {}
+
     details: dict = {}
     for c in appendix_ids:
         if c.startswith("incident:"):
@@ -2468,15 +2513,16 @@ async def build_defense_packet(conn, matter: dict, corpus: dict, memo: dict,
             case_id = c.split(":", 1)[1]
             d = await _safe_detail(build_er_packet(conn, UUID(case_id), company_id))
             if d:
-                # Ownership was already proved by the packet fetch above, so the
-                # audit fetch needs no company predicate (er_audit_log has none).
-                d["audit_trail"] = await _safe_detail(_detail_er_audit(conn, case_id)) or []
+                # Ownership is proved by the packet fetch above; the batched
+                # audit rows are keyed on the same id (er_audit_log has no
+                # company column of its own).
+                d["audit_trail"] = er_audit.get(case_id, [])
                 details[c] = ("er_case", d)
         elif c.startswith("discipline:"):
             disc_id = c.split(":", 1)[1]
             d = await _safe_detail(_detail_discipline(conn, disc_id, company_id))
             if d:
-                d["audit_trail"] = await _safe_detail(_detail_discipline_audit(conn, disc_id)) or []
+                d["audit_trail"] = disc_audit.get(disc_id, [])
                 details[c] = ("discipline", d)
         elif c.startswith("compliance_req:"):
             d = await _safe_detail(_detail_compliance(conn, c.split(":", 1)[1], company_id))

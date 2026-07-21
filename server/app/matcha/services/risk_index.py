@@ -102,12 +102,17 @@ def _wc_score(severity_band, emr, ever_recordable, trir=None):
     return max(0, min(100, round(base))), detail
 
 
-async def _wc_component(conn, company_id: UUID):
-    """Tenant WC sub-score — pulls metrics + latest mod, then scores."""
-    from ..routes.ir_incidents.analytics import compute_wc_metrics  # lazy: route module
-    m = await compute_wc_metrics(conn, company_id)
-    emr = (await wc_depth.latest_mods(conn, [company_id])).get(str(company_id), {}).get("experience_mod")
-    return _wc_score(m.get("severity_band"), emr, m.get("ever_recordable"), trir=m.get("trir"))
+async def _wc_component(conn, company_id: UUID, *, wc=None, emr=None):
+    """Tenant WC sub-score — pulls metrics + latest mod, then scores.
+
+    ``wc`` (a ``compute_wc_metrics`` result) and ``emr`` may be passed in by a
+    caller that already has them, to skip two queries."""
+    if wc is None:
+        from ..routes.ir_incidents.analytics import compute_wc_metrics  # lazy: route module
+        wc = await compute_wc_metrics(conn, company_id)
+    if emr is None:
+        emr = (await wc_depth.latest_mods(conn, [company_id])).get(str(company_id), {}).get("experience_mod")
+    return _wc_score(wc.get("severity_band"), emr, wc.get("ever_recordable"), trir=wc.get("trir"))
 
 
 async def _wc_reserve_confidence(conn, company_id: UUID) -> str:
@@ -407,10 +412,13 @@ def _property_score(rollup: Optional[dict], cat: Optional[dict] = None,
     return max(0, min(100, round(score))), "; ".join(bits), _worst_conf(confs)
 
 
-async def _property_component(conn, company_id: UUID):
+async def _property_component(conn, company_id: UUID, *, cat=None):
     """Tenant property sub-score from the Statement of Values. None when no buildings.
     Catastrophe is wired via ``property_cat.company_cat_exposure``; adverse loss
     development via the company's own property loss-run triangle.
+
+    ``cat`` may be passed in by a caller that already computed it (the broker
+    submission context does) — it is the same whole-SOV rollup either way.
 
     Best-effort: degrades to None if the property tables aren't present yet (migration
     lag on a server that has the code but not ``prop01``) so the composite index never
@@ -426,12 +434,12 @@ async def _property_component(conn, company_id: UUID):
     if not buildings:
         return None
     rollup = property_sov.rollup(buildings, date.today().year)
-    cat = None
-    try:
-        from . import property_cat
-        cat = await property_cat.company_cat_exposure(conn, company_id)
-    except (ImportError, AttributeError, asyncpg.exceptions.UndefinedTableError):
-        cat = None
+    if cat is None:
+        try:
+            from . import property_cat
+            cat = await property_cat.company_cat_exposure(conn, company_id)
+        except (ImportError, AttributeError, asyncpg.exceptions.UndefinedTableError):
+            cat = None
     loss = None
     try:
         from . import loss_development
@@ -442,9 +450,16 @@ async def _property_component(conn, company_id: UUID):
     return _property_score(rollup, cat, loss)
 
 
-async def compute_risk_index(conn, company_id: UUID) -> dict:
+async def compute_risk_index(conn, company_id: UUID, *, wc=None, emr=None,
+                             epl=None, cat=None) -> dict:
     """Composite 0–100 index for an on-platform (tenant) client: WC + EPL +
-    compliance, plus commercial property when that feature is enabled."""
+    compliance, plus commercial property when that feature is enabled.
+
+    The four keyword arguments let a caller that has ALREADY computed a
+    sub-input hand it over instead of paying for it twice — the broker
+    submission context computes WC metrics, the experience mod, EPL readiness
+    and the catastrophe rollup before it asks for the index. Omit them and every
+    input is fetched here, exactly as before."""
     from app.core.feature_flags import merge_company_features
 
     company = await conn.fetchrow(
@@ -463,14 +478,15 @@ async def compute_risk_index(conn, company_id: UUID) -> dict:
 
     components: list[dict] = []
 
-    wc = await _wc_component(conn, company_id)
-    if wc is not None:
+    wc_scored = await _wc_component(conn, company_id, wc=wc, emr=emr)
+    if wc_scored is not None:
         wc_conf = await _wc_reserve_confidence(conn, company_id)
-        detail = wc[1] if wc_conf == "high" else f"{wc[1]}; reserves {wc_conf} confidence"
+        detail = wc_scored[1] if wc_conf == "high" else f"{wc_scored[1]}; reserves {wc_conf} confidence"
         components.append({"key": "wc", "label": "Workers' Comp", "weight": _WEIGHTS["wc"],
-                           "score": wc[0], "detail": detail, "confidence": wc_conf})
+                           "score": wc_scored[0], "detail": detail, "confidence": wc_conf})
 
-    epl = await epl_readiness.compute_epl_readiness(conn, company_id)
+    if epl is None:
+        epl = await epl_readiness.compute_epl_readiness(conn, company_id)
     components.append(_epl_component(epl))
 
     comp = await _compliance_component(conn, company_id)
@@ -483,7 +499,7 @@ async def compute_risk_index(conn, company_id: UUID) -> dict:
                            "score": comp[0], "detail": comp[1], "confidence": comp[2]})
 
     if property_enabled:
-        prop = await _property_component(conn, company_id)
+        prop = await _property_component(conn, company_id, cat=cat)
         if prop is not None:
             components.append({"key": "property", "label": "Commercial Property", "weight": _WEIGHTS["property"],
                                "score": prop[0], "detail": prop[1], "confidence": prop[2]})

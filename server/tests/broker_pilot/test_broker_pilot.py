@@ -227,8 +227,9 @@ def test_platform_records_property_substructures():
     assert "platform:property" in recs                      # rollup still emitted
     assert "platform:property.cat" in recs
     assert "platform:property.exposure" in recs
-    assert "platform:property.plan.0" in recs
-    assert "platform:property.plan.1" in recs
+    # cids key on the fix's own key + building, never its rank position
+    assert "platform:property.plan.sprinkler.b1" in recs
+    assert "platform:property.plan.itv" in recs
     assert "platform:property.risk" in recs
 
     cat = recs["platform:property.cat"]["summary"].lower()
@@ -240,8 +241,8 @@ def test_platform_records_property_substructures():
     exposure = recs["platform:property.exposure"]["summary"]
     assert "41,000" in exposure and "3,100,000" in exposure and "900,000" in exposure
 
-    assert "Add sprinklers" in recs["platform:property.plan.0"]["summary"]
-    assert "high" in recs["platform:property.plan.0"]["summary"].lower()
+    assert "Add sprinklers" in recs["platform:property.plan.sprinkler.b1"]["summary"]
+    assert "high" in recs["platform:property.plan.sprinkler.b1"]["summary"].lower()
     risk = recs["platform:property.risk"]["summary"]
     assert "58" in risk and "Building A" in risk
 
@@ -290,7 +291,7 @@ def test_platform_records_external_property_shape_is_inert():
 
 def test_build_corpus_indexes_property_and_risk_records():
     corpus = bp.build_corpus("Hillcrest", _PROP_CTX, _docs())
-    for cid in ("platform:property.cat", "platform:property.plan.0", "platform:risk",
+    for cid in ("platform:property.cat", "platform:property.plan.sprinkler.b1", "platform:risk",
                 "platform:risk.property"):
         assert cid in corpus["index"], cid
         assert corpus["index"][cid]["source"] == "platform"
@@ -581,3 +582,27 @@ def test_broker_native_gather_skips_leave_and_only_leave():
     joined = "\n".join(seen)
     assert "leave_requests" not in joined                    # never even queried
     assert "agency_charges" in joined and "separation_agreements" in joined
+
+
+def test_property_plan_cids_survive_a_reranked_plan():
+    """`build_plan` re-ranks by severity and $ impact, and the corpus is rebuilt
+    on every chat turn and again at memo time. A positional cid would silently
+    repoint a citation at a different fix; the citation gate can't catch that
+    because the id still resolves."""
+    fixes = _PROP_CTX["property"]["plan"]["fixes"]
+    ctx_a = {"property": {"plan": {"fixes": fixes}}}
+    ctx_b = {"property": {"plan": {"fixes": list(reversed(fixes))}}}
+    by_cid_a = {r["cid"]: r["summary"] for r in bp._platform_records(ctx_a)}
+    by_cid_b = {r["cid"]: r["summary"] for r in bp._platform_records(ctx_b)}
+    assert by_cid_a == by_cid_b
+
+
+def test_property_plan_cids_stay_unique_for_a_repeated_key():
+    # same fix key twice on the same building (or on no building) must not
+    # collapse two records onto one cid
+    ctx = {"property": {"plan": {"fixes": [
+        {"key": "itv", "label": "Raise insured value", "severity": "medium"},
+        {"key": "itv", "label": "Raise insured value again", "severity": "low"},
+    ]}}}
+    cids = [r["cid"] for r in bp._platform_records(ctx)]
+    assert cids == ["platform:property.plan.itv", "platform:property.plan.itv-2"]

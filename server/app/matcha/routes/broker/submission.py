@@ -164,8 +164,13 @@ def _submission_preview(ctx: dict) -> dict:
     }
 
 
-async def _tenant_context(conn, user_id, company_id: UUID) -> dict:
-    """Common submission context for an on-platform (tenant) client."""
+async def _tenant_context(conn, user_id, company_id: UUID, *,
+                          include_risk_index: bool = False) -> dict:
+    """Common submission context for an on-platform (tenant) client.
+
+    ``include_risk_index`` is off by default: only Broker Pilot grounds on the
+    composite index, and the packet/preview/coverage-gap paths would otherwise
+    pay for a whole extra engine run they never read."""
     meta = await _assert_broker_owns_company(conn, user_id, company_id)
     broker_id = await _broker_id(conn, user_id)
     m = await compute_wc_metrics(conn, company_id)
@@ -191,12 +196,23 @@ async def _tenant_context(conn, user_id, company_id: UUID) -> dict:
         plan = property_recs.build_plan(sov["buildings"], sov.get("rollup"), cat=cat, exposure=exp)
         risk = property_risk_svc.portfolio_risk(sov["buildings"])
         property_ctx = {**sov, "cat": cat, "exposure": exp, "plan": plan, "risk": risk}
-    # Composite index (WC + EPL + compliance [+ property]) — the same engine the
-    # client's own risk portal renders. Carried in the context so Broker Pilot can
-    # cite it; the packet renderers ignore keys they don't know.
-    risk_idx = await _safe(risk_index.compute_risk_index(conn, company_id), None, "risk_index")
     primary = states[0] if states else None
     latest = mods.get(str(company_id)) or {}
+    # Composite index (WC + EPL + compliance [+ property]) — the same engine the
+    # client's own risk portal renders. Carried in the context so Broker Pilot can
+    # cite it; the packet renderers ignore keys they don't know. Every input it
+    # would otherwise re-fetch (WC metrics, experience mod, EPL, catastrophe
+    # rollup) was already computed above, so it is handed over rather than
+    # queried a second time.
+    risk_idx = None
+    if include_risk_index:
+        risk_idx = await _safe(
+            risk_index.compute_risk_index(
+                # `cat or None`: _safe defaults a failed rollup to {}, and the
+                # index must re-fetch in that case rather than score against an
+                # empty rollup as if there were no catastrophe exposure.
+                conn, company_id, wc=m, emr=latest.get("experience_mod"), epl=epl, cat=cat or None),
+            None, "risk_index")
     return {
         "name": meta["name"],
         "industry": m.get("industry"),

@@ -1319,3 +1319,87 @@ def test_discipline_and_er_appendices_render_the_custody_table():
     # a record whose audit fetch degraded (no key at all) still renders
     assert "No audit-trail entries" in ld._er_section("er_case:e1", {
         "case": {"case_number": "ER-1"}, "notes": []})
+
+
+# --- review fixes -------------------------------------------------------------
+
+def test_leave_window_keeps_a_still_running_leave_that_predates_it():
+    """An open-ended leave (end_date NULL) that began before the window is the
+    leave an interference matter is usually about — collapsing the window
+    predicate to start_date would drop it."""
+    captured = {}
+
+    class _Conn:
+        async def fetch(self, sql, *args):
+            captured["sql"] = sql
+            return []
+
+    asyncio.run(ld._src_leave(_Conn(), "cid", "2025-01-01", None, None, None))
+    assert "COALESCE(lr.end_date, lr.actual_return_date, CURRENT_DATE) >= $2" in captured["sql"]
+
+
+def test_separation_without_a_presented_date_still_carries_one():
+    class _Conn(_HRConn):
+        async def fetch(self, sql, *args):
+            return [{**_SEP_ROW, "presented_date": None, "signed_date": None,
+                     "created_at": "2025-03-02"}]
+
+    r = asyncio.run(ld._src_separations(_Conn(), "cid", None, None, None, None))[0]
+    assert r["when"] and r["when"] != "—"
+    assert r["when_iso"] == "2025-03-02"        # in the chronology, not dropped
+    assert "not presented" in r["summary"]
+
+
+def test_money_keeps_cents_when_they_exist():
+    assert ld._money(45000) == "$45,000"
+    assert ld._money(45000.50) == "$45,000.50"
+    assert ld._money("12000.00") == "$12,000"
+    assert ld._money(None) == "—" and ld._money("nope") == "—"
+
+
+def test_custody_table_never_describes_a_foreign_action_as_a_matter_action():
+    """`_AUDIT_ACTION_LABELS` is the legal-matter vocabulary. An ER or discipline
+    trail whose action happens to be 'update' must not render 'Matter updated'
+    in an attorney-facing packet."""
+    html = ld._custody_table(
+        [{"action": "update", "details": {}, "created_at": None, "user_email": "a@example.com"},
+         {"action": "message", "details": {"role": "user"}, "created_at": None,
+          "user_email": "b@example.com"}], "—")
+    assert "Matter updated" not in html and "Chat message" not in html
+    assert "Update" in html and "Message" in html
+    # the matter's own chain of custody keeps the matter vocabulary
+    assert ld._describe_audit({"action": "update", "details": {}}) == "Matter updated"
+
+
+def test_emp_name_fallbacks():
+    assert ld._emp_name({"first_name": "Dana", "last_name": "Reyes"}) == "Dana Reyes"
+    assert ld._emp_name({}) == "—"                                  # appendix convention
+    assert ld._emp_name({}, "an employee") == "an employee"         # corpus convention
+
+
+def test_packet_audit_trails_are_fetched_in_one_query_per_kind():
+    """One `= ANY($1)` per kind, not one query per record: the appendix covers
+    every in-scope ER case and discipline record, not just the cited ones."""
+    calls = {"er": 0, "disc": 0}
+
+    class _Conn:
+        async def fetch(self, sql, *args):
+            if "er_audit_log" in sql:
+                calls["er"] += 1
+                assert "ANY($1::uuid[])" in sql
+                return [{"case_id": args[0][0], "action": "case_updated",
+                         "details": {}, "created_at": None, "user_email": "a@example.com"}]
+            if "discipline_audit_log" in sql:
+                calls["disc"] += 1
+                assert "ANY($1::uuid[])" in sql
+                return []
+            return []
+
+    ids = [f"0000000{i}-0000-0000-0000-00000000000{i}" for i in range(1, 5)]
+    grouped = asyncio.run(ld._er_audit_by_case(_Conn(), ids))
+    assert calls["er"] == 1
+    assert grouped[ids[0]][0]["action"] == "case_updated"
+    # empty id list short-circuits — no query at all
+    assert asyncio.run(ld._er_audit_by_case(_Conn(), [])) == {}
+    assert asyncio.run(ld._discipline_audit_by_record(_Conn(), [])) == {}
+    assert calls["er"] == 1 and calls["disc"] == 0

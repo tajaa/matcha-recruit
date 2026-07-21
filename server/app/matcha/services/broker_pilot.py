@@ -735,7 +735,8 @@ def _platform_records(ctx: dict) -> list[dict]:
     # chat could not cite them at all. Off-platform clients carry a flat
     # broker-entered snapshot under `property` with none of these keys, so every
     # guard below silently emits nothing for them (never a KeyError).
-    cat = prop.get("cat") if isinstance(prop, dict) else None
+    prop = prop if isinstance(prop, dict) else {}
+    cat = prop.get("cat")
     if isinstance(cat, dict) and cat.get("worst_tier"):
         bits = ["worst catastrophe tier " + _hum(cat["worst_tier"])
                 + (f" ({_hum(cat['worst_peril'])})" if cat.get("worst_peril") else "")]
@@ -755,7 +756,7 @@ def _platform_records(ctx: dict) -> list[dict]:
                         "not a hazard-agency-documented probability")
         add("platform:property.cat", "Property catastrophe exposure", "; ".join(bits) + ".")
 
-    exposure = prop.get("exposure") if isinstance(prop, dict) else None
+    exposure = prop.get("exposure")
     if isinstance(exposure, dict) and any(
             exposure.get(k) for k in ("total_aal", "worst_pml", "coinsurance_shortfall")):
         bits = []
@@ -772,21 +773,34 @@ def _platform_records(ctx: dict) -> list[dict]:
             summary += f" Basis: {exposure['basis']}."
         add("platform:property.exposure", "Property modeled exposure", summary)
 
-    plan = prop.get("plan") if isinstance(prop, dict) else None
+    plan = prop.get("plan")
     fixes = plan.get("fixes") if isinstance(plan, dict) else None
+    # The cid keys on the fix's own key (+ its building), NOT its list position:
+    # build_plan re-ranks by severity and $ impact on every corpus build, and the
+    # corpus is rebuilt for each chat turn AND again at memo time. A positional
+    # cid would silently point at a different fix once the ranking moved, and the
+    # citation gate can't catch that — the id still resolves.
+    plan_seen: dict[str, int] = {}
     for i, fx in enumerate(fixes or []):
         if not isinstance(fx, dict):
             continue
         label = fx.get("label") or _hum(fx.get("key")) or f"property fix {i + 1}"
+        slug = _slug(fx.get("key") or label)
+        if fx.get("building_id"):
+            slug = f"{slug}.{_slug(fx['building_id'])}"
+        n = plan_seen.get(slug, 0)
+        plan_seen[slug] = n + 1
+        if n:                      # same fix twice on one building — keep cids unique
+            slug = f"{slug}-{n + 1}"
         bits = [f"severity {_hum(fx.get('severity')) or 'unrated'}"]
         if fx.get("impact"):
             bits.append(f"projected impact {fx['impact']}")
         if fx.get("detail"):
             bits.append(str(fx["detail"]))
-        add(f"platform:property.plan.{i}", f"Property fix — {label}",
+        add(f"platform:property.plan.{slug}", f"Property fix — {label}",
             f"{label}: {'; '.join(bits)}.")
 
-    prisk = prop.get("risk") if isinstance(prop, dict) else None
+    prisk = prop.get("risk")
     if isinstance(prisk, dict) and prisk.get("score") is not None:
         bits = [f"TIV-weighted property risk score {prisk['score']}/100"]
         if prisk.get("grade"):

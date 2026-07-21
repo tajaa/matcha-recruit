@@ -247,3 +247,45 @@ def test_weighted_book_risk_confidence_mix_ignores_missing_confidence():
     r = risk_index.weighted_book_risk(clients, "headcount")
     assert r["confidence_mix"]["high"] == 0.5  # only the 10/20 with a confidence signal counts
     assert sum(r["confidence_mix"].values()) == 0.5
+
+
+# --- precomputed-input injection ---------------------------------------------
+
+def test_wc_component_uses_injected_metrics_without_querying():
+    """The broker submission context already has WC metrics and the experience
+    mod; handing them over must skip both queries, not just be accepted."""
+    import asyncio
+
+    class _Conn:
+        async def fetch(self, sql, *args):
+            raise AssertionError("no query expected when both inputs are injected")
+
+        async def fetchrow(self, sql, *args):
+            raise AssertionError("no query expected when both inputs are injected")
+
+    scored = asyncio.run(risk_index._wc_component(
+        _Conn(), "cid",
+        wc={"severity_band": "at_risk", "ever_recordable": True, "trir": 4.2},
+        emr=1.18,
+    ))
+    assert scored is not None and isinstance(scored[0], int)
+
+
+def test_property_component_uses_an_injected_cat_rollup():
+    import asyncio
+
+    seen: list[str] = []
+
+    class _Conn:
+        async def fetch(self, sql, *args):
+            seen.append(sql)
+            return []
+
+        async def fetchrow(self, sql, *args):
+            seen.append(sql)
+            return None
+
+    # no buildings → None, but the point is that company_cat_exposure is never
+    # reached when the caller passes its own rollup
+    asyncio.run(risk_index._property_component(_Conn(), "cid", cat={"worst_tier": "high"}))
+    assert not any("property_building_perils" in s for s in seen)
