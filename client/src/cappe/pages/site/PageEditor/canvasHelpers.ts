@@ -3,6 +3,37 @@ import type { CappeBlock, CappeCanvasElement, CappeCanvasElementStyle, CappeCanv
 export function genId(): string {
   try { return crypto.randomUUID().replace(/-/g, '').slice(0, 8) } catch { return Math.random().toString(36).slice(2, 10) }
 }
+export function genKey(): string {
+  return typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `k${Math.random().toString(36).slice(2)}`
+}
+
+function asDesignRecord(v: unknown): Record<string, unknown> {
+  return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {}
+}
+
+/** Deep-copy a block (content, `_design`, canvas elements — all plain JSON
+ *  data, so a JSON round-trip is a full copy with no shared references back
+ *  to the source) with a fresh `_k`, for the "duplicate this section" action.
+ *  Shared by the editor's own Duplicate menu item and Merlin's
+ *  `duplicate_block` op — same action, same result either way.
+ *
+ *  Two ids the clone can't share with its source: an anchor id would
+ *  duplicate an HTML id on the page, and canvas element ids are looked up by
+ *  canvas_update/canvas_remove — sharing them would let an op meant for one
+ *  copy silently edit the other. */
+export function cloneBlock(block: CappeBlock): CappeBlock {
+  const clone: CappeBlock = JSON.parse(JSON.stringify(block))
+  clone._k = genKey()
+  const design = asDesignRecord(clone._design)
+  if (asDesignRecord(design.anchor).id) {
+    const { anchor: _anchor, ...restDesign } = design
+    clone._design = restDesign
+  }
+  if (clone.type === 'canvas' && Array.isArray(clone.elements)) {
+    clone.elements = (clone.elements as CappeCanvasElement[]).map((e) => ({ ...e, id: genId() }))
+  }
+  return clone
+}
 export function cvEls(b: unknown): CappeCanvasElement[] {
   const els = (b as { elements?: unknown } | null)?.elements
   return Array.isArray(els) ? (els as CappeCanvasElement[]) : []

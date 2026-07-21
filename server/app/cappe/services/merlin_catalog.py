@@ -77,6 +77,16 @@ TEXT_KINDS: frozenset[str] = frozenset({"text", "textarea", "select", "image", "
 
 BLOCK_TYPES: frozenset[str] = frozenset(BLOCK_FIELDS.keys())
 
+# Grid-shaped block types where `layout.columns` actually reaches CSS (render.py
+# reads `--cz-cols` only in their grid templates). Mirrors DesignInspector.tsx's
+# COLUMN_BLOCKS — bento (span layout) and logos (flex row) are deliberately
+# excluded there, and set_design must refuse the same way: without this gate,
+# "make the hero three columns" validates and reports success while the var
+# never reaches a rule that reads it.
+COLUMN_BLOCK_TYPES: frozenset[str] = frozenset({
+    "features", "gallery", "pricing", "testimonial", "stats", "credentials", "reviews", "menu",
+})
+
 # Human labels, for the prompt only (mirrors BLOCK_SCHEMAS[type].label).
 BLOCK_LABELS: dict[str, str] = {
     "hero": "Hero", "features": "Features", "gallery": "Gallery", "pricing": "Pricing",

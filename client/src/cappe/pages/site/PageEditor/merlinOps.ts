@@ -11,7 +11,7 @@
 import { CAPPE_THEMES, contrastText } from '../../../data/cappeThemes'
 import type { CappeBlock, CappeCanvasElement } from '../../../types'
 import { BLOCK_SCHEMAS } from './blockSchemas'
-import { CV_MAX_ELEMENTS, cvEls, cvNextY, genId } from './canvasHelpers'
+import { CV_MAX_ELEMENTS, cloneBlock, cvEls, cvNextY, genId, genKey } from './canvasHelpers'
 
 export type MerlinCanvasElementInput = {
   kind: CappeCanvasElement['kind']
@@ -23,16 +23,24 @@ export type MerlinCanvasElementInput = {
   style?: CappeCanvasElement['style']
 }
 
-export type MerlinDesignGroup = 'motion' | 'bg' | 'layout' | 'colors' | 'border' | 'anchor'
+export type MerlinDesignGroup = 'motion' | 'bg' | 'layout' | 'colors' | 'border' | 'anchor' | 'type' | 'image' | 'divider'
 
 export type MerlinOp =
   | { op: 'set_field'; block: string; path: string; value: unknown }
   | { op: 'set_design'; block: string; group: MerlinDesignGroup; key: string; value: unknown }
+  // Server-resolved: "all" is expanded to a concrete id list at validation
+  // time, so the client here just targets the ids it's given (any missing
+  // mid-flight are silently skipped, same as every other id-addressed op).
+  | { op: 'set_design_bulk'; blocks: string[]; design: Partial<Record<MerlinDesignGroup, Record<string, unknown>>> }
   // `design` is a server-validated per-section design bag applied as `_design`
   // (lets one op create a fully styled section). `preset` is provenance from a
   // server-expanded apply_section_preset — the client treats it as a plain
   // add_block either way.
-  | { op: 'add_block'; type: string; at: number; content?: Record<string, unknown>; design?: Record<string, Record<string, unknown>>; preset?: string }
+  // `id` is a model-assigned temp id (e.g. "new-1") — NOT the block's real
+  // `_k` — so a LATER op in this same turn can target a block before it
+  // exists. Server registers it the same way for validation; see tempIdMap.
+  | { op: 'add_block'; type: string; at: number; content?: Record<string, unknown>; design?: Record<string, Record<string, unknown>>; preset?: string; id?: string }
+  | { op: 'duplicate_block'; block: string; at?: number }
   | { op: 'remove_block'; block: string }
   | { op: 'move_block'; block: string; to: number }
   | { op: 'set_theme'; key: string; value: unknown }
@@ -49,10 +57,20 @@ export type MerlinApplyResult = {
   blocks: CappeBlock[]
   theme: Record<string, unknown>
   results: MerlinOpResult[]
+  /** Model-assigned add_block `id` → the block's real `_k`, for this turn
+   *  only. useMerlin uses it to remap a same-turn generate_image's `block`
+   *  before calling the (async, out-of-band) image endpoint. */
+  tempIdMap: Record<string, string>
 }
 
-const genKey = () =>
-  (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `k${Math.random().toString(36).slice(2)}`)
+/** The subset of GET /merlin/schema this module reads — just enough to catch
+ *  a `set_design` group/key the server doesn't actually offer (e.g. version
+ *  skew between an old client bundle and a newer server registry). Optional:
+ *  callers that don't fetch the schema fall back to today's behavior of
+ *  applying whatever the server sent (it already validated group/key/value
+ *  server-side — this is a belt-and-braces client check, not the source of
+ *  truth). */
+export type MerlinDesignSchema = { design?: Record<string, Record<string, unknown>> }
 
 const blockLabel = (type: unknown): string => BLOCK_SCHEMAS[type as string]?.label ?? String(type ?? 'block')
 
@@ -130,10 +148,17 @@ export function applyMerlinOps(
   blocks: CappeBlock[],
   theme: Record<string, unknown>,
   ops: MerlinOp[],
+  schema?: MerlinDesignSchema,
 ): MerlinApplyResult {
   let nextBlocks = blocks
   let nextTheme = theme
   const results: MerlinOpResult[] = []
+  // add_block(id="new-1") records here; every later op's `.block` resolves
+  // through this first, so an id an earlier op in THIS turn assigned targets
+  // the block it actually became — the temp id is never used as the real
+  // `_k` (two turns could both say "new-1").
+  const tempIdMap: Record<string, string> = {}
+  const resolveBlock = (id: string) => tempIdMap[id] ?? id
 
   const findCanvas = (id: string): { idx: number; block: CappeBlock } | null => {
     const idx = nextBlocks.findIndex((b) => b._k === id)
@@ -144,7 +169,7 @@ export function applyMerlinOps(
   for (const op of ops) {
     switch (op.op) {
       case 'set_field': {
-        const idx = nextBlocks.findIndex((b) => b._k === op.block)
+        const idx = nextBlocks.findIndex((b) => b._k === resolveBlock(op.block))
         if (idx === -1) { results.push({ ok: false, summary: 'Skipped — section no longer exists' }); break }
         const block = nextBlocks[idx]
         const [head, ...rest] = op.path.split('.')
@@ -160,8 +185,12 @@ export function applyMerlinOps(
         break
       }
       case 'set_design': {
-        const idx = nextBlocks.findIndex((b) => b._k === op.block)
+        const idx = nextBlocks.findIndex((b) => b._k === resolveBlock(op.block))
         if (idx === -1) { results.push({ ok: false, summary: 'Skipped — section no longer exists' }); break }
+        if (schema?.design && !(op.key in (schema.design[op.group] || {}))) {
+          results.push({ ok: false, summary: `Skipped — unknown design setting "${op.group}.${op.key}"` })
+          break
+        }
         const block = nextBlocks[idx]
         const design = asRecord(block._design)
         const group = { ...asRecord(design[op.group]) }
@@ -173,18 +202,55 @@ export function applyMerlinOps(
         results.push({ ok: true, summary: `${blockLabel(block.type)} — ${op.group} ${op.key}` })
         break
       }
+      case 'set_design_bulk': {
+        const targets = new Set(op.blocks.map(resolveBlock))
+        const groupsTouched = new Set<string>()
+        let changed = 0
+        // Referential stability: a run that matches nothing must return the
+        // identical `nextBlocks` ref, same contract as every other op here —
+        // index.tsx keys "did anything change?" off reference equality, and a
+        // fresh array from .map() would push a spurious undo entry.
+        if (nextBlocks.some((b) => targets.has(b._k as string))) {
+          nextBlocks = nextBlocks.map((b) => {
+            if (!targets.has(b._k as string)) return b
+            const design = asRecord(b._design)
+            const merged: Record<string, unknown> = { ...design }
+            for (const [group, keys] of Object.entries(op.design)) {
+              merged[group] = { ...asRecord(design[group]), ...keys }
+              groupsTouched.add(group)
+            }
+            changed += 1
+            return { ...b, _design: merged }
+          })
+        }
+        results.push(changed === 0
+          ? { ok: false, summary: 'Skipped — none of the targeted sections exist' }
+          : { ok: true, summary: `Styled ${changed} section${changed === 1 ? '' : 's'} — ${[...groupsTouched].join(', ')}` })
+        break
+      }
       case 'add_block': {
         const schema = BLOCK_SCHEMAS[op.type]
         if (!schema) { results.push({ ok: false, summary: `Skipped — unknown block type "${op.type}"` }); break }
         const nb: CappeBlock = { ...schema.make(), ...(op.content || {}), _k: genKey() }
         if (op.design && Object.keys(op.design).length > 0) nb._design = op.design
+        if (op.id) tempIdMap[op.id] = nb._k as string
         const at = Math.max(0, Math.min(op.at, nextBlocks.length))
         nextBlocks = [...nextBlocks.slice(0, at), nb, ...nextBlocks.slice(at)]
         results.push({ ok: true, summary: op.preset ? `Added ${schema.label} (${op.preset} preset)` : `Added ${schema.label}` })
         break
       }
+      case 'duplicate_block': {
+        const idx = nextBlocks.findIndex((b) => b._k === resolveBlock(op.block))
+        if (idx === -1) { results.push({ ok: false, summary: 'Skipped — section no longer exists' }); break }
+        const src = nextBlocks[idx]
+        const clone = cloneBlock(src)
+        const at = op.at !== undefined ? Math.max(0, Math.min(op.at, nextBlocks.length)) : idx + 1
+        nextBlocks = [...nextBlocks.slice(0, at), clone, ...nextBlocks.slice(at)]
+        results.push({ ok: true, summary: `Duplicated ${blockLabel(src.type)}` })
+        break
+      }
       case 'remove_block': {
-        const idx = nextBlocks.findIndex((b) => b._k === op.block)
+        const idx = nextBlocks.findIndex((b) => b._k === resolveBlock(op.block))
         if (idx === -1) { results.push({ ok: false, summary: 'Skipped — section already removed' }); break }
         const label = blockLabel(nextBlocks[idx].type)
         nextBlocks = nextBlocks.filter((_, i) => i !== idx)
@@ -192,7 +258,7 @@ export function applyMerlinOps(
         break
       }
       case 'move_block': {
-        const from = nextBlocks.findIndex((b) => b._k === op.block)
+        const from = nextBlocks.findIndex((b) => b._k === resolveBlock(op.block))
         if (from === -1) { results.push({ ok: false, summary: 'Skipped — section no longer exists' }); break }
         const to = Math.max(0, Math.min(op.to, nextBlocks.length - 1))
         const label = blockLabel(nextBlocks[from].type)
@@ -212,7 +278,7 @@ export function applyMerlinOps(
         break
       }
       case 'canvas_add': {
-        const found = findCanvas(op.block)
+        const found = findCanvas(resolveBlock(op.block))
         if (!found) { results.push({ ok: false, summary: 'Skipped — canvas section not found' }); break }
         const els = cvEls(found.block)
         if (els.length >= CV_MAX_ELEMENTS) { results.push({ ok: false, summary: 'Skipped — canvas is full' }); break }
@@ -231,7 +297,7 @@ export function applyMerlinOps(
         break
       }
       case 'canvas_update': {
-        const found = findCanvas(op.block)
+        const found = findCanvas(resolveBlock(op.block))
         if (!found) { results.push({ ok: false, summary: 'Skipped — canvas section not found' }); break }
         const els = cvEls(found.block)
         const elIdx = els.findIndex((e) => e.id === op.el)
@@ -242,7 +308,7 @@ export function applyMerlinOps(
         break
       }
       case 'canvas_remove': {
-        const found = findCanvas(op.block)
+        const found = findCanvas(resolveBlock(op.block))
         if (!found) { results.push({ ok: false, summary: 'Skipped — canvas section not found' }); break }
         const els = cvEls(found.block)
         if (!els.some((e) => e.id === op.el)) { results.push({ ok: false, summary: 'Skipped — element no longer exists' }); break }
@@ -260,5 +326,5 @@ export function applyMerlinOps(
     }
   }
 
-  return { blocks: nextBlocks, theme: nextTheme, results }
+  return { blocks: nextBlocks, theme: nextTheme, results, tempIdMap }
 }

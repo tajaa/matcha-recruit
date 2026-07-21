@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { AlertCircle, Check, Loader2, Lock, Sparkles, X } from 'lucide-react'
+import { AlertCircle, Check, Loader2, Lock, Sparkles, Trash2, X } from 'lucide-react'
 import { usePremium } from './DesignPrimitives'
 import { dHead } from './styles'
 import { MERLIN_TIERS, type MerlinTier, type useMerlin } from './useMerlin'
@@ -21,7 +21,7 @@ export function MerlinButton({ open, setOpen }: { open: boolean; setOpen: (fn: (
 
 export function MerlinDrawer({ merlin }: { merlin: ReturnType<typeof useMerlin> }) {
   const premium = usePremium()
-  const { open, setOpen, messages, send, sending, error, tier, setTier } = merlin
+  const { open, setOpen, messages, send, sending, error, tier, setTier, clearChat } = merlin
   const [input, setInput] = useState('')
   const listRef = useRef<HTMLDivElement>(null)
 
@@ -52,7 +52,14 @@ export function MerlinDrawer({ merlin }: { merlin: ReturnType<typeof useMerlin> 
     <div className="flex w-80 shrink-0 flex-col overflow-hidden border-l border-zinc-800 bg-zinc-900">
       <div className="flex items-center justify-between border-b border-zinc-800 p-3">
         <p className={dHead}>Merlin</p>
-        <button onClick={() => setOpen(() => false)} className="rounded p-0.5 text-zinc-500 hover:text-zinc-200" title="Close (Esc)"><X className="h-4 w-4" /></button>
+        <div className="flex items-center gap-1">
+          {messages.length > 0 && (
+            <button onClick={clearChat} className="rounded p-0.5 text-zinc-500 hover:text-zinc-200" title="Clear chat">
+              <Trash2 className="h-4 w-4" />
+            </button>
+          )}
+          <button onClick={() => setOpen(() => false)} className="rounded p-0.5 text-zinc-500 hover:text-zinc-200" title="Close (Esc)"><X className="h-4 w-4" /></button>
+        </div>
       </div>
 
       <>
@@ -60,7 +67,8 @@ export function MerlinDrawer({ merlin }: { merlin: ReturnType<typeof useMerlin> 
             {messages.length === 0 && (
               <p className="text-xs text-zinc-500">
                 Tell Merlin what to change — "make the hero darker", "add an FAQ section", "swap the brand color for something warmer".
-                Edits apply live to the preview; nothing saves until you hit Save, and ⌘Z undoes a whole turn at once.
+                Edits apply live to the preview; nothing saves until you hit Save. ⌘Z undoes a turn's edits
+                (an AI-generated image applies as its own step, right after).
               </p>
             )}
             {messages.map((m, i) => (

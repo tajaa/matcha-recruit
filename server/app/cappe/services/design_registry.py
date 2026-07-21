@@ -18,8 +18,9 @@ used to live in two files and drift:
     in `_apply_design`; the registry still records the key so the vocabulary is
     complete and the parity test can assert every AI key is honored.
 
-Deliberate subset vs superset: the renderer honors MORE than the AI may set
-(e.g. `type.headingSize`, `layout.columns`, `bg.gradient`). Those carry
+Deliberate subset vs superset: the renderer still honors a few keys the AI may
+not set — px-override sentinels (`layout.gap/padTopPx/padBottomPx`) that would
+just compete with the enum knobs Merlin already has. Those carry
 `merlin_spec=None`. This asymmetry is intentional — a human in DesignInspector
 has the full surface; the AI gets a curated, conservative slice.
 
@@ -125,20 +126,27 @@ DESIGN_KEYS: tuple[DesignKey, ...] = (
     DesignKey("bg", "color", "color"),
     DesignKey("bg", "image", "text"),
     DesignKey("bg", "video", "text"),
-    DesignKey("bg", "blur", "bool", note="AI sees bool; renderer clamps 0-40"),
+    DesignKey("bg", "blur", (0, 40), note="renderer clamps 0-40 (px); legacy bool rows still clamp fine"),
+    DesignKey("bg", "overlayOpacity", (0, 100), note="rgba alpha %; only rendered with bg image/video"),
+    DesignKey("bg", "gradient", "gradient", note='{"angle":0-360,"stops":["#hex","#hex"(,3rd)]}; pair with bg.type="gradient"'),
     DesignKey("bg", "pattern", _BG_PATTERN, note="cz-pat-{v} CSS-gradient pattern; combines with bg color"),
     DesignKey("bg", "patternColor", "color", note="--cz-pat-col (default: faded ink)"),
     # ── layout (bespoke: px-override sentinel, columns→repeat template) ──
     DesignKey("layout", "align", _LAYOUT_ALIGN, note="cz-al-{left|center}"),
     DesignKey("layout", "maxWidth", _LAYOUT_MAXW, note="--cz-maxw + cz-has-maxw"),
     DesignKey("layout", "minHeight", _LAYOUT_MINH, note="--cz-minh + cz-has-minh"),
+    DesignKey("layout", "columns", (1, 6), note="--cz-cols grid template (cards/grid-shaped blocks only)"),
+    DesignKey("layout", "columnsMd", (1, 6), note="responsive columns (tablet)"),
+    DesignKey("layout", "columnsSm", (1, 6), note="responsive columns (mobile)"),
+    DesignKey("layout", "gap", None, note="renderer-only grid gap override"),
     DesignKey("layout", "padTop", "text", note="_PAD_SCALE enum or padTopPx override"),
     DesignKey("layout", "padBottom", "text", note="_PAD_SCALE enum or padBottomPx override"),
+    DesignKey("layout", "padTopPx", None, note="renderer-only px override sentinel for padTop"),
+    DesignKey("layout", "padBottomPx", None, note="renderer-only px override sentinel for padBottom"),
     # Per-breakpoint responsive overrides (tablet Md ≤1024, mobile Sm ≤640),
     # emitted as a scoped <style> by render._responsive_layout_style. AI-settable
     # for exactly the base layout keys that are AI-settable (padTop/padBottom/
-    # align); `columns` responsive is renderer+inspector-only, mirroring how base
-    # `columns` is renderer-only (not in the AI surface).
+    # align/columns — declared alongside their base key above).
     DesignKey("layout", "padTopMd", "text", note="responsive padding-top (tablet)"),
     DesignKey("layout", "padTopSm", "text", note="responsive padding-top (mobile)"),
     DesignKey("layout", "padBottomMd", "text", note="responsive padding-bottom (tablet)"),
@@ -150,15 +158,15 @@ DESIGN_KEYS: tuple[DesignKey, ...] = (
     DesignKey("colors", "heading", "color", render=RenderRule("hex", "--cz-heading")),
     DesignKey("colors", "accent", "color",
               render=RenderRule("hex", "--cz-brand", css_class="cz-acc", extra_vars=("--cz-accent",))),
-    # ── type (renderer-only, not AI-settable; registry-driven emission) ──
-    DesignKey("type", "headingSize", None,
+    # ── type (registry-driven emission) ──
+    DesignKey("type", "headingSize", (16, 96),
               render=RenderRule("int_px", "--cz-h-size", css_class="cz-has-hsize", lo=16, hi=96)),
-    DesignKey("type", "bodySize", None,
+    DesignKey("type", "bodySize", (12, 28),
               render=RenderRule("int_px", "--cz-p-size", css_class="cz-has-psize", lo=12, hi=28)),
     # ── border (bespoke: top/bottom/width/color coupling) ──
     DesignKey("border", "top", "bool"),
     DesignKey("border", "bottom", "bool"),
-    DesignKey("border", "width", (0, 20)),
+    DesignKey("border", "width", (1, 8), note="renderer clamps 1-8"),
     DesignKey("border", "color", "color"),
     # ── anchor (bespoke: id-collision guard on the section tag) ──
     DesignKey("anchor", "id", "text"),

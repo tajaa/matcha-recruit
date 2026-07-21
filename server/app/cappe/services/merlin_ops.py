@@ -36,6 +36,7 @@ from .merlin_catalog import (
     CANVAS_MOBILE_GRID_COLS,
     CANVAS_PATCH_KEYS,
     CANVAS_STYLE_KEYS,
+    COLUMN_BLOCK_TYPES,
     DESIGN_GROUPS,
     LIST_KINDS,
     MAX_OPS_PER_TURN,
@@ -47,8 +48,15 @@ from .merlin_catalog import (
 )
 
 from .section_presets import PRESETS_BY_KEY, SECTION_PRESETS
+from .theme_presets import PRESET_IDS, THEME_PRESETS, font_pairings_text, preset_catalog_text
 
 _HEX_COLOR_RE = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
+
+# `layout.columns`/`columnsMd`/`columnsSm` only reach CSS on grid-shaped block
+# types (see COLUMN_BLOCK_TYPES) — set_design/add_block/set_design_bulk all
+# gate on this so "make the hero three columns" doesn't validate and report
+# success while `--cz-cols` goes unread.
+_COLUMN_DESIGN_KEYS = frozenset({"columns", "columnsMd", "columnsSm"})
 
 # ---------------------------------------------------------------------------
 # Low-level value helpers (moved verbatim from merlin.py — behavior-preserving)
@@ -143,7 +151,12 @@ def _validate_field_value(
         current = block.get(head)
         length = len(current) if isinstance(current, list) else 0
         # `== length` is an append; anything past that would leave undefined holes.
-        if idx > length:
+        # A synthetic same-turn block (see _v_add_block) has no schema
+        # defaults, so a real list field reads as length 0 here even though
+        # the client will construct it with defaults — skip the bound for it;
+        # the client still refuses an actual out-of-range index when it
+        # applies the op for real.
+        if idx > length and not block.get("_synthetic"):
             return f"index {idx} is past the end of '{head}' (length {length})"
         if kind == "strlist" and len(rest) > 1:
             return f"'{head}' holds plain strings — '{rest[1]}' is not addressable"
@@ -205,6 +218,19 @@ def _design_value_error(value: Any, spec: Any, group: str, key: str) -> Optional
     elif spec == "text":
         if not isinstance(value, str):
             return f"'{key}' must be text"
+    elif spec == "gradient":
+        if not isinstance(value, dict):
+            return f"'{key}' must be an object like {{\"angle\":135,\"stops\":[\"#111\",\"#eee\"]}}"
+        stops = value.get("stops")
+        if not isinstance(stops, list) or not (2 <= len(stops) <= 3) or not all(
+            isinstance(s, str) and _HEX_COLOR_RE.match(s) for s in stops
+        ):
+            return f"'{key}.stops' must be 2-3 hex colors like #1a2b3c"
+        angle = value.get("angle")
+        if angle is not None:
+            num = _num(angle)
+            if num is None or not (0 <= num <= 360):
+                return f"'{key}.angle' must be a number between 0 and 360"
     return None
 
 
@@ -263,7 +289,81 @@ def _v_set_design(raw: dict[str, Any], ctx: ValidationCtx) -> Optional[str]:
     key = _sid(raw.get("key"))
     if key is None or key not in spec:
         return f"'{raw.get('key')}' is not a {group} setting — expected one of: {', '.join(sorted(spec))}"
+    if group == "layout" and key in _COLUMN_DESIGN_KEYS and block.get("type") not in COLUMN_BLOCK_TYPES:
+        return f"'{key}' has no effect on a {block.get('type')} block — only grid-shaped sections support columns"
     return _design_value_error(raw.get("value"), spec[key], group, key)
+
+
+def _v_set_design_bulk(raw: dict[str, Any], ctx: ValidationCtx) -> Optional[str]:
+    """Style many sections in one op — same premium gate and per-key cleaning
+    as set_design, but targets a list of ids (or literal "all") instead of
+    one block. Exists so "make everything dark and moody" costs 1 op instead
+    of N × groups-changed, comfortably inside MAX_OPS_PER_TURN."""
+    if not ctx.premium:
+        return "section design and animation are a Pro feature — upgrade to use them"
+    targets_raw = raw.get("blocks")
+    if targets_raw == "all":
+        target_ids = sorted(ctx.by_id)
+    elif isinstance(targets_raw, list) and targets_raw:
+        ids = [_sid(x) for x in targets_raw]
+        if any(i is None for i in ids):
+            return "'blocks' must be a list of block ids, or the literal \"all\""
+        unknown = sorted({i for i in ids if i not in ctx.by_id})
+        if unknown:
+            return f"unknown block id(s): {', '.join(unknown)}"
+        target_ids = ids
+    else:
+        return "'blocks' must be a non-empty list of block ids, or the literal \"all\""
+    cleaned = _clean_design_bag(raw.get("design"))
+    if not cleaned:
+        return "'design' has no valid group/key/value entries"
+    # Targets can be mixed block types, so (unlike add_block, which knows its
+    # one block's type up front) this can't drop the columns keys per-target
+    # inside _clean_design_bag — reject explicit instead of silently applying
+    # to some targets and not others, same "don't silently drop" stance as
+    # the unknown-id check above.
+    if cleaned.get("layout", {}).keys() & _COLUMN_DESIGN_KEYS:
+        non_grid = sorted(
+            tid for tid in target_ids if ctx.by_id.get(tid, {}).get("type") not in COLUMN_BLOCK_TYPES
+        )
+        if non_grid:
+            return f"columns has no effect on: {', '.join(non_grid)} — only grid-shaped sections support columns"
+    raw["blocks"] = target_ids
+    raw["design"] = cleaned
+    return None
+
+
+def _clean_design_bag(design: Any, btype: Optional[str] = None) -> dict[str, dict[str, Any]]:
+    """Filter a raw `{group: {key: value}}` design bag down to entries valid
+    against DESIGN_GROUPS — an invalid group/key/value is dropped rather than
+    failing the whole op (a partially-styled result beats none). The caller
+    decides whether an empty result should reject the op. Shared by add_block
+    (a fresh block's optional `design`) and set_design_bulk (many sections at
+    once) — same cleaning rules either way.
+
+    `btype` additionally drops `layout.columns`/`columnsMd`/`columnsSm` when
+    the (single, known-up-front) block type can't render them — same gate
+    `_v_set_design` enforces by rejecting outright. Only add_block passes it;
+    set_design_bulk's targets can be mixed types, so it gates separately."""
+    if not isinstance(design, dict):
+        return {}
+    cleaned: dict[str, dict[str, Any]] = {}
+    for group, keys in design.items():
+        sg = _sid(group)
+        spec = DESIGN_GROUPS.get(sg) if sg else None
+        if spec is None or not isinstance(keys, dict):
+            continue
+        kept = {}
+        for k, v in keys.items():
+            sk = _sid(k)
+            if not sk or sk not in spec or v is None or _design_value_error(v, spec[sk], sg, sk) is not None:
+                continue  # nulls dropped too — nothing to clear on a brand-new block/target
+            if sg == "layout" and sk in _COLUMN_DESIGN_KEYS and btype is not None and btype not in COLUMN_BLOCK_TYPES:
+                continue
+            kept[sk] = v
+        if kept:
+            cleaned[sg] = kept
+    return cleaned
 
 
 def _v_add_block(raw: dict[str, Any], ctx: ValidationCtx) -> Optional[str]:
@@ -297,24 +397,35 @@ def _v_add_block(raw: dict[str, Any], ctx: ValidationCtx) -> Optional[str]:
             # bad content entries above).
             raw.pop("design", None)
         else:
-            cleaned: dict[str, dict[str, Any]] = {}
-            for group, keys in design.items():
-                sg = _sid(group)
-                spec = DESIGN_GROUPS.get(sg) if sg else None
-                if spec is None or not isinstance(keys, dict):
-                    continue
-                kept = {}
-                for k, v in keys.items():
-                    sk = _sid(k)
-                    # Nulls are dropped (nothing to clear on a brand-new block).
-                    if sk and sk in spec and v is not None and _design_value_error(v, spec[sk], sg, sk) is None:
-                        kept[sk] = v
-                if kept:
-                    cleaned[sg] = kept
+            cleaned = _clean_design_bag(design, btype)
             if cleaned:
                 raw["design"] = cleaned
             else:
                 raw.pop("design", None)
+    raw_id = raw.get("id")
+    if raw_id is not None:
+        temp_id = _sid(raw_id)
+        if temp_id is None:
+            return "'id' must be a string"
+        if temp_id in ctx.by_id:
+            return f"id '{raw_id}' collides with an existing or already-added block"
+        # Register a synthetic block so LATER ops in this same turn (set_field,
+        # set_design, generate_image, move_block, canvas_*, duplicate_block,
+        # remove_block) can resolve it before it's actually created client-side.
+        # ctx.by_id is shared across the whole validate_ops loop, so this is
+        # visible to every op validated after this one (not before — ops are
+        # validated in order, same as the client applies them).
+        # `_synthetic` marks this for `_validate_field_value`: unlike a real
+        # snapshot block, this dict has only the explicit `content` fields —
+        # no schema defaults — so a real list field (e.g. faq's `items`)
+        # reads as length 0 even though the client will construct it with
+        # defaults. Bound-checking a list index against that phantom length
+        # rejected the flagship same-turn case ("add a section and fill it
+        # in"); the marker tells that check to skip the bound here.
+        synthetic: dict[str, Any] = {"id": temp_id, "type": btype, **(raw.get("content") or {}), "_synthetic": True}
+        ctx.by_id[temp_id] = synthetic
+        if btype == "canvas":
+            ctx.pending_canvas_count[temp_id] = 0
     return None
 
 
@@ -346,9 +457,11 @@ def _v_generate_image(raw: dict[str, Any], ctx: ValidationCtx) -> Optional[str]:
     as a follow-up set_field. Not premium-gated here — the endpoint's daily quota
     (free taste + paid headroom) is the cost guard, same as the editor button.
 
-    v1 targets an EXISTING block (validated against the snapshot); a same-turn
-    add_block + generate_image on the new block isn't supported (the new block's
-    id doesn't exist yet server-side) — it degrades to 'block id not found'."""
+    Targets a block in `ctx.by_id`, which holds both real snapshot blocks and
+    any synthetic same-turn adds `_v_add_block` registered under their model-
+    given `id` — so a same-turn `add_block(id="new-1")` + `generate_image` on
+    "new-1" resolves normally. An id no earlier op registered still degrades
+    to 'block id not found'."""
     block = ctx.by_id.get(_sid(raw.get("block")))
     if block is None:
         return "block id not found"
@@ -371,6 +484,15 @@ def _v_generate_image(raw: dict[str, Any], ctx: ValidationCtx) -> Optional[str]:
     aspect = raw.get("aspect")
     if aspect is not None and not (isinstance(aspect, str) and aspect in AI_ASPECT_RATIOS):
         raw.pop("aspect", None)
+    return None
+
+
+def _v_duplicate_block(raw: dict[str, Any], ctx: ValidationCtx) -> Optional[str]:
+    if _sid(raw.get("block")) not in ctx.by_id:
+        return "block id not found"
+    at = raw.get("at")
+    if at is not None and (not isinstance(at, int) or isinstance(at, bool)):
+        return "invalid 'at' index"
     return None
 
 
@@ -397,11 +519,14 @@ def _v_set_theme(raw: dict[str, Any], ctx: ValidationCtx) -> Optional[str]:
         return f"unknown theme key '{key}'"
     if key == "mode" and _sid(raw.get("value")) not in THEME_MODE_VALUES:
         return "mode must be 'light' or 'dark'"
-    if key == "preset" and not ctx.theme_intent:
-        # Switching preset replaces brand, fonts, radius and mode site-wide.
-        # Firing that off a request that never mentioned themes is how a
-        # "animate this text" turn silently restyled the whole site.
-        return "won't switch the site theme unless you ask for a theme change directly"
+    if key == "preset":
+        if not ctx.theme_intent:
+            # Switching preset replaces brand, fonts, radius and mode site-wide.
+            # Firing that off a request that never mentioned themes is how a
+            # "animate this text" turn silently restyled the whole site.
+            return "won't switch the site theme unless you ask for a theme change directly"
+        if _sid(raw.get("value")) not in PRESET_IDS:
+            return f"unknown theme preset '{raw.get('value')}' — expected one of: {', '.join(sorted(PRESET_IDS))}"
     return None
 
 
@@ -510,17 +635,41 @@ MERLIN_OPS: tuple[MerlinOp, ...] = (
             'Animation and per-section styling live in set_design, NOT in the theme. '
             '"Animate the heading" is {"op":"set_design","group":"motion","key":"heading","value":"shimmer"|"rise"}. '
             'Reveal-on-scroll is motion.effect. Never switch the site theme to satisfy an animation or styling request.',
+            'bg.gradient only renders when bg.type is also "gradient" — set both in the same turn. '
+            'bg.overlayOpacity only affects a bg.type of image or video (it needs bg-media to sit over).',
+            'layout.columns/columnsMd/columnsSm only affect grid-shaped sections: '
+            + ", ".join(sorted(COLUMN_BLOCK_TYPES))
+            + ". Setting it on any other block type is rejected.",
+        ),
+    ),
+    MerlinOp(
+        name="set_design_bulk",
+        validate=_v_set_design_bulk,
+        prompt_shape=(
+            '{"op":"set_design_bulk","blocks":["<id>",...]|"all","design":{"<group>":{"<key>":<value>}}}'
+        ),
+        prompt_rules=(
+            'When styling 3+ sections the same way (e.g. "make everything dark and moody"), use ONE '
+            'set_design_bulk instead of many set_design ops — "design" takes a whole bag of groups/keys '
+            'applied to every section in "blocks" (or "all"). Same group/key/value rules as set_design. '
+            'It can only SET values, not clear them (no null-clearing across many sections) — use set_design '
+            'for that on a single section.',
         ),
     ),
     MerlinOp(
         name="add_block",
         validate=_v_add_block,
-        prompt_shape='{"op":"add_block","type":"<blockType>","at":<index>,"content":{...fields...},"design":{...optional set_design groups/keys...}}',
+        prompt_shape='{"op":"add_block","type":"<blockType>","at":<index>,"content":{...fields...},"design":{...optional set_design groups/keys...},"id":"<optional short id, e.g. new-1>"}',
+        prompt_rules=(
+            'Give a new block an "id" (e.g. "new-1") when a LATER op in this same turn needs to target it — '
+            'set_field, set_design, generate_image, move_block, canvas_add/update/remove, duplicate_block and '
+            'remove_block can all address it by that id. The op giving it the id must come BEFORE any op using it.',
+        ),
     ),
     MerlinOp(
         name="apply_section_preset",
         validate=_v_apply_section_preset,
-        prompt_shape='{"op":"apply_section_preset","preset":"<presetName>","at":<index>}',
+        prompt_shape='{"op":"apply_section_preset","preset":"<presetName>","at":<index>,"id":"<optional short id, see add_block>"}',
         prompt_rules=(
             "Prefer apply_section_preset over hand-building add_block when the user asks for a new "
             "section without specifying detailed content — presets are professionally designed. "
@@ -530,14 +679,23 @@ MERLIN_OPS: tuple[MerlinOp, ...] = (
         ),
     ),
     MerlinOp(
+        name="duplicate_block",
+        validate=_v_duplicate_block,
+        prompt_shape='{"op":"duplicate_block","block":"<id>","at":<index optional, default right after the source>}',
+        prompt_rules=(
+            "Use duplicate_block for \"copy/duplicate this section\" instead of hand-rebuilding it with "
+            "add_block — it copies content AND design in one op.",
+        ),
+    ),
+    MerlinOp(
         name="generate_image",
         validate=_v_generate_image,
         prompt_shape='{"op":"generate_image","block":"<id>","field":"<imageField>","prompt":"<what to depict>","aspect":"16:9"}',
         prompt_rules=(
-            "generate_image creates an AI image and places it in an existing block's image field "
+            "generate_image creates an AI image and places it in a block's image field "
             "(field defaults to \"image\"; on a hero that's the full-bleed background). Use it when the "
             "user asks to generate/create/imagine a photo or background — NOT for stock the user will "
-            "supply. Only target a block that already exists (not one you're adding in the same turn). "
+            "supply. Can target a block added earlier in this same turn if that add_block gave it an \"id\". "
             "aspect is one of: " + ", ".join(sorted(AI_ASPECT_RATIOS)) + ".",
         ),
     ),
@@ -562,6 +720,8 @@ MERLIN_OPS: tuple[MerlinOp, ...] = (
             'Only use set_theme with key "preset" when the user explicitly asks to change their theme — '
             'it replaces their brand color, fonts, corners and light/dark mode site-wide.',
             '"value" for set_theme "mode" must be "light" or "dark".',
+            "Available theme presets (id — description):\n" + preset_catalog_text(),
+            "Good heading/body font pairings for fonts.heading + fonts.body: " + font_pairings_text() + ".",
         ),
     ),
     MerlinOp(
@@ -609,6 +769,8 @@ def _spec_json(spec: Any) -> Any:
         return {"enum": sorted(spec)}
     if isinstance(spec, tuple):
         return {"min": spec[0], "max": spec[1]}
+    if spec == "gradient":
+        return {"kind": "gradient", "stops": {"min": 2, "max": 3}, "angle": {"min": 0, "max": 360}}
     return {"kind": spec}
 
 
@@ -653,6 +815,10 @@ def build_merlin_schema() -> dict[str, Any]:
         "sectionPresets": [
             {"name": p.key, "label": p.label, "blurb": p.blurb, "blockType": p.block_type}
             for p in SECTION_PRESETS
+        ],
+        "themePresets": [
+            {"id": p.id, "name": p.name, "blurb": p.blurb, "premium": p.premium, "mode": p.mode}
+            for p in THEME_PRESETS
         ],
         "imageGen": {
             "aspectRatios": sorted(AI_ASPECT_RATIOS),

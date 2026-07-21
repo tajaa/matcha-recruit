@@ -77,6 +77,7 @@ export function DesignInspector({ blockType, design, onChange }: { blockType?: s
                 {(bgType === 'image' || bgType === 'video') && (
                   <div className="grid grid-cols-2 gap-2">
                     <DSelect label="Overlay" value={str(bg.overlay) || 'none'} onChange={(v) => patch('bg', 'overlay', v)} options={[['none', 'None'], ['light', 'Light'], ['medium', 'Medium'], ['dark', 'Dark']]} />
+                    <DNum label="Overlay opacity (%)" value={Number(bg.overlayOpacity) || 0} min={0} max={100} step={5} onChange={(v) => numPatch('bg', 'overlayOpacity', v)} />
                     <DNum label="Blur (px)" value={Number(bg.blur) || 0} min={0} max={40} onChange={(v) => patch('bg', 'blur', v)} />
                   </div>
                 )}

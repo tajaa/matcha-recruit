@@ -165,10 +165,32 @@ def _design_catalog_text() -> str:
                 rendered.append(f"{key}({'|'.join(sorted(spec))})")
             elif isinstance(spec, tuple):
                 rendered.append(f"{key}({spec[0]}-{spec[1]})")
+            elif spec == "gradient":
+                rendered.append(f'{key}({{"angle":0-360,"stops":["#hex","#hex"(,3rd)]}})')
             else:
                 rendered.append(f"{key}:{spec}")
         lines.append(f"- {group}: {', '.join(rendered)}")
     return "\n".join(lines)
+
+
+def _strip_prompt_noise(block: dict[str, Any]) -> dict[str, Any]:
+    """A prompt-only view of one block: drops null/empty-string field values
+    and empty `_design` groups — noise that costs tokens on every turn without
+    helping the model (an absent key already reads as unset/default, same as
+    an explicit null). Pure — returns a new dict; the caller's original block
+    (which validate_ops still needs at full fidelity, from the same request
+    payload) is untouched."""
+    cleaned: dict[str, Any] = {}
+    for k, v in block.items():
+        if v is None or v == "":
+            continue
+        if k == "_design" and isinstance(v, dict):
+            design = {g: keys for g, keys in v.items() if isinstance(keys, dict) and keys}
+            if design:
+                cleaned[k] = design
+            continue
+        cleaned[k] = v
+    return cleaned
 
 
 def _build_prompt(
@@ -187,8 +209,9 @@ def _build_prompt(
     if business_name or business_type:
         parts.append(f"Site: {business_name or '(unnamed)'} — {business_type or 'general business'}")
 
-    parts.append("Current blocks (JSON):\n" + json.dumps(blocks))
-    parts.append("Current theme (JSON):\n" + json.dumps(theme))
+    compact_blocks = [_strip_prompt_noise(b) if isinstance(b, dict) else b for b in blocks]
+    parts.append("Current blocks (JSON):\n" + json.dumps(compact_blocks, separators=(",", ":")))
+    parts.append("Current theme (JSON):\n" + json.dumps(theme, separators=(",", ":")))
 
     if selected_block:
         parts.append(

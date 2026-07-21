@@ -378,6 +378,26 @@ def test_add_block_content_keeps_correctly_typed_values():
     assert valid[0]["content"] == {"heading": "Real", "items": [{"title": "a"}]}
 
 
+def test_add_block_drops_columns_design_on_a_non_grid_block_type():
+    # hero isn't grid-shaped — columns is dropped (add_block's "keep the
+    # block, drop the bad entry" philosophy), not rejected outright.
+    valid, rejected = _only([{
+        "op": "add_block", "type": "hero", "at": 0,
+        "design": {"layout": {"columns": 3}, "motion": {"effect": "fade"}},
+    }])
+    assert not rejected
+    assert valid[0]["design"] == {"motion": {"effect": "fade"}}
+
+
+def test_add_block_keeps_columns_design_on_a_grid_block_type():
+    valid, rejected = _only([{
+        "op": "add_block", "type": "features", "at": 0,
+        "design": {"layout": {"columns": 3}},
+    }])
+    assert not rejected
+    assert valid[0]["design"] == {"layout": {"columns": 3}}
+
+
 # --- request size caps --------------------------------------------------------
 
 def test_request_model_bounds_snapshot_and_history():
@@ -463,6 +483,235 @@ def test_set_design_refused_on_non_premium_with_an_honest_reason():
         _BLOCKS, premium=False,
     )
     assert not valid and "Pro feature" in rejected[0]["reason"]
+
+
+# --- Phase 1: vocab completion + range unification ---------------------------
+
+def test_set_design_heading_and_body_size_now_ai_settable():
+    ok, _ = _only([{"op": "set_design", "block": "b1", "group": "type", "key": "headingSize", "value": 64}])
+    assert len(ok) == 1
+    bad_v, bad_r = _only([{"op": "set_design", "block": "b1", "group": "type", "key": "headingSize", "value": 999}])
+    assert not bad_v and "between 16 and 96" in bad_r[0]["reason"]
+    ok2, _ = _only([{"op": "set_design", "block": "b1", "group": "type", "key": "bodySize", "value": 16}])
+    assert len(ok2) == 1
+
+
+def test_set_design_columns_now_ai_settable():
+    # b4 is a `features` block — grid-shaped (in COLUMN_BLOCK_TYPES).
+    ok, _ = _only([{"op": "set_design", "block": "b4", "group": "layout", "key": "columns", "value": 3}])
+    assert len(ok) == 1
+    bad_v, bad_r = _only([{"op": "set_design", "block": "b4", "group": "layout", "key": "columns", "value": 12}])
+    assert not bad_v and "between 1 and 6" in bad_r[0]["reason"]
+
+
+def test_set_design_columns_rejected_on_non_grid_block():
+    # b1 is a `hero` block — not grid-shaped; --cz-cols would go unread.
+    bad_v, bad_r = _only([{"op": "set_design", "block": "b1", "group": "layout", "key": "columns", "value": 3}])
+    assert not bad_v and "no effect on a hero block" in bad_r[0]["reason"]
+
+
+def test_set_design_blur_is_now_numeric_not_bool():
+    ok, _ = _only([{"op": "set_design", "block": "b1", "group": "bg", "key": "blur", "value": 12}])
+    assert len(ok) == 1
+    bad_v, bad_r = _only([{"op": "set_design", "block": "b1", "group": "bg", "key": "blur", "value": True}])
+    assert not bad_v and "between 0 and 40" in bad_r[0]["reason"]
+
+
+def test_set_design_border_width_range_matches_renderer_clamp():
+    ok, _ = _only([{"op": "set_design", "block": "b1", "group": "border", "key": "width", "value": 4}])
+    assert len(ok) == 1
+    bad_v, bad_r = _only([{"op": "set_design", "block": "b1", "group": "border", "key": "width", "value": 15}])
+    assert not bad_v and "between 1 and 8" in bad_r[0]["reason"]
+
+
+def test_set_design_overlay_opacity_accepted_in_range():
+    ok, _ = _only([{"op": "set_design", "block": "b1", "group": "bg", "key": "overlayOpacity", "value": 60}])
+    assert len(ok) == 1
+    bad_v, bad_r = _only([{"op": "set_design", "block": "b1", "group": "bg", "key": "overlayOpacity", "value": 150}])
+    assert not bad_v and "between 0 and 100" in bad_r[0]["reason"]
+
+
+def test_set_design_gradient_happy_path():
+    ok, _ = _only([{
+        "op": "set_design", "block": "b1", "group": "bg", "key": "gradient",
+        "value": {"angle": 135, "stops": ["#111111", "#eeeeee"]},
+    }])
+    assert len(ok) == 1
+
+
+def test_set_design_gradient_rejects_bad_stops():
+    _, one_stop = _only([{
+        "op": "set_design", "block": "b1", "group": "bg", "key": "gradient",
+        "value": {"stops": ["#111111"]},
+    }])
+    assert "stops" in one_stop[0]["reason"]
+    _, bad_hex = _only([{
+        "op": "set_design", "block": "b1", "group": "bg", "key": "gradient",
+        "value": {"stops": ["not-a-color", "#eeeeee"]},
+    }])
+    assert "stops" in bad_hex[0]["reason"]
+    _, not_dict = _only([{
+        "op": "set_design", "block": "b1", "group": "bg", "key": "gradient", "value": "purple",
+    }])
+    assert not_dict
+
+
+def test_set_design_gradient_rejects_bad_angle():
+    _, rejected = _only([{
+        "op": "set_design", "block": "b1", "group": "bg", "key": "gradient",
+        "value": {"angle": 999, "stops": ["#111111", "#eeeeee"]},
+    }])
+    assert "angle" in rejected[0]["reason"]
+
+
+# --- duplicate_block -----------------------------------------------------------
+
+def test_duplicate_block_valid():
+    ok, _ = _only([{"op": "duplicate_block", "block": "b1"}])
+    assert len(ok) == 1
+
+
+def test_duplicate_block_with_explicit_at():
+    ok, _ = _only([{"op": "duplicate_block", "block": "b1", "at": 2}])
+    assert len(ok) == 1
+
+
+def test_duplicate_block_unknown_id_rejected():
+    _, rejected = _only([{"op": "duplicate_block", "block": "ghost"}])
+    assert rejected and "not found" in rejected[0]["reason"]
+
+
+def test_duplicate_block_invalid_at_rejected():
+    _, rejected = _only([{"op": "duplicate_block", "block": "b1", "at": "two"}])
+    assert rejected and "at" in rejected[0]["reason"]
+
+
+# --- set_design_bulk -----------------------------------------------------------
+
+def test_set_design_bulk_explicit_ids_valid():
+    ok, _ = _only([{
+        "op": "set_design_bulk", "blocks": ["b1", "b4"],
+        "design": {"bg": {"overlay": "dark"}},
+    }])
+    assert len(ok) == 1
+    assert ok[0]["blocks"] == ["b1", "b4"]
+
+
+def test_set_design_bulk_all_resolves_to_every_known_id():
+    ok, _ = _only([{"op": "set_design_bulk", "blocks": "all", "design": {"bg": {"overlay": "dark"}}}])
+    assert len(ok) == 1
+    assert set(ok[0]["blocks"]) == {"b1", "b2", "b4", "b5"}
+
+
+def test_set_design_bulk_unknown_id_rejected():
+    _, rejected = _only([{
+        "op": "set_design_bulk", "blocks": ["b1", "ghost"],
+        "design": {"bg": {"overlay": "dark"}},
+    }])
+    assert rejected and "ghost" in rejected[0]["reason"]
+
+
+def test_set_design_bulk_empty_blocks_rejected():
+    _, rejected = _only([{"op": "set_design_bulk", "blocks": [], "design": {"bg": {"overlay": "dark"}}}])
+    assert rejected
+
+
+def test_set_design_bulk_bad_design_bag_rejected():
+    _, rejected = _only([{"op": "set_design_bulk", "blocks": ["b1"], "design": {"bg": {"overlay": "nope"}}}])
+    assert rejected and "no valid" in rejected[0]["reason"]
+
+
+def test_set_design_bulk_cleans_partial_bag_keeping_valid_keys():
+    ok, _ = _only([{
+        "op": "set_design_bulk", "blocks": ["b1"],
+        "design": {"bg": {"overlay": "dark", "color": "not-a-hex"}, "bogus_group": {"x": 1}},
+    }])
+    assert len(ok) == 1
+    assert ok[0]["design"] == {"bg": {"overlay": "dark"}}
+
+
+def test_set_design_bulk_columns_ok_when_every_target_is_grid_shaped():
+    ok, _ = _only([{
+        "op": "set_design_bulk", "blocks": ["b4"], "design": {"layout": {"columns": 3}},
+    }])
+    assert len(ok) == 1
+
+
+def test_set_design_bulk_columns_rejected_when_any_target_is_not_grid_shaped():
+    # b1 (hero) can't take columns even though b4 (features) can — reject
+    # the whole op rather than silently applying to only some targets.
+    _, rejected = _only([{
+        "op": "set_design_bulk", "blocks": ["b1", "b4"], "design": {"layout": {"columns": 3}},
+    }])
+    assert rejected and "no effect on" in rejected[0]["reason"] and "b1" in rejected[0]["reason"]
+
+
+def test_set_design_bulk_refused_on_non_premium():
+    valid, rejected = validate_ops(
+        [{"op": "set_design_bulk", "blocks": ["b1"], "design": {"bg": {"overlay": "dark"}}}],
+        _BLOCKS, premium=False,
+    )
+    assert not valid and "Pro feature" in rejected[0]["reason"]
+
+
+# --- same-turn refs: add_block(id=...) resolved by later ops in this turn -----
+
+def test_add_block_with_id_then_set_field_same_turn():
+    valid, rejected = _only([
+        {"op": "add_block", "type": "hero", "at": 0, "id": "new-1"},
+        {"op": "set_field", "block": "new-1", "path": "heading", "value": "Hi"},
+    ])
+    assert not rejected
+    assert len(valid) == 2
+
+
+def test_add_block_with_id_then_set_design_same_turn():
+    valid, rejected = _only([
+        {"op": "add_block", "type": "hero", "at": 0, "id": "new-1"},
+        {"op": "set_design", "block": "new-1", "group": "motion", "key": "heading", "value": "shimmer"},
+    ])
+    assert not rejected
+    assert len(valid) == 2
+
+
+def test_add_block_with_id_then_generate_image_same_turn():
+    valid, rejected = _only([
+        {"op": "add_block", "type": "hero", "at": 0, "id": "new-1"},
+        {"op": "generate_image", "block": "new-1", "prompt": "a mountain sunrise"},
+    ])
+    assert not rejected
+    assert len(valid) == 2
+
+
+def test_add_block_id_collides_with_existing_block_rejected():
+    _, rejected = _only([{"op": "add_block", "type": "hero", "at": 0, "id": "b1"}])
+    assert rejected and "collides" in rejected[0]["reason"]
+
+
+def test_add_block_id_collides_with_earlier_same_turn_add_rejected():
+    valid, rejected = _only([
+        {"op": "add_block", "type": "hero", "at": 0, "id": "new-1"},
+        {"op": "add_block", "type": "faq", "at": 1, "id": "new-1"},
+    ])
+    assert len(valid) == 1
+    assert rejected and "collides" in rejected[0]["reason"]
+
+
+def test_op_before_its_defining_add_block_is_not_found():
+    """Ops validate in order — a reference to an id its add_block hasn't
+    registered yet (because it comes later in the list) degrades to the
+    ordinary 'not found', not a special ordering error."""
+    valid, rejected = _only([
+        {"op": "set_field", "block": "new-1", "path": "heading", "value": "Hi"},
+        {"op": "add_block", "type": "hero", "at": 0, "id": "new-1"},
+    ])
+    assert len(valid) == 1
+    assert rejected and "not found" in rejected[0]["reason"]
+
+
+def test_add_block_non_string_id_rejected():
+    _, rejected = _only([{"op": "add_block", "type": "hero", "at": 0, "id": 123}])
+    assert rejected and "'id' must be a string" in rejected[0]["reason"]
 
 
 # --- theme swaps need explicit intent ----------------------------------------

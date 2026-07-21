@@ -4,6 +4,7 @@ import { ArrowLeft, Loader2 } from 'lucide-react'
 import { cappeApi } from '../../../api'
 import type { CappeBlock, CappePage, CappeSite } from '../../../types'
 import { BLOCK_SCHEMAS } from './blockSchemas'
+import { cloneBlock, genKey } from './canvasHelpers'
 import { CanvasModeView } from './CanvasModeView'
 import { SiteCtx } from './context'
 import { usePremium } from './DesignPrimitives'
@@ -23,8 +24,6 @@ import { useThemeEditor } from './useThemeEditor'
 // keys would strand each card's local open/collapse state on reorder). Stripped
 // before persisting so it never lands in stored `content.blocks`.
 const STYLE_CLIP_KEY = 'cappe:styleClipboard'
-const genKey = () =>
-  (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `k${Math.random().toString(36).slice(2)}`)
 const withKey = (b: CappeBlock): CappeBlock => (b._k ? b : { ...b, _k: genKey() })
 const withKeys = (bs: CappeBlock[]) => bs.map(withKey)
 const stripKeys = (bs: CappeBlock[]) => bs.map((b) => { const r = { ...b }; delete r._k; return r })
@@ -186,12 +185,12 @@ export default function PageEditor() {
     setJustAddedKey(nb._k as string)
     canvas.setSelBlock(i + 1)
   }
-  // Deep-copy a block (incl. _design + list items) and insert after it. Fresh key.
+  // Deep-copy a block and insert after it — same helper Merlin's
+  // duplicate_block op uses, so the menu action and the chat action produce
+  // an identical result (anchor id stripped, canvas element ids regenerated).
   const duplicateBlock = (i: number) => {
     setBlocks((bs) => {
-      const clone = JSON.parse(JSON.stringify(bs[i])) as CappeBlock
-      clone._k = genKey()
-      const next = [...bs]; next.splice(i + 1, 0, clone); return next
+      const next = [...bs]; next.splice(i + 1, 0, cloneBlock(bs[i])); return next
     })
     canvas.setSelBlock(i + 1)
   }

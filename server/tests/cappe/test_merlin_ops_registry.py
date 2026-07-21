@@ -27,6 +27,8 @@ _EXPECTED_OPS = {
     "set_theme", "canvas_add", "canvas_update", "canvas_remove",
     "apply_section_preset",  # Phase 4 — server-expanded into add_block
     "generate_image",        # Phase 6 — server-validated, client-executed (async)
+    "duplicate_block",       # op-power Phase 4c3 — copies content + design in one op
+    "set_design_bulk",       # op-power Phase 4c1 — styles many sections in one op
 }
 
 

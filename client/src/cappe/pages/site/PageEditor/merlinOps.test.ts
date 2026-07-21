@@ -90,6 +90,37 @@ describe('block CRUD', () => {
     expect(r.blocks[0]._design).toBeUndefined()
   })
 
+  it('duplicates a block right after the source by default, with a fresh key', () => {
+    const r = run([hero(), features()], [{ op: 'duplicate_block', block: 'k1' }])
+    expect(r.blocks).toHaveLength(3)
+    expect(r.blocks[1].type).toBe('hero')
+    expect(r.blocks[1].heading).toBe('Old')
+    expect(r.blocks[1]._k).toBeTruthy()
+    expect(r.blocks[1]._k).not.toBe('k1')
+  })
+
+  it('duplicates a canvas block with regenerated element ids', () => {
+    const r = run([canvas()], [{ op: 'duplicate_block', block: 'k3', at: 1 }])
+    const original = (r.blocks[0].elements as { id: string }[])[0]
+    const copy = (r.blocks[1].elements as { id: string }[])[0]
+    expect(copy.id).toBeTruthy()
+    expect(copy.id).not.toBe(original.id)
+  })
+
+  it('strips a duplicated anchor id (no duplicate HTML ids)', () => {
+    const b: CappeBlock = { _k: 'k9', type: 'hero', _design: { anchor: { id: 'pricing' }, motion: { effect: 'fade' } } }
+    const r = run([b], [{ op: 'duplicate_block', block: 'k9' }])
+    const design = r.blocks[1]._design as Record<string, unknown>
+    expect(design.anchor).toBeUndefined()
+    expect(design.motion).toEqual({ effect: 'fade' })
+  })
+
+  it('skips duplicating a section that no longer exists', () => {
+    const r = run([hero()], [{ op: 'duplicate_block', block: 'ghost' }])
+    expect(r.results[0].ok).toBe(false)
+    expect(r.blocks).toHaveLength(1)
+  })
+
   it('removes and moves by id', () => {
     const blocks = [hero(), features()]
     expect(run(blocks, [{ op: 'remove_block', block: 'k1' }]).blocks).toHaveLength(1)
@@ -151,6 +182,40 @@ describe('canvas', () => {
   })
 })
 
+describe('same-turn refs (add_block id resolved by later ops in this turn)', () => {
+  it('resolves set_field against a block added earlier in the same turn', () => {
+    const r = run([hero()], [
+      { op: 'add_block', type: 'faq', at: 1, id: 'new-1' },
+      { op: 'set_field', block: 'new-1', path: 'heading', value: 'From Merlin' },
+    ])
+    expect(r.blocks).toHaveLength(2)
+    expect(r.blocks[1].heading).toBe('From Merlin')
+    expect(r.results[1].ok).toBe(true)
+  })
+
+  it('resolves set_design and duplicate_block against the same temp id', () => {
+    const r = run([hero()], [
+      { op: 'add_block', type: 'faq', at: 1, id: 'new-1' },
+      { op: 'set_design', block: 'new-1', group: 'motion', key: 'heading', value: 'shimmer' },
+      { op: 'duplicate_block', block: 'new-1' },
+    ])
+    expect(r.blocks).toHaveLength(3)
+    expect(r.blocks[1]._design).toEqual({ motion: { heading: 'shimmer' } })
+    expect(r.blocks[2].type).toBe('faq') // the duplicate, right after the temp-id block
+  })
+
+  it('never uses the temp id as the real _k (no collision across turns)', () => {
+    const r = run([hero()], [{ op: 'add_block', type: 'faq', at: 1, id: 'new-1' }])
+    expect(r.blocks[1]._k).not.toBe('new-1')
+    expect(r.tempIdMap['new-1']).toBe(r.blocks[1]._k)
+  })
+
+  it('an unresolved id (no earlier add_block gave it) skips like any unknown block', () => {
+    const r = run([hero()], [{ op: 'set_field', block: 'never-added', path: 'heading', value: 'x' }])
+    expect(r.results[0].ok).toBe(false)
+  })
+})
+
 describe('referential stability', () => {
   it('returns the identical blocks/theme refs when nothing applied', () => {
     // index.tsx keys "did anything change?" off reference equality — a new ref
@@ -193,5 +258,62 @@ describe('set_design (the op whose absence caused the destructive substitution)'
   it('skips a section that no longer exists', () => {
     const r = run([hero()], [{ op: 'set_design', block: 'ghost', group: 'motion', key: 'heading', value: 'rise' }])
     expect(r.results[0].ok).toBe(false)
+  })
+})
+
+describe('set_design_bulk (many sections in one op)', () => {
+  it('merges a design bag into every targeted section without dropping sibling keys', () => {
+    const h: CappeBlock = { _k: 'k1', type: 'hero', _design: { motion: { effect: 'fade' } } }
+    const f: CappeBlock = { _k: 'k2', type: 'features' }
+    const r = run([h, f], [{
+      op: 'set_design_bulk', blocks: ['k1', 'k2'], design: { bg: { overlay: 'dark' } },
+    }])
+    expect(r.blocks[0]._design).toEqual({ motion: { effect: 'fade' }, bg: { overlay: 'dark' } })
+    expect(r.blocks[1]._design).toEqual({ bg: { overlay: 'dark' } })
+    expect(r.results[0].ok).toBe(true)
+    expect(r.results[0].summary).toContain('2 sections')
+  })
+
+  it('skips sections not in the target list', () => {
+    const r = run([hero(), features()], [{ op: 'set_design_bulk', blocks: ['k1'], design: { bg: { overlay: 'dark' } } }])
+    expect(r.blocks[0]._design).toEqual({ bg: { overlay: 'dark' } })
+    expect(r.blocks[1]._design).toBeUndefined()
+  })
+
+  it('reports failure when none of the target ids still exist', () => {
+    const r = run([hero()], [{ op: 'set_design_bulk', blocks: ['ghost'], design: { bg: { overlay: 'dark' } } }])
+    expect(r.results[0].ok).toBe(false)
+  })
+
+  it('keeps the identical blocks ref when no target matches (referential stability)', () => {
+    const blocks = [hero()]
+    const r = run(blocks, [{ op: 'set_design_bulk', blocks: ['ghost'], design: { bg: { overlay: 'dark' } } }])
+    expect(r.blocks).toBe(blocks)
+  })
+})
+
+describe('set_design against a schema (client-side existence check)', () => {
+  const schema = { design: { motion: { heading: { enum: ['none', 'rise', 'shimmer'] } } } }
+
+  it('applies a known group/key when a schema is provided', () => {
+    const r = applyMerlinOps([hero()], {}, [
+      { op: 'set_design', block: 'k1', group: 'motion', key: 'heading', value: 'shimmer' },
+    ], schema)
+    expect(r.results[0].ok).toBe(true)
+    expect(r.blocks[0]._design).toEqual({ motion: { heading: 'shimmer' } })
+  })
+
+  it('skips an unknown key the schema does not list, instead of a false "applied"', () => {
+    const r = applyMerlinOps([hero()], {}, [
+      { op: 'set_design', block: 'k1', group: 'motion', key: 'bogus', value: 'x' },
+    ], schema)
+    expect(r.results[0].ok).toBe(false)
+    expect(r.results[0].summary).toContain('unknown design setting')
+    expect(r.blocks[0]._design).toBeUndefined()
+  })
+
+  it('applies unvalidated (today\'s behavior) when no schema is passed', () => {
+    const r = run([hero()], [{ op: 'set_design', block: 'k1', group: 'motion', key: 'bogus', value: 'x' }])
+    expect(r.results[0].ok).toBe(true)
   })
 })

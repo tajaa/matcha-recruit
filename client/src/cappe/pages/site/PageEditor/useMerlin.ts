@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { cappeApi } from '../../../api'
 import type { CappeBlock } from '../../../types'
-import { applyMerlinOps, type MerlinOp, type MerlinOpResult } from './merlinOps'
+import { applyMerlinOps, type MerlinDesignSchema, type MerlinOp, type MerlinOpResult } from './merlinOps'
 
 export type MerlinTier = 'lite' | 'regular'
 
@@ -34,6 +34,10 @@ type MerlinChatResponse = {
 
 const HISTORY_TURNS = 10
 const TIER_KEY = 'cappe:merlin-tier'
+const TRANSCRIPT_MAX = 30
+
+const transcriptKey = (siteId?: string, pageId?: string): string | null =>
+  siteId && pageId ? `cappe:merlin-chat:${siteId}:${pageId}` : null
 
 /** Merlin chat: client-held transcript (lost on reload — acceptable for v1),
  *  resent each turn capped at HISTORY_TURNS. Applying is a single-shot
@@ -80,20 +84,78 @@ export function useMerlin(
     try { localStorage.setItem(TIER_KEY, t) } catch { /* ignore quota */ }
   }
 
+  // Live siteId/pageId, read by both the in-flight check in `send` (below)
+  // and the persist effect below — both need a ref because `send` closes
+  // over a stale `pageId` otherwise, and the persist effect must NOT list
+  // pageId/siteId as dependencies (see that effect's comment for why).
+  const siteIdRef = useRef(siteId)
+  siteIdRef.current = siteId
+  const pageIdRef = useRef(pageId)
+  pageIdRef.current = pageId
+
   // PageEditor is NOT remounted when the route's :pageId changes (no `key` on
   // the route), so without this the transcript — and its ops_summary context —
-  // would bleed from one page into the next.
+  // would bleed from one page into the next. Restores that page's own saved
+  // transcript instead of always clearing (lost-on-reload was acceptable for
+  // v1; losing it on every navigation was needlessly worse).
   // Also clear `sending`: an in-flight turn (esp. a slow image generation)
   // belongs to the page it was started on — its apply is pageId-guarded — so
   // don't leave the destination page's panel spinning + re-entry-locked.
-  useEffect(() => { setMessages([]); setError(null); setSending(false) }, [pageId])
+  useEffect(() => {
+    const key = transcriptKey(siteId, pageId)
+    let restored: MerlinMessage[] = []
+    if (key) {
+      try {
+        const raw = localStorage.getItem(key)
+        const parsed = raw ? JSON.parse(raw) : null
+        // Guard the shape, not just JSON.parse: a truncated write, a devtools
+        // edit, or a future format change can leave non-array JSON (null,
+        // `{}`, a bare string) in the slot — feeding that to setMessages
+        // crashes the panel's `messages.length` read on the very next render.
+        if (Array.isArray(parsed)) restored = parsed
+      } catch { /* corrupt entry — start fresh rather than throw */ }
+    }
+    setMessages(restored)
+    setError(null)
+    setSending(false)
+  }, [siteId, pageId])
 
-  // Live pageId for the in-flight check in `send`. It MUST be a ref: `send` is
-  // recreated each render, so an in-flight call and the `pageId` param it can
-  // see are the same closure binding — comparing them is always false, and the
-  // navigation guard silently never fires.
-  const pageIdRef = useRef(pageId)
-  pageIdRef.current = pageId
+  // Persists on every turn, capped so a long-running session doesn't grow the
+  // localStorage entry unboundedly. An empty transcript (fresh page, or after
+  // clearChat) removes the key rather than storing `"[]"`.
+  //
+  // Deps are `[messages]` ONLY — siteId/pageId are read from refs instead.
+  // On navigation, the load effect above and this one both re-run in the
+  // same commit while `messages` still holds the OUTGOING page's transcript
+  // (setMessages from the load effect hasn't applied yet); if this effect
+  // also depended on siteId/pageId it would re-fire in that same commit and
+  // write the outgoing page's messages under the incoming page's key. Firing
+  // only on an actual `messages` change means this effect doesn't run again
+  // until the load effect's setMessages has landed — by which point the refs
+  // already agree with the transcript being persisted.
+  useEffect(() => {
+    const key = transcriptKey(siteIdRef.current, pageIdRef.current)
+    if (!key) return
+    try {
+      if (messages.length) localStorage.setItem(key, JSON.stringify(messages.slice(-TRANSCRIPT_MAX)))
+      else localStorage.removeItem(key)
+    } catch { /* ignore quota */ }
+  }, [messages])
+
+  const clearChat = () => setMessages([])
+
+  // Fetched once and cached for the component's lifetime: the registry it
+  // reflects only changes on a deploy. A failed fetch (offline, cold start)
+  // just leaves this null — applyMerlinOps falls back to trusting the
+  // server's own validation, today's behavior.
+  const schemaRef = useRef<MerlinDesignSchema | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    cappeApi.get<MerlinDesignSchema>('/merlin/schema')
+      .then((s) => { if (!cancelled) schemaRef.current = s })
+      .catch(() => { /* degrade to unvalidated apply */ })
+    return () => { cancelled = true }
+  }, [])
 
   // Execute generate_image ops sequentially: generate via the endpoint, then
   // apply the returned URL as a follow-up set_field to LIVE state (a second
@@ -183,7 +245,7 @@ export function useMerlin(
 
       // Re-read: apply to live state, not the pre-flight snapshot.
       const cur = getSnapshot()
-      const applied = applyMerlinOps(cur.blocks, cur.theme, syncOps)
+      const applied = applyMerlinOps(cur.blocks, cur.theme, syncOps, schemaRef.current ?? undefined)
       const blocksChanged = applied.blocks !== cur.blocks
       const themeChanged = applied.theme !== cur.theme
       if (blocksChanged || themeChanged) {
@@ -199,7 +261,13 @@ export function useMerlin(
 
       // Kept inside `send`'s try so `sending` (and the panel spinner) stays true
       // across the slow generation; a per-image assistant note reports each one.
-      if (genOps.length) await runImageOps(siteId, genOps, sentForPageId)
+      // `block` may be a same-turn add_block's temp id — remap through the
+      // map applying the sync ops just built, same as applyMerlinOps does
+      // internally for every other op that can target one.
+      if (genOps.length) {
+        const remapped = genOps.map((g) => ({ ...g, block: applied.tempIdMap[g.block] ?? g.block }))
+        await runImageOps(siteId, remapped, sentForPageId)
+      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Merlin failed to respond'
       setError(msg)
@@ -209,5 +277,5 @@ export function useMerlin(
     }
   }
 
-  return { open, setOpen, messages, send, sending, error, tier, setTier }
+  return { open, setOpen, messages, send, sending, error, tier, setTier, clearChat }
 }

@@ -49,10 +49,12 @@ _EXPECTED_DESIGN_GROUPS = {
     "bg": {
         "type": frozenset({"none", "color", "gradient", "image", "video"}),
         "overlay": frozenset({"none", "light", "medium", "dark"}),
+        "overlayOpacity": (0, 100),
         "color": "color",
         "image": "text",
         "video": "text",
-        "blur": "bool",
+        "blur": (0, 40),
+        "gradient": "gradient",
         # decorative (Phase 5b)
         "pattern": frozenset({"none", "dots", "grid", "diagonal"}),
         "patternColor": "color",
@@ -61,6 +63,9 @@ _EXPECTED_DESIGN_GROUPS = {
         "align": frozenset({"default", "left", "center"}),
         "maxWidth": frozenset({"default", "narrow", "wide", "full"}),
         "minHeight": frozenset({"default", "tall", "screen"}),
+        "columns": (1, 6),
+        "columnsMd": (1, 6),
+        "columnsSm": (1, 6),
         "padTop": "text",
         "padBottom": "text",
         # responsive (Phase 3) — AI-settable variants of the AI-settable base keys
@@ -72,7 +77,8 @@ _EXPECTED_DESIGN_GROUPS = {
         "alignSm": frozenset({"default", "left", "center"}),
     },
     "colors": {"heading": "color", "text": "color", "accent": "color"},
-    "border": {"top": "bool", "bottom": "bool", "width": (0, 20), "color": "color"},
+    "type": {"headingSize": (16, 96), "bodySize": (12, 28)},
+    "border": {"top": "bool", "bottom": "bool", "width": (1, 8), "color": "color"},
     "anchor": {"id": "text"},
     # decorative lane (Phase 5a/5c)
     "image": {"filter": frozenset({"none", "mono", "warm", "cool", "soft", "punch"})},
@@ -92,12 +98,16 @@ def test_design_groups_derivation_is_byte_equal_to_history():
 
 
 def test_renderer_only_keys_are_not_offered_to_merlin():
-    """type.* / layout.columns etc. are honored by the renderer but must NOT be
-    in the AI surface — they carry merlin_spec=None."""
+    """The px-override sentinels are honored by the renderer but must NOT be in
+    the AI surface (they'd just compete with the enum knobs Merlin already
+    has) — they carry merlin_spec=None."""
     settable = {(dk.group, dk.key) for dk in DESIGN_KEYS if dk.merlin_settable}
-    assert ("type", "headingSize") not in settable
-    assert ("type", "bodySize") not in settable
-    # colors IS settable (sanity that the split isn't inverted)
+    assert ("layout", "gap") not in settable
+    assert ("layout", "padTopPx") not in settable
+    assert ("layout", "padBottomPx") not in settable
+    # type.headingSize/bodySize and colors ARE settable (Phase 1 vocab expansion)
+    assert ("type", "headingSize") in settable
+    assert ("type", "bodySize") in settable
     assert ("colors", "accent") in settable
 
 

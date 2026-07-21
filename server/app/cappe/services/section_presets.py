@@ -17,7 +17,7 @@ render smoke test):
   - `content` keys/values must satisfy `merlin_catalog.BLOCK_FIELDS` kinds
     (+ SELECT_OPTIONS for selects).
   - `design` groups/keys/values must satisfy the AI-facing DESIGN_GROUPS specs
-    (so e.g. no `bg.gradient` — that key is renderer-only).
+    (so e.g. no `layout.gap` — that key is a renderer-only px override).
   - Copy is business-agnostic placeholder text the user will edit; never
     invent emails/domains (root CLAUDE.md test-data rule).
 """

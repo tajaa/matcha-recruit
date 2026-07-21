@@ -63,14 +63,15 @@ def test_default_value_is_no_override():
     assert "cz-rb0" not in html  # nothing to override → no scoped style at all
 
 
-def test_ai_can_set_the_exposed_responsive_keys_but_not_columns():
-    # padTop/padBottom/align responsive are AI-settable (mirror their base keys)…
-    for key in ("padTopSm", "padBottomMd", "alignSm"):
-        val = "left" if key.startswith("align") else "sm"
+def test_ai_can_set_the_exposed_responsive_keys_including_columns():
+    # padTop/padBottom/align/columns responsive are all AI-settable (Phase 1
+    # vocab expansion made base `columns` AI-settable, so its responsive
+    # variants — declared alongside it — are too).
+    for key, val in (("padTopSm", "sm"), ("padBottomMd", "sm"), ("alignSm", "left"), ("columnsSm", 1)):
         v, r = validate_ops([{"op": "set_design", "block": "b1", "group": "layout",
                               "key": key, "value": val}], _BLOCKS)
         assert len(v) == 1 and not r, key
-    # …columns responsive is renderer/inspector-only (base columns isn't AI-settable either)
+    # gap is still renderer/inspector-only (px-override sentinel, not in the AI surface)
     v, r = validate_ops([{"op": "set_design", "block": "b1", "group": "layout",
-                          "key": "columnsSm", "value": 1}], _BLOCKS)
+                          "key": "gap", "value": 20}], _BLOCKS)
     assert not v and r  # rejected: not a layout setting in the AI surface

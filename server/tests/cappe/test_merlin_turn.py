@@ -53,6 +53,28 @@ def test_build_prompt_includes_history_and_feedback():
     assert "FAILED VALIDATION" in prompt
 
 
+def test_build_prompt_strips_noise_from_blocks_without_mutating_the_input():
+    blocks = [{
+        "id": "b1", "type": "hero", "heading": "Old", "subheading": "",
+        "eyebrow": None, "_design": {"motion": {"effect": "fade"}, "bg": {}},
+    }]
+    prompt = _build_prompt(
+        message="hi", history=[], blocks=blocks, theme={}, business_name=None,
+        business_type=None, feedback=None,
+    )
+    blocks_line = next(line for line in prompt.splitlines() if line.startswith("Current blocks"))
+    blocks_json = prompt.splitlines()[prompt.splitlines().index(blocks_line) + 1]
+    assert '"subheading"' not in blocks_json   # empty string dropped
+    assert '"eyebrow"' not in blocks_json      # null dropped
+    assert '"bg"' not in blocks_json           # empty _design group dropped
+    assert '"motion":{"effect":"fade"}' in blocks_json  # non-empty group kept, compact separators
+    # the caller's original block dict is untouched — validate_ops still needs
+    # subheading/eyebrow/bg.* at full fidelity from the same request payload.
+    assert blocks[0]["subheading"] == ""
+    assert blocks[0]["eyebrow"] is None
+    assert blocks[0]["_design"]["bg"] == {}
+
+
 # --- turn contract -----------------------------------------------------------
 
 class _FakeResponse:
