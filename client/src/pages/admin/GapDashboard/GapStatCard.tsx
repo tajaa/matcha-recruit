@@ -1,4 +1,6 @@
-export default function StatCard({ label, value, tone }: { label: string; value: number | string; tone?: 'gap' | 'ok' }) {
+// Distinct from components/dashboard/StatCard (a large clickable icon tile). This is the
+// small static admin gap/ok stat cell — different props/element/tokens, deliberately not merged.
+export default function GapStatCard({ label, value, tone }: { label: string; value: number | string; tone?: 'gap' | 'ok' }) {
   const valueColor = tone === 'gap' ? 'text-amber-300' : tone === 'ok' ? 'text-emerald-300' : 'text-zinc-100'
   return (
     <div className="rounded-lg border border-vsc-border bg-vsc-panel p-3">

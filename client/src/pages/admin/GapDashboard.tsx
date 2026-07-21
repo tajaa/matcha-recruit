@@ -28,7 +28,7 @@ import { complexityBandClass } from './GapOverview'
 import type { CoveredItem } from './GapDashboard/types'
 import { COVERAGE_SOURCE_BADGE, COVERAGE_SOURCE_LABEL, COVERAGE_SOURCE_TITLE } from './GapDashboard/constants'
 import { missingId, toResearchItem } from './GapDashboard/helpers'
-import StatCard from './GapDashboard/StatCard'
+import GapStatCard from './GapDashboard/GapStatCard'
 import EventFeed from './GapDashboard/EventFeed'
 import CoveredRow from './GapDashboard/CoveredRow'
 
@@ -234,10 +234,10 @@ export default function GapDashboard() {
                 </div>
               </button>
             )}
-            <StatCard label="Covered" value={counts?.covered ?? 0} tone="ok" />
-            <StatCard label="Gaps" value={counts?.gaps ?? 0} tone="gap" />
-            <StatCard label="Ambiguous" value={counts?.ambiguous ?? 0} />
-            <StatCard label="Jurisdictions" value={jurisdictionCount} />
+            <GapStatCard label="Covered" value={counts?.covered ?? 0} tone="ok" />
+            <GapStatCard label="Gaps" value={counts?.gaps ?? 0} tone="gap" />
+            <GapStatCard label="Ambiguous" value={counts?.ambiguous ?? 0} />
+            <GapStatCard label="Jurisdictions" value={jurisdictionCount} />
           </div>
 
           {/* Base-layer labor readiness — the federal + state foundation this
