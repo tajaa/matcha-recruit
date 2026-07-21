@@ -241,9 +241,28 @@ def test_build_corpus_notes_when_no_scopes():
 
 
 def test_build_corpus_tolerates_empty_grounding():
+    """No profile, no locations, no existing content — build a corpus anyway.
+
+    The index is NOT empty: `_playbook_records` falls back to the `general`
+    industry, which carries a summary and baseline sections, and those are real
+    citable records independent of tenant data. What must be empty is everything
+    DERIVED from the (absent) company data — and the notes must say why."""
     corpus = hp.build_corpus({})
-    assert corpus["index"] == {}
     assert isinstance(corpus["sources"], dict)
+
+    for key in ("profile", "law", "existing_handbook", "existing_policies", "compliance_floor"):
+        assert corpus["sources"][key]["records"] == [], key
+    playbook = corpus["sources"]["playbook"]["records"]
+    assert playbook, "the industry baseline grounds a session with no data of its own"
+    assert all(r["cid"].startswith("playbook:") for r in playbook)
+
+    # flat-index invariant holds over whatever WAS minted
+    assert set(corpus["index"]) == {r["cid"] for r in playbook}
+    assert all(corpus["index"][r["cid"]]["source"] == "playbook" for r in playbook)
+
+    # absence is stated, never silent
+    assert any("No work locations on file" in n for n in corpus["notes"])
+    assert any("No jurisdiction requirements" in n for n in corpus["notes"])
 
 
 # --- draft coercion + citation gate ----------------------------------------
