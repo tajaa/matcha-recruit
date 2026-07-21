@@ -152,10 +152,11 @@ DESIGN_GROUPS: dict[str, dict[str, Any]] = build_design_groups()
 DESIGN_REQUIRES_PREMIUM = True
 
 # --- Model tiers -------------------------------------------------------------
-# The same ladder the rest of the codebase uses (see
-# core/services/gemini_compliance.py:34-37 for the canonical constants and
-# matcha_work_ai.py:695 for the precedent of restating them locally rather than
-# importing a heavy service module).
+# Restated locally rather than imported from a heavy service module (the
+# matcha_work_ai.py:695 precedent). NOTE: this ladder is deliberately AHEAD of
+# core/services/gemini_compliance.py:37-38, which still names the 3.1/3-preview
+# generation — Merlin moved to the 2026-07-21 GA models first. Don't "resync"
+# them by reverting this; the rest of the codebase is the side that's stale.
 #
 # `lite` is the default and is available on every plan — it's cheap enough to
 # absorb as a funnel into upgrades. `regular` needs a paid plan; the server
@@ -164,9 +165,20 @@ DESIGN_REQUIRES_PREMIUM = True
 # instead of an error. A pro/heavy tier is deliberately NOT offered — page
 # editing is a structured-op task that flash handles well, and the cost is not
 # metered yet (no token wallet), so the expensive model has no guard rail.
+#
+# Cost of the 2026-07-21 bump, per 1M tokens (in → out):
+#   lite     3.1-flash-lite $0.25/$1.50  →  3.5-flash-lite $0.30/$2.50
+#   regular  3-flash-preview $0.50/$3.00 →  3.6-flash      $1.50/$7.50
+# Both went UP against what we were running: Google prices 3.6 Flash as the
+# cheaper successor to 3.5 Flash ($9.00 out), but Merlin was never on 3.5 Flash
+# — it sat a rung lower on a *preview* model. Bought with it: both tiers are now
+# GA rather than preview, and flash-lite's agentic score (the op-emission task
+# Merlin actually does) jumps Terminal-Bench 2.1 31% → 54%. 3.6 Flash also emits
+# ~17% fewer output tokens than 3.5 Flash, which claws back part of the `regular`
+# increase. Revisit if the token wallet lands and per-account cost gets metered.
 MODEL_TIERS: dict[str, str] = {
-    "lite": "gemini-3.1-flash-lite",
-    "regular": "gemini-3-flash-preview",
+    "lite": "gemini-3.5-flash-lite",
+    "regular": "gemini-3.6-flash",
 }
 DEFAULT_MODEL_TIER = "lite"
 # Tiers a non-premium (free / hosting) plan may use.
