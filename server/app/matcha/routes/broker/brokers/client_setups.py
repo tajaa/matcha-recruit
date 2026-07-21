@@ -655,7 +655,7 @@ async def get_broker_company_detail(
     current_user: CurrentUser = Depends(require_broker),
 ):
     """Return detailed read-only data about one of the broker's linked clients."""
-    from ....core.services.handbook_service import HandbookService
+    from app.core.services.handbook_service import HandbookService
 
     async with get_connection() as conn:
         membership = await _get_broker_membership(conn, user_id=current_user.id)

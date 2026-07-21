@@ -936,7 +936,7 @@ async def generate_pdf(
         return cached
 
     # Lazy import to avoid circular imports at module load time
-    from ..routes.employee_lifecycle.offer_letters import _generate_offer_letter_html
+    from app.matcha.routes.employee_lifecycle.offer_letters import _generate_offer_letter_html
 
     render_state = dict(state)
     render_state.setdefault("created_at", datetime.utcnow())
@@ -967,7 +967,7 @@ async def generate_pdf(
                 }
                 """
                 html_content = html_content.replace("</style>", watermark_css + "</style>")
-            from ...core.services.pdf import render_pdf
+            from app.core.services.pdf import render_pdf
 
             return render_pdf(html_content)
         except ImportError:
@@ -1136,7 +1136,7 @@ async def generate_presentation_pdf(
     def _render() -> Optional[bytes]:
         try:
             from weasyprint import CSS
-            from ...core.services.pdf import render_pdf
+            from app.core.services.pdf import render_pdf
             html_content = _render_presentation_html(render_state)
             return render_pdf(
                 html_content,

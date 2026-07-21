@@ -304,7 +304,7 @@ async def list_referred_clients(current_user: CurrentUser = Depends(require_brok
         }
 @router.get("/reporting/handbook-coverage")
 async def get_broker_handbook_coverage(current_user: CurrentUser = Depends(require_broker)):
-    from ....core.services.handbook_service import HandbookService
+    from app.core.services.handbook_service import HandbookService
 
     async with get_connection() as conn:
         membership = await _get_broker_membership(conn, user_id=current_user.id)

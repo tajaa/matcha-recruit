@@ -173,7 +173,7 @@ async def create_broker_member(
     current_user: CurrentUser = Depends(require_broker),
 ):
     """Create an additional broker user under this brokerage (owner/admin only)."""
-    from ....core.services.auth import hash_password  # lazy: avoid import cycle
+    from app.core.services.auth import hash_password  # lazy: avoid import cycle
 
     generated_password = not bool(request.password and request.password.strip())
     member_password = request.password.strip() if request.password else secrets.token_urlsafe(12)
