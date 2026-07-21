@@ -1,5 +1,219 @@
 [
   {
+    "id": "broker-company-chat",
+    "date": "2026-07-20",
+    "category": "Broker",
+    "title": "Broker ↔ company chat for flagged data, claims and documents",
+    "summary": "New private messaging surface between an HR broker and its linked client companies, so both sides can discuss flagged data, claims and shared documents directly in-platform instead of over email. Threads can anchor to a claim, loss run, document, incident, submission or policy as a reference chip. A same-day review pass then closed several access and correctness gaps: a terminated broker could still list and read the full transcript of a company they'd lost access to, the read watermark could mark messages as read that arrived mid-request, and a reused client-side message id in a different thread silently dropped the send instead of erroring.",
+    "whatsNew": [
+      "New conversation surface: Broker → /broker/messages, Company → /app/broker-chat (Communication sidebar entry, shown only when an active broker link exists).",
+      "Threads can reference a claim, loss run, document, incident, submission or policy inline.",
+      "Real-time delivery via the existing notification pipeline (live WS push + APNs + bell row) with unread counts on both sides.",
+      "Fixed: a broker whose company link had ended could still read/list that company's full chat transcript — access is now re-checked on every read path, not just send.",
+      "Fixed: the read watermark stamped the time you opened the thread, not the message you actually saw — could mark unread messages read if they arrived mid-request.",
+      "Fixed: a client_message_id reused across two different threads silently dropped the second send instead of erroring.",
+      "Fixed: editing or deleting the latest message left the old text showing in both sidebars' preview line."
+    ],
+    "howToUse": [
+      "Company: Communication → Broker Chat (visible once your company has an active broker link).",
+      "Broker: Messages tab in the broker portal, per linked client."
+    ],
+    "setup": [
+      "Apply migration brokerchat01 (broker_company_conversations / _messages / _conversation_reads) — not applied to any database as of this commit."
+    ],
+    "notes": null,
+    "tag": "action-needed"
+  },
+  {
+    "id": "handbook-pilot-compliance-floor-and-audit-grounding",
+    "date": "2026-07-20",
+    "category": "Handbook Pilot",
+    "title": "Handbook Pilot drafts against the governing rule (not the flat overlap list), quotes full section text, and grounds on the handbook's own audit gaps + freshness findings",
+    "summary": "Three groundings landed in one pass. First, Handbook Pilot now pulls the same precedence-resolved compliance floor (federal → state → local governing requirement) that HR Pilot uses, and the drafting prompt is told the floor outranks the flat jurisdiction-requirements list when both cover the same category — previously the assistant only saw the overlapping flat list with no sense of which rule actually governs. Second, drafting now quotes the company's own handbook sections and policies at full text instead of a 280-char preview, so a draft revising a policy is reading the actual clause, not a summary of it. Third, the pilot now grounds on findings the platform has already produced about this company's handbook: open gaps from its latest completed audit, and findings from each handbook's latest freshness check — both surfaced as findings, never citable as the source of a legal obligation themselves. A same-day review pass fixed a connection-pool exhaustion risk (the floor fetch was holding a pooled connection while triggering a second acquisition) and a wildcard-floor bug where a state with its own stricter floor could still be governed by the generic federal wildcard.",
+    "whatsNew": [
+      "Drafting now cites the governing compliance floor over the flat overlapping-requirements list when both apply to the same category.",
+      "Drafting quotes full section/policy text (capped, with graceful fallback to summaries past the cap) instead of a 280-character preview.",
+      "New grounding: open gaps from the company's latest completed handbook audit (severity-ranked).",
+      "New grounding: findings from each handbook's latest freshness check.",
+      "A cited floor record now correctly counts toward \"grounded\" and closes its matching flat-requirement gap on the coverage map (previously only direct citations of the flat list counted, so a draft citing the actual governing rule could read as ungrounded).",
+      "Fixed: a model-embedded [floor:…] citation token could leak into employee-facing prose uncaught.",
+      "Fixed: a connection-pool exhaustion risk where the floor fetch held a pooled connection while triggering a second pool acquisition.",
+      "Fixed: a federal wildcard floor could override a state's own stricter floor instead of yielding to it."
+    ],
+    "howToUse": null,
+    "setup": null,
+    "notes": null,
+    "tag": null
+  },
+  {
+    "id": "broker-pilot-property-fleet-risk-grounding",
+    "date": "2026-07-20",
+    "category": "Broker Pilot",
+    "title": "Broker Pilot can now cite property catastrophe/exposure data, the composite risk index, and fleet/driver-risk scoring",
+    "summary": "Broker Pilot's chat previously couldn't see several things the broker portal already showed in the submission packet. Property catastrophe tier, exposure, plan-of-fixes, and the composite risk index (with its uncertainty band and un-scored components) are now citable in chat, not just visible in the rendered packet. Separately, the platform's fleet/driver-risk scoring (MVR-based driver grades rolling up to a fleet grade) is now grounded in Broker Pilot too, gated on the client's own driver_risk flag so an unfilled-in MVR table can't read as \"clean fleet.\" A review-pass fix made property-plan citations stable across turns: the plan is re-ranked by severity every time it's rebuilt, so a citation keyed on list position could silently point at a different fix by the time a report referenced it — it's now keyed on the fix's own identity.",
+    "whatsNew": [
+      "New citable records: property catastrophe tier/exposure, the fix-priority plan, and the composite risk index with its components.",
+      "New citable records: fleet/driver-risk grade, tier counts, overdue reviews, and individual marginal/high-risk drivers (capped, disclosed).",
+      "Directional hazard tiers and MVR-derived grades are labeled as such in the record itself, not just the prompt, so they can't be cited as a pulled report.",
+      "Fixed: property-plan citations could silently point at a different fix after the plan re-ranked itself — citations are now stable across rebuilds."
+    ],
+    "howToUse": null,
+    "setup": null,
+    "notes": null,
+    "tag": null
+  },
+  {
+    "id": "analysis-pilot-platform-datasets",
+    "date": "2026-07-20",
+    "category": "Analysis Pilot",
+    "title": "Analysis Pilot can now build datasets from the company's own platform records, not just uploads",
+    "summary": "Dataset ingestion was hard-wired to file uploads even though the underlying model (series + periods + roles) was always source-agnostic. Two new platform-sourced dataset builders: incident counts by month/type (24-month window) and workers'-comp loss runs by policy period, developed to their latest valuation. Both arrive pre-confirmed (no extraction-review step, since a SQL builder with explicit roles isn't the untrusted Gemini-reads-a-PDF case the confirm gate exists for) and are point-in-time snapshots — nothing syncs after creation, so a report can never cite figures that changed underneath it. A same-day review pass fixed a bug where a company with zero incidents in the window still got a dataset of 24 zeroed months marked ready (now yields no dataset instead), and a loss-run bug that hard-defaulted to the workers'-comp line even for a company that only had general-liability or property loss runs on file.",
+    "whatsNew": [
+      "New dataset source: incident counts by month/type, pulled directly from IR records (gated on the incidents feature).",
+      "New dataset source: workers'-comp loss runs by policy period, developed to latest valuation (gated on the incidents feature).",
+      "Both platform sources are pre-confirmed snapshots — no review step, and nothing updates after creation.",
+      "Fixed: a company with no incidents in the 24-month window got a dataset of all zeros marked ready instead of no dataset.",
+      "Fixed: loss-run datasets defaulted to the workers'-comp line even for companies whose loss runs were only general-liability or property — now picks the line with the most data on file and notes what else exists."
+    ],
+    "howToUse": [
+      "Analysis Pilot → new session → Add dataset → \"From platform records\" instead of upload."
+    ],
+    "setup": [
+      "Apply migration analysispilot02 (widens dataset source_kind to admit 'platform', drops storage_path NOT NULL) — not applied to any database as of this commit."
+    ],
+    "notes": null,
+    "tag": "action-needed"
+  },
+  {
+    "id": "legal-pilot-leave-charge-termination-evidence",
+    "date": "2026-07-20",
+    "category": "Legal Pilot",
+    "title": "Legal Pilot now grounds on leave, agency-charge and termination-lifecycle records, plus fuller chain-of-custody in packets",
+    "summary": "Five new grounded sources for Legal Pilot: leave requests (type/status/dates only — free-text medical detail is never selected), agency charges (EEOC/NLRB/OSHA/state, including settlement amounts), and the termination lifecycle (pre-termination review, separation agreements with their ADEA/OWBPA consideration and revocation windows, and post-termination claims). Evidence packets also gained fuller chain-of-custody: ER cases and discipline records now carry their audit-log trail in the appendix alongside incidents, which already had theirs. Broker Pilot explicitly excludes the leave source (who took FMLA is medical-adjacent) while still grounding on charges and termination records as EPL underwriting context. A same-day review pass fixed a leave-window bug that dropped a still-open leave from the record (the exact leave an interference matter would be about), a separation-agreement dating bug that could leave a drafted-but-unpresented agreement dateless and out of the chronology, and a labeling bug where an ER or discipline audit action could render with the wrong (legal-matter-specific) vocabulary in an attorney packet.",
+    "whatsNew": [
+      "New grounded sources: leave requests, agency charges (EEOC/NLRB/OSHA/state), pre-termination review, separation agreements, and post-termination claims.",
+      "Separation-agreement records surface their ADEA/OWBPA consideration and revocation windows — the release's actual validity window.",
+      "Evidence packets now include the audit-log trail for ER cases and discipline records, matching what incidents already had.",
+      "Broker Pilot excludes the leave source from its grounding (medical-adjacent); charges and termination records still flow through as EPL context.",
+      "Fixed: a still-open leave that started before the query window was dropped from the record entirely.",
+      "Fixed: a drafted-but-unpresented separation agreement could come back dateless and fall out of the chronology.",
+      "Fixed: ER/discipline audit actions could render with legal-matter-specific labels (e.g. \"Matter updated\") instead of their own action's label.",
+      "Fixed: settlement/severance amounts under a dollar were rounded away in packets."
+    ],
+    "howToUse": null,
+    "setup": null,
+    "notes": null,
+    "tag": null
+  },
+  {
+    "id": "matcha-work-tasks-split-and-test-fixes",
+    "date": "2026-07-19",
+    "category": "Matcha Work",
+    "title": "tasks.py split into five files, plus two bugs the split exposed",
+    "summary": "Behavior-preserving cleanup of tasks.py (1755 lines spanning ticket drafts, task history, task files, and research tasks) into separate modules, ahead of upcoming Werk feature work. The split moved a shared ownership-check helper into a module-private location that a route left behind still called, causing every POST to start a task round to 500 with a NameError — fixed same day and promoted to a proper shared helper with a regression test. Also fixed a pre-existing issue where the whole backend test suite failed to collect: ~17 test files each hand-rolled their own partial stub of the google.genai SDK into sys.modules, and whichever one loaded last silently determined what attributes were available to every other test.",
+    "whatsNew": [
+      "tasks.py split into ticket_drafts.py, task_history.py, task_files.py, and research_tasks.py -- no endpoint paths or response shapes changed.",
+      "Duplicated round-start logic (reject flow + rounds endpoint) consolidated into one service helper.",
+      "send_message_stream broken into staged functions (quota gate, attachments, hard-stop gates, mode contexts, generation, audit+persist) as prep for streaming/ticket-reference work.",
+      "Fixed: POST /projects/{id}/tasks/{taskId}/rounds was 500ing with a NameError after the split (helper moved but caller left behind).",
+      "Fixed: a disconnect arriving during a keepalive frame left an already-billed Gemini call's task orphaned instead of reaching the cancellation handler.",
+      "Test suite: replaced ~17 per-file google.genai stubs with one shared stub in conftest.py, fixing an order-dependent collection failure and a hidden production code path that only the stub ever exercised."
+    ],
+    "howToUse": null,
+    "setup": null,
+    "notes": [
+      "Internal refactor + bugfix, no user-facing change. Flagging because the NameError bug (task rounds 500ing) shipped and was live for a period before the fix landed same day."
+    ],
+    "tag": null
+  },
+  {
+    "id": "ir-copilot-thread-destroyed-on-accept",
+    "date": "2026-07-19",
+    "category": "IR",
+    "title": "Fixed the IR Copilot thread getting wiped out when accepting a card",
+    "summary": "Two independent bugs compounded: the incident detail page blanked the entire page (destroying the in-memory Copilot panel) on every background refetch, not just the first load, so accepting a card that changed a field could reset the conversation and sometimes trigger a fresh AI round. Separately, resume-after-more-info writes landed in one DB transaction with a timestamp column that doesn't advance within a transaction, so ordering-dependent code could drop that round's cards entirely. A third bug let a swallowed Gemini timeout write a blank assistant turn and clear every open card.",
+    "whatsNew": [
+      "Accepting a Copilot card no longer risks resetting the thread or losing in-flight cards.",
+      "Resume-after-info-request rounds are now ordered correctly even when written in a single transaction.",
+      "A failed/timed-out Gemini call no longer clears the user's message or supersedes open cards."
+    ],
+    "howToUse": null,
+    "setup": null,
+    "notes": null,
+    "tag": null
+  },
+  {
+    "id": "ops-fast-deploy-seed-runner",
+    "date": "2026-07-19",
+    "category": "Ops",
+    "title": "Faster deploys, plus a guarded runner for writing seed/demo data to prod",
+    "summary": "Deploys were paying for two things that bought nothing: the pre-pull docker image prune was deleting the layers the pull was about to reuse (forcing a cold full-image pull every time), and the pre-deploy backup step had been silently failing on every run since the RDS cutover (still targeting the deleted matcha-postgres container) while still blocking the deploy. Replaced with a repo-tracked backup script that streams straight to S3 in the background, and moved the prune to after the swap. Also adds a guarded runner for the only sanctioned way to write test/demo rows to prod.",
+    "whatsNew": [
+      "docker image prune -a moved from before the pull to after the swap -- deploys no longer cold-pull the full image every time.",
+      "Prod backup replaced: deploy/backup-prod-rds.sh streams a pg_dump of RDS straight to S3 in the background (never touches host disk), fired by every backend deploy.",
+      "New --hotfix flag on the deploy scripts: pull + blue/green swap only, for emergency patches.",
+      "migrate-prod.sh no longer waits for the RDS snapshot to finish before proceeding (a snapshot's point-in-time is fixed at initiation) -- it still verifies the snapshot succeeded via a status check.",
+      "New scripts/seed-prod.sh: guarded runner for writing seed/demo rows to prod (DDL blocked, non-reserved email domains blocked, transaction-control statements blocked, --dry-run runs for real inside a rolled-back transaction, typed confirm required)."
+    ],
+    "howToUse": [
+      "Normal deploy is unchanged: ./scripts/build-and-push.sh && ./scripts/update-ec2.sh --matcha.",
+      "Emergency patch: ./scripts/build-and-push.sh --backend-only && ./scripts/update-ec2.sh --backend --hotfix.",
+      "To write demo/seed data to prod: scripts/seed-prod.sh <pack> --dry-run first, then without --dry-run."
+    ],
+    "setup": null,
+    "notes": [
+      "The old ~/backup-postgres.sh had been failing silently on every run since the RDS cutover -- check ~/backup.log on the app EC2 to confirm the new background backup is actually running post-deploy."
+    ],
+    "tag": "action-needed"
+  },
+  {
+    "id": "hr-pilot-agentic-actions-and-supervisor-copilot",
+    "date": "2026-07-19",
+    "category": "HR Pilot",
+    "title": "HR Pilot goes agentic (confirm-first discipline drafts + PTO filing), Supervisor Copilot grounding, cited answers, employee Ask HR, and a proactive-push worker",
+    "summary": "Big widening of HR Pilot. It can now take bounded, documented actions on a strict two-turn confirm-first envelope: draft a progressive-discipline write-up or file a PTO request, staged on one turn and only executed on an explicit later confirmation, gated by the deterministic discipline-compliance check at both propose and execute time. A hard safety/harassment stop no longer dead-ends the conversation -- it stages a confirm-first hand-off into a real IR incident or ER case, prefilled from the supervisor's narrative, and emails admins. Grounding widened to Supervisor Copilot facts (published shifts + staffing gaps, training completion/overdue, recent incidents with no names) and every answer now carries real citations, with hallucinated ones stripped before the reply is shown. New employee-facing Ask HR portal reuses the same grounded corpus with coworker-naming data redacted. A new worker proactively opens pre-briefed HR Pilot threads ahead of leave returns, discipline deadlines, and unsigned-document digests. A same-branch review pass then fixed several bugs the new grounding introduced: Ask HR was leaking coworker training/incident data before the redaction landed, declined shifts counted as staffed, the currently-running shift was excluded from \"who's on now,\" terminated employees still showed up in shifts/training, and several proactive-push races (duplicate threads, stranded runs, undercounted digests).",
+    "whatsNew": [
+      "Agentic HR Pilot: confirm-first discipline write-up drafting and PTO filing, gated by the discipline-compliance check at both propose and execute time.",
+      "Hard safety/harassment stops now stage a confirm-first IR incident or ER case hand-off instead of dead-ending the conversation, and email admins.",
+      "Supervisor Copilot grounding: published shifts + staffing shortfalls, training completion/overdue, and recent incidents (no employee names) added to HR Pilot's context.",
+      "HR Pilot answers now carry real citations; anything the model cites that isn't in the retrieved corpus is stripped before the reply is shown.",
+      "New employee Ask HR portal (own flag) -- same grounded corpus, coworker-naming data redacted, its own hard-stop handling that auto-files to the HR review queue.",
+      "New proactive-push worker: opens pre-briefed HR Pilot threads ahead of leave returns, discipline review/expiry dates, and weekly unsigned-document digests.",
+      "Fixed: Ask HR was able to surface coworker training failures and incident data before the redaction pass landed.",
+      "Fixed: declined shift assignments counted as staffed; the shift running right now was excluded from \"who's on?\"; terminated employees still appeared in shifts/training.",
+      "Fixed several proactive-push worker races: duplicate threads on concurrent runs, one failing event stranding the rest of the sweep, and an undercounted signature digest."
+    ],
+    "howToUse": [
+      "HR Pilot thread: ask a question or describe a situation -- the assistant may propose a discipline draft or PTO filing; nothing is written until you confirm it on a later turn.",
+      "Employee portal: new \"Ask HR\" tab for policy questions, grounded the same way, redacted of coworker-identifying data.",
+      "Proactive threads open automatically ahead of leave returns / discipline deadlines / unsigned-document backlogs -- no setup needed once the migrations below are applied."
+    ],
+    "setup": [
+      "Apply migrations hrpilot02 (IR/ER hand-off link columns), askhr01 (ask_hr_sessions/_messages + mw_escalated_queries widened), and hrpush01 (proactive-push ledger + scheduler row, seeded disabled) -- none of these were applied to any database as of this commit.",
+      "Enable the hr_proactive_push scheduler row once ready for the proactive-push worker to actually fire."
+    ],
+    "notes": [
+      "Migration askhr01 also fixes a live latent bug: mw_escalated_queries.ai_mode was VARCHAR(20), one char short for 'hr_pilot_compliance_block' (25 chars) -- every statutory discipline-block escalation had been failing silently at insert until this widened it to VARCHAR(40)."
+    ],
+    "tag": "action-needed"
+  },
+  {
+    "id": "legal-pilot-intake-gaps",
+    "date": "2026-07-19",
+    "category": "Legal Pilot",
+    "title": "Legal Pilot now asks for missing material before concluding, plus a scrollable matter form",
+    "summary": "Legal Pilot chat used to conclude on turn one even for a nearly-empty matter, emitting grounded observations and open questions for counsel regardless of how thin the record was, and never asked the admin for the documents that would complete the case file. It now works the admin for what's missing first, conversationally, the same pattern IR Copilot uses -- a soft, model-led gate computed over the already-assembled corpus, no new state machine or column. Also fixed the new-matter form running off the bottom of shorter screens with the Create button unreachable.",
+    "whatsNew": [
+      "Legal Pilot now asks for missing matter facts and expected-but-empty document sources before offering observations, instead of concluding immediately.",
+      "Fixed: a packet generated right after a gathering turn could render \"No grounded observations were recorded\" over a matter that actually had a full analysis one turn earlier.",
+      "Fixed: the new-matter form could run past the bottom of the screen with the Create button unreachable -- the field area now scrolls with a pinned action footer."
+    ],
+    "howToUse": null,
+    "setup": null,
+    "notes": null,
+    "tag": null
+  },
+  {
     "id": "workforce-compliance-real-pay-gap",
     "date": "2026-07-19",
     "category": "Workforce Compliance",
@@ -23,6 +237,25 @@
       "The footprint-scoping bug meant any WA employer — not just Seattle/King County ones — saw the Seattle/King County pay-transparency ordinance as an open requirement; worth a spot-check on any company whose gap dashboard changed after this deploy."
     ],
     "tag": "action-needed"
+  },
+  {
+    "id": "werk-macos-architecture-review-hardening",
+    "date": "2026-07-18",
+    "category": "Werk (macOS)",
+    "title": "Werk desktop architecture review — data-race fixes, channel history paging, god-object split",
+    "summary": "Full architecture review pass on the Werk macOS app (build 6). Two P0 data races in shared singletons were fixed, channel history now pages instead of silently truncating at 50 messages, keychain persistence gets checked instead of assumed, and several previously-swallowed errors now surface to the user instead of failing silently. The rest is internal: the AppState god-object and the two largest views (ChannelDetailView, ProjectDetailView) were split into concern-scoped extensions, standalone types were extracted from the four largest files, and a MatchaTests unit-test target was added with real coverage on the channel-merge logic.",
+    "whatsNew": [
+      "Fixed two P0 data races in shared singletons.",
+      "Channel history now pages instead of truncating at 50 messages.",
+      "Keychain writes are now verified instead of assumed to have persisted; logout now clears the view-model cache.",
+      "Several previously-swallowed errors (decode failures, crash guards) now surface to the user instead of failing silently.",
+      "Internal: AppState split into concern extensions; ChannelDetailView and ProjectDetailView split into extensions; standalone types extracted from the 4 largest files; new MatchaTests unit-test target with channel-merge coverage.",
+      "Build bumped to 6."
+    ],
+    "howToUse": null,
+    "setup": null,
+    "notes": null,
+    "tag": null
   },
   {
     "id": "ir-copilot-close-gate-progress",
