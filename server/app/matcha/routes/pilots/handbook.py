@@ -273,6 +273,8 @@ async def get_context(session_id: UUID, current_user=Depends(require_admin_or_cl
     async with get_connection() as conn:
         session = await _load_session(conn, session_id, company_id)
         grounding = await hp.gather_grounding(conn, company_id, session)
+    # Outside the connection block on purpose — see attach_compliance_floor.
+    grounding = await hp.attach_compliance_floor(grounding, company_id)
     corpus = hp.build_corpus(grounding)
     return {
         "sources": {k: {"label": s["label"], "count": len(s["records"])}
@@ -300,7 +302,8 @@ async def chat(session_id: UUID, body: ChatIn, request: Request,
         )
         await _audit(conn, session_id, current_user, request, "message", {"role": "user"})
 
-    corpus = hp.build_corpus(grounding)
+    grounding = await hp.attach_compliance_floor(grounding, company_id)
+    corpus = hp.build_corpus(grounding, with_full_text=True)
     user_id = getattr(current_user, "id", None)
 
     async def _persist(result_payload: dict):
@@ -377,6 +380,7 @@ async def get_handbook(session_id: UUID, current_user=Depends(require_admin_or_c
         session = await _load_session(conn, session_id, company_id)
         drafts = await _load_drafts(conn, session_id)
         grounding = await hp.gather_grounding(conn, company_id, session)
+    grounding = await hp.attach_compliance_floor(grounding, company_id)
     corpus = hp.build_corpus(grounding)
     return hp.assemble_handbook(session, drafts, corpus)
 
@@ -395,6 +399,7 @@ async def compliance_scan(session_id: UUID, request: Request,
         await check_rate_limit(str(company_id), "handbook_pilot_scan", 15, 3600)
         drafts = await _load_drafts(conn, session_id)
         grounding = await hp.gather_grounding(conn, company_id, session)
+    grounding = await hp.attach_compliance_floor(grounding, company_id)
 
     if not any(str(d.get("content") or "").strip() and str(d.get("title") or "").strip()
                for d in drafts):

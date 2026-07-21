@@ -50,17 +50,20 @@ def test_ir_monthly_totals_cover_every_type_including_untracked_ones():
 
 def test_ir_monthly_ignores_rows_outside_the_window_and_null_types():
     rows = [{"month": date(2000, 1, 1), "incident_type": "injury", "n": 9},
-            {"month": date(2026, 7, 1), "incident_type": None, "n": 2}]
+            {"month": date(2026, 7, 1), "incident_type": None, "n": 2}]  # noqa: E501
     built = ps.ir_monthly_series(rows, date(2026, 7, 20))
     assert "Unclassified" in built["series"]
     assert sum(built["series"][ps._TOTAL_LABEL]) == 2
 
 
-def test_ir_monthly_empty_is_empty_not_a_flat_line_of_zeros_with_no_series():
-    built = ps.ir_monthly_series([], date(2026, 7, 20))
-    # the total series still exists (all zeros) — the route's "no data" check
-    # keys on the query returning nothing, not on this shape
-    assert built["series"][ps._TOTAL_LABEL] == [0.0] * ps._IR_MONTHS
+def test_ir_monthly_with_no_incidents_yields_no_series_at_all():
+    """24 zeros is not a dataset, it is the absence of one. The route refuses to
+    persist a build whose `series` is empty, so a company with no incidents must
+    land there rather than getting a flat line the chat can cite as a finding."""
+    assert ps.ir_monthly_series([], date(2026, 7, 20))["series"] == {}
+    # rows that all fall outside the labelled window are the same case
+    stale = [{"month": date(2000, 1, 1), "incident_type": "injury", "n": 9}]
+    assert ps.ir_monthly_series(stale, date(2026, 7, 20))["series"] == {}
 
 
 # --- loss runs ----------------------------------------------------------------
@@ -140,3 +143,22 @@ def test_roles_assigned_by_the_builder_are_canonical():
     they must still be vocabulary the packs recognize."""
     for role in ps._LOSS_ROLES.values():
         assert role in mapping.CANONICAL_ROLES
+
+
+# --- line selection -----------------------------------------------------------
+
+def test_pick_line_prefers_the_line_with_the_most_periods():
+    """Hard-defaulting to `wc` told a company that records only GL loss runs it
+    had none — the rows were there, on another line."""
+    snaps = [_snap("2024-25", "2026-01-01", 1, 1), _snap("2023-24", "2025-01-01", 1, 1)]
+    for s in snaps:
+        s["line"] = "gl"
+    snaps.append({**_snap("2024-25", "2026-01-01", 1, 1), "line": "wc"})
+    assert ps.pick_line(snaps) == "gl"
+    assert ps.pick_line([]) is None
+    assert ps.pick_line([{"line": "", "policy_period_label": "x"}]) is None
+
+
+def test_pick_line_is_deterministic_under_a_tie():
+    snaps = [{**_snap("2024-25", "2026-01-01", 1, 1), "line": ln} for ln in ("wc", "auto")]
+    assert ps.pick_line(snaps) == ps.pick_line(list(reversed(snaps))) == "auto"

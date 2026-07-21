@@ -155,21 +155,6 @@ async def gather_grounding(conn, company_id, session: dict) -> dict:
     except Exception:  # noqa: BLE001
         logger.warning("handbook_pilot: existing-policy fetch failed for %s", company_id)
 
-    # Precedence-resolved compliance floor — the GOVERNING requirement per
-    # category (federal → state → local), which is what a drafting tool should
-    # write against; `requirements` above is the flat overlapping list.
-    # `build_compliance_context` is already Redis-cached with a per-key build
-    # lock (120s, `mw:compliance_ctx:{company_id}`) and the chains survive the
-    # cache round-trip, so the expensive resolution runs at most once per company
-    # per window no matter which pilot asks — no second cache layer here.
-    reasoning_chains: list = []
-    try:
-        from . import matcha_work_node
-        result = await matcha_work_node.build_compliance_context(company_id)
-        reasoning_chains = list(getattr(result, "reasoning_chains", None) or [])
-    except Exception:  # noqa: BLE001 — same degrade-to-empty as every source here
-        logger.warning("handbook_pilot: compliance floor fetch failed for %s", company_id)
-
     return {
         "scopes": scopes,
         "profile": dict(profile) if profile else None,
@@ -177,8 +162,40 @@ async def gather_grounding(conn, company_id, session: dict) -> dict:
         "sections": [dict(r) for r in sections],
         "policies": [dict(r) for r in policies],
         "industry": session.get("industry"),
-        "reasoning_chains": reasoning_chains,
+        # Filled by `attach_compliance_floor` AFTER the caller releases `conn` —
+        # see that function for why it cannot be fetched here.
+        "reasoning_chains": [],
     }
+
+
+async def attach_compliance_floor(grounding: dict, company_id) -> dict:
+    """Add the precedence-resolved compliance floor to a `gather_grounding`
+    result: the GOVERNING requirement per category (federal → state → local),
+    which is what a drafting tool should write against — `requirements` is the
+    flat overlapping list.
+
+    **Call this OUTSIDE the caller's `async with get_connection()` block.**
+    `build_compliance_context` opens its own pooled connection, so invoking it
+    while the route still holds one nests two acquisitions out of a pool of ten;
+    enough concurrent cold-cache requests then hold every slot while waiting for
+    a second and none can finish. HR Pilot solved this the same way and says so
+    at `matcha_work_mode_contexts._build_hr_pilot_bundle_uncached`.
+
+    No cache layer of its own: `build_compliance_context` is already Redis-cached
+    behind a per-key build lock (120s, `mw:compliance_ctx:{company_id}`) and the
+    chains survive the round-trip, so the expensive resolution runs at most once
+    per company per window no matter which pilot asks. Degrades to empty, like
+    every other source in `gather_grounding`."""
+    chains: list = []
+    try:
+        from . import matcha_work_node
+        result = await matcha_work_node.build_compliance_context(company_id)
+        chains = list(getattr(result, "reasoning_chains", None) or [])
+    except Exception:  # noqa: BLE001 — a missing floor is a note, never an error
+        logger.warning("handbook_pilot: compliance floor fetch failed for %s", company_id)
+    grounding = grounding or {}
+    grounding["reasoning_chains"] = chains
+    return grounding
 
 
 # --------------------------------------------------------------------------- #
@@ -463,13 +480,17 @@ def _full_text_map(grounding: dict) -> tuple[dict[str, str], int]:
     return out, overflow
 
 
-def build_corpus(grounding: dict) -> dict:
+def build_corpus(grounding: dict, *, with_full_text: bool = False) -> dict:
     """Assemble the grounding corpus `{sources, index, notes}` — the same shape
     Legal/Broker Pilot use, so `validate_citations` works unchanged. Pure.
 
-    Also carries `full_text`: cid → the record's real body, used only when
-    rendering the prompt (see `_full_text_map`). It is deliberately NOT folded
-    into the records — those are stored."""
+    ``with_full_text`` adds `full_text`: cid → the record's real body, for the
+    ONE caller that renders a prompt (see `_full_text_map`). Off by default
+    because the other callers don't render one — `/context` counts records,
+    `assemble_handbook` reads the index, and HR Pilot builds its own full-text
+    map — and the map is up to 120k characters that HR Pilot's Redis-cached
+    corpus would otherwise carry per company for nothing. It is never folded
+    into the records either way; those are stored."""
     grounding = grounding or {}
     sources = {
         "profile": {"label": "Company profile",
@@ -500,7 +521,7 @@ def build_corpus(grounding: dict) -> dict:
             "No precedence-resolved compliance floor available — answers ground on "
             "the flat per-state requirement list only."
         )
-    full_text, overflow = _full_text_map(grounding)
+    full_text, overflow = _full_text_map(grounding) if with_full_text else ({}, 0)
     if overflow:
         notes.append(
             f"{overflow} existing section(s)/policy(ies) exceeded the prompt's full-text "
@@ -853,25 +874,40 @@ def _assemble_draft(d: dict, index: dict) -> dict:
     }
 
 
-def _floor_coverage(cited_by: dict, index: dict) -> dict[tuple[str, str], list[str]]:
-    """(category slug, jurisdiction slug) → draft ids, over the cited `floor:`
-    records. A federally-governing floor is filed under `*`: it is the operative
-    rule in every state the chain resolved for. Pure."""
-    out: dict[tuple[str, str], list[str]] = {}
-    for cid, drafts in cited_by.items():
+def _floor_coverage(cited_by: dict, index: dict) -> tuple[dict, dict]:
+    """Two maps over the corpus's `floor:` records:
+
+    * ``cover``: (category slug, jurisdiction slug) → draft ids that cited that
+      floor. A federally-governing floor is filed under ``*``.
+    * ``local``: category slug → the set of NON-federal jurisdictions that have
+      a governing floor of their own, cited or not.
+
+    ``local`` is what keeps the ``*`` wildcard honest. A company with CA and TX
+    locations can have federal governing a category in TX while California
+    governs it in CA. Citing the federal floor must not mark California's
+    requirement covered — the draft would state the weaker federal obligation
+    for California employees, which is exactly the mis-attribution the
+    jurisdiction match exists to prevent. Pure."""
+    cover: dict[tuple[str, str], list[str]] = {}
+    local: dict[str, set] = {}
+    for cid, rec in (index or {}).items():
         if not (isinstance(cid, str) and cid.startswith("floor:")):
             continue
-        rec = index.get(cid) or {}
-        category = _slug(rec.get("category"))
+        category = _slug((rec or {}).get("category"))
         if not category or category == "x":
             continue
-        level = str(rec.get("governing_level") or "").lower()
+        level = str((rec or {}).get("governing_level") or "").lower()
+        if level != "federal":
+            local.setdefault(category, set()).add(_slug(rec.get("jurisdiction")))
+        drafts = cited_by.get(cid) or []
+        if not drafts:
+            continue
         juris = "*" if level == "federal" else _slug(rec.get("jurisdiction"))
-        out.setdefault((category, juris), []).extend(drafts)
-    return out
+        cover.setdefault((category, juris), []).extend(drafts)
+    return cover, local
 
 
-def _floor_citers(floor_cover: dict, law_rec: dict) -> list[str]:
+def _floor_citers(floor_cover: dict, floor_local: dict, law_rec: dict) -> list[str]:
     """Draft ids whose cited floor record governs this flat requirement.
 
     Matched on category plus jurisdiction, never category alone — California's
@@ -879,25 +915,38 @@ def _floor_citers(floor_cover: dict, law_rec: dict) -> list[str]:
     state is compared both as a code and as its full name, since a floor record
     carries the jurisdiction's name ("California") and a law record its code
     ("CA"). A city-level floor won't match its state's requirement; that
-    under-credits coverage, which is the safe direction for a gap report."""
+    under-credits coverage, which is the safe direction for a gap report.
+
+    The federal ``*`` wildcard applies only where no jurisdiction of this
+    requirement's own has a governing floor for the category — see
+    `_floor_coverage`."""
     category = _slug(law_rec.get("category"))
     if not category or category == "x":
         return []
-    out: list[str] = []
-    keys = {(category, "*")}
+    keys: set = set()
+    own: set = set()
     state = str(law_rec.get("state") or "").strip()
     if state:
-        keys.add((category, _slug(state)))
+        own.add(_slug(state))
         try:
             from app.core.services.compliance_service import _CODE_TO_STATE_NAME
             name = _CODE_TO_STATE_NAME.get(state.upper())
         except Exception:  # noqa: BLE001 — matching degrades, never raises
             name = None
         if name:
-            keys.add((category, _slug(name)))
+            own.add(_slug(name))
     juris = str(law_rec.get("jurisdiction") or "").strip()
     if juris:
-        keys.add((category, _slug(juris)))
+        own.add(_slug(juris))
+    keys.update((category, j) for j in own)
+
+    # Federal covers this requirement only when nothing local governs the
+    # category here; otherwise the local floor is the operative rule and only a
+    # draft citing THAT one covers it.
+    if not (floor_local.get(category) or set()) & own:
+        keys.add((category, "*"))
+
+    out: list[str] = []
     for key in keys:
         for draft_id in floor_cover.get(key) or []:
             if draft_id not in out:
@@ -931,7 +980,7 @@ def assemble_handbook(session: dict, drafts: list[dict], corpus: dict) -> dict:
             if draft_id not in ids:
                 ids.append(draft_id)
 
-    floor_cover = _floor_coverage(cited_by, index)
+    floor_cover, floor_local = _floor_coverage(cited_by, index)
 
     law_records = [(cid, rec) for cid, rec in index.items()
                    if isinstance(cid, str) and cid.startswith("law:")]
@@ -942,7 +991,7 @@ def assemble_handbook(session: dict, drafts: list[dict], corpus: dict) -> dict:
         # the flat requirement too — the prompt tells the model to prefer
         # `floor:`, so counting only direct `law:` cites would report the
         # best-grounded sections as gaps.
-        for draft_id in _floor_citers(floor_cover, rec):
+        for draft_id in _floor_citers(floor_cover, floor_local, rec):
             if draft_id not in citing:
                 citing.append(draft_id)
         entry = {

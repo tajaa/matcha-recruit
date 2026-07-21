@@ -47,14 +47,12 @@ _MAX_UPLOAD_BYTES = 25_000_000
 _MAX_DATASETS_PER_SESSION = 20
 _EXT_TO_KIND = {".csv": "csv", ".xlsx": "xlsx", ".pdf": "pdf"}
 
-# A platform-built dataset has no stored file. `storage_path` is NOT NULL, so it
-# carries this marker instead of an s3:// key — every storage call checks for it
-# rather than handing a non-path to the storage client.
-_PLATFORM_PATH_PREFIX = "platform://"
-
-
 def _is_platform_dataset(row) -> bool:
-    return str((row or {}).get("storage_path") or "").startswith(_PLATFORM_PATH_PREFIX)
+    """A platform-built dataset has no stored file at all — `analysispilot02`
+    drops the NOT NULL on `storage_path` so absence can say that directly. A
+    sentinel string would have to be remembered by every storage call added
+    later; a null one reads as "nothing to fetch" to whoever writes it."""
+    return not (row or {}).get("storage_path")
 
 # Bundled sample datasets for the Examples tab's live demo — small, self-contained
 # CSVs shipped with the server (not user data), one per analyzer-pack domain, so
@@ -690,16 +688,23 @@ async def load_platform_dataset(session_id: str, body: PlatformDatasetIn, reques
                 detail=f"No {source.label.lower()} on file for this company yet.")
 
         as_of = built.get("as_of") or ""
-        filename = f"{source.label}{f' — as of {as_of}' if as_of else ''}"[:300]
+        hint = built.get("label_hint")
+        filename = (f"{source.label}"
+                    f"{f' — {hint}' if hint else ''}"
+                    f"{f' — as of {as_of}' if as_of else ''}")[:300]
+        roles = built.get("roles") or {}
         ds_row = await conn.fetchrow(
             """INSERT INTO analysis_pilot_datasets
                    (session_id, company_id, filename, storage_path, source_kind,
-                    content_type, uploaded_by)
-               VALUES ($1,$2,$3,$4,'platform',NULL,$5) RETURNING id""",
+                    content_type, mapping, uploaded_by)
+               VALUES ($1,$2,$3,NULL,'platform',NULL,$4::jsonb,$5) RETURNING id""",
             session_id, company_id, filename,
-            # No file exists. The marker keeps the NOT NULL column honest and is
-            # what `_is_platform_dataset` reads to keep storage calls off it.
-            f"{_PLATFORM_PATH_PREFIX}{source.key}", getattr(current_user, "id", None),
+            # The builder assigns roles deterministically; storing them as the
+            # dataset's mapping is what makes a later recompute reuse them. Left
+            # unstored, the PATCH path merges an empty mapping and `normalize`
+            # re-guesses from series NAMES — where the lexicon reads "Open
+            # claims" as claim_count, silently changing the insurance metrics.
+            _dump_jsonb(roles) if roles else None, getattr(current_user, "id", None),
         )
         ds_id = ds_row["id"]
         await _audit(conn, session_id, current_user, request, "upload",
@@ -720,6 +725,10 @@ async def load_platform_dataset(session_id: str, body: PlatformDatasetIn, reques
         # survives into anything generated from it.
         normalized.setdefault("meta", {}).update(
             {"platform_source": source.key, "platform_label": source.label, "as_of": as_of})
+        if not normalized.get("series"):
+            # Same disclosure the upload paths make: a dataset with nothing in it
+            # must not wear the green "ready" pill.
+            status, error = "failed", "No numeric series could be built from that data."
     except Exception:  # noqa: BLE001 - degrade, never 500 after the row exists
         logger.exception("analysis_pilot: platform analysis failed for %s", source.key)
         status, error = "failed", "Could not analyze the platform data."

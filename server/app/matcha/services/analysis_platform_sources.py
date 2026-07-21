@@ -61,10 +61,17 @@ def month_labels(as_of: date, months: int) -> list[str]:
 def ir_monthly_series(rows: list[dict], as_of: date) -> dict:
     """(month, incident_type, count) rows → zero-filled monthly series.
 
-    Zero-filling is load-bearing: a month with no incidents must be 0, not
-    absent. A gap would shorten the series against its own period labels and
-    every trend, extreme and mean computed from it would describe a different
-    12 months than the axis claims."""
+    Zero-filling is load-bearing: a month WITHIN the window that has no
+    incidents must be 0, not absent. A gap would shorten the series against its
+    own period labels and every trend, extreme and mean computed from it would
+    describe a different 24 months than the axis claims.
+
+    A company with NO incidents at all is the opposite case and returns no
+    series: 24 zeros is not a dataset, it is the absence of one, and the route
+    reads an empty `series` as "nothing on file" and refuses rather than
+    persisting a flat line the chat could then cite as a finding."""
+    if not rows:
+        return {"series": {}, "periods": [], "roles": {}, "warnings": [], "as_of": as_of.isoformat()}
     periods = month_labels(as_of, _IR_MONTHS)
     slot = {label: i for i, label in enumerate(periods)}
 
@@ -93,6 +100,11 @@ def ir_monthly_series(rows: list[dict], as_of: date) -> dict:
             f"{len(ranked) - _MAX_IR_TYPES} less frequent incident type(s) are not broken out "
             f"as their own series; they remain counted in “{_TOTAL_LABEL}”."
         )
+
+    if not any(totals):
+        # Rows existed but every one fell outside the labelled window (see the
+        # `slot` guard above) — emit nothing rather than a fabricated flat line.
+        return {"series": {}, "periods": [], "roles": {}, "warnings": [], "as_of": as_of.isoformat()}
 
     series: dict[str, list] = {_TOTAL_LABEL: [float(v) for v in totals]}
     for k in kept:
@@ -196,6 +208,12 @@ def loss_run_series(snapshots: list[dict]) -> dict:
 # --------------------------------------------------------------------------- #
 
 async def build_ir_monthly(conn, company_id, **_opts) -> dict:
+    # Both ends of the window come from the DATABASE clock. Bounding the query
+    # with CURRENT_DATE and labelling with the app process's `date.today()` is
+    # the same window only while the two agree: on the last day of a month a
+    # container behind UTC labels through July while the DB already returns
+    # August, and August's incidents land on no label and are silently dropped.
+    as_of = await conn.fetchval("SELECT date_trunc('month', CURRENT_DATE)::date")
     rows = await conn.fetch(
         f"""
         SELECT date_trunc('month', i.occurred_at)::date AS month,
@@ -203,23 +221,59 @@ async def build_ir_monthly(conn, company_id, **_opts) -> dict:
                COUNT(*) AS n
         FROM ir_incidents i
         WHERE i.company_id = $1
-          AND i.occurred_at >= (date_trunc('month', CURRENT_DATE)
-                                - INTERVAL '{_IR_MONTHS - 1} months')
+          AND i.occurred_at >= ($2::date - INTERVAL '{_IR_MONTHS - 1} months')
         GROUP BY 1, 2
         """,
-        company_id,
+        company_id, as_of,
     )
-    return ir_monthly_series([dict(r) for r in rows], date.today())
+    return ir_monthly_series([dict(r) for r in rows], as_of or date.today())
 
 
-async def build_loss_runs(conn, company_id, *, line: str = "wc", **_opts) -> dict:
+def pick_line(snapshots: list[dict]) -> str | None:
+    """The coverage line to build when the caller didn't name one: the one with
+    the most distinct policy periods (ties broken by name, so it never flaps).
+
+    Defaulting to a hard-coded "wc" told a company that records only GL or
+    property loss runs it had none — its rows were there, just on another line.
+    Pure."""
+    periods: dict[str, set] = {}
+    for r in snapshots or []:
+        line = str(r.get("line") or "").strip()
+        label = str(r.get("policy_period_label") or "").strip()
+        if line and label:
+            periods.setdefault(line, set()).add(label)
+    if not periods:
+        return None
+    return sorted(periods, key=lambda ln: (-len(periods[ln]), ln))[0]
+
+
+async def build_loss_runs(conn, company_id, *, line: str | None = None, **_opts) -> dict:
     from . import loss_development
     # `list_company_snapshots` is the company-scoped read (subject_kind='company'),
     # not the broker-keyed `list_snapshots` — a company's own loss runs may have
     # been entered by several brokers over time, and none of their other clients'
-    # rows are reachable through it.
-    snapshots = await loss_development.list_company_snapshots(conn, company_id, line)
-    return loss_run_series(snapshots)
+    # rows are reachable through it. Fetching every line in one read also lets
+    # `pick_line` choose when the caller didn't.
+    snapshots = [dict(r) for r in await loss_development.list_company_snapshots(conn, company_id)]
+    chosen = line or pick_line(snapshots)
+    if not chosen:
+        return {"series": {}, "periods": [], "roles": {}, "warnings": [], "as_of": None,
+                "label_hint": None}
+    built = loss_run_series([r for r in snapshots if str(r.get("line") or "") == chosen])
+    # The line has to reach the dataset's name: "Loss runs by policy period" over
+    # WC figures reads as the whole book when GL and auto sit alongside it.
+    built["label_hint"] = str(chosen).upper() if len(str(chosen)) <= 3 else _hum_line(chosen)
+    others = sorted({str(r.get("line") or "") for r in snapshots} - {chosen, ""})
+    if others:
+        built.setdefault("warnings", []).append(
+            "This dataset covers the " + str(built["label_hint"]) + " line only; loss runs are also "
+            "on file for: " + ", ".join(others) + ". Build one dataset per line to compare them."
+        )
+    return built
+
+
+def _hum_line(line) -> str:
+    return str(line or "").replace("_", " ").strip().title()
 
 
 SOURCES: list[PlatformSource] = [
