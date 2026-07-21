@@ -1,8 +1,7 @@
 import { useState } from 'react'
-import { ChevronRight } from 'lucide-react'
-import { HelpHint } from '../../../components/ui/HelpHint'
 import type { EvidencePreview } from '../../../api/legal-defense/legalDefense'
-import { LABEL, SOURCE_META } from './shared'
+import { EvidencePanel as PilotEvidencePanel } from '../../../components/pilot/EvidencePanel'
+import { SOURCE_META } from './shared'
 import { RecordViewer, type ViewerTarget } from './RecordViewer'
 
 /** Evidence browser: every in-scope source expands to its record list —
@@ -10,80 +9,21 @@ import { RecordViewer, type ViewerTarget } from './RecordViewer'
  *  Clicking a record opens it in the shared RecordViewer doc-viewer in place —
  *  it never navigates away from the matter workbench. */
 export function EvidencePanel({ evidence }: { evidence: EvidencePreview | null }) {
-  const [open, setOpen] = useState<Record<string, boolean>>({})
   const [selected, setSelected] = useState<ViewerTarget | null>(null)
 
   return (
-    <div className="flex flex-col">
-      <div className="flex items-baseline justify-between px-4 pb-2 pt-4">
-        <span className="inline-flex items-center gap-1.5">
-          <span className={LABEL}>Evidence</span>
-          <HelpHint text="Each record here is real data from your own systems. The record ids the analyst cites in chat trace back to one of these — click any to open it." />
-        </span>
-        <span className="font-mono text-[11px] tabular-nums text-zinc-500">
-          {evidence ? `${evidence.total} records` : '…'}
-        </span>
-      </div>
-      <div>
-        {!evidence ? (
-          <p className="px-4 py-2 text-xs text-zinc-600">Loading the record…</p>
-        ) : evidence.total === 0 ? (
-          <p className="px-4 py-2 text-xs text-zinc-500">
-            {evidence.theory
-              ? `No records match this matter's ${evidence.theory.label} subject inside its evidence window. Widen the window, or change the subject to "All records" under Legal landscape.`
-              : "No records fall inside the matter's evidence window. Widen the window when creating the matter to pull more history in."}
-          </p>
-        ) : (
-          <>
-            {SOURCE_META.map((meta) => {
-              const src = evidence.sources[meta.key]
-              if (!src || src.records.length === 0) return null
-              const isOpen = !!open[meta.key]
-              const Icon = meta.icon
-              return (
-                <div key={meta.key} className="border-t border-white/[0.04] first:border-t-0">
-                  <button
-                    onClick={() => setOpen((o) => ({ ...o, [meta.key]: !o[meta.key] }))}
-                    className="flex w-full items-center gap-2 px-4 py-2 text-left transition-colors hover:bg-white/[0.02]"
-                  >
-                    <ChevronRight className={`h-3 w-3 shrink-0 text-zinc-600 transition-transform ${isOpen ? 'rotate-90' : ''}`} />
-                    <Icon className="h-3.5 w-3.5 shrink-0 text-emerald-400/80" />
-                    <span className="flex-1 truncate text-xs text-zinc-300">{src.label}</span>
-                    <span className="font-mono text-[11px] tabular-nums text-zinc-500">{src.records.length}</span>
-                  </button>
-                  {isOpen && (
-                    <div className="border-t border-white/[0.04] bg-white/[0.01] pb-1">
-                      {src.records.map((r) => (
-                        <button
-                          key={r.cid}
-                          onClick={() => setSelected({ cid: r.cid, ref: r.ref, sourceLabel: src.label, summary: r.summary, when: r.when })}
-                          className="block w-full px-4 py-1.5 pl-9 text-left transition-colors hover:bg-white/[0.03]"
-                        >
-                          <div className="flex items-baseline justify-between gap-2 font-mono text-[10px] tabular-nums">
-                            <span className="truncate text-zinc-400">{r.ref || '—'}</span>
-                            <span className="shrink-0 text-zinc-600">{r.when || ''}</span>
-                          </div>
-                          <div className="truncate text-[11px] leading-snug text-zinc-500" title={r.summary}>
-                            {r.summary}
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )
-            })}
-            {evidence.notes.length > 0 && (
-              <div className="border-t border-white/[0.04] px-4 py-2">
-                {evidence.notes.map((n, i) => (
-                  <p key={i} className="text-[10px] leading-relaxed text-zinc-600">{n}</p>
-                ))}
-              </div>
-            )}
-          </>
-        )}
-      </div>
-      {selected && <RecordViewer target={selected} onClose={() => setSelected(null)} />}
-    </div>
+    <PilotEvidencePanel
+      helpText="Each record here is real data from your own systems. The record ids the analyst cites in chat trace back to one of these — click any to open it."
+      total={evidence ? evidence.total : null}
+      emptyText={evidence?.theory
+        ? `No records match this matter's ${evidence.theory.label} subject inside its evidence window. Widen the window, or change the subject to "All records" under Legal landscape.`
+        : "No records fall inside the matter's evidence window. Widen the window when creating the matter to pull more history in."}
+      sourceMeta={SOURCE_META}
+      recordsFor={(key) => evidence?.sources[key]?.records}
+      labelFor={(meta) => evidence?.sources[meta.key]?.label ?? meta.label}
+      notes={evidence?.notes ?? []}
+      onRecordClick={(r, sourceLabel) => setSelected({ cid: r.cid, ref: r.ref, sourceLabel, summary: r.summary, when: r.when })}
+      footer={selected && <RecordViewer target={selected} onClose={() => setSelected(null)} />}
+    />
   )
 }

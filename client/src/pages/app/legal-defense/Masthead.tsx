@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { FileArchive, FileText, Loader2 } from 'lucide-react'
 import { Button, Toggle } from '../../../components/ui'
 import { HelpHint } from '../../../components/ui/HelpHint'
 import { SUBJECT_FILTERED_SOURCES, type EvidencePreview, type Matter, type ResearchRow } from '../../../api/legal-defense/legalDefense'
+import { SystemsStrip } from '../../../components/pilot/SystemsStrip'
 import { LABEL, SOURCE_META, typeLabel } from './shared'
 
 /** Docket header: matter caption + the systems strip (which internal systems
@@ -92,7 +93,25 @@ export function Masthead({ matter, evidence, genKind, hasAssistant, research, on
         </div>
       )}
 
-      <SystemsStrip key={matter.id} evidence={evidence} />
+      <SystemsStrip
+        key={matter.id}
+        sourceMeta={SOURCE_META}
+        total={evidence ? evidence.total : null}
+        countFor={(k) => (evidence?.sources[k]?.records.length ?? 0)}
+        titleFor={(s) => {
+          const src = evidence?.sources[s.key]
+          return src ? src.label
+            : ['law', 'legislation', 'case_law'].includes(s.key)
+              ? `${s.label}: set a location/state and run Research in the Legal landscape panel`
+              // Only blame the subject filter for the sources it actually
+              // narrows — an empty Training panel is a feature gate or an
+              // empty subsystem, and saying otherwise sends the user to the
+              // wrong control.
+              : evidence?.theory && SUBJECT_FILTERED_SOURCES.has(s.key)
+                ? `${s.label}: no records matching this matter's ${evidence.theory.label} subject inside the matter window`
+                : `${s.label}: no records in the matter window`
+        }}
+      />
 
       {genKind && (
         <div className="flex items-center gap-2 border-t border-emerald-500/20 bg-emerald-500/[0.04] px-5 py-1.5">
@@ -102,56 +121,6 @@ export function Masthead({ matter, evidence, genKind, hasAssistant, research, on
           </span>
         </div>
       )}
-    </div>
-  )
-}
-
-function SystemsStrip({ evidence }: { evidence: EvidencePreview | null }) {
-  const [shown, setShown] = useState(false)
-  useEffect(() => {
-    const id = requestAnimationFrame(() => setShown(true))
-    return () => cancelAnimationFrame(id)
-  }, [])
-
-  return (
-    <div className="mt-3 flex items-stretch divide-x divide-white/[0.06] overflow-x-auto border-t border-white/[0.06]">
-      <div className="flex shrink-0 items-center gap-2.5 py-2.5 pl-5 pr-4">
-        <span className={LABEL}>In scope</span>
-        <span className="font-mono text-sm font-semibold tabular-nums text-emerald-400">
-          {evidence ? evidence.total : '·'}
-        </span>
-        <span className="font-mono text-[10px] uppercase tracking-wide text-zinc-600">records</span>
-      </div>
-      {SOURCE_META.map((s, i) => {
-        const src = evidence?.sources[s.key]
-        const active = !!src && src.records.length > 0
-        const Icon = s.icon
-        return (
-          <div
-            key={s.key}
-            className={`flex shrink-0 items-center gap-2 px-4 py-2.5 transition-opacity duration-300 motion-reduce:transition-none ${shown ? 'opacity-100' : 'opacity-0'}`}
-            style={{ transitionDelay: `${i * 40}ms` }}
-            title={src ? src.label
-              : ['law', 'legislation', 'case_law'].includes(s.key)
-                ? `${s.label}: set a location/state and run Research in the Legal landscape panel`
-                // Only blame the subject filter for the sources it actually
-                // narrows — an empty Training panel is a feature gate or an
-                // empty subsystem, and saying otherwise sends the user to the
-                // wrong control.
-                : evidence?.theory && SUBJECT_FILTERED_SOURCES.has(s.key)
-                  ? `${s.label}: no records matching this matter's ${evidence.theory.label} subject inside the matter window`
-                  : `${s.label}: no records in the matter window`}
-          >
-            <Icon className={`h-3.5 w-3.5 ${active ? 'text-emerald-400' : 'text-zinc-700'}`} />
-            <span className={`text-[10px] font-medium uppercase tracking-[0.15em] ${active ? 'text-zinc-300' : 'text-zinc-600'}`}>
-              {s.label}
-            </span>
-            <span className={`font-mono text-xs tabular-nums ${active ? 'text-zinc-100' : 'text-zinc-700'}`}>
-              {active ? src.records.length : '—'}
-            </span>
-          </div>
-        )
-      })}
     </div>
   )
 }

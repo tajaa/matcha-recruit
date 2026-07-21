@@ -1,14 +1,13 @@
 import { useState } from 'react'
 import { Download, FileText, Loader2 } from 'lucide-react'
 import { downloadPilotPacket, type PilotPacket, type PilotSession } from '../../../api/broker/brokerPilot'
-import { HelpHint } from '../../../components/broker/HelpHint'
-import { LABEL, fmtSize, fmtWhen } from './shared'
+import { PacketsPanel as PilotPacketsPanel } from '../../../components/pilot/PacketsPanel'
+import { fmtSize, fmtWhen } from './shared'
 
 /** Work product: the memo PDFs generated for this session, newest first. */
 export function PacketsPanel({ session }: { session: PilotSession }) {
   const [busy, setBusy] = useState<string | null>(null)
   const packets = session.packets ?? []
-  if (packets.length === 0) return null
 
   const download = async (packet: PilotPacket) => {
     setBusy(packet.id)
@@ -16,14 +15,13 @@ export function PacketsPanel({ session }: { session: PilotSession }) {
   }
 
   return (
-    <div className="flex flex-col border-b border-white/[0.06]">
-      <div className="flex items-baseline justify-between px-4 pb-2 pt-4">
-        <span className="inline-flex items-center gap-1.5">
-          <span className={LABEL}>Work product</span>
-          <HelpHint text="Analysis memos exported from this session — client-ready PDFs with the narrative, numbered grounded observations, an evidence index, and appendices reproducing every cited record. Click to re-download." />
-        </span>
-        <span className="font-mono text-[11px] tabular-nums text-zinc-500">{packets.length}</span>
-      </div>
+    <PilotPacketsPanel
+      empty={packets.length === 0}
+      className="flex flex-col border-b border-white/[0.06]"
+      variant="label"
+      helpText="Analysis memos exported from this session — client-ready PDFs with the narrative, numbered grounded observations, an evidence index, and appendices reproducing every cited record. Click to re-download."
+      count={packets.length}
+    >
       <div className="pb-1">
         {packets.map((p) => (
           <button
@@ -44,6 +42,6 @@ export function PacketsPanel({ session }: { session: PilotSession }) {
           </button>
         ))}
       </div>
-    </div>
+    </PilotPacketsPanel>
   )
 }
