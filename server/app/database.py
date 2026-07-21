@@ -4127,6 +4127,37 @@ async def init_db():
             CREATE INDEX IF NOT EXISTS idx_rate_limits_service ON api_rate_limits(service_name)
         """)
 
+        # ===========================================
+        # AI Usage Log (provider-general call ledger, see app/core/services/ai_usage.py)
+        # ===========================================
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS ai_usage_log (
+                id              BIGSERIAL PRIMARY KEY,
+                provider        TEXT NOT NULL DEFAULT 'gemini',
+                model           TEXT NOT NULL,
+                feature         TEXT NOT NULL,
+                method          TEXT NOT NULL,
+                input_tokens    INTEGER,
+                output_tokens   INTEGER,
+                thinking_tokens INTEGER,
+                cached_tokens   INTEGER,
+                cost_usd        NUMERIC(12,6),
+                latency_ms      INTEGER,
+                status          TEXT NOT NULL DEFAULT 'ok',
+                error           TEXT,
+                created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS ix_ai_usage_created ON ai_usage_log (created_at)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS ix_ai_usage_feature ON ai_usage_log (feature, created_at)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS ix_ai_usage_model ON ai_usage_log (model, created_at)
+        """)
+
         # Business invitations (admin-generated invite links for auto-approved registration)
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS business_invitations (

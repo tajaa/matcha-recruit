@@ -28,6 +28,7 @@ import GapDashboard from '../pages/admin/GapDashboard'
 import GapAnalysisReport from '../components/admin/onboarding/GapAnalysisReport'
 import ClientErrors from '../pages/admin/ClientErrors'
 import ServerErrors from '../pages/admin/ServerErrors'
+import AiUsage from '../pages/admin/AiUsage'
 import TrafficReport from '../pages/admin/TrafficReport'
 import Usage from '../pages/admin/Usage'
 import NewsletterAdmin from '../pages/admin/newsletter'
@@ -68,6 +69,7 @@ export default function AdminRoutes() {
         <Route path="individuals" element={<Navigate to="/admin/matcha-work" replace />} />
         <Route path="client-errors" element={<ClientErrors />} />
         <Route path="server-errors" element={<ServerErrors />} />
+        <Route path="ai-usage" element={<AiUsage />} />
         <Route path="traffic" element={<TrafficReport />} />
         <Route path="usage" element={<Usage />} />
         <Route path="features" element={<Features />} />

@@ -15,6 +15,7 @@ from typing import Optional
 from google import genai
 
 from app.config import get_settings
+from app.core.services.ai_usage import wrap_client
 
 
 def get_genai_client(api_key: Optional[str] = None, **kwargs) -> genai.Client:
@@ -23,13 +24,19 @@ def get_genai_client(api_key: Optional[str] = None, **kwargs) -> genai.Client:
     * Vertex (``USE_VERTEX_AI=true``): IAM/ADC auth + ``project``/``location`` —
       the BAA-covered endpoint. ``api_key`` is ignored.
     * Consumer (default): API-key auth against ``generativelanguage.googleapis.com``.
+
+    The returned client is wrapped (see ``ai_usage.wrap_client``) so every
+    generate_content/embed_content call — sync, async, or streaming — is
+    logged to ``ai_usage_log`` with zero changes at any call site. The
+    ``-> genai.Client`` annotation stays nominal: nothing in the codebase
+    isinstance-checks this return value, only type-annotates it.
     """
     settings = get_settings()
     if getattr(settings, "use_vertex_ai", False):
-        return genai.Client(
+        return wrap_client(genai.Client(
             vertexai=True,
             project=settings.vertex_ai_project,
             location=settings.vertex_ai_location,
             **kwargs,
-        )
-    return genai.Client(api_key=api_key or settings.gemini_api_key, **kwargs)
+        ))
+    return wrap_client(genai.Client(api_key=api_key or settings.gemini_api_key, **kwargs))

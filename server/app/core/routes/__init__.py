@@ -35,6 +35,7 @@ from .profile_resume import router as profile_resume_router
 from .newsletter import public_router as newsletter_public_router, admin_router as newsletter_admin_router
 from .client_errors import router as client_errors_router
 from .server_errors import router as server_errors_router
+from .ai_usage_admin import router as ai_usage_admin_router
 from .traffic import router as traffic_router
 from .usage import router as usage_router
 from .landing_media import public_router as landing_media_public_router, admin_router as landing_media_admin_router
@@ -120,6 +121,7 @@ core_router.include_router(landing_media_public_router, tags=["landing-media-pub
 core_router.include_router(landing_media_admin_router, prefix="/admin", tags=["landing-media-admin"])
 core_router.include_router(client_errors_router, tags=["client-errors"])
 core_router.include_router(server_errors_router, tags=["server-errors"])
+core_router.include_router(ai_usage_admin_router, tags=["ai-usage"])
 core_router.include_router(traffic_router, tags=["traffic"])
 core_router.include_router(usage_router, tags=["usage"])
 
