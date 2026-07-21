@@ -176,6 +176,126 @@ def test_platform_records_empty_ctx_emits_nothing():
     assert not any(c.startswith("platform:limits.") for c in cids)
 
 
+# Property sub-structures + composite index, as `_tenant_context` builds them
+# (property_cat.summarize / property_exposure.portfolio_exposure /
+# property_recommendations.build_plan / property_risk.portfolio_risk /
+# risk_index.compute_risk_index). Off-platform clients have none of these.
+_PROP_CTX = {
+    **_CTX,
+    "property": {
+        "rollup": {"building_count": 3, "total_tiv": 12_500_000,
+                   "worst_cope_grade": "C", "insured_to_value_pct": 84},
+        "cat": {"worst_tier": "high", "worst_peril": "wildfire",
+                "worst_peril_documented": False,
+                "by_peril": {"flood": "moderate", "wildfire": "high"},
+                "by_peril_detail": {}, "documented_probability_perils": ["flood", "quake"],
+                "severe_high_count": 1, "buildings_total": 3, "buildings_geocoded": 2},
+        "exposure": {"total_aal": 41_000, "worst_pml": 3_100_000,
+                     "worst_pml_peril": "wildfire", "coinsurance_shortfall": 900_000,
+                     "by_peril": {}, "buildings": {"b1": {"aal": 1}}, "basis": "directional"},
+        "plan": {"fixes": [
+            {"key": "sprinkler", "label": "Add sprinklers — Building A", "severity": "high",
+             "detail": "Un-sprinklered frame.", "impact": "COPE +12",
+             "building_id": "b1", "building_name": "Building A"},
+            {"key": "itv", "label": "Raise insured value", "severity": "medium",
+             "detail": "ITV 84%.", "impact": "$900,000 shortfall"},
+        ], "summary": {"total": 2, "by_severity": {"high": 1, "medium": 1}, "shown": 2}},
+        "risk": {"score": 58, "grade": "C", "risk_level": "elevated", "rated": 3,
+                 "by_building": {"b1": {"score": 41}},
+                 "top_risks": [{"building_id": "b1", "name": "Building A", "tiv": 5_000_000,
+                                "score": 41, "grade": "D", "risk_level": "high"}]},
+    },
+    "risk_index": {
+        "company_id": "c1", "index": 64, "band": "adequate",
+        "components": [
+            {"key": "wc", "label": "Workers' Comp", "weight": 0.35, "score": 70,
+             "detail": "TRIR 4.2 vs benchmark", "confidence": "high"},
+            {"key": "property", "label": "Commercial Property", "weight": 0.15, "score": 58,
+             "detail": "COPE C", "confidence": "low"},
+            {"key": "epl", "label": "EPL", "weight": 0.3, "score": None,
+             "detail": "unscored", "confidence": "low"},
+        ],
+        "top_fixes": [], "coverage": 0.85,
+        "components_missing": [{"key": "compliance", "label": "Compliance", "weight": 0.2}],
+        "index_confidence": "low", "index_low": 55, "index_high": 73, "index_sigma": 4.6,
+    },
+}
+
+
+def test_platform_records_property_substructures():
+    recs = {r["cid"]: r for r in bp._platform_records(_PROP_CTX)}
+    assert "platform:property" in recs                      # rollup still emitted
+    assert "platform:property.cat" in recs
+    assert "platform:property.exposure" in recs
+    assert "platform:property.plan.0" in recs
+    assert "platform:property.plan.1" in recs
+    assert "platform:property.risk" in recs
+
+    cat = recs["platform:property.cat"]["summary"].lower()
+    assert "high" in cat and "wildfire" in cat
+    assert "1 of 3" in cat and "2/3 geocoded" in cat
+    # a directional tier must not read as a documented probability
+    assert "directional baseline" in cat
+
+    exposure = recs["platform:property.exposure"]["summary"]
+    assert "41,000" in exposure and "3,100,000" in exposure and "900,000" in exposure
+
+    assert "Add sprinklers" in recs["platform:property.plan.0"]["summary"]
+    assert "high" in recs["platform:property.plan.0"]["summary"].lower()
+    risk = recs["platform:property.risk"]["summary"]
+    assert "58" in risk and "Building A" in risk
+
+
+def test_platform_records_risk_index():
+    recs = {r["cid"]: r for r in bp._platform_records(_PROP_CTX)}
+    head = recs["platform:risk"]["summary"]
+    assert "64/100" in head and "adequate" in head.lower()
+    assert "55–73" in head                       # uncertainty band carried
+    assert "85%" in head                         # coverage
+    assert "Compliance" in head                  # unscored component named
+    assert "platform:risk.wc" in recs and "platform:risk.property" in recs
+    assert "platform:risk.epl" not in recs       # score None → no record
+    assert "70/100" in recs["platform:risk.wc"]["summary"]
+
+
+def test_platform_records_property_partials_emit_nothing():
+    # None scores / missing sections must emit no half-filled record.
+    ctx = {"property": {"cat": {"worst_tier": None, "by_peril": {}},
+                        "risk": {"score": None, "top_risks": []},
+                        "exposure": {"total_aal": 0, "worst_pml": 0,
+                                     "coinsurance_shortfall": 0},
+                        "plan": {"fixes": []}},
+           "risk_index": {"index": None, "components": []}}
+    cids = {r["cid"] for r in bp._platform_records(ctx)}
+    assert not any(c.startswith("platform:property") for c in cids)
+    assert not any(c.startswith("platform:risk") for c in cids)
+
+
+def test_platform_records_external_property_shape_is_inert():
+    # `_external_context` puts a flat broker-entered snapshot under `property`
+    # (no cat/exposure/plan/risk keys) — it must degrade, never raise.
+    ext_ctx = {"name": "OffPlat Co", "state": "TX",
+               "wc": {"trir": 3.0}, "epl": {"score": 50, "band": "low", "factors": []},
+               "property": {"building_count": 2, "total_tiv": 4_000_000,
+                            "cat": "not-a-dict", "plan": ["junk"], "risk": None,
+                            "exposure": 7}}
+    cids = {r["cid"] for r in bp._platform_records(ext_ctx)}
+    assert not any(c.startswith("platform:property.") for c in cids)
+    assert not any(c.startswith("platform:risk") for c in cids)
+    # junk in every optional slot still never raises
+    for junk in ({"property": "string"}, {"property": ["list"]}, {"risk_index": "nope"},
+                 {"property": {"plan": {"fixes": ["str", None, 3]}}}):
+        bp._platform_records(junk)
+
+
+def test_build_corpus_indexes_property_and_risk_records():
+    corpus = bp.build_corpus("Hillcrest", _PROP_CTX, _docs())
+    for cid in ("platform:property.cat", "platform:property.plan.0", "platform:risk",
+                "platform:risk.property"):
+        assert cid in corpus["index"], cid
+        assert corpus["index"][cid]["source"] == "platform"
+
+
 def test_doc_records_statuses():
     doc_recs, fig_recs, notes = bp._doc_records(_docs())
     cids = {r["cid"] for r in doc_recs}

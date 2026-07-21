@@ -729,6 +729,112 @@ def _platform_records(ctx: dict) -> list[dict]:
         add("platform:property", "Commercial property",
             f"Property on file: {'; '.join(bits)}.")
 
+    # Property sub-structures — cat / exposure / plan / risk are computed by
+    # `_tenant_context` alongside the rollup (submission.py) and were previously
+    # dropped here, so the broker could read them in the packet PDF while the
+    # chat could not cite them at all. Off-platform clients carry a flat
+    # broker-entered snapshot under `property` with none of these keys, so every
+    # guard below silently emits nothing for them (never a KeyError).
+    cat = prop.get("cat") if isinstance(prop, dict) else None
+    if isinstance(cat, dict) and cat.get("worst_tier"):
+        bits = ["worst catastrophe tier " + _hum(cat["worst_tier"])
+                + (f" ({_hum(cat['worst_peril'])})" if cat.get("worst_peril") else "")]
+        if cat.get("buildings_total"):
+            bits.append(f"{cat.get('severe_high_count') or 0} of {cat['buildings_total']}"
+                        " building(s) at high or severe")
+            if cat.get("buildings_geocoded") is not None:
+                bits.append(f"{cat['buildings_geocoded']}/{cat['buildings_total']} geocoded")
+        tiers = cat.get("by_peril")
+        if isinstance(tiers, dict) and tiers:
+            bits.append("tiers by peril: "
+                        + ", ".join(f"{_hum(p)} {_hum(t)}" for p, t in sorted(tiers.items())))
+        # A wind/wildfire tier is a directional baseline, not a hazard-agency
+        # probability — say so, or it gets cited as if it were modeled.
+        if cat.get("worst_peril_documented") is False:
+            bits.append("the worst peril's tier is a directional baseline, "
+                        "not a hazard-agency-documented probability")
+        add("platform:property.cat", "Property catastrophe exposure", "; ".join(bits) + ".")
+
+    exposure = prop.get("exposure") if isinstance(prop, dict) else None
+    if isinstance(exposure, dict) and any(
+            exposure.get(k) for k in ("total_aal", "worst_pml", "coinsurance_shortfall")):
+        bits = []
+        if exposure.get("total_aal"):
+            bits.append(f"modeled AAL ${_fmt_num(exposure['total_aal'])}")
+        if exposure.get("worst_pml"):
+            bits.append(f"worst PML ${_fmt_num(exposure['worst_pml'])}"
+                        + (f" ({_hum(exposure['worst_pml_peril'])})"
+                           if exposure.get("worst_pml_peril") else ""))
+        if exposure.get("coinsurance_shortfall"):
+            bits.append(f"coinsurance shortfall ${_fmt_num(exposure['coinsurance_shortfall'])}")
+        summary = "; ".join(bits) + "."
+        if exposure.get("basis"):
+            summary += f" Basis: {exposure['basis']}."
+        add("platform:property.exposure", "Property modeled exposure", summary)
+
+    plan = prop.get("plan") if isinstance(prop, dict) else None
+    fixes = plan.get("fixes") if isinstance(plan, dict) else None
+    for i, fx in enumerate(fixes or []):
+        if not isinstance(fx, dict):
+            continue
+        label = fx.get("label") or _hum(fx.get("key")) or f"property fix {i + 1}"
+        bits = [f"severity {_hum(fx.get('severity')) or 'unrated'}"]
+        if fx.get("impact"):
+            bits.append(f"projected impact {fx['impact']}")
+        if fx.get("detail"):
+            bits.append(str(fx["detail"]))
+        add(f"platform:property.plan.{i}", f"Property fix — {label}",
+            f"{label}: {'; '.join(bits)}.")
+
+    prisk = prop.get("risk") if isinstance(prop, dict) else None
+    if isinstance(prisk, dict) and prisk.get("score") is not None:
+        bits = [f"TIV-weighted property risk score {prisk['score']}/100"]
+        if prisk.get("grade"):
+            bits.append(f"grade {prisk['grade']}")
+        if prisk.get("risk_level"):
+            bits.append(f"level {_hum(prisk['risk_level'])}")
+        if prisk.get("rated") is not None:
+            bits.append(f"{prisk['rated']} building(s) rated")
+        top = next((t for t in (prisk.get("top_risks") or []) if isinstance(t, dict)), None)
+        if top:
+            bits.append(f"worst building {top.get('name') or 'unnamed'} at {top.get('score')}"
+                        + (f" ({top['grade']})" if top.get("grade") else ""))
+        add("platform:property.risk", "Property risk score", "; ".join(bits) + ".")
+
+    # Composite risk index — headline + per-component sub-records, mirroring the
+    # EPL block above. Tenant only: `_external_context` has no company row to
+    # compute it from, so the key is simply absent for off-platform clients.
+    risk = ctx.get("risk_index") or {}
+    if isinstance(risk, dict) and risk.get("index") is not None:
+        bits = [f"composite risk index {risk['index']}/100"]
+        if risk.get("band"):
+            bits.append(f"band {_hum(risk['band'])}")
+        if risk.get("index_low") is not None and risk.get("index_high") is not None:
+            bits.append(f"uncertainty band {risk['index_low']}–{risk['index_high']}")
+        if risk.get("index_confidence"):
+            bits.append(f"{_hum(risk['index_confidence'])} confidence")
+        if risk.get("coverage") is not None:
+            try:
+                bits.append(f"{round(float(risk['coverage']) * 100)}% of component weight scored")
+            except (TypeError, ValueError):
+                pass
+        missing = [m.get("label") or _hum(m.get("key"))
+                   for m in (risk.get("components_missing") or []) if isinstance(m, dict)]
+        if missing:
+            bits.append("not scored: " + ", ".join(m for m in missing if m))
+        add("platform:risk", "Composite risk index", "; ".join(bits) + ".")
+        for c in risk.get("components") or []:
+            if not isinstance(c, dict) or not c.get("key") or c.get("score") is None:
+                continue
+            label = c.get("label") or _hum(c["key"])
+            cbits = [f"score {c['score']}/100", f"weight {c.get('weight')}"]
+            if c.get("confidence"):
+                cbits.append(f"{_hum(c['confidence'])} confidence")
+            if c.get("detail"):
+                cbits.append(str(c["detail"]))
+            add(f"platform:risk.{_slug(c['key'])}", f"Risk index component — {label}",
+                f"{label}: {'; '.join(cbits)}.")
+
     return recs
 
 
@@ -945,6 +1051,7 @@ HARD RULES:
 - On `clause:` records: your remit is INSURANCE AND RISK TRANSFER ONLY. Discuss indemnity form, insurability, and the endorsements a clause requires — never opine on payment terms, termination, IP, or dispute resolution, and never state that a clause IS or IS NOT enforceable. A recorded verdict is a starting point for counsel, so report it as such and say so.
 - A `clause:` record marked PROVISIONAL comes from an unconfirmed AI extraction — say that whenever you rely on it.
 - On `jur:` records: these are the client's CODIFIED state and federal statutory obligations (e.g. final-pay timing, pay-transparency, anti-discrimination). Cite the statute when a point turns on the law, and never state a legal conclusion, opine on whether the client is compliant, or give legal advice — surface the obligation and route the judgment to counsel.
+- On property and index records: `platform:property.cat` (catastrophe tiers), `platform:property.exposure` (modeled AAL/PML), `platform:property.plan.<n>` (ranked property fixes) and `platform:property.risk` (TIV-weighted score) are the platform's own property analytics, and `platform:risk` plus `platform:risk.<component>` are its composite risk index. These are the platform's models, not carrier output — cite them as the platform's figures, and where a record says a tier is a directional baseline rather than a documented probability, repeat that qualifier when you use it.
 - Raw document text (DOCUMENT TEXT blocks) belongs to its `doc:` ID — cite that ID when using it.
 
 ANSWER SHAPE — a short lead answer, then three reviewable lists. The broker reads

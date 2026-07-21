@@ -24,7 +24,7 @@ from ...services import (
     risk_transfer as rt,
     loss_development as ld, property_sov, property_cat,
     property_exposure as property_exp, property_recommendations as property_recs,
-    property_risk as property_risk_svc,
+    property_risk as property_risk_svc, risk_index,
 )
 from ..ir_incidents import compute_wc_metrics
 from .portfolio import _assert_broker_owns_company
@@ -191,6 +191,10 @@ async def _tenant_context(conn, user_id, company_id: UUID) -> dict:
         plan = property_recs.build_plan(sov["buildings"], sov.get("rollup"), cat=cat, exposure=exp)
         risk = property_risk_svc.portfolio_risk(sov["buildings"])
         property_ctx = {**sov, "cat": cat, "exposure": exp, "plan": plan, "risk": risk}
+    # Composite index (WC + EPL + compliance [+ property]) — the same engine the
+    # client's own risk portal renders. Carried in the context so Broker Pilot can
+    # cite it; the packet renderers ignore keys they don't know.
+    risk_idx = await _safe(risk_index.compute_risk_index(conn, company_id), None, "risk_index")
     primary = states[0] if states else None
     latest = mods.get(str(company_id)) or {}
     return {
@@ -215,6 +219,7 @@ async def _tenant_context(conn, user_id, company_id: UUID) -> dict:
         "limits": limits,
         "property": property_ctx,
         "loss_development": loss_dev,
+        "risk_index": risk_idx,
     }
 
 
