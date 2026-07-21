@@ -4,6 +4,7 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LabelList,
 } from 'recharts'
 import type { ERCaseMetrics } from '../../types/riskAssessment'
+import { MetricStrip } from '../ui/MetricStrip'
 
 const CATEGORY_COLORS = ['#f59e0b', '#ef4444', '#3b82f6', '#10b981', '#a855f7', '#f97316', '#06b6d4', '#6366f1']
 const OUTCOME_COLORS = ['#10b981', '#f59e0b', '#3b82f6', '#ef4444', '#a855f7', '#6366f1']
@@ -53,7 +54,7 @@ export function ERCaseMetricsPanel() {
       {!loading && metrics && metrics.total_cases > 0 && (
         <div className="space-y-4">
           {/* Stat cards */}
-          <div className="grid grid-cols-4 gap-px bg-white/10 border border-white/10 rounded-2xl overflow-hidden">
+          <MetricStrip cols="grid-cols-4">
             {[
               { label: 'Total Cases', value: metrics.total_cases },
               { label: 'Open', value: metrics.by_status['open'] || 0 },
@@ -65,7 +66,7 @@ export function ERCaseMetricsPanel() {
                 <div className="text-3xl font-light font-mono text-zinc-200 mt-2">{s.value}</div>
               </div>
             ))}
-          </div>
+          </MetricStrip>
 
           {/* Charts row */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

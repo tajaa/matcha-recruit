@@ -1,4 +1,5 @@
 import { HelpCircle, AlertTriangle, MapPin, Sparkles } from 'lucide-react'
+import { MetricStrip } from '../../ui/MetricStrip'
 import {
   IR_DIMENSION_ORDER,
   IR_DIMENSION_LABELS,
@@ -28,7 +29,7 @@ export function IRRiskHeroCard({
   const critical = assessment.critical_themes
   return (
     <div>
-      <div className="grid grid-cols-1 lg:grid-cols-7 gap-px bg-white/10 border border-white/10 rounded-2xl overflow-hidden">
+      <MetricStrip cols="grid-cols-1 lg:grid-cols-7">
         {/* Big number — span 2 of 7 */}
         <div className="lg:col-span-2 bg-zinc-900 p-8 flex flex-col justify-between">
           <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">
@@ -97,7 +98,7 @@ export function IRRiskHeroCard({
             </div>
           )
         })}
-      </div>
+      </MetricStrip>
 
       {assessment.report && (
         <p className="text-sm text-zinc-400 leading-relaxed mt-4">{assessment.report}</p>

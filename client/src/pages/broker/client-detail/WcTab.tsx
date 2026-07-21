@@ -2,7 +2,7 @@ import { type ReactNode } from 'react'
 import {
   Loader2, AlertTriangle, TrendingUp, TrendingDown, Minus, Plus, Trash2, Gauge, HeartPulse, Boxes, Sparkles, Upload, MapPin,
 } from 'lucide-react'
-import { Card } from '../../../components/ui'
+import { Card, MetricStrip } from '../../../components/ui'
 import { useWcTab, useWcClassExposures } from './useWcTab'
 
 const WC_BAND_TONE: Record<string, string> = {
@@ -112,7 +112,7 @@ export function WcTab({ companyId }: { companyId: string }) {
   return (
     <div className="space-y-4">
       {/* Metric header */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-px bg-white/10 border border-white/10 rounded-2xl overflow-hidden">
+      <MetricStrip cols="grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
         <MetricCell
           label="TRIR"
           value={m.trir ?? '—'}
@@ -130,7 +130,7 @@ export function WcTab({ companyId }: { companyId: string }) {
           tone={latestMod ? (latestMod.experience_mod > 1 ? 'text-red-400' : latestMod.experience_mod < 1 ? 'text-emerald-400' : 'text-zinc-300') : 'text-zinc-600'}
         />
         <MetricCell label="Days since" value={m.days_since_last_recordable ?? '—'} sub="last recordable" />
-      </div>
+      </MetricStrip>
 
       {m.data_quality.insufficient_population && (
         <p className="text-[11px] text-amber-400/80">Low exposure base &mdash; TRIR/DART are directional only.</p>

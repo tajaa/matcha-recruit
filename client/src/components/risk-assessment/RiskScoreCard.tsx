@@ -4,6 +4,7 @@ import {
   type Band, type DimensionResult,
 } from '../../types/riskAssessment'
 import { HoverTip } from './InfoTip'
+import { MetricStrip } from '../ui/MetricStrip'
 
 function HelpTooltip({ text }: { text: string }) {
   // The bubble itself is portalled (see HoverTip) — the grid below is
@@ -48,7 +49,7 @@ export function RiskScoreCard({ score, band, dimensions, weights }: Props) {
 
   return (
     <div>
-      <div className="grid grid-cols-5 gap-px bg-white/10 border border-white/10 rounded-2xl overflow-hidden">
+      <MetricStrip cols="grid-cols-5">
         {/* Big number */}
         <div className="col-span-2 bg-zinc-900 p-8 flex flex-col justify-between group">
           <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold flex items-center gap-1.5">
@@ -89,7 +90,7 @@ export function RiskScoreCard({ score, band, dimensions, weights }: Props) {
             </div>
           )
         })}
-      </div>
+      </MetricStrip>
     </div>
   )
 }

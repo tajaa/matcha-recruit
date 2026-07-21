@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { FileDown, Loader2, FileText } from 'lucide-react'
 import { Card } from '../../../components/ui'
 import { useAsync } from '../../../hooks/useAsync'
+import { RegisterSpinner } from '../../../components/register/registerKit'
 import { listAcordForms, downloadAcord } from '../../../api/risk/acord'
 
 export default function Acord() {
@@ -13,7 +14,7 @@ export default function Acord() {
     try { await downloadAcord(form) } finally { setDl(null) }
   }
 
-  if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="h-6 w-6 text-zinc-500 animate-spin" /></div>
+  if (loading) return <RegisterSpinner />
 
   return (
     <div className="space-y-6">

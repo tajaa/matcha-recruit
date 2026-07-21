@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { ShieldCheck, Loader2, Sparkles, CheckCircle2 } from 'lucide-react'
 import { Card, useToast } from '../../../components/ui'
+import { RegisterSpinner } from '../../../components/register/registerKit'
 import {
   getPrefill, listQuotes, createQuote, bindQuote,
   type Quote, type QuotableLine, type QuotePayload,
@@ -84,7 +85,7 @@ export default function Insurance() {
     setPayload((p) => (p ? { ...p, exposure: { ...p.exposure, [k]: v } } : p))
   }
 
-  if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="h-6 w-6 text-zinc-500 animate-spin" /></div>
+  if (loading) return <RegisterSpinner />
 
   return (
     <div className="space-y-6">

@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { ShieldCheck, Bot, Fingerprint, Plus, Trash2, Loader2, AlertTriangle, Check, Scale, Sparkles } from 'lucide-react'
-import { Card } from '../../../components/ui'
+import { Card, MetricStrip } from '../../../components/ui'
+import { inputCls, today, RegisterSpinner } from '../../../components/register/registerKit'
 import {
   fetchAiAudits, createAiAudit, updateAiAudit, deleteAiAudit,
   fetchBiometricPoints, createBiometricPoint, updateBiometricPoint, deleteBiometricPoint,
@@ -16,8 +17,6 @@ import type {
   PayEquityAnalysisResult, PayEquityRole, PayEquityPriorityAction, RequirementGate, GateDomain,
 } from '../../../types/workforceCompliance'
 
-const today = () => new Date().toISOString().slice(0, 10)
-const inputCls = 'w-full bg-zinc-900 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500'
 const PT_TONE: Record<string, string> = { compliant: 'text-emerald-400', action_needed: 'text-red-400', na: 'text-zinc-500' }
 const COLLECTION_TYPES: CollectionType[] = ['fingerprint', 'face', 'iris', 'voice', 'hand_geometry', 'other']
 const PE_TONE: Record<string, string> = { flag: 'text-red-400', watch: 'text-amber-400', ok: 'text-emerald-400' }
@@ -57,7 +56,7 @@ export default function WorkforceCompliance() {
   useEffect(load, [])
 
   if (loading) {
-    return <div className="flex items-center justify-center h-64"><Loader2 className="h-6 w-6 text-zinc-500 animate-spin" /></div>
+    return <RegisterSpinner />
   }
 
   const ptAction = pt.filter((r) => r.required && r.status !== 'compliant').length
@@ -76,7 +75,7 @@ export default function WorkforceCompliance() {
       </div>
 
       {/* Summary strip */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-px bg-white/10 border border-white/10 rounded-2xl overflow-hidden">
+      <MetricStrip cols="grid-cols-2 md:grid-cols-4">
         {[
           { label: 'Pay-Transparency · Action', value: ptAction, warn: ptAction > 0 },
           { label: 'AI Audits · Overdue', value: overdue, warn: overdue > 0 },
@@ -88,7 +87,7 @@ export default function WorkforceCompliance() {
             <div className={`text-2xl font-light font-mono mt-1.5 ${c.warn ? 'text-red-400' : 'text-emerald-400'}`}>{c.value}</div>
           </div>
         ))}
-      </div>
+      </MetricStrip>
 
       <PayEquitySection reviews={payEquity} reload={load} gate={gate.pay_equity} />
       <PayTransparencySection rows={pt} onChange={setPt} gate={gate.pay_transparency} />

@@ -1,5 +1,6 @@
 import { AlertTriangle, Inbox, Sparkles } from 'lucide-react'
 import type { IRAnalyticsSummary } from '../../types/ir'
+import { MetricStrip } from '../ui/MetricStrip'
 
 type MiniKey = 'open' | 'investigating' | 'critical' | 'high' | 'closed'
 
@@ -20,7 +21,7 @@ export function IRStatHero({ summary, captionLeft }: {
   const open = summary.open
   const critical = summary.critical
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-7 gap-px bg-white/[0.06] border border-white/[0.08] rounded-2xl overflow-hidden">
+    <MetricStrip cols="grid-cols-1 lg:grid-cols-7" subtle>
       {/* Big number — span 2 of 7 */}
       <div className="lg:col-span-2 bg-zinc-900 px-7 py-7 flex flex-col">
         <div className="text-[10px] text-zinc-500 uppercase tracking-[0.16em]">
@@ -67,6 +68,6 @@ export function IRStatHero({ summary, captionLeft }: {
           </div>
         )
       })}
-    </div>
+    </MetricStrip>
   )
 }

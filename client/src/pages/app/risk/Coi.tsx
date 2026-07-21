@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import { FileText, Loader2, Upload, Trash2 } from 'lucide-react'
 import { Card } from '../../../components/ui'
 import { useAsync } from '../../../hooks/useAsync'
+import { RegisterSpinner } from '../../../components/register/registerKit'
 import { listCois, uploadCoi, deleteCoi, type CoiStatus } from '../../../api/risk/coi'
 
 const STATUS_TONE: Record<CoiStatus, string> = {
@@ -24,7 +25,7 @@ export default function Coi() {
     setData(await deleteCoi(id))
   }
 
-  if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="h-6 w-6 text-zinc-500 animate-spin" /></div>
+  if (loading) return <RegisterSpinner />
   if (!data) return <p className="text-sm text-zinc-500">Unable to load certificates.</p>
 
   const s = data.summary

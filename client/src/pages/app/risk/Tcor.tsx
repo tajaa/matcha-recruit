@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Coins, Loader2, Plus } from 'lucide-react'
 import { Card } from '../../../components/ui'
 import { useAsync } from '../../../hooks/useAsync'
+import { RegisterSpinner } from '../../../components/register/registerKit'
 import { getTcor, upsertTcorInput } from '../../../api/risk/tcor'
 
 const money = (n: number | null | undefined) =>
@@ -31,7 +32,7 @@ export default function Tcor() {
     } finally { setSaving(false) }
   }
 
-  if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="h-6 w-6 text-zinc-500 animate-spin" /></div>
+  if (loading) return <RegisterSpinner />
   if (!data) return <p className="text-sm text-zinc-500">Unable to load TCOR.</p>
 
   const opt = data.optimization

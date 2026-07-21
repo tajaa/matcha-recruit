@@ -1,4 +1,5 @@
 import { HelpCircle, Shield, Calendar, Activity, Heart, TrendingDown, TrendingUp, Minus } from 'lucide-react'
+import { MetricStrip } from '../../ui/MetricStrip'
 
 export type WcBenchmark = {
   sector: string
@@ -156,7 +157,7 @@ export function IRWcMetricsCard({ metrics }: { metrics: WcMetrics }) {
         )}
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-px bg-white/10 border border-white/10 rounded-2xl overflow-hidden">
+      <MetricStrip cols="grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
         {/* TRIR */}
         <div className="bg-zinc-900 p-6 flex flex-col justify-between group">
           <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold flex items-center gap-1.5">
@@ -242,7 +243,7 @@ export function IRWcMetricsCard({ metrics }: { metrics: WcMetrics }) {
             </div>
           )}
         </div>
-      </div>
+      </MetricStrip>
 
       <p className="text-[10px] text-zinc-600 mt-3 leading-relaxed">
         Approximation. Hours worked assumed at headcount × 2,000 prorated to period.

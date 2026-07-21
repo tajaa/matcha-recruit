@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { Car, FileDown, Loader2, Plus, Trash2, ChevronDown, Check, AlertTriangle } from 'lucide-react'
-import { Card } from '../../../components/ui'
+import { Card, MetricStrip } from '../../../components/ui'
 import { useAsync } from '../../../hooks/useAsync'
+import { RegisterSpinner } from '../../../components/register/registerKit'
 import { fetchFleet, createDriver, updateDriver, deleteDriver, downloadFleetPdf } from '../../../api/risk/driverRisk'
 import type { Fleet, DriverRow, DriverPayload, DriverTier, LicenseStatus, ReviewType, MvrStatus } from '../../../types/driverRisk'
 import { TIER_TONE, TIER_LABEL, GRADE_TONE } from '../../../types/driverRisk'
@@ -21,7 +22,7 @@ export default function DriverRisk() {
     try { await downloadFleetPdf() } finally { setDl(false) }
   }
 
-  if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="h-6 w-6 text-zinc-500 animate-spin" /></div>
+  if (loading) return <RegisterSpinner />
   if (!fleet) return <p className="text-sm text-zinc-500">Unable to load driver risk.</p>
 
   const s = fleet.summary
@@ -42,13 +43,13 @@ export default function DriverRisk() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-px bg-white/10 border border-white/10 rounded-2xl overflow-hidden">
+      <MetricStrip cols="grid-cols-2 md:grid-cols-5">
         <Stat label="Fleet grade" value={s.grade} tone={GRADE_TONE[s.grade] ?? 'text-zinc-200'} />
         <Stat label="Drivers" value={s.total_drivers} tone="text-zinc-200" />
         <Stat label="Clean" value={s.clean} tone="text-emerald-400" />
         <Stat label="High risk" value={s.high_risk} tone={s.high_risk ? 'text-red-400' : 'text-zinc-200'} />
         <Stat label="Overdue MVR" value={s.overdue_reviews} tone={s.overdue_reviews ? 'text-amber-400' : 'text-zinc-200'} />
-      </div>
+      </MetricStrip>
 
       {adding && (
         <Card className="p-4">
