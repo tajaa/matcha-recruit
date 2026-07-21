@@ -13,6 +13,7 @@ import { IRPolicyMappingPanel } from '../../../components/ir/IRPolicyMappingPane
 import { IRConsistencyGuidancePanel } from '../../../components/ir/IRConsistencyGuidancePanel'
 import { IRDocumentPanel } from '../../../components/ir/IRDocumentPanel'
 import { IRCorrectiveActionsPanel } from '../../../components/ir/IRCorrectiveActionsPanel'
+import { ShareWithBrokerButton } from '../../../components/ir/ShareWithBrokerButton'
 import { IRInterviewScheduler } from '../../../components/ir/IRInterviewScheduler'
 import { IREscalationForm } from '../../../components/ir/IREscalationForm'
 import { IRCategoryDataDisplay } from '../../../components/ir/IRCategoryDataDisplay'
@@ -458,6 +459,8 @@ export default function IRDetail() {
               onClick={() => api.download(`/ir/incidents/${incidentId}/claims-readiness.pdf`, `claims-readiness-${incident?.incident_number}.pdf`)}>
               <Download size={12} className="mr-1.5" /> Claims-readiness packet
             </Button>
+            {/* Renders nothing unless the company has a linked broker. */}
+            <ShareWithBrokerButton incidentId={incidentId!} />
             {showERFeatures && (
               <IREscalationForm incidentId={incidentId!} incident={incident} onEscalated={(id) => navigate(`/app/er-copilot/${id}`)} />
             )}

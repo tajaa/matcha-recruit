@@ -4307,6 +4307,28 @@ async def init_db():
                 PRIMARY KEY (conversation_id, user_id)
             )
         """)
+        # Client-controlled grants: a broker sees an incident's defense file only
+        # where the client shared THAT incident with THAT broker (migration
+        # irshare01). Access additionally requires a live broker_company_links row.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS broker_incident_shares (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+                incident_id UUID NOT NULL REFERENCES ir_incidents(id) ON DELETE CASCADE,
+                broker_id UUID NOT NULL REFERENCES brokers(id) ON DELETE CASCADE,
+                shared_by UUID REFERENCES users(id) ON DELETE SET NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                UNIQUE (incident_id, broker_id)
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_broker_incident_shares_broker_company
+            ON broker_incident_shares(broker_id, company_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_broker_incident_shares_incident
+            ON broker_incident_shares(incident_id)
+        """)
         await conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_broker_company_links_broker_status ON broker_company_links(broker_id, status)
         """)

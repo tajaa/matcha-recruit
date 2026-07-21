@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { Activity, Loader2, AlertCircle, Users, DollarSign, Globe } from 'lucide-react'
 import {
@@ -64,6 +64,15 @@ export default function BrokerRiskCurve() {
   function toggle(k: string) {
     setSelected((prev) => { const n = new Set(prev); if (n.has(k)) n.delete(k); else n.add(k); return n })
   }
+
+  // Header checkbox: all → clear, anything else (none or some) → select all.
+  // `indeterminate` is DOM-only — React has no prop for it, so it's set via ref.
+  const allSelected = !!data && data.clients.length > 0 && selected.size === data.clients.length
+  const someSelected = selected.size > 0 && !allSelected
+  const headerBoxRef = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    if (headerBoxRef.current) headerBoxRef.current.indeterminate = someSelected
+  }, [someSelected])
 
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="h-6 w-6 text-zinc-500 animate-spin" /></div>
   if (error || !data) return (
@@ -255,7 +264,13 @@ export default function BrokerRiskCurve() {
             <table className="w-full text-left text-sm">
               <thead>
                 <tr className="border-b border-zinc-800/60 bg-zinc-900/40">
-                  <th className="px-4 py-2.5 w-8"></th>
+                  <th className="px-4 py-2.5 w-8">
+                    <input type="checkbox" ref={headerBoxRef} checked={allSelected}
+                      onChange={() => setSelected(allSelected ? new Set() : new Set(clients.map(keyOf)))}
+                      title={allSelected ? 'Deselect all clients' : 'Select all clients'}
+                      aria-label={allSelected ? 'Deselect all clients' : 'Select all clients'}
+                      className="rounded border-zinc-600 bg-zinc-800 text-emerald-500 focus:ring-emerald-500" />
+                  </th>
                   <th className="px-4 py-2.5 text-[11px] font-medium text-zinc-500 uppercase tracking-wider">Client</th>
                   <th className="px-4 py-2.5 text-[11px] font-medium text-zinc-500 uppercase tracking-wider">Industry</th>
                   <th className="px-4 py-2.5 text-[11px] font-medium text-zinc-500 uppercase tracking-wider text-right">Risk</th>

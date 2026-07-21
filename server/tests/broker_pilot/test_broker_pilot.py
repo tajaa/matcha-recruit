@@ -691,3 +691,88 @@ def test_property_plan_cids_stay_unique_for_a_repeated_key():
     ]}}}
     cids = [r["cid"] for r in bp._platform_records(ctx)]
     assert cids == ["platform:property.plan.itv", "platform:property.plan.itv-2"]
+
+
+# --- generation: JSON mode, empty-turn retry, no dead turn persisted --------
+
+class _FakeResp:
+    """Minimal stand-in for a google-genai response."""
+
+    def __init__(self, text, finish="STOP"):
+        self.text = text
+        self.candidates = [type("C", (), {"finish_reason": finish})()]
+        self.prompt_feedback = None
+        self.usage_metadata = None
+
+
+def _fake_genai(replies, calls):
+    """A client whose generate_content pops the next canned reply and records
+    the config it was called with."""
+    class _Models:
+        async def generate_content(self, *, model, contents, config=None):
+            calls.append({"model": model, "config": config})
+            return _FakeResp(replies[len(calls) - 1])
+
+    return type("C", (), {"aio": type("A", (), {"models": _Models()})()})()
+
+
+_GOOD = ('{"assistant_text": "Loss run reviewed.", "key_questions": [], '
+         '"considerations": [], "gaps": [], "evidence_map": []}')
+
+
+def _run_generate(monkeypatch, replies):
+    import asyncio
+    calls = []
+    monkeypatch.setattr(bp, "_genai", lambda: _fake_genai(replies, calls))
+    turn = asyncio.run(bp._generate({}, "Acme", [], {"sources": {}, "notes": []}, [], "hi"))
+    return turn, calls
+
+
+def test_chat_turn_requests_json_mode(monkeypatch):
+    """Without response_mime_type the model may answer in prose or fenced
+    markdown, `_parse_json` returns {}, and the whole turn degrades to the
+    'I couldn't produce an analysis' fallback. Every sibling pilot sets it."""
+    turn, calls = _run_generate(monkeypatch, [_GOOD])
+    assert len(calls) == 1
+    assert calls[0]["config"].response_mime_type == "application/json"
+    assert turn["assistant_text"] == "Loss run reviewed."
+
+
+def test_empty_turn_retries_once_then_succeeds(monkeypatch):
+    turn, calls = _run_generate(monkeypatch, ["not json at all", _GOOD])
+    assert len(calls) == 2
+    assert turn["assistant_text"] == "Loss run reviewed."
+
+
+def test_empty_turn_retries_at_most_once(monkeypatch):
+    """A retry loop on a persistently-failing model would burn the broker's
+    latency budget; one extra attempt is the whole allowance."""
+    turn, calls = _run_generate(monkeypatch, ["garbage", "still garbage"])
+    assert len(calls) == 2
+    assert bp._is_empty_turn(turn)
+
+
+def test_a_turn_with_findings_but_no_lead_answer_is_not_retried(monkeypatch):
+    """Re-rolling a turn that produced real findings would be invisible
+    non-determinism — only a wholly empty turn is worth another call."""
+    partial = ('{"assistant_text": "", "gaps": [{"point": "No umbrella limit on file", '
+               '"severity": "high", "cited_ids": ["platform:limits"]}]}')
+    turn, calls = _run_generate(monkeypatch, [partial, _GOOD])
+    assert len(calls) == 1
+    assert not bp._is_empty_turn(turn)
+
+
+def test_dead_turn_is_an_error_frame_not_a_result(monkeypatch):
+    """A `result` frame is persisted by the route and becomes history grounding
+    the NEXT turn. A turn that produced nothing must not enter that history."""
+    import asyncio
+
+    monkeypatch.setattr(bp, "_genai", lambda: _fake_genai(["junk", "junk"], []))
+
+    async def _collect():
+        return [ev async for ev in bp.run_chat_turn(
+            {}, "Acme", [], {"sources": {}, "notes": [], "index": {}}, [], "hi")]
+
+    frames = asyncio.run(_collect())
+    assert [f["type"] for f in frames] == ["status", "error"]
+    assert "couldn't produce an analysis" in frames[-1]["message"]

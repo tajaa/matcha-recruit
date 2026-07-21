@@ -478,8 +478,8 @@ async def extract_document(data: bytes | None, text: str | None, *, is_pdf: bool
     returns ``{"extraction": {...}, "available": bool}``."""
     payload: dict = {}
     try:
+        from google.genai import types
         if is_pdf and data:
-            from google.genai import types
             part = types.Part.from_bytes(data=data, mime_type="application/pdf")
             contents = [f"{_EXTRACT_PROMPT}\n\nFILENAME: {filename}", part]
         else:
@@ -488,10 +488,16 @@ async def extract_document(data: bytes | None, text: str | None, *, is_pdf: bool
                 f"DOCUMENT TEXT:\n{(text or '')[:_STORED_TEXT_CAP]}"
             )
         resp = await asyncio.wait_for(
-            _genai().aio.models.generate_content(model=MODEL, contents=contents),
+            _genai().aio.models.generate_content(
+                model=MODEL, contents=contents,
+                config=types.GenerateContentConfig(response_mime_type="application/json"),
+            ),
             timeout=_GEMINI_TIMEOUT,
         )
         payload = _parse_json(getattr(resp, "text", "") or "")
+        if not payload:
+            logger.warning("broker_pilot: unparseable extraction reply for %s — %s",
+                           filename, _why_empty(resp))
     except Exception as exc:  # noqa: BLE001 - degrade to text_only, never 500 the upload
         logger.warning("broker_pilot: document extraction failed for %s: %s", filename, exc)
         payload = {}
@@ -1292,14 +1298,72 @@ def _gate(items: list[dict], index: dict) -> tuple[list[dict], list[str]]:
     return clean, dropped
 
 
-async def _generate(session: dict, subject_name: str, history: list[dict],
-                    corpus: dict, docs: list[dict], latest: str) -> dict:
-    prompt = _build_prompt(session, subject_name, history, corpus, docs, latest)
+def _why_empty(resp) -> str:
+    """One-line diagnosis of a reply that produced no usable turn.
+
+    The empty-answer path used to be silent, so a broker hitting the "I couldn't
+    produce an analysis" fallback left nothing behind to diagnose — the three
+    causes (safety block, output-cap truncation, prose instead of JSON) are
+    indistinguishable from the outside and want different fixes."""
+    cand = (getattr(resp, "candidates", None) or [None])[0]
+    reason = getattr(cand, "finish_reason", None)
+    usage = getattr(resp, "usage_metadata", None)
+    return (
+        f"finish_reason={reason} "
+        f"prompt_feedback={getattr(resp, 'prompt_feedback', None)} "
+        f"candidates_tokens={getattr(usage, 'candidates_token_count', None)} "
+        f"thoughts_tokens={getattr(usage, 'thoughts_token_count', None)}"
+    )
+
+
+async def _generate_once(prompt: str) -> tuple[dict, str]:
+    """One generation. Returns (coerced turn, raw text).
+
+    ``response_mime_type="application/json"`` is what every sibling pilot already
+    passes (`analysis_pilot._gen_config`); without it the model is free to answer
+    in prose or fenced markdown, `_parse_json` returns {}, and the whole turn
+    degrades to the fallback string."""
+    from google.genai import types
     resp = await asyncio.wait_for(
-        _genai().aio.models.generate_content(model=MODEL, contents=prompt),
+        _genai().aio.models.generate_content(
+            model=MODEL, contents=prompt,
+            config=types.GenerateContentConfig(response_mime_type="application/json"),
+        ),
         timeout=_GEMINI_TIMEOUT,
     )
-    return _coerce_turn(_parse_json(getattr(resp, "text", "") or ""))
+    text = getattr(resp, "text", "") or ""
+    turn = _coerce_turn(_parse_json(text))
+    if not turn["assistant_text"]:
+        logger.warning(
+            "broker_pilot: empty turn from model — %s text_len=%d head=%r",
+            _why_empty(resp), len(text), text[:400],
+        )
+    return turn, text
+
+
+async def _generate(session: dict, subject_name: str, history: list[dict],
+                    corpus: dict, docs: list[dict], latest: str) -> dict:
+    """Generate one turn, retrying once on a wholly empty result.
+
+    The retry is deliberately narrow: an empty `assistant_text` AND no buckets
+    means nothing usable came back at all (a safety block, a truncated reply, or
+    a parse failure), and those are transient often enough that one more attempt
+    beats showing the broker a dead end. A turn with *any* content is kept as-is
+    — re-rolling a real answer would be non-determinism the broker can't see."""
+    prompt = _build_prompt(session, subject_name, history, corpus, docs, latest)
+    turn, _ = await _generate_once(prompt)
+    if not _is_empty_turn(turn):
+        return turn
+    logger.info("broker_pilot: empty first turn — retrying once")
+    retried, _ = await _generate_once(prompt)
+    return retried if not _is_empty_turn(retried) else turn
+
+
+def _is_empty_turn(turn: dict) -> bool:
+    """Nothing usable came back — no answer and no populated bucket."""
+    return not turn.get("assistant_text") and not any(
+        turn.get(k) for k in ("key_questions", "considerations", "gaps", "evidence_map")
+    )
 
 
 async def run_chat_turn(session: dict, subject_name: str, history: list[dict],
@@ -1345,9 +1409,21 @@ async def run_chat_turn(session: dict, subject_name: str, history: list[dict],
         result["dropped_citations"] = dropped
         logger.info("broker_pilot: dropped %d hallucinated citation(s)", len(dropped))
     if not result["assistant_text"]:
+        # Nothing usable survived (or ever arrived). Surface it as an ERROR, not a
+        # result: an error is transient in the console and — unlike a result — is
+        # never persisted, so a dead turn can't enter the history that grounds the
+        # next one. `_generate` has already retried once and logged the cause.
+        if _is_empty_turn(result):
+            yield {"type": "error", "message": (
+                "I couldn't produce an analysis from the material this time. "
+                "Try rephrasing, or check that the documents finished processing."
+            )}
+            return
+        # A turn with lists but no lead answer is still worth keeping — the
+        # broker reads the lists. Say the lead is missing rather than fake one.
         result["assistant_text"] = (
-            "I couldn't produce an analysis from the material this time. Try "
-            "rephrasing, or check that the documents finished processing."
+            "No summary came back for this turn — the findings below are what the "
+            "material supports."
         )
     yield {"type": "result", "data": result}
 

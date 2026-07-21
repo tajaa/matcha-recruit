@@ -421,18 +421,51 @@ async def tenant_controls_pdf(company_id: UUID, current_user=Depends(require_bro
 
 
 # --- claims-readiness / defense packets for an on-platform client -----------
+#
+# SHARED-ONLY. These packets carry the client's incident narrative, witness and
+# employee names, and corrective actions — the client's record, not the broker's.
+# A broker link alone grants none of it: the client shares an incident with a
+# specific broker (`broker_incident_shares`, migration irshare01) and only then
+# does it appear here. Both routes gate on the same join, so the list can never
+# advertise a packet the download would refuse.
+#
+# The ER-case counterparts were removed outright — there is no share path for
+# them, so there is nothing for a broker to read.
+
+
+async def _broker_id_for(conn, user_id) -> UUID | None:
+    """The broker this user is an active member of (same resolution the rest of
+    the broker surface uses)."""
+    return await conn.fetchval(
+        """
+        SELECT broker_id FROM broker_members
+        WHERE user_id = $1 AND is_active = true
+        ORDER BY created_at ASC
+        LIMIT 1
+        """,
+        user_id,
+    )
+
 
 @router.get("/clients/{company_id}/defense/incidents")
 async def tenant_defense_incidents(company_id: UUID, current_user=Depends(require_broker)):
+    """Only the incidents this client has shared with THIS broker."""
     async with get_connection() as conn:
         await _assert_broker_owns_company(conn, current_user.id, company_id)
+        broker_id = await _broker_id_for(conn, current_user.id)
+        if broker_id is None:
+            return {"incidents": []}
         rows = await conn.fetch(
             """
-            SELECT id, incident_number, title, incident_type, severity, status, occurred_at
-            FROM ir_incidents WHERE company_id = $1
-            ORDER BY occurred_at DESC NULLS LAST LIMIT 200
+            SELECT i.id, i.incident_number, i.title, i.incident_type, i.severity,
+                   i.status, i.occurred_at, s.created_at AS shared_at
+            FROM ir_incidents i
+            JOIN broker_incident_shares s
+              ON s.incident_id = i.id AND s.broker_id = $2
+            WHERE i.company_id = $1
+            ORDER BY i.occurred_at DESC NULLS LAST LIMIT 200
             """,
-            company_id,
+            company_id, broker_id,
         )
     return {"incidents": [dict(r) for r in rows]}
 
@@ -441,40 +474,22 @@ async def tenant_defense_incidents(company_id: UUID, current_user=Depends(requir
 async def tenant_defense_incident_pdf(company_id: UUID, incident_id: UUID,
                                       current_user=Depends(require_broker)):
     async with get_connection() as conn:
-        meta = await _assert_broker_owns_company(conn, current_user.id, company_id)
+        await _assert_broker_owns_company(conn, current_user.id, company_id)
+        broker_id = await _broker_id_for(conn, current_user.id)
+        shared = broker_id is not None and await conn.fetchval(
+            "SELECT 1 FROM broker_incident_shares "
+            "WHERE incident_id = $1 AND broker_id = $2 AND company_id = $3",
+            incident_id, broker_id, company_id,
+        )
+        # 404, not 403: an unshared incident is indistinguishable from one that
+        # doesn't exist, so the broker learns nothing by probing ids.
+        if not shared:
+            raise HTTPException(status_code=404, detail="Incident not found")
         data = await cr.build_incident_packet(conn, incident_id, company_id)
     if data is None:
         raise HTTPException(status_code=404, detail="Incident not found")
     pdf = await cr.render_incident_packet_pdf(data)
     num = str(data["incident"].get("incident_number") or incident_id)
-    return _named_pdf(num, "claims-readiness", pdf)
-
-
-@router.get("/clients/{company_id}/defense/er-cases")
-async def tenant_defense_er_cases(company_id: UUID, current_user=Depends(require_broker)):
-    async with get_connection() as conn:
-        await _assert_broker_owns_company(conn, current_user.id, company_id)
-        rows = await conn.fetch(
-            """
-            SELECT id, case_number, title, status, category, outcome, created_at
-            FROM er_cases WHERE company_id = $1
-            ORDER BY created_at DESC NULLS LAST LIMIT 200
-            """,
-            company_id,
-        )
-    return {"cases": [dict(r) for r in rows]}
-
-
-@router.get("/clients/{company_id}/defense/er-cases/{case_id}.pdf")
-async def tenant_defense_er_case_pdf(company_id: UUID, case_id: UUID,
-                                     current_user=Depends(require_broker)):
-    async with get_connection() as conn:
-        meta = await _assert_broker_owns_company(conn, current_user.id, company_id)
-        data = await cr.build_er_packet(conn, case_id, company_id)
-    if data is None:
-        raise HTTPException(status_code=404, detail="ER case not found")
-    pdf = await cr.render_er_packet_pdf(data)
-    num = str(data["case"].get("case_number") or case_id)
     return _named_pdf(num, "claims-readiness", pdf)
 
 

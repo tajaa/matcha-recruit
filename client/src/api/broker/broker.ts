@@ -252,13 +252,13 @@ export function downloadClientControls(companyId: string) {
   return api.download(`/broker/clients/${companyId}/controls.pdf`, `proof-of-controls-${companyId}.pdf`)
 }
 
+// Defense files are SHARED-ONLY: the endpoint returns just the incidents this
+// client has chosen to share with this broker. ER-case defense packets are no
+// longer exposed to brokers at all — there is no share path for them.
 export interface DefenseIncident {
   id: string; incident_number: string | null; title: string | null
-  incident_type: string | null; severity: string | null; status: string | null; occurred_at: string | null
-}
-export interface DefenseErCase {
-  id: string; case_number: string | null; title: string | null
-  status: string | null; category: string | null; outcome: string | null; created_at: string | null
+  incident_type: string | null; severity: string | null; status: string | null
+  occurred_at: string | null; shared_at: string | null
 }
 
 export function fetchClientDefenseIncidents(companyId: string) {
@@ -266,12 +266,6 @@ export function fetchClientDefenseIncidents(companyId: string) {
 }
 export function downloadDefenseIncident(companyId: string, incidentId: string, num?: string | null) {
   return api.download(`/broker/clients/${companyId}/defense/incidents/${incidentId}.pdf`, `claims-readiness-${num ?? incidentId}.pdf`)
-}
-export function fetchClientDefenseErCases(companyId: string) {
-  return api.get<{ cases: DefenseErCase[] }>(`/broker/clients/${companyId}/defense/er-cases`)
-}
-export function downloadDefenseErCase(companyId: string, caseId: string, num?: string | null) {
-  return api.download(`/broker/clients/${companyId}/defense/er-cases/${caseId}.pdf`, `claims-readiness-${num ?? caseId}.pdf`)
 }
 
 // --- limit-adequacy / contract review for a client --------------------------

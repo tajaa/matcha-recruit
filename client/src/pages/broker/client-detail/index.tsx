@@ -43,7 +43,7 @@ const tabs: { key: Tab; label: string }[] = [
   { key: 'epl', label: 'EPL Readiness' },
   { key: 'controls', label: 'Controls' },
   { key: 'limits', label: 'Limits' },
-  { key: 'defense', label: 'Defense Files' },
+  { key: 'defense', label: 'Shared' },
   { key: 'submission', label: 'Submission' },
   { key: 'insurance', label: 'Insurance' },
   { key: 'pilot', label: 'Pilot' },
