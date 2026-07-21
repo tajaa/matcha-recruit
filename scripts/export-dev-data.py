@@ -1,28 +1,35 @@
 #!/usr/bin/env python3
-"""Export dev rows as ADDITIVE SQL for prod — whole test tenants, or whole tables.
+"""Export dev rows as SQL for prod — whole test tenants, or whole tables.
 
-    ./scripts/export-dev-data.py --tenant "Sunset Smile Dental Group" \
-                                 --tenant "720 Behavioral" \
-                                 --tenant Onc \
-                                 --table admin_updates \
-                                 --out scripts/sql/push_test_tenants.sql
+FOR THE THREE TEST TENANTS, DON'T CALL THIS DIRECTLY — use the wrapper:
 
-Then, and only then:
+    ./scripts/sync-test-tenants.sh           # show what would change
+    ./scripts/sync-test-tenants.sh --apply   # do it
 
-    ./scripts/seed-prod.sh scripts/sql/push_test_tenants.sql --dry-run   # always first
-    ./scripts/seed-prod.sh scripts/sql/push_test_tenants.sql
+This script is the engine underneath, for anything the wrapper does not cover:
 
-This script NEVER touches prod. It reads dev and writes a .sql file (plus a
-.undo.sql). `seed-prod.sh` remains the single path that writes to prod, so its
-guardrails — DDL block, reserved-email block, single-transaction envelope,
-rehearsal, typed confirm — all still apply. Writing a second prod-write path
-would mean a second, less-guarded one.
+    ./scripts/export-dev-data.py --tenant "Some Company" --table admin_updates \
+                                 --mode update --scrub-emails \
+                                 --out scripts/sql/push.sql
+    ./scripts/seed-prod.sh scripts/sql/push.sql --dry-run   # always first
+    ./scripts/seed-prod.sh scripts/sql/push.sql
 
-WHAT "ADDITIVE" MEANS HERE
-    Every statement is INSERT … ON CONFLICT DO NOTHING. Nothing is updated,
-    nothing is deleted. A row whose primary key already exists on prod is left
-    exactly as prod has it. That is the whole contract; if you need dev to win
-    on an existing row, do it by hand and know that you are overwriting.
+It NEVER touches prod. It reads dev and writes a .sql file (plus a .undo.sql).
+`seed-prod.sh` remains the single path that writes to prod, so its guardrails —
+DDL block, reserved-email block, single-transaction envelope, rehearsal, typed
+confirm — all still apply. A second prod-write path would be a second,
+less-guarded one.
+
+NOTHING IS EVER DELETED
+    A prod row this export does not mention is untouched, in either mode. What
+    differs is what happens to a row prod already has:
+
+      --mode skip    (default) prod wins — the row is left exactly as prod has
+                     it. Purely additive.
+      --mode update  dev wins — the row is refreshed from dev. Correct for TEST
+                     tenants, where dev is the source of truth and the point of
+                     the sync is that dev has newer data. Wrong for anything
+                     real, which is why it is not the default.
 
 HOW A TENANT IS COLLECTED
     Start at the companies row, then walk the live foreign-key graph:
@@ -145,6 +152,12 @@ RESERVED_EMAIL = re.compile(
 )
 EMAIL = re.compile(r"[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}", re.I)
 DDL_WORD = re.compile(r"\b(create|drop|alter|truncate|grant|revoke)\b", re.I)
+
+# "skip"   — additive only; a row prod already has is left exactly as prod has it.
+# "update" — dev wins on rows this export mentions. Correct for TEST tenants,
+#            where dev is the source of truth. Never deletes either way: a prod
+#            row this export does not mention is untouched in both modes.
+MODE = "skip"
 
 
 # --------------------------------------------------------------------------- #
@@ -370,16 +383,30 @@ async def emit(conn, collector, order, self_ref_cols, targets_desc):
                 v = None if (c in deferred and row.get(c) is not None) else row.get(c)
                 vals.append(lit(v))
             collist = ", ".join(f'"{c}"' for c in cols)
-            # Target-less ON CONFLICT on purpose: naming the primary key would
-            # guard only that one constraint, and a row colliding on a SECONDARY
-            # unique index (a users row with the same email under a different
-            # id) would still raise and abort the whole transaction on prod.
-            # Untargeted means "skip anything that collides with what prod
-            # already has", which is exactly the additive contract.
-            lines.append(
-                f'INSERT INTO "{table}" ({collist}) VALUES ({", ".join(vals)})'
-                f' ON CONFLICT DO NOTHING;'
-            )
+            if MODE == "update":
+                # Test tenants: dev is the source of truth, so a row prod
+                # already has is refreshed rather than skipped. Still never
+                # deletes — a prod row this export does not mention is
+                # untouched.
+                sets = ", ".join(
+                    f'"{c}" = EXCLUDED."{c}"' for c in cols if c not in pk
+                )
+                lines.append(
+                    f'INSERT INTO "{table}" ({collist}) VALUES ({", ".join(vals)})'
+                    + (f' ON CONFLICT {conflict} DO UPDATE SET {sets};' if sets
+                       else f' ON CONFLICT {conflict} DO NOTHING;')
+                )
+            else:
+                # Target-less ON CONFLICT on purpose: naming the primary key
+                # would guard only that one constraint, and a row colliding on
+                # a SECONDARY unique index (a users row with the same email
+                # under a different id) would still raise and abort the whole
+                # transaction on prod. Untargeted means "skip anything that
+                # collides with what prod already has".
+                lines.append(
+                    f'INSERT INTO "{table}" ({collist}) VALUES ({", ".join(vals)})'
+                    f' ON CONFLICT DO NOTHING;'
+                )
             for c in deferred:
                 if row.get(c) is not None and pk:
                     where = " AND ".join(f'"{p}" = {lit(row[p])}' for p in pk)
@@ -414,6 +441,11 @@ async def main():
                     help="Copy a whole table additively (e.g. admin_updates). Repeatable.")
     ap.add_argument("--exclude", action="append", default=[],
                     help="Extra table to skip. Repeatable.")
+    ap.add_argument("--mode", choices=("skip", "update"), default="skip",
+                    help="skip (default): purely additive, prod wins on any row it "
+                         "already has. update: dev wins on the rows in this export — "
+                         "correct for test tenants, wrong for anything real. Neither "
+                         "mode ever deletes.")
     ap.add_argument("--scrub-emails", action="store_true",
                     help="Rewrite every non-reserved email address to <local>@example.com "
                          "(deterministic, so the same address maps the same way everywhere). "
@@ -423,6 +455,9 @@ async def main():
     ap.add_argument("--out", help="Output .sql path (default: scripts/sql/push_dev_<date>.sql)")
     ap.add_argument("--dsn", default=os.getenv("DEV_DATABASE_URL", DEFAULT_DSN))
     args = ap.parse_args()
+
+    global MODE
+    MODE = args.mode
 
     if not args.tenant and not args.table:
         ap.error("nothing to export — pass --tenant and/or --table")
