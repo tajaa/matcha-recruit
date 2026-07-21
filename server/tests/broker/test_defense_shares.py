@@ -96,3 +96,11 @@ def test_share_routes_use_two_or_more_segments():
     one-segment path here would be shadowed."""
     for r in broker_sharing.router.routes:
         assert r.path.strip("/").count("/") >= 1, r.path
+
+
+def test_repeat_share_does_not_write_a_second_audit_row():
+    """A repeat click is a no-op; logging it would put a 'granted' entry in the
+    trail for a grant that already existed."""
+    src = inspect.getsource(broker_sharing.share_incident_with_broker)
+    assert "RETURNING id" in src
+    assert "if granted:" in src

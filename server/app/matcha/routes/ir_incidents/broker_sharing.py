@@ -95,18 +95,22 @@ async def share_incident_with_broker(
         if broker_id not in await chat_svc.company_active_broker_ids(conn, company_id):
             raise HTTPException(status_code=403, detail="Not linked to that broker")
         async with conn.transaction():
-            await conn.execute(
+            # RETURNING distinguishes a real grant from a repeat click — logging
+            # both would put a "granted" entry in the trail for a no-op.
+            granted = await conn.fetchval(
                 """
                 INSERT INTO broker_incident_shares
                     (company_id, incident_id, broker_id, shared_by)
                 VALUES ($1, $2, $3, $4)
                 ON CONFLICT (incident_id, broker_id) DO NOTHING
+                RETURNING id
                 """,
                 company_id, incident_id, broker_id, current_user.id,
             )
-            await log_audit(conn, incident_id, current_user.id, "broker_share_granted",
-                            entity_type="broker", entity_id=str(broker_id),
-                            details={"broker_id": str(broker_id)})
+            if granted:
+                await log_audit(conn, incident_id, current_user.id, "broker_share_granted",
+                                entity_type="broker", entity_id=str(broker_id),
+                                details={"broker_id": str(broker_id)})
     return {"shared": True}
 
 
