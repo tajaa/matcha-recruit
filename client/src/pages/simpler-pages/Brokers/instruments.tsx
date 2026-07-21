@@ -2,7 +2,7 @@ import { useRef } from 'react'
 import { motion, useInView } from 'framer-motion'
 import { InstrumentFrame } from './InstrumentFrame'
 import { PulseDot } from './PulseDot'
-import { useLoopCycle } from './useLoopCycle'
+import { useLoopCycle } from '../_shared/useLoopCycle'
 import { CARD_LINE, CARD_MUTED, CARD_TEXT, GREEN } from './theme'
 
 // ── Pillars — alternating rows with bespoke grayscale+green instruments ────
