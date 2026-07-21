@@ -864,3 +864,36 @@ the load-error into a channel the UI doesn't show (HiringClientPickerModal, Invi
 and fetch-then-populate-a-form effects (MatchaLitePricingPanel, MatchaXOnboardingWizard).
 The clean single-fetch quadruplet is largely exhausted; what's left needs the god-component /
 E2 hook-extraction pass, not a mechanical sweep.
+
+### J6 (part 2) — compliance_service.py sub-package (DONE — LAST structural split)
+`core/services/compliance_service.py` (10,676 lines, 143 funcs, 19 consts, 0 classes) →
+package `compliance_service/` (name kept so all **42** importers are untouched). Tracked
+module-by-module in **[COMPLIANCE_SERVICE_SPLIT.md](./COMPLIANCE_SERVICE_SPLIT.md)** (its own
+doc because the surface is uniquely large — 87 external names, ~45 of them `_`-private,
+pulled cross-module). 12 concern modules bottom→top (`_shared` → `_normalize` → `_industry`
+→ `_verification` → `_jurisdictions` → `_hierarchy` → `_catalog_writes` → `_alerts` →
+`_research` → `_specialization` → `_locations` → `_checks`) + a thin `__init__` that
+re-exports **every** public + cross-module-private symbol.
+- **Layering made it a clean DAG via 4 measured back-edge moves**: `_heartbeat_while` down to
+  `_shared` (killed research→checks); `_project_chain_to_location` to `_hierarchy` (killed
+  jurisdictions→hierarchy); `get_hierarchical_requirements`+`search_company_requirements` up
+  to `_checks` (killed hierarchy→checks). The one irreducible cycle
+  (`_locations.ensure_location_for_employee → _checks.run_compliance_check_background`) is an
+  **in-function** import, not module-level.
+- **Surface discipline**: `import *` skips underscore names, so the `__init__` re-exports are
+  explicit; `__init__` also `import httpx` because a test monkeypatches
+  `compliance_service.httpx.AsyncClient`. Cross-module imports are fully absolute
+  (`from app.core.services.compliance_service._x import …`) so grep-to-zero on `from \.` is
+  trivially clean.
+
+**Verification** (via `server/venv`): compile clean; boots at **1858 routes**; all 87
+external names + `httpx` resolve off the package; 39 consumer/worker modules import clean;
+3 monkeypatch test files green + 373 `tests/compliance/` + 760 hris/scope/onboarding/evals
+pass. The 8 failures (7 `test_compliance_schema_redesign.py` migration-glob + 1
+`test_build_dossier_full`) are **pre-existing** — identical on the monolith via
+`git worktree add HEAD`.
+
+**J6 complete → every structural split in the plan is done** (J5 admin, J6 handbook +
+compliance, J7 provisioning/dashboard/brokers, L5 ir-cards, L6 matcha_work_document). What
+remains in the plan is non-structural: the client god-component/hook passes (D/I/K), the
+J2/J3+L2 conformance PR, and the manual click-throughs.
