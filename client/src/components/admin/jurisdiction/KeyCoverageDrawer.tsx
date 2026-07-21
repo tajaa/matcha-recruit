@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
+import { useAsync } from '../../../hooks/useAsync'
 import { fetchKeyCoverage, runStalenessCheck } from '../../../api/compliance/compliance'
 import type { CategoryKeyCoverage, RegulationKeyCoverage } from '../../../api/compliance/compliance'
 
@@ -131,19 +132,13 @@ function CategorySection({ cat }: { cat: CategoryKeyCoverage }) {
 }
 
 export default function KeyCoverageDrawer({ jurisdictionId, category, state, onClose }: KeyCoverageDrawerProps) {
-  const [data, setData] = useState<{ summary: any; by_category: CategoryKeyCoverage[] } | null>(null)
-  const [loading, setLoading] = useState(true)
   const [runningCheck, setRunningCheck] = useState(false)
 
-  const load = () => {
-    setLoading(true)
-    fetchKeyCoverage({ jurisdiction_id: jurisdictionId, category, state })
-      .then(setData)
-      .catch(() => {})
-      .finally(() => setLoading(false))
-  }
-
-  useEffect(() => { load() }, [jurisdictionId, category, state])
+  const { data, loading, reload: load } = useAsync(
+    () => fetchKeyCoverage({ jurisdiction_id: jurisdictionId, category, state }),
+    [jurisdictionId, category, state],
+    null,
+  )
 
   const handleRunCheck = async () => {
     setRunningCheck(true)

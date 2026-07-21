@@ -1,4 +1,16 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
+import { useAsync } from '../../hooks/useAsync'
+import { relativeTime, shortDateWithYear } from '../../utils/format'
+
+// Public page: an absolute date after a week (a dated comment is more useful
+// than "23d ago"), and echo an unparseable timestamp rather than rendering a
+// bare em dash to a visitor.
+const formatRelative = (iso: string) =>
+  relativeTime(iso, {
+    maxRelativeDays: 7,
+    absolute: shortDateWithYear,
+    onInvalid: (raw) => String(raw),
+  })
 import { api } from '../../api/client'
 
 const INK = 'var(--color-ivory-ink)'
@@ -13,22 +25,16 @@ type Comment = {
 }
 
 export default function BlogComments({ slug }: { slug: string }) {
-  const [comments, setComments] = useState<Comment[]>([])
-  const [loading, setLoading] = useState(true)
+  const { data: comments, loading } = useAsync(
+    () => (slug ? api.get<Comment[]>(`/blogs/${slug}/comments`) : Promise.resolve([])),
+    [slug],
+    [],
+  )
   const [authorName, setAuthorName] = useState('')
   const [content, setContent] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [submitted, setSubmitted] = useState(false)
   const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (!slug) return
-    setLoading(true)
-    api.get<Comment[]>(`/blogs/${slug}/comments`)
-      .then(setComments)
-      .catch(() => setComments([]))
-      .finally(() => setLoading(false))
-  }, [slug])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -120,17 +126,3 @@ export default function BlogComments({ slug }: { slug: string }) {
   )
 }
 
-function formatRelative(iso: string): string {
-  try {
-    const then = new Date(iso).getTime()
-    const diff = Date.now() - then
-    const day = 24 * 60 * 60 * 1000
-    if (diff < 60 * 1000) return 'just now'
-    if (diff < 60 * 60 * 1000) return `${Math.floor(diff / (60 * 1000))}m ago`
-    if (diff < day) return `${Math.floor(diff / (60 * 60 * 1000))}h ago`
-    if (diff < 7 * day) return `${Math.floor(diff / day)}d ago`
-    return new Date(iso).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
-  } catch {
-    return iso
-  }
-}

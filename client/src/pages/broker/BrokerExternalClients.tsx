@@ -1,4 +1,5 @@
-import { useState, useEffect, type FormEvent } from 'react'
+import { useState, type FormEvent } from 'react'
+import { useAsync } from '../../hooks/useAsync'
 import { Link } from 'react-router-dom'
 import { Globe, Plus, Loader2, AlertCircle, CheckCircle2, Clock } from 'lucide-react'
 import { Card } from '../../components/ui'
@@ -41,20 +42,15 @@ function IntakeCell({ status, submittedAt }: { status: ExternalClientRow['intake
 }
 
 export default function BrokerExternalClients() {
-  const [clients, setClients] = useState<ExternalClientRow[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(false)
+  const { data: clients, loading, error, reload: load } = useAsync(
+    () => fetchExternalClients().then((r) => r.clients),
+    [],
+    [],
+  )
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState({ name: '', industry: '', headcount: '', primary_state: '', note: '' })
   const [saving, setSaving] = useState(false)
   const [formErr, setFormErr] = useState<string | null>(null)
-
-  const load = () => {
-    setLoading(true)
-    setError(false)
-    fetchExternalClients().then((r) => setClients(r.clients)).catch(() => setError(true)).finally(() => setLoading(false))
-  }
-  useEffect(load, [])
 
   async function submit(e: FormEvent) {
     e.preventDefault()

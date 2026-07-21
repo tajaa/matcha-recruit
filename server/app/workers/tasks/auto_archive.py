@@ -8,20 +8,13 @@ Only processes status='active' rows. Idempotent.
 import asyncio
 
 from ..celery_app import celery_app
-from ..utils import get_db_connection
+from ..utils import get_db_connection, scheduler_enabled
 
 
 async def _run_auto_archive() -> dict:
     conn = await get_db_connection()
     try:
-        try:
-            sched_row = await conn.fetchrow(
-                "SELECT enabled FROM scheduler_settings WHERE task_key = 'auto_archive'"
-            )
-        except Exception:
-            sched_row = None
-
-        if sched_row and not sched_row["enabled"]:
+        if not await scheduler_enabled(conn, "auto_archive"):
             print("[AutoArchive] Scheduler disabled, skipping.")
             return {"threads": 0, "projects": 0, "skipped": True}
 

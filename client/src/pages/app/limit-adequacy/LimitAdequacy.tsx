@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Scale, FileDown, Loader2, ChevronDown, Check, AlertTriangle, Trash2 } from 'lucide-react'
-import { Card } from '../../../components/ui'
+import { Scale, ChevronDown, Check, AlertTriangle, Trash2 } from 'lucide-react'
+import { Card, MetricStrip } from '../../../components/ui'
+import { RegisterSpinner, DownloadButton } from '../../../components/register/registerKit'
 import {
   fetchLimitReview, fetchCoverage, upsertCoverage, deleteCoverage,
   uploadContract, createContract, updateContract, deleteContract, confirmContract,
@@ -41,7 +42,7 @@ export default function LimitAdequacy() {
     try { await downloadReviewPdf() } finally { setDownloading(false) }
   }
 
-  if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="h-6 w-6 text-zinc-500 animate-spin" /></div>
+  if (loading) return <RegisterSpinner />
   if (!review || !coverage) return <p className="text-sm text-zinc-500">Unable to load limit-adequacy review.</p>
 
   const s = review.summary
@@ -54,17 +55,15 @@ export default function LimitAdequacy() {
           </h1>
           <p className="text-sm text-zinc-500 mt-1 max-w-2xl">Record what you carry, upload the contracts that impose insurance requirements, and we diff them — so you find "you carry $1M but a contract requires $2M" before a customer (or underwriter) does.</p>
         </div>
-        <button onClick={download} disabled={downloading} className="inline-flex items-center gap-1.5 text-sm text-zinc-900 bg-zinc-100 hover:bg-white rounded-lg px-3 py-2 font-medium disabled:opacity-50 shrink-0">
-          {downloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileDown className="h-4 w-4" />} Review PDF
-        </button>
+        <DownloadButton onClick={download} downloading={downloading} label="Review PDF" />
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-px bg-white/10 border border-white/10 rounded-2xl overflow-hidden">
+      <MetricStrip cols="grid-cols-2 md:grid-cols-4">
         <Stat label="Contract shortfalls" value={s.contract_shortfalls} tone={s.contract_shortfalls ? 'text-red-400' : 'text-emerald-400'} />
         <Stat label="Below baseline" value={s.baseline_lows} tone={s.baseline_lows ? 'text-amber-400' : 'text-zinc-200'} />
         <Stat label="Lines carried" value={s.lines_carried} tone="text-zinc-200" />
         <Stat label="Contracts" value={s.contracts} tone="text-zinc-200" />
-      </div>
+      </MetricStrip>
 
       <AdequacyTable lines={review.lines} />
       <CoverageEditor coverage={coverage} reload={reloadAll} />

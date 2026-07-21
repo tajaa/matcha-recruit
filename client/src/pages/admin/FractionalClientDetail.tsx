@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { useParams, useNavigate, Link } from 'react-router-dom'
+import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { Badge, Button, Card, Input, Modal, PillTabs, Select, Textarea } from '../../components/ui'
 import { ArrowLeft, ExternalLink, Loader2, Plus, Trash2 } from 'lucide-react'
 import {
@@ -17,6 +17,7 @@ import {
   type TaskStatus,
   type TimeEntry,
 } from '../../api/admin/fractionalHr'
+import { useFractionalClientDetail, type Tab } from './useFractionalClientDetail'
 
 const STATUS_VARIANT: Record<string, 'success' | 'warning' | 'neutral' | 'danger'> = {
   active: 'success', prospect: 'neutral', paused: 'warning', offboarded: 'danger',
@@ -28,8 +29,6 @@ const SERVICE_OPTS = Object.keys(SERVICE_LABELS).map((k) => ({ value: k, label: 
 const PRIORITY_OPTS = [
   { value: 'low', label: 'Low' }, { value: 'medium', label: 'Medium' }, { value: 'high', label: 'High' },
 ]
-
-type Tab = 'scope' | 'tasks' | 'time' | 'team' | 'settings'
 
 function HoursPanel({ d }: { d: ClientDetail }) {
   const s = d.hours_summary
@@ -64,36 +63,22 @@ function HoursPanel({ d }: { d: ClientDetail }) {
 }
 
 export default function FractionalClientDetail() {
-  const { clientId } = useParams<{ clientId: string }>()
-  const navigate = useNavigate()
-  const [detail, setDetail] = useState<ClientDetail | null>(null)
-  const [scope, setScope] = useState<ScopeItem[]>([])
-  const [tasks, setTasks] = useState<Task[]>([])
-  const [time, setTime] = useState<TimeEntry[]>([])
-  const [pros, setPros] = useState<Pro[]>([])
-  const [tab, setTab] = useState<Tab>('scope')
-  const [loading, setLoading] = useState(true)
-
-  async function loadAll() {
-    if (!clientId) return
-    const [d, sc, tk, tm, pr] = await Promise.all([
-      fractionalHr.getClient(clientId),
-      fractionalHr.listScope(clientId),
-      fractionalHr.listTasks(clientId),
-      fractionalHr.listTime(clientId),
-      fractionalHr.pros(),
-    ])
-    setDetail(d); setScope(sc.scope_items); setTasks(tk.tasks); setTime(tm.time_entries); setPros(pr.pros)
-  }
-
-  useEffect(() => {
-    setLoading(true)
-    loadAll().finally(() => setLoading(false))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clientId])
-
-  const refreshHeader = async () => { if (clientId) setDetail(await fractionalHr.getClient(clientId)) }
-  const proOpts = [{ value: '', label: 'Unassigned' }, ...pros.map((p) => ({ value: p.id, label: p.email }))]
+  const {
+    navigate,
+    detail,
+    scope,
+    setScope,
+    tasks,
+    setTasks,
+    time,
+    setTime,
+    pros,
+    tab,
+    setTab,
+    loading,
+    refreshHeader,
+    proOpts,
+  } = useFractionalClientDetail()
 
   if (loading || !detail) {
     return <div className="flex items-center justify-center h-64 text-zinc-500"><Loader2 className="animate-spin" /></div>

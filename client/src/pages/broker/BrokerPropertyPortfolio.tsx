@@ -1,10 +1,10 @@
-import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { Building2, Loader2, AlertCircle } from 'lucide-react'
+import { useAsync } from '../../hooks/useAsync'
 import { Card } from '../../components/ui'
 import { HelpHint } from '../../components/broker/HelpHint'
 import { fetchPropertyPortfolio } from '../../api/broker/broker'
-import type { PropertyPortfolioRow, PropertyPortfolioResponse } from '../../types/broker'
+import type { PropertyPortfolioRow } from '../../types/broker'
 
 const COPE_TONE: Record<string, string> = { A: 'text-emerald-400', B: 'text-zinc-200', C: 'text-amber-400', D: 'text-red-400' }
 const CAT_TONE: Record<string, string> = {
@@ -19,13 +19,7 @@ function fmtUsd(n: number | null): string {
 }
 
 export default function BrokerPropertyPortfolio() {
-  const [data, setData] = useState<PropertyPortfolioResponse | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(false)
-
-  useEffect(() => {
-    fetchPropertyPortfolio().then(setData).catch(() => setError(true)).finally(() => setLoading(false))
-  }, [])
+  const { data, loading, error } = useAsync(() => fetchPropertyPortfolio(), [], null)
 
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="h-6 w-6 text-zinc-500 animate-spin" /></div>
   if (error || !data) return (

@@ -1,27 +1,24 @@
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useState, useMemo } from 'react'
 import { FileDown, Loader2 } from 'lucide-react'
 import { Card } from '../../../components/ui'
+import { useAsync } from '../../../hooks/useAsync'
 import { fetchClientLimitAdequacy, downloadClientLimits } from '../../../api/broker/broker'
 import {
   uploadBrokerContract, updateBrokerContract, confirmBrokerContract,
   fetchBrokerContractReview, downloadBrokerContractReviewPdf, fetchBrokerContractSourceUrl,
 } from '../../../api/limit-adequacy/limitAdequacy'
-import type { LimitReview, CoverageCatalogEntry } from '../../../types/limitAdequacy'
+import type { CoverageCatalogEntry } from '../../../types/limitAdequacy'
 import { LIMIT_STATUS_LABEL, fmtMoney } from '../../../types/limitAdequacy'
 import { ContractsPanel } from '../../../components/limit-adequacy/ContractsPanel'
 import type { ContractsApi } from '../../../components/limit-adequacy/ContractsPanel'
 
 export function LimitsTab({ companyId }: { companyId: string }) {
-  const [review, setReview] = useState<LimitReview | null>(null)
-  const [loading, setLoading] = useState(true)
+  const { data: review, loading, reload } = useAsync(
+    () => fetchClientLimitAdequacy(companyId).catch(() => null),
+    [companyId],
+    null,
+  )
   const [dl, setDl] = useState(false)
-
-  const reload = useCallback(async () => {
-    const r = await fetchClientLimitAdequacy(companyId).catch(() => null)
-    setReview(r)
-  }, [companyId])
-
-  useEffect(() => { reload().finally(() => setLoading(false)) }, [reload])
 
   // The broker writes into the client's own contract records, so the tenant sees
   // the same rows on its Limit Adequacy page. No manual-entry or delete path —

@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Coins, Loader2, Plus } from 'lucide-react'
 import { Card } from '../../../components/ui'
-import { getTcor, upsertTcorInput, type TcorResult } from '../../../api/risk/tcor'
+import { useAsync } from '../../../hooks/useAsync'
+import { RegisterSpinner } from '../../../components/register/registerKit'
+import { getTcor, upsertTcorInput } from '../../../api/risk/tcor'
 
 const money = (n: number | null | undefined) =>
   n == null ? '—' : n >= 1_000_000 ? `$${(n / 1_000_000).toFixed(1)}M` : n >= 1_000 ? `$${Math.round(n / 1_000)}K` : `$${Math.round(n)}`
@@ -9,12 +11,10 @@ const money = (n: number | null | undefined) =>
 const LINES = ['wc', 'gl', 'auto', 'property', 'umbrella', 'cyber', 'epl', 'professional']
 
 export default function Tcor() {
-  const [data, setData] = useState<TcorResult | null>(null)
-  const [loading, setLoading] = useState(true)
   const [form, setForm] = useState({ line: 'wc', annual_premium: '', fees: '', risk_mitigation_spend: '', current_retention: '' })
   const [saving, setSaving] = useState(false)
 
-  useEffect(() => { getTcor().then(setData).finally(() => setLoading(false)) }, [])
+  const { data, loading, setData } = useAsync(() => getTcor(), [])
 
   async function save() {
     setSaving(true)
@@ -32,7 +32,7 @@ export default function Tcor() {
     } finally { setSaving(false) }
   }
 
-  if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="h-6 w-6 text-zinc-500 animate-spin" /></div>
+  if (loading) return <RegisterSpinner />
   if (!data) return <p className="text-sm text-zinc-500">Unable to load TCOR.</p>
 
   const opt = data.optimization

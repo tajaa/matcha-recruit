@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Activity, ArrowUpRight, Calendar, DollarSign, Heart, Loader2, Lock, TrendingUp, Users } from 'lucide-react'
 import { createLiteUpgradeCheckout } from '../../../api/billing/liteAddons'
+import { MetricStrip } from '../../ui/MetricStrip'
 
 // Essentials replacement for the Workers' Comp metric cards. Those metrics
 // are computed from OSHA recordable data maintained through the OSHA log
@@ -77,7 +78,7 @@ export function IREssentialsLockedCard() {
 
       <div className="mt-4 space-y-4 pointer-events-none" aria-hidden>
         {/* WC posture stat tiles — mirrors IRWcMetricsCard */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-px bg-white/10 border border-white/10 rounded-2xl overflow-hidden">
+        <MetricStrip cols="grid-cols-2 lg:grid-cols-4">
           {GHOST_TILES.map((t) => (
             <div key={t.label} className="bg-zinc-950/70 p-5 flex flex-col">
               <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold flex items-center gap-1.5">
@@ -91,7 +92,7 @@ export function IREssentialsLockedCard() {
               </div>
             </div>
           ))}
-        </div>
+        </MetricStrip>
 
         <div className="grid gap-4 lg:grid-cols-2">
           {/* Premium impact — mirrors IRPremiumImpactCard */}

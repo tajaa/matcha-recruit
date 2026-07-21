@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Loader2, Search, Zap, Plus, UserPlus, Copy, Check, Shield, KeyRound } from 'lucide-react'
 import { api } from '../../api/client'
+import { useAsync } from '../../hooks/useAsync'
 
 interface IndividualUser {
   user_id: string
@@ -47,8 +48,6 @@ function relTime(iso: string | null): string {
 }
 
 export default function Individuals() {
-  const [users, setUsers] = useState<IndividualUser[]>([])
-  const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [grantTarget, setGrantTarget] = useState<IndividualUser | null>(null)
   const [grantAmount, setGrantAmount] = useState('')
@@ -60,14 +59,12 @@ export default function Individuals() {
   const [inviting, setInviting] = useState(false)
   const [copied, setCopied] = useState(false)
 
-  function fetchUsers() {
-    api.get<IndividualUser[]>('/matcha-work/billing/admin/individuals')
-      .then(setUsers)
-      .catch(() => {})
-      .finally(() => setLoading(false))
-  }
-
-  useEffect(() => { fetchUsers() }, [])
+  const {
+    data: users,
+    loading,
+    setData: setUsers,
+    reload: fetchUsers,
+  } = useAsync(() => api.get<IndividualUser[]>('/matcha-work/billing/admin/individuals'), [], [])
 
   async function toggleBetaFlag(userId: string, flag: string, value: boolean) {
     setUsers(prev => prev.map(u =>
@@ -127,9 +124,10 @@ export default function Individuals() {
         tokens: amount,
         description: `Admin grant to individual: ${grantTarget.email}`,
       })
-      // Refresh list
-      const updated = await api.get<IndividualUser[]>('/matcha-work/billing/admin/individuals')
-      setUsers(updated)
+      // Await the refetch before dismissing: closing first leaves the row
+      // showing its pre-grant token count for the length of the round-trip,
+      // which reads as "the grant didn't work".
+      await fetchUsers()
       setGrantTarget(null)
       setGrantAmount('')
     } catch {}

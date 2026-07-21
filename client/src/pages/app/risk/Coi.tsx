@@ -1,19 +1,18 @@
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { FileText, Loader2, Upload, Trash2 } from 'lucide-react'
 import { Card } from '../../../components/ui'
-import { listCois, uploadCoi, deleteCoi, type CoiList, type CoiStatus } from '../../../api/risk/coi'
+import { useAsync } from '../../../hooks/useAsync'
+import { RegisterSpinner } from '../../../components/register/registerKit'
+import { listCois, uploadCoi, deleteCoi, type CoiStatus } from '../../../api/risk/coi'
 
 const STATUS_TONE: Record<CoiStatus, string> = {
   active: 'text-emerald-400', expiring: 'text-amber-400', expired: 'text-rose-400', unknown: 'text-zinc-500',
 }
 
 export default function Coi() {
-  const [data, setData] = useState<CoiList | null>(null)
-  const [loading, setLoading] = useState(true)
+  const { data, loading, setData } = useAsync(() => listCois(), [], null)
   const [uploading, setUploading] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
-
-  useEffect(() => { listCois().then(setData).finally(() => setLoading(false)) }, [])
 
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -26,7 +25,7 @@ export default function Coi() {
     setData(await deleteCoi(id))
   }
 
-  if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="h-6 w-6 text-zinc-500 animate-spin" /></div>
+  if (loading) return <RegisterSpinner />
   if (!data) return <p className="text-sm text-zinc-500">Unable to load certificates.</p>
 
   const s = data.summary

@@ -1,17 +1,12 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { FileDown, Loader2 } from 'lucide-react'
 import { Card } from '../../../components/ui'
+import { useAsync } from '../../../hooks/useAsync'
 import { fetchClientControls, downloadClientControls } from '../../../api/broker/broker'
-import type { ControlsRegister } from '../../../types/controlsEvidence'
 
 export function ControlsTab({ companyId }: { companyId: string }) {
-  const [reg, setReg] = useState<ControlsRegister | null>(null)
-  const [loading, setLoading] = useState(true)
+  const { data: reg, loading } = useAsync(() => fetchClientControls(companyId), [companyId], null)
   const [dl, setDl] = useState(false)
-
-  useEffect(() => {
-    fetchClientControls(companyId).then(setReg).catch(() => setReg(null)).finally(() => setLoading(false))
-  }, [companyId])
 
   const tone = (s: string) =>
     s === 'strong' ? 'text-emerald-400' : s === 'partial' ? 'text-amber-400' : s === 'gap' ? 'text-red-400' : 'text-zinc-500'

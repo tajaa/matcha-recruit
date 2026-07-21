@@ -1,13 +1,9 @@
 import { useState, useEffect } from 'react'
+import { severityVariant } from '../ui/badgeMaps'
 import { api } from '../../api/client'
-import { Badge, Button, type BadgeVariant } from '../ui'
+import { Badge, Button } from '../ui'
 import type { DiscrepancyAnalysisResponse, DiscrepancyItem, CredibilityNote } from '../../types/er'
 
-const severityVariant: Record<string, BadgeVariant> = {
-  high: 'danger',
-  medium: 'warning',
-  low: 'neutral',
-}
 
 type Props = { caseId: string }
 

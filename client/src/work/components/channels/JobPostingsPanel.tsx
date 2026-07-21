@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
+import { useAsync } from '../../../hooks/useAsync'
 import { X, Plus, Loader2, Users, UserCheck } from 'lucide-react'
 import { listJobPostings } from '../../api/channelJobPostings'
-import type { JobPostingSummary } from '../../api/channelJobPostings'
 import CreateJobPostingModal from './CreateJobPostingModal'
 
 interface Props {
@@ -24,26 +24,15 @@ const STATUS_LABEL: Record<string, string> = {
 }
 
 export default function JobPostingsPanel({ channelId, myRole, onClose, onOpenDetail }: Props) {
-  const [postings, setPostings] = useState<JobPostingSummary[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
   const [showCreate, setShowCreate] = useState(false)
 
   const isManager = myRole === 'owner' || myRole === 'moderator'
 
-  useEffect(() => {
-    setLoading(true)
-    listJobPostings(channelId)
-      .then((data) => {
-        if (isManager) {
-          setPostings(data)
-        } else {
-          setPostings(data.filter((p) => p.status === 'active'))
-        }
-      })
-      .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load postings'))
-      .finally(() => setLoading(false))
-  }, [channelId, isManager])
+  const { data: postings, loading, error, setData: setPostings } = useAsync(
+    () => listJobPostings(channelId).then((data) => (isManager ? data : data.filter((p) => p.status === 'active'))),
+    [channelId, isManager],
+    [],
+  )
 
   return (
     <>

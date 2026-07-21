@@ -1,4 +1,14 @@
 import { useEffect, useState, useCallback } from 'react'
+import { relativeTime as baseRelativeTime, shortDate } from '../../../utils/format'
+
+// Sentence-cased to match the surrounding labels, and a narrow absolute format
+// because this renders inside a dropdown.
+const relativeTime = (iso: string) =>
+  baseRelativeTime(iso, {
+    justNowLabel: 'Just now',
+    yesterdayLabel: 'Yesterday',
+    absolute: shortDate,
+  })
 import { useNavigate } from 'react-router-dom'
 import { Loader2, Bell } from 'lucide-react'
 import { api } from '../../../api/client'
@@ -40,19 +50,6 @@ const TYPE_LABEL: Record<string, { text: string; color: string }> = {
   job_posting_invite: { text: 'Job Invite', color: 'bg-emerald-900/30 text-emerald-400 border-emerald-800/40' },
   job_application_received: { text: 'Application', color: 'bg-blue-900/30 text-blue-400 border-blue-800/40' },
   job_application_status_changed: { text: 'Status Update', color: 'bg-purple-900/30 text-purple-400 border-purple-800/40' },
-}
-
-function relativeTime(iso: string): string {
-  const now = Date.now()
-  const then = new Date(iso).getTime()
-  const diffSec = Math.floor((now - then) / 1000)
-  if (diffSec < 60) return 'Just now'
-  if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m ago`
-  if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h ago`
-  const days = Math.floor(diffSec / 86400)
-  if (days === 1) return 'Yesterday'
-  if (days < 30) return `${days}d ago`
-  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
 
 export default function Notifications() {

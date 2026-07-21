@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Loader2, Send, X } from 'lucide-react'
-import { authStreamHeaders } from '../../api/client'
+import { postSSE } from '../../api/sse'
 import { IconGuide } from '../sidebars/nav-icons'
 import type { PageHelp } from '../../data/pageHelp'
 
@@ -25,46 +25,30 @@ export default function HelpAssistant({ pageHelp }: { pageHelp: PageHelp }) {
     setStreaming(true)
     setMessages((prev) => [...prev, { role: 'assistant', text: '' }])
 
-    const base = import.meta.env.VITE_API_URL || '/api'
     try {
-      const headers = await authStreamHeaders()
-      const res = await fetch(`${base}/assistant/help`, {
-        method: 'POST',
-        headers: { ...headers, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      await postSSE(
+        '/assistant/help',
+        {
           question,
           page_context: { title: pageHelp.title, summary: pageHelp.summary, tips: pageHelp.tips },
-        }),
-      })
-      const reader = res.body?.getReader()
-      const decoder = new TextDecoder()
-      if (!reader) { setStreaming(false); return }
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        for (const line of decoder.decode(value).split('\n')) {
-          if (!line.startsWith('data: ')) continue
-          const data = line.slice(6)
-          if (data === '[DONE]') { setStreaming(false); return }
-          try {
-            const ev = JSON.parse(data)
-            if (ev.type === 'content' && ev.text) {
-              setMessages((prev) => {
-                const next = [...prev]
-                next[next.length - 1] = { ...next[next.length - 1], text: next[next.length - 1].text + ev.text }
-                return next
-              })
-            } else if (ev.type === 'error') {
-              setMessages((prev) => {
-                const next = [...prev]
-                next[next.length - 1] = { role: 'assistant', text: ev.message || 'Something went wrong' }
-                return next
-              })
-              setStreaming(false)
-            }
-          } catch { /* ignore malformed SSE lines */ }
-        }
-      }
+        },
+        (data) => {
+          const ev = data as { type?: string; text?: string; message?: string }
+          if (ev.type === 'content' && ev.text) {
+            setMessages((prev) => {
+              const next = [...prev]
+              next[next.length - 1] = { ...next[next.length - 1], text: next[next.length - 1].text + ev.text }
+              return next
+            })
+          } else if (ev.type === 'error') {
+            setMessages((prev) => {
+              const next = [...prev]
+              next[next.length - 1] = { role: 'assistant', text: ev.message || 'Something went wrong' }
+              return next
+            })
+          }
+        },
+      )
     } catch (e) {
       setMessages((prev) => {
         const next = [...prev]

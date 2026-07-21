@@ -17,7 +17,7 @@ from app.cappe.services.reminders import reminder_due
 from app.core.services.email._shared import _is_reserved_test_domain
 
 from ..celery_app import celery_app
-from ..utils import get_db_connection
+from ..utils import get_db_connection, scheduler_settings_row
 
 REMINDER_WINDOW_HOURS = 24
 DEFAULT_MAX_PER_CYCLE = 200
@@ -26,12 +26,7 @@ DEFAULT_MAX_PER_CYCLE = 200
 async def _run() -> dict:
     conn = await get_db_connection()
     try:
-        try:
-            row = await conn.fetchrow(
-                "SELECT enabled, max_per_cycle FROM scheduler_settings WHERE task_key = 'cappe_booking_reminders'"
-            )
-        except Exception:
-            row = None
+        row = await scheduler_settings_row(conn, "cappe_booking_reminders")
         if not row:
             return {"skipped": True, "reason": "scheduler_not_registered"}
         if not row["enabled"]:

@@ -7,7 +7,8 @@ Backend routes for matcha-lite's Incident Reporting product. Package was split f
 | File | Concern | Endpoints |
 |---|---|---|
 | `__init__.py` | Routing assembly + external re-exports | — |
-| `_shared.py` | Cross-cutting helpers + shared constants | — |
+| `_shared.py` | Cross-cutting helpers + shared constants (DB-backed card dispatchers `next_case_step` / `ensure_osha_case_rows` / `_persist_osha_emergency_alert` stay here and import the builders from `_cards`) | — |
+| `_cards.py` | Pure IR Copilot card builders (`build_*_card`) + their constants (`OSHA_INJURY_TYPES/_LABELS`, `OSHA_EMERGENCY_*`, `ROOT_CAUSE_*`) + `compose_root_cause_text`. Self-contained (stdlib + `osha_privacy` only); `_shared` **re-exports every name**, so `from ._shared import build_osha_...` keeps working (L5 split 2026-07-20) | — |
 | `crud.py` | Collection root + per-incident lifecycle | 7 |
 | `copilot.py` | IR Copilot transcript, stream, accept, skip, close | 5 |
 | `analytics.py` | Summary, trends, locations, WC metrics, risk-matrix, risk-insights, consistency | 7 |

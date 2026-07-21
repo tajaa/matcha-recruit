@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Building2, Check, Download, FileText, Globe, Loader2, Pencil, X } from 'lucide-react'
 import { Button } from '../../../components/ui'
 import { HelpHint } from '../../../components/broker/HelpHint'
@@ -6,6 +6,7 @@ import {
   updatePilotSession, generatePilotMemo, downloadPilotPacket,
   type ContextPreview, type PilotSession,
 } from '../../../api/broker/brokerPilot'
+import { SystemsStrip } from '../../../components/pilot/SystemsStrip'
 import { LABEL, NATIVE_KEYS, SOURCE_META, deriveSystems, fmtWhen } from './shared'
 
 interface MastheadProps {
@@ -24,6 +25,7 @@ export function Masthead({ session, context, onChanged }: MastheadProps) {
 
   const hasAssistant = (session.messages ?? []).some((m) => m.role === 'assistant')
   const latestPacket = (session.packets ?? [])[0]
+  const systems = deriveSystems(context)
 
   const saveTitle = async () => {
     const next = title.trim()
@@ -103,7 +105,20 @@ export function Masthead({ session, context, onChanged }: MastheadProps) {
         </div>
       </div>
 
-      <SystemsStrip key={session.id} context={context} />
+      <SystemsStrip
+        key={session.id}
+        sourceMeta={SOURCE_META}
+        total={context ? context.total : null}
+        countFor={(k) => (systems[k]?.length ?? 0)}
+        titleFor={(s, count) =>
+          count > 0
+            ? `${s.label}: ${count} record(s)`
+            : s.darkHint
+              ? `${s.label}: ${s.darkHint}`
+              : NATIVE_KEYS.has(s.key)
+                ? `${s.label}: generated natively once this client operates on Matcha`
+                : `${s.label}: none on file`}
+      />
 
       {generating && (
         <div className="flex items-center gap-2 border-t border-emerald-500/20 bg-emerald-500/[0.04] px-5 py-1.5">
@@ -113,55 +128,6 @@ export function Masthead({ session, context, onChanged }: MastheadProps) {
           </span>
         </div>
       )}
-    </div>
-  )
-}
-
-function SystemsStrip({ context }: { context: ContextPreview | null }) {
-  const [shown, setShown] = useState(false)
-  useEffect(() => {
-    const id = requestAnimationFrame(() => setShown(true))
-    return () => cancelAnimationFrame(id)
-  }, [])
-
-  const systems = deriveSystems(context)
-
-  return (
-    <div className="mt-3 flex items-stretch divide-x divide-white/[0.06] overflow-x-auto border-t border-white/[0.06]">
-      <div className="flex shrink-0 items-center gap-2.5 py-2.5 pl-5 pr-4">
-        <span className={LABEL}>In scope</span>
-        <span className="font-mono text-sm font-semibold tabular-nums text-emerald-400">
-          {context ? context.total : '·'}
-        </span>
-        <span className="font-mono text-[10px] uppercase tracking-wide text-zinc-600">records</span>
-      </div>
-      {SOURCE_META.map((s, i) => {
-        const records = systems[s.key]
-        const active = !!records && records.length > 0
-        const Icon = s.icon
-        return (
-          <div
-            key={s.key}
-            className={`flex shrink-0 items-center gap-2 px-4 py-2.5 transition-opacity duration-300 motion-reduce:transition-none ${shown ? 'opacity-100' : 'opacity-0'}`}
-            style={{ transitionDelay: `${i * 40}ms` }}
-            title={active
-              ? `${s.label}: ${records.length} record(s)`
-              : s.darkHint
-                ? `${s.label}: ${s.darkHint}`
-                : NATIVE_KEYS.has(s.key)
-                  ? `${s.label}: generated natively once this client operates on Matcha`
-                  : `${s.label}: none on file`}
-          >
-            <Icon className={`h-3.5 w-3.5 ${active ? 'text-emerald-400' : 'text-zinc-700'}`} />
-            <span className={`text-[10px] font-medium uppercase tracking-[0.15em] ${active ? 'text-zinc-300' : 'text-zinc-600'}`}>
-              {s.label}
-            </span>
-            <span className={`font-mono text-xs tabular-nums ${active ? 'text-zinc-100' : 'text-zinc-700'}`}>
-              {active ? records.length : '—'}
-            </span>
-          </div>
-        )
-      })}
     </div>
   )
 }

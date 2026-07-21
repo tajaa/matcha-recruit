@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
+import { useAsync } from '../../../hooks/useAsync'
 import { fetchIntegrityCheck, runStalenessCheck } from '../../../api/compliance/compliance'
-import type { IntegrityCheckResponse } from '../../../api/compliance/compliance'
 
 function Section({ title, count, children }: { title: string; count: number; children: React.ReactNode }) {
   const [open, setOpen] = useState(count > 0)
@@ -33,20 +33,14 @@ function stalenessLabel(level: string) {
 }
 
 export default function IntegrityTab() {
-  const [data, setData] = useState<IntegrityCheckResponse | null>(null)
-  const [loading, setLoading] = useState(true)
   const [running, setRunning] = useState(false)
   const [stateFilter, setStateFilter] = useState('')
 
-  const load = () => {
-    setLoading(true)
-    fetchIntegrityCheck(stateFilter ? { state: stateFilter } : undefined)
-      .then(setData)
-      .catch(() => {})
-      .finally(() => setLoading(false))
-  }
-
-  useEffect(() => { load() }, [stateFilter])
+  const { data, loading, reload: load } = useAsync(
+    () => fetchIntegrityCheck(stateFilter ? { state: stateFilter } : undefined),
+    [stateFilter],
+    null,
+  )
 
   const handleRunCheck = async () => {
     setRunning(true)

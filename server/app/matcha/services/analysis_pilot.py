@@ -29,7 +29,7 @@ import logging
 from datetime import datetime, timezone
 
 from app.core.services.genai_client import get_genai_client
-from app.core.services.pdf import safe_url_fetcher
+from app.core.services.pdf import render_pdf
 
 from . import analysis_packs as packs
 from .analysis_packs.base import to_float
@@ -793,8 +793,7 @@ def _report_html(session: dict, corpus: dict, memo: dict, datasets: list[dict],
 
 async def _render_pdf(html_str: str) -> bytes:
     def _r() -> bytes:
-        from weasyprint import HTML
-        return HTML(string=html_str, url_fetcher=safe_url_fetcher).write_pdf()
+        return render_pdf(html_str)
     return await asyncio.to_thread(_r)
 
 

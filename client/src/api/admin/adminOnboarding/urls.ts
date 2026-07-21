@@ -1,27 +1,24 @@
 /**
- * Absolute stream URLs for the onboarding wizard — consumed via fetch +
- * ReadableStream (not EventSource) so the Authorization header can be attached.
+ * Stream paths for the onboarding wizard. These answer with SSE, not JSON — the
+ * stream IS the work (the server projects as it yields), so callers drive them
+ * through `postSSE` (api/sse.ts) rather than `api.post`, which would choke
+ * parsing `data: {...}`.
+ *
+ * Paths, not absolute URLs: postSSE prepends the API base itself.
  */
 
-// Absolute URL for the SSE enrichment stream — consumed via fetch + ReadableStream
-// (not EventSource) so the Authorization header can be attached. Mirrors
-// getComplianceCheckUrl in api/compliance.ts.
-export function getEnrichStreamUrl(companyId: string): string {
-  const base = import.meta.env.VITE_API_URL || '/api'
-  return `${base}/admin/onboarding/enrich/${companyId}/stream`
+/** SSE enrichment stream — enriches a company from its roster. */
+export function getEnrichStreamPath(companyId: string): string {
+  return `/admin/onboarding/enrich/${companyId}/stream`
 }
 
-// SSE selective gap-fill — researches only the chosen (jurisdiction, category)
-// items. POST with a JSON body, consumed via fetch + ReadableStream.
-export function getResearchGapsUrl(companyId: string): string {
-  const base = import.meta.env.VITE_API_URL || '/api'
-  return `${base}/admin/onboarding/research-gaps/${companyId}/stream`
+/** SSE selective gap-fill — researches only the chosen (jurisdiction, category)
+ *  items. POSTed with a JSON body. */
+export function getResearchGapsPath(companyId: string): string {
+  return `/admin/onboarding/research-gaps/${companyId}/stream`
 }
 
-/** Per-location compliance re-check. Answers with SSE, not JSON — the stream IS
- *  the work (the server projects as it yields), so callers must fetch+drain it
- *  rather than go through `api.post`, which would choke parsing `data: {...}`. */
-export function getLocationCheckUrl(locationId: string, companyId: string): string {
-  const base = import.meta.env.VITE_API_URL || '/api'
-  return `${base}/compliance/locations/${locationId}/check?company_id=${companyId}`
+/** Per-location compliance re-check, scoped to a company (admin view). */
+export function getLocationCheckPath(locationId: string, companyId: string): string {
+  return `/compliance/locations/${locationId}/check?company_id=${companyId}`
 }

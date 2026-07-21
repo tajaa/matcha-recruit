@@ -1,7 +1,8 @@
-import { useState, useEffect, type FormEvent, type ChangeEvent, type ReactNode } from 'react'
+import { useState, type FormEvent, type ChangeEvent, type ReactNode } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { ArrowLeft, Loader2, AlertCircle, Gauge, Shield, Upload, Link2 as LinkIcon, CheckCircle2, Clock, CircleDashed, Building2, Sparkles, ShieldCheck } from 'lucide-react'
-import { Card } from '../../components/ui'
+import { Card, MetricStrip } from '../../components/ui'
+import { useAsync } from '../../hooks/useAsync'
 import { HelpHint } from '../../components/broker/HelpHint'
 import { SubmissionPanel } from '../../components/broker/SubmissionPanel'
 import { QuotingDeskPanel } from '../../components/broker/QuotingDeskPanel'
@@ -100,9 +101,6 @@ function IntakeStatusBadge({ intake }: { intake: ExternalClientDetail['intake'] 
 
 export default function BrokerExternalClientDetail() {
   const { clientId } = useParams<{ clientId: string }>()
-  const [data, setData] = useState<ExternalClientDetail | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(false)
   const [editWc, setEditWc] = useState(false)
   const [wcForm, setWcForm] = useState<Record<string, string>>({})
   const [savingWc, setSavingWc] = useState(false)
@@ -113,11 +111,10 @@ export default function BrokerExternalClientDetail() {
   const [intakeBusy, setIntakeBusy] = useState(false)
   const [copied, setCopied] = useState(false)
 
-  useEffect(() => {
-    if (!clientId) return
-    setLoading(true); setError(false)
-    fetchExternalClientDetail(clientId).then(setData).catch(() => setError(true)).finally(() => setLoading(false))
-  }, [clientId])
+  const { data, loading, error, setData } = useAsync(
+    () => (clientId ? fetchExternalClientDetail(clientId) : Promise.resolve(null)),
+    [clientId],
+  )
 
   function openWcEditor() {
     if (!data) return
@@ -286,7 +283,7 @@ export default function BrokerExternalClientDetail() {
 
         {!editWc && (
           <>
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-px bg-white/10 border border-white/10 rounded-2xl overflow-hidden mb-4">
+            <MetricStrip cols="grid-cols-2 md:grid-cols-5" className="mb-4">
               <Cell label="TRIR" value={wc.trir ?? '—'} sub={benchRatio ? `${benchRatio.toFixed(1)}× bench` : 'no benchmark'} tone={WC_TONE[wc.severity_band]} />
               <Cell label="DART" value={wc.dart_rate ?? '—'} />
               <Cell label="Recordables" value={wc.recordable_cases} sub={`${wc.dart_cases} DART`} />
@@ -294,7 +291,7 @@ export default function BrokerExternalClientDetail() {
                 tone={wc.current_emr != null ? (wc.current_emr > 1 ? 'text-red-400' : wc.current_emr < 1 ? 'text-emerald-400' : 'text-zinc-300') : 'text-zinc-600'} />
               <Cell label="State rate" value={wc.state_rate ? `${wc.state_rate.loss_cost_change_pct > 0 ? '+' : ''}${wc.state_rate.loss_cost_change_pct}%` : '—'}
                 tone={wc.state_rate ? rateTone(wc.state_rate.trend) : 'text-zinc-600'} sub={client.primary_state ?? undefined} />
-            </div>
+            </MetricStrip>
             {wc.has_data ? (
               <div className="grid grid-cols-3 gap-3 text-center text-[12px]">
                 <div className="rounded-lg bg-zinc-900/60 py-2"><div className="font-mono text-zinc-200">{wc.claim_breakdown.cumulative_trauma}/{wc.claim_breakdown.acute}</div><div className="text-[10px] text-zinc-500 mt-0.5">CT / acute</div></div>
@@ -455,13 +452,13 @@ function PropertyCard({ clientId, property, onSaved }: { clientId: string; prope
       </div>
       {!edit ? (
         property.has_data ? (
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-px bg-white/10 border border-white/10 rounded-2xl overflow-hidden">
+          <MetricStrip cols="grid-cols-2 md:grid-cols-5">
             <Cell label="TIV" value={_pmoney(property.total_tiv)} sub={`${property.building_count} bldg`} />
             <Cell label="Construction" value={property.worst_construction ? (PROP_CON_LABEL[property.worst_construction] ?? property.worst_construction) : '—'} sub={property.sprinklered_pct != null ? `${property.sprinklered_pct}% spr` : undefined} />
             <Cell label="Ins-to-value" value={itv != null ? `${itv}%` : '—'} tone={itv == null ? 'text-zinc-600' : itv < 90 ? 'text-amber-400' : 'text-emerald-400'} />
             <Cell label="Cat tier" value={(property.worst_cat_tier ?? '—').toUpperCase()} tone={property.worst_cat_tier ? PROP_CAT_TONE[property.worst_cat_tier] : 'text-zinc-600'} />
             <Cell label="Premium" value={_pmoney(property.annual_premium)} sub={property.carrier ?? undefined} />
-          </div>
+          </MetricStrip>
         ) : <p className="text-sm text-zinc-500">No property on file. Key in the client's Statement-of-Values summary to score property risk.</p>
       ) : (
         <form onSubmit={save}>

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { api, authStreamHeaders } from '../../../../api/client'
+import { api } from '../../../../api/client'
+import { postSSE } from '../../../../api/sse'
 import { extractCitation } from '../utils'
 import type { PendingItem, ReviewGroup, ApproveResult, UncodifiedItem } from '../types'
 import type { FitGatedRow } from '../../../../api/admin/adminOnboarding'
@@ -103,42 +104,30 @@ export function usePipeline({
     const body = item.type === 'category'
       ? { item_type: 'category', request_id: item.id, city: item.city, state: item.state, county: item.county, categories: categoryKeys }
       : { item_type: 'vertical', company_id: item.company_id, categories: categoryKeys }
-    const base = import.meta.env.VITE_API_URL || '/api'
-    authStreamHeaders().then((headers) => fetch(`${base}/admin/pending-research/run`, {
-      method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-    })).then(async (res) => {
-      const reader = res.body?.getReader()
-      const decoder = new TextDecoder()
-      if (!reader) { setRunningId(null); return }
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        for (const line of decoder.decode(value).split('\n')) {
-          if (line.startsWith(': ')) continue
-          if (!line.startsWith('data: ')) continue
-          const data = line.slice(6)
-          if (data === '[DONE]') {
-            setRunningId(null)
-            setSelected((prev) => { const next = { ...prev }; delete next[rowId]; return next })
-            fetchRequests()
-            // Pull the freshly-staged drafts and scroll to Review — otherwise
-            // the results "vanish" (they're staged, not live) with no signal.
-            setReviewResult(null)
-            setJustStaged(true)
-            fetchReview().then(() => reviewRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
-            return
-          }
-          try {
-            const ev = JSON.parse(data)
-            if (ev.type === 'error') { setRunMessages((p) => [...p, `Error: ${ev.message}`]); setRunningId(null); return }
-            if (ev.message) setRunMessages((p) => [...p, ev.message])
-          } catch {}
-        }
-      }
-      setRunningId(null)
-    }).catch(() => setRunningId(null))
+    let failed = false
+    postSSE(
+      '/admin/pending-research/run',
+      body,
+      (data) => {
+        const ev = data as { type?: string; message?: string }
+        if (ev.type === 'error') { setRunMessages((p) => [...p, `Error: ${ev.message}`]); failed = true; return true }
+        const msg = ev.message
+        if (msg) setRunMessages((p) => [...p, msg])
+      },
+    )
+      .then(() => {
+        if (failed) return
+        setSelected((prev) => { const next = { ...prev }; delete next[rowId]; return next })
+        fetchRequests()
+        // Pull the freshly-staged drafts and scroll to Review — otherwise
+        // the results "vanish" (they're staged, not live) with no signal.
+        setReviewResult(null)
+        setJustStaged(true)
+        void fetchReview().then(() => reviewRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+      })
+      .catch(() => {})
+      .finally(() => setRunningId(null))
   }
-
   async function approveReview(ids: string[], group: ReviewGroup) {
     const res = await api.post<{ activated: number; published: number; codified: number; uncodified: number; results?: ApproveResult[] }>(
       '/admin/research-review/approve',

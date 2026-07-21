@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
+import { useAsync } from '../../hooks/useAsync'
 import { api } from '../../api/client'
 import { Badge, Button, Textarea, Select, type BadgeVariant } from '../ui'
 
@@ -24,18 +25,10 @@ export function NoteThread({
   noteTypes = defaultNoteTypes,
   maxHeight = 'max-h-96',
 }: NoteThreadProps) {
-  const [notes, setNotes] = useState<Note[]>([])
-  const [loading, setLoading] = useState(true)
+  const { data: notes, loading, setData: setNotes } = useAsync(() => api.get<Note[]>(endpoint), [endpoint], [])
   const [content, setContent] = useState('')
   const [noteType, setNoteType] = useState(noteTypes[0]?.value ?? 'general')
   const [posting, setPosting] = useState(false)
-
-  useEffect(() => {
-    api.get<Note[]>(endpoint)
-      .then(setNotes)
-      .catch(() => setNotes([]))
-      .finally(() => setLoading(false))
-  }, [endpoint])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()

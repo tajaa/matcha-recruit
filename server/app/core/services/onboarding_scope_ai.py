@@ -21,6 +21,7 @@ import json
 import logging
 import os
 from typing import Any, Optional
+from app.core.services.model_json import strip_json_fence as _strip_json_fence
 
 logger = logging.getLogger(__name__)
 
@@ -274,6 +275,7 @@ def _gemini_client():
     kept for defense-in-depth.
     """
     from google import genai
+    from app.core.services.genai_client import get_genai_client
     from app.config import get_settings, load_settings
 
     try:
@@ -284,18 +286,7 @@ def _gemini_client():
     api_key = os.getenv("GEMINI_API_KEY") or settings.gemini_api_key
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY not configured")
-    return genai.Client(api_key=api_key)
-
-
-def _strip_json_fence(text: str) -> str:
-    text = (text or "").strip()
-    if text.startswith("```json"):
-        text = text[7:]
-    elif text.startswith("```"):
-        text = text[3:]
-    if text.endswith("```"):
-        text = text[:-3]
-    return text.strip()
+    return get_genai_client(api_key=api_key)
 
 
 async def _fetch_category_slugs(conn) -> list[str]:

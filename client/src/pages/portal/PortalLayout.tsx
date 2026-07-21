@@ -5,7 +5,7 @@ import PortalSidebar from '../../components/portal/PortalSidebar'
 import { useMe } from '../../hooks/useMe'
 
 export default function PortalLayout() {
-  const { me, loading } = useMe()
+  const { me, loading, authFailed } = useMe()
   const { pathname } = useLocation()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
@@ -21,8 +21,22 @@ export default function PortalLayout() {
     )
   }
 
-  if (!me) {
+  // Not `!me`: useMe reports a null user for ANY /auth/me failure, so
+  // redirecting on that logs a signed-in user out over a transient 502 and
+  // discards where they were. Only a real 401/403 (authFailed) means the
+  // session is gone. Same fix as AppLayout / RequireRole / WerkLiteRoutes.
+  if (authFailed) {
     return <Navigate to={`/login?next=${encodeURIComponent(pathname)}`} replace />
+  }
+
+  // Session state unknown (the lookup failed, not a 401): render a recoverable
+  // message rather than the portal shell or a redirect.
+  if (!me) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-zinc-950 px-6 text-center text-sm text-zinc-500">
+        Could not verify your session. Check your connection and reload.
+      </div>
+    )
   }
 
   // Employees only — others get redirected to their tenant root. Fail-closed:

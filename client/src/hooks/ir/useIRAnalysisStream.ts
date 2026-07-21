@@ -1,7 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { authStreamHeaders } from '../../api/client'
-
-const BASE = import.meta.env.VITE_API_URL ?? '/api'
+import { postSSE } from '../../api/sse'
 
 export type IRStreamAnalysisType = 'root-cause' | 'recommendations' | 'similar'
 
@@ -36,62 +34,36 @@ export function useIRAnalysisStream(incidentId: string) {
       setState({ streaming: true, messages: [], result: null, error: '', analysisType: type })
 
       const endpoint = type === 'similar' ? 'similar' : type
-      const url = `${BASE}/ir/incidents/${incidentId}/analyze/${endpoint}`
 
-      authStreamHeaders({ 'Content-Type': 'application/json' }).then((headers) =>
-        fetch(url, {
-          method: 'POST',
-          headers,
-          signal: ctrl.signal,
-        }),
+      postSSE(
+        `/ir/incidents/${incidentId}/analyze/${endpoint}`,
+        undefined,
+        (data) => {
+          const msg = data as { type?: string; message?: string; result?: unknown; data?: unknown }
+          if (msg.type === 'phase') {
+            setState((s) => ({ ...s, messages: [...s.messages, msg.message ?? ''] }))
+          }
+          if (msg.type === 'cached' || msg.type === 'complete') {
+            setState((s) => ({ ...s, result: (msg.result ?? msg.data) as typeof s.result, streaming: false }))
+            return true
+          }
+          if (msg.type === 'error') {
+            setState((s) => ({ ...s, error: msg.message ?? 'Analysis failed', streaming: false }))
+            return true
+          }
+        },
+        { signal: ctrl.signal },
       )
-        .then(async (res) => {
-          if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
-          const reader = res.body?.getReader()
-          if (!reader) throw new Error('No response body')
-          const decoder = new TextDecoder()
-          let buf = ''
-
-          while (true) {
-            const { done, value } = await reader.read()
-            if (done) break
-            buf += decoder.decode(value, { stream: true })
-            const lines = buf.split('\n')
-            buf = lines.pop() ?? ''
-
-            for (const line of lines) {
-              if (!line.startsWith('data: ')) continue
-              const raw = line.slice(6).trim()
-              if (raw === '[DONE]') {
-                setState((s) => ({ ...s, streaming: false }))
-                return
-              }
-              try {
-                const msg = JSON.parse(raw)
-                if (msg.type === 'phase') {
-                  setState((s) => ({ ...s, messages: [...s.messages, msg.message ?? ''] }))
-                }
-                if (msg.type === 'cached' || msg.type === 'complete') {
-                  setState((s) => ({ ...s, result: msg.result ?? msg.data, streaming: false }))
-                  return
-                }
-                if (msg.type === 'error') {
-                  setState((s) => ({ ...s, error: msg.message ?? 'Analysis failed', streaming: false }))
-                  return
-                }
-              } catch { /* skip malformed */ }
-            }
-          }
-          setState((s) => ({ ...s, streaming: false }))
-        })
         .catch((e) => {
-          if (e.name !== 'AbortError') {
-            setState((s) => ({
-              ...s,
-              error: e instanceof Error ? e.message : 'Stream failed',
-              streaming: false,
-            }))
-          }
+          if (ctrl.signal.aborted) return
+          setState((s) => ({
+            ...s,
+            error: e instanceof Error ? e.message : 'Stream failed',
+            streaming: false,
+          }))
+        })
+        .finally(() => {
+          if (!ctrl.signal.aborted) setState((s) => ({ ...s, streaming: false }))
         })
     },
     [incidentId],

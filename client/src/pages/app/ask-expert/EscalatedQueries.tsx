@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { relativeTime as timeAgo } from '../../../utils/format'
 import { Card, Badge, Button } from '../../../components/ui'
 import { MessageSquareWarning, ExternalLink, X, Check, Eye } from 'lucide-react'
 import {
@@ -29,16 +30,6 @@ const STATUS_BADGE: Record<string, 'warning' | 'neutral' | 'success' | 'danger'>
   in_review: 'neutral',
   resolved: 'success',
   dismissed: 'danger',
-}
-
-function timeAgo(dateStr: string) {
-  const diff = Date.now() - new Date(dateStr).getTime()
-  const mins = Math.floor(diff / 60000)
-  if (mins < 60) return `${mins}m ago`
-  const hrs = Math.floor(mins / 60)
-  if (hrs < 24) return `${hrs}h ago`
-  const days = Math.floor(hrs / 24)
-  return `${days}d ago`
 }
 
 export default function EscalatedQueries() {

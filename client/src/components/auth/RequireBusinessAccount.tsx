@@ -12,7 +12,7 @@ interface Props {
 }
 
 export default function RequireBusinessAccount({ children }: Props) {
-  const { me, loading } = useMe()
+  const { me, loading, authFailed } = useMe()
   const location = useLocation()
 
   if (loading) {
@@ -26,9 +26,24 @@ export default function RequireBusinessAccount({ children }: Props) {
     )
   }
 
-  if (!me) {
+  // Not `!me`: useMe reports a null user for ANY /auth/me failure, so
+  // redirecting on that logs a signed-in user out over a transient 502 and
+  // discards where they were. Only a real 401/403 (authFailed) means the
+  // session is gone. Same fix as AppLayout / RequireRole / WerkLiteRoutes.
+  if (authFailed) {
     const next = encodeURIComponent(location.pathname + location.search)
     return <Navigate to={`/login?next=${next}`} replace />
+  }
+
+  if (!me) {
+    return (
+      <div
+        style={{ backgroundColor: BG, color: INK, minHeight: '100vh' }}
+        className="flex items-center justify-center px-6 text-center text-sm"
+      >
+        Could not verify your session. Check your connection and reload.
+      </div>
+    )
   }
 
   if (me.user.role !== 'client') {

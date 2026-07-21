@@ -7,7 +7,7 @@ This scheduler runs periodic return-to-work and accommodation stall checks.
 import asyncio
 
 from ..celery_app import celery_app
-from ..utils import get_db_connection
+from ..utils import get_db_connection, scheduler_settings_row
 
 
 async def _run_leave_agent_orchestration() -> dict:
@@ -17,12 +17,7 @@ async def _run_leave_agent_orchestration() -> dict:
     conn = await get_db_connection()
     try:
         # Guard against scheduler table not existing during deploy ordering.
-        try:
-            sched_row = await conn.fetchrow(
-                "SELECT enabled, max_per_cycle FROM scheduler_settings WHERE task_key = 'leave_agent_orchestration'"
-            )
-        except Exception:
-            sched_row = None
+        sched_row = await scheduler_settings_row(conn, "leave_agent_orchestration")
 
         if sched_row and not sched_row["enabled"]:
             print("[Leave Agent] Scheduler disabled, skipping.")

@@ -1,13 +1,17 @@
 // Broker Pilot API client (Broker Pro). Sessions CRUD + document uploads +
-// grounded chat (SSE) + memo generation/download. The chat stream is a raw
-// fetch (like legalDefense.ts / IRCopilotPanel) since api/client.ts doesn't
-// stream; everything else goes through the typed `api` helper.
-import { api, authStreamHeaders } from '../client'
+// grounded chat (SSE) + memo generation/download. The chat stream goes through
+// api/sse.ts (which api/client.ts can't do); everything else uses the typed
+// `api` helper.
+import { api } from '../client'
+import {
+  streamPilotChat as sharedStreamPilotChat,
+  type ChatHandlers as SharedChatHandlers,
+  type SessionStatus,
+} from '../sse'
 
-const BASE = import.meta.env.VITE_API_URL ?? '/api'
+export type { SessionStatus } from '../sse'
 
 export type SubjectKind = 'company' | 'external'
-export type SessionStatus = 'active' | 'closed'
 export type DocStatus = 'processing' | 'ready' | 'text_only' | 'failed'
 export type DocType =
   | 'loss_run' | 'dec_page' | 'quote' | 'carrier_letter'
@@ -184,65 +188,36 @@ export type ChatResult = {
 /** The documents the mode needs but doesn't have — the 409 the chat gate raises. */
 export type MissingDoc = { doc_type: DocType; label: string; hint: string }
 
-export type ChatHandlers = {
-  onStatus?: (message: string) => void
-  onResult?: (data: ChatResult) => void
-  onError?: (message: string) => void
+export type ChatHandlers = SharedChatHandlers<ChatResult> & {
   /** The mode's required documents aren't in yet. Re-send with {force:true} to answer anyway. */
   onBlocked?: (missing: MissingDoc[]) => void
 }
 
-// Grounded chat turn over SSE — raw fetch + ReadableStream (api/client.ts can't
-// stream). Mirrors the legalDefense.ts / IRCopilotPanel consumption pattern.
+// Grounded chat turn over SSE. Pass a `signal` to abort the turn (e.g. when the
+// user switches sessions mid-stream); an aborted turn resolves quietly.
 export async function streamPilotChat(
   sessionId: string,
   message: string,
   h: ChatHandlers,
-  opts: { force?: boolean } = {},
+  opts: { force?: boolean; signal?: AbortSignal } = {},
 ): Promise<void> {
-  // authStreamHeaders proactively refreshes a near-expiry token — a stream
-  // can't be replayed after a mid-flight 401.
   const qs = opts.force ? '?force=true' : ''
-  const res = await fetch(`${BASE}/broker/pilot/sessions/${sessionId}/chat${qs}`, {
-    method: 'POST',
-    headers: await authStreamHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({ message }),
-  })
-  if (!res.ok || !res.body) {
-    // The document gate answers before the stream opens, so its 409 arrives as a
-    // plain JSON body. This is the one error whose payload we need — everything
-    // else stays a status-code message.
-    if (res.status === 409) {
-      const detail = await res.json().then((b) => b?.detail).catch(() => null)
-      if (detail?.code === 'missing_required_documents') {
-        h.onBlocked?.((detail.missing ?? []) as MissingDoc[])
-        return
-      }
-    }
-    h.onError?.(`Chat failed (${res.status})`)
-    return
-  }
-  const reader = res.body.getReader()
-  const decoder = new TextDecoder()
-  let buf = ''
-  while (true) {
-    const { value, done } = await reader.read()
-    if (done) break
-    buf += decoder.decode(value, { stream: true })
-    const events = buf.split('\n\n')
-    buf = events.pop() || ''
-    for (const ev of events) {
-      if (!ev.startsWith('data: ')) continue
-      const payload = ev.slice(6)
-      if (payload === '[DONE]') return
-      try {
-        const data = JSON.parse(payload)
-        if (data.type === 'status') h.onStatus?.(data.message)
-        else if (data.type === 'result') h.onResult?.(data.data)
-        else if (data.type === 'error') h.onError?.(data.message)
-      } catch {
-        /* ignore partial/non-JSON frames */
-      }
-    }
-  }
+  await sharedStreamPilotChat<ChatResult>(
+    `/broker/pilot/sessions/${sessionId}/chat${qs}`,
+    { message },
+    h,
+    {
+      signal: opts.signal,
+      // The document gate answers before the stream opens, so its 409 arrives as
+      // a plain JSON body. This is the one error whose payload we need —
+      // everything else falls through to the shared onError.
+      onHttpError: (err) => {
+        if (err.status !== 409) return
+        const detail = (err.body as { detail?: { code?: string; missing?: MissingDoc[] } } | null)?.detail
+        if (detail?.code !== 'missing_required_documents') return
+        h.onBlocked?.(detail.missing ?? [])
+        return true
+      },
+    },
+  )
 }

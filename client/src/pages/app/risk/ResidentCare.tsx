@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { HeartPulse, ShieldPlus, Car, Plus, Trash2, Loader2, AlertTriangle, Check, FileDown } from 'lucide-react'
-import { Card } from '../../../components/ui'
+import { HeartPulse, ShieldPlus, Car, Plus, Trash2, AlertTriangle, Check } from 'lucide-react'
+import { Card, MetricStrip } from '../../../components/ui'
+import { inputCls, today, RegisterSpinner, DownloadButton } from '../../../components/register/registerKit'
 import {
   fetchResidentCareSummary, fetchSafetyPrograms, createSafetyProgram, deleteSafetyProgram, suggestSafetyPrograms,
   fetchMvrReviews, createMvrReview, updateMvrReview, deleteMvrReview, downloadResidentCareAsset,
@@ -9,8 +10,6 @@ import type { SafetyProgram, MvrReview, ResidentCareSummary, ProgramType, MvrSta
 import { PROGRAM_LABELS, PROGRAM_TYPES } from '../../../types/residentCare'
 import { AiSuggest } from '../../../components/widgets/AiSuggest'
 
-const today = () => new Date().toISOString().slice(0, 10)
-const inputCls = 'w-full bg-zinc-900 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500'
 const MVR_TONE: Record<MvrStatus, string> = { clear: 'text-emerald-400', flagged: 'text-red-400', pending: 'text-amber-400' }
 
 export default function ResidentCare() {
@@ -36,7 +35,7 @@ export default function ResidentCare() {
   }
 
   if (loading) {
-    return <div className="flex items-center justify-center h-64"><Loader2 className="h-6 w-6 text-zinc-500 animate-spin" /></div>
+    return <RegisterSpinner />
   }
 
   return (
@@ -48,19 +47,17 @@ export default function ResidentCare() {
           </h1>
           <p className="text-sm text-zinc-500 mt-1">Your resident-care risk-management program — safety programs, MVR reviews, and credentialing currency. A documented program is a valuable asset to highlight for prospective insurers.</p>
         </div>
-        <button onClick={download} disabled={downloading} className="inline-flex items-center gap-1.5 text-sm text-zinc-900 bg-zinc-100 hover:bg-white rounded-lg px-3 py-2 font-medium disabled:opacity-50 shrink-0">
-          {downloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileDown className="h-4 w-4" />} Insurer asset
-        </button>
+        <DownloadButton onClick={download} downloading={downloading} label="Insurer asset" />
       </div>
 
       {/* Summary strip */}
       {summary && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-px bg-white/10 border border-white/10 rounded-2xl overflow-hidden">
+        <MetricStrip cols="grid-cols-2 md:grid-cols-4">
           <Stat label="Active programs" value={summary.programs.active} good={summary.programs.active > 0} />
           <Stat label="MVR current" value={`${summary.mvr.current}/${summary.mvr.total}`} good={summary.mvr.overdue === 0} />
           <Stat label="MVR overdue" value={summary.mvr.overdue} good={summary.mvr.overdue === 0} invert />
           <Stat label="Credentialing" value={summary.credentialing.current_pct != null ? `${summary.credentialing.current_pct}%` : '—'} good={(summary.credentialing.current_pct ?? 100) >= 90} />
-        </div>
+        </MetricStrip>
       )}
 
       <SafetyProgramsSection programs={programs} reload={load} />

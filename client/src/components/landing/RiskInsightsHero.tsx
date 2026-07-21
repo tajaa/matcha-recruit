@@ -7,8 +7,8 @@ import { Area, AreaChart, ResponsiveContainer, XAxis, YAxis } from 'recharts'
 // ivory marketing tokens) mirroring /app/ir/risk-insights. Mock data — but it
 // MOVES continuously: the trend area chart scrolls + breathes a stacked hump,
 // and the worker-comp posture numbers count up then live-jitter forever.
-// (The risk-matrix table lives in IrAnalysisPanel further down the page, so it
-// is intentionally NOT duplicated here.)
+// (No risk-matrix table here — that surface was retired with the rest of the
+// unused landing panels.)
 
 // ---------------------------------------------------------------------------
 // Moving incident-trend area chart — a stacked hump that scrolls and breathes

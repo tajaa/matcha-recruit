@@ -7,7 +7,6 @@ safety programs, MVR-review currency, and credentialing currency (from the
 existing employee_credentials data). Deterministic PDF (WeasyPrint, SSRF-guarded).
 """
 
-import asyncio
 import html
 from uuid import UUID
 
@@ -135,14 +134,6 @@ def _asset_html(company_name: str, s: dict, programs: list[dict], mvr: list[dict
 
 
 async def render_asset_pdf(company_name: str, s: dict, programs: list[dict], mvr: list[dict]) -> bytes:
-    def _render() -> bytes:
-        from weasyprint import HTML, default_url_fetcher
+    from app.core.services.pdf import render_pdf_async
 
-        def _no_net(url: str):
-            if url.startswith("data:"):
-                return default_url_fetcher(url)
-            raise ValueError("network fetching disabled for resident-care asset PDF")
-
-        return HTML(string=_asset_html(company_name, s, programs, mvr), url_fetcher=_no_net).write_pdf()
-
-    return await asyncio.to_thread(_render)
+    return await render_pdf_async(_asset_html(company_name, s, programs, mvr))

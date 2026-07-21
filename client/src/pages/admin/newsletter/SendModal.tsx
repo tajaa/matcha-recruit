@@ -1,4 +1,4 @@
-import { X } from 'lucide-react'
+import { Modal } from '../../../components/ui'
 import type { Tag, SubStats } from './types'
 
 export function SendModal({
@@ -17,17 +17,13 @@ export function SendModal({
   sending: boolean
   confirmSend: () => Promise<void>
 }) {
+  const title =
+    sendModal.kind === 'now' ? `Send to ${stats?.active ?? 0} subscribers`
+      : sendModal.kind === 'segment' ? 'Send to segment'
+      : 'Schedule send'
+
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
-      <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 w-full max-w-md">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-sm font-semibold text-zinc-100">
-            {sendModal.kind === 'now' ? `Send to ${stats?.active ?? 0} subscribers`
-              : sendModal.kind === 'segment' ? 'Send to segment'
-              : 'Schedule send'}
-          </h3>
-          <button onClick={() => setSendModal(null)} className="text-zinc-500 hover:text-zinc-300"><X size={16} /></button>
-        </div>
+    <Modal open onClose={() => setSendModal(null)} title={title} width="sm" dismissible={!sending}>
         {sendModal.kind === 'segment' && (
           <div className="space-y-2 max-h-64 overflow-auto">
             <p className="text-xs text-zinc-500 mb-2">Pick one or more tags. Leave all unchecked to send to everyone.</p>
@@ -64,13 +60,12 @@ export function SendModal({
             </p>
           </div>
         )}
-        <div className="flex justify-end gap-2 mt-5">
-          <button onClick={() => setSendModal(null)} className="text-xs px-3 py-1.5 rounded-lg text-zinc-400 hover:text-zinc-200">Cancel</button>
-          <button onClick={confirmSend} disabled={sending} className="text-xs px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-40">
-            {sending ? 'Working…' : sendModal.kind === 'schedule' ? 'Schedule' : 'Send'}
-          </button>
-        </div>
+      <div className="flex justify-end gap-2 mt-5">
+        <button onClick={() => setSendModal(null)} className="text-xs px-3 py-1.5 rounded-lg text-zinc-400 hover:text-zinc-200">Cancel</button>
+        <button onClick={confirmSend} disabled={sending} className="text-xs px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-40">
+          {sending ? 'Working…' : sendModal.kind === 'schedule' ? 'Schedule' : 'Send'}
+        </button>
       </div>
-    </div>
+    </Modal>
   )
 }

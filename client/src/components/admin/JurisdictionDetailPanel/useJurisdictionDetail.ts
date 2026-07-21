@@ -1,10 +1,22 @@
 import { useEffect, useState, useCallback, useMemo } from 'react'
-import { api, authStreamHeaders } from '../../../api/client'
+import { api } from '../../../api/client'
+import { postSSE } from '../../../api/sse'
 import type { PreemptionRule, IndustryProfile } from '../jurisdiction/types'
 import { matchesSpecialty, matchesProfileRateTypes } from '../jurisdiction/utils'
 import type { SpecialtyFilter } from '../jurisdiction/types'
 import type { JurisdictionDetail, JurisdictionReq, ViewMode, EditForm } from './types'
-import { getCategoryLabel, reqAnchor, sectionAnchor, readSSEStream } from './helpers'
+import { getCategoryLabel, reqAnchor, sectionAnchor } from './helpers'
+
+/** A frame from any of the five jurisdiction scan streams. Every scan emits
+ *  `status`/`message` progress and a possible `error`; only check-federal-sources
+ *  additionally emits a `preview` carrying the rows it proposes to apply. */
+type ScanEvent = {
+  type?: string
+  message?: string
+  results?: unknown[]
+  by_category?: Record<string, unknown[]>
+  total?: number
+}
 
 type HookArgs = {
   id: string
@@ -44,82 +56,51 @@ export function useJurisdictionDetail({ id, state, preemptionRules, selectedProf
 
   useEffect(() => { fetchDetail() }, [fetchDetail])
 
-  function startCheck() {
-    setScanning(true); setScanMessages([])
-    const base = import.meta.env.VITE_API_URL || '/api'
-    authStreamHeaders().then((headers) => fetch(`${base}/admin/jurisdictions/${id}/check`, {
-      method: 'POST', headers,
-    })).then((res) => readSSEStream(
-      res,
-      (ev) => {
+  // The five scans differ only by endpoint, which spinner they own, and whether
+  // they refetch afterwards — so they share one driver rather than five copies
+  // of the same stream plumbing.
+  const runScan = useCallback((
+    endpoint: string,
+    setRunning: (v: boolean) => void,
+    opts: { refetch?: boolean; onEvent?: (ev: ScanEvent) => void } = {},
+  ) => {
+    setRunning(true); setScanMessages([])
+    postSSE(
+      `/admin/jurisdictions/${id}/${endpoint}`,
+      undefined,
+      (data) => {
+        const ev = data as ScanEvent
         if (ev.type === 'error') { setScanMessages((p) => [...p, `Error: ${ev.message}`]); return }
-        if (ev.message) setScanMessages((p) => [...p, ev.message])
+        opts.onEvent?.(ev)
+        const msg = ev.message
+        if (msg) setScanMessages((p) => [...p, msg])
       },
-      () => { setScanning(false); fetchDetail(); onCheckComplete?.() },
-    )).catch(() => setScanning(false))
-  }
+    )
+      .then(() => {
+        if (opts.refetch !== false) { fetchDetail(); onCheckComplete?.() }
+      })
+      .catch(() => {})
+      .finally(() => setRunning(false))
+  }, [id, fetchDetail, onCheckComplete])
 
-  function startSpecialtyCheck() {
-    setSpecialtyRunning(true); setScanMessages([])
-    const base = import.meta.env.VITE_API_URL || '/api'
-    authStreamHeaders().then((headers) => fetch(`${base}/admin/jurisdictions/${id}/check-specialty`, {
-      method: 'POST', headers,
-    })).then((res) => readSSEStream(
-      res,
-      (ev) => {
-        if (ev.type === 'error') { setScanMessages((p) => [...p, `Error: ${ev.message}`]); return }
-        if (ev.message) setScanMessages((p) => [...p, ev.message])
-      },
-      () => { setSpecialtyRunning(false); fetchDetail(); onCheckComplete?.() },
-    )).catch(() => setSpecialtyRunning(false))
-  }
-
-  function startMedicalCheck() {
-    setMedicalRunning(true); setScanMessages([])
-    const base = import.meta.env.VITE_API_URL || '/api'
-    authStreamHeaders().then((headers) => fetch(`${base}/admin/jurisdictions/${id}/check-medical-compliance`, {
-      method: 'POST', headers,
-    })).then((res) => readSSEStream(
-      res,
-      (ev) => {
-        if (ev.type === 'error') { setScanMessages((p) => [...p, `Error: ${ev.message}`]); return }
-        if (ev.message) setScanMessages((p) => [...p, ev.message])
-      },
-      () => { setMedicalRunning(false); fetchDetail(); onCheckComplete?.() },
-    )).catch(() => setMedicalRunning(false))
-  }
-
-  function startLifeSciCheck() {
-    setLifeSciRunning(true); setScanMessages([])
-    const base = import.meta.env.VITE_API_URL || '/api'
-    authStreamHeaders().then((headers) => fetch(`${base}/admin/jurisdictions/${id}/check-life-sciences`, {
-      method: 'POST', headers,
-    })).then((res) => readSSEStream(
-      res,
-      (ev) => {
-        if (ev.type === 'error') { setScanMessages((p) => [...p, `Error: ${ev.message}`]); return }
-        if (ev.message) setScanMessages((p) => [...p, ev.message])
-      },
-      () => { setLifeSciRunning(false); fetchDetail(); onCheckComplete?.() },
-    )).catch(() => setLifeSciRunning(false))
-  }
+  const startCheck = () => runScan('check', setScanning)
+  const startSpecialtyCheck = () => runScan('check-specialty', setSpecialtyRunning)
+  const startMedicalCheck = () => runScan('check-medical-compliance', setMedicalRunning)
+  const startLifeSciCheck = () => runScan('check-life-sciences', setLifeSciRunning)
 
   function startFedSourcesCheck() {
-    setFedSourcesRunning(true); setScanMessages([]); setFedPreview(null)
-    const base = import.meta.env.VITE_API_URL || '/api'
-    authStreamHeaders().then((headers) => fetch(`${base}/admin/jurisdictions/${id}/check-federal-sources`, {
-      method: 'POST', headers,
-    })).then((res) => readSSEStream(
-      res,
-      (ev) => {
-        if (ev.type === 'error') { setScanMessages((p) => [...p, `Error: ${ev.message}`]); return }
-        if (ev.type === 'preview') {
-          setFedPreview({ results: ev.results, by_category: ev.by_category, total: ev.total })
-        }
-        if (ev.message) setScanMessages((p) => [...p, ev.message])
+    setFedPreview(null)
+    runScan('check-federal-sources', setFedSourcesRunning, {
+      refetch: false,
+      onEvent: (ev) => {
+        if (ev.type !== 'preview') return
+        setFedPreview({
+          results: ev.results ?? [],
+          by_category: ev.by_category ?? {},
+          total: ev.total ?? 0,
+        })
       },
-      () => setFedSourcesRunning(false),
-    )).catch(() => setFedSourcesRunning(false))
+    })
   }
 
   async function applyFedSources() {

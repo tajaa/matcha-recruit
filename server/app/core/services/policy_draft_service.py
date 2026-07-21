@@ -6,6 +6,7 @@ from typing import AsyncGenerator, Dict, List, Optional
 from uuid import UUID
 
 from google import genai
+from app.core.services.genai_client import get_genai_client
 from google.genai import types
 
 from ...config import get_settings
@@ -221,7 +222,7 @@ FALLBACK_MODEL = "gemini-2.5-flash"
 def _get_client() -> genai.Client:
     settings = get_settings()
     api_key = os.getenv("GEMINI_API_KEY") or settings.gemini_api_key
-    return genai.Client(api_key=api_key)
+    return get_genai_client(api_key=api_key)
 
 
 def _requirement_to_context(req: dict) -> dict:

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useAsync } from '../../hooks/useAsync'
 import { api } from '../../api/client'
 import type { BenchmarkResult } from '../../types/riskAssessment'
 
@@ -15,16 +15,7 @@ type Props = {
 }
 
 export function BenchmarksPanel({ qs }: Props) {
-  const [bm, setBm] = useState<BenchmarkResult | null>(null)
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    setLoading(true)
-    api.get<BenchmarkResult>(`/risk-assessment/benchmarks${qs}`)
-      .then(setBm)
-      .catch(() => setBm(null))
-      .finally(() => setLoading(false))
-  }, [qs])
+  const { data: bm, loading } = useAsync(() => api.get<BenchmarkResult>(`/risk-assessment/benchmarks${qs}`), [qs], null)
 
   return (
     <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6 space-y-4">

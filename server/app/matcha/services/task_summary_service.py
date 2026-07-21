@@ -13,6 +13,7 @@ from typing import Optional
 from uuid import UUID
 
 from google import genai
+from app.core.services.genai_client import get_genai_client
 from google.genai import types
 
 from ...config import get_settings
@@ -33,7 +34,7 @@ def _get_client() -> genai.Client:
     global _client
     if _client is None:
         settings = get_settings()
-        _client = genai.Client(api_key=os.getenv("GEMINI_API_KEY") or settings.gemini_api_key)
+        _client = get_genai_client(api_key=os.getenv("GEMINI_API_KEY") or settings.gemini_api_key)
     return _client
 
 

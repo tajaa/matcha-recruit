@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { WizardStepper } from '../../ui/WizardStepper'
 import { useNavigate } from 'react-router-dom'
 import { Loader2, X } from 'lucide-react'
 import { matchaXOnboarding, type MatchaXStep } from '../../../api/matcha-x/matchaXOnboarding'
@@ -108,39 +109,14 @@ export default function MatchaXOnboardingWizard() {
 }
 
 function Stepper({ current }: { current: MatchaXStep }) {
-  const steps: { key: MatchaXStep; label: string }[] = [
+  const steps = [
     { key: 'locations', label: 'Locations' },
     { key: 'policies', label: 'Policies' },
     { key: 'people', label: 'People' },
     { key: 'build', label: 'Build' },
   ]
-  const activeIdx = steps.findIndex((s) => s.key === current)
-  // 'done' sits past Build — render every prior step as complete.
-  const effIdx = current === 'done' ? steps.length : activeIdx
-  return (
-    <ol className="flex items-center gap-2 text-xs text-zinc-500">
-      {steps.map((s, i) => {
-        const done = i < effIdx
-        const active = i === effIdx
-        return (
-          <li key={s.key} className="flex items-center gap-2">
-            <span
-              className={
-                'w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-medium ' +
-                (done
-                  ? 'bg-emerald-700 text-white'
-                  : active
-                    ? 'bg-zinc-800 text-zinc-100 ring-1 ring-emerald-700'
-                    : 'bg-zinc-900 text-zinc-600')
-              }
-            >
-              {i + 1}
-            </span>
-            <span className={active ? 'text-zinc-200' : ''}>{s.label}</span>
-            {i < steps.length - 1 && <span className="text-zinc-700">→</span>}
-          </li>
-        )
-      })}
-    </ol>
-  )
+  // 'done' sits past Build — render every step as complete.
+  const activeIndex =
+    current === 'done' ? steps.length : steps.findIndex((s) => s.key === current)
+  return <WizardStepper steps={steps} activeIndex={activeIndex} />
 }

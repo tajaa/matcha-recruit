@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { getComplianceCheckUrl } from '../../api/compliance/compliance'
-import { ensureFreshToken } from '../../api/client'
+import { getComplianceCheckPath } from '../../api/compliance/compliance'
+import { postSSE } from '../../api/sse'
 
 export interface ComplianceCheckMessage {
   type: string
@@ -30,47 +30,19 @@ export function useComplianceCheck(onComplete: () => void) {
     setScanning(true)
     setMessages([])
 
-    const token = await ensureFreshToken()
-    const url = getComplianceCheckUrl(locationId)
-
     try {
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-        signal: ctrl.signal,
-      })
-      const reader = res.body?.getReader()
-      if (!reader) throw new Error('No response body')
-      const decoder = new TextDecoder()
-      let buf = ''
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buf += decoder.decode(value, { stream: true })
-        const lines = buf.split('\n')
-        buf = lines.pop() ?? ''
-
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue
-          const data = line.slice(6).trim()
-          if (data === '[DONE]') {
-            setScanning(false)
-            onComplete()
-            return
-          }
-          try {
-            const ev = JSON.parse(data)
-            setMessages((prev) => [...prev, ev])
-          } catch { /* skip malformed */ }
-        }
-      }
-      setScanning(false)
+      await postSSE(
+        getComplianceCheckPath(locationId),
+        undefined,
+        (data) => { setMessages((prev) => [...prev, data as ComplianceCheckMessage]) },
+        { signal: ctrl.signal },
+      )
       onComplete()
-    } catch (e) {
-      if ((e as Error).name !== 'AbortError') {
+    } catch {
+      if (!ctrl.signal.aborted) {
         setMessages((prev) => [...prev, { type: 'error', message: 'Compliance check failed' }])
       }
+    } finally {
       setScanning(false)
     }
   }, [onComplete])

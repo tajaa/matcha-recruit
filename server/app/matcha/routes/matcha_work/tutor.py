@@ -261,7 +261,8 @@ async def check_tutor_utterance(
     settings = get_settings()
     try:
         from google import genai
-        client = genai.Client(api_key=settings.gemini_api_key)
+        from app.core.services.genai_client import get_genai_client
+        client = get_genai_client(api_key=settings.gemini_api_key)
 
         if language in ("es", "es-mx"):
             prompt = UTTERANCE_CHECK_PROMPT_ES.format(utterance=utterance)

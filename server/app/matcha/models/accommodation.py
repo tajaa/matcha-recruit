@@ -121,20 +121,6 @@ class AccommodationAnalysisResponse(BaseModel):
 # Audit Log Models
 # ===========================================
 
-class AuditLogEntry(BaseModel):
-    """An entry in the audit log."""
-    id: UUID
-    case_id: Optional[UUID] = None
-    user_id: Optional[UUID] = None
-    action: str
-    entity_type: Optional[str] = None
-    entity_id: Optional[UUID] = None
-    details: Optional[dict] = None
-    ip_address: Optional[str] = None
-    created_at: datetime
-
-
-class AuditLogResponse(BaseModel):
-    """Response for listing audit log entries."""
-    entries: list[AuditLogEntry]
-    total: int
+# Re-exported from the shared module so existing
+# `from app.matcha.models.<domain> import AuditLogEntry` imports keep working.
+from app.matcha.models.audit_log import AuditLogEntry, AuditLogResponse  # noqa: F401

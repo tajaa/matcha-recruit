@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Badge, Button, Input, Modal } from '../../components/ui'
+import { Badge, Button, DataTable, Input, Modal } from '../../components/ui'
 import { api } from '../../api/client'
+import { useAsync } from '../../hooks/useAsync'
 import {
   INDUSTRY_OPTIONS,
   HEALTHCARE_SPECIALTIES,
@@ -113,30 +114,34 @@ function industryLabel(value: string | null) {
 }
 
 export default function Companies() {
-  const [companies, setCompanies] = useState<Company[]>([])
   const [filter, setFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all')
   const [tier, setTier] = useState<Tier>('all')
   const [search, setSearch] = useState('')
-  const [loading, setLoading] = useState(true)
   const [showAdd, setShowAdd] = useState(false)
   const [form, setForm] = useState<RegisterForm>(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
   const [addError, setAddError] = useState('')
   const [runningAssessment, setRunningAssessment] = useState<string | null>(null)
 
-  function fetchCompanies() {
-    setLoading(true)
-    const qs = new URLSearchParams()
-    if (filter !== 'all') qs.set('status', filter)
-    if (tier !== 'all') qs.set('tier', tier)
-    const params = qs.toString() ? `?${qs.toString()}` : ''
-    api.get<CompanyListResponse>(`/admin/business-registrations${params}`)
-      .then((res) => setCompanies(res.registrations))
-      .catch(() => setCompanies([]))
-      .finally(() => setLoading(false))
-  }
-
-  useEffect(() => { fetchCompanies() }, [filter, tier])
+  const {
+    data: companies,
+    loading,
+    error,
+    setData: setCompanies,
+    reload: fetchCompanies,
+  } = useAsync(
+    () => {
+      const qs = new URLSearchParams()
+      if (filter !== 'all') qs.set('status', filter)
+      if (tier !== 'all') qs.set('tier', tier)
+      const params = qs.toString() ? `?${qs.toString()}` : ''
+      return api
+        .get<CompanyListResponse>(`/admin/business-registrations${params}`)
+        .then((res) => res.registrations)
+    },
+    [filter, tier],
+    [],
+  )
 
   const filtered = companies.filter((c) =>
     c.company_name.toLowerCase().includes(search.toLowerCase())
@@ -261,80 +266,75 @@ export default function Companies() {
 
       {/* Table */}
       <div className="mt-6">
-        {loading ? (
-          <p className="text-sm text-zinc-500">Loading...</p>
-        ) : filtered.length === 0 ? (
-          <p className="text-sm text-zinc-500">No companies found.</p>
-        ) : (
-          <div className="overflow-hidden rounded-xl border border-zinc-800">
-            <table className="w-full text-sm text-left">
-              <thead className="bg-zinc-900/50 text-zinc-400">
-                <tr>
-                  <th className="px-4 py-3 font-medium">Company</th>
-                  <th className="px-4 py-3 font-medium">Tier</th>
-                  <th className="px-4 py-3 font-medium">Industry</th>
-                  <th className="px-4 py-3 font-medium">Size</th>
-                  <th className="px-4 py-3 font-medium">Status</th>
-                  <th className="px-4 py-3 font-medium text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-zinc-800">
-                {filtered.map((c) => (
-                  <tr key={c.id} className="text-zinc-300">
-                    <td className="px-4 py-3">
-                      <Link to={`/admin/companies/${c.id}`} className="font-medium text-zinc-100 hover:text-emerald-400 transition-colors">{c.company_name}</Link>
-                      <p className="text-xs text-zinc-500">{c.owner_email}</p>
-                      {c.is_suspended && (
-                        <span
-                          className="inline-block mt-1 text-[10px] px-1.5 py-0.5 rounded border border-red-500/40 bg-red-500/10 text-red-300"
-                          title="The company owner is suspended; other users in the company may not be."
-                        >
-                          Owner suspended
+        <DataTable
+          rows={filtered}
+          rowKey={(c) => c.id}
+          loading={loading}
+          error={error}
+          emptyText="No companies found."
+          columns={[
+            {
+              key: 'company',
+              header: 'Company',
+              render: (c) => (
+                <>
+                  <Link to={`/admin/companies/${c.id}`} className="font-medium text-zinc-100 hover:text-emerald-400 transition-colors">{c.company_name}</Link>
+                  <p className="text-xs text-zinc-500">{c.owner_email}</p>
+                  {c.is_suspended && (
+                    <span
+                      className="inline-block mt-1 text-[10px] px-1.5 py-0.5 rounded border border-red-500/40 bg-red-500/10 text-red-300"
+                      title="The company owner is suspended; other users in the company may not be."
+                    >
+                      Owner suspended
+                    </span>
+                  )}
+                </>
+              ),
+            },
+            { key: 'tier', header: 'Tier', render: (c) => <TierBadge c={c} /> },
+            {
+              key: 'industry',
+              header: 'Industry',
+              render: (c) => (
+                <>
+                  <span>{industryLabel(c.industry)}</span>
+                  {c.healthcare_specialties && c.healthcare_specialties.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {c.healthcare_specialties.map((s) => (
+                        <span key={s} className="text-[10px] px-1.5 py-0.5 rounded-full border border-violet-500/30 bg-violet-500/10 text-violet-300">
+                          {HEALTHCARE_SPECIALTIES.find((x) => x.value === s)?.label ?? s}
                         </span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3"><TierBadge c={c} /></td>
-                    <td className="px-4 py-3">
-                      <span>{industryLabel(c.industry)}</span>
-                      {c.healthcare_specialties && c.healthcare_specialties.length > 0 && (
-                        <div className="flex flex-wrap gap-1 mt-1">
-                          {c.healthcare_specialties.map((s) => (
-                            <span key={s} className="text-[10px] px-1.5 py-0.5 rounded-full border border-violet-500/30 bg-violet-500/10 text-violet-300">
-                              {HEALTHCARE_SPECIALTIES.find((x) => x.value === s)?.label ?? s}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">{c.company_size ?? '—'}</td>
-                    <td className="px-4 py-3">{statusBadge(c.status)}</td>
-                    <td className="px-4 py-3 text-right">
-                      {c.status === 'pending' ? (
-                        <div className="flex justify-end gap-2">
-                          <Button size="sm" onClick={() => approve(c.id)}>
-                            Approve
-                          </Button>
-                          <Button size="sm" variant="ghost" onClick={() => reject(c.id)}>
-                            Reject
-                          </Button>
-                        </div>
-                      ) : (!c.status || c.status === 'approved') ? (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => runAssessment(c.id)}
-                          disabled={runningAssessment === c.id}
-                        >
-                          {runningAssessment === c.id ? 'Running...' : 'Run Assessment'}
-                        </Button>
-                      ) : null}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+                      ))}
+                    </div>
+                  )}
+                </>
+              ),
+            },
+            { key: 'size', header: 'Size', render: (c) => c.company_size ?? '—' },
+            { key: 'status', header: 'Status', render: (c) => statusBadge(c.status) },
+            {
+              key: 'actions',
+              header: 'Actions',
+              align: 'right',
+              render: (c) =>
+                c.status === 'pending' ? (
+                  <div className="flex justify-end gap-2">
+                    <Button size="sm" onClick={() => approve(c.id)}>Approve</Button>
+                    <Button size="sm" variant="ghost" onClick={() => reject(c.id)}>Reject</Button>
+                  </div>
+                ) : (!c.status || c.status === 'approved') ? (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => runAssessment(c.id)}
+                    disabled={runningAssessment === c.id}
+                  >
+                    {runningAssessment === c.id ? 'Running...' : 'Run Assessment'}
+                  </Button>
+                ) : null,
+            },
+          ]}
+        />
       </div>
 
       {/* Add Company Modal */}

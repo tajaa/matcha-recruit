@@ -222,9 +222,8 @@ th {{ background: #f5f5f5; font-weight: 600; text-transform: uppercase; font-siz
 </body></html>"""
 
     try:
-        from weasyprint import HTML as WeasyHTML
-        from ....core.services.pdf import safe_url_fetcher
-        pdf_bytes = WeasyHTML(string=html, url_fetcher=safe_url_fetcher).write_pdf()
+        from ....core.services.pdf import render_pdf
+        pdf_bytes = render_pdf(html)
     except ImportError:
         raise HTTPException(status_code=500, detail="PDF generation not available (WeasyPrint not installed)")
     except Exception as exc:

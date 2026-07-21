@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
+import { useAsync } from '../../hooks/useAsync'
 import { Link } from 'react-router-dom'
 
 import MarketingNav from './MarketingNav'
@@ -29,16 +30,8 @@ type BlogPost = {
 type BlogList = { items: BlogPost[]; total: number }
 
 export default function BlogIndex() {
-  const [posts, setPosts] = useState<BlogPost[]>([])
-  const [loading, setLoading] = useState(true)
+  const { data: posts, loading } = useAsync(() => api.get<BlogList>('/blogs?status=published&limit=50').then(d => d.items), [], [])
   const [showPricing, setShowPricing] = useState(false)
-
-  useEffect(() => {
-    api.get<BlogList>('/blogs?status=published&limit=50')
-      .then(d => setPosts(d.items))
-      .catch(() => setPosts([]))
-      .finally(() => setLoading(false))
-  }, [])
 
   return (
     <div style={{ backgroundColor: BG, color: INK, minHeight: '100vh' }}>

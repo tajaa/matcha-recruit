@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { ChevronDown, Download, FileArchive, FileText, Share2 } from 'lucide-react'
 import { useToast } from '../../../components/ui'
-import { HelpHint } from '../../../components/ui/HelpHint'
+import { PacketsPanel as PilotPacketsPanel } from '../../../components/pilot/PacketsPanel'
 import { downloadPacket, type Packet } from '../../../api/legal-defense/legalDefense'
 import { fmtSize } from './shared'
 
@@ -24,7 +24,6 @@ export function PacketsPanel({ matterId, packets, toast, onShare }: {
   onShare: (p: Packet) => void
 }) {
   const [showOlder, setShowOlder] = useState(false)
-  if (packets.length === 0) return null
 
   // Newest-first from the backend; pin the latest of each kind.
   const latest: Packet[] = []
@@ -36,11 +35,12 @@ export function PacketsPanel({ matterId, packets, toast, onShare }: {
   const older = packets.filter((p) => !latestIds.has(p.id))
 
   return (
-    <div className="shrink-0 border-t border-white/[0.06]">
-      <div className="flex items-center gap-1.5 px-4 pb-1 pt-3 text-[10px] font-medium uppercase tracking-[0.15em] text-zinc-500">
-        Work product
-        <HelpHint text="The PDF is a defense memo that cites only real records; the ZIP bundles the underlying source documents. Shared links are logged for chain of custody." />
-      </div>
+    <PilotPacketsPanel
+      empty={packets.length === 0}
+      className="shrink-0 border-t border-white/[0.06]"
+      variant="inline"
+      helpText="The PDF is a defense memo that cites only real records; the ZIP bundles the underlying source documents. Shared links are logged for chain of custody."
+    >
       {latest.map((p) => (
         <PacketRow key={p.id} matterId={matterId} packet={p} toast={toast} onShare={() => onShare(p)} />
       ))}
@@ -60,7 +60,7 @@ export function PacketsPanel({ matterId, packets, toast, onShare }: {
           ))}
         </>
       )}
-    </div>
+    </PilotPacketsPanel>
   )
 }
 

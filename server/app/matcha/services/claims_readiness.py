@@ -14,7 +14,7 @@ import json
 import logging
 from uuid import UUID
 
-from app.core.services.pdf import safe_url_fetcher
+from app.core.services.pdf import render_pdf
 
 logger = logging.getLogger(__name__)
 
@@ -194,9 +194,8 @@ def _incident_html(data: dict) -> str:
 
 async def render_incident_packet_pdf(data: dict) -> bytes:
     def _render() -> bytes:
-        from weasyprint import HTML
 
-        return HTML(string=_incident_html(data), url_fetcher=safe_url_fetcher).write_pdf()
+        return render_pdf(_incident_html(data))
 
     return await asyncio.to_thread(_render)
 
@@ -283,8 +282,7 @@ def _er_html(data: dict) -> str:
 
 async def render_er_packet_pdf(data: dict) -> bytes:
     def _render() -> bytes:
-        from weasyprint import HTML
 
-        return HTML(string=_er_html(data), url_fetcher=safe_url_fetcher).write_pdf()
+        return render_pdf(_er_html(data))
 
     return await asyncio.to_thread(_render)

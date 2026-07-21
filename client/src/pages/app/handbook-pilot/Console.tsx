@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Loader2, Send } from 'lucide-react'
 import { streamChat, type PilotSession, type PilotMessage } from '../../../api/handbook-pilot/handbookPilot'
+import { usePilotChat } from '../../../components/pilot/usePilotChat'
 import type { ComposerSeed } from './shared'
 
 const HANDBOOK_EXAMPLES = [
@@ -24,17 +25,11 @@ export function Console({ session, onTurn, seed, onSeedConsumed, autoSeed }: {
   onSeedConsumed: () => void
   autoSeed: boolean
 }) {
-  const [messages, setMessages] = useState<PilotMessage[]>(session.messages ?? [])
-  const [input, setInput] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [status, setStatus] = useState<string | null>(null)
+  const {
+    messages, setMessages, input, setInput, busy, status, setStatus,
+    scrollRef, textareaRef, runTurn,
+  } = usePilotChat<PilotMessage>({ initialMessages: session.messages ?? [], statusLabel: 'Thinking…', onTurn })
   const [view, setView] = useState<'chat' | 'examples'>('chat')
-  const scrollRef = useRef<HTMLDivElement>(null)
-  const abortRef = useRef<AbortController | null>(null)
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
-
-  // Abort any in-flight turn when the user switches sessions (unmount).
-  useEffect(() => () => abortRef.current?.abort(), [])
 
   // A requirement's Draft button seeds the composer. Consumed on apply, so
   // remounting (mode toggle) never refills an already-sent prompt. Appends
@@ -49,21 +44,12 @@ export function Console({ session, onTurn, seed, onSeedConsumed, autoSeed }: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seed?.nonce])
 
-  useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
-  }, [messages, status])
-
   const send = async (override?: string) => {
     const text = (override ?? input).trim()
     if (!text || busy) return
     setInput('')
-    setBusy(true)
-    setStatus('Thinking…')
     setMessages((m) => [...m, { role: 'user', content: text, metadata: null, created_at: new Date().toISOString() }])
-    const controller = new AbortController()
-    abortRef.current = controller
-    let hadError = false
-    try {
+    await runTurn(async (signal, markError) => {
       await streamChat(session.id, text, {
         onStatus: (msg) => setStatus(msg),
         onResult: (data) => {
@@ -73,15 +59,9 @@ export function Console({ session, onTurn, seed, onSeedConsumed, autoSeed }: {
             created_at: new Date().toISOString(),
           }])
         },
-        onError: (msg) => { hadError = true; setStatus(`⚠ ${msg}`) },
-      }, controller.signal)
-    } finally {
-      if (!controller.signal.aborted) {
-        setBusy(false)
-        if (!hadError) setStatus(null)  // keep the error visible; clear only on success
-        onTurn() // pull persisted drafts
-      }
-    }
+        onError: (msg) => { markError(); setStatus(`⚠ ${msg}`) },
+      }, signal)
+    })
   }
 
   // The goal from the New-session modal is the first thing the user typed — it

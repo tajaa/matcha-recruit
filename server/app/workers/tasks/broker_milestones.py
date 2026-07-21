@@ -23,7 +23,7 @@ from datetime import datetime
 from typing import Optional
 
 from ..celery_app import celery_app
-from ..utils import get_db_connection
+from ..utils import get_db_connection, scheduler_settings_row
 from .broker_risk_alerts import should_suppress
 
 # ── Tunables (code constants) ────────────────────────────────────────────────
@@ -122,12 +122,7 @@ async def _run_broker_milestones() -> dict:
 
     conn = await get_db_connection()
     try:
-        try:
-            sched = await conn.fetchrow(
-                "SELECT enabled, max_per_cycle FROM scheduler_settings WHERE task_key = 'broker_milestones'"
-            )
-        except Exception:
-            sched = None
+        sched = await scheduler_settings_row(conn, "broker_milestones")
         if not sched:
             return {"skipped": True, "reason": "scheduler_not_registered"}
         if not sched["enabled"]:

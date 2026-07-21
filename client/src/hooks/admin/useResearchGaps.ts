@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { getResearchGapsUrl } from '../../api/admin/adminOnboarding'
-import { ensureFreshToken } from '../../api/client'
+import { getResearchGapsPath } from '../../api/admin/adminOnboarding'
+import { postSSE } from '../../api/sse'
 import type { EnrichEvent } from './useEnrichStream'
 
 /**
@@ -38,52 +38,23 @@ export function useResearchGaps() {
     setDone(null)
     setError(null)
 
-    const token = await ensureFreshToken()
-
     try {
-      const res = await fetch(getResearchGapsUrl(companyId), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      await postSSE(
+        getResearchGapsPath(companyId),
+        { items },
+        (data) => {
+          const ev = data as EnrichEvent
+          if (ev.type === 'complete') setDone(ev)
+          if (ev.type === 'error' && !ev.jurisdiction) setError(ev.message ?? 'Research failed')
+          setEvents((prev) => [...prev, ev])
         },
-        body: JSON.stringify({ items }),
-        signal: ctrl.signal,
-      })
-      if (!res.ok) throw new Error(`Research failed (${res.status})`)
-      const reader = res.body?.getReader()
-      if (!reader) throw new Error('No response body')
-      const decoder = new TextDecoder()
-      let buf = ''
-
-      while (true) {
-        const { done: streamDone, value } = await reader.read()
-        if (streamDone) break
-        buf += decoder.decode(value, { stream: true })
-        const lines = buf.split('\n')
-        buf = lines.pop() ?? ''
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue
-          const data = line.slice(6).trim()
-          if (data === '[DONE]') {
-            setRunning(false)
-            return
-          }
-          try {
-            const ev = JSON.parse(data) as EnrichEvent
-            if (ev.type === 'complete') setDone(ev)
-            if (ev.type === 'error' && !ev.jurisdiction) setError(ev.message ?? 'Research failed')
-            setEvents((prev) => [...prev, ev])
-          } catch {
-            /* skip malformed */
-          }
-        }
-      }
-      setRunning(false)
+        { signal: ctrl.signal },
+      )
     } catch (e) {
-      if ((e as Error).name !== 'AbortError') {
+      if (!ctrl.signal.aborted) {
         setError(e instanceof Error ? e.message : 'Research stream failed')
       }
+    } finally {
       setRunning(false)
     }
   }, [])

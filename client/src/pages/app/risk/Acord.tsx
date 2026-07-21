@@ -1,21 +1,20 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { FileDown, Loader2, FileText } from 'lucide-react'
 import { Card } from '../../../components/ui'
-import { listAcordForms, downloadAcord, type AcordForm } from '../../../api/risk/acord'
+import { useAsync } from '../../../hooks/useAsync'
+import { RegisterSpinner } from '../../../components/register/registerKit'
+import { listAcordForms, downloadAcord } from '../../../api/risk/acord'
 
 export default function Acord() {
-  const [forms, setForms] = useState<AcordForm[] | null>(null)
-  const [loading, setLoading] = useState(true)
+  const { data: forms, loading } = useAsync(() => listAcordForms().then((r) => r.forms), [], [])
   const [dl, setDl] = useState<string | null>(null)
-
-  useEffect(() => { listAcordForms().then((r) => setForms(r.forms)).finally(() => setLoading(false)) }, [])
 
   async function download(form: string) {
     setDl(form)
     try { await downloadAcord(form) } finally { setDl(null) }
   }
 
-  if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="h-6 w-6 text-zinc-500 animate-spin" /></div>
+  if (loading) return <RegisterSpinner />
 
   return (
     <div className="space-y-6">

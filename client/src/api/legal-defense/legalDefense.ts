@@ -1,10 +1,11 @@
 // Legal Pilot API client. Matters CRUD + grounded chat (SSE) + packet
-// generation/download/share. The chat stream is a raw fetch (like
-// IRCopilotPanel) since api/client.ts doesn't stream; everything else goes
-// through the typed `api` helper.
-import { api, authStreamHeaders } from '../client'
-
-const BASE = import.meta.env.VITE_API_URL ?? '/api'
+// generation/download/share. The chat stream goes through api/sse.ts (which
+// api/client.ts can't do); everything else uses the typed `api` helper.
+import { api } from '../client'
+import {
+  streamPilotChat as sharedStreamPilotChat,
+  type ChatHandlers as SharedChatHandlers,
+} from '../sse'
 
 export type MatterType = 'subpoena' | 'class_action' | 'eeoc_charge' | 'single_plaintiff' | 'audit' | 'other'
 export type MatterStatus = 'draft' | 'active' | 'closed'
@@ -204,46 +205,20 @@ export type ChatResult = {
   intake_requests?: string[]
   ready_for_analysis?: boolean
 }
-export type ChatHandlers = {
-  onStatus?: (message: string) => void
-  onResult?: (data: ChatResult) => void
-  onError?: (message: string) => void
-}
+export type ChatHandlers = SharedChatHandlers<ChatResult>
 
-// Grounded chat turn over SSE — raw fetch + ReadableStream (api/client.ts can't
-// stream). Mirrors the IRCopilotPanel consumption pattern.
-export async function streamChat(matterId: string, message: string, h: ChatHandlers): Promise<void> {
-  // Streams can't replay a 401 refresh-and-retry — refresh proactively.
-  const res = await fetch(`${BASE}/legal-pilot/matters/${matterId}/chat`, {
-    method: 'POST',
-    headers: await authStreamHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({ message }),
-  })
-  if (!res.ok || !res.body) {
-    h.onError?.(`Chat failed (${res.status})`)
-    return
-  }
-  const reader = res.body.getReader()
-  const decoder = new TextDecoder()
-  let buf = ''
-  while (true) {
-    const { value, done } = await reader.read()
-    if (done) break
-    buf += decoder.decode(value, { stream: true })
-    const events = buf.split('\n\n')
-    buf = events.pop() || ''
-    for (const ev of events) {
-      if (!ev.startsWith('data: ')) continue
-      const payload = ev.slice(6)
-      if (payload === '[DONE]') return
-      try {
-        const data = JSON.parse(payload)
-        if (data.type === 'status') h.onStatus?.(data.message)
-        else if (data.type === 'result') h.onResult?.(data.data)
-        else if (data.type === 'error') h.onError?.(data.message)
-      } catch {
-        /* ignore partial/non-JSON frames */
-      }
-    }
-  }
+// Grounded chat turn over SSE. Pass a `signal` to abort the turn (e.g. when the
+// user switches matters mid-stream); an aborted turn resolves quietly.
+export async function streamChat(
+  matterId: string,
+  message: string,
+  h: ChatHandlers,
+  signal?: AbortSignal,
+): Promise<void> {
+  await sharedStreamPilotChat<ChatResult>(
+    `/legal-pilot/matters/${matterId}/chat`,
+    { message },
+    h,
+    { signal },
+  )
 }

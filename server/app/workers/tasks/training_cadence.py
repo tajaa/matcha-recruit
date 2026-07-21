@@ -15,7 +15,7 @@ After each insert batch, fans out assignment emails (best-effort).
 import asyncio
 
 from ..celery_app import celery_app
-from ..utils import get_db_connection
+from ..utils import get_db_connection, scheduler_settings_row
 
 
 async def _send_assignment_email(employee_email: str, employee_name: str, training_title: str, due_date) -> None:
@@ -47,12 +47,7 @@ async def _dispatch_training_cadence() -> dict:
     inserted_renewal = 0
     notifications_sent = 0
     try:
-        try:
-            sched_row = await conn.fetchrow(
-                "SELECT enabled, max_per_cycle FROM scheduler_settings WHERE task_key = 'training_cadence'"
-            )
-        except Exception:
-            sched_row = None
+        sched_row = await scheduler_settings_row(conn, "training_cadence")
 
         if sched_row and not sched_row["enabled"]:
             print("[Training Cadence] Scheduler disabled, skipping.")

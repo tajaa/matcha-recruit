@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'react'
-import { ShieldAlert, Loader2 } from 'lucide-react'
+import { useState } from 'react'
+import { ShieldAlert } from 'lucide-react'
 import { Card } from '../../../components/ui'
-import { getDoReadiness, upsertDoAttestation, type DoReadiness, type DoStatus } from '../../../api/risk/managementLiability'
+import { useAsync } from '../../../hooks/useAsync'
+import { RegisterSpinner } from '../../../components/register/registerKit'
+import { getDoReadiness, upsertDoAttestation, type DoStatus } from '../../../api/risk/managementLiability'
 
 const STATUSES: DoStatus[] = ['in_place', 'partial', 'gap', 'unknown']
 const BAND_TONE: Record<string, string> = {
@@ -10,18 +12,15 @@ const BAND_TONE: Record<string, string> = {
 const FACTOR_TONE: Record<string, string> = { strong: 'text-emerald-400', partial: 'text-amber-400', gap: 'text-rose-400' }
 
 export default function ManagementLiability() {
-  const [data, setData] = useState<DoReadiness | null>(null)
-  const [loading, setLoading] = useState(true)
+  const { data, loading, setData } = useAsync(() => getDoReadiness(), [], null)
   const [busy, setBusy] = useState<string | null>(null)
-
-  useEffect(() => { getDoReadiness().then(setData).finally(() => setLoading(false)) }, [])
 
   async function setStatus(item_key: string, status: DoStatus) {
     setBusy(item_key)
     try { setData(await upsertDoAttestation({ item_key, status })) } finally { setBusy(null) }
   }
 
-  if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="h-6 w-6 text-zinc-500 animate-spin" /></div>
+  if (loading) return <RegisterSpinner />
   if (!data) return <p className="text-sm text-zinc-500">Unable to load D&O readiness.</p>
 
   return (

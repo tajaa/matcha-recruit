@@ -123,7 +123,7 @@ export function useChannelSocket({
     // this effect's initial mount, since the shared socket is usually already
     // open) — refetch and merge by id so messages missed during the drop
     // aren't silently gone. Optimistic-pending sends not yet echoed are kept.
-    socket.onConnected = () => {
+    const offConnected = socket.addConnectedListener(() => {
       getChannelMessages(channelId)
         .then((fetched) => {
           setMessages((prev) => {
@@ -133,7 +133,7 @@ export function useChannelSocket({
           })
         })
         .catch(() => {})
-    }
+    })
 
     // Global hook should already have joined this room, but joinRoom is
     // idempotent on the client and the server allows duplicate joins.
@@ -150,7 +150,10 @@ export function useChannelSocket({
       socket.onMessageDeleted = null
       socket.onMessageEdited = null
       socket.onReactionUpdate = null
-      socket.onConnected = null
+      // Unsubscribe rather than nulling a shared slot: useChannelNotifications
+      // and useLiveKitCall hold the same singleton, and `= null` used to remove
+      // whichever handler happened to be registered, not just this one.
+      offConnected()
       socketRef.current = null
       // Do NOT call disconnect() or leaveRoom() — the shared socket persists.
     }

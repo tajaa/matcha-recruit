@@ -134,10 +134,11 @@ export function useVoiceSession(options: UseVoiceSessionOptions | null) {
       // Load AudioWorklet
       await audioCtx.audioWorklet.addModule('/worklets/pcm-capture-processor.js')
 
-      // Build WebSocket URL
+      // Build WebSocket URL. Token rides the `bearer` Sec-WebSocket-Protocol header,
+      // not the URL, so it never lands in nginx/proxy access logs (mirrors baseSocket.ts).
       const base = window.location.origin.replace(/^http/, 'ws')
-      const wsUrl = `${base}${websocketUrl}?token=${encodeURIComponent(wsAuthToken)}`
-      const ws = new WebSocket(wsUrl)
+      const wsUrl = `${base}${websocketUrl}`
+      const ws = new WebSocket(wsUrl, ['bearer', wsAuthToken])
       ws.binaryType = 'arraybuffer'
       wsRef.current = ws
 

@@ -1,16 +1,17 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { Card } from '../../components/ui'
 import { Button } from '../../components/ui'
 import { Loader2, Trash2, Plus, RefreshCw, Send } from 'lucide-react'
+import { useAsync } from '../../hooks/useAsync'
+import {
+  adminSettingsApi,
+  type TokenQuota,
+  type TokenUsage,
+  type BetaInvitation,
+} from '../../api/admin/platformSettings'
 
-const BASE = import.meta.env.VITE_API_URL ?? '/api'
-
-function authHeaders(): Record<string, string> {
-  const token = localStorage.getItem('matcha_access_token')
-  const h: Record<string, string> = { 'Content-Type': 'application/json' }
-  if (token) h.Authorization = `Bearer ${token}`
-  return h
-}
+// Mirrors the backend's fallback when platform_settings has no row yet.
+const DEFAULT_RESEARCH_MODE = 'light'
 
 const RESEARCH_MODELS = [
   { id: 'lite', label: 'Lite', model: 'Gemini 3.1 Flash Lite', description: 'Fastest, lowest cost — good for bulk research' },
@@ -18,96 +19,94 @@ const RESEARCH_MODELS = [
   { id: 'heavy', label: 'Pro', model: 'Gemini 3.1 Pro', description: 'Highest quality, slower — best for targeted research' },
 ]
 
-interface TokenQuota {
-  id: string
-  user_id: string | null
-  company_id: string | null
-  user_email: string | null
-  company_name: string | null
-  token_limit: number
-  window_hours: number
-  is_active: boolean
-}
-
-interface TokenUsage {
-  user_id: string
-  email: string
-  company_name: string | null
-  tokens_used: number
-  call_count: number
-  cost_dollars: number
-  last_active: string
-}
+const errText = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
 export default function Settings() {
-  const [researchMode, setResearchMode] = useState<string | null>(null)
   const [pendingMode, setPendingMode] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
-  const [loading, setLoading] = useState(true)
+  const [saveError, setSaveError] = useState<string | null>(null)
 
   // Token quotas & usage
-  const [quotas, setQuotas] = useState<TokenQuota[]>([])
-  const [usage, setUsage] = useState<TokenUsage[]>([])
-  const [quotaLoading, setQuotaLoading] = useState(true)
   const [showAddQuota, setShowAddQuota] = useState(false)
   const [newQuota, setNewQuota] = useState({ user_email: '', token_limit: '100000', window_hours: '12' })
   const [quotaError, setQuotaError] = useState('')
 
   // Beta invitations
   const [betaEmails, setBetaEmails] = useState('')
-  const [betaInvites, setBetaInvites] = useState<{ id: string; email: string; status: string; created_at: string | null; registered_at: string | null }[]>([])
-  const [betaLoading, setBetaLoading] = useState(true)
   const [betaSending, setBetaSending] = useState(false)
   const [betaResult, setBetaResult] = useState<string | null>(null)
 
+  // Two different nulls, deliberately kept apart. An UNSET row means the backend
+  // is using its documented 'light' default, so show Light selected. A FAILED
+  // lookup means we don't know, and the old code's `catch -> 'light'` displayed
+  // Light with total confidence while the real mode might be anything — that
+  // case is now settings.error and renders as an error, not as a selection.
+  const settings = useAsync(() => adminSettingsApi.getPlatformSettings(), [])
+  const researchMode = settings.data
+    ? (settings.data.jurisdiction_research_model_mode ?? DEFAULT_RESEARCH_MODE)
+    : null
+
+  // Seed the pending selection once the saved value arrives, without clobbering
+  // a choice the admin has already made while it was in flight.
   useEffect(() => {
-    fetch(`${BASE}/admin/platform-settings`, { headers: authHeaders() })
-      .then((r) => r.json())
-      .then((data) => {
-        const mode = data.jurisdiction_research_model_mode || 'light'
-        setResearchMode(mode)
-        setPendingMode(mode)
-      })
-      .catch(() => { setResearchMode('light'); setPendingMode('light') })
-      .finally(() => setLoading(false))
-  }, [])
+    if (researchMode && pendingMode === null) setPendingMode(researchMode)
+  }, [researchMode, pendingMode])
 
-  const loadQuotasAndUsage = useCallback(async () => {
-    setQuotaLoading(true)
-    try {
-      const [qRes, uRes] = await Promise.all([
-        fetch(`${BASE}/admin/token-quotas`, { headers: authHeaders() }),
-        fetch(`${BASE}/admin/token-usage`, { headers: authHeaders() }),
+  const quotaState = useAsync<{ quotas: TokenQuota[]; usage: TokenUsage[] }>(
+    async () => {
+      const [quotas, usage] = await Promise.all([
+        adminSettingsApi.listQuotas(),
+        adminSettingsApi.listUsage(),
       ])
-      if (qRes.ok) setQuotas(await qRes.json())
-      if (uRes.ok) setUsage(await uRes.json())
-    } catch {}
-    setQuotaLoading(false)
-  }, [])
+      return { quotas, usage }
+    },
+    [],
+    { quotas: [], usage: [] },
+  )
+  const { quotas, usage } = quotaState.data
+  const quotaLoading = quotaState.loading
 
-  useEffect(() => { loadQuotasAndUsage() }, [loadQuotasAndUsage])
+  const beta = useAsync<BetaInvitation[]>(() => adminSettingsApi.listBetaInvitations(), [], [])
+  const betaInvites = beta.data
+  const betaLoading = beta.loading
 
   async function handleSave() {
     if (!pendingMode || pendingMode === researchMode) return
     setSaving(true)
+    setSaveError(null)
     try {
-      const res = await fetch(`${BASE}/admin/platform-settings/jurisdiction-research-model-mode`, {
-        method: 'PUT', headers: authHeaders(), body: JSON.stringify({ mode: pendingMode }),
-      })
-      if (res.ok) setResearchMode(pendingMode)
+      await adminSettingsApi.setResearchModelMode(pendingMode)
+      settings.setData({ jurisdiction_research_model_mode: pendingMode })
+    } catch (e) {
+      // api/client.ts throws on non-2xx. Uncaught, this was an unhandled
+      // rejection: the button returned to "Saved" and the admin had no way to
+      // know the mode had not changed.
+      setSaveError(errText(e))
     } finally { setSaving(false) }
   }
 
   async function handleUpdateQuota(id: string, updates: Record<string, unknown>) {
-    await fetch(`${BASE}/admin/token-quotas/${id}`, {
-      method: 'PUT', headers: authHeaders(), body: JSON.stringify(updates),
-    })
-    await loadQuotasAndUsage()
+    setQuotaError('')
+    try {
+      await adminSettingsApi.updateQuota(id, updates)
+    } catch (e) {
+      setQuotaError(errText(e))
+      return
+    }
+    await quotaState.reload()
   }
 
   async function handleDeleteQuota(id: string) {
-    await fetch(`${BASE}/admin/token-quotas/${id}`, { method: 'DELETE', headers: authHeaders() })
-    await loadQuotasAndUsage()
+    setQuotaError('')
+    try {
+      await adminSettingsApi.deleteQuota(id)
+    } catch (e) {
+      // Without this a failed delete left the row on screen with no message —
+      // indistinguishable from a delete that worked but hadn't refreshed yet.
+      setQuotaError(errText(e))
+      return
+    }
+    await quotaState.reload()
   }
 
   async function handleAddQuota() {
@@ -129,26 +128,18 @@ export default function Settings() {
         return
       }
     }
-    const res = await fetch(`${BASE}/admin/token-quotas`, {
-      method: 'POST', headers: authHeaders(), body: JSON.stringify(body),
-    })
-    if (res.ok) {
-      setShowAddQuota(false)
-      setNewQuota({ user_email: '', token_limit: '100000', window_hours: '12' })
-      await loadQuotasAndUsage()
-    }
-  }
-
-  const loadBetaInvites = useCallback(async () => {
-    setBetaLoading(true)
     try {
-      const res = await fetch(`${BASE}/admin/beta-invitations`, { headers: authHeaders() })
-      if (res.ok) setBetaInvites(await res.json())
-    } catch {}
-    setBetaLoading(false)
-  }, [])
-
-  useEffect(() => { loadBetaInvites() }, [loadBetaInvites])
+      await adminSettingsApi.createQuota(body)
+    } catch (e) {
+      // Previously `if (res.ok)` — a rejected quota just did nothing and left
+      // the form open with no explanation.
+      setQuotaError(errText(e))
+      return
+    }
+    setShowAddQuota(false)
+    setNewQuota({ user_email: '', token_limit: '100000', window_hours: '12' })
+    await quotaState.reload()
+  }
 
   async function handleSendBetaInvites() {
     const emails = betaEmails
@@ -159,22 +150,26 @@ export default function Settings() {
     setBetaSending(true)
     setBetaResult(null)
     try {
-      const res = await fetch(`${BASE}/admin/beta-invitations`, {
-        method: 'POST', headers: authHeaders(), body: JSON.stringify({ emails }),
-      })
-      if (res.ok) {
-        const data = await res.json()
-        setBetaResult(`Sent ${data.sent} invitation${data.sent !== 1 ? 's' : ''}${data.skipped?.length ? `. Skipped: ${data.skipped.join(', ')}` : ''}`)
-        setBetaEmails('')
-        await loadBetaInvites()
-      }
-    } catch {}
-    setBetaSending(false)
+      const data = await adminSettingsApi.sendBetaInvitations(emails)
+      setBetaResult(`Sent ${data.sent} invitation${data.sent !== 1 ? 's' : ''}${data.skipped?.length ? `. Skipped: ${data.skipped.join(', ')}` : ''}`)
+      setBetaEmails('')
+      await beta.reload()
+    } catch (e) {
+      setBetaResult(errText(e))
+    } finally {
+      setBetaSending(false)
+    }
   }
 
   async function handleRevokeBetaInvite(id: string) {
-    await fetch(`${BASE}/admin/beta-invitations/${id}`, { method: 'DELETE', headers: authHeaders() })
-    await loadBetaInvites()
+    setBetaResult(null)
+    try {
+      await adminSettingsApi.revokeBetaInvitation(id)
+    } catch (e) {
+      setBetaResult(errText(e))
+      return
+    }
+    await beta.reload()
   }
 
   const hasChanges = pendingMode !== researchMode
@@ -190,10 +185,14 @@ export default function Settings() {
         <p className="text-xs text-zinc-500 mb-3">
           Controls which Gemini model is used for jurisdiction &amp; specialization research.
         </p>
-        {loading ? (
+        {settings.loading ? (
           <div className="flex items-center gap-2 py-4 text-sm text-zinc-500">
             <Loader2 className="w-4 h-4 animate-spin" /> Loading settings...
           </div>
+        ) : settings.error ? (
+          /* Without this the list renders with no option selected, which reads
+             as "no mode is set" rather than "we couldn't find out". */
+          <p className="py-4 text-sm text-red-400">{settings.error}</p>
         ) : (
           <div className="space-y-2">
             {RESEARCH_MODELS.map((m) => (
@@ -221,6 +220,7 @@ export default function Settings() {
           <Button onClick={handleSave} disabled={!hasChanges || saving}>
             {saving ? 'Saving...' : hasChanges ? 'Save changes' : 'Saved'}
           </Button>
+          {saveError && <p className="mt-2 text-xs text-red-400">{saveError}</p>}
         </div>
       </div>
 
@@ -229,7 +229,7 @@ export default function Settings() {
         <div className="flex items-center justify-between mb-1">
           <h2 className="text-sm font-medium text-zinc-300">Token Quotas</h2>
           <div className="flex items-center gap-2">
-            <button onClick={loadQuotasAndUsage} className="text-zinc-500 hover:text-zinc-300 p-1">
+            <button onClick={() => quotaState.reload()} className="text-zinc-500 hover:text-zinc-300 p-1">
               <RefreshCw size={14} />
             </button>
             <button
@@ -288,6 +288,11 @@ export default function Settings() {
           <div className="flex items-center gap-2 py-4 text-sm text-zinc-500">
             <Loader2 className="w-4 h-4 animate-spin" /> Loading quotas...
           </div>
+        ) : quotaState.error ? (
+          /* An error must outrank the list: rendering an empty quota list on a
+             failed load reads as "no quotas configured", and an admin acting on
+             that creates a duplicate. */
+          <p className="py-4 text-sm text-red-400">{quotaState.error}</p>
         ) : (
           <div className="space-y-2">
             {quotas.map((q) => (
@@ -339,6 +344,8 @@ export default function Settings() {
           <div className="flex items-center gap-2 py-4 text-sm text-zinc-500">
             <Loader2 className="w-4 h-4 animate-spin" /> Loading...
           </div>
+        ) : quotaState.error ? (
+          <p className="py-4 text-sm text-red-400">{quotaState.error}</p>
         ) : usage.length === 0 ? (
           <p className="text-xs text-zinc-500 py-4">No token usage in the last 12 hours.</p>
         ) : (
@@ -415,6 +422,8 @@ export default function Settings() {
           <div className="flex items-center gap-2 py-4 text-sm text-zinc-500">
             <Loader2 className="w-4 h-4 animate-spin" /> Loading invitations...
           </div>
+        ) : beta.error ? (
+          <p className="py-4 text-sm text-red-400">{beta.error}</p>
         ) : betaInvites.length === 0 ? (
           <p className="text-xs text-zinc-500 py-4">No invitations sent yet.</p>
         ) : (

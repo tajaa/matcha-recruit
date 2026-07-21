@@ -75,9 +75,10 @@ async def _categorize_actions(
     Returns {incident_id: [category, ...]} mapping.
     """
     from google import genai
+    from app.core.services.genai_client import get_genai_client
     from ...core.services.rate_limiter import get_rate_limiter
 
-    client = genai.Client(api_key=api_key)
+    client = get_genai_client(api_key=api_key)
 
     rate_limiter = get_rate_limiter()
     await rate_limiter.check_limit("ir_analysis", "consistency_categorize")
@@ -135,9 +136,10 @@ async def _generate_insight(
 ) -> Optional[str]:
     """Single Gemini call to produce a 1-sentence consistency insight."""
     from google import genai
+    from app.core.services.genai_client import get_genai_client
     from ...core.services.rate_limiter import get_rate_limiter
 
-    client = genai.Client(api_key=api_key)
+    client = get_genai_client(api_key=api_key)
 
     rate_limiter = get_rate_limiter()
     await rate_limiter.check_limit("ir_analysis", "consistency_insight")

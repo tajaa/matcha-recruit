@@ -14,7 +14,7 @@ import logging
 from uuid import UUID
 
 from app.core.feature_flags import merge_company_features
-from app.core.services.pdf import safe_url_fetcher
+from app.core.services.pdf import render_pdf
 
 from . import epl_readiness, resident_care
 
@@ -272,8 +272,7 @@ def _controls_html(company_name: str, register: dict) -> str:
 
 async def render_controls_packet(company_name: str, register: dict) -> bytes:
     def _render() -> bytes:
-        from weasyprint import HTML
 
-        return HTML(string=_controls_html(company_name, register), url_fetcher=safe_url_fetcher).write_pdf()
+        return render_pdf(_controls_html(company_name, register))
 
     return await asyncio.to_thread(_render)

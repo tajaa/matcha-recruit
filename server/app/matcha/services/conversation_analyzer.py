@@ -12,7 +12,7 @@ import json
 from datetime import datetime, timezone
 from typing import Optional, Any
 
-from google import genai
+from app.core.services.genai_client import get_genai_client
 
 
 CULTURE_INTERVIEW_ANALYSIS_PROMPT = """Analyze this culture interview transcript where an AI interviewer asked an HR representative about their company culture.
@@ -634,7 +634,7 @@ class ConversationAnalyzer:
         model: str = "gemini-3-flash-preview",
     ):
         self.model = model
-        self.client = genai.Client(api_key=api_key)
+        self.client = get_genai_client(api_key=api_key)
 
     async def analyze_interview(
         self,

@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { api, ensureFreshToken } from '../../../../api/client'
+import { api } from '../../../../api/client'
+import { postSSE } from '../../../../api/sse'
 import { type DiscoverResponse } from '../SpecialtyReviewModal'
 import type { VerticalCoverageResponse } from '../types'
-import { BASE, GROUP_ORDER, HEADCOUNT_MIDPOINT } from './constants'
+import { GROUP_ORDER, HEADCOUNT_MIDPOINT } from './constants'
 import type {
   CategoryEntry,
   GeneralCoverage,
@@ -293,50 +294,20 @@ export function useCoverage({
     bumpNonce()
   }
 
-  const streamResearch = async (source: 'gap' | 'queue', url: string, body: unknown) => {
+  const streamResearch = async (source: 'gap' | 'queue', path: string, body: unknown) => {
     abortRef.current?.abort()
     const ctrl = new AbortController()
     abortRef.current = ctrl
     setResearch({ source, running: true, message: 'Starting research…', completed: 0, total: 0, error: null })
 
     try {
-      const token = await ensureFreshToken()
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify(body),
-        signal: ctrl.signal,
-      })
-      if (!res.ok) {
-        const errBody = await res.json().catch(() => null)
-        throw new Error(errBody?.detail ?? `Request failed (${res.status})`)
-      }
-
-      const reader = res.body?.getReader()
-      if (!reader) throw new Error('No response body')
-      const decoder = new TextDecoder()
-      let buf = ''
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buf += decoder.decode(value, { stream: true })
-        const lines = buf.split('\n')
-        buf = lines.pop() ?? ''
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue
-          const payload = line.slice(6).trim()
-          if (!payload || payload === 'DONE' || payload === '[DONE]') continue
-          let event: {
+      await postSSE(
+        path,
+        body,
+        (data) => {
+          const event = data as {
             type: string; message?: string; jurisdiction?: string
             progress?: number; total?: number; summary?: { total_requirements?: number }
-          }
-          try {
-            event = JSON.parse(payload)
-          } catch {
-            continue
           }
           if (event.type === 'status') {
             setResearch((r) => (r ? { ...r, message: event.message ?? '' } : r))
@@ -366,10 +337,11 @@ export function useCoverage({
           } else if (event.type === 'error') {
             setResearch((r) => (r ? { ...r, running: false, error: event.message ?? 'Research failed' } : r))
           }
-        }
-      }
+        },
+        { signal: ctrl.signal },
+      )
     } catch (e) {
-      if (e instanceof Error && e.name === 'AbortError') return
+      if (ctrl.signal.aborted) return
       setResearch({
         source, running: false, message: '', completed: 0, total: 0,
         error: e instanceof Error ? e.message : 'Research failed',
@@ -384,7 +356,7 @@ export function useCoverage({
       return
     }
     const cities = city.trim() ? [{ city: city.trim(), state: state.trim().toUpperCase() }] : []
-    streamResearch('gap', `${BASE}/admin/specialization-research/run`, {
+    streamResearch('gap', '/admin/specialization-research/run', {
       specialization: researchTarget.label,
       parent_industry: industry,
       industry_tag: researchTarget.industry_tag,
@@ -396,7 +368,7 @@ export function useCoverage({
   }
 
   const researchFetchQueue = () => {
-    streamResearch('queue', `${BASE}/admin/scope-registry/fetch-queue/research`, {
+    streamResearch('queue', '/admin/scope-registry/fetch-queue/research', {
       state: state.trim() ? state.trim().toUpperCase() : null,
       city: city.trim() || null,
     })

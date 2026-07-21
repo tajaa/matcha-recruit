@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
+import { useAsync } from '../../hooks/useAsync'
 import { ToggleLeft, Search, Loader2 } from 'lucide-react'
 import { Badge, Toggle, LABEL } from '../../components/ui'
 import { api } from '../../api/client'
@@ -84,19 +85,15 @@ function enabledCount(features: Record<string, boolean>) {
 }
 
 export default function Features() {
-  const [companies, setCompanies] = useState<CompanyFeatures[]>([])
+  const { data: companies, loading, setData: setCompanies } = useAsync(
+    () => api.get<CompanyFeatures[]>('/admin/company-features'),
+    [],
+    [],
+  )
   const [search, setSearch] = useState('')
-  const [loading, setLoading] = useState(true)
   const [toggling, setToggling] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
-
-  useEffect(() => {
-    api.get<CompanyFeatures[]>('/admin/company-features')
-      .then(setCompanies)
-      .catch(() => setCompanies([]))
-      .finally(() => setLoading(false))
-  }, [])
 
   const filtered = useMemo(
     () => companies.filter((c) => c.company_name.toLowerCase().includes(search.toLowerCase())),

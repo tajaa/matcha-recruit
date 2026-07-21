@@ -8,16 +8,17 @@ commit_scan_service) rather than the entangled matcha_work_ai.generate()."""
 import json
 import logging
 import os
-import re
 from typing import Optional
 from uuid import UUID
 
 from google import genai
+from app.core.services.genai_client import get_genai_client
 from google.genai import types
 
 from ...config import get_settings
 from ...database import get_connection
 from . import element_repo_service
+from app.core.services.model_json import clean_model_json as _clean_json_text
 
 logger = logging.getLogger(__name__)
 
@@ -33,23 +34,8 @@ def _get_client() -> genai.Client:
     global _client
     if _client is None:
         settings = get_settings()
-        _client = genai.Client(api_key=os.getenv("GEMINI_API_KEY") or settings.gemini_api_key)
+        _client = get_genai_client(api_key=os.getenv("GEMINI_API_KEY") or settings.gemini_api_key)
     return _client
-
-
-def _clean_json_text(text: str) -> str:
-    text = (text or "").strip()
-    if text.startswith("```json"):
-        text = text[7:]
-    elif text.startswith("```"):
-        text = text[3:]
-    if text.endswith("```"):
-        text = text[:-3]
-    text = text.strip()
-    s, e = text.find("{"), text.rfind("}")
-    if s != -1 and e != -1:
-        text = text[s:e + 1]
-    return text
 
 
 # ---------------------------------------------------------------------------

@@ -7,6 +7,7 @@ Embeddings are 768-dimensional vectors used for semantic similarity search.
 from typing import Optional
 
 from google import genai
+from app.core.services.genai_client import get_genai_client
 
 
 class EmbeddingService:
@@ -33,7 +34,7 @@ class EmbeddingService:
         Args:
             api_key: Gemini API key.
         """
-        self.client = genai.Client(api_key=api_key)
+        self.client = get_genai_client(api_key=api_key)
 
     async def embed_text(
         self,

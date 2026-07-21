@@ -16,6 +16,7 @@ from ...core.services.email import get_email_service
 from ...database import get_connection
 from .leave_eligibility_service import LeaveEligibilityService
 from .leave_notices_service import LeaveNoticeService
+from app.core.services.company_contacts import get_company_admin_contacts
 
 logger = logging.getLogger(__name__)
 
@@ -82,21 +83,9 @@ class LeaveAgent:
         self.email_service = get_email_service()
 
     async def _get_company_admin_contacts(self, conn, company_id: UUID) -> list[dict[str, str]]:
-        rows = await conn.fetch(
-            """
-            SELECT DISTINCT
-                u.email,
-                COALESCE(NULLIF(c.name, ''), split_part(u.email, '@', 1)) AS name
-            FROM clients c
-            JOIN users u ON u.id = c.user_id
-            WHERE c.company_id = $1
-              AND u.is_active = true
-              AND u.email IS NOT NULL
-            ORDER BY u.email
-            """,
-            company_id,
-        )
-        return [{"email": r["email"], "name": r["name"] or r["email"]} for r in rows]
+        """Delegates to the shared helper; kept as a method so the eight
+        `self._get_company_admin_contacts(...)` call sites are untouched."""
+        return await get_company_admin_contacts(conn, company_id)
 
     async def _send_leave_notifications(
         self,

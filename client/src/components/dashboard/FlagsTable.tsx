@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { relativeTime as timeAgo } from '../../utils/format'
 import { useNavigate } from 'react-router-dom'
 import { Search, ChevronUp, ChevronDown, AlertTriangle, RefreshCw, Loader2, Map as MapIcon } from 'lucide-react'
 import type { DashboardFlag, HeatMapCell, BusinessLocation } from '../../types/dashboard'
@@ -19,13 +20,6 @@ interface Props {
 type SortKey = 'priority' | 'category' | 'location_subject'
 type SortDir = 'asc' | 'desc'
 
-function timeAgo(iso: string): string {
-  const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000)
-  if (mins < 1) return 'just now'
-  if (mins < 60) return `${mins}m ago`
-  const hrs = Math.floor(mins / 60)
-  return `${hrs}h ago`
-}
 
 export function FlagsTable({ flags, heatMap, locations, totalFlags: _totalFlags, criticalCount: _criticalCount, analyzedAt, onRefresh, refreshing }: Props) {
   const navigate = useNavigate()

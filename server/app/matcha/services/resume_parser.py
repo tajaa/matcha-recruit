@@ -20,6 +20,7 @@ import os
 from typing import Optional
 
 from google import genai
+from app.core.services.genai_client import get_genai_client
 from google.genai import types
 
 from ...config import get_settings
@@ -63,7 +64,7 @@ async def parse_resume_text(text: str) -> dict:
     api_key = os.getenv("GEMINI_API_KEY") or settings.gemini_api_key
     if not api_key:
         raise ResumeParseError("GEMINI_API_KEY not configured")
-    client = genai.Client(api_key=api_key)
+    client = get_genai_client(api_key=api_key)
     capped = text[:RESUME_TEXT_CAP]
     try:
         resp = await asyncio.wait_for(

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useAsync } from '../../hooks/useAsync'
 import { api } from '../../api/client'
 import type { AnomalyDetectionResult } from '../../types/riskAssessment'
 
@@ -7,17 +7,10 @@ type Props = {
 }
 
 export function AnomaliesPanel({ qs }: Props) {
-  const [result, setResult] = useState<AnomalyDetectionResult | null>(null)
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    setLoading(true)
+  const { data: result, loading } = useAsync(() => {
     const sep = qs ? '&' : '?'
-    api.get<AnomalyDetectionResult>(`/risk-assessment/anomalies${qs}${sep}months=24`)
-      .then(setResult)
-      .catch(() => setResult(null))
-      .finally(() => setLoading(false))
-  }, [qs])
+    return api.get<AnomalyDetectionResult>(`/risk-assessment/anomalies${qs}${sep}months=24`)
+  }, [qs], null)
 
   return (
     <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6 space-y-4">

@@ -13,7 +13,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional, Any, AsyncIterator, Callable
 
-from google import genai
+from app.core.services.genai_client import get_genai_client
 
 logger = logging.getLogger(__name__)
 
@@ -550,7 +550,7 @@ class ERAnalyzer:
             model: Model to use for analysis (default: gemini-3-flash-preview).
         """
         self.model = model
-        self.client = genai.Client(api_key=api_key)
+        self.client = get_genai_client(api_key=api_key)
 
     @staticmethod
     def _is_model_unavailable_error(error: Exception) -> bool:

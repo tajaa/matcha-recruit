@@ -12,7 +12,7 @@ import asyncio
 import html
 from uuid import UUID
 
-from app.core.services.pdf import safe_url_fetcher
+from app.core.services.pdf import render_pdf
 from . import property_sov, wc_depth
 
 FORMS = {
@@ -143,6 +143,5 @@ def _form_html(form: str, ctx: dict) -> str:
 
 async def render_acord_pdf(form: str, ctx: dict) -> bytes:
     def _render() -> bytes:
-        from weasyprint import HTML
-        return HTML(string=_form_html(form, ctx), url_fetcher=safe_url_fetcher).write_pdf()
+        return render_pdf(_form_html(form, ctx))
     return await asyncio.to_thread(_render)

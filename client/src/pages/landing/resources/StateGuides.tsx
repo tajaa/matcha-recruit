@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useAsync } from '../../../hooks/useAsync'
 import { Link } from 'react-router-dom'
 import { ChevronRight, MapPin, Search } from 'lucide-react'
 
@@ -24,18 +25,11 @@ type StateEntry = {
 type StateList = { states: StateEntry[] }
 
 export default function StateGuides() {
-  const [states, setStates] = useState<StateEntry[]>([])
-  const [loading, setLoading] = useState(true)
+  const { data: states, loading } = useAsync(() => api.get<StateList>('/resources/state-guides').then(d => d.states), [], [])
   const [showPricing, setShowPricing] = useState(false)
   const [query, setQuery] = useState('')
 
-  useEffect(() => {
-    document.title = 'State HR Compliance Guides — Matcha'
-    api.get<StateList>('/resources/state-guides')
-      .then(d => setStates(d.states))
-      .catch(() => setStates([]))
-      .finally(() => setLoading(false))
-  }, [])
+  useEffect(() => { document.title = 'State HR Compliance Guides — Matcha' }, [])
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()

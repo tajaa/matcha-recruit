@@ -20,7 +20,7 @@ import re
 from datetime import date
 from typing import Optional
 
-from app.core.services.pdf import safe_url_fetcher
+from app.core.services.pdf import render_pdf
 
 logger = logging.getLogger(__name__)
 
@@ -605,8 +605,7 @@ def _triangle_html(subject_name: str, tri: dict) -> str:
 
 async def render_triangle_pdf(subject_name: str, tri: dict) -> bytes:
     def _render() -> bytes:
-        from weasyprint import HTML
 
-        return HTML(string=_triangle_html(subject_name, tri), url_fetcher=safe_url_fetcher).write_pdf()
+        return render_pdf(_triangle_html(subject_name, tri))
 
     return await asyncio.to_thread(_render)

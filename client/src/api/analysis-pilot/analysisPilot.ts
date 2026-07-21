@@ -1,13 +1,16 @@
 // Analysis Pilot API client — general-purpose bring-your-own-data analysis.
 // Sessions + datasets (CSV/XLSX/PDF upload → deterministic metrics) + saved
 // comparisons + grounded chat (SSE, with highlighted-record focus and
-// AI-proposed extraction corrections) + analyst report PDF. The chat stream is
-// a raw fetch (api/client.ts can't stream), mirroring handbookPilot.ts.
-import { api, authStreamHeaders } from '../client'
+// AI-proposed extraction corrections) + analyst report PDF. The chat stream
+// goes through api/sse.ts (which api/client.ts can't do).
+import { api } from '../client'
+import {
+  streamPilotChat as sharedStreamPilotChat,
+  type ChatHandlers as SharedChatHandlers,
+  type SessionStatus,
+} from '../sse'
 
-const BASE = import.meta.env.VITE_API_URL ?? '/api'
-
-export type SessionStatus = 'active' | 'closed'
+export type { SessionStatus } from '../sse'
 export type DatasetStatus = 'processing' | 'ready' | 'needs_review' | 'failed'
 export type SourceKind = 'csv' | 'xlsx' | 'pdf'
 
@@ -205,12 +208,11 @@ export type ChatResult = {
   proposed_edits?: ProposedEdit[]
   dropped_edits?: unknown[]
 }
-export type ChatHandlers = {
-  onStatus?: (message: string) => void
-  onResult?: (data: ChatResult) => void
-  onError?: (message: string) => void
-}
+export type ChatHandlers = SharedChatHandlers<ChatResult>
 
+// The backend's `detail` (e.g. the session conversation-limit cap) surfaces in
+// place of a bare status code — that extraction now lives in api/sse.ts and is
+// shared by every pilot.
 export async function streamChat(
   sessionId: string,
   message: string,
@@ -218,58 +220,10 @@ export async function streamChat(
   signal?: AbortSignal,
   focus?: string[],
 ): Promise<void> {
-  let res: Response
-  try {
-    res = await fetch(`${BASE}/analysis-pilot/pilot/sessions/${sessionId}/chat`, {
-      method: 'POST',
-      headers: await authStreamHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify(focus && focus.length ? { message, focus } : { message }),
-      signal,
-    })
-  } catch {
-    if (signal?.aborted) return
-    h.onError?.('Chat failed — please try again.')
-    return
-  }
-  if (!res.ok || !res.body) {
-    // Surface the backend's message (e.g. the session conversation-limit cap)
-    // instead of a bare status code.
-    let detail = ''
-    try {
-      const body = await res.json()
-      detail = typeof body?.detail === 'string' ? body.detail : ''
-    } catch {
-      /* non-JSON error body */
-    }
-    h.onError?.(detail || `Chat failed (${res.status})`)
-    return
-  }
-  const reader = res.body.getReader()
-  const decoder = new TextDecoder()
-  let buf = ''
-  try {
-    while (true) {
-      const { value, done } = await reader.read()
-      if (done) break
-      buf += decoder.decode(value, { stream: true })
-      const events = buf.split('\n\n')
-      buf = events.pop() || ''
-      for (const ev of events) {
-        if (!ev.startsWith('data: ')) continue
-        const payload = ev.slice(6)
-        if (payload === '[DONE]') return
-        try {
-          const data = JSON.parse(payload)
-          if (data.type === 'status') h.onStatus?.(data.message)
-          else if (data.type === 'result') h.onResult?.(data.data)
-          else if (data.type === 'error') h.onError?.(data.message)
-        } catch {
-          /* ignore partial/non-JSON frames */
-        }
-      }
-    }
-  } catch {
-    if (signal?.aborted) return
-    h.onError?.('Chat connection dropped — please try again.')
-  }
+  await sharedStreamPilotChat<ChatResult>(
+    `/analysis-pilot/pilot/sessions/${sessionId}/chat`,
+    focus && focus.length ? { message, focus } : { message },
+    h,
+    { signal },
+  )
 }

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
+import { useOptimisticMessages, makeTempId } from '../../hooks/useOptimisticMessages'
 import { UserPlus, Settings, Heart, BarChart2, Briefcase, LogOut } from 'lucide-react'
 import {
   getChannel,
@@ -41,6 +42,7 @@ export function useChannelView(channelIdOverride?: string | null, embedded = fal
 
   const [channel, setChannel] = useState<ChannelDetail | null>(null)
   const [messages, setMessages] = useState<ChannelMessage[]>([])
+  const { appendOptimistic } = useOptimisticMessages(setMessages)
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -179,9 +181,7 @@ export function useChannelView(channelIdOverride?: string | null, embedded = fal
       setPendingFiles([])
     }
 
-    const cmid = (typeof crypto !== 'undefined' && crypto.randomUUID)
-      ? crypto.randomUUID()
-      : `cmid-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    const cmid = makeTempId('cmid')
     if (me?.user) {
       const optimistic: ChannelMessage = {
         id: cmid,
@@ -196,12 +196,9 @@ export function useChannelView(channelIdOverride?: string | null, embedded = fal
         client_message_id: cmid,
         pending: true,
       }
-      setMessages((prev) => {
-        // Loopback race: WS echo may resolve before this updater runs. If a
-        // message with our cmid is already present, don't append a duplicate.
-        if (prev.some((m) => m.client_message_id === cmid)) return prev
-        return [...prev, optimistic]
-      })
+      // Loopback-race guard: WS echo may arrive before this append; skip if a
+      // message with our cmid is already present.
+      appendOptimistic(optimistic, (m) => m.client_message_id === cmid)
       const container = messagesContainerRef.current
       if (container) {
         const nearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 150

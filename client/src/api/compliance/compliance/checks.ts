@@ -7,9 +7,12 @@ import type {
 
 // ── Compliance Checks ──
 
-export function getComplianceCheckUrl(locationId: string): string {
-  const base = import.meta.env.VITE_API_URL || '/api'
-  return `${base}/compliance/locations/${locationId}/check`
+/** Per-location compliance re-check. Answers with SSE, not JSON — the stream IS
+ *  the work (the server projects as it yields), so callers drive it through
+ *  `postSSE` (api/sse.ts) rather than `api.post`, which would choke parsing
+ *  `data: {...}`. A path, not an absolute URL — postSSE prepends the base. */
+export function getComplianceCheckPath(locationId: string): string {
+  return `/compliance/locations/${locationId}/check`
 }
 
 export function fetchCheckLog(locationId: string, limit = 20) {

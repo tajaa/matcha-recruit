@@ -578,11 +578,11 @@ async def upload_thread_inventory(
 
     async def event_stream():
         try:
-            from google import genai as _genai
+            from app.core.services.genai_client import get_genai_client
             from google.genai import types as _types
 
             api_key = os.getenv("GEMINI_API_KEY") or get_settings().gemini_api_key
-            client = _genai.Client(api_key=api_key)
+            client = get_genai_client(api_key=api_key)
             extract_model = "gemini-3.1-flash-lite"
 
             parser = ERDocumentParser()

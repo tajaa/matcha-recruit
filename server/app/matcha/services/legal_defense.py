@@ -35,7 +35,7 @@ from uuid import UUID
 from app.config import get_settings
 from app.core.compliance_registry import CATEGORY_KEYS
 from app.core.services.genai_client import get_genai_client
-from app.core.services.pdf import safe_url_fetcher
+from app.core.services.pdf import render_pdf
 from app.core.services.storage import get_storage
 from app.matcha.models.er_case import ERCaseCategory
 from app.matcha.models.ir_incident import IRIncidentType
@@ -1824,8 +1824,7 @@ def _er_section(cid: str, data: dict) -> str:
 
 async def _render_pdf(html_str: str) -> bytes:
     def _r() -> bytes:
-        from weasyprint import HTML
-        return HTML(string=html_str, url_fetcher=safe_url_fetcher).write_pdf()
+        return render_pdf(html_str)
     return await asyncio.to_thread(_r)
 
 

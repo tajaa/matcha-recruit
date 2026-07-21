@@ -12,6 +12,7 @@ import os
 from typing import Any, Optional
 
 from google import genai
+from app.core.services.genai_client import get_genai_client
 from google.genai import types
 
 from ...config import get_settings
@@ -72,7 +73,7 @@ EXTRACTION_FIELDS: dict[str, list[dict[str, str]]] = {
 def _get_client() -> genai.Client:
     settings = get_settings()
     api_key = os.getenv("GEMINI_API_KEY") or settings.gemini_api_key
-    return genai.Client(api_key=api_key)
+    return get_genai_client(api_key=api_key)
 
 
 def _build_prompt(document_type: str) -> str:

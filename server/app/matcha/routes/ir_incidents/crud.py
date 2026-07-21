@@ -352,8 +352,7 @@ async def export_incidents(
 
     # PDF — WeasyPrint render
     try:
-        from weasyprint import HTML
-        from ....core.services.pdf import safe_url_fetcher
+        from ....core.services.pdf import render_pdf
     except ImportError:
         raise HTTPException(status_code=500, detail="PDF generation unavailable on server")
 
@@ -415,7 +414,7 @@ async def export_incidents(
     </body></html>
     """
 
-    pdf_bytes = await asyncio.to_thread(lambda: HTML(string=html_str, url_fetcher=safe_url_fetcher).write_pdf())
+    pdf_bytes = await asyncio.to_thread(lambda: render_pdf(html_str))
     return StreamingResponse(
         io.BytesIO(pdf_bytes),
         media_type="application/pdf",
@@ -730,14 +729,13 @@ async def export_incident_pdf(
     )
 
     try:
-        from weasyprint import HTML
-        from ....core.services.pdf import safe_url_fetcher
+        from ....core.services.pdf import render_pdf
     except ImportError as ie:
         logger.error("weasyprint import failed: %s", ie)
         raise HTTPException(status_code=501, detail="PDF generation not available on this server")
     try:
         pdf_bytes = await asyncio.wait_for(
-            asyncio.to_thread(lambda: HTML(string=html_str, url_fetcher=safe_url_fetcher).write_pdf()),
+            asyncio.to_thread(lambda: render_pdf(html_str)),
             timeout=60.0,
         )
     except asyncio.TimeoutError:

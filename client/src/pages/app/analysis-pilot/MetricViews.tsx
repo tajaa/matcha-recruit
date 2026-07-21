@@ -8,8 +8,25 @@ import { slugify, type FocusChip } from './shared'
 // --------------------------------------------------------------------------- //
 
 function Chart({ svg }: { svg: string }) {
-  // Server-generated, escaped inline SVG from our own backend.
-  return <div className="overflow-x-auto" dangerouslySetInnerHTML={{ __html: svg }} />
+  // Server-generated SVG, but its axis/series labels come from user-uploaded
+  // datasets, and inline SVG is a scripting context (`<script>`, `onload=`).
+  // Rendered as an <img> data-URI instead: identical pixels, but the SVG is a
+  // passive image — browsers refuse to run script in one, so no escaping bug
+  // upstream can become XSS here.
+  // An <img> renders the SVG as its own isolated document, so it no longer
+  // inherits the page font — and charts.py sets font-size but never
+  // font-family, which would drop every axis label to the browser default
+  // serif. Inject a font-family on the root <svg> to keep the rendering the
+  // inline version had.
+  const styled = svg.replace(
+    /^\s*<svg\b/,
+    '<svg font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif"',
+  )
+  return (
+    <div className="overflow-x-auto">
+      <img src={`data:image/svg+xml;utf8,${encodeURIComponent(styled)}`} alt="" className="max-w-full" />
+    </div>
+  )
 }
 
 export function BlockView({ block, onFocus }: { block: MetricBlock; onFocus?: (chip: FocusChip) => void }) {

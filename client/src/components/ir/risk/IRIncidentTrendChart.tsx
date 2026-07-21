@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
+import { useAsync } from '../../../hooks/useAsync'
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { TrendingDown, TrendingUp } from 'lucide-react'
 import { api } from '../../../api/client'
@@ -64,20 +65,16 @@ function ChartTooltip({ active, payload, label }: any) {
 export function IRIncidentTrendChart() {
   const [mode, setMode] = useState<Mode>('severity')
   const [windowDays, setWindowDays] = useState<Window>(90)
-  const [points, setPoints] = useState<IRTrendPoint[]>([])
-  const [loading, setLoading] = useState(true)
 
   const period: 'weekly' | 'monthly' = windowDays >= 180 ? 'monthly' : 'weekly'
 
-  useEffect(() => {
-    setLoading(true)
-    api.get<{ period: string; data: IRTrendPoint[] }>(
+  const { data: points, loading } = useAsync(
+    () => api.get<{ period: string; data: IRTrendPoint[] }>(
       `/ir/incidents/analytics/trends?period=${period}&days=${windowDays}`,
-    )
-      .then((res) => setPoints(res.data || []))
-      .catch(() => setPoints([]))
-      .finally(() => setLoading(false))
-  }, [period, windowDays])
+    ).then((res) => res.data || []),
+    [period, windowDays],
+    [],
+  )
 
   const chartData = useMemo(() => {
     return points.map((p) => {

@@ -9,6 +9,7 @@ import { useMe } from '../../../hooks/useMe'
 import { useWorkBase } from '../../routes/WorkSurfaceContext'
 import { RESUME_EXTENSIONS, RESUME_MAX_SIZE, INVENTORY_EXTENSIONS } from './constants'
 import { useThreadCollaboration } from './useThreadCollaboration'
+import { useOptimisticMessages, makeTempId } from '../../hooks/useOptimisticMessages'
 
 export function useThreadController() {
   const { me, hasFeature } = useMe()
@@ -17,6 +18,7 @@ export function useThreadController() {
   const base = useWorkBase()
   const [thread, setThread] = useState<MWThreadDetail | null>(null)
   const [messages, setMessages] = useState<MWMessage[]>([])
+  const { appendOptimistic, reconcileById } = useOptimisticMessages(setMessages)
   const [input, setInput] = useState('')
   const [streaming, setStreaming] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -139,7 +141,7 @@ export function useThreadController() {
 
     // Optimistically add user message
     const tempUserMsg: MWMessage = {
-      id: crypto.randomUUID(),
+      id: makeTempId(),
       thread_id: threadId,
       role: 'user',
       content,
@@ -147,7 +149,7 @@ export function useThreadController() {
       version_created: null,
       created_at: new Date().toISOString(),
     }
-    setMessages((prev) => [...prev, tempUserMsg])
+    appendOptimistic(tempUserMsg)
 
     const streamOpts: Record<string, unknown> = {}
     if (slideIndex != null) streamOpts.slide_index = slideIndex
@@ -160,10 +162,7 @@ export function useThreadController() {
       onComplete: (data: MWSendResponse) => {
         setStatusMessage('')
         // Replace temp user message + add assistant message
-        setMessages((prev) => {
-          const withoutTemp = prev.filter((m) => m.id !== tempUserMsg.id)
-          return [...withoutTemp, data.user_message, data.assistant_message]
-        })
+        reconcileById(tempUserMsg.id, data.user_message, data.assistant_message)
         // Update thread state
         setThread((prev) =>
           prev
@@ -214,7 +213,7 @@ export function useThreadController() {
     setError('')
 
     const tempMsg: MWMessage = {
-      id: crypto.randomUUID(),
+      id: makeTempId(),
       thread_id: threadId,
       role: 'user',
       content: `[Resume batch: ${fileList.length} files]`,
@@ -222,7 +221,7 @@ export function useThreadController() {
       version_created: null,
       created_at: new Date().toISOString(),
     }
-    setMessages((prev) => [...prev, tempMsg])
+    appendOptimistic(tempMsg)
 
     abortRef.current = uploadResumes(threadId, fileList, {
       onEvent: (event: MWStreamEvent) => {
@@ -230,10 +229,7 @@ export function useThreadController() {
       },
       onComplete: (data: MWSendResponse) => {
         setStatusMessage('')
-        setMessages((prev) => {
-          const withoutTemp = prev.filter((m) => m.id !== tempMsg.id)
-          return [...withoutTemp, data.user_message, data.assistant_message]
-        })
+        reconcileById(tempMsg.id, data.user_message, data.assistant_message)
         setThread((prev) =>
           prev
             ? { ...prev, current_state: data.current_state, version: data.version, task_type: data.task_type ?? prev.task_type }
@@ -269,7 +265,7 @@ export function useThreadController() {
     setError('')
 
     const tempMsg: MWMessage = {
-      id: crypto.randomUUID(),
+      id: makeTempId(),
       thread_id: threadId,
       role: 'user',
       content: `[Inventory batch: ${files.length} file${files.length !== 1 ? 's' : ''}]`,
@@ -277,7 +273,7 @@ export function useThreadController() {
       version_created: null,
       created_at: new Date().toISOString(),
     }
-    setMessages((prev) => [...prev, tempMsg])
+    appendOptimistic(tempMsg)
 
     abortRef.current = uploadInventory(threadId, files, {
       onEvent: (event: MWStreamEvent) => {
@@ -285,10 +281,7 @@ export function useThreadController() {
       },
       onComplete: (data: MWSendResponse) => {
         setStatusMessage('')
-        setMessages((prev) => {
-          const withoutTemp = prev.filter((m) => m.id !== tempMsg.id)
-          return [...withoutTemp, data.user_message, data.assistant_message]
-        })
+        reconcileById(tempMsg.id, data.user_message, data.assistant_message)
         setThread((prev) =>
           prev
             ? { ...prev, current_state: data.current_state, version: data.version, task_type: data.task_type ?? prev.task_type }

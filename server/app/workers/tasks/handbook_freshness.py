@@ -10,7 +10,7 @@ from typing import Optional
 
 from ..celery_app import celery_app
 from ..notifications import publish_task_complete, publish_task_error
-from ..utils import get_db_connection
+from ..utils import get_db_connection, scheduler_settings_row
 
 
 async def _run_single_freshness_check(handbook_id: str, company_id: str) -> dict:
@@ -37,12 +37,7 @@ async def _dispatch_freshness_checks() -> dict:
     """Find published handbooks due for freshness check and run them."""
     conn = await get_db_connection()
     try:
-        try:
-            sched_row = await conn.fetchrow(
-                "SELECT enabled, max_per_cycle FROM scheduler_settings WHERE task_key = 'handbook_freshness'"
-            )
-        except Exception:
-            sched_row = None
+        sched_row = await scheduler_settings_row(conn, "handbook_freshness")
 
         if sched_row and not sched_row["enabled"]:
             print("[Handbook Freshness] Scheduler disabled, skipping.")

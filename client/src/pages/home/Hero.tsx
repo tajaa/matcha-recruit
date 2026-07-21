@@ -1,9 +1,17 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { AMBER, ASH, BONE, DISPLAY, LEAF, LINE_D, MATCHA } from "./theme";
 import { useReducedMotion } from "./instruments/shared";
-import { ProductCarousel } from "./ProductCarousel";
 import { StartCapture } from "./StartCapture";
+
+// The carousel and its four instruments are the ONLY framer-motion importers on
+// the apex route (~60-110 KB gz), and it renders below the fold behind a
+// CAROUSEL_DELAY_S animation delay. Lazy-loading it keeps framer out of the
+// eager `/` chunk without changing what the visitor sees: the chunk lands long
+// before the delay elapses.
+const ProductCarousel = lazy(() =>
+  import("./ProductCarousel").then((m) => ({ default: m.ProductCarousel })),
+);
 
 // The headline types itself out like a terminal. Segments keep the per-word
 // styling (italic accents) that the old static markup had.
@@ -142,7 +150,11 @@ export function Hero() {
             className="mt-14 home-fade w-full max-w-[1360px] mx-auto"
             style={{ animationDelay: `${CAROUSEL_DELAY_S}s` }}
           >
-            <ProductCarousel startDelayMs={CAROUSEL_DELAY_S * 1000} />
+            {/* No spinner: the slot is already blank during the CSS fade-in
+                delay, and a fallback would flash where nothing was shown. */}
+            <Suspense fallback={null}>
+              <ProductCarousel startDelayMs={CAROUSEL_DELAY_S * 1000} />
+            </Suspense>
           </div>
         </div>
       </div>
