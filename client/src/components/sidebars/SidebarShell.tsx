@@ -30,6 +30,9 @@ export type NavItem = {
 
 export type NavGroup = {
   label: string
+  /** Stable identifier for code that needs to find this group (e.g. injecting a
+   *  conditional entry). Match on this, never on `label` — that's display copy. */
+  key?: string
   items: NavItem[]
   /** Optional company feature flag — group is hidden when the flag is false. */
   feature?: string

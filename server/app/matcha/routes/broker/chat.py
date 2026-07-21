@@ -138,9 +138,9 @@ async def send_message(
 ):
     async with get_connection() as conn:
         broker_id = await svc.resolve_broker_id(conn, current_user.id)
+        # _load_conversation 404s once the link is no longer live (the service's
+        # get_conversation carries that predicate), so no separate re-check here.
         conv = await _load_conversation(conn, conversation_id, broker_id, current_user.id)
-        # Re-check the link is still live before allowing a new message.
-        await svc.assert_broker_reaches_company(conn, broker_id, conv["company_id"])
         msg, is_new = await svc.post_message(
             conn, conversation_id=conversation_id, sender_user_id=current_user.id,
             sender_side=SIDE, body=body.body, reference=body.reference,
@@ -158,6 +158,8 @@ async def edit_message(
     current_user: CurrentUser = Depends(require_broker),
 ):
     async with get_connection() as conn:
+        # Seat gate only — the service scopes the write to the caller's own
+        # message inside a still-linked conversation.
         await svc.resolve_broker_id(conn, current_user.id)
         msg = await svc.edit_message(conn, message_id, current_user.id, body.body)
     if not msg:
@@ -171,6 +173,7 @@ async def delete_message(
     current_user: CurrentUser = Depends(require_broker),
 ):
     async with get_connection() as conn:
+        # Seat gate only — see edit_message.
         await svc.resolve_broker_id(conn, current_user.id)
         ok = await svc.delete_message(conn, message_id, current_user.id)
     if not ok:
@@ -212,9 +215,7 @@ async def unread_count(current_user: CurrentUser = Depends(require_broker)):
 
 
 def _schedule_fanout(background_tasks: BackgroundTasks, conv: dict, msg: dict) -> None:
-    preview = msg["body"]
-    if len(preview) > 140:
-        preview = preview[:140] + "…"
+    preview = svc.preview_text(msg["body"])
     background_tasks.add_task(
         svc.notify_new_message,
         conversation_id=conv["id"],

@@ -3,6 +3,7 @@ import { Loader2, MessageSquare } from 'lucide-react'
 import BrokerCompanyChat from '../../../components/broker/chat/BrokerCompanyChat'
 import type { BrokerChatAdapter } from '../../../components/broker/chat/adapter'
 import {
+  archiveCompanyConversation,
   createCompanyConversation,
   fetchCompanyBrokerChatSummary,
   fetchCompanyConversations,
@@ -42,7 +43,9 @@ export default function BrokerChat() {
       markRead: async (id, last) => {
         await markCompanyConversationRead(id, last)
       },
-      // Company side has no archive control — brokers own thread lifecycle.
+      // Status is shared, so the company needs the same control: a broker
+      // archiving a thread hid it from this side with no way back.
+      archive: (id, archived) => archiveCompanyConversation(id, archived),
     }),
     [],
   )

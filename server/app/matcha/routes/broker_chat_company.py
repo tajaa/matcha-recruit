@@ -1,10 +1,17 @@
 """Company side of the broker↔company chat.
 
 Mounted at ``/broker-chat`` (prefix in ``routes/__init__.py``); every endpoint is
-``require_admin_or_client`` and re-derives the caller's company. A company user
-can only reach conversations that belong to their own company and one of their
+``require_client`` and re-derives the caller's company. A company user can only
+reach conversations that belong to their own company and one of their
 currently-linked brokers. The broker-facing half lives in
 ``routes/broker/chat.py``; both share ``services/broker_chat_service.py``.
+
+Deliberately ``require_client``, not ``require_admin_or_client``: for an ``admin``
+``resolve_accessible_company_scope`` falls back to the *oldest company in the
+table*, so a platform admin would silently be bound to an arbitrary tenant and
+post into that tenant's broker thread as if they were the client. Messages here
+are attributed to a side and read by an outside party — the actor has to be a
+real member of the company, not a superuser standing in for one.
 """
 from datetime import datetime
 from uuid import UUID
@@ -12,7 +19,7 @@ from uuid import UUID
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 
 from ...database import get_connection
-from ..dependencies import get_client_company_id, require_admin_or_client
+from ..dependencies import get_client_company_id, require_client
 from ..models.broker_chat import (
     ConversationCreate,
     ConversationListOut,
@@ -47,7 +54,7 @@ async def _load_conversation(conn, conversation_id: UUID, company_id: UUID,
 
 
 @router.get("/summary")
-async def summary(current_user: CurrentUser = Depends(require_admin_or_client)):
+async def summary(current_user: CurrentUser = Depends(require_client)):
     """Lightweight sidebar helper: does this company have a broker, and unread count."""
     async with get_connection() as conn:
         company_id, broker_ids = await _resolve_scope(conn, current_user)
@@ -69,7 +76,7 @@ async def summary(current_user: CurrentUser = Depends(require_admin_or_client)):
 @router.get("/conversations", response_model=ConversationListOut)
 async def list_conversations(
     include_archived: bool = Query(default=False),
-    current_user: CurrentUser = Depends(require_admin_or_client),
+    current_user: CurrentUser = Depends(require_client),
 ):
     async with get_connection() as conn:
         company_id, broker_ids = await _resolve_scope(conn, current_user)
@@ -87,7 +94,7 @@ async def list_conversations(
 async def create_conversation(
     body: ConversationCreate,
     background_tasks: BackgroundTasks,
-    current_user: CurrentUser = Depends(require_admin_or_client),
+    current_user: CurrentUser = Depends(require_client),
 ):
     async with get_connection() as conn:
         company_id, broker_ids = await _resolve_scope(conn, current_user)
@@ -120,7 +127,7 @@ async def create_conversation(
 @router.get("/conversations/{conversation_id}", response_model=ConversationOut)
 async def get_conversation(
     conversation_id: UUID,
-    current_user: CurrentUser = Depends(require_admin_or_client),
+    current_user: CurrentUser = Depends(require_client),
 ):
     async with get_connection() as conn:
         company_id, broker_ids = await _resolve_scope(conn, current_user)
@@ -132,7 +139,7 @@ async def list_messages(
     conversation_id: UUID,
     before: str | None = Query(default=None, description="ISO timestamp cursor"),
     limit: int = Query(default=50, ge=1, le=100),
-    current_user: CurrentUser = Depends(require_admin_or_client),
+    current_user: CurrentUser = Depends(require_client),
 ):
     async with get_connection() as conn:
         company_id, broker_ids = await _resolve_scope(conn, current_user)
@@ -151,7 +158,7 @@ async def send_message(
     conversation_id: UUID,
     body: MessageCreate,
     background_tasks: BackgroundTasks,
-    current_user: CurrentUser = Depends(require_admin_or_client),
+    current_user: CurrentUser = Depends(require_client),
 ):
     async with get_connection() as conn:
         company_id, broker_ids = await _resolve_scope(conn, current_user)
@@ -170,7 +177,7 @@ async def send_message(
 async def edit_message(
     message_id: UUID,
     body: MessageEdit,
-    current_user: CurrentUser = Depends(require_admin_or_client),
+    current_user: CurrentUser = Depends(require_client),
 ):
     async with get_connection() as conn:
         msg = await svc.edit_message(conn, message_id, current_user.id, body.body)
@@ -182,7 +189,7 @@ async def edit_message(
 @router.delete("/messages/{message_id}", status_code=204)
 async def delete_message(
     message_id: UUID,
-    current_user: CurrentUser = Depends(require_admin_or_client),
+    current_user: CurrentUser = Depends(require_client),
 ):
     async with get_connection() as conn:
         ok = await svc.delete_message(conn, message_id, current_user.id)
@@ -194,7 +201,7 @@ async def delete_message(
 async def mark_read(
     conversation_id: UUID,
     body: MarkReadRequest,
-    current_user: CurrentUser = Depends(require_admin_or_client),
+    current_user: CurrentUser = Depends(require_client),
 ):
     async with get_connection() as conn:
         company_id, broker_ids = await _resolve_scope(conn, current_user)
@@ -203,8 +210,27 @@ async def mark_read(
     return {"ok": True}
 
 
+@router.post("/conversations/{conversation_id}/archive", response_model=ConversationOut)
+async def set_archived(
+    conversation_id: UUID,
+    archived: bool = Query(default=True),
+    current_user: CurrentUser = Depends(require_client),
+):
+    """Archive/unarchive from the company side.
+
+    Status is a property of the shared thread, so the broker archiving one hid it
+    from the company as well — with no company-side way back. Both sides get the
+    same control rather than the company depending on the broker to undo it.
+    """
+    async with get_connection() as conn:
+        company_id, broker_ids = await _resolve_scope(conn, current_user)
+        await _load_conversation(conn, conversation_id, company_id, broker_ids, current_user.id)
+        await svc.set_conversation_status(conn, conversation_id, "archived" if archived else "open")
+        return await svc.get_conversation(conn, conversation_id, user_id=current_user.id)
+
+
 @router.get("/unread-count")
-async def unread_count(current_user: CurrentUser = Depends(require_admin_or_client)):
+async def unread_count(current_user: CurrentUser = Depends(require_client)):
     async with get_connection() as conn:
         company_id, broker_ids = await _resolve_scope(conn, current_user)
         total = await svc.total_unread(
@@ -214,9 +240,7 @@ async def unread_count(current_user: CurrentUser = Depends(require_admin_or_clie
 
 
 def _schedule_fanout(background_tasks: BackgroundTasks, conv: dict, msg: dict) -> None:
-    preview = msg["body"]
-    if len(preview) > 140:
-        preview = preview[:140] + "…"
+    preview = svc.preview_text(msg["body"])
     background_tasks.add_task(
         svc.notify_new_message,
         conversation_id=conv["id"],

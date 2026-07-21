@@ -88,10 +88,13 @@ def upgrade():
         "ON broker_company_messages(conversation_id, created_at)"
     )
     # Idempotent send: a retried POST with the same client_message_id from the
-    # same sender collapses to the original row (matches channel_messages).
+    # same sender into the same thread collapses to the original row (matches
+    # channel_messages). Scoped per conversation on purpose — a sender-wide key
+    # would make a token reused across threads return the *other* thread's
+    # message and silently drop this send.
     op.execute(
-        "CREATE UNIQUE INDEX IF NOT EXISTS uq_bc_messages_sender_cmid "
-        "ON broker_company_messages(sender_user_id, client_message_id) "
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_bc_messages_conv_sender_cmid "
+        "ON broker_company_messages(conversation_id, sender_user_id, client_message_id) "
         "WHERE client_message_id IS NOT NULL"
     )
 

@@ -4289,9 +4289,12 @@ async def init_db():
             CREATE INDEX IF NOT EXISTS idx_bc_messages_conversation
             ON broker_company_messages(conversation_id, created_at)
         """)
+        # Idempotent send, scoped per conversation: a sender-wide key would make
+        # a client_message_id reused across threads collapse onto the other
+        # thread's row and silently drop the new message.
         await conn.execute("""
-            CREATE UNIQUE INDEX IF NOT EXISTS uq_bc_messages_sender_cmid
-            ON broker_company_messages(sender_user_id, client_message_id)
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_bc_messages_conv_sender_cmid
+            ON broker_company_messages(conversation_id, sender_user_id, client_message_id)
             WHERE client_message_id IS NOT NULL
         """)
         await conn.execute("""

@@ -58,6 +58,7 @@ const nav: (NavItem | NavGroup)[] = [
   },
   {
     label: 'Communication',
+    key: 'communication',
     items: [
       { to: '/app/inbox', icon: Mail, label: 'Inbox' },
       { to: '/app/notifications', icon: Bell, label: 'Notifications' },
@@ -119,25 +120,27 @@ export default function ClientSidebar() {
       .catch(() => {})
   }, [isPersonal])
 
+  // Keyed on `key`, not the group's display label: matching on copy meant a
+  // rename (or the group being filtered away) silently dropped the entry for a
+  // company that does have a broker. If the group isn't there, append the item
+  // at top level rather than losing it.
   function withBrokerChat(items: (NavItem | NavGroup)[]): (NavItem | NavGroup)[] {
     if (!brokerChat.show) return items
-    return items.map((item) => {
-      if ('items' in item && item.label === 'Communication') {
-        return {
-          ...item,
-          items: [
-            ...item.items,
-            {
-              to: '/app/broker-chat',
-              icon: Handshake,
-              label: 'Broker Chat',
-              badge: brokerChat.unread || undefined,
-            } as NavItem,
-          ],
-        }
+    const entry: NavItem = {
+      to: '/app/broker-chat',
+      icon: Handshake,
+      label: 'Broker Chat',
+      badge: brokerChat.unread || undefined,
+    }
+    let placed = false
+    const out = items.map((item) => {
+      if ('items' in item && item.key === 'communication') {
+        placed = true
+        return { ...item, items: [...item.items, entry] }
       }
       return item
     })
+    return placed ? out : [...out, entry]
   }
 
   function filterByFeatures(items: (NavItem | NavGroup)[]): (NavItem | NavGroup)[] {

@@ -30,6 +30,29 @@ ACTIVE_LINK_STATUSES = ("active", "grace")
 # have no name row, so they fall back to their login email.
 _SENDER_NAME_EXPR = "COALESCE(cl.name, u.email)"
 
+# Every conversation read goes through this predicate (it assumes the
+# conversations table is aliased ``c``). Scoping by broker_id / company_id alone
+# is NOT enough: after a link is terminated the pair still matches, so the
+# ex-broker would keep listing and reading the whole history. The company side
+# happens to be safe because it derives its broker_ids from live links; this
+# makes the rule structural for both sides instead of an accident of one.
+_ACTIVE_LINK_PREDICATE = (
+    "EXISTS (SELECT 1 FROM broker_company_links l"
+    " WHERE l.broker_id = c.broker_id AND l.company_id = c.company_id"
+    "   AND l.status = ANY(ARRAY["
+    + ", ".join(f"'{s}'" for s in ACTIVE_LINK_STATUSES)
+    + "]::text[]))"
+)
+
+# Sidebar/list preview length. One definition — the routers' fan-out preview and
+# the conversation tail refresh both use it.
+PREVIEW_LIMIT = 140
+
+
+def preview_text(body: str) -> str:
+    """The one-line preview stored on the conversation / sent in a notification."""
+    return (body[:PREVIEW_LIMIT] + "…") if len(body) > PREVIEW_LIMIT else body
+
 
 # --------------------------------------------------------------------------- #
 # Access resolution
@@ -123,7 +146,7 @@ async def list_conversations(
     Exactly one selector is used: ``broker_id`` (broker side, scoped to one
     company optionally) or ``company_id`` + ``broker_ids`` (company side).
     """
-    where = ["1=1"]
+    where = [_ACTIVE_LINK_PREDICATE]
     params: list = []
 
     def p(v):
@@ -174,9 +197,14 @@ async def list_conversations(
 
 
 async def get_conversation(conn, conversation_id: UUID, *, user_id: UUID) -> Optional[dict]:
-    """Fetch one conversation with its unread count. Access is checked by caller."""
+    """Fetch one conversation with its unread count.
+
+    Returns None once the (broker, company) link is no longer live, so every
+    caller — read, mark-read, archive, send — 404s on a terminated relationship.
+    Which *side* the caller is on is still checked by the caller.
+    """
     row = await conn.fetchrow(
-        """
+        f"""
         SELECT c.id, c.broker_id, c.company_id, c.subject, c.status,
                c.reference_type, c.reference_id, c.reference_label,
                c.created_by_side, c.last_message_at, c.last_message_preview,
@@ -195,7 +223,7 @@ async def get_conversation(conn, conversation_id: UUID, *, user_id: UUID) -> Opt
         FROM broker_company_conversations c
         JOIN companies comp ON comp.id = c.company_id
         JOIN brokers b ON b.id = c.broker_id
-        WHERE c.id = $1
+        WHERE c.id = $1 AND {_ACTIVE_LINK_PREDICATE}
         """,
         conversation_id, user_id,
     )
@@ -308,6 +336,11 @@ async def post_message(
 ) -> tuple[dict, bool]:
     """Insert a message (idempotent on client_message_id). Returns (message, is_new).
 
+    Idempotency is scoped to ``(conversation_id, sender_user_id,
+    client_message_id)``, not to the sender alone: a client that reuses a token
+    across threads would otherwise get the *other* thread's message back with
+    is_new=False, and this send would vanish with a 201 on it.
+
     On a fresh insert the conversation's last-message fields advance and the
     sender's own read watermark is bumped. Caller handles notification fan-out.
     """
@@ -320,7 +353,7 @@ async def post_message(
             (conversation_id, sender_user_id, sender_side, body,
              reference_type, reference_id, reference_label, client_message_id)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-        ON CONFLICT (sender_user_id, client_message_id)
+        ON CONFLICT (conversation_id, sender_user_id, client_message_id)
             WHERE client_message_id IS NOT NULL
             DO UPDATE SET id = broker_company_messages.id
         RETURNING id, conversation_id, sender_user_id, sender_side, body,
@@ -343,7 +376,7 @@ async def post_message(
     msg["sender_name"] = sender_name or "Unknown"
 
     if is_new:
-        preview = (body[:140] + "…") if len(body) > 140 else body
+        preview = preview_text(body)
         await conn.execute(
             """
             UPDATE broker_company_conversations
@@ -360,12 +393,43 @@ async def post_message(
     return _message_dict(msg), is_new
 
 
+async def _refresh_conversation_tail(conn, conversation_id: UUID) -> None:
+    """Recompute the conversation's last-message fields from live messages.
+
+    The list views on both sides render ``last_message_preview``, so editing or
+    deleting the newest message has to rewrite it — otherwise "delete" removes
+    the message from the thread while leaving its text in the other side's
+    sidebar forever. Nulls out both fields when nothing is left.
+    """
+    tail = await conn.fetchrow(
+        """
+        SELECT body, created_at FROM broker_company_messages
+        WHERE conversation_id = $1 AND deleted_at IS NULL
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1
+        """,
+        conversation_id,
+    )
+    await conn.execute(
+        """
+        UPDATE broker_company_conversations
+        SET last_message_at = $2, last_message_preview = $3, updated_at = NOW()
+        WHERE id = $1
+        """,
+        conversation_id,
+        tail["created_at"] if tail else None,
+        preview_text(tail["body"]) if tail else None,
+    )
+
+
 async def edit_message(conn, message_id: UUID, sender_user_id: UUID, body: str) -> Optional[dict]:
     row = await conn.fetchrow(
-        """
-        UPDATE broker_company_messages
+        f"""
+        UPDATE broker_company_messages m
         SET body = $3, edited_at = NOW()
-        WHERE id = $1 AND sender_user_id = $2 AND deleted_at IS NULL
+        WHERE m.id = $1 AND m.sender_user_id = $2 AND m.deleted_at IS NULL
+          AND EXISTS (SELECT 1 FROM broker_company_conversations c
+                       WHERE c.id = m.conversation_id AND {_ACTIVE_LINK_PREDICATE})
         RETURNING id, conversation_id, sender_user_id, sender_side, body,
                   reference_type, reference_id, reference_label, client_message_id,
                   created_at, edited_at
@@ -379,34 +443,65 @@ async def edit_message(conn, message_id: UUID, sender_user_id: UUID, body: str) 
             LEFT JOIN clients cl ON cl.user_id = u.id WHERE u.id = $1""",
         sender_user_id,
     )
+    await _refresh_conversation_tail(conn, row["conversation_id"])
     d = dict(row)
     d["sender_name"] = sender_name or "Unknown"
     return _message_dict(d)
 
 
 async def delete_message(conn, message_id: UUID, sender_user_id: UUID) -> bool:
-    result = await conn.execute(
-        """
-        UPDATE broker_company_messages SET deleted_at = NOW()
-        WHERE id = $1 AND sender_user_id = $2 AND deleted_at IS NULL
+    row = await conn.fetchrow(
+        f"""
+        UPDATE broker_company_messages m SET deleted_at = NOW()
+        WHERE m.id = $1 AND m.sender_user_id = $2 AND m.deleted_at IS NULL
+          AND EXISTS (SELECT 1 FROM broker_company_conversations c
+                       WHERE c.id = m.conversation_id AND {_ACTIVE_LINK_PREDICATE})
+        RETURNING conversation_id
         """,
         message_id, sender_user_id,
     )
-    return result.endswith("1")
+    if not row:
+        return False
+    await _refresh_conversation_tail(conn, row["conversation_id"])
+    return True
 
 
 # --------------------------------------------------------------------------- #
 # Read watermarks
 # --------------------------------------------------------------------------- #
 async def mark_read(conn, conversation_id: UUID, user_id: UUID, last_read_message_id=None) -> None:
+    """Advance the caller's read watermark.
+
+    When a message id is supplied the watermark is **that message's timestamp**,
+    not ``NOW()``: the client read up to the message it rendered, and anything
+    that arrived while the read round-trip was in flight must stay unread.
+    Stamping NOW() here silently swallowed those. Omitting the id still means
+    "whole thread read" and falls back to NOW().
+
+    The watermark only ever moves forward (``GREATEST``), so an out-of-order or
+    replayed mark-read can't un-read messages the user has already seen.
+    """
     await conn.execute(
         """
         INSERT INTO broker_company_conversation_reads
             (conversation_id, user_id, last_read_at, last_read_message_id)
-        VALUES ($1, $2, NOW(), $3)
+        SELECT $1::uuid, $2::uuid,
+               COALESCE(
+                   (SELECT m.created_at FROM broker_company_messages m
+                     WHERE m.id = $3::uuid AND m.conversation_id = $1::uuid),
+                   NOW()
+               ),
+               $3::uuid
         ON CONFLICT (conversation_id, user_id)
-        DO UPDATE SET last_read_at = NOW(),
-                      last_read_message_id = COALESCE($3, broker_company_conversation_reads.last_read_message_id)
+        DO UPDATE SET
+            last_read_at = GREATEST(
+                broker_company_conversation_reads.last_read_at, EXCLUDED.last_read_at),
+            last_read_message_id = CASE
+                WHEN EXCLUDED.last_read_at >= broker_company_conversation_reads.last_read_at
+                    THEN COALESCE(EXCLUDED.last_read_message_id,
+                                  broker_company_conversation_reads.last_read_message_id)
+                ELSE broker_company_conversation_reads.last_read_message_id
+            END
         """,
         conversation_id, user_id, last_read_message_id,
     )
@@ -422,7 +517,8 @@ async def total_unread(
 ) -> int:
     where = ["m.deleted_at IS NULL", "m.sender_user_id <> $1",
              "(r.last_read_at IS NULL OR m.created_at > r.last_read_at)",
-             "c.status <> 'archived'"]
+             "c.status <> 'archived'",
+             _ACTIVE_LINK_PREDICATE]
     params: list = [user_id]
 
     def p(v):

@@ -43,5 +43,10 @@ export const markCompanyConversationRead = (
     last_read_message_id: lastReadMessageId ?? null,
   })
 
+export const archiveCompanyConversation = (conversationId: string, archived: boolean) =>
+  api.post<Conversation>(
+    `/broker-chat/conversations/${conversationId}/archive?archived=${archived}`,
+  )
+
 export const fetchCompanyBrokerChatUnread = () =>
   api.get<{ unread: number }>('/broker-chat/unread-count')

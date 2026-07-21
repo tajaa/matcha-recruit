@@ -59,6 +59,14 @@ function conversationTitle(c: Conversation, side: 'broker' | 'company'): string 
   return side === 'broker' ? (c.company_name || 'Client') : (c.broker_name || 'Broker')
 }
 
+// The 5s poll re-fetches the same rows almost every time. Comparing identity
+// before committing keeps React (and the auto-scroll effect below) from seeing a
+// change that isn't one.
+function sameMessages(a: ChatMessage[], b: ChatMessage[]): boolean {
+  if (a.length !== b.length) return false
+  return a.every((m, i) => m.id === b[i].id && m.edited_at === b[i].edited_at && m.body === b[i].body)
+}
+
 export default function BrokerCompanyChat({ adapter }: { adapter: BrokerChatAdapter }) {
   const { toast } = useToast()
   const [conversations, setConversations] = useState<Conversation[]>([])
@@ -70,10 +78,17 @@ export default function BrokerCompanyChat({ adapter }: { adapter: BrokerChatAdap
   const [sending, setSending] = useState(false)
   const [composerRef, setComposerRef] = useState<MessageReference | null>(null)
   const [showNew, setShowNew] = useState(false)
+  const [showArchived, setShowArchived] = useState(false)
 
   const selectedIdRef = useRef<string | null>(null)
   selectedIdRef.current = selectedId
   const scrollRef = useRef<HTMLDivElement | null>(null)
+  // Only auto-scroll when the reader is already at the bottom — otherwise the
+  // poll yanks someone reading history back down every few seconds.
+  const atBottomRef = useRef(true)
+  // Newest message already acknowledged, so an idle open thread stops re-PUTting
+  // /read on every poll tick.
+  const lastReadIdRef = useRef<string | null>(null)
 
   const selected = useMemo(
     () => conversations.find((c) => c.id === selectedId) || null,
@@ -82,14 +97,14 @@ export default function BrokerCompanyChat({ adapter }: { adapter: BrokerChatAdap
 
   const loadConversations = useCallback(async () => {
     try {
-      const res = await adapter.listConversations(false)
+      const res = await adapter.listConversations(showArchived)
       setConversations(res.conversations)
     } catch {
       // best-effort; a transient list refresh failure is non-fatal
     } finally {
       setLoadingConvs(false)
     }
-  }, [adapter])
+  }, [adapter, showArchived])
 
   const markConversationRead = useCallback(
     async (conversationId: string, lastMessageId?: string) => {
@@ -99,7 +114,8 @@ export default function BrokerCompanyChat({ adapter }: { adapter: BrokerChatAdap
           prev.map((c) => (c.id === conversationId ? { ...c, unread_count: 0 } : c)),
         )
       } catch {
-        /* non-fatal */
+        // Leave the watermark unacknowledged so the next poll retries it.
+        lastReadIdRef.current = null
       }
     },
     [adapter],
@@ -112,9 +128,21 @@ export default function BrokerCompanyChat({ adapter }: { adapter: BrokerChatAdap
         const msgs = await adapter.getMessages(conversationId)
         // Only apply if the user hasn't switched conversations mid-request.
         if (selectedIdRef.current !== conversationId) return
-        setMessages(msgs)
+        setMessages((prev) => {
+          // Keep optimistic sends the server hasn't echoed back yet.
+          const pending = prev.filter(
+            (m) =>
+              m.id.startsWith('pending-') &&
+              !msgs.some((s) => s.client_message_id && s.client_message_id === m.client_message_id),
+          )
+          const next = pending.length ? [...msgs, ...pending] : msgs
+          return sameMessages(prev, next) ? prev : next
+        })
         const last = msgs[msgs.length - 1]
-        if (last) markConversationRead(conversationId, last.id)
+        if (last && lastReadIdRef.current !== last.id) {
+          lastReadIdRef.current = last.id
+          markConversationRead(conversationId, last.id)
+        }
       } catch {
         /* non-fatal — polling will retry */
       } finally {
@@ -141,21 +169,33 @@ export default function BrokerCompanyChat({ adapter }: { adapter: BrokerChatAdap
       setMessages([])
       return
     }
+    // A newly-opened thread starts pinned to the newest message.
+    atBottomRef.current = true
+    lastReadIdRef.current = null
     loadMessages(selectedId, { showSpinner: true })
     const id = setInterval(() => loadMessages(selectedId), 5000)
     return () => clearInterval(id)
   }, [selectedId, loadMessages])
 
-  // Keep the thread scrolled to the newest message.
+  // Follow the newest message only while the reader is already at the bottom.
   useEffect(() => {
     const el = scrollRef.current
-    if (el) el.scrollTop = el.scrollHeight
+    if (el && atBottomRef.current) el.scrollTop = el.scrollHeight
   }, [messages])
 
   const handleSend = useCallback(async () => {
     const trimmed = input.trim()
     if (!trimmed || !selectedId || sending) return
+    // The server requires a non-empty reference label (MessageReference.label is
+    // min_length=1), so an attached-but-unlabelled reference 422s the whole send.
+    // Same guard the new-conversation modal already has.
+    if (composerRef && !composerRef.label.trim()) {
+      toast('Reference needs a label', 'error')
+      return
+    }
     setSending(true)
+    // Own message: follow it down even if the reader had scrolled up.
+    atBottomRef.current = true
     const cmid = crypto.randomUUID()
     const reference = composerRef
     // Optimistic append.
@@ -207,12 +247,25 @@ export default function BrokerCompanyChat({ adapter }: { adapter: BrokerChatAdap
     <div className="flex h-[calc(100vh-8rem)] min-h-[32rem] overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950">
       {/* Conversation list */}
       <aside className="flex w-72 shrink-0 flex-col border-r border-zinc-800">
-        <div className="flex items-center justify-between border-b border-zinc-800 px-4 py-3">
-          <h2 className="text-sm font-semibold text-zinc-200">Messages</h2>
-          <Button size="sm" onClick={() => setShowNew(true)} className="!px-2 !py-1">
-            <Plus className="h-4 w-4" />
-            New
-          </Button>
+        <div className="border-b border-zinc-800 px-4 py-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-zinc-200">Messages</h2>
+            <Button size="sm" onClick={() => setShowNew(true)} className="!px-2 !py-1">
+              <Plus className="h-4 w-4" />
+              New
+            </Button>
+          </div>
+          {/* Archive status is shared between the two sides, so both need a way
+              back to an archived thread — not just whoever archived it. */}
+          <label className="mt-2 flex cursor-pointer items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-300">
+            <input
+              type="checkbox"
+              checked={showArchived}
+              onChange={(e) => setShowArchived(e.target.checked)}
+              className="h-3 w-3 accent-emerald-600"
+            />
+            Show archived
+          </label>
         </div>
         <div className="flex-1 overflow-y-auto">
           {loadingConvs ? (
@@ -243,6 +296,7 @@ export default function BrokerCompanyChat({ adapter }: { adapter: BrokerChatAdap
                   )}
                 </div>
                 <span className="truncate text-xs text-zinc-500">
+                  {c.status === 'archived' ? '(archived) ' : ''}
                   {c.last_message_preview || 'No messages yet'}
                 </span>
               </button>
@@ -281,7 +335,14 @@ export default function BrokerCompanyChat({ adapter }: { adapter: BrokerChatAdap
               )}
             </header>
 
-            <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto px-5 py-4">
+            <div
+              ref={scrollRef}
+              onScroll={(e) => {
+                const el = e.currentTarget
+                atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+              }}
+              className="flex-1 space-y-3 overflow-y-auto px-5 py-4"
+            >
               {loadingMsgs ? (
                 <div className="flex items-center justify-center py-10 text-zinc-500">
                   <Loader2 className="h-5 w-5 animate-spin" />
