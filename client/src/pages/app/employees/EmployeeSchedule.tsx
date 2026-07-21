@@ -6,17 +6,18 @@ import {
 import { Card, useToast } from '../../../components/ui'
 import { ApiError } from '../../../api/client'
 import {
-  fetchWeek, createShift, deleteShift, publishShift, publishRange,
+  createShift, deleteShift, publishShift,
   assignEmployee, unassignEmployee, fetchTemplates, createTemplate, deleteTemplate,
   generateFromTemplate, fetchRequests, reviewRequest,
 } from '../../../api/employees/employeeSchedule'
 import type {
-  Shift, RosterEmployee, ScheduleSummary, ShiftTemplate, ScheduleRequest, ShiftPayload,
+  Shift, RosterEmployee, ShiftTemplate, ScheduleRequest, ShiftPayload,
 } from '../../../types/employeeSchedule'
 import {
   STATUS_TONE, REQUEST_TONE, errorMessage,
   fmtTime, fmtDayLabel, toISODate, addDays, startOfWeekSunday,
 } from '../../../types/employeeSchedule'
+import { useEmployeeSchedule } from './useEmployeeSchedule'
 
 const inputCls = 'bg-zinc-900 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500 w-full'
 
@@ -62,44 +63,20 @@ function conflictPrompt(err: unknown): string | null {
   return null
 }
 
-type Tab = 'schedule' | 'templates' | 'requests'
-
 export default function EmployeeSchedule() {
-  const [tab, setTab] = useState<Tab>('schedule')
-  const [weekStart, setWeekStart] = useState(() => toISODate(startOfWeekSunday(new Date())))
-  const [shifts, setShifts] = useState<Shift[]>([])
-  const [roster, setRoster] = useState<RosterEmployee[]>([])
-  const [summary, setSummary] = useState<ScheduleSummary | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [publishing, setPublishing] = useState(false)
-
-  const reload = useCallback(async () => {
-    const w = await fetchWeek(weekStart)
-    setShifts(w.shifts)
-    setRoster(w.roster)
-    setSummary(w.summary)
-  }, [weekStart])
-
-  useEffect(() => {
-    setLoading(true)
-    reload().finally(() => setLoading(false))
-  }, [reload])
-
-  function patchShift(updated: Shift) {
-    setShifts((prev) => prev.map((s) => (s.id === updated.id ? updated : s)))
-  }
-
-  async function publishWeek() {
-    setPublishing(true)
-    try {
-      await publishRange(`${weekStart}T00:00:00Z`, `${addDays(weekStart, 7)}T00:00:00Z`)
-      await reload()
-    } finally {
-      setPublishing(false)
-    }
-  }
-
-  const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i))
+  const {
+    tab, setTab,
+    weekStart, setWeekStart,
+    shifts,
+    roster,
+    summary,
+    loading,
+    publishing,
+    reload,
+    patchShift,
+    publishWeek,
+    days,
+  } = useEmployeeSchedule()
 
   return (
     // Same page frame as Compliance/Dashboard/Onboarding/Company/OSHA Logs.
