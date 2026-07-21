@@ -275,10 +275,10 @@ async def run_merlin_turn(
     client = get_genai_client()
     tier_cfg = MODEL_TIERS[tier]
     model = tier_cfg.model
-    thinking_cfg = (
-        types.ThinkingConfig(thinking_level=tier_cfg.thinking_level)
-        if tier_cfg.thinking_level else types.ThinkingConfig(thinking_budget=0)
-    )
+    # Always a LEVEL, never a budget: `thinking_budget` is a 2.5-era param the
+    # 3.x models reject outright (400 INVALID_ARGUMENT on 3.5-flash-lite, even
+    # for budget=0). "minimal" is the thinking-off equivalent.
+    thinking_cfg = types.ThinkingConfig(thinking_level=tier_cfg.thinking_level)
     premium = is_premium_plan(plan)
     # Did the user actually ask about themes this turn? Gates the site-wide
     # preset swap so it can't ride along on an unrelated request.

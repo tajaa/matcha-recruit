@@ -12,7 +12,7 @@ Kept as plain dicts/sets (not Pydantic) — this is read-only reference data
 consumed by prompt-building and validation, not request/response shapes.
 """
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 # type -> {field name: field kind}, for the block's top-level content fields
 # (excluding `type` itself and the structural `_design`/`_k`). Kinds use the
@@ -188,12 +188,15 @@ DESIGN_REQUIRES_PREMIUM = True
 @dataclass(frozen=True)
 class ModelTier:
     model: str
-    # None → thinking explicitly OFF (ThinkingConfig(thinking_budget=0), the
-    # fastest path). A string names a level (ThinkingConfig(thinking_level=…)).
+    # A ThinkingLevel name: "minimal" | "low" | "medium" | "high". ALWAYS a
+    # level, never a budget — the 3.x generation dropped `thinking_budget`,
+    # and passing it (even `thinking_budget=0`, the 2.5-era way to turn
+    # thinking off) is a hard 400 INVALID_ARGUMENT on 3.5-flash-lite. The
+    # thinking-off equivalent is `thinking_level="minimal"`.
     # `regular` used to get Gemini's own default dynamic thinking (no config
     # was ever passed) — now explicit "low", so its latency/cost are pinned
     # instead of drifting with Google's default heuristic.
-    thinking_level: Optional[str]
+    thinking_level: str
     # Per-tier call timeout (seconds) — a thinking turn is slower than a
     # non-thinking one, so `max` gets more room before run_merlin_turn's
     # timeout-retry-feedback path kicks in.
@@ -209,7 +212,7 @@ class ModelTier:
 # on an identical model+prompt; gated premium like `regular`, tracked under
 # its own rate-limiter key (`record_call("cappe_merlin", "max")`).
 MODEL_TIERS: dict[str, ModelTier] = {
-    "lite": ModelTier("gemini-3.5-flash-lite", None, 45),
+    "lite": ModelTier("gemini-3.5-flash-lite", "minimal", 45),
     "regular": ModelTier("gemini-3.6-flash", "low", 45),
     "max": ModelTier("gemini-3.6-flash", "high", 90),
 }

@@ -214,12 +214,12 @@ async def test_turn_reports_the_tier_it_used(monkeypatch):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("tier,expect_level,expect_budget", [
-    ("lite", None, 0),                                  # thinking explicitly OFF
-    ("regular", _ThinkingLevel.LOW, None),
-    ("max", _ThinkingLevel.HIGH, None),
+@pytest.mark.parametrize("tier,expect_level", [
+    ("lite", _ThinkingLevel.MINIMAL),   # "thinking off" for the 3.x generation
+    ("regular", _ThinkingLevel.LOW),
+    ("max", _ThinkingLevel.HIGH),
 ])
-async def test_turn_configures_thinking_per_tier(monkeypatch, tier, expect_level, expect_budget):
+async def test_turn_configures_thinking_per_tier(monkeypatch, tier, expect_level):
     payload = '{"message": "Done.", "ops": []}'
     fake = _FakeClient(payload)
     monkeypatch.setattr(merlin, "get_genai_client", lambda **kw: fake)
@@ -227,10 +227,22 @@ async def test_turn_configures_thinking_per_tier(monkeypatch, tier, expect_level
         message="hi", history=[], blocks=_BLOCKS, theme={}, model_tier=tier, plan="business",
     )
     assert result["tier"] == tier
-    config = fake.aio.models.last_kwargs["config"]
-    thinking = config.thinking_config
+    thinking = fake.aio.models.last_kwargs["config"].thinking_config
     assert thinking.thinking_level == expect_level
-    assert thinking.thinking_budget == expect_budget
+    # NEVER a budget. `thinking_budget` is a 2.5-era param; 3.5-flash-lite
+    # 400s on it (including budget=0), which silently killed the default tier
+    # for every user — the never-raises contract turned it into a friendly
+    # "couldn't process that" instead of an alarm. Regression guard.
+    assert thinking.thinking_budget is None
+
+
+def test_no_tier_uses_a_thinking_budget():
+    """The 3.x models take thinking_level only. A tier configured with a
+    budget is a 400 on every single turn it serves."""
+    from app.cappe.services.merlin_catalog import MODEL_TIERS
+    valid = {"minimal", "low", "medium", "high"}
+    for name, cfg in MODEL_TIERS.items():
+        assert cfg.thinking_level in valid, f"{name}: {cfg.thinking_level!r} is not a ThinkingLevel"
 
 
 def test_max_tier_gets_a_longer_timeout_than_lite():
