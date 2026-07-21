@@ -2473,7 +2473,20 @@ def render_site_html(site: dict, page: dict, nav_pages: list[dict], preview: boo
         f":root{{--bg:{_clean_css(c['bg'])};--surface:{_clean_css(c['surface'])};"
         f"--ink:{_clean_css(c['text'])};--muted:{_clean_css(c['muted'])};--line:{_clean_css(c['border'])};"
         f"--brand:{_clean_css(c['brand'])};--brand-fg:{_clean_css(c['brandText'])};--accent:{_clean_css(c['accent'])};"
-        f"--radius:{_clean_css(t['radius'])};--font-h:{_font_stack(t['heading'])};--font-b:{_font_stack(t['body'])}}}"
+        f"--radius:{_clean_css(t['radius'])};--font-h:{_font_stack(t['heading'])};--font-b:{_font_stack(t['body'])};"
+        # `--t-*`: stable, cycle-proof aliases for design_registry.DESIGN_COLOR_TOKENS.
+        # A `_design` color token must NEVER resolve through --bg/--surface/--brand/etc
+        # directly — a section that also sets colors.accent remaps --brand to
+        # --cz-brand (the `.cz-acc` class, below), and --cz-brand's own value is
+        # `var(--brand)`. If a token had resolved to `var(--brand)`, that section's
+        # gradient/icon colors would read `--brand -> --cz-brand -> --brand`, a
+        # reference cycle the CSS spec makes INVALID (not "falls back to the
+        # cycled value" — the whole custom property computes to nothing), which is
+        # exactly what killed the icons and gradient in the 2026-07-21 "brand-glow
+        # + accent" incident. --t-* are declared ONCE here with concrete values and
+        # no section-scoped class ever reassigns them, so no cycle is constructible.
+        f"--t-bg:{_clean_css(c['bg'])};--t-surface:{_clean_css(c['surface'])};--t-ink:{_clean_css(c['text'])};"
+        f"--t-line:{_clean_css(c['border'])};--t-brand:{_clean_css(c['brand'])};--t-muted:{_clean_css(c['muted'])}}}"
     )
 
     # Designer typography + brand-gradient tokens (all optional; absent = today).

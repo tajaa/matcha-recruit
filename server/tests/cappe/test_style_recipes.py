@@ -108,3 +108,26 @@ def test_apply_style_recipe_targets_explicit_ids():
 def test_apply_style_recipe_unknown_block_id_rejected():
     valid, rejected = _apply("framed", blocks=["ghost"])
     assert not valid and "unknown block id" in rejected[0]["reason"]
+
+
+# --- 2026-07-21 "arguably worse" regression: brand-glow visibility + spotlight -
+
+def test_brand_glow_uses_a_visible_gradient_stop_not_the_faint_one():
+    """brand-faint (8% mix) over a near-black bg read as no gradient at all —
+    regression guard against reverting to it."""
+    stops = RECIPES_BY_KEY["brand-glow"].design["bg"]["gradient"]["stops"]
+    assert "brand-soft" in stops
+    assert "brand-faint" not in stops
+
+
+def test_brand_glow_is_a_coordinated_multi_group_restyle():
+    """A bg tint alone reads as "nothing happened" for a redesign ask —
+    brand-glow must also move layout/typography, not just paint a color."""
+    design = RECIPES_BY_KEY["brand-glow"].design
+    assert "layout" in design and "motion" in design
+
+
+def test_spotlight_recipe_exists_for_completely_different_asks():
+    r = RECIPES_BY_KEY.get("spotlight")
+    assert r is not None
+    assert set(r.design) >= {"type", "layout", "bg", "motion"}  # a real structural swing, not one group

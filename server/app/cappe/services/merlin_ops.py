@@ -692,6 +692,11 @@ MERLIN_OPS: tuple[MerlinOp, ...] = (
             '(token-based) multi-key restyle in one op; freehand set_design values risk picking colors with '
             'no relationship to the theme (this is how a dark-on-dark gradient went invisible, and how a '
             'literal pattern color rendered as a bright wireframe-grid overlay). '
+            'For "completely different / redesign from scratch / totally new look", a recipe ALONE is not '
+            'enough — a bg tint with the same padding/typography reads as "nothing happened". Pick the '
+            'closest recipe (spotlight is the strongest structural swing) AND add coordinated layout '
+            '(padTop/padBottom/align/maxWidth) and/or type.headingSize ops in the SAME turn on the same '
+            'section(s) so the change is structurally visible, not just tinted. '
             'Available recipes: '
             + "; ".join(f"{r.key} — {r.blurb}" for r in STYLE_RECIPES)
             + ".",

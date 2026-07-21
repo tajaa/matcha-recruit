@@ -63,7 +63,7 @@ def test_pattern_color_accepts_a_theme_token_and_stays_translucent():
     entirely; the sanctioned way to color a pattern is a token so it degrades
     gracefully across light/dark instead of going opaque."""
     html = _render({"bg": {"type": "color", "color": "#101216", "pattern": "grid", "patternColor": "ink-faint"}})
-    assert "--cz-pat-col:color-mix(in srgb,var(--ink) 10%,transparent)" in _section(html)
+    assert "--cz-pat-col:color-mix(in srgb,var(--t-ink) 10%,transparent)" in _section(html)
 
 
 # --- shape dividers -----------------------------------------------------------
@@ -96,7 +96,7 @@ def test_divider_none_injects_nothing():
 
 def test_divider_color_accepts_a_theme_token():
     html = _render({"divider": {"top": "wave", "color": "brand-soft"}})
-    assert 'style="fill:color-mix(in srgb,var(--brand) 18%,transparent)"' in html
+    assert 'style="fill:color-mix(in srgb,var(--t-brand) 18%,transparent)"' in html
 
 
 # --- AI surface ---------------------------------------------------------------

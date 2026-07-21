@@ -133,7 +133,7 @@ def test_registry_driven_colors_emission_reaches_html():
 
 # --- semantic color tokens (2026-07-21 "invisible dark-on-dark restyle" fix) --
 
-_TOKEN_RE = re.compile(r"^(var\(--[a-z-]+\)|color-mix\(in srgb,var\(--[a-z-]+\) \d+%,(var\(--[a-z-]+\)|transparent)\)|transparent)$")
+_TOKEN_RE = re.compile(r"^(var\(--t-[a-z-]+\)|color-mix\(in srgb,var\(--t-[a-z-]+\) \d+%,(var\(--t-[a-z-]+\)|transparent)\)|transparent)$")
 
 
 def test_design_color_tokens_are_safe_css_primitives_only():
@@ -145,14 +145,28 @@ def test_design_color_tokens_are_safe_css_primitives_only():
         assert _TOKEN_RE.match(css), f"{name!r}: {css!r} doesn't match the safe-primitive shape"
 
 
+def test_design_color_tokens_never_reference_the_section_remappable_vars():
+    """Regression guard for the 2026-07-21 'brand-glow + accent' incident: a
+    token that resolved to plain var(--brand) (or --bg/--surface/--ink/--line/
+    --muted) created --brand -> --cz-brand -> --brand once a section also set
+    colors.accent (the `.cz-acc` class remaps --brand to --cz-brand, whose own
+    value is var(--brand)) — a CSS custom-property reference cycle, which the
+    spec makes compute to nothing for every property in the cycle. Tokens must
+    reference ONLY the --t-* aliases, which no section-scoped class ever
+    reassigns, so no cycle is constructible."""
+    for name, css in DESIGN_COLOR_TOKENS.items():
+        for raw_var in ("--bg)", "--surface)", "--ink)", "--line)", "--brand)", "--muted)"):
+            assert raw_var not in css, f"{name!r}: {css!r} references the remappable {raw_var} directly"
+
+
 def test_a_color_token_resolves_to_its_css_in_registry_driven_emission():
     html = _render_with_design({"colors": {"accent": "brand-soft"}})
-    assert "--cz-brand:color-mix(in srgb,var(--brand) 18%,transparent)" in html
+    assert "--cz-brand:color-mix(in srgb,var(--t-brand) 18%,transparent)" in html
 
 
 def test_bg_color_token_resolves():
     html = _render_with_design({"bg": {"type": "color", "color": "surface-2"}})
-    assert "--cz-bg-color:color-mix(in srgb,var(--ink) 5%,var(--surface))" in html
+    assert "--cz-bg-color:color-mix(in srgb,var(--t-ink) 5%,var(--t-surface))" in html
 
 
 def test_unknown_token_name_degrades_to_unset_not_a_raw_string():

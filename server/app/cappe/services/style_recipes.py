@@ -57,11 +57,14 @@ STYLE_RECIPES: tuple[StyleRecipe, ...] = (
     StyleRecipe(
         key="brand-glow",
         label="Brand glow",
-        blurb="a faint brand-tinted gradient wash with a glow hover — confident, not loud",
+        blurb="a visible brand-tinted gradient wash, roomier padding, a rising heading, glow hover",
         design={
-            "bg": {"type": "gradient", "gradient": {"angle": 135, "stops": ["brand-faint", "transparent"]}},
+            # brand-soft (18%), not brand-faint (8%) — 8% over a near-black bg
+            # read as no gradient at all (2026-07-21 "arguably worse" report).
+            "bg": {"type": "gradient", "gradient": {"angle": 135, "stops": ["brand-soft", "transparent"]}},
             "colors": {"accent": "brand"},
-            "motion": {"hover": "glow", "easing": "gentle"},
+            "layout": {"padTop": "lg", "padBottom": "lg"},
+            "motion": {"heading": "rise", "hover": "glow", "easing": "gentle"},
         },
     ),
     StyleRecipe(
@@ -97,6 +100,20 @@ STYLE_RECIPES: tuple[StyleRecipe, ...] = (
         design={
             "colors": {"heading": "brand"},
             "motion": {"hover": "lift", "easing": "snappy"},
+        },
+    ),
+    StyleRecipe(
+        key="spotlight",
+        label="Spotlight",
+        blurb="the biggest structural swing: a large centered heading, generous framed padding, a subtle "
+              "top-down surface wash, and a staggered fade-up — reach for this on \"completely different / "
+              "from-scratch redesign\" asks a single-group tweak can't deliver",
+        design={
+            "type": {"headingSize": 56},
+            "layout": {"padTop": "xl", "padBottom": "xl", "align": "center", "maxWidth": "narrow"},
+            "bg": {"type": "gradient", "gradient": {"angle": 180, "stops": ["surface-2", "transparent"]}},
+            "border": {"top": True, "color": "line-soft", "width": 1},
+            "motion": {"effect": "fade-up", "stagger": True, "heading": "rise", "easing": "gentle"},
         },
     ),
 )

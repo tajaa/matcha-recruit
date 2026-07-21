@@ -68,18 +68,29 @@ _LAYOUT_MINH = frozenset({"default", "tall", "screen"})
 # it's coherent on every theme (light/dark/custom) by construction, and it can
 # never be raw CSS — render._design_color looks values up in this dict only,
 # nothing free-form reaches the stylesheet.
+#
+# References `--t-*`, NOT the plain `--bg`/`--brand`/etc: those get remapped
+# per-section by `.cz-acc` (colors.accent → `--brand:var(--cz-brand)`), and
+# `--cz-brand` is itself `var(--brand)` — a token resolving to `var(--brand)`
+# on a section that ALSO sets colors.accent creates `--brand → --cz-brand →
+# --brand`, a reference cycle. Per the CSS custom-properties spec, a cycle
+# makes every custom property in it compute to nothing (not "keep the old
+# value") — this silently killed icon colors and a recipe's own gradient in
+# the 2026-07-21 "brand-glow + accent" regression. `--t-*` (render.py's
+# `theme_vars`) are declared once at :root with concrete values and no
+# section-scoped class ever reassigns them, so no cycle is constructible.
 DESIGN_COLOR_TOKENS: dict[str, str] = {
-    "bg": "var(--bg)",
-    "surface": "var(--surface)",
-    "surface-2": "color-mix(in srgb,var(--ink) 5%,var(--surface))",  # one step elevated
-    "line": "var(--line)",
-    "line-soft": "color-mix(in srgb,var(--line) 55%,transparent)",
-    "brand": "var(--brand)",
-    "brand-soft": "color-mix(in srgb,var(--brand) 18%,transparent)",
-    "brand-faint": "color-mix(in srgb,var(--brand) 8%,transparent)",
-    "ink": "var(--ink)",
-    "ink-faint": "color-mix(in srgb,var(--ink) 10%,transparent)",
-    "muted": "var(--muted)",
+    "bg": "var(--t-bg)",
+    "surface": "var(--t-surface)",
+    "surface-2": "color-mix(in srgb,var(--t-ink) 5%,var(--t-surface))",  # one step elevated
+    "line": "var(--t-line)",
+    "line-soft": "color-mix(in srgb,var(--t-line) 55%,transparent)",
+    "brand": "var(--t-brand)",
+    "brand-soft": "color-mix(in srgb,var(--t-brand) 18%,transparent)",
+    "brand-faint": "color-mix(in srgb,var(--t-brand) 8%,transparent)",
+    "ink": "var(--t-ink)",
+    "ink-faint": "color-mix(in srgb,var(--t-ink) 10%,transparent)",
+    "muted": "var(--t-muted)",
     "transparent": "transparent",
 }
 
