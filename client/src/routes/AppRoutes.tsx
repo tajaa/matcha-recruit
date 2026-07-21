@@ -3,6 +3,7 @@ import AppLayout from '../layouts/AppLayout'
 import TenantSidebar from '../components/sidebars/TenantSidebar'
 import { FeatureGate } from '../components/shared/FeatureGate'
 import Dashboard from '../pages/app/dashboard/Dashboard'
+import BrokerChat from '../pages/app/broker-chat/BrokerChat'
 import Employees from '../pages/app/employees/Employees'
 import LiteUpgradeComplete from '../pages/app/billing/LiteUpgradeComplete'
 import Onboarding from '../pages/app/employees/Onboarding'
@@ -63,6 +64,9 @@ export default function AppRoutes() {
       <Route element={<AppLayout sidebar={<TenantSidebar />} />}>
         <Route index element={<Dashboard />} />
         <Route path="company" element={<CompanySettings />} />
+        {/* Broker↔company chat — access is gated by an active broker link, not a
+            feature flag (the page renders an empty state when no broker is linked). */}
+        <Route path="broker-chat" element={<BrokerChat />} />
         <Route path="upgrade/complete" element={<LiteUpgradeComplete />} />
         <Route path="employees" element={<FeatureGate feature="employees" label="Employees"><Employees /></FeatureGate>} />
         <Route path="employees/:employeeId" element={<FeatureGate feature="employees" label="Employees"><EmployeeDetail /></FeatureGate>} />
