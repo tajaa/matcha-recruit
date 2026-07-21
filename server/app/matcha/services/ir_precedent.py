@@ -302,15 +302,7 @@ async def enrich_with_semantics(
 
     Returns dict with 'scores' list and 'pattern_summary'.
     """
-    from google import genai
-    from app.core.services.genai_client import get_genai_client
-    from ...core.services.rate_limiter import get_rate_limiter
-
-    client = get_genai_client(api_key=api_key)
-
-    # Rate limit check
-    rate_limiter = get_rate_limiter()
-    await rate_limiter.check_limit("ir_analysis", "precedent_semantic")
+    from app.matcha.services.precedent_common import run_semantic_enrichment
 
     # Build candidates text
     candidates_lines = []
@@ -333,35 +325,11 @@ async def enrich_with_semantics(
         candidates_text="\n\n".join(candidates_lines),
     )
 
-    try:
-        response = await asyncio.wait_for(
-            client.aio.models.generate_content(
-                model="gemini-3-flash-preview",
-                contents=prompt,
-            ),
-            timeout=GEMINI_CALL_TIMEOUT,
-        )
-
-        await rate_limiter.record_call("ir_analysis", "precedent_semantic")
-
-        text = response.text.strip()
-        if text.startswith("```json"):
-            text = text[7:]
-        elif text.startswith("```"):
-            text = text[3:]
-        if text.endswith("```"):
-            text = text[:-3]
-
-        result = json.loads(text.strip())
-        return result
-
-    except Exception as e:
-        logger.warning(f"Gemini semantic enrichment failed: {e}")
-        # Return empty scores — structural scores still work
-        return {
-            "scores": [],
-            "pattern_summary": None,
-        }
+    # Shared plumbing (precedent_common): IR gains ER's model-candidate fallback + robust
+    # JSON extraction that it previously lacked — same scoring, more resilient call.
+    return await run_semantic_enrichment(
+        prompt, domain="ir_analysis", api_key=api_key, timeout=GEMINI_CALL_TIMEOUT
+    )
 
 
 # ===========================================
