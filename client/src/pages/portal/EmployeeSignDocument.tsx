@@ -3,7 +3,8 @@ import { useNavigate, useParams } from 'react-router-dom'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { ArrowLeft, CheckCircle2, Loader2 } from 'lucide-react'
-import { Button, Card, Input } from '../../components/ui'
+import { Button, Card } from '../../components/ui'
+import { SignatureAttestation } from '../../components/shared/SignatureAttestation'
 import {
   portalDocumentsApi, isHandbookDoc,
   type DocumentHandbookContent, type EmployeeDocument,
@@ -141,31 +142,20 @@ export default function EmployeeSignDocument() {
       ) : contentUnavailable ? null : (
         <Card className="mt-4 p-5 space-y-3">
           <h2 className="text-sm font-semibold text-zinc-300">Acknowledgement</h2>
-          <label className="flex items-start gap-2 text-xs text-zinc-400">
-            <input
-              type="checkbox"
-              checked={agreed}
-              onChange={(e) => setAgreed(e.target.checked)}
-              className="mt-0.5 accent-emerald-500"
-            />
-            <span>
-              I confirm I have received, read, and understand this document, and agree to comply
-              with it.
-            </span>
-          </label>
-          <Input
-            label="Type your full legal name to sign"
-            value={typedName}
-            onChange={(e) => setTypedName(e.target.value)}
-            placeholder="Jane Doe"
-          />
-          {error && <p className="text-xs text-red-400">{error}</p>}
-          <Button size="sm" onClick={sign} disabled={signing || !agreed || !typedName.trim()}>
-            {signing ? 'Signing…' : 'Sign acknowledgement'}
-          </Button>
-          <p className="text-[11px] text-zinc-600">
-            Your name, the date, and your IP address are recorded with this acknowledgement.
-          </p>
+          <SignatureAttestation
+            variant="kit"
+            agreed={agreed}
+            onAgreedChange={setAgreed}
+            typedName={typedName}
+            onTypedNameChange={setTypedName}
+            namePlaceholder="Jane Doe"
+            footerText="Your name, the date, and your IP address are recorded with this acknowledgement."
+          >
+            {error && <p className="text-xs text-red-400">{error}</p>}
+            <Button size="sm" onClick={sign} disabled={signing || !agreed || !typedName.trim()}>
+              {signing ? 'Signing…' : 'Sign acknowledgement'}
+            </Button>
+          </SignatureAttestation>
         </Card>
       )}
     </div>
