@@ -20,6 +20,8 @@ from app.config import load_settings  # noqa: E402
 
 load_settings()  # run_merlin_turn reads settings.analysis_model
 
+from google.genai.types import ThinkingLevel as _ThinkingLevel  # noqa: E402
+
 from app.cappe.services import merlin  # noqa: E402
 from app.cappe.services.merlin import _build_prompt, run_merlin_turn  # noqa: E402
 
@@ -85,8 +87,10 @@ class _FakeResponse:
 class _FakeModels:
     def __init__(self, behavior):
         self._behavior = behavior
+        self.last_kwargs: dict = {}
 
-    async def generate_content(self, **_kwargs):
+    async def generate_content(self, **kwargs):
+        self.last_kwargs = kwargs
         if isinstance(self._behavior, Exception):
             raise self._behavior
         return _FakeResponse(self._behavior)
@@ -188,6 +192,11 @@ async def test_invalid_ops_are_reported_not_raised(monkeypatch):
     ("business", None, "lite"),
     ("business", {"a": 1}, "lite"),
     (None, "regular", "lite"),
+    # max is premium like regular — clamps down the same way.
+    ("free", "max", "lite"),
+    ("hosting", "max", "lite"),
+    ("pro", "max", "max"),
+    ("business", "max", "max"),
 ])
 def test_resolve_model_tier_clamps_to_plan(plan, requested, expected):
     from app.cappe.services.merlin import resolve_model_tier
@@ -204,11 +213,38 @@ async def test_turn_reports_the_tier_it_used(monkeypatch):
     assert result["tier"] == "regular"
 
 
-def test_no_heavy_pro_tier_is_offered():
-    """Guard against re-adding an unmetered expensive model by accident."""
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tier,expect_level,expect_budget", [
+    ("lite", None, 0),                                  # thinking explicitly OFF
+    ("regular", _ThinkingLevel.LOW, None),
+    ("max", _ThinkingLevel.HIGH, None),
+])
+async def test_turn_configures_thinking_per_tier(monkeypatch, tier, expect_level, expect_budget):
+    payload = '{"message": "Done.", "ops": []}'
+    fake = _FakeClient(payload)
+    monkeypatch.setattr(merlin, "get_genai_client", lambda **kw: fake)
+    result = await run_merlin_turn(
+        message="hi", history=[], blocks=_BLOCKS, theme={}, model_tier=tier, plan="business",
+    )
+    assert result["tier"] == tier
+    config = fake.aio.models.last_kwargs["config"]
+    thinking = config.thinking_config
+    assert thinking.thinking_level == expect_level
+    assert thinking.thinking_budget == expect_budget
+
+
+def test_max_tier_gets_a_longer_timeout_than_lite():
     from app.cappe.services.merlin_catalog import MODEL_TIERS
-    assert set(MODEL_TIERS) == {"lite", "regular"}
-    assert not any("pro-" in m for m in MODEL_TIERS.values())
+    assert MODEL_TIERS["max"].timeout > MODEL_TIERS["lite"].timeout
+
+
+def test_no_heavy_pro_tier_is_offered():
+    """Guard against re-adding an unmetered expensive model by accident. `max`
+    doesn't violate this — it's the SAME model as `regular` (3.6-flash)
+    reconfigured with more thinking, not a distinct heavier model."""
+    from app.cappe.services.merlin_catalog import MODEL_TIERS
+    assert set(MODEL_TIERS) == {"lite", "regular", "max"}
+    assert not any("pro-" in t.model for t in MODEL_TIERS.values())
 
 
 @pytest.mark.asyncio
@@ -224,8 +260,11 @@ async def test_turn_falls_back_to_lite_on_an_unknown_tier(monkeypatch):
 def test_every_tier_maps_to_a_real_model():
     from app.cappe.services.merlin_catalog import DEFAULT_MODEL_TIER, MODEL_TIERS
     assert DEFAULT_MODEL_TIER in MODEL_TIERS
-    assert all(m.startswith("gemini-") for m in MODEL_TIERS.values())
-    assert len(set(MODEL_TIERS.values())) == len(MODEL_TIERS)  # no tier aliasing another
+    assert all(t.model.startswith("gemini-") for t in MODEL_TIERS.values())
+    # No two tiers are configured identically (max/regular share a MODEL but
+    # differ in thinking_level, so the ModelTier objects themselves are
+    # distinct — this would only fail if a tier were a byte-for-byte dupe).
+    assert len(set(MODEL_TIERS.values())) == len(MODEL_TIERS)
 
 
 # --- theme-intent detection ---------------------------------------------------

@@ -11,7 +11,8 @@ a block type or field is added/renamed/removed on the frontend.
 Kept as plain dicts/sets (not Pydantic) — this is read-only reference data
 consumed by prompt-building and validation, not request/response shapes.
 """
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Optional
 
 # type -> {field name: field kind}, for the block's top-level content fields
 # (excluding `type` itself and the structural `_design`/`_k`). Kinds use the
@@ -169,12 +170,10 @@ DESIGN_REQUIRES_PREMIUM = True
 # them by reverting this; the rest of the codebase is the side that's stale.
 #
 # `lite` is the default and is available on every plan — it's cheap enough to
-# absorb as a funnel into upgrades. `regular` needs a paid plan; the server
-# CLAMPS rather than 403s (mirroring matcha_work_ai._get_model), so a stale
-# client asking for a tier it can't have silently gets what it's entitled to
-# instead of an error. A pro/heavy tier is deliberately NOT offered — page
-# editing is a structured-op task that flash handles well, and the cost is not
-# metered yet (no token wallet), so the expensive model has no guard rail.
+# absorb as a funnel into upgrades. `regular`/`max` need a paid plan; the
+# server CLAMPS rather than 403s (mirroring matcha_work_ai._get_model), so a
+# stale client asking for a tier it can't have silently gets what it's
+# entitled to instead of an error.
 #
 # Cost of the 2026-07-21 bump, per 1M tokens (in → out):
 #   lite     3.1-flash-lite $0.25/$1.50  →  3.5-flash-lite $0.30/$2.50
@@ -186,9 +185,33 @@ DESIGN_REQUIRES_PREMIUM = True
 # Merlin actually does) jumps Terminal-Bench 2.1 31% → 54%. 3.6 Flash also emits
 # ~17% fewer output tokens than 3.5 Flash, which claws back part of the `regular`
 # increase. Revisit if the token wallet lands and per-account cost gets metered.
-MODEL_TIERS: dict[str, str] = {
-    "lite": "gemini-3.5-flash-lite",
-    "regular": "gemini-3.6-flash",
+@dataclass(frozen=True)
+class ModelTier:
+    model: str
+    # None → thinking explicitly OFF (ThinkingConfig(thinking_budget=0), the
+    # fastest path). A string names a level (ThinkingConfig(thinking_level=…)).
+    # `regular` used to get Gemini's own default dynamic thinking (no config
+    # was ever passed) — now explicit "low", so its latency/cost are pinned
+    # instead of drifting with Google's default heuristic.
+    thinking_level: Optional[str]
+    # Per-tier call timeout (seconds) — a thinking turn is slower than a
+    # non-thinking one, so `max` gets more room before run_merlin_turn's
+    # timeout-retry-feedback path kicks in.
+    timeout: int
+
+
+# `max` == same model as `regular` (3.6-flash) + thinking_level="high": a
+# structured-op task doesn't need a bigger model, it needs the SAME model
+# reasoning longer before it commits to values — the taste gap this tier
+# exists for (see the 2026-07-21 "invisible dark-on-dark restyle" incident)
+# is a reasoning-depth problem, not a capability-ceiling one. Thinking tokens
+# bill as output tokens, so a `max` turn costs a multiple of `regular` even
+# on an identical model+prompt; gated premium like `regular`, tracked under
+# its own rate-limiter key (`record_call("cappe_merlin", "max")`).
+MODEL_TIERS: dict[str, ModelTier] = {
+    "lite": ModelTier("gemini-3.5-flash-lite", None, 45),
+    "regular": ModelTier("gemini-3.6-flash", "low", 45),
+    "max": ModelTier("gemini-3.6-flash", "high", 90),
 }
 DEFAULT_MODEL_TIER = "lite"
 # Tiers a non-premium (free / hosting) plan may use.

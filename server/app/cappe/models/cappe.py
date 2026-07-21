@@ -1271,7 +1271,7 @@ class CappeMerlinChatRequest(BaseModel):
     theme: dict[str, Any] = Field(default_factory=dict)
     # Clamped server-side to what the plan allows — an unknown or over-plan
     # tier degrades to 'lite' rather than 403ing (see merlin.resolve_model_tier).
-    model_tier: Literal["lite", "regular"] = "lite"
+    model_tier: Literal["lite", "regular", "max"] = "lite"
     # The block the user currently has selected in the editor, so "this
     # section" resolves to something instead of being guessed at.
     selected_block: Optional[str] = Field(default=None, max_length=100)
@@ -1287,7 +1287,7 @@ class CappeMerlinChatResponse(BaseModel):
     ops: list[dict[str, Any]]
     rejected: list[CappeMerlinRejection] = Field(default_factory=list)
     # The tier actually used — may differ from the request if it was clamped.
-    tier: Literal["lite", "regular"] = "lite"
+    tier: Literal["lite", "regular", "max"] = "lite"
 
 
 # ===========================================================================

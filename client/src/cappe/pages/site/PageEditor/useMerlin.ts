@@ -3,7 +3,7 @@ import { cappeApi } from '../../../api'
 import type { CappeBlock } from '../../../types'
 import { applyMerlinOps, type MerlinDesignSchema, type MerlinOp, type MerlinOpResult } from './merlinOps'
 
-export type MerlinTier = 'lite' | 'regular'
+export type MerlinTier = 'lite' | 'regular' | 'max'
 
 /** Mirrors MODEL_TIERS in server/app/cappe/services/merlin_catalog.py.
  *  `premium` marks the tiers that need a Pro/Business plan — the server
@@ -11,6 +11,7 @@ export type MerlinTier = 'lite' | 'regular'
 export const MERLIN_TIERS: { id: MerlinTier; label: string; hint: string; premium: boolean }[] = [
   { id: 'lite', label: 'Lite', hint: 'Fastest, best for small edits', premium: false },
   { id: 'regular', label: 'Regular', hint: 'Balanced — good for most changes', premium: true },
+  { id: 'max', label: 'Max', hint: 'Thinks before editing — best for design work', premium: true },
 ]
 
 export type MerlinMessage = {

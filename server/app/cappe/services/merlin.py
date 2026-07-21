@@ -45,7 +45,9 @@ from .merlin_ops import MERLIN_OPS, OP_NAMES, validate_ops  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
-MERLIN_CALL_TIMEOUT = 45  # seconds — same order as ir_analysis.GEMINI_CALL_TIMEOUT
+# Per-turn call timeout now lives on ModelTier (merlin_catalog.py) — a
+# thinking tier is slower than a non-thinking one, so it isn't one flat
+# constant anymore. Same order of magnitude as ir_analysis.GEMINI_CALL_TIMEOUT.
 # A theme swap replaces brand/fonts/radius/mode site-wide, so it only fires when
 # the user actually asked for one. Without this the model reached for `preset`
 # on a request that never mentioned themes and nuked the site's look.
@@ -271,7 +273,12 @@ async def run_merlin_turn(
 
     tier = model_tier if model_tier in MODEL_TIERS else DEFAULT_MODEL_TIER
     client = get_genai_client()
-    model = MODEL_TIERS[tier]
+    tier_cfg = MODEL_TIERS[tier]
+    model = tier_cfg.model
+    thinking_cfg = (
+        types.ThinkingConfig(thinking_level=tier_cfg.thinking_level)
+        if tier_cfg.thinking_level else types.ThinkingConfig(thinking_budget=0)
+    )
     premium = is_premium_plan(plan)
     # Did the user actually ask about themes this turn? Gates the site-wide
     # preset swap so it can't ride along on an unrelated request.
@@ -300,9 +307,11 @@ async def run_merlin_turn(
                     client.aio.models.generate_content(
                         model=model,
                         contents=prompt,
-                        config=types.GenerateContentConfig(response_mime_type="application/json"),
+                        config=types.GenerateContentConfig(
+                            response_mime_type="application/json", thinking_config=thinking_cfg,
+                        ),
                     ),
-                    timeout=MERLIN_CALL_TIMEOUT,
+                    timeout=tier_cfg.timeout,
                 )
             finally:
                 # Record even on timeout — the request was issued and billed, so
@@ -322,7 +331,7 @@ async def run_merlin_turn(
             )
         except asyncio.TimeoutError:
             logger.warning("Merlin call timed out (attempt %d/2)", attempt + 1)
-            last_feedback = f"the previous attempt timed out after {MERLIN_CALL_TIMEOUT}s — respond more concisely"
+            last_feedback = f"the previous attempt timed out after {tier_cfg.timeout}s — respond more concisely"
             continue
         except (json.JSONDecodeError, ValueError) as exc:
             logger.warning("Merlin returned unusable JSON (attempt %d/2): %s", attempt + 1, exc)
