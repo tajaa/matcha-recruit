@@ -1,5 +1,111 @@
 [
   {
+    "id": "broker-company-chat",
+    "date": "2026-07-20",
+    "category": "Broker",
+    "title": "Broker ↔ company chat for flagged data, claims and documents",
+    "summary": "New private messaging surface between an HR broker and its linked client companies, so both sides can discuss flagged data, claims and shared documents directly in-platform instead of over email. Threads can anchor to a claim, loss run, document, incident, submission or policy as a reference chip. A same-day review pass then closed several access and correctness gaps: a terminated broker could still list and read the full transcript of a company they'd lost access to, the read watermark could mark messages as read that arrived mid-request, and a reused client-side message id in a different thread silently dropped the send instead of erroring.",
+    "whatsNew": [
+      "New conversation surface: Broker → /broker/messages, Company → /app/broker-chat (Communication sidebar entry, shown only when an active broker link exists).",
+      "Threads can reference a claim, loss run, document, incident, submission or policy inline.",
+      "Real-time delivery via the existing notification pipeline (live WS push + APNs + bell row) with unread counts on both sides.",
+      "Fixed: a broker whose company link had ended could still read/list that company's full chat transcript — access is now re-checked on every read path, not just send.",
+      "Fixed: the read watermark stamped the time you opened the thread, not the message you actually saw — could mark unread messages read if they arrived mid-request.",
+      "Fixed: a client_message_id reused across two different threads silently dropped the second send instead of erroring.",
+      "Fixed: editing or deleting the latest message left the old text showing in both sidebars' preview line."
+    ],
+    "howToUse": [
+      "Company: Communication → Broker Chat (visible once your company has an active broker link).",
+      "Broker: Messages tab in the broker portal, per linked client."
+    ],
+    "setup": [
+      "Apply migration brokerchat01 (broker_company_conversations / _messages / _conversation_reads) — not applied to any database as of this commit."
+    ],
+    "notes": null,
+    "tag": "action-needed"
+  },
+  {
+    "id": "handbook-pilot-compliance-floor-and-audit-grounding",
+    "date": "2026-07-20",
+    "category": "Handbook Pilot",
+    "title": "Handbook Pilot drafts against the governing rule (not the flat overlap list), quotes full section text, and grounds on the handbook's own audit gaps + freshness findings",
+    "summary": "Three groundings landed in one pass. First, Handbook Pilot now pulls the same precedence-resolved compliance floor (federal → state → local governing requirement) that HR Pilot uses, and the drafting prompt is told the floor outranks the flat jurisdiction-requirements list when both cover the same category — previously the assistant only saw the overlapping flat list with no sense of which rule actually governs. Second, drafting now quotes the company's own handbook sections and policies at full text instead of a 280-char preview, so a draft revising a policy is reading the actual clause, not a summary of it. Third, the pilot now grounds on findings the platform has already produced about this company's handbook: open gaps from its latest completed audit, and findings from each handbook's latest freshness check — both surfaced as findings, never citable as the source of a legal obligation themselves. A same-day review pass fixed a connection-pool exhaustion risk (the floor fetch was holding a pooled connection while triggering a second acquisition) and a wildcard-floor bug where a state with its own stricter floor could still be governed by the generic federal wildcard.",
+    "whatsNew": [
+      "Drafting now cites the governing compliance floor over the flat overlapping-requirements list when both apply to the same category.",
+      "Drafting quotes full section/policy text (capped, with graceful fallback to summaries past the cap) instead of a 280-character preview.",
+      "New grounding: open gaps from the company's latest completed handbook audit (severity-ranked).",
+      "New grounding: findings from each handbook's latest freshness check.",
+      "A cited floor record now correctly counts toward \"grounded\" and closes its matching flat-requirement gap on the coverage map (previously only direct citations of the flat list counted, so a draft citing the actual governing rule could read as ungrounded).",
+      "Fixed: a model-embedded [floor:…] citation token could leak into employee-facing prose uncaught.",
+      "Fixed: a connection-pool exhaustion risk where the floor fetch held a pooled connection while triggering a second pool acquisition.",
+      "Fixed: a federal wildcard floor could override a state's own stricter floor instead of yielding to it."
+    ],
+    "howToUse": null,
+    "setup": null,
+    "notes": null,
+    "tag": null
+  },
+  {
+    "id": "broker-pilot-property-fleet-risk-grounding",
+    "date": "2026-07-20",
+    "category": "Broker Pilot",
+    "title": "Broker Pilot can now cite property catastrophe/exposure data, the composite risk index, and fleet/driver-risk scoring",
+    "summary": "Broker Pilot's chat previously couldn't see several things the broker portal already showed in the submission packet. Property catastrophe tier, exposure, plan-of-fixes, and the composite risk index (with its uncertainty band and un-scored components) are now citable in chat, not just visible in the rendered packet. Separately, the platform's fleet/driver-risk scoring (MVR-based driver grades rolling up to a fleet grade) is now grounded in Broker Pilot too, gated on the client's own driver_risk flag so an unfilled-in MVR table can't read as \"clean fleet.\" A review-pass fix made property-plan citations stable across turns: the plan is re-ranked by severity every time it's rebuilt, so a citation keyed on list position could silently point at a different fix by the time a report referenced it — it's now keyed on the fix's own identity.",
+    "whatsNew": [
+      "New citable records: property catastrophe tier/exposure, the fix-priority plan, and the composite risk index with its components.",
+      "New citable records: fleet/driver-risk grade, tier counts, overdue reviews, and individual marginal/high-risk drivers (capped, disclosed).",
+      "Directional hazard tiers and MVR-derived grades are labeled as such in the record itself, not just the prompt, so they can't be cited as a pulled report.",
+      "Fixed: property-plan citations could silently point at a different fix after the plan re-ranked itself — citations are now stable across rebuilds."
+    ],
+    "howToUse": null,
+    "setup": null,
+    "notes": null,
+    "tag": null
+  },
+  {
+    "id": "analysis-pilot-platform-datasets",
+    "date": "2026-07-20",
+    "category": "Analysis Pilot",
+    "title": "Analysis Pilot can now build datasets from the company's own platform records, not just uploads",
+    "summary": "Dataset ingestion was hard-wired to file uploads even though the underlying model (series + periods + roles) was always source-agnostic. Two new platform-sourced dataset builders: incident counts by month/type (24-month window) and workers'-comp loss runs by policy period, developed to their latest valuation. Both arrive pre-confirmed (no extraction-review step, since a SQL builder with explicit roles isn't the untrusted Gemini-reads-a-PDF case the confirm gate exists for) and are point-in-time snapshots — nothing syncs after creation, so a report can never cite figures that changed underneath it. A same-day review pass fixed a bug where a company with zero incidents in the window still got a dataset of 24 zeroed months marked ready (now yields no dataset instead), and a loss-run bug that hard-defaulted to the workers'-comp line even for a company that only had general-liability or property loss runs on file.",
+    "whatsNew": [
+      "New dataset source: incident counts by month/type, pulled directly from IR records (gated on the incidents feature).",
+      "New dataset source: workers'-comp loss runs by policy period, developed to latest valuation (gated on the incidents feature).",
+      "Both platform sources are pre-confirmed snapshots — no review step, and nothing updates after creation.",
+      "Fixed: a company with no incidents in the 24-month window got a dataset of all zeros marked ready instead of no dataset.",
+      "Fixed: loss-run datasets defaulted to the workers'-comp line even for companies whose loss runs were only general-liability or property — now picks the line with the most data on file and notes what else exists."
+    ],
+    "howToUse": [
+      "Analysis Pilot → new session → Add dataset → \"From platform records\" instead of upload."
+    ],
+    "setup": [
+      "Apply migration analysispilot02 (widens dataset source_kind to admit 'platform', drops storage_path NOT NULL) — not applied to any database as of this commit."
+    ],
+    "notes": null,
+    "tag": "action-needed"
+  },
+  {
+    "id": "legal-pilot-leave-charge-termination-evidence",
+    "date": "2026-07-20",
+    "category": "Legal Pilot",
+    "title": "Legal Pilot now grounds on leave, agency-charge and termination-lifecycle records, plus fuller chain-of-custody in packets",
+    "summary": "Five new grounded sources for Legal Pilot: leave requests (type/status/dates only — free-text medical detail is never selected), agency charges (EEOC/NLRB/OSHA/state, including settlement amounts), and the termination lifecycle (pre-termination review, separation agreements with their ADEA/OWBPA consideration and revocation windows, and post-termination claims). Evidence packets also gained fuller chain-of-custody: ER cases and discipline records now carry their audit-log trail in the appendix alongside incidents, which already had theirs. Broker Pilot explicitly excludes the leave source (who took FMLA is medical-adjacent) while still grounding on charges and termination records as EPL underwriting context. A same-day review pass fixed a leave-window bug that dropped a still-open leave from the record (the exact leave an interference matter would be about), a separation-agreement dating bug that could leave a drafted-but-unpresented agreement dateless and out of the chronology, and a labeling bug where an ER or discipline audit action could render with the wrong (legal-matter-specific) vocabulary in an attorney packet.",
+    "whatsNew": [
+      "New grounded sources: leave requests, agency charges (EEOC/NLRB/OSHA/state), pre-termination review, separation agreements, and post-termination claims.",
+      "Separation-agreement records surface their ADEA/OWBPA consideration and revocation windows — the release's actual validity window.",
+      "Evidence packets now include the audit-log trail for ER cases and discipline records, matching what incidents already had.",
+      "Broker Pilot excludes the leave source from its grounding (medical-adjacent); charges and termination records still flow through as EPL context.",
+      "Fixed: a still-open leave that started before the query window was dropped from the record entirely.",
+      "Fixed: a drafted-but-unpresented separation agreement could come back dateless and fall out of the chronology.",
+      "Fixed: ER/discipline audit actions could render with legal-matter-specific labels (e.g. \"Matter updated\") instead of their own action's label.",
+      "Fixed: settlement/severance amounts under a dollar were rounded away in packets."
+    ],
+    "howToUse": null,
+    "setup": null,
+    "notes": null,
+    "tag": null
+  },
+  {
     "id": "matcha-work-tasks-split-and-test-fixes",
     "date": "2026-07-19",
     "category": "Matcha Work",
