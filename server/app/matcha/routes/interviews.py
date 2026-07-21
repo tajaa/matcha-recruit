@@ -1070,15 +1070,48 @@ async def analyze_interview(
         return analysis
 
 
+def _token_from_request(
+    websocket: WebSocket, query_token: Optional[str]
+) -> tuple[Optional[str], Optional[str]]:
+    """Extract the JWT from the handshake. Sources, in preference order:
+
+    1. ``Sec-WebSocket-Protocol: bearer, <token>`` — web clients; keeps the token
+       out of the URL so it never lands in nginx/proxy access logs.
+    2. ``?token=`` query param — legacy web clients / pre-deploy tabs.
+    3. ``Authorization: Bearer`` header — native clients.
+
+    Returns ``(token, subprotocol_to_echo)`` — when the token arrived via subprotocol
+    the accept() MUST echo ``"bearer"`` or browsers fail the handshake. (Mirrors the
+    same helper in work/thread_ws.py, work/project_ws.py, werk/channels_ws.py.)
+    """
+    proto = websocket.headers.get("sec-websocket-protocol")
+    if proto:
+        parts = [p.strip() for p in proto.split(",")]
+        if len(parts) >= 2 and parts[0] == "bearer" and parts[1]:
+            return parts[1], "bearer"
+    if query_token:
+        return query_token, None
+    auth = websocket.headers.get("authorization") or websocket.headers.get("Authorization")
+    if auth and auth.startswith("Bearer "):
+        return auth[7:], None
+    return None, None
+
+
 # WebSocket endpoint for voice interviews
 @router.websocket("/ws/interview/{interview_id}")
 async def interview_websocket(
     websocket: WebSocket,
     interview_id: UUID,
-    token: str = Query(...),
+    token: Optional[str] = Query(None),
 ):
     """WebSocket endpoint for voice interview sessions."""
-    await websocket.accept()
+    # Prefer the token from the `bearer` subprotocol (keeps it out of access logs);
+    # fall back to the legacy `?token=` query param for pre-deploy tabs.
+    token, subprotocol = _token_from_request(websocket, token)
+    await websocket.accept(subprotocol=subprotocol)
+    if not token:
+        await websocket.close(code=4001, reason="Missing token")
+        return
 
     settings = get_settings()
     cancelled = False
