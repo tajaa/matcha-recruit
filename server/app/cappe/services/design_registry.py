@@ -57,6 +57,32 @@ _LAYOUT_ALIGN = frozenset({"default", "left", "center"})
 _LAYOUT_MAXW = frozenset({"default", "narrow", "wide", "full"})
 _LAYOUT_MINH = frozenset({"default", "tall", "screen"})
 
+# Semantic color tokens — the same var()/color-mix vocabulary the hand-written
+# _BASE_CSS already uses (render.py's `.cz-card`/`.cz-premium` etc.), exposed
+# to the AI through a closed whitelist. Every `_design` color today had to be
+# a literal hex (`_hexonly` in render.py rejects anything else), which forces
+# the model to guess a value with zero awareness of the theme's own
+# bg/surface/line/brand relationship — the mechanism behind the "invisible
+# dark-on-dark restyle" and "bright grid-mesh overlay" incidents (2026-07-21).
+# A token resolves through the SAME theme vars a hand-authored class would, so
+# it's coherent on every theme (light/dark/custom) by construction, and it can
+# never be raw CSS — render._design_color looks values up in this dict only,
+# nothing free-form reaches the stylesheet.
+DESIGN_COLOR_TOKENS: dict[str, str] = {
+    "bg": "var(--bg)",
+    "surface": "var(--surface)",
+    "surface-2": "color-mix(in srgb,var(--ink) 5%,var(--surface))",  # one step elevated
+    "line": "var(--line)",
+    "line-soft": "color-mix(in srgb,var(--line) 55%,transparent)",
+    "brand": "var(--brand)",
+    "brand-soft": "color-mix(in srgb,var(--brand) 18%,transparent)",
+    "brand-faint": "color-mix(in srgb,var(--brand) 8%,transparent)",
+    "ink": "var(--ink)",
+    "ink-faint": "color-mix(in srgb,var(--ink) 10%,transparent)",
+    "muted": "var(--muted)",
+    "transparent": "transparent",
+}
+
 
 @dataclass(frozen=True)
 class RenderRule:

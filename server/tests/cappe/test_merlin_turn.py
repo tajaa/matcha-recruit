@@ -41,7 +41,20 @@ def test_build_prompt_does_not_raise_and_carries_the_catalog():
     assert "hero (Hero)" in prompt          # catalog was appended
     assert "heading:text" in prompt          # …with field kinds
     assert '{"op":"set_field"' in prompt     # op shapes survived verbatim
-    assert "make the hero darker" in prompt
+
+
+def test_build_prompt_carries_design_principles_and_color_token_vocab():
+    """2026-07-21 fix: the model must be told to prefer theme tokens over hex
+    and to reach for apply_style_recipe for a 'make it look designed' ask —
+    without these, op volume alone doesn't produce a theme-coherent result."""
+    prompt = _build_prompt(
+        message="make this look designed", history=[], blocks=_BLOCKS, theme={},
+        business_name=None, business_type=None, feedback=None,
+    )
+    assert "PREFER tokens over hex" in prompt
+    assert "apply_style_recipe" in prompt
+    assert "brand-soft" in prompt  # a real token name from the shared vocab line
+    assert "wireframe" in prompt   # the anti-pattern rule made it in
 
 
 def test_build_prompt_includes_history_and_feedback():
@@ -150,6 +163,39 @@ async def test_valid_ops_pass_through(monkeypatch):
     assert len(result["ops"]) == 1
     assert result["ops"][0]["value"] == "New"
     assert result["rejected"] == []
+
+
+# --- design brief (forced planning field, dropped before it reaches the client) -
+
+@pytest.mark.asyncio
+async def test_payload_with_a_plan_field_parses_and_the_plan_is_not_returned(monkeypatch):
+    payload = (
+        '{"plan": "Dark theme, surface is near-black — use a token-based elevate.", '
+        '"message": "Styled it.", "ops": []}'
+    )
+    monkeypatch.setattr(merlin, "get_genai_client", lambda **kw: _FakeClient(payload))
+    result = await _run(payload)
+    assert result["message"] == "Styled it."
+    assert "plan" not in result
+    assert set(result) == {"message", "ops", "rejected", "tier"}
+
+
+@pytest.mark.asyncio
+async def test_payload_without_a_plan_field_still_works(monkeypatch):
+    """Model omissions must not break the never-raises contract — `plan` is a
+    prompt instruction, not an enforced schema field."""
+    payload = '{"message": "Done.", "ops": []}'
+    monkeypatch.setattr(merlin, "get_genai_client", lambda **kw: _FakeClient(payload))
+    result = await _run(payload)
+    assert result["message"] == "Done."
+    assert result["ops"] == []
+
+
+def test_system_prompt_documents_plan_before_message_and_ops():
+    """Generation order in the documented shape forces the model to write the
+    brief before it commits to concrete values — `plan` must lead."""
+    shape_line = merlin._SYSTEM_PROMPT.split("\n\n")[1]
+    assert shape_line.index('"plan"') < shape_line.index('"message"') < shape_line.index('"ops"')
 
 
 @pytest.mark.asyncio

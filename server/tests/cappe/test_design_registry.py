@@ -16,8 +16,11 @@ os.environ.setdefault("LIVE_API", "test-key")
 os.environ.setdefault("DATABASE_URL", "postgresql://test:test@localhost/test")
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret-key-cappe")
 
+import re  # noqa: E402
+
 import app.cappe.services.design_registry as design_registry  # noqa: E402
 from app.cappe.services.design_registry import (  # noqa: E402
+    DESIGN_COLOR_TOKENS,
     DESIGN_KEYS,
     DesignKey,
     RenderRule,
@@ -126,6 +129,39 @@ def test_registry_driven_colors_emission_reaches_html():
     assert "--cz-brand:#ff8800" in html
     assert "--cz-accent:#ff8800" in html
     assert "cz-acc" in html
+
+
+# --- semantic color tokens (2026-07-21 "invisible dark-on-dark restyle" fix) --
+
+_TOKEN_RE = re.compile(r"^(var\(--[a-z-]+\)|color-mix\(in srgb,var\(--[a-z-]+\) \d+%,(var\(--[a-z-]+\)|transparent)\)|transparent)$")
+
+
+def test_design_color_tokens_are_safe_css_primitives_only():
+    """The whitelist is the injection boundary for _design_color — every value
+    must be one of: a bare var(), a two-stop color-mix over var()s/transparent,
+    or the literal 'transparent'. Nothing free-form can ever reach the
+    stylesheet through this dict."""
+    for name, css in DESIGN_COLOR_TOKENS.items():
+        assert _TOKEN_RE.match(css), f"{name!r}: {css!r} doesn't match the safe-primitive shape"
+
+
+def test_a_color_token_resolves_to_its_css_in_registry_driven_emission():
+    html = _render_with_design({"colors": {"accent": "brand-soft"}})
+    assert "--cz-brand:color-mix(in srgb,var(--brand) 18%,transparent)" in html
+
+
+def test_bg_color_token_resolves():
+    html = _render_with_design({"bg": {"type": "color", "color": "surface-2"}})
+    assert "--cz-bg-color:color-mix(in srgb,var(--ink) 5%,var(--surface))" in html
+
+
+def test_unknown_token_name_degrades_to_unset_not_a_raw_string():
+    """A retired/typo'd token name isn't a hex either, so it must fall through
+    to _hexonly's empty-string branch — never leak the literal token name (or
+    anything else unsanitized) into the stylesheet."""
+    html = _render_with_design({"colors": {"accent": "not-a-real-token"}})
+    assert "not-a-real-token" not in html
+    assert "--cz-brand:" not in html  # unset — nothing emitted for this section
 
 
 def test_registry_driven_type_emission_reaches_html():

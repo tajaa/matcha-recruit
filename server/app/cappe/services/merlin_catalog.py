@@ -152,7 +152,7 @@ AI_IMAGE_PROMPT_MAX = 1000  # matches CappeImageGenRequest.prompt max_length
 # tests/cappe/test_design_registry.py. Value spec per key: a frozenset is a
 # closed enum; "bool"/"color"/"text"/(min, max) int ranges are checked by kind
 # in merlin_ops.py.
-from .design_registry import build_design_groups
+from .design_registry import DESIGN_COLOR_TOKENS, build_design_groups  # noqa: F401
 
 DESIGN_GROUPS: dict[str, dict[str, Any]] = build_design_groups()
 

@@ -58,6 +58,14 @@ def test_pattern_none_is_inert():
     assert "cz-pat-" not in _section(_render({"bg": {"pattern": "none"}}))
 
 
+def test_pattern_color_accepts_a_theme_token_and_stays_translucent():
+    """The 2026-07-21 fix: a literal hex bypasses the faded-ink default
+    entirely; the sanctioned way to color a pattern is a token so it degrades
+    gracefully across light/dark instead of going opaque."""
+    html = _render({"bg": {"type": "color", "color": "#101216", "pattern": "grid", "patternColor": "ink-faint"}})
+    assert "--cz-pat-col:color-mix(in srgb,var(--ink) 10%,transparent)" in _section(html)
+
+
 # --- shape dividers -----------------------------------------------------------
 
 def test_divider_injects_inline_svg_with_clamped_height_and_hex_fill():
@@ -84,6 +92,11 @@ def test_divider_height_is_clamped_not_reflected_raw():
 def test_divider_none_injects_nothing():
     html = _render({"divider": {"top": "none", "bottom": "none"}})
     assert "cz-div" not in html.split("</style>")[-1]  # not in the body (CSS rules aside)
+
+
+def test_divider_color_accepts_a_theme_token():
+    html = _render({"divider": {"top": "wave", "color": "brand-soft"}})
+    assert 'style="fill:color-mix(in srgb,var(--brand) 18%,transparent)"' in html
 
 
 # --- AI surface ---------------------------------------------------------------

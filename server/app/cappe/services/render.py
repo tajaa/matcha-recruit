@@ -22,7 +22,7 @@ import re
 from typing import Any
 from urllib.parse import quote
 
-from .design_registry import DESIGN_KEYS_BY_GROUP
+from .design_registry import DESIGN_COLOR_TOKENS, DESIGN_KEYS_BY_GROUP
 
 _uid_counter = itertools.count(1)
 
@@ -92,6 +92,20 @@ _SECTION_RE = re.compile(r"<section\b([^>]*)>")
 def _hexonly(v: Any) -> str:
     s = str(v or "").strip()
     return s if _HEX_RE.match(s) else ""
+
+
+def _design_color(v: Any) -> str:
+    """A `_design` color value: a hex literal OR a semantic theme token,
+    resolved to the SAME var()/color-mix CSS the hand-authored classes use
+    (DESIGN_COLOR_TOKENS is a closed whitelist — nothing free-form reaches the
+    stylesheet through it). Merlin's `_design_value_error` already restricts
+    what a request can carry to one of these two forms; this is where it
+    becomes CSS. Anything else (a token name that was retired, a non-string)
+    falls through to `_hexonly`, so a stale value degrades to "no color" —
+    never a raw pass-through string."""
+    if isinstance(v, str) and v in DESIGN_COLOR_TOKENS:
+        return DESIGN_COLOR_TOKENS[v]
+    return _hexonly(v)
 
 
 def _clampi(v: Any, lo: int, hi: int, default: int = 0) -> int:
@@ -228,7 +242,7 @@ def _emit_design_group(group: str, values: dict, classes: list, cssvars: list) -
             continue
         raw = values.get(dk.key)
         if rule.kind == "hex":
-            v = _hexonly(raw)
+            v = _design_color(raw)
             if v:
                 cssvars.append(f"{rule.var}:{v}")
                 for ev in rule.extra_vars:
@@ -355,7 +369,7 @@ def _apply_design(html_str: str, design: Any, *, block_index: Any = None, editab
         # ── background ──────────────────────────────────────────────────────
         bg_type = bg.get("type")
         if bg_type == "color":
-            col = _hexonly(bg.get("color"))
+            col = _design_color(bg.get("color"))
             if col:
                 classes.append("cz-bg--color")
                 cssvars.append(f"--cz-bg-color:{col}")
@@ -391,7 +405,7 @@ def _apply_design(html_str: str, design: Any, *, block_index: Any = None, editab
         # over background-color, so it combines with a solid bg fill).
         if bg.get("pattern") in _BG_PATTERNS:
             classes.append(f"cz-pat-{bg['pattern']}")
-            pcol = _hexonly(bg.get("patternColor"))
+            pcol = _design_color(bg.get("patternColor"))
             if pcol:
                 cssvars.append(f"--cz-pat-col:{pcol}")
 
@@ -454,7 +468,7 @@ def _apply_design(html_str: str, design: Any, *, block_index: Any = None, editab
         # ── shape dividers (enum-keyed inline SVG, injected like bg_media) ──
         if divider.get("top") in _DIVIDER_PATHS or divider.get("bottom") in _DIVIDER_PATHS:
             dh = _clampi(divider.get("height"), 20, 160, 64)
-            dcol = _hexonly(divider.get("color")) or "var(--bg)"
+            dcol = _design_color(divider.get("color")) or "var(--bg)"
             for edge in ("top", "bottom"):
                 shape = divider.get(edge)
                 if shape in _DIVIDER_PATHS:
@@ -467,7 +481,7 @@ def _apply_design(html_str: str, design: Any, *, block_index: Any = None, editab
         # ── per-section border / divider ────────────────────────────────────
         if border.get("top") or border.get("bottom"):
             bw = _clampi(border.get("width"), 1, 8, 1)
-            bcol = _hexonly(border.get("color"))
+            bcol = _design_color(border.get("color"))
             cssvars.append(f"--cz-bd-w:{bw}px")
             if bcol:
                 cssvars.append(f"--cz-bd-col:{bcol}")
@@ -516,7 +530,7 @@ def _apply_design(html_str: str, design: Any, *, block_index: Any = None, editab
 def _design_gradient(g: Any) -> str:
     if not isinstance(g, dict):
         return ""
-    stops = [s for s in (_hexonly(x) for x in (g.get("stops") or [])) if s]
+    stops = [s for s in (_design_color(x) for x in (g.get("stops") or [])) if s]
     if len(stops) < 2:
         return ""
     angle = _clampi(g.get("angle"), 0, 360, 135)

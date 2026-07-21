@@ -29,6 +29,7 @@ _EXPECTED_OPS = {
     "generate_image",        # Phase 6 — server-validated, client-executed (async)
     "duplicate_block",       # op-power Phase 4c3 — copies content + design in one op
     "set_design_bulk",       # op-power Phase 4c1 — styles many sections in one op
+    "apply_style_recipe",    # server-expanded into set_design_bulk — curated theme-portable restyles
 }
 
 
@@ -75,3 +76,6 @@ def test_schema_export_is_json_serializable_and_registry_derived():
     # a range spec renders as {min,max}; an enum as {enum:[...]}
     assert schema["design"]["motion"]["duration"] == {"min": 100, "max": 2000}
     assert "enum" in schema["design"]["motion"]["effect"]
+    # a color spec carries the semantic-token vocabulary alongside "hex or token"
+    assert "brand-soft" in schema["design"]["colors"]["accent"]["tokens"]
+    assert "brand-soft" in schema["design"]["bg"]["gradient"]["stops"]["tokens"]

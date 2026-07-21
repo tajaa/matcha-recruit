@@ -34,6 +34,7 @@ from .merlin_catalog import (
     BLOCK_LABELS,
     BLOCK_TYPES,
     DEFAULT_MODEL_TIER,
+    DESIGN_COLOR_TOKENS,
     DESIGN_GROUPS,
     FREE_PLAN_TIERS,
     MODEL_TIERS,
@@ -117,7 +118,14 @@ def _catalog_text() -> str:
 _SYSTEM_PROMPT = """You are Merlin, an AI that edits a website page by emitting a strict JSON \
 plan. You do not write prose explanations of code — you output ONLY a JSON object shaped exactly:
 
-{"message": "<one short sentence for the user, plain language>", "ops": [<op>, ...]}"""
+{"plan": "<2-3 sentences, written BEFORE you decide any op — see below>", \
+"message": "<one short sentence for the user, plain language>", "ops": [<op>, ...]}
+
+"plan" is a forced planning step, not shown to the user: write it FIRST, before you commit to any \
+op. State what the user is asking for in design terms, what the CURRENT section + theme (mode, \
+colors, existing design) imply about what will actually look right, and which design groups/ops \
+you will use and why. Then make your ops agree with your own plan — an op that contradicts what \
+you just wrote in "plan" is a failure, not a change of mind."""
 # NOTE: _SYSTEM_PROMPT (and every generated fragment below) is full of literal
 # JSON braces — never run str.format() or an f-string over any of them
 # (`{"message"...}` parses as a replacement field and raises KeyError). They are
@@ -140,6 +148,32 @@ _GENERAL_RULES: tuple[str, ...] = (
 )
 
 
+# Design TASTE, as opposed to _GENERAL_RULES' scope/safety guardrails. Added
+# 2026-07-21 after two bad-restyle incidents on a dark theme: an invisible
+# dark-on-dark gradient, and a "look designed in Figma" ask that painted a
+# bright wireframe-grid overlay over the section. Op volume wasn't the
+# problem either time — value CHOICE was. These rules exist to steer that
+# choice; the token vocabulary (_design_catalog_text) and apply_style_recipe
+# exist to make a good choice easy to reach for.
+_DESIGN_PRINCIPLES: tuple[str, ...] = (
+    "The unstyled theme is already professionally designed — coherent surface/line/brand relationships baked "
+    "into every card and section. Prefer TOKENS over hex for any color you set (see the color-token line "
+    "below): a token stays correct on whatever theme/mode the site is using; a hex is a blind guess.",
+    'For "make it look designed / polished / professional / premium", a coordinated multi-key restyle is what '
+    'the request actually means — apply_style_recipe exists exactly for this and should be your first choice. '
+    "This does NOT contradict \"change only what was asked\": touching several design groups ON THE TARGETED "
+    "SECTION(S) is the ask; touching unrelated sections or the theme is not.",
+    "Never set a section background close to the surrounding card/surface color — it flattens cards into the "
+    "background instead of framing them. If you're not sure a color choice will read against the section's "
+    "existing content, prefer leaving that key unset over guessing.",
+    'bg.pattern is a deliberate, subtle texture flourish — never the answer to "make it look designed". If you '
+    "use it, patternColor should be a faint token (ink-faint) or left unset; a bright/opaque pattern color "
+    "renders as a debug wireframe overlay, not texture.",
+    "A border's default color (the theme's own hairline) is usually correct — only set border.color for a "
+    "deliberate tinted line (e.g. brand-soft), not because a color has to go there.",
+)
+
+
 def _op_shapes_text() -> str:
     """The "Each op is one of:" block, generated from the MERLIN_OPS registry so
     an op's documented shape can't drift from its validator."""
@@ -147,10 +181,13 @@ def _op_shapes_text() -> str:
 
 
 def _rules_text() -> str:
-    """General rules + the op-specific rules carried on the registry entries."""
+    """General rules + the op-specific rules carried on the registry entries
+    + the design-taste principles (kept separate from _GENERAL_RULES, which
+    is scope/safety, not aesthetic judgment)."""
     lines = list(_GENERAL_RULES)
     for op in MERLIN_OPS:
         lines.extend(op.prompt_rules)
+    lines.extend(_DESIGN_PRINCIPLES)
     return "Rules:\n" + "\n".join(f"- {r}" for r in lines)
 
 
@@ -172,6 +209,19 @@ def _design_catalog_text() -> str:
             else:
                 rendered.append(f"{key}:{spec}")
         lines.append(f"- {group}: {', '.join(rendered)}")
+    # One shared line rather than annotating every color key — keeps the
+    # catalog compact. Tokens resolve through the THEME'S OWN CSS variables
+    # (var()/color-mix), so a token-authored value is coherent on every theme
+    # by construction; a hex is a blind guess with no relationship to the
+    # section's actual bg/surface/line/brand. This is the fix for the
+    # 2026-07-21 "invisible dark-on-dark restyle" / "bright grid overlay"
+    # incidents — both were literal hexes picked with no theme awareness.
+    lines.append(
+        'color values (bg.color, bg.patternColor, bg.gradient stops, border.color, divider.color, '
+        'colors.text/heading/accent): "#hex" OR a theme token — '
+        + "|".join(sorted(DESIGN_COLOR_TOKENS))
+        + ". PREFER tokens over hex — they stay correct if the user changes theme mode."
+    )
     return "\n".join(lines)
 
 
@@ -322,6 +372,16 @@ async def run_merlin_turn(
                 # Valid JSON, wrong shape (a bare array or string) — `.get` on it
                 # would be an AttributeError.
                 raise ValueError("payload was not a JSON object")
+
+            # Forced planning step (see _SYSTEM_PROMPT) — logged for
+            # debuggability (the brief is the explanation when a turn's ops
+            # don't match what was asked) but never returned to the client or
+            # persisted: it would bloat resent history for no benefit over
+            # the existing ops_summary, and it's an internal reasoning aid,
+            # not user-facing copy.
+            design_brief = payload.get("plan")
+            if isinstance(design_brief, str) and design_brief.strip():
+                logger.info("Merlin design brief (attempt %d/2): %s", attempt + 1, design_brief.strip())
 
             raw_message = str(payload.get("message") or "").strip() or "Done."
             raw_ops = payload.get("ops")

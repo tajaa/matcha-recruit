@@ -475,6 +475,15 @@ def test_set_design_validates_colors_as_hex():
     assert not bad_v and "hex color" in bad_r[0]["reason"]
 
 
+def test_set_design_accepts_a_semantic_color_token():
+    """2026-07-21: colors may also be a theme token (DESIGN_COLOR_TOKENS) — the
+    token resolves through the theme's own vars, unlike a blind hex guess."""
+    ok, _ = _only([{"op": "set_design", "block": "b1", "group": "colors", "key": "accent", "value": "brand-soft"}])
+    assert len(ok) == 1
+    bad_v, bad_r = _only([{"op": "set_design", "block": "b1", "group": "colors", "key": "accent", "value": "brand-medium"}])
+    assert not bad_v and "theme token" in bad_r[0]["reason"]
+
+
 def test_set_design_refused_on_non_premium_with_an_honest_reason():
     """`gate_content` strips `_design` on save for free plans, so applying it
     in-editor would look like it worked and then silently vanish."""
@@ -537,6 +546,19 @@ def test_set_design_gradient_happy_path():
         "value": {"angle": 135, "stops": ["#111111", "#eeeeee"]},
     }])
     assert len(ok) == 1
+
+
+def test_set_design_gradient_accepts_theme_tokens_as_stops():
+    ok, _ = _only([{
+        "op": "set_design", "block": "b1", "group": "bg", "key": "gradient",
+        "value": {"stops": ["brand-faint", "transparent"]},
+    }])
+    assert len(ok) == 1
+    ok2, _ = _only([{
+        "op": "set_design", "block": "b1", "group": "bg", "key": "gradient",
+        "value": {"stops": ["surface-2", "#eeeeee", "brand-soft"]},
+    }])
+    assert len(ok2) == 1
 
 
 def test_set_design_gradient_rejects_bad_stops():

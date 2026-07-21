@@ -37,6 +37,7 @@ from .merlin_catalog import (
     CANVAS_PATCH_KEYS,
     CANVAS_STYLE_KEYS,
     COLUMN_BLOCK_TYPES,
+    DESIGN_COLOR_TOKENS,
     DESIGN_GROUPS,
     LIST_KINDS,
     MAX_OPS_PER_TURN,
@@ -48,6 +49,7 @@ from .merlin_catalog import (
 )
 
 from .section_presets import PRESETS_BY_KEY, SECTION_PRESETS
+from .style_recipes import RECIPES_BY_KEY, STYLE_RECIPES
 from .theme_presets import PRESET_IDS, THEME_PRESETS, font_pairings_text, preset_catalog_text
 
 _HEX_COLOR_RE = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
@@ -195,6 +197,14 @@ def _valid_field_value(value: Any, kind: str, btype: str, head: str) -> bool:
     return _field_value_error(value, kind, btype, head) is None
 
 
+def _is_valid_color(value: Any) -> bool:
+    """A hex string OR a semantic theme token (DESIGN_COLOR_TOKENS) — tokens
+    resolve through the theme's own var()/color-mix relationship, so they
+    stay coherent on every theme by construction; a literal hex is a blind
+    guess the model has no way to check against the theme it's editing."""
+    return isinstance(value, str) and (bool(_HEX_COLOR_RE.match(value)) or value in DESIGN_COLOR_TOKENS)
+
+
 def _design_value_error(value: Any, spec: Any, group: str, key: str) -> Optional[str]:
     """Check a `_design` value against its spec from DESIGN_GROUPS: a frozenset
     is a closed enum, a (min, max) tuple an int range, else a kind name.
@@ -213,8 +223,8 @@ def _design_value_error(value: Any, spec: Any, group: str, key: str) -> Optional
         if not isinstance(value, bool):
             return f"'{key}' must be true or false"
     elif spec == "color":
-        if not isinstance(value, str) or not _HEX_COLOR_RE.match(value):
-            return f"'{key}' must be a hex color like #1a2b3c"
+        if not _is_valid_color(value):
+            return f"'{key}' must be a hex color like #1a2b3c or a theme token ({', '.join(sorted(DESIGN_COLOR_TOKENS))})"
     elif spec == "text":
         if not isinstance(value, str):
             return f"'{key}' must be text"
@@ -223,9 +233,9 @@ def _design_value_error(value: Any, spec: Any, group: str, key: str) -> Optional
             return f"'{key}' must be an object like {{\"angle\":135,\"stops\":[\"#111\",\"#eee\"]}}"
         stops = value.get("stops")
         if not isinstance(stops, list) or not (2 <= len(stops) <= 3) or not all(
-            isinstance(s, str) and _HEX_COLOR_RE.match(s) for s in stops
+            _is_valid_color(s) for s in stops
         ):
-            return f"'{key}.stops' must be 2-3 hex colors like #1a2b3c"
+            return f"'{key}.stops' must be 2-3 hex colors or theme tokens like #1a2b3c or 'brand-soft'"
         angle = value.get("angle")
         if angle is not None:
             num = _num(angle)
@@ -331,6 +341,22 @@ def _v_set_design_bulk(raw: dict[str, Any], ctx: ValidationCtx) -> Optional[str]
     raw["blocks"] = target_ids
     raw["design"] = cleaned
     return None
+
+
+def _v_apply_style_recipe(raw: dict[str, Any], ctx: ValidationCtx) -> Optional[str]:
+    """Expand a curated style recipe into a `set_design_bulk` op IN PLACE, then
+    delegate to the real validator (same target-resolution, premium gate, and
+    columns/mixed-type guard) — the `apply_section_preset` → `add_block` trick,
+    for restyling instead of new-block content. The client only ever sees the
+    expanded `set_design_bulk`; the recipe library never needs a TS mirror.
+    deepcopy so downstream mutation of the op can't corrupt the shared recipe
+    data. The original `recipe` key is kept as provenance."""
+    recipe = RECIPES_BY_KEY.get(_sid(raw.get("recipe")))
+    if recipe is None:
+        return f"unknown style recipe '{raw.get('recipe')}' — expected one of: {', '.join(sorted(RECIPES_BY_KEY))}"
+    raw["op"] = "set_design_bulk"
+    raw["design"] = deepcopy(recipe.design)
+    return _v_set_design_bulk(raw, ctx)
 
 
 def _clean_design_bag(design: Any, btype: Optional[str] = None) -> dict[str, dict[str, Any]]:
@@ -657,6 +683,21 @@ MERLIN_OPS: tuple[MerlinOp, ...] = (
         ),
     ),
     MerlinOp(
+        name="apply_style_recipe",
+        validate=_v_apply_style_recipe,
+        prompt_shape='{"op":"apply_style_recipe","blocks":["<id>",...]|"all","recipe":"<recipeKey>"}',
+        prompt_rules=(
+            'For "make this look designed / polished / professional / premium", PREFER apply_style_recipe '
+            'over hand-picking set_design values — a recipe is a professionally-authored, theme-portable '
+            '(token-based) multi-key restyle in one op; freehand set_design values risk picking colors with '
+            'no relationship to the theme (this is how a dark-on-dark gradient went invisible, and how a '
+            'literal pattern color rendered as a bright wireframe-grid overlay). '
+            'Available recipes: '
+            + "; ".join(f"{r.key} — {r.blurb}" for r in STYLE_RECIPES)
+            + ".",
+        ),
+    ),
+    MerlinOp(
         name="add_block",
         validate=_v_add_block,
         prompt_shape='{"op":"add_block","type":"<blockType>","at":<index>,"content":{...fields...},"design":{...optional set_design groups/keys...},"id":"<optional short id, e.g. new-1>"}',
@@ -770,7 +811,12 @@ def _spec_json(spec: Any) -> Any:
     if isinstance(spec, tuple):
         return {"min": spec[0], "max": spec[1]}
     if spec == "gradient":
-        return {"kind": "gradient", "stops": {"min": 2, "max": 3}, "angle": {"min": 0, "max": 360}}
+        return {
+            "kind": "gradient", "stops": {"min": 2, "max": 3, "tokens": sorted(DESIGN_COLOR_TOKENS)},
+            "angle": {"min": 0, "max": 360},
+        }
+    if spec == "color":
+        return {"kind": "color", "tokens": sorted(DESIGN_COLOR_TOKENS)}
     return {"kind": spec}
 
 
@@ -819,6 +865,9 @@ def build_merlin_schema() -> dict[str, Any]:
         "themePresets": [
             {"id": p.id, "name": p.name, "blurb": p.blurb, "premium": p.premium, "mode": p.mode}
             for p in THEME_PRESETS
+        ],
+        "styleRecipes": [
+            {"key": r.key, "label": r.label, "blurb": r.blurb} for r in STYLE_RECIPES
         ],
         "imageGen": {
             "aspectRatios": sorted(AI_ASPECT_RATIOS),
