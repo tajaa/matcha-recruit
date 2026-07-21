@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Check, Loader2, Send, X } from 'lucide-react'
 import { HelpHint } from '../../../components/ui/HelpHint'
 import {
   streamChat, patchDataset,
   type AnalysisSession, type AnalysisMessage, type ProposedEdit,
 } from '../../../api/analysis-pilot/analysisPilot'
+import { usePilotChat } from '../../../components/pilot/usePilotChat'
 import { buildCidIndex, type FocusChip } from './shared'
 import { CidChips, CitedMarkdown } from './citations'
 
@@ -17,20 +18,14 @@ export function Console({ session, onTurn, focus, onRemoveFocus, onClearFocus, p
   focus: FocusChip[]; onRemoveFocus: (cid: string) => void; onClearFocus: () => void
   prefill?: { text: string; nonce: number; autoSend?: boolean } | null
 }) {
-  const [messages, setMessages] = useState<AnalysisMessage[]>(session.messages ?? [])
-  const [input, setInput] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [status, setStatus] = useState<string | null>(null)
+  const {
+    messages, setMessages, input, setInput, busy, status, setStatus,
+    scrollRef, textareaRef, runTurn,
+  } = usePilotChat<AnalysisMessage>({ initialMessages: session.messages ?? [], statusLabel: 'Analyzing…', onTurn })
   // Per-proposal outcome, keyed `${messageIdx}:${editIdx}`.
   const [resolved, setResolved] = useState<Record<string, 'applied' | 'dismissed'>>({})
   const [applying, setApplying] = useState<string | null>(null)
-  const scrollRef = useRef<HTMLDivElement>(null)
-  const abortRef = useRef<AbortController | null>(null)
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
   const cidIndex = useMemo(() => buildCidIndex(session), [session])
-
-  useEffect(() => () => abortRef.current?.abort(), [])
-  useEffect(() => { scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight }) }, [messages, status])
 
   // Examples tab hands off a prompt here. Plain examples just fill the composer
   // and focus it (never auto-send, avoids firing a grounded turn against
@@ -51,17 +46,14 @@ export function Console({ session, onTurn, focus, onRemoveFocus, onClearFocus, p
     const text = (override ?? input).trim()
     if (!text || busy) return
     const focusCids = focus.map((c) => c.cid)
-    setInput(''); setBusy(true); setStatus('Analyzing…')
+    setInput('')
     setMessages((m) => [...m, {
       role: 'user', content: text,
       metadata: focusCids.length ? { focus: focusCids } : null,
       created_at: new Date().toISOString(),
     }])
     onClearFocus()
-    const controller = new AbortController()
-    abortRef.current = controller
-    let hadError = false
-    try {
+    await runTurn(async (signal, markError) => {
       await streamChat(session.id, text, {
         onStatus: (msg) => setStatus(msg),
         onResult: (data) => {
@@ -74,15 +66,9 @@ export function Console({ session, onTurn, focus, onRemoveFocus, onClearFocus, p
             created_at: new Date().toISOString(),
           }])
         },
-        onError: (msg) => { hadError = true; setStatus(`⚠ ${msg}`) },
-      }, controller.signal, focusCids)
-    } finally {
-      if (!controller.signal.aborted) {
-        setBusy(false)
-        if (!hadError) setStatus(null)
-        onTurn()
-      }
-    }
+        onError: (msg) => { markError(); setStatus(`⚠ ${msg}`) },
+      }, signal, focusCids)
+    })
   }
 
   // Apply a chat-proposed correction through the normal confirmed PATCH →
