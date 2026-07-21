@@ -1,6 +1,5 @@
-import { useState, useEffect } from 'react'
-import { useIRAnalysisStream } from '../../hooks/ir/useIRAnalysisStream'
-import { Badge, Button } from '../ui'
+import { IRAnalysisPanel } from './IRAnalysisPanel'
+import { Badge } from '../ui'
 import type { IRRecommendationsAnalysis } from '../../types/ir'
 
 type Props = {
@@ -9,41 +8,19 @@ type Props = {
   onResult?: (r: IRRecommendationsAnalysis) => void
 }
 
-export function IRRecommendationsPanel({ incidentId, result: externalResult, onResult }: Props) {
-  const stream = useIRAnalysisStream(incidentId)
-  const [localResult, setLocalResult] = useState<IRRecommendationsAnalysis | null>(null)
-
-  const result = externalResult ?? localResult
-
-  useEffect(() => {
-    if (!stream.streaming && stream.result && stream.analysisType === 'recommendations') {
-      const res = stream.result as IRRecommendationsAnalysis
-      setLocalResult(res)
-      onResult?.(res)
-    }
-  }, [stream.streaming, stream.result, stream.analysisType]) // eslint-disable-line react-hooks/exhaustive-deps
-
+export function IRRecommendationsPanel({ incidentId, result, onResult }: Props) {
   return (
-    <div>
-      <div className="flex items-center justify-between mb-2">
-        <h3 className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Intelligent Theme Analysis · Recommendations</h3>
-        <Button variant="ghost" size="sm" disabled={stream.streaming}
-          onClick={() => stream.runAnalysis('recommendations')}>
-          {stream.streaming ? 'Analyzing...' : 'Run'}
-        </Button>
-      </div>
-      {stream.streaming && (
-        <div className="border border-zinc-800 rounded-lg px-4 py-3">
-          {stream.messages.map((m, i) => (
-            <p key={i} className="text-xs text-zinc-500">{m}</p>
-          ))}
-        </div>
-      )}
-      {result && (
+    <IRAnalysisPanel<IRRecommendationsAnalysis>
+      incidentId={incidentId}
+      analysisType="recommendations"
+      title="Intelligent Theme Analysis · Recommendations"
+      result={result}
+      onResult={onResult}
+      renderResult={(res) => (
         <div className="border border-zinc-800 rounded-lg px-4 py-3 space-y-2">
-          <p className="text-xs text-zinc-400">{result.summary}</p>
+          <p className="text-xs text-zinc-400">{res.summary}</p>
           <div className="space-y-2">
-            {result.recommendations.map((rec, i) => (
+            {res.recommendations.map((rec, i) => (
               <div key={i} className="flex items-start gap-2">
                 <Badge variant={rec.priority === 'immediate' ? 'danger' : rec.priority === 'short_term' ? 'warning' : 'neutral'}>
                   {rec.priority.replace(/_/g, ' ')}
@@ -57,7 +34,6 @@ export function IRRecommendationsPanel({ incidentId, result: externalResult, onR
           </div>
         </div>
       )}
-      {stream.error && <p className="text-xs text-red-400 mt-1">{stream.error}</p>}
-    </div>
+    />
   )
 }
