@@ -467,13 +467,25 @@ def _ops(grounding, **over):
     return g
 
 
-def test_corpus_has_ten_groups(grounding):
+def test_corpus_has_twelve_groups(grounding):
     corpus = build_hr_pilot_corpus(_ops(grounding), [])
     assert set(corpus["sources"]) == {
         "profile", "law", "existing_handbook", "existing_policies", "playbook",
         "compliance_floor", "discipline_ladder",
         "schedule", "training_status", "recent_incidents",
+        # Minted by the shared `handbook_pilot.build_corpus` and always EMPTY
+        # here: `gather_hr_pilot_grounding` doesn't fetch audit gaps or freshness
+        # findings (a supervisor needs the rule in force, not a list of where the
+        # handbook falls short). Empty groups render nothing in the prompt.
+        "handbook_audit", "handbook_freshness",
     }
+
+
+def test_the_finding_groups_stay_empty_for_hr_pilot(grounding):
+    corpus = build_hr_pilot_corpus(_ops(grounding), [])
+    assert corpus["sources"]["handbook_audit"]["records"] == []
+    assert corpus["sources"]["handbook_freshness"]["records"] == []
+    assert not any(c.startswith(("audit:", "fresh:")) for c in corpus["index"])
 
 
 def test_no_cid_collisions_with_operational_groups(grounding):

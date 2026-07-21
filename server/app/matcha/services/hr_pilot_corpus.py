@@ -660,11 +660,19 @@ def build_hr_pilot_corpus(grounding: dict, reasoning_chains: list | None = None)
     return {"sources": sources, "index": index, "notes": notes}
 
 
-# Source groups that describe OTHER PEOPLE rather than company policy. A
-# supervisor is entitled to them — knowing who is on shift and who is overdue on
-# training is the job. An employee is not: these name coworkers, their training
-# failures, and incidents at their site.
-_SUPERVISOR_ONLY_SOURCES = ("schedule", "training_status", "recent_incidents")
+# Source groups an employee must not see. The first three describe OTHER PEOPLE
+# rather than company policy — a supervisor is entitled to them (knowing who is
+# on shift and who is overdue on training is the job), an employee is not: they
+# name coworkers, their training failures, and incidents at their site.
+#
+# The last two describe the EMPLOYER's own shortfalls: a graded handbook gap and
+# a section the law has moved under. `gather_hr_pilot_grounding` doesn't fetch
+# them today (only Handbook Pilot does), so both groups are empty here — they are
+# listed anyway because `build_corpus` is shared, and the day anyone wires them
+# in, the default must not be that an employee's "what's the PTO policy?" comes
+# back with a list of where the company's handbook is non-compliant.
+_SUPERVISOR_ONLY_SOURCES = ("schedule", "training_status", "recent_incidents",
+                            "handbook_audit", "handbook_freshness")
 
 
 def redact_for_employee(corpus: dict) -> dict:

@@ -764,3 +764,161 @@ def test_a_federal_floor_still_covers_a_state_with_no_local_floor():
                "promoted_ref": None, "citations": [federal["cid"]]}]
     asm = hp.assemble_handbook({}, drafts, corpus)
     assert "law:ca-meal-0" in {c["cid"] for c in asm["coverage"]["covered"]}
+
+
+# --- audit gaps + freshness findings (C3) -------------------------------------
+
+def _audit(days_ago: int = 10, n_extra: int = 0):
+    from datetime import datetime, timedelta, timezone
+    gaps = [
+        {"state": "CA", "requirement_key": "paid_sick_leave",
+         "requirement_title": "Paid sick leave accrual", "covered": False,
+         "severity": "critical", "citation": "Cal. Lab. Code § 246",
+         "what_good_looks_like": "State the accrual rate and carryover cap.",
+         "matched_section_title": "Time Off"},
+        {"state": "CA", "requirement_key": "lactation_accommodation",
+         "requirement_title": "Lactation accommodation", "covered": False,
+         "severity": "recommended", "what_good_looks_like": "Name the private space."},
+        # already covered by the handbook — must never become a record
+        {"state": "CA", "requirement_key": "at_will", "requirement_title": "At-will notice",
+         "covered": True, "severity": "critical"},
+    ]
+    gaps += [{"state": "TX", "requirement_key": f"extra_{i}",
+              "requirement_title": f"Extra requirement {i}", "covered": False,
+              "severity": "recommended"} for i in range(n_extra)]
+    return {"report_id": "r1", "states": ["CA"], "industry": "hospitality",
+            "completed_at": datetime.now(timezone.utc) - timedelta(days=days_ago),
+            "gaps": gaps}
+
+
+def _freshness(n: int = 2, change_request: bool = False):
+    from datetime import datetime, timezone
+    return [{"id": f"f{i}", "section_key": f"section_{i}", "finding_type": "outdated",
+             "summary": f"Finding {i}: the meal-break rule changed.",
+             "source_url": "https://example.com/law", "effective_date": "2026-01-01",
+             "age_days": 400, "change_request_id": ("cr1" if change_request else None),
+             "checked_at": datetime.now(timezone.utc), "handbook_title": "US Handbook"}
+            for i in range(n)]
+
+
+def test_audit_records_only_uncovered_gaps_severity_first():
+    recs, notes = hp._audit_records(_audit())
+    cids = [r["cid"] for r in recs]
+    assert cids == ["audit:ca-paid-sick-leave", "audit:ca-lactation-accommodation"]
+    assert not any("at-will" in c for c in cids)   # covered gaps are not findings
+    assert notes == []                             # fresh audit, nothing truncated
+
+    top = recs[0]
+    assert "critical gap" in top["summary"] and "Paid sick leave accrual" in top["summary"]
+    assert "what good looks like" in top["summary"]
+    assert "Cal. Lab. Code § 246" in top["summary"]
+    assert "Time Off" in top["summary"]            # closest existing section named
+
+
+def test_audit_records_cap_and_stale_notes():
+    recs, notes = hp._audit_records(_audit(days_ago=400, n_extra=hp._MAX_AUDIT_GAPS + 10))
+    assert len(recs) == hp._MAX_AUDIT_GAPS
+    # the criticals survive the cut — ranking happens before the cap
+    assert recs[0]["cid"] == "audit:ca-paid-sick-leave"
+    assert any("400 days ago" in n for n in notes)
+    assert any(str(hp._MAX_AUDIT_GAPS) in n for n in notes)
+
+
+def test_audit_records_empty_and_junk():
+    assert hp._audit_records(None) == ([], [])
+    assert hp._audit_records({}) == ([], [])
+    assert hp._audit_records({"gaps": ["junk", None, 3]}) == ([], [])
+    # every gap already covered → no records, no note
+    assert hp._audit_records({"gaps": [{"covered": True, "requirement_title": "x"}]}) == ([], [])
+
+
+def test_audit_cids_are_unique_when_two_gaps_share_a_key():
+    dup = {"gaps": [{"state": "CA", "requirement_key": "wage", "requirement_title": "Wage A"},
+                    {"state": "CA", "requirement_key": "wage", "requirement_title": "Wage B"}]}
+    recs, _ = hp._audit_records(dup)
+    assert [r["cid"] for r in recs] == ["audit:ca-wage", "audit:ca-wage-2"]
+
+
+def test_freshness_records_and_change_request_flag():
+    recs, notes = hp._freshness_records(_freshness())
+    assert [r["cid"] for r in recs] == ["fresh:f0", "fresh:f1"]
+    assert notes == []
+    s = recs[0]["summary"]
+    assert "US Handbook" in s and "section_0" in s
+    assert "law this section relies on has changed" in s
+    assert "effective 2026-01-01" in s
+    assert "already been raised" not in s
+
+    withcr, _ = hp._freshness_records(_freshness(n=1, change_request=True))
+    assert "already been raised" in withcr[0]["summary"]
+
+
+def test_freshness_records_cap_notes_and_empties():
+    recs, notes = hp._freshness_records(_freshness(n=hp._MAX_FRESHNESS_FINDINGS + 5))
+    assert len(recs) == hp._MAX_FRESHNESS_FINDINGS
+    assert any(str(hp._MAX_FRESHNESS_FINDINGS) in n for n in notes)
+    assert hp._freshness_records(None) == ([], [])
+    assert hp._freshness_records([]) == ([], [])
+
+
+def test_build_corpus_indexes_audit_and_freshness():
+    corpus = hp.build_corpus({**_grounding(), "audit": _audit(), "freshness": _freshness()})
+    idx = corpus["index"]
+    assert idx["audit:ca-paid-sick-leave"]["source"] == "handbook_audit"
+    assert idx["fresh:f0"]["source"] == "handbook_freshness"
+    # still one flat index — every record reachable by the citation gate
+    assert len(idx) == sum(len(s["records"]) for s in corpus["sources"].values())
+
+
+def test_a_finding_is_not_legal_grounding():
+    """`audit:`/`fresh:` say the handbook is WRONG; they never say what the law
+    IS. A draft citing only findings must still read as ungrounded, or the amber
+    dot stops meaning "no legal citation"."""
+    corpus = hp.build_corpus({**_grounding(), "audit": _audit(), "freshness": _freshness()})
+    drafts = [{"id": "d1", "kind": "handbook_section", "title": "Sick Leave",
+               "section_key": "sick_leave", "content": "body", "status": "pending",
+               "promoted_ref": None,
+               "citations": ["audit:ca-paid-sick-leave", "fresh:f0"]}]
+    asm = hp.assemble_handbook({}, drafts, corpus)
+    section = asm["sections"][0]
+    assert section["law_citation_count"] == 0
+    assert section["grounded"] is False
+    # ...but the citations still resolve, so the admin can see what drove the draft
+    assert {c["cid"] for c in section["citations"]} == {"audit:ca-paid-sick-leave", "fresh:f0"}
+
+
+def test_prompt_forbids_citing_a_finding_as_law():
+    assert "NOT law" in hp._SYSTEM
+    corpus = hp.build_corpus({**_grounding(), "audit": _audit(), "freshness": _freshness()})
+    text = hp._corpus_text(corpus)
+    assert "[audit:ca-paid-sick-leave]" in text and "[fresh:f0]" in text
+    assert "Handbook audit gaps" in text and "Handbook freshness findings" in text
+
+
+def test_inline_cid_strips_every_namespace_from_prose():
+    """Model-embedded corpus ids must not survive into employee-facing text —
+    including the namespaces added after the regex was first written."""
+    body = ("You accrue sick leave [law:ca-paid-sick-leave] per the governing rule "
+            "[floor:state-california-paid-leave], see [audit:ca-paid-sick-leave] and "
+            "[fresh:f0]. Contact [HR_CONTACT_EMAIL] or read [our policy](https://x.test).")
+    cleaned = hp._INLINE_CID.sub("", body)
+    for token in ("law:", "floor:", "audit:", "fresh:"):
+        assert token not in cleaned
+    assert "[HR_CONTACT_EMAIL]" in cleaned            # placeholders survive
+    assert "[our policy](https://x.test)" in cleaned  # markdown links survive
+
+
+def test_employee_redaction_covers_the_new_finding_groups():
+    """Ask HR shares this corpus. The finding groups are empty for HR Pilot
+    today, but the redaction list must already name them: whoever wires them in
+    should not have to remember that an employee asking about PTO would
+    otherwise be handed the company's own compliance gaps."""
+    from app.matcha.services import hr_pilot_corpus as hpc
+    assert "handbook_audit" in hpc._SUPERVISOR_ONLY_SOURCES
+    assert "handbook_freshness" in hpc._SUPERVISOR_ONLY_SOURCES
+
+    corpus = hp.build_corpus({**_grounding(), "audit": _audit(), "freshness": _freshness()})
+    red = hpc.redact_for_employee(corpus)
+    assert "handbook_audit" not in red["sources"] and "handbook_freshness" not in red["sources"]
+    # cids leave the index too, so a guessed citation can't resolve either
+    assert not any(c.startswith(("audit:", "fresh:")) for c in red["index"])

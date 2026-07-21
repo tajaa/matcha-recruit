@@ -103,8 +103,8 @@ export const promotePilotDrafts = (
 
 // A draft's citation resolved back to the corpus record it grounds in. `source`
 // is one of law | compliance_floor | playbook | handbook | policy | profile |
-// unknown ("No longer in scope" when the requirement aged out since the draft
-// was proposed).
+// handbook_audit | handbook_freshness | unknown ("No longer in scope" when the
+// requirement aged out since the draft was proposed).
 export type ResolvedCitation = {
   cid: string
   ref: string

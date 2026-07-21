@@ -22,6 +22,13 @@ Corpus cid scheme (one flat index; the citation gate keys on it):
 - ``handbook:<uuid>``                — one record per existing handbook section
 - ``policy:<uuid>``                  — one record per existing policy
 - ``playbook:<slug>``                — one record per industry playbook baseline section
+- ``floor:<level>-<juris>-<cat>``    — the GOVERNING requirement per category (precedence-resolved)
+- ``audit:<state>-<req-key>``        — one record per open gap from the latest handbook audit
+- ``fresh:<uuid>``                   — one record per finding from the latest freshness check
+
+`audit:` / `fresh:` are findings ABOUT the handbook, not law — the prompt forbids
+citing them as the source of an obligation, and `law_citation_count` (which
+drives the grounded/amber dot) deliberately ignores them.
 
 Law cids are derived from the requirement's *content* (state + category + title),
 not its position in the fetch, because `_fetch_state_requirements` orders by
@@ -52,6 +59,11 @@ _MAX_EXISTING_SECTIONS = 60
 _MAX_EXISTING_POLICIES = 60
 _MAX_DRAFTS_PER_TURN = 6         # candidate artifacts the model may propose per turn
 _CONTENT_CAP = 12_000            # generated body cap per draft
+_MAX_AUDIT_GAPS = 60             # gaps from the latest handbook audit, severity-ranked
+_MAX_FRESHNESS_FINDINGS = 40     # findings from the latest freshness check per handbook
+# An audit older than this is still worth grounding on (the gaps rarely close by
+# themselves) but is flagged as possibly answered by later handbook edits.
+_AUDIT_STALE_DAYS = 180
 
 DRAFT_KINDS = ("handbook_section", "policy")
 
@@ -155,9 +167,14 @@ async def gather_grounding(conn, company_id, session: dict) -> dict:
     except Exception:  # noqa: BLE001
         logger.warning("handbook_pilot: existing-policy fetch failed for %s", company_id)
 
+    audit = await _fetch_audit_gaps(conn, company_id)
+    freshness = await _fetch_freshness_findings(conn, company_id)
+
     return {
         "scopes": scopes,
         "profile": dict(profile) if profile else None,
+        "audit": audit,
+        "freshness": freshness,
         "requirements": requirements,
         "sections": [dict(r) for r in sections],
         "policies": [dict(r) for r in policies],
@@ -166,6 +183,103 @@ async def gather_grounding(conn, company_id, session: dict) -> dict:
         # see that function for why it cannot be fetched here.
         "reasoning_chains": [],
     }
+
+
+async def _fetch_audit_gaps(conn, company_id) -> dict:
+    """The company's latest completed handbook **audit** — the graded gap list
+    from `handbook_audit_service`.
+
+    Gated on the company's own `handbook_audit` flag. Handbook Pilot's tiers (X
+    + Pro) carry that flag today, so the check is belt-and-braces rather than a
+    live gate — but `handbook_audit_reports` is also written by the PUBLIC
+    lead-gen analyzer, which any signed-in user can run, and grounding a paid
+    drafting tool on a report the company can't open in-app would cite findings
+    it has no way to inspect or dispute.
+
+    Scoped through `clients` (user → company): the table is keyed on the user or
+    email that uploaded the PDF, not on a company, so there is no company_id to
+    filter. Company-wide rather than per-admin on purpose — the finding is about
+    the company's handbook, and a second admin drafting against it should not be
+    told the gaps don't exist because a colleague ran the audit.
+
+    Best-effort: any failure degrades to ``{}`` and the corpus simply carries no
+    audit records."""
+    try:
+        flags = await conn.fetchrow(
+            "SELECT enabled_features, signup_source FROM companies WHERE id = $1", company_id)
+        if flags:
+            from app.core.feature_flags import merge_company_features
+            if not merge_company_features(
+                    flags["enabled_features"], flags["signup_source"]).get("handbook_audit"):
+                return {}
+        row = await conn.fetchrow(
+            """
+            SELECT r.id, r.states, r.industry, r.gaps_jsonb, r.gap_counts,
+                   r.created_at, r.completed_at
+            FROM handbook_audit_reports r
+            JOIN clients cl ON cl.user_id = r.user_id
+            WHERE cl.company_id = $1 AND r.status = 'ready'
+            ORDER BY r.completed_at DESC NULLS LAST, r.created_at DESC
+            LIMIT 1
+            """,
+            company_id,
+        )
+    except Exception:  # noqa: BLE001 — a missing audit is a note, never an error
+        logger.warning("handbook_pilot: audit fetch failed for %s", company_id)
+        return {}
+    if not row:
+        return {}
+    gaps = row["gaps_jsonb"]
+    if isinstance(gaps, str):
+        try:
+            gaps = json.loads(gaps)
+        except (json.JSONDecodeError, TypeError):
+            gaps = []
+    return {
+        "report_id": str(row["id"]),
+        "states": list(row["states"] or []),
+        "industry": row["industry"],
+        "completed_at": row["completed_at"] or row["created_at"],
+        "gaps": [g for g in (gaps or []) if isinstance(g, dict)],
+    }
+
+
+async def _fetch_freshness_findings(conn, company_id) -> list[dict]:
+    """Findings from the LATEST completed freshness check of each of the
+    company's handbooks — "the law moved under section X since this was written".
+
+    One check per handbook, not the company's latest check overall: a company
+    with a US and a CA handbook would otherwise ground on whichever was swept
+    most recently and silently carry nothing for the other.
+
+    No feature gate. The manual `POST /handbooks/{id}/freshness-check` ships with
+    `handbooks`, which every Handbook Pilot tenant has; `handbook_watch` gates
+    only the SCHEDULED sweep that also writes these rows. Gating the read on
+    `handbook_watch` would hide the company's own manual findings from it."""
+    try:
+        rows = await conn.fetch(
+            """
+            WITH latest AS (
+                SELECT DISTINCT ON (handbook_id) id, handbook_id, created_at
+                FROM handbook_freshness_checks
+                WHERE company_id = $1 AND status = 'completed'
+                ORDER BY handbook_id, created_at DESC
+            )
+            SELECT f.id, f.section_key, f.finding_type, f.summary, f.source_url,
+                   f.effective_date, f.age_days, f.change_request_id,
+                   l.created_at AS checked_at, h.title AS handbook_title
+            FROM latest l
+            JOIN handbook_freshness_findings f ON f.freshness_check_id = l.id
+            LEFT JOIN handbooks h ON h.id = f.handbook_id
+            ORDER BY l.created_at DESC, f.created_at
+            LIMIT $2
+            """,
+            company_id, _MAX_FRESHNESS_FINDINGS + 1,
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning("handbook_pilot: freshness fetch failed for %s", company_id)
+        return []
+    return [dict(r) for r in rows]
 
 
 async def attach_compliance_floor(grounding: dict, company_id) -> dict:
@@ -381,6 +495,132 @@ def _playbook_records(industry: str | None) -> list[dict]:
     return recs
 
 
+_SEVERITY_RANK = {"critical": 0, "important": 1, "recommended": 2}
+
+
+def _audit_records(audit: dict | None) -> tuple[list[dict], list[str]]:
+    """(records, notes) for the latest handbook-audit gap list. Pure.
+
+    Severity-ranked before the cap, so a truncated corpus keeps the criticals.
+    The cid keys on state + requirement key, not list position: the same audit
+    is re-read on every turn and re-ranked here, and a positional cid would
+    still resolve after a re-rank — to a different gap.
+
+    A gap is a finding about the company's HANDBOOK, never a statement of law.
+    The summary says which handbook document was graded and how old the grading
+    is, because both are things the model would otherwise assume."""
+    audit = audit or {}
+    gaps = [g for g in (audit.get("gaps") or []) if isinstance(g, dict) and not g.get("covered")]
+    if not gaps:
+        return [], []
+
+    when = audit.get("completed_at")
+    when_s = when.date().isoformat() if hasattr(when, "date") else (str(when)[:10] or "unknown date")
+    notes: list[str] = []
+    age_days = None
+    if hasattr(when, "date"):
+        try:
+            age_days = (datetime.now(timezone.utc) - when).days
+        except TypeError:                       # naive timestamp — skip the staleness note
+            age_days = None
+    if age_days is not None and age_days > _AUDIT_STALE_DAYS:
+        notes.append(
+            f"The handbook audit these gaps come from ran {age_days} days ago ({when_s}); "
+            "a gap may already have been closed by a later handbook edit."
+        )
+
+    ranked = sorted(
+        gaps,
+        key=lambda g: (_SEVERITY_RANK.get(str(g.get("severity") or "").lower(), 9),
+                       str(g.get("state") or ""), str(g.get("requirement_title") or "")),
+    )
+    if len(ranked) > _MAX_AUDIT_GAPS:
+        notes.append(
+            f"{len(ranked)} audit gaps on file; the {_MAX_AUDIT_GAPS} most severe are in scope."
+        )
+        ranked = ranked[:_MAX_AUDIT_GAPS]
+
+    recs, seen = [], {}
+    for g in ranked:
+        state = str(g.get("state") or "").strip().upper() or "US"
+        title = str(g.get("requirement_title") or g.get("requirement_key") or "requirement")
+        cid = f"audit:{_slug(state)}-{_slug(g.get('requirement_key') or title)}"
+        n = seen.get(cid, 0)
+        seen[cid] = n + 1
+        if n:
+            cid = f"{cid}-{n + 1}"
+        severity = str(g.get("severity") or "recommended").lower()
+        bits = [f"{state} — {severity} gap: the audited handbook does not adequately cover "
+                f"{title}"]
+        if g.get("what_good_looks_like"):
+            bits.append(f"what good looks like: {str(g['what_good_looks_like'])[:400]}")
+        if g.get("matched_section_title"):
+            bits.append(f"closest existing section: {g['matched_section_title']}")
+        if g.get("citation"):
+            bits.append(f"cited authority: {g['citation']}")
+        recs.append({
+            "cid": cid,
+            "ref": f"Handbook gap — {title} ({state})",
+            "summary": "; ".join(bits) + ".",
+            "when": when_s,
+        })
+    return recs, notes
+
+
+_FRESHNESS_LABELS = {
+    "outdated": "the law this section relies on has changed",
+    "new_requirement": "a new requirement is not reflected in the handbook",
+    "missing": "the handbook has no section for this requirement",
+    "stale_data": "the underlying jurisdiction data is stale",
+}
+
+
+def _freshness_records(findings: list[dict] | None) -> tuple[list[dict], list[str]]:
+    """(records, notes) for the latest freshness check per handbook. Pure.
+
+    Cids key on the finding's own row id, which is stable — unlike the audit
+    gaps, these are real rows."""
+    rows = [f for f in (findings or []) if isinstance(f, dict)]
+    if not rows:
+        return [], []
+    notes: list[str] = []
+    if len(rows) > _MAX_FRESHNESS_FINDINGS:
+        notes.append(
+            f"More than {_MAX_FRESHNESS_FINDINGS} handbook-freshness findings are open; "
+            f"the {_MAX_FRESHNESS_FINDINGS} most recent are in scope."
+        )
+        rows = rows[:_MAX_FRESHNESS_FINDINGS]
+    recs = []
+    for f in rows:
+        kind = str(f.get("finding_type") or "").lower()
+        bits = [str(f.get("summary") or _FRESHNESS_LABELS.get(kind) or "handbook freshness finding")]
+        if f.get("handbook_title"):
+            bits.insert(0, f"handbook “{f['handbook_title']}”")
+        if f.get("section_key"):
+            bits.append(f"section {f['section_key']}")
+        if kind and kind in _FRESHNESS_LABELS:
+            bits.append(_FRESHNESS_LABELS[kind])
+        if f.get("effective_date"):
+            bits.append(f"change effective {f['effective_date']}")
+        if f.get("age_days") is not None:
+            bits.append(f"section {f['age_days']} day(s) old")
+        if f.get("source_url"):
+            bits.append(f"source {f['source_url']}")
+        if f.get("change_request_id"):
+            # Otherwise the pilot re-proposes work the admin has already queued.
+            bits.append("a change request has already been raised for this finding")
+        checked = f.get("checked_at")
+        recs.append({
+            "cid": f"fresh:{f.get('id')}",
+            "ref": (f"Freshness finding — {_hum(kind) or 'handbook'}"
+                    + (f" ({f['section_key']})" if f.get("section_key") else "")),
+            "summary": "; ".join(bits) + ".",
+            "when": (checked.date().isoformat() if hasattr(checked, "date")
+                     else str(checked or "")[:10] or "current"),
+        })
+    return recs, notes
+
+
 def _floor_records(reasoning_chains: list | None) -> list[dict]:
     """One record per GOVERNING compliance requirement, deduped across
     locations. `reasoning_chains` is the structured list from
@@ -492,6 +732,8 @@ def build_corpus(grounding: dict, *, with_full_text: bool = False) -> dict:
     corpus would otherwise carry per company for nothing. It is never folded
     into the records either way; those are stored."""
     grounding = grounding or {}
+    audit_recs, audit_notes = _audit_records(grounding.get("audit"))
+    fresh_recs, fresh_notes = _freshness_records(grounding.get("freshness"))
     sources = {
         "profile": {"label": "Company profile",
                     "records": _profile_record(grounding.get("profile"))},
@@ -505,8 +747,14 @@ def build_corpus(grounding: dict, *, with_full_text: bool = False) -> dict:
                               "records": _existing_policy_records(grounding.get("policies"))},
         "playbook": {"label": "Industry playbook baseline",
                      "records": _playbook_records(grounding.get("industry"))},
+        # Findings ABOUT the company's handbook — where it falls short and where
+        # the law moved under it. Not law themselves: `law_citation_count` below
+        # deliberately does not count them, so a draft citing only a gap is still
+        # "ungrounded" and shows amber.
+        "handbook_audit": {"label": "Handbook audit gaps", "records": audit_recs},
+        "handbook_freshness": {"label": "Handbook freshness findings", "records": fresh_recs},
     }
-    notes: list[str] = []
+    notes: list[str] = [*audit_notes, *fresh_notes]
     if not grounding.get("scopes"):
         notes.append(
             "No work locations on file — add employee locations or session scopes "
@@ -593,7 +841,7 @@ def canonical_cid(cid, index: dict) -> str:
 # Grounded AI turn — HR policy drafter, grounded in the corpus.
 # --------------------------------------------------------------------------- #
 
-_SYSTEM = """You are an HR handbook and policy drafting assistant working for a company's HR administrator. You draft employee-handbook sections and standalone workplace policies, grounding EVERY enforceable clause in the EVIDENCE CORPUS below: the company profile (`profile`), the GOVERNING requirement per compliance category after federal/state/local precedence is resolved (`floor:` IDs), the full list of jurisdiction requirements that apply to the company's work locations (`law:` IDs), the company's existing handbook sections (`handbook:` IDs) and existing policies (`policy:` IDs), and the industry playbook baseline (`playbook:` IDs).
+_SYSTEM = """You are an HR handbook and policy drafting assistant working for a company's HR administrator. You draft employee-handbook sections and standalone workplace policies, grounding EVERY enforceable clause in the EVIDENCE CORPUS below: the company profile (`profile`), the GOVERNING requirement per compliance category after federal/state/local precedence is resolved (`floor:` IDs), the full list of jurisdiction requirements that apply to the company's work locations (`law:` IDs), the company's existing handbook sections (`handbook:` IDs) and existing policies (`policy:` IDs), the industry playbook baseline (`playbook:` IDs), and the findings the platform has already recorded about this company's handbook — audited gaps (`audit:` IDs) and freshness findings (`fresh:` IDs).
 
 HARD RULES:
 - Cite ONLY the bracketed IDs that appear in the EVIDENCE CORPUS. NEVER invent a statute, dollar figure, deadline, or ID.
@@ -601,6 +849,8 @@ HARD RULES:
 - Put those corpus IDs ONLY in the `cited_ids` array. NEVER write a corpus ID (like `law:…` or `handbook:…`) into the `content` prose — `content` is employee-facing handbook text. (Placeholder tokens like [HR_CONTACT_EMAIL] are fine in content.)
 - When you assert a legal obligation (a required notice window, an accrual rate, a posting duty, a covered-employer threshold), cite the `law:` ID it comes from. If the corpus does not establish it, say so under open_questions instead of stating it as fact.
 - Revise rather than duplicate: if an existing `handbook:`/`policy:` record already covers the topic, cite it and build on it.
+- `audit:` and `fresh:` records are findings ABOUT this company's handbook — a graded gap, or a section the law has moved under. They are NOT law: never cite one as the source of a legal obligation, and never restate its wording as the requirement. Use them to decide WHAT to draft or revise, then cite the `floor:`/`law:` record for what the rule actually is. If the corpus has a finding but no matching `floor:`/`law:` record, say so under open_questions rather than inventing the obligation.
+- An `audit:` gap is graded against a handbook DOCUMENT that was uploaded for audit — it may predate the sections in this corpus. Where a `handbook:` record already covers a gap, say the gap appears closed instead of drafting the section again.
 - Write clear, enforceable, employee-facing prose. You MAY use the placeholder tokens the company resolves later, e.g. [HR_CONTACT_EMAIL], [HARASSMENT_REPORTING_HOTLINE], [ATTENDANCE_NOTICE_WINDOW].
 - You draft; you do not give legal advice. Note where counsel review is warranted.
 
@@ -661,13 +911,13 @@ LATEST ADMIN MESSAGE:
 
 # Inline corpus-id tokens the model embeds in prose despite the prompt asking for
 # cited_ids only (e.g. "...report concerns [handbook:0e29…]."). Colon-form
-# (law:/handbook:/policy:/playbook:) is unambiguous; `profile` is the one bare
+# (law:/floor:/handbook:/policy:/playbook:/audit:/fresh:) is unambiguous; `profile` is the one bare
 # cid. `(?!\()` protects markdown links [text](url), mirroring the frontend
 # highlightPlaceholders guard; ALL-CAPS placeholder tokens like [HR_CONTACT_EMAIL]
 # never match (the prefixes are lowercase keywords). Leading `[ \t]*` eats the
 # space before the tag so removal doesn't leave a double space.
 _INLINE_CID = re.compile(
-    r"[ \t]*\[(?:(?:law|handbook|policy|playbook):[^\]\s]+|profile)\](?!\()"
+    r"[ \t]*\[(?:(?:law|floor|handbook|policy|playbook|audit|fresh):[^\]\s]+|profile)\](?!\()"
 )
 
 
