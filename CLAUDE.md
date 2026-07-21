@@ -56,6 +56,17 @@ Sidebar dispatch in `client/src/components/sidebars/TenantSidebar.tsx`. Tier-che
 - Surfaces inside: projects, threads, channels (real-time WebSocket), inbox (DMs), people/connections, anonymous incident report intake.
 - Stripe-gated sub-features: `paid_channel_creator`, `channel_job_postings` in `server/app/core/feature_flags.py`.
 
+### Custom products — the admin product builder (`/admin/products`)
+
+Everything above is a **hardcoded** product (~10 touchpoints each: `signup_source` string, `TIER_REQUIRED_FEATURES` overlay, `auth.py` register branch, `_TIER_FEATURE_PRESETS` row, `matcha_lite_pricing` row, its own `/resources/checkout/<x>`, a webhook branch, `tier.ts` predicates, a pending sidebar, an active sidebar). **New** packages are data instead: an admin composes one at `/admin/products` (`pages/admin/Products.tsx`) and gets a live `/p/<slug>/signup` link.
+
+- **Table** `product_definitions` (+ `product_definition_history`), migration `proddef01`. Service `core/services/product_definitions.py` — the whitelist (`ALLOWED_PRODUCT_FEATURES` = `DEFAULT_COMPANY_FEATURES` + `incidents`/`employees`) is the authorization boundary for what signup and billing may flip, exactly like `lite_addons.py`.
+- **Tenants** get `signup_source = 'product:<slug>'` — namespaced, so it can never collide with a hardcoded source, and it's a no-op in the `TIER_REQUIRED_FEATURES` lookup.
+- **Grants are MATERIALIZED**, not overlaid: `merge_company_features` is pure + sync and runs in the pool-free Celery workers, so a DB-consulting overlay would need a cache on the hot path of every request. Consequence: editing a live product does **not** retro-grant — `POST /admin/products/{id}/sync-tenants` re-materializes activated tenants (pending ones are skipped, or the product would be free).
+- **Pricing**: per-seat / block / flat (Stripe, `POST /resources/checkout/product` → `stripe_service.create_custom_product_checkout`, webhook `type='custom_product'` re-loads the row by slug and grants only its features) · free (activates at signup) · contact-sales (stays pending; admin runs `activate-tenant`, which refuses Stripe-billed products the same way `admin_change_tier` refuses free promotion into Lite/X/Compliance).
+- **Paid gate**: each priced product names one `gate_feature` (its `incidents`) — false while pending, flipped by the webhook, reset on `customer.subscription.deleted` (pack_id `product:<slug>`).
+- **Frontend**: `/auth/me` carries `profile.product`; `utils/tier.ts` `isCustomProduct`/`isCustomProductPending`; `TenantSidebar` dispatches to `tier-sidebars/ProductSidebar.tsx`, whose nav is derived from the granted features via `data/productNavCatalog.ts` (feature → route/icon/label — **add one line there when shipping a new page**, not a new sidebar). Signup page `pages/auth/ProductSignup.tsx` at `/p/:slug/signup`, broker `?ref=` + admin `?invite_token=` comp paths included.
+
 ### Auxiliary surfaces (share codebase, not products)
 - **Admin** — `AdminSidebar`, `/admin/*` routes; internal tooling (companies, jurisdiction data, payer data, broker mgmt).
 - **Broker** — `BrokerSidebar`, `/broker/*` routes; HR brokers managing multiple client companies.

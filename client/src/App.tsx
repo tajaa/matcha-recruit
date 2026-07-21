@@ -89,6 +89,7 @@ const IrSignup = lazy(() => import("./pages/auth/IrSignup"));
 const MatchaLiteSignup = lazy(() => import("./pages/auth/MatchaLiteSignup"));
 const MatchaXSignup = lazy(() => import("./pages/auth/MatchaXSignup"));
 const ComplianceSignup = lazy(() => import("./pages/auth/ComplianceSignup"));
+const ProductSignup = lazy(() => import("./pages/auth/ProductSignup"));
 const BusinessInviteRegister = lazy(
   () => import("./pages/auth/BusinessInviteRegister"),
 );
@@ -220,6 +221,8 @@ export default function App() {
         <Route path="/lite/signup" element={<MatchaLiteSignup />} />
         <Route path="/matcha-x/signup" element={<MatchaXSignup />} />
         <Route path="/compliance/signup" element={<ComplianceSignup />} />
+        {/* Generic signup for admin-composed products (/admin/products). */}
+        <Route path="/p/:slug/signup" element={<ProductSignup />} />
         <Route path="/ir/onboarding" element={<IrOnboardingWizard />} />
         <Route
           path="/matcha-x/onboarding"

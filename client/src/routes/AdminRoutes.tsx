@@ -16,6 +16,7 @@ import FractionalHR from '../pages/admin/FractionalHR'
 import FractionalClientDetail from '../pages/admin/FractionalClientDetail'
 import DealFlow from '../pages/admin/DealFlow'
 import MatchaLiteAdmin from '../pages/admin/MatchaLiteAdmin'
+import Products from '../pages/admin/Products'
 import ComplianceManagement from '../pages/admin/ComplianceManagement'
 import MatchaWork from '../pages/admin/MatchaWork'
 import Customers from '../pages/admin/Customers'
@@ -85,6 +86,7 @@ export default function AdminRoutes() {
         <Route path="fractional-hr/:clientId" element={<FractionalClientDetail />} />
         <Route path="deal-flow" element={<DealFlow />} />
         <Route path="matcha-lite" element={<MatchaLiteAdmin />} />
+        <Route path="products" element={<Products />} />
         <Route path="compliance-mgmt" element={<ComplianceManagement />} />
         <Route path="newsletter" element={<NewsletterAdmin />} />
         <Route path="newsletter/composer" element={<NewsletterAdmin />} />

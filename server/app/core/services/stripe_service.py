@@ -503,6 +503,69 @@ class StripeService:
         except Exception as exc:
             raise StripeServiceError(f"Failed to create Lite add-on checkout: {exc}") from exc
 
+    async def create_custom_product_checkout(
+        self,
+        company_id: UUID,
+        product_slug: str,
+        product_name: str,
+        product_description: str,
+        headcount: int,
+        amount_cents: int,
+        success_url: Optional[str] = None,
+        cancel_url: Optional[str] = None,
+    ):
+        """Subscription checkout for an admin-composed product (/admin/products).
+
+        Price is resolved by the caller from the product_definitions row
+        (services/product_definitions.compute_product_price_cents) and passed in
+        as `amount_cents` — this module stays DB-free. The webhook re-loads the
+        product by `metadata.product_slug` and grants only that row's features;
+        it never trusts a metadata-supplied flag name (same rule as
+        services/lite_addons.py).
+        """
+        self._ensure_secret_key()
+
+        resolved_success_url = success_url or self.settings.stripe_success_url
+        resolved_cancel_url = cancel_url or self.settings.stripe_cancel_url
+
+        metadata = {
+            "company_id": str(company_id),
+            "type": "custom_product",
+            "product_slug": product_slug,
+            "headcount": str(headcount),
+            "amount_cents": str(amount_cents),
+            "mode": "subscription",
+        }
+
+        def _create():
+            return stripe.checkout.Session.create(
+                mode="subscription",
+                success_url=resolved_success_url,
+                cancel_url=resolved_cancel_url,
+                payment_method_types=["card"],
+                metadata=metadata,
+                subscription_data={"metadata": metadata},
+                line_items=[
+                    {
+                        "price_data": {
+                            "currency": "usd",
+                            "unit_amount": amount_cents,
+                            "recurring": {"interval": "month"},
+                            "product_data": {
+                                "name": product_name,
+                                "description": product_description or f"{product_name}. Auto-renews monthly.",
+                            },
+                        },
+                        "quantity": 1,
+                    }
+                ],
+            )
+
+        try:
+            return await asyncio.to_thread(_create)
+        except Exception as exc:
+            raise StripeServiceError(f"Failed to create {product_name} checkout: {exc}") from exc
+
     async def create_lite_essentials_upgrade_checkout(
         self,
         company_id: UUID,

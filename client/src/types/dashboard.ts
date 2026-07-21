@@ -341,6 +341,30 @@ export interface MeClientProfile {
   jurisdiction_count?: number
   // Broker profile rides on this same `profile` slot; Pro entitlement gates off-platform.
   plan?: 'standard' | 'pro'
+  /** Set only for tenants on an admin-composed product (signup_source
+   *  'product:<slug>' — see /admin/products). Drives the pending/active
+   *  sidebar dispatch, the Subscribe price and the generated nav. */
+  product?: ProductDefinition | null
+}
+
+/** An admin-composed product (server: product_definitions). Public shape —
+ *  what /auth/me and GET /api/products/{slug} return. */
+export interface ProductDefinition {
+  slug: string
+  name: string
+  description: string
+  /** The feature flags this product grants, enabled ones only. */
+  features: string[]
+  /** The one flag that is false while payment is pending (like `incidents`
+   *  for Matcha Lite). Null for free / contact-sales products. */
+  gate_feature: string | null
+  pricing_model: 'per_seat' | 'block' | 'flat' | 'free' | 'contact_sales'
+  price_cents: number | null
+  block_size: number | null
+  min_headcount: number
+  max_headcount: number
+  /** Optional nav ordering/labels over `features`; null = catalog order. */
+  nav: { feature: string; label?: string }[] | null
 }
 
 export interface MeResponse {

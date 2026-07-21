@@ -42,6 +42,7 @@ from .resources import router as resources_router
 from .matcha_lite_pricing_admin import router as matcha_lite_pricing_admin_router
 from .handbook_gap_analyzer import router as handbook_gap_analyzer_router
 from .expert_advice import router as expert_advice_router
+from .products import router as products_public_router
 from ...matcha.dependencies import require_feature, require_any_feature
 from ..feature_flags import COMPLIANCE_READ_FEATURES, COMPLIANCE_SHARED_FEATURES
 
@@ -113,6 +114,8 @@ core_router.include_router(
     tags=["handbook-gap-analyzer"],
 )
 core_router.include_router(expert_advice_router, prefix="/expert-advice", tags=["expert-advice"])
+# Public read of admin-composed products (published only) — the /p/<slug>/signup page.
+core_router.include_router(products_public_router, prefix="/products", tags=["products-public"])
 core_router.include_router(landing_media_public_router, tags=["landing-media-public"])
 core_router.include_router(landing_media_admin_router, prefix="/admin", tags=["landing-media-admin"])
 core_router.include_router(client_errors_router, tags=["client-errors"])

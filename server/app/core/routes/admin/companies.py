@@ -807,8 +807,15 @@ async def admin_change_tier(company_id: UUID, body: TierChangeBody):
                 detail=f"Activating {_label} requires Stripe checkout. Send the customer to {_path} or use a broker referral token; admin cannot promote into a paid tier without payment.",
             )
 
-        # Paid tier → anything else: cancel the active Stripe sub first.
-        if current_tier in _stripe_gated and body.tier != current_tier:
+        # Paid tier → anything else: cancel the active Stripe sub first. An
+        # admin-composed product ('product:<slug>') is Stripe-billed the same
+        # way, so moving one of those tenants off must also stop the sub —
+        # otherwise the customer keeps paying for a tier they no longer have.
+        from app.core.services.product_definitions import SIGNUP_SOURCE_PREFIX as _PRODUCT_PREFIX
+        _leaving_paid = current_tier in _stripe_gated or (
+            (current_tier or "").startswith(_PRODUCT_PREFIX)
+        )
+        if _leaving_paid and body.tier != current_tier:
             sub_row = await conn.fetchrow(
                 """SELECT stripe_subscription_id
                      FROM mw_subscriptions

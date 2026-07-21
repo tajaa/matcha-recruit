@@ -1688,7 +1688,7 @@ async def register_business(request: BusinessRegister, http_request: Request):
             # Resolve Lite referral token — non-blocking if invalid/expired
             lite_broker_pays = False
             broker_seat_count = None  # set when a company-pinned broker seat invite is redeemed
-            if request.lite_broker_token and request.tier in ("matcha_lite", "matcha_x", "matcha_compliance") and referring_broker_id is None:
+            if request.lite_broker_token and request.tier in ("matcha_lite", "matcha_x", "matcha_compliance", "custom_product") and referring_broker_id is None:
                 lite_ref_row = await conn.fetchrow(
                     """
                     UPDATE broker_lite_referral_tokens
@@ -1712,7 +1712,7 @@ async def register_business(request: BusinessRegister, http_request: Request):
             # can't both pass (matches business_invitations pattern above).
             lite_invite_activated = False
             lite_invite_id = None
-            if request.lite_invite_token and request.tier in ("matcha_lite", "matcha_x", "matcha_compliance"):
+            if request.lite_invite_token and request.tier in ("matcha_lite", "matcha_x", "matcha_compliance", "custom_product"):
                 invite_row = await conn.fetchrow(
                     """UPDATE matcha_lite_invite_tokens
                        SET used_at = NOW()
@@ -1733,10 +1733,28 @@ async def register_business(request: BusinessRegister, http_request: Request):
             is_matcha_lite = request.tier == "matcha_lite"
             is_matcha_x = request.tier == "matcha_x"
             is_matcha_compliance = request.tier == "matcha_compliance"
+            # Admin-composed product from the /admin/products builder. The
+            # product row (not this module) defines the features, the paid
+            # gate, and the price — resolved here so the headcount cap below
+            # and the feature materialization use the same row.
+            is_custom_product = request.tier == "custom_product"
+            custom_product = None
+            if is_custom_product:
+                from ..services.product_definitions import get_product_by_slug
+                custom_product = await get_product_by_slug(
+                    conn, (request.product_slug or "").strip().lower(), published_only=True
+                )
+                if custom_product is None:
+                    raise HTTPException(status_code=404, detail="Product not found or not available")
 
             # Broker seat invites carry their own allocation, so they bypass the
             # self-serve headcount cap (same as an admin comp invite).
             if not lite_invite_activated and broker_seat_count is None:
+                if is_custom_product and custom_product.is_paid and request.headcount > custom_product.max_headcount:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Headcount over {custom_product.max_headcount} — please contact us for pricing at matcha.work",
+                    )
                 if is_matcha_x and request.headcount > 300:
                     raise HTTPException(
                         status_code=400,
@@ -1761,7 +1779,34 @@ async def register_business(request: BusinessRegister, http_request: Request):
                             detail=f"Headcount over {reg_pricing.max_headcount} — please contact us for pricing at matcha.work",
                         )
 
-            if is_ir_only:
+            if is_custom_product:
+                # Admin-composed product. The row is the source of truth for
+                # what this tenant gets; signup_source carries the slug so
+                # /auth/me, the sidebar and the webhook can resolve it back.
+                #
+                # Features are MATERIALIZED here (not overlaid at read time
+                # like TIER_REQUIRED_FEATURES) because merge_company_features
+                # is pure + sync and runs in the pool-free Celery workers.
+                # Editing the product later doesn't reach this company —
+                # POST /admin/products/{id}/sync-tenants is the catch-up.
+                #
+                # Stripe-billed products start with EVERY flag off (the paid
+                # gate flips on checkout.session.completed, same as `incidents`
+                # for Lite). Free products and comped signups (broker-pays or
+                # admin invite) activate immediately. `contact_sales` also
+                # starts off — it has no self-serve payment path, so an admin
+                # activates it via /admin/products/{id}/activate-tenant.
+                from ..services.product_definitions import (
+                    materialize_features as _materialize_product_features,
+                    pending_features as _pending_product_features,
+                )
+                company_status = "approved"
+                signup_source = custom_product.signup_source
+                if custom_product.activates_on_signup or lite_broker_pays or lite_invite_activated:
+                    enabled_features_json = json.dumps(_materialize_product_features(custom_product))
+                else:
+                    enabled_features_json = json.dumps(_pending_product_features(custom_product))
+            elif is_ir_only:
                 company_status = "approved"
                 signup_source = "ir_only_self_serve"
                 # Matcha Cap bundle: incidents + employees + discipline.
@@ -2043,7 +2088,25 @@ async def register_business(request: BusinessRegister, http_request: Request):
 
             # Send appropriate email
             email_service = get_email_service()
-            if is_matcha_lite or is_matcha_x or is_matcha_compliance:
+            if is_custom_product:
+                # Admin-composed products reuse the Lite transactional emails:
+                # active accounts get the approved email, Stripe-pending ones
+                # the payment-required email. contact_sales lands in the
+                # pending copy too — an admin activates it by hand.
+                if custom_product.activates_on_signup or lite_broker_pays or lite_invite_activated:
+                    await email_service.send_business_approved_email(
+                        to_email=user["email"],
+                        to_name=request.name,
+                        company_name=request.company_name,
+                    )
+                else:
+                    await email_service.send_lite_payment_pending_email(
+                        to_email=user["email"],
+                        to_name=request.name,
+                        company_name=request.company_name,
+                        headcount=request.headcount,
+                    )
+            elif is_matcha_lite or is_matcha_x or is_matcha_compliance:
                 # matcha_x + matcha_compliance reuse the Lite transactional
                 # emails for now — swap in branded copy when each productizes.
                 if lite_broker_pays or lite_invite_activated:
@@ -2083,7 +2146,19 @@ async def register_business(request: BusinessRegister, http_request: Request):
                     company_name=request.company_name
                 )
 
-            if is_matcha_compliance and (lite_broker_pays or lite_invite_activated):
+            if is_custom_product:
+                if custom_product.activates_on_signup or lite_broker_pays or lite_invite_activated:
+                    next_route = "/app"
+                    msg = f"Welcome to {custom_product.name}."
+                elif custom_product.is_paid:
+                    # Client SPA chains the Stripe call directly; this hint is
+                    # for any caller that doesn't.
+                    next_route = "/checkout/product"
+                    msg = f"Account created. Complete payment to activate {custom_product.name}."
+                else:
+                    next_route = None
+                    msg = f"Account created. Our team will be in touch to activate {custom_product.name}."
+            elif is_matcha_compliance and (lite_broker_pays or lite_invite_activated):
                 next_route = "/compliance/onboarding"
                 msg = "Welcome to Matcha Compliance. Let's set up your locations."
             elif is_matcha_compliance:
@@ -2558,6 +2633,20 @@ async def get_current_user_profile(token_payload: TokenPayload = Depends(get_tok
                 default_company_features_json(),
             )
 
+            # Admin-composed product (signup_source = 'product:<slug>') — the
+            # frontend needs the row to detect pending payment, price the
+            # Subscribe CTA and build the sidebar nav. Archived products are
+            # still resolved (published_only=False): the tenant keeps working
+            # after we stop selling it.
+            product_payload = None
+            if profile:
+                from ..services.product_definitions import get_product_by_signup_source
+                _product = await get_product_by_signup_source(
+                    conn, profile["signup_source"], published_only=False
+                )
+                if _product:
+                    product_payload = _product.public_dict()
+
             # Compute which enabled features still need onboarding setup
             onboarding_needed = {}
             if profile:
@@ -2646,6 +2735,8 @@ async def get_current_user_profile(token_payload: TokenPayload = Depends(get_tok
                     "created_at": profile["created_at"].isoformat(),
                     "headcount": int(profile["headcount"]) if "headcount" in profile.keys() else 0,
                     "jurisdiction_count": int(profile["jurisdiction_count"]) if "jurisdiction_count" in profile.keys() else 0,
+                    # Present only for admin-composed products; null otherwise.
+                    "product": product_payload,
                 } if profile else None,
                 "onboarding_needed": onboarding_needed,
                 "visible_features": visible_features,

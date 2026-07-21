@@ -8,6 +8,7 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, Request, status
 
 from ..services.stripe_service import StripeService, StripeServiceError
+from ..services.product_definitions import product_for_pack_id
 from ...database import get_connection
 from ...matcha.services import billing_service
 from ...matcha.services import token_budget_service
@@ -477,6 +478,95 @@ async def _route_event(event_type: str, event_object: dict) -> dict:
                         company_id_str, exc,
                     )
 
+        elif session_mode == "subscription" and meta.get("type") == "custom_product":
+            # ── Admin-composed product (/admin/products) signup payment ────
+            # The product row — NOT the metadata — decides which feature flags
+            # this payment grants (same authorization rule as lite_addons.py:
+            # billing may only touch flags the stored definition names). The
+            # slug in metadata is just the lookup key.
+            company_id_str = meta.get("company_id") or ""
+            product_slug = meta.get("product_slug") or ""
+            stripe_sub_id = str(event_object.get("subscription") or "")
+            stripe_customer_id = str(event_object.get("customer") or "")
+            if company_id_str and product_slug:
+                try:
+                    import json as _json
+                    from ...database import get_connection as _gc
+                    from ..services.product_definitions import (
+                        get_product_by_slug as _get_product,
+                        materialize_features as _materialize,
+                    )
+                    company_id = UUID(company_id_str)
+                    just_activated = False
+                    owner = None
+                    async with _gc() as conn:
+                        # published_only=False — archiving a product must not
+                        # strand a customer who already paid for it.
+                        product = await _get_product(conn, product_slug, published_only=False)
+                        if product is None:
+                            raise ValueError(f"Unknown product slug '{product_slug}'")
+                        existing = await conn.fetchval(
+                            "SELECT enabled_features FROM companies WHERE id = $1",
+                            company_id,
+                        )
+                        stored = existing if isinstance(existing, dict) else (
+                            _json.loads(existing) if existing else {}
+                        )
+                        gate = product.gate_feature
+                        # First-time activation only, so a Stripe retry of the
+                        # same event doesn't resend the activation email.
+                        just_activated = not bool(stored.get(gate)) if gate else True
+                        await conn.execute(
+                            "UPDATE companies SET enabled_features = $1::jsonb WHERE id = $2",
+                            _json.dumps(_materialize(product)), company_id,
+                        )
+                        if just_activated:
+                            owner = await conn.fetchrow(
+                                """
+                                SELECT u.email,
+                                       COALESCE(c.name, u.email) AS name,
+                                       comp.name AS company_name
+                                FROM companies comp
+                                JOIN clients c ON c.company_id = comp.id
+                                JOIN users u ON u.id = c.user_id
+                                WHERE comp.id = $1
+                                ORDER BY c.created_at ASC
+                                LIMIT 1
+                                """,
+                                company_id,
+                            )
+                    if stripe_sub_id:
+                        await billing_service.upsert_subscription(
+                            company_id=company_id,
+                            stripe_subscription_id=stripe_sub_id,
+                            stripe_customer_id=stripe_customer_id,
+                            pack_id=product.pack_id,
+                            credits_per_cycle=0,
+                            amount_cents=int(meta.get("amount_cents") or 0),
+                        )
+                    if owner:
+                        try:
+                            from ..services.email import get_email_service
+                            await get_email_service().send_lite_subscription_active_email(
+                                to_email=owner["email"],
+                                to_name=owner["name"],
+                                company_name=owner["company_name"],
+                            )
+                        except Exception as email_exc:
+                            logger.warning(
+                                "Product %s activated but activation email failed for %s: %s",
+                                product_slug, company_id_str, email_exc,
+                            )
+                    logger.info(
+                        "Custom product %s activated: company=%s sub=%s",
+                        product_slug, company_id_str, stripe_sub_id,
+                    )
+                except Exception as exc:
+                    logger.error(
+                        "Failed to activate custom product %s for %s: %s",
+                        product_slug, company_id_str, exc,
+                    )
+
         elif session_mode == "subscription" and is_channel_event:
             # ── Channel subscription checkout ────────────────────────────
             channel_id_str = meta.get("channel_id") or ""
@@ -730,6 +820,43 @@ async def _route_event(event_type: str, event_object: dict) -> dict:
                 if sub and sub["pack_id"] == token_budget_service.SUBSCRIPTION_PACK_ID:
                     await token_budget_service.cancel_subscription_budget(sub["company_id"])
                     logger.info("Token budget zeroed for company %s", sub["company_id"])
+                elif sub and product_for_pack_id(sub["pack_id"]):
+                    # ── Admin-composed product canceled ──────────────────
+                    # Reset to the pending shape (every flag off) so the
+                    # tenant lands back on the Subscribe CTA, mirroring the
+                    # Lite un-flip. Same cancel-then-resubscribe guard.
+                    _slug = product_for_pack_id(sub["pack_id"])
+                    replacement = await billing_service.get_active_subscription(
+                        sub["company_id"], pack_ids=(sub["pack_id"],)
+                    )
+                    if replacement is not None:
+                        logger.info(
+                            "Product %s sub %s canceled but replacement %s is active for company %s — keeping access",
+                            _slug, stripe_sub_id,
+                            replacement["stripe_subscription_id"], sub["company_id"],
+                        )
+                    else:
+                        try:
+                            import json as _json
+                            from ...database import get_connection as _gc
+                            from ..services.product_definitions import (
+                                get_product_by_slug as _get_product,
+                                pending_features as _pending,
+                            )
+                            async with _gc() as conn:
+                                product = await _get_product(conn, _slug, published_only=False)
+                                if product is None:
+                                    raise ValueError(f"Unknown product slug '{_slug}'")
+                                await conn.execute(
+                                    "UPDATE companies SET enabled_features = $1::jsonb WHERE id = $2",
+                                    _json.dumps(_pending(product)), sub["company_id"],
+                                )
+                            logger.info("Product %s deactivated for company %s", _slug, sub["company_id"])
+                        except Exception as exc:
+                            logger.error(
+                                "Failed to deactivate product %s for %s: %s",
+                                _slug, sub["company_id"], exc,
+                            )
                 elif sub and sub["pack_id"] in ("matcha_lite", "matcha_x", "matcha_compliance"):
                     # Each tier flips its single paid gate off on cancellation —
                     # incidents for Lite/X, the full `compliance` for the

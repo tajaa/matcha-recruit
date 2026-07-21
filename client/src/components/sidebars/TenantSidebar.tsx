@@ -5,8 +5,10 @@ import ClientSidebar from './ClientSidebar'
 import IrSidebar from '../tier-sidebars/IrSidebar'
 import MatchaXSidebar from '../tier-sidebars/MatchaXSidebar'
 import ComplianceSidebar from '../tier-sidebars/ComplianceSidebar'
+import ProductSidebar from '../tier-sidebars/ProductSidebar'
 import { useMe } from '../../hooks/useMe'
-import { isIrOnlyTier, isMatchaLitePending, isMatchaX, isMatchaXPending, isMatchaCompliance, isMatchaCompliancePending } from '../../utils/tier'
+import { isIrOnlyTier, isMatchaLitePending, isMatchaX, isMatchaXPending, isMatchaCompliance, isMatchaCompliancePending, isCustomProduct, isCustomProductPending, productPriceDollars } from '../../utils/tier'
+import type { ProductDefinition } from '../../types/dashboard'
 import { useMatchaLitePricing, computeLitePriceDollars } from '../../api/billing/matchaLitePricing'
 import { api, ApiError } from '../../api/client'
 
@@ -29,6 +31,13 @@ function matchaXPriceDollars(headcount: number): number {
 export default function TenantSidebar() {
   const { me, loading } = useMe()
   if (loading) return <ClientSidebar />
+  // Admin-composed products (/admin/products) come first: their signup_source
+  // is namespaced ('product:<slug>') so they can never collide with the
+  // hardcoded tiers below, and the shell is built from the product row.
+  if (isCustomProductPending(me?.profile)) {
+    return <ProductPendingSidebar product={me!.profile!.product!} headcount={me?.profile?.headcount ?? 0} />
+  }
+  if (isCustomProduct(me?.profile)) return <ProductSidebar product={me!.profile!.product!} />
   if (isMatchaXPending(me?.profile)) return <MatchaXPendingSidebar headcount={me?.profile?.headcount ?? 0} />
   if (isMatchaX(me?.profile)) return <MatchaXSidebar />
   if (isMatchaCompliancePending(me?.profile)) return <CompliancePendingSidebar headcount={me?.profile?.headcount ?? 0} jurisdictionCount={me?.profile?.jurisdiction_count ?? 0} />
@@ -41,6 +50,80 @@ export default function TenantSidebar() {
   )
   if (isIrOnlyTier(me?.profile)) return <IrSidebar />
   return <ClientSidebar />
+}
+
+// Pending shell for an admin-composed product. One component for every such
+// product: price and copy come from the product row, and the checkout endpoint
+// resolves the product from the company's own signup_source (nothing about the
+// purchase is chosen client-side). contact_sales products have no checkout —
+// they wait on an admin running /admin/products/{id}/activate-tenant.
+function ProductPendingSidebar({ product, headcount }: { product: ProductDefinition; headcount: number }) {
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const isContactSales = product.pricing_model === 'contact_sales'
+  const overLimit = headcount > product.max_headcount
+  const price = productPriceDollars(product, headcount)
+
+  async function handleSubscribe() {
+    setLoading(true)
+    setError(null)
+    try {
+      const { checkout_url } = await api.post<{ checkout_url: string }>('/resources/checkout/product', {
+        success_url: `${window.location.origin}/app`,
+        cancel_url: window.location.href,
+      })
+      externalRedirect(checkout_url)
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Something went wrong. Please try again.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="flex flex-col h-full bg-zinc-950 border-r border-zinc-800 p-5">
+      <div className="mb-6">
+        <h2 className="text-sm font-semibold text-zinc-100 mb-1">
+          {isContactSales ? 'Activation pending' : 'Complete your subscription'}
+        </h2>
+        <p className="text-xs text-zinc-400">
+          {isContactSales
+            ? `Our team is setting up ${product.name} for your company. We'll be in touch shortly.`
+            : `Activate ${product.name} to unlock your workspace.`}
+        </p>
+      </div>
+
+      {!isContactSales && (
+        <div className="space-y-4">
+          {price !== null ? (
+            <p className="text-xs text-zinc-400">
+              <span className="text-zinc-100 font-medium">${price}/month</span>
+              {product.pricing_model !== 'flat' && (
+                <> for {headcount} employee{headcount !== 1 ? 's' : ''}</>
+              )}
+            </p>
+          ) : overLimit ? (
+            <p className="text-xs text-red-400">
+              Over {product.max_headcount} employees —{' '}
+              <a href="mailto:hello@matcha.work" className="underline">contact us</a>
+            </p>
+          ) : null}
+
+          {error && <p className="text-xs text-red-400">{error}</p>}
+
+          <button
+            onClick={handleSubscribe}
+            disabled={price === null || loading}
+            className="w-full bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 text-white text-sm font-medium py-2 rounded transition-colors flex items-center justify-center gap-2"
+          >
+            {loading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+            Subscribe
+          </button>
+        </div>
+      )}
+    </div>
+  )
 }
 
 function MatchaLitePendingSidebar({ headcount, isEssentials }: { headcount: number; isEssentials: boolean }) {

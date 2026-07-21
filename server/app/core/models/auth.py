@@ -135,8 +135,15 @@ class BusinessRegister(BaseModel):
     # "matcha_compliance" = standalone self-serve Compliance product
     # (headcount + jurisdiction-priced Stripe; webhook flips the full
     # `compliance` flag). "resources_free" = free resources hub. Anything
-    # else / None = bespoke sales-led path (existing behavior).
+    # "custom_product" = an admin-composed product from the /admin/products
+    # builder; `product_slug` names which one (signup_source becomes
+    # 'product:<slug>'). Anything else / None = bespoke sales-led path
+    # (existing behavior).
     tier: Optional[str] = None
+
+    # Slug of the admin-composed product being signed up for. Required when
+    # tier == "custom_product", ignored otherwise.
+    product_slug: Optional[str] = None
 
 
 class TestAccountRegister(BaseModel):

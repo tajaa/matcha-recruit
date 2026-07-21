@@ -133,6 +133,94 @@ async def create_lite_checkout(
 
 
 
+@router.post("/checkout/product", response_model=UpgradeCheckoutResponse)
+async def create_custom_product_checkout(
+    body: LiteCheckoutRequest,
+    current_user: CurrentUser = Depends(require_client),
+):
+    """Open a Stripe subscription checkout for the caller's admin-composed product.
+
+    The product is resolved from the company's own signup_source
+    ('product:<slug>'), never from the request body — a caller can only ever
+    buy the product it signed up for. Pricing comes from the product row
+    (per_seat / block / flat); free + contact_sales products have no checkout.
+    """
+    from app.core.services.stripe_service import StripeService, StripeServiceError
+    from app.core.services.product_definitions import (
+        ProductDefinitionError,
+        compute_product_price_cents,
+        get_product_by_signup_source,
+    )
+
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=400, detail="No company associated with this account")
+
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT c.signup_source, COALESCE(chp.headcount, 0) AS headcount
+            FROM companies c
+            LEFT JOIN company_handbook_profiles chp ON chp.company_id = c.id
+            WHERE c.id = $1
+            """,
+            company_id,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Company not found")
+        # published_only=False: a company mid-checkout on a product we just
+        # archived must still be able to finish paying for it.
+        product = await get_product_by_signup_source(
+            conn, row["signup_source"], published_only=False
+        )
+
+    if product is None:
+        raise HTTPException(
+            status_code=403,
+            detail="This endpoint is only available for companies on a custom product",
+        )
+    if not product.is_paid:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{product.name} is not billed through Stripe",
+        )
+
+    headcount = int(row["headcount"])
+    if headcount < 1:
+        raise HTTPException(status_code=400, detail="Company headcount not set — please contact support")
+
+    try:
+        amount_cents = compute_product_price_cents(product, headcount)
+    except ProductDefinitionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    stripe_service = StripeService()
+    try:
+        session = await stripe_service.create_custom_product_checkout(
+            company_id=company_id,
+            product_slug=product.slug,
+            product_name=product.name,
+            product_description=product.description,
+            headcount=headcount,
+            amount_cents=amount_cents or 0,
+            success_url=body.success_url,
+            cancel_url=body.cancel_url,
+        )
+    except StripeServiceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    stripe_session_id = str(getattr(session, "id", "") or "")
+    checkout_url = str(getattr(session, "url", "") or "")
+    if not stripe_session_id or not checkout_url:
+        raise HTTPException(status_code=502, detail="Stripe checkout did not return expected fields")
+
+    logger.info(
+        "Custom product checkout opened: company=%s product=%s headcount=%d session=%s",
+        company_id, product.slug, headcount, stripe_session_id,
+    )
+    return UpgradeCheckoutResponse(checkout_url=checkout_url, stripe_session_id=stripe_session_id)
+
+
 @router.post("/checkout/lite-addon", response_model=UpgradeCheckoutResponse)
 async def create_lite_addon_checkout(
     body: LiteAddonCheckoutRequest,
