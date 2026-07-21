@@ -41,12 +41,19 @@ _MIN_COVERAGE = 50.0   # % of analyzed employees needing a demographic before we
 _MATERIAL_GAP = 5.0    # a measured gap at/above this is worth naming in the summary
 
 
-def role_stats(title: str, pays: list[float]) -> dict:
+def role_stats(title: str, pays: list[float], people: list[tuple[str, float]] | None = None) -> dict:
     """Per-role pay-dispersion stats. Pure (no DB) so it's unit-testable.
 
     Beyond the headline spread, surfaces the quartile spread (IQR — robust to a
     single outlier), how many people sit below the role's pay band, the dollars it
-    would take to lift them to that band, and a severity tier the UI can colour."""
+    would take to lift them to that band, and a severity tier the UI can colour.
+
+    `people` — optional (name, pay) pairs for the same role, so the below-band
+    finding can name WHO to lift rather than just how many. Names ride the roster
+    (already admin-visible), never the demographics join; and they stay out of
+    `review_row`, so nothing individual reaches the persisted study row or the
+    broker/underwriter surfaces that read it. Omitted → `below_band_employees` is
+    [] and every other key is unchanged."""
     pays = sorted(float(p) for p in pays)
     n = len(pays)
     med = statistics.median(pays)
@@ -62,6 +69,15 @@ def role_stats(title: str, pays: list[float]) -> dict:
     floor = _BAND_FLOOR * med
     below = [p for p in pays if p < floor]
     severity = "flag" if spread >= _EXCESS_SPREAD else ("watch" if spread >= _WATCH_SPREAD else "ok")
+    # Biggest lift first — same order the dollars matter in.
+    below_people = sorted(
+        (
+            {"name": name, "pay": round(pay), "lift": round(floor - pay)}
+            for name, pay in (people or [])
+            if pay < floor
+        ),
+        key=lambda p: -p["lift"],
+    )
     return {
         "title": title, "n": n,
         "median": round(med), "min": round(lo), "max": round(hi),
@@ -69,6 +85,7 @@ def role_stats(title: str, pays: list[float]) -> dict:
         "spread_pct": spread, "iqr_pct": iqr_pct,
         "range_ratio": round(hi / lo, 2) if lo else None,
         "below_band_n": len(below),
+        "below_band_employees": below_people,
         "remediation_cost": round(sum(floor - p for p in below)),
         "severity": severity,
     }
@@ -161,6 +178,10 @@ def priority_actions(roles: list[dict], limit: int = 5) -> list[dict]:
         out.append({
             "title": r["title"], "severity": r["severity"],
             "below_band_n": r["below_band_n"], "remediation_cost": r["remediation_cost"],
+            # Named structurally rather than baked into `action`: the UI renders
+            # them as their own chips, and a caller that only logs the sentence
+            # (review_row) stays name-free.
+            "below_band_employees": r.get("below_band_employees") or [],
             "spread_pct": r["spread_pct"], "action": action,
         })
     return out
@@ -179,6 +200,7 @@ async def analyze(conn, company_id: UUID) -> dict:
         f"""
         SELECT COALESCE(NULLIF(TRIM(e.job_title), ''), '(untitled)') AS title,
                {_ANNUALIZE} AS pay,
+               NULLIF(TRIM(CONCAT_WS(' ', e.first_name, e.last_name)), '') AS name,
                d.gender
         FROM employees e
         LEFT JOIN employee_demographics d ON d.employee_id = e.id
@@ -188,11 +210,16 @@ async def analyze(conn, company_id: UUID) -> dict:
         company_id,
     )
     by_role: dict[str, list[float]] = defaultdict(list)
+    # Parallel to by_role but carrying the name, so the below-band finding is
+    # actionable. NOT fed into by_role_class — the protected-class path stays
+    # aggregate-only by construction.
+    by_role_people: dict[str, list[tuple[str, float]]] = defaultdict(list)
     by_role_class: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
     with_gender = 0
     for r in rows:
         if r["pay"] and float(r["pay"]) > 0:
             by_role[r["title"]].append(float(r["pay"]))
+            by_role_people[r["title"]].append((r["name"] or "Unnamed employee", float(r["pay"])))
             gender = (r["gender"] or "").strip().lower()
             # "decline_to_specify" is an answer about privacy, not a class to compare —
             # treating it as a group would manufacture a cohort out of non-responses.
@@ -200,7 +227,10 @@ async def analyze(conn, company_id: UUID) -> dict:
                 by_role_class[r["title"]][gender].append(float(r["pay"]))
                 with_gender += 1
 
-    roles = [role_stats(title, pays) for title, pays in by_role.items() if len(pays) >= 2]
+    roles = [
+        role_stats(title, pays, by_role_people.get(title))
+        for title, pays in by_role.items() if len(pays) >= 2
+    ]
     roles.sort(key=lambda r: r["spread_pct"], reverse=True)
 
     flagged = [r for r in roles if r["severity"] == "flag"]

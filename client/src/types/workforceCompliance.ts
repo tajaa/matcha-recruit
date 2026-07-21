@@ -76,8 +76,18 @@ export interface PayEquityRole {
   iqr_pct: number
   range_ratio: number | null
   below_band_n: number
+  below_band_employees: PayEquityBelowBandEmployee[]
   remediation_cost: number
   severity: PayEquitySeverity
+}
+
+// One person paid under their role's band, with the dollars to lift them to it.
+// Live analysis only — names never reach the persisted study row or the broker
+// surfaces that read it (see pay_equity_analysis.review_row).
+export interface PayEquityBelowBandEmployee {
+  name: string
+  pay: number
+  lift: number
 }
 
 export type PayEquityPostureBand = 'equitable' | 'watch' | 'action' | 'insufficient'
@@ -92,6 +102,7 @@ export interface PayEquityPriorityAction {
   title: string
   severity: PayEquitySeverity
   below_band_n: number
+  below_band_employees: PayEquityBelowBandEmployee[]
   remediation_cost: number
   spread_pct: number
   action: string

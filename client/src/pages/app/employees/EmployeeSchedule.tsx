@@ -1,12 +1,12 @@
 import { useEffect, useState, useCallback } from 'react'
 import {
   CalendarDays, Loader2, Plus, Trash2, ChevronLeft, ChevronRight, Check, X,
-  Send, Users, LayoutTemplate, Inbox, Sparkles,
+  Send, Users, LayoutTemplate, Inbox, Sparkles, Pencil,
 } from 'lucide-react'
 import { Card, useToast } from '../../../components/ui'
 import { ApiError } from '../../../api/client'
 import {
-  createShift, deleteShift, publishShift,
+  createShift, updateShift, deleteShift, publishShift,
   assignEmployee, unassignEmployee, fetchTemplates, createTemplate, deleteTemplate,
   generateFromTemplate, fetchRequests, reviewRequest,
 } from '../../../api/employees/employeeSchedule'
@@ -198,6 +198,7 @@ function ShiftCard({ shift, roster, onPatch, onChanged }: {
   const { toast } = useToast()
   const [busy, setBusy] = useState(false)
   const [pickerOpen, setPickerOpen] = useState(false)
+  const [editing, setEditing] = useState(false)
   const assignedIds = new Set(shift.assignments.map((a) => a.employee_id))
   const available = roster.filter((e) => !assignedIds.has(e.id))
   const understaffed = shift.assignments.length < shift.required_staff
@@ -228,6 +229,19 @@ function ShiftCard({ shift, roster, onPatch, onChanged }: {
   async function remove() {
     setBusy(true)
     try { await deleteShift(shift.id); onChanged() } catch (err) { toast(errorMessage(err), 'error') } finally { setBusy(false) }
+  }
+
+  if (editing) {
+    return (
+      <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2.5">
+        <ShiftForm
+          day={shift.starts_at.slice(0, 10)}
+          shift={shift}
+          onSaved={(s) => { onPatch(s); setEditing(false) }}
+          onCancel={() => setEditing(false)}
+        />
+      </div>
+    )
   }
 
   return (
@@ -264,6 +278,11 @@ function ShiftCard({ shift, roster, onPatch, onChanged }: {
 
       <div className="mt-2 flex items-center gap-2">
         <button onClick={() => setPickerOpen((v) => !v)} disabled={busy || available.length === 0} className="inline-flex items-center gap-1 text-[11px] text-zinc-400 hover:text-zinc-100 disabled:opacity-40"><Users className="h-3 w-3" /> Assign</button>
+        {/* Cancelled is terminal — the backend refuses to republish it, so offering
+            an edit here would be a form whose save can only fail. */}
+        {shift.status !== 'cancelled' && (
+          <button onClick={() => { setPickerOpen(false); setEditing(true) }} disabled={busy} className="inline-flex items-center gap-1 text-[11px] text-zinc-400 hover:text-zinc-100 disabled:opacity-40"><Pencil className="h-3 w-3" /> Edit</button>
+        )}
         {shift.status === 'draft' && (
           <button onClick={() => act(() => publishShift(shift.id))} disabled={busy} className="inline-flex items-center gap-1 text-[11px] text-emerald-400 hover:text-emerald-300"><Send className="h-3 w-3" /> Publish</button>
         )}
@@ -273,38 +292,113 @@ function ShiftCard({ shift, roster, onPatch, onChanged }: {
   )
 }
 
-function ShiftForm({ day, onDone, onCancel }: { day: string; onDone: () => void; onCancel: () => void }) {
-  const [start, setStart] = useState('09:00')
-  const [end, setEnd] = useState('17:00')
-  const [role, setRole] = useState('')
-  const [required, setRequired] = useState('1')
+/** "HH:MM" → the same wall-clock time formatted like every other time on this
+ *  page. Shifts are stored and rendered as UTC wall-clock throughout (see
+ *  fmtTime), so the 2000-01-01 stub is a formatting vehicle, not a date. */
+function fmtClock(hhmm: string): string {
+  return /^\d{2}:\d{2}$/.test(hhmm) ? fmtTime(`2000-01-01T${hhmm}:00Z`) : '—'
+}
+
+/** Length of the window in hours, wrapping past midnight the same way save() does. */
+function spanHours(start: string, end: string): number {
+  const [sh, sm] = start.split(':').map(Number)
+  const [eh, em] = end.split(':').map(Number)
+  const mins = (eh * 60 + em) - (sh * 60 + sm)
+  return Math.round(((mins <= 0 ? mins + 1440 : mins) / 60) * 10) / 10
+}
+
+/** Create (no `shift`) or edit (with `shift`) one shift.
+ *
+ *  Times are stacked full-width rather than side-by-side: in the 7-column day
+ *  grid a half-width native time input collapses to just its picker icon, so the
+ *  chosen time was invisible until the card re-rendered post-submit. The preview
+ *  line below is the belt to that braces — the selection is legible even where
+ *  the native control isn't. */
+function ShiftForm({ day, shift, onDone, onSaved, onCancel }: {
+  day: string
+  shift?: Shift
+  onDone?: () => void
+  onSaved?: (s: Shift) => void
+  onCancel: () => void
+}) {
+  const { toast } = useToast()
+  const editing = !!shift
+  const [start, setStart] = useState(shift ? shift.starts_at.slice(11, 16) : '09:00')
+  const [end, setEnd] = useState(shift ? shift.ends_at.slice(11, 16) : '17:00')
+  const [role, setRole] = useState(shift?.role ?? '')
+  const [required, setRequired] = useState(String(shift?.required_staff ?? 1))
   const [busy, setBusy] = useState(false)
+
+  const overnight = end <= start
+
+  function buildPayload(): ShiftPayload {
+    const startDay = editing ? shift!.starts_at.slice(0, 10) : day
+    const endDay = overnight ? addDays(startDay, 1) : startDay
+    return {
+      starts_at: `${startDay}T${start}:00Z`,
+      ends_at: `${endDay}T${end}:00Z`,
+      role: role.trim() || null,
+      required_staff: Math.max(1, Math.round(Number(required) || 1)),
+    }
+  }
 
   async function save() {
     setBusy(true)
     try {
-      const endDay = end <= start ? addDays(day, 1) : day
-      const payload: ShiftPayload = {
-        starts_at: `${day}T${start}:00Z`,
-        ends_at: `${endDay}T${end}:00Z`,
-        role: role.trim() || null,
-        required_staff: Math.max(1, Math.round(Number(required) || 1)),
+      const payload = buildPayload()
+      if (editing) {
+        // PUT is a true PATCH, but every field here is one the form owns, so
+        // sending the lot is the same write. `status` is deliberately NOT sent —
+        // editing a published shift must not silently unpublish it.
+        try {
+          onSaved?.(await updateShift(shift!.id, payload))
+        } catch (err) {
+          // Retiming can double-book an assignee or trip a scheduling-law
+          // advisory — same forceable 409s the assign path handles.
+          const prompt = conflictPrompt(err)
+          if (!prompt) { toast(errorMessage(err), 'error'); return }
+          if (!window.confirm(prompt)) return
+          onSaved?.(await updateShift(shift!.id, payload, true))
+        }
+      } else {
+        try {
+          await createShift(payload)
+        } catch (err) {
+          // Was swallowed entirely: a 409 left the form open with no feedback,
+          // reading as "the button does nothing".
+          const prompt = conflictPrompt(err)
+          if (!prompt) { toast(errorMessage(err), 'error'); return }
+          if (!window.confirm(prompt)) return
+          await createShift(payload, true)
+        }
+        onDone?.()
       }
-      await createShift(payload)
-      onDone()
+    } catch (err) {
+      toast(errorMessage(err), 'error')
     } finally { setBusy(false) }
   }
 
   return (
     <div className="space-y-1.5">
-      <div className="grid grid-cols-2 gap-1.5">
-        <input type="time" value={start} onChange={(e) => setStart(e.target.value)} className={inputCls} />
-        <input type="time" value={end} onChange={(e) => setEnd(e.target.value)} className={inputCls} />
+      <label className="block">
+        <span className="text-[10px] text-zinc-500 uppercase tracking-wide">Start</span>
+        <input type="time" value={start} onChange={(e) => setStart(e.target.value)} className={`${inputCls} mt-0.5`} />
+      </label>
+      <label className="block">
+        <span className="text-[10px] text-zinc-500 uppercase tracking-wide">End</span>
+        <input type="time" value={end} onChange={(e) => setEnd(e.target.value)} className={`${inputCls} mt-0.5`} />
+      </label>
+      <div className="text-[11px] text-zinc-400 font-medium">
+        {fmtClock(start)}–{fmtClock(end)}
+        <span className="text-zinc-600"> · {spanHours(start, end)}h{overnight ? ' · next day' : ''}</span>
       </div>
       <input value={role} onChange={(e) => setRole(e.target.value)} placeholder="Role (optional)" className={inputCls} />
-      <input value={required} onChange={(e) => setRequired(e.target.value)} placeholder="Staff needed" className={inputCls} />
+      <label className="block">
+        <span className="text-[10px] text-zinc-500 uppercase tracking-wide">Staff needed</span>
+        <input value={required} onChange={(e) => setRequired(e.target.value)} className={`${inputCls} mt-0.5`} />
+      </label>
       <div className="flex items-center gap-1.5">
-        <button onClick={save} disabled={busy} className="inline-flex items-center gap-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium rounded-lg px-2.5 py-1.5 disabled:opacity-50">{busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Add</button>
+        <button onClick={save} disabled={busy} className="inline-flex items-center gap-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium rounded-lg px-2.5 py-1.5 disabled:opacity-50">{busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} {editing ? 'Save' : 'Add'}</button>
         <button onClick={onCancel} className="text-xs text-zinc-400 hover:text-zinc-100 px-2.5 py-1.5 rounded-lg border border-zinc-700">Cancel</button>
       </div>
     </div>

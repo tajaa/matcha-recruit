@@ -361,7 +361,20 @@ function PayEquityReport({ a }: { a: PayEquityAnalysisResult }) {
               <li key={p.title} className="flex items-start gap-2 text-[12px] text-zinc-300">
                 <span className="text-zinc-600 font-mono mt-px">{i + 1}.</span>
                 <span className={`h-2 w-2 rounded-full mt-1.5 flex-shrink-0 ${PE_BAR[p.severity]}`} />
-                <span className="flex-1">{p.action}</span>
+                <div className="flex-1 min-w-0">
+                  <span>{p.action}</span>
+                  {/* Who to lift — the action sentence only ever says how many. */}
+                  {p.below_band_employees.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {p.below_band_employees.map((e) => (
+                        <span key={e.name} className="inline-flex items-center gap-1 rounded-full bg-white/[0.06] border border-white/[0.06] px-2 py-0.5 text-[11px] text-zinc-300">
+                          {e.name}
+                          <span className="font-mono text-amber-400">+{fmtUsd(e.lift)}</span>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
                 {p.remediation_cost > 0 && <span className="font-mono text-amber-400 whitespace-nowrap">{fmtUsd(p.remediation_cost)}</span>}
               </li>
             ))}
@@ -392,7 +405,12 @@ function PayEquityReport({ a }: { a: PayEquityAnalysisResult }) {
                 <td className="px-2"><SpreadBar r={r} /></td>
                 <td className={`px-2 text-right font-mono ${PE_TONE[r.severity]}`}>{r.spread_pct}%</td>
                 <td className="px-2 text-right font-mono text-zinc-500">{r.iqr_pct}%</td>
-                <td className="px-2 text-right font-mono text-zinc-400">{r.below_band_n || '—'}</td>
+                <td
+                  className="px-2 text-right font-mono text-zinc-400"
+                  title={r.below_band_employees.map((e) => `${e.name} — ${fmtUsd(e.pay)} (+${fmtUsd(e.lift)})`).join('\n') || undefined}
+                >
+                  {r.below_band_n || '—'}
+                </td>
                 <td className={`px-2 text-right font-mono ${r.remediation_cost > 0 ? 'text-amber-400' : 'text-zinc-600'}`}>{r.remediation_cost > 0 ? fmtUsd(r.remediation_cost) : '—'}</td>
                 <td className="pl-2 text-right"><span className={`text-[10px] font-semibold ${PE_TONE[r.severity]}`}>{PE_LABEL[r.severity]}</span></td>
               </tr>

@@ -152,6 +152,32 @@ def test_pay_equity_role_stats_flagged_with_remediation():
     assert s["below_band_n"] == 1 and s["remediation_cost"] == 30_000
 
 
+def test_pay_equity_role_stats_names_below_band_people():
+    """`people` names WHO to lift — the count alone isn't actionable."""
+    s = pe.role_stats(
+        "Engineer", [50_000, 100_000, 150_000],
+        [("Ada Lovelace", 50_000.0), ("Grace Hopper", 100_000.0), ("Alan Turing", 150_000.0)],
+    )
+    assert s["below_band_n"] == 1
+    assert s["below_band_employees"] == [{"name": "Ada Lovelace", "pay": 50_000, "lift": 30_000}]
+
+
+def test_pay_equity_role_stats_below_band_people_sorted_by_lift():
+    s = pe.role_stats(
+        "Engineer", [40_000, 60_000, 100_000, 100_000],
+        [("Low", 40_000.0), ("Mid", 60_000.0), ("A", 100_000.0), ("B", 100_000.0)],
+    )
+    # floor = 0.8 * 80k median = 64k → both under it, biggest lift first
+    assert [e["name"] for e in s["below_band_employees"]] == ["Low", "Mid"]
+
+
+def test_pay_equity_role_stats_people_optional():
+    """Omitted `people` → empty list, every other key unchanged (the demographics
+    path and existing callers pass pays only)."""
+    s = pe.role_stats("Engineer", [50_000, 100_000, 150_000])
+    assert s["below_band_n"] == 1 and s["below_band_employees"] == []
+
+
 def test_pay_equity_role_stats_watch_tier():
     s = pe.role_stats("Manager", [100_000, 120_000])
     assert 15.0 <= s["spread_pct"] < 30.0 and s["severity"] == "watch"
@@ -215,6 +241,19 @@ def test_priority_actions_ranks_below_band_by_cost_desc():
     ]
     out = pe.priority_actions(roles)
     assert [p["title"] for p in out] == ["Pricey", "Cheap"]
+
+
+def test_priority_actions_carries_below_band_employees():
+    role = _role("BelowBand", below=1, cost=30_000, spread=40.0, severity="flag")
+    role["below_band_employees"] = [{"name": "Ada Lovelace", "pay": 50_000, "lift": 30_000}]
+    out = pe.priority_actions([role])
+    assert out[0]["below_band_employees"] == role["below_band_employees"]
+
+
+def test_priority_actions_below_band_employees_defaults_empty():
+    """A role dict without the key (old caller / no roster names) must not KeyError."""
+    out = pe.priority_actions([_role("BelowBand", below=1, cost=30_000, severity="flag")])
+    assert out[0]["below_band_employees"] == []
 
 
 def test_priority_actions_caps_at_limit():
