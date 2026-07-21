@@ -39,46 +39,53 @@ function UpdateRow({ u, open, onToggle }: { u: AdminUpdate; open: boolean; onTog
           <div className="mt-3">
             <div className={`mb-1 ${LABEL}`}>What's new</div>
             <ul className="space-y-1 text-sm leading-normal text-zinc-300 lg:columns-2 lg:gap-8 [&>li]:break-inside-avoid">
-              {u.whatsNew.map((w, i) => (
+              {(u.whatsNew ?? []).map((w, i) => (
                 <li key={i}>· {w}</li>
               ))}
             </ul>
           </div>
 
-          <div className="mt-4 grid gap-6 border-t border-white/[0.06] pt-4 lg:grid-cols-2">
-            <div>
-              <div className={`mb-1 ${LABEL}`}>How to use it</div>
-              <ol className="space-y-1 text-sm leading-normal text-zinc-300">
-                {u.howToUse.map((h, i) => (
-                  <li key={i}>{i + 1}. {h}</li>
-                ))}
-              </ol>
+          {/* Ternary, not `&&`: these are numbers, and `0 || 0 || 0` renders a literal "0". */}
+          {(u.howToUse?.length || u.notes?.length || u.setup?.length) ? (
+            <div className="mt-4 grid gap-6 border-t border-white/[0.06] pt-4 lg:grid-cols-2">
+              <div>
+                {u.howToUse && u.howToUse.length > 0 && (
+                  <>
+                    <div className={`mb-1 ${LABEL}`}>How to use it</div>
+                    <ol className="space-y-1 text-sm leading-normal text-zinc-300">
+                      {u.howToUse.map((h, i) => (
+                        <li key={i}>{i + 1}. {h}</li>
+                      ))}
+                    </ol>
+                  </>
+                )}
+              </div>
+              <div>
+                {u.notes && u.notes.length > 0 && (
+                  <>
+                    <div className={`mb-1 ${LABEL}`}>Context</div>
+                    <ul className="space-y-1 text-sm leading-normal text-zinc-400">
+                      {u.notes.map((n, i) => (
+                        <li key={i}>· {n}</li>
+                      ))}
+                    </ul>
+                  </>
+                )}
+                {u.setup && u.setup.length > 0 && (
+                  <>
+                    <div className={`mb-1 text-[10px] font-medium uppercase tracking-[0.15em] text-amber-400 ${u.notes?.length ? 'mt-3' : ''}`}>
+                      Setup before it works
+                    </div>
+                    <ul className="space-y-1 text-sm leading-normal text-amber-100/80">
+                      {u.setup.map((s, i) => (
+                        <li key={i}>· {s}</li>
+                      ))}
+                    </ul>
+                  </>
+                )}
+              </div>
             </div>
-            <div>
-              {u.notes && u.notes.length > 0 && (
-                <>
-                  <div className={`mb-1 ${LABEL}`}>Context</div>
-                  <ul className="space-y-1 text-sm leading-normal text-zinc-400">
-                    {u.notes.map((n, i) => (
-                      <li key={i}>· {n}</li>
-                    ))}
-                  </ul>
-                </>
-              )}
-              {u.setup && u.setup.length > 0 && (
-                <>
-                  <div className={`mb-1 text-[10px] font-medium uppercase tracking-[0.15em] text-amber-400 ${u.notes?.length ? 'mt-3' : ''}`}>
-                    Setup before it works
-                  </div>
-                  <ul className="space-y-1 text-sm leading-normal text-amber-100/80">
-                    {u.setup.map((s, i) => (
-                      <li key={i}>· {s}</li>
-                    ))}
-                  </ul>
-                </>
-              )}
-            </div>
-          </div>
+          ) : null}
         </div>
       )}
     </article>

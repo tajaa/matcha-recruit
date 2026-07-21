@@ -10,7 +10,7 @@ export type AdminUpdate = {
   title: string
   summary: string
   whatsNew: string[] // what changed / what you can now do
-  howToUse: string[] // user-facing steps in the app
+  howToUse?: string[] | null // user-facing steps in the app (absent for internal fixes)
   setup?: string[] | null // operator prerequisites before it works (optional)
   notes?: string[] | null // plain-language context / why it matters (optional)
   tag?: AdminUpdateTag | null
