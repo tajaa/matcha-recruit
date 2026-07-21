@@ -392,7 +392,13 @@ function ShiftForm({ day, shift, onDone, onSaved, onCancel }: {
         {fmtClock(start)}–{fmtClock(end)}
         <span className="text-zinc-600"> · {spanHours(start, end)}h{overnight ? ' · next day' : ''}</span>
       </div>
-      <input value={role} onChange={(e) => setRole(e.target.value)} placeholder="Role (optional)" className={inputCls} />
+      <label className="block">
+        {/* Labelled rather than placeholder-only: "Role (optional)" clips to
+            "Role (option…" at day-column width, and a clipped placeholder
+            disappears entirely the moment you type. */}
+        <span className="text-[10px] text-zinc-500 uppercase tracking-wide">Role <span className="text-zinc-600 normal-case">(optional)</span></span>
+        <input value={role} onChange={(e) => setRole(e.target.value)} className={`${inputCls} mt-0.5`} />
+      </label>
       <label className="block">
         <span className="text-[10px] text-zinc-500 uppercase tracking-wide">Staff needed</span>
         <input value={required} onChange={(e) => setRequired(e.target.value)} className={`${inputCls} mt-0.5`} />
