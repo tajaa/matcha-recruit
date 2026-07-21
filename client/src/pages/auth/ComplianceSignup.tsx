@@ -1,3 +1,4 @@
+import { externalRedirect } from '../../utils/externalRedirect'
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
@@ -122,7 +123,7 @@ export default function ComplianceSignup() {
         setError(checkoutData.detail ?? 'Failed to start checkout')
         return
       }
-      window.location.href = checkoutData.checkout_url
+      externalRedirect(checkoutData.checkout_url)
     } catch {
       setError('Something went wrong. Please try again.')
     } finally {

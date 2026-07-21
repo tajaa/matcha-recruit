@@ -1,3 +1,4 @@
+import { externalRedirect } from '../../utils/externalRedirect'
 import { useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import ClientSidebar from './ClientSidebar'
@@ -59,7 +60,7 @@ function MatchaLitePendingSidebar({ headcount, isEssentials }: { headcount: numb
         success_url: `${window.location.origin}/ir/onboarding?lite=1`,
         cancel_url: window.location.href,
       })
-      window.location.href = checkout_url
+      externalRedirect(checkout_url)
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'Something went wrong. Please try again.')
     } finally {
@@ -125,7 +126,7 @@ function CompliancePendingSidebar({ headcount, jurisdictionCount }: { headcount:
         success_url: `${window.location.origin}/compliance/onboarding?compliance=1`,
         cancel_url: window.location.href,
       })
-      window.location.href = checkout_url
+      externalRedirect(checkout_url)
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'Something went wrong. Please try again.')
     } finally {
@@ -191,7 +192,7 @@ function MatchaXPendingSidebar({ headcount }: { headcount: number }) {
         success_url: `${window.location.origin}/matcha-x/onboarding?x=1`,
         cancel_url: window.location.href,
       })
-      window.location.href = checkout_url
+      externalRedirect(checkout_url)
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'Something went wrong. Please try again.')
     } finally {
