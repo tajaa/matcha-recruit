@@ -297,6 +297,91 @@ def test_build_corpus_indexes_property_and_risk_records():
         assert corpus["index"][cid]["source"] == "platform"
 
 
+def _fleet_ctx(n_marginal: int = 0) -> dict:
+    """A `driver_risk.build_fleet` payload as `_tenant_context` carries it."""
+    drivers = [
+        {"id": "d-hi", "driver_name": "Ada Wren", "tier": "high_risk", "score": 82.4,
+         "points": 12, "license_status": "suspended", "violation_count": 3,
+         "accident_count": 1, "major_violation": True, "overdue": True,
+         "review_date": "2026-02-11"},
+        {"id": "d-mid", "driver_name": "Bo Vance", "tier": "marginal", "score": 21.0,
+         "points": 2, "license_status": "valid", "violation_count": 2,
+         "accident_count": 0, "major_violation": False, "overdue": False,
+         "review_date": "2026-05-02"},
+        {"id": "d-ok", "driver_name": "Cy Doyle", "tier": "clean", "score": 0.0,
+         "points": 0, "license_status": "valid", "violation_count": 0,
+         "accident_count": 0, "major_violation": False, "overdue": False},
+    ]
+    drivers += [{"id": f"d-{i}", "driver_name": f"Extra {i}", "tier": "marginal",
+                 "score": 5.0, "points": 1, "license_status": "valid",
+                 "violation_count": 1, "accident_count": 0, "major_violation": False}
+                for i in range(n_marginal)]
+    return {**_CTX, "fleet": {
+        "company_id": "c1", "company_name": "Hillcrest", "drivers": drivers,
+        "summary": {"total_drivers": len(drivers), "clean": 1,
+                    "marginal": 1 + n_marginal, "high_risk": 1,
+                    "overdue_reviews": 1, "clean_pct": 33.3, "grade": "D"},
+    }}
+
+
+def test_platform_records_fleet():
+    recs = {r["cid"]: r for r in bp._platform_records(_fleet_ctx())}
+    head = recs["platform:fleet"]["summary"]
+    assert "grade D" in head and "3 driver(s)" in head
+    assert "1 clean / 1 marginal / 1 high-risk" in head
+    assert "1 overdue MVR review(s)" in head
+    # the provenance qualifier rides on the record itself, not just the prompt
+    assert "not a pulled motor-vehicle record" in head
+
+    # cids key on the driver's row id, never its rank position: build_fleet sorts
+    # by score and the corpus is rebuilt every turn.
+    assert "platform:fleet.d-hi" in recs and "platform:fleet.d-mid" in recs
+    assert "platform:fleet.d-ok" not in recs        # clean drivers aren't itemized
+
+    hi = recs["platform:fleet.d-hi"]
+    assert "Ada Wren" in hi["ref"] and "82.4/100" in hi["summary"]
+    assert "major violation" in hi["summary"].lower()
+    assert "suspended" in hi["summary"].lower()
+    assert "overdue" in hi["summary"].lower()
+    assert hi["when"] == "2026-02-11"
+
+
+def test_platform_records_fleet_caps_named_drivers_and_says_so():
+    over = bp._FLEET_DRIVER_CAP + 5
+    recs = {r["cid"]: r for r in bp._platform_records(_fleet_ctx(n_marginal=over))}
+    named = [c for c in recs if c.startswith("platform:fleet.") and c != "platform:fleet.truncated"]
+    assert len(named) == bp._FLEET_DRIVER_CAP
+    # the headline still counts every driver, and the cut is disclosed
+    assert f"{over + 3} driver(s)" in recs["platform:fleet"]["summary"]
+    assert "platform:fleet.truncated" in recs
+    assert str(bp._FLEET_DRIVER_CAP) in recs["platform:fleet.truncated"]["summary"]
+
+
+def test_platform_records_fleet_absent_or_empty_emits_nothing():
+    # No `driver_risk` flag → `_tenant_context` leaves the key None; an enabled
+    # company with no MVR rows → an empty fleet. Neither may emit a record: a
+    # "grade n/a, 0 drivers" line reads as a finding about the fleet.
+    for ctx in ({**_CTX, "fleet": None},
+                {**_CTX, "fleet": {"drivers": [], "summary": {
+                    "total_drivers": 0, "clean": 0, "marginal": 0, "high_risk": 0,
+                    "overdue_reviews": 0, "clean_pct": 0.0, "grade": "n/a"}}},
+                {**_CTX, "fleet": "junk"}, {**_CTX, "fleet": {"summary": "junk"}}):
+        cids = {r["cid"] for r in bp._platform_records(ctx)}
+        assert not any(c.startswith("platform:fleet") for c in cids)
+
+
+def test_build_corpus_indexes_fleet_records():
+    corpus = bp.build_corpus("Hillcrest", _fleet_ctx(), _docs())
+    for cid in ("platform:fleet", "platform:fleet.d-hi"):
+        assert cid in corpus["index"], cid
+        assert corpus["index"][cid]["source"] == "platform"
+    clean, dropped = validate_citations(
+        [{"point": "Two rated drivers", "cited_ids": ["platform:fleet.d-hi", "platform:fleet.d-nope"]}],
+        corpus["index"])
+    assert clean[0]["cited_ids"] == ["platform:fleet.d-hi"]
+    assert dropped == ["platform:fleet.d-nope"]
+
+
 def test_doc_records_statuses():
     doc_recs, fig_recs, notes = bp._doc_records(_docs())
     cids = {r["cid"] for r in doc_recs}

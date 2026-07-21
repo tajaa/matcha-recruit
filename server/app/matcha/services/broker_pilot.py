@@ -565,6 +565,12 @@ def _clause_records(ctx: dict) -> list[dict]:
     return recs
 
 
+# Named drivers itemized in the corpus. The fleet headline always counts every
+# driver; this only bounds how many are named, so a 400-driver fleet can't crowd
+# out the rest of the grounding.
+_FLEET_DRIVER_CAP = 25
+
+
 def _platform_records(ctx: dict) -> list[dict]:
     """Serialize a `_tenant_context` / `_external_context` dict into compact
     corpus records. Every accessor is guard-railed — a missing/empty section
@@ -814,6 +820,53 @@ def _platform_records(ctx: dict) -> list[dict]:
             bits.append(f"worst building {top.get('name') or 'unnamed'} at {top.get('score')}"
                         + (f" ({top['grade']})" if top.get("grade") else ""))
         add("platform:property.risk", "Property risk score", "; ".join(bits) + ".")
+
+    # Fleet / driver risk — the commercial-auto input. Tenant only, and only
+    # when the client owns `driver_risk` (`_tenant_context` gates the fetch).
+    fleet = ctx.get("fleet") or {}
+    fsum = fleet.get("summary") if isinstance(fleet, dict) else None
+    if isinstance(fsum, dict) and fsum.get("total_drivers"):
+        bits = [f"fleet grade {fsum.get('grade') or 'n/a'}",
+                f"{fsum['total_drivers']} driver(s) on file",
+                f"{fsum.get('clean', 0)} clean / {fsum.get('marginal', 0)} marginal / "
+                f"{fsum.get('high_risk', 0)} high-risk"]
+        if fsum.get("clean_pct") is not None:
+            bits.append(f"{fsum['clean_pct']}% clean")
+        if fsum.get("overdue_reviews"):
+            bits.append(f"{fsum['overdue_reviews']} overdue MVR review(s)")
+        add("platform:fleet", "Driver risk — fleet",
+            "; ".join(bits) + ". Tiers are derived from employer-recorded MVR reviews, "
+            "not a pulled motor-vehicle record — directional.")
+        # Sub-records for the drivers that move an auto quote: high-risk first,
+        # then marginal, capped. `build_fleet` already sorts worst-first. The cid
+        # keys on the row id, not the list position, because the sort is by score
+        # and re-runs on every corpus build (the `platform:property.plan.*`
+        # lesson: a positional cid still resolves after a re-rank, just to a
+        # different driver).
+        rated = [d for d in (fleet.get("drivers") or [])
+                 if isinstance(d, dict) and d.get("tier") in ("high_risk", "marginal")]
+        if len(rated) > _FLEET_DRIVER_CAP:
+            add("platform:fleet.truncated", "Driver risk — coverage note",
+                f"{len(rated)} driver(s) are rated marginal or high-risk; the "
+                f"{_FLEET_DRIVER_CAP} worst are itemized below. The fleet totals in "
+                "`platform:fleet` count all of them.")
+            rated = rated[:_FLEET_DRIVER_CAP]
+        for d in rated:
+            name = d.get("driver_name") or "Unnamed driver"
+            dbits = [f"tier {_hum(d['tier'])}", f"severity score {d.get('score')}/100"]
+            if d.get("license_status"):
+                dbits.append(f"license {_hum(d['license_status'])}")
+            if d.get("violation_count"):
+                dbits.append(f"{d['violation_count']} moving violation(s)")
+            if d.get("accident_count"):
+                dbits.append(f"{d['accident_count']} accident(s)")
+            if d.get("major_violation"):
+                dbits.append("major violation (DUI/reckless)")
+            if d.get("overdue"):
+                dbits.append("MVR review overdue")
+            add(f"platform:fleet.{_slug(d.get('id') or name)}", f"Driver — {name}",
+                f"{name}: {'; '.join(dbits)}.",
+                when=str(d.get("review_date") or "current"))
 
     # Composite risk index — headline + per-component sub-records, mirroring the
     # EPL block above. Tenant only: `_external_context` has no company row to
@@ -1077,6 +1130,7 @@ HARD RULES:
 - A `clause:` record marked PROVISIONAL comes from an unconfirmed AI extraction — say that whenever you rely on it.
 - On `jur:` records: these are the client's CODIFIED state and federal statutory obligations (e.g. final-pay timing, pay-transparency, anti-discrimination). Cite the statute when a point turns on the law, and never state a legal conclusion, opine on whether the client is compliant, or give legal advice — surface the obligation and route the judgment to counsel.
 - On property and index records: `platform:property.cat` (catastrophe tiers), `platform:property.exposure` (modeled AAL/PML), `platform:property.plan.<n>` (ranked property fixes) and `platform:property.risk` (TIV-weighted score) are the platform's own property analytics, and `platform:risk` plus `platform:risk.<component>` are its composite risk index. These are the platform's models, not carrier output — cite them as the platform's figures, and where a record says a tier is a directional baseline rather than a documented probability, repeat that qualifier when you use it.
+- On `platform:fleet` and `platform:fleet.<driver>` records: these are the commercial-auto driver-risk view, scored from MVR data the EMPLOYER recorded — not a pulled motor-vehicle record and not carrier output. Say that whenever you rely on them, and treat a named driver's tier as the platform's score, not a finding about that person.
 - Raw document text (DOCUMENT TEXT blocks) belongs to its `doc:` ID — cite that ID when using it.
 
 ANSWER SHAPE — a short lead answer, then three reviewable lists. The broker reads

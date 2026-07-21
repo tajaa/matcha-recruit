@@ -111,10 +111,11 @@ async def _build_ctx(conn, user_id, session: dict) -> dict:
     still grounds on the uploaded documents."""
     try:
         if session["subject_kind"] == "company":
-            # The composite risk index is corpus material for the chat, so this
-            # is the one caller that asks for it (see _tenant_context).
+            # The composite risk index and the fleet are corpus material for the
+            # chat, so this is the one caller that asks for them (see
+            # _tenant_context).
             return await _tenant_context(conn, user_id, session["subject_id"],
-                                         include_risk_index=True)
+                                         include_risk_index=True, include_fleet=True)
         return await _external_context(conn, user_id, session["subject_id"])
     except HTTPException:
         raise

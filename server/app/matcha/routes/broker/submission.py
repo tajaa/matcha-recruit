@@ -24,7 +24,7 @@ from ...services import (
     risk_transfer as rt,
     loss_development as ld, property_sov, property_cat,
     property_exposure as property_exp, property_recommendations as property_recs,
-    property_risk as property_risk_svc, risk_index,
+    property_risk as property_risk_svc, risk_index, driver_risk,
 )
 from ..ir_incidents import compute_wc_metrics
 from .portfolio import _assert_broker_owns_company
@@ -164,13 +164,26 @@ def _submission_preview(ctx: dict) -> dict:
     }
 
 
+async def _company_features(conn, company_id: UUID) -> dict:
+    """The client company's merged feature flags (defaults + tier overlay +
+    stored overrides), so a broker-side read of a client subsystem asks the same
+    question the client's own routes do."""
+    row = await conn.fetchrow(
+        "SELECT enabled_features, signup_source FROM companies WHERE id = $1", company_id
+    )
+    return merge_company_features(row["enabled_features"] if row else None,
+                                  row["signup_source"] if row else None)
+
+
 async def _tenant_context(conn, user_id, company_id: UUID, *,
-                          include_risk_index: bool = False) -> dict:
+                          include_risk_index: bool = False,
+                          include_fleet: bool = False) -> dict:
     """Common submission context for an on-platform (tenant) client.
 
-    ``include_risk_index`` is off by default: only Broker Pilot grounds on the
-    composite index, and the packet/preview/coverage-gap paths would otherwise
-    pay for a whole extra engine run they never read."""
+    ``include_risk_index`` / ``include_fleet`` are off by default: only Broker
+    Pilot grounds on the composite index and the fleet, and the
+    packet/preview/coverage-gap paths would otherwise pay for engine runs they
+    never read."""
     meta = await _assert_broker_owns_company(conn, user_id, company_id)
     broker_id = await _broker_id(conn, user_id)
     m = await compute_wc_metrics(conn, company_id)
@@ -213,6 +226,17 @@ async def _tenant_context(conn, user_id, company_id: UUID, *,
                 # empty rollup as if there were no catastrophe exposure.
                 conn, company_id, wc=m, emr=latest.get("experience_mod"), epl=epl, cat=cat or None),
             None, "risk_index")
+    # Fleet / driver risk. Gated on the CLIENT's own `driver_risk` flag, not on
+    # the presence of `mvr_reviews` rows: `resident_care` writes to the same
+    # table for credentialing currency and leaves the scoring columns
+    # (violations, accidents, major) at their defaults, which `score_driver`
+    # reads as a spotless record — grounding an underwriter narrative on
+    # "grade A fleet" that is really "nobody filled this in".
+    fleet = None
+    if include_fleet:
+        features = await _safe(_company_features(conn, company_id), {}, "features")
+        if features.get("driver_risk"):
+            fleet = await _safe(driver_risk.build_fleet(conn, company_id), None, "driver_risk")
     return {
         "name": meta["name"],
         "industry": m.get("industry"),
@@ -236,6 +260,7 @@ async def _tenant_context(conn, user_id, company_id: UUID, *,
         "property": property_ctx,
         "loss_development": loss_dev,
         "risk_index": risk_idx,
+        "fleet": fleet,
     }
 
 
@@ -487,11 +512,7 @@ async def _assert_client_has_limit_adequacy(conn, company_id: UUID) -> None:
     company whose Limit Adequacy page doesn't exist would strand the row where the
     client can never see, correct, or confirm it. Reads stay ungated.
     """
-    row = await conn.fetchrow(
-        "SELECT enabled_features, signup_source FROM companies WHERE id = $1", company_id
-    )
-    features = merge_company_features(row["enabled_features"] if row else None,
-                                      row["signup_source"] if row else None)
+    features = await _company_features(conn, company_id)
     if not features.get("limit_adequacy"):
         raise HTTPException(status_code=403, detail="Client does not have Limit Adequacy enabled")
 
