@@ -12,7 +12,9 @@ import {
 
 export type { SessionStatus } from '../sse'
 export type DatasetStatus = 'processing' | 'ready' | 'needs_review' | 'failed'
-export type SourceKind = 'csv' | 'xlsx' | 'pdf'
+// 'platform' = built deterministically from the company's own records
+// (no upload, no extraction-confirm step, no stored source file).
+export type SourceKind = 'csv' | 'xlsx' | 'pdf' | 'platform'
 
 export type MetricTile = { label: string; value: string }
 export type MetricTable = { title: string; columns: string[]; rows: string[][] }
@@ -162,6 +164,26 @@ export const uploadDataset = (sessionId: string, file: File) => {
 export type DemoDatasetKey = 'volatility' | 'financial' | 'insurance' | 'inventory'
 export const loadDemoDataset = (sessionId: string, demoKey: DemoDatasetKey) =>
   api.post<AnalysisDataset>(`/analysis-pilot/pilot/sessions/${sessionId}/datasets/demo`, { demo_key: demoKey })
+// Platform data sources — datasets built from the company's OWN records instead
+// of an upload. `available` is false when the source's subsystem is off for this
+// company (reported, not hidden: "you don't have incident reporting" beats a
+// silently shorter list).
+export type PlatformSource = {
+  key: string
+  label: string
+  description: string
+  required_feature: string
+  kind: string
+  available: boolean
+}
+export const listPlatformSources = () =>
+  api.get<{ sources: PlatformSource[] }>('/analysis-pilot/pilot/platform-sources')
+export const loadPlatformDataset = (sessionId: string, source: string, line?: string) =>
+  api.post<AnalysisDataset>(
+    `/analysis-pilot/pilot/sessions/${sessionId}/datasets/platform`,
+    { source, ...(line ? { line } : {}) },
+  )
+
 export const patchDataset = (
   sessionId: string,
   datasetId: string,

@@ -30,9 +30,11 @@ from app.core.services.redis_cache import check_rate_limit, client_ip
 from app.core.services.storage import get_storage
 from ...services import analysis_pilot as ap
 from ...services import analysis_packs as packs
+from ...services import analysis_platform_sources as platform_sources
 from ...services.er_document_parser import ERDocumentParser
 from ...models.analysis_pilot import (
     SessionCreate, SessionUpdate, DatasetPatch, ComparisonCreate, ChatIn, ReportIn, DemoDatasetIn,
+    PlatformDatasetIn,
 )
 # Shared ASCII filename hardening (Starlette latin-1-encodes headers).
 from .legal_defense import _safe_name, _safe_filename
@@ -44,6 +46,15 @@ router = APIRouter()
 _MAX_UPLOAD_BYTES = 25_000_000
 _MAX_DATASETS_PER_SESSION = 20
 _EXT_TO_KIND = {".csv": "csv", ".xlsx": "xlsx", ".pdf": "pdf"}
+
+# A platform-built dataset has no stored file. `storage_path` is NOT NULL, so it
+# carries this marker instead of an s3:// key — every storage call checks for it
+# rather than handing a non-path to the storage client.
+_PLATFORM_PATH_PREFIX = "platform://"
+
+
+def _is_platform_dataset(row) -> bool:
+    return str((row or {}).get("storage_path") or "").startswith(_PLATFORM_PATH_PREFIX)
 
 # Bundled sample datasets for the Examples tab's live demo — small, self-contained
 # CSVs shipped with the server (not user data), one per analyzer-pack domain, so
@@ -525,6 +536,12 @@ async def patch_dataset(session_id: str, dataset_id: str, body: DatasetPatch, re
     if body.orientation is not None and is_pdf:
         raise HTTPException(status_code=400,
                             detail="Orientation only applies to tabular (CSV/XLSX) datasets.")
+    if body.orientation is not None and _is_platform_dataset(d):
+        # There is no stored original to re-parse — the re-orient branch would
+        # hand the `platform://` marker to the storage client.
+        raise HTTPException(
+            status_code=400,
+            detail="Orientation doesn't apply to a dataset built from your platform records.")
 
     # Merge overrides.
     mapping = {**(d.get("mapping") or {}), **(body.mapping or {})}
@@ -608,6 +625,111 @@ async def patch_dataset(session_id: str, dataset_id: str, body: DatasetPatch, re
     return _dataset_out(out)
 
 
+@router.get("/pilot/platform-sources")
+async def list_platform_sources(current_user=Depends(require_admin_or_client)):
+    """The platform-data sources this company can build a dataset from. Sources
+    whose subsystem is off are returned with `available: false` rather than
+    hidden — "you don't have incident reporting" is a more useful answer than a
+    silently shorter list."""
+    from app.core.feature_flags import merge_company_features
+
+    company_id = await get_client_company_id(current_user)
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            "SELECT enabled_features, signup_source FROM companies WHERE id = $1", company_id)
+    features = merge_company_features(row["enabled_features"], row["signup_source"]) if row else {}
+    return {"sources": [{**s, "available": bool(features.get(s["required_feature"]))}
+                        for s in platform_sources.catalog()]}
+
+
+@router.post("/pilot/sessions/{session_id}/datasets/platform")
+async def load_platform_dataset(session_id: str, body: PlatformDatasetIn, request: Request,
+                                current_user=Depends(require_admin_or_client)):
+    """Build a dataset from the company's own records instead of an upload.
+
+    Point-in-time snapshot: `meta.as_of` records when it was built and nothing
+    syncs afterwards — a refresh is a new dataset, so a report can never cite
+    figures that changed underneath it. Arrives `ready`, not `needs_review`: the
+    extraction-confirm gate exists for untrusted Gemini document reads, and a
+    deterministic SQL builder with explicitly-assigned roles is not that."""
+    from app.core.feature_flags import merge_company_features
+
+    company_id = await get_client_company_id(current_user)
+    source = platform_sources.get_source(body.source)
+    if source is None:
+        raise HTTPException(status_code=404, detail="Unknown platform data source")
+
+    async with get_connection() as conn:
+        await _load_session(conn, session_id, company_id)
+        await check_rate_limit(str(company_id), "analysis_pilot_upload", 40, 3600)
+        row = await conn.fetchrow(
+            "SELECT enabled_features, signup_source FROM companies WHERE id = $1", company_id)
+        features = merge_company_features(row["enabled_features"], row["signup_source"]) if row else {}
+        # Per-source gate. The mount's `analysis_pilot` gate says the company may
+        # analyze data; it says nothing about owning this subsystem's records.
+        if not features.get(source.required_feature):
+            raise HTTPException(
+                status_code=403,
+                detail=f"{source.label} needs the {source.required_feature} module.")
+        count = await conn.fetchval(
+            "SELECT COUNT(*) FROM analysis_pilot_datasets WHERE session_id = $1", session_id)
+        if int(count or 0) >= _MAX_DATASETS_PER_SESSION:
+            raise HTTPException(status_code=400,
+                                detail=f"Session dataset limit reached ({_MAX_DATASETS_PER_SESSION})")
+        try:
+            built = await source.build(conn, company_id, line=body.line or "wc")
+        except Exception:  # noqa: BLE001 - a failed build is a 502, never a half-written dataset
+            logger.exception("analysis_pilot: platform build failed for %s", source.key)
+            raise HTTPException(status_code=502, detail="Could not build that dataset — try again.")
+
+        if not built.get("series"):
+            # Nothing to analyze: refuse rather than persist an empty dataset the
+            # user then has to notice and delete.
+            raise HTTPException(
+                status_code=409,
+                detail=f"No {source.label.lower()} on file for this company yet.")
+
+        as_of = built.get("as_of") or ""
+        filename = f"{source.label}{f' — as of {as_of}' if as_of else ''}"[:300]
+        ds_row = await conn.fetchrow(
+            """INSERT INTO analysis_pilot_datasets
+                   (session_id, company_id, filename, storage_path, source_kind,
+                    content_type, uploaded_by)
+               VALUES ($1,$2,$3,$4,'platform',NULL,$5) RETURNING id""",
+            session_id, company_id, filename,
+            # No file exists. The marker keeps the NOT NULL column honest and is
+            # what `_is_platform_dataset` reads to keep storage calls off it.
+            f"{_PLATFORM_PATH_PREFIX}{source.key}", getattr(current_user, "id", None),
+        )
+        ds_id = ds_row["id"]
+        await _audit(conn, session_id, current_user, request, "upload",
+                     {"dataset_id": str(ds_id), "filename": filename,
+                      "source_kind": "platform", "platform_source": source.key,
+                      "as_of": as_of})
+
+    status, error, normalized, metrics = "ready", None, {}, {}
+    row_count = column_count = 0
+    try:
+        parsed = {"series": built["series"], "periods": built.get("periods"),
+                  "warnings": list(built.get("warnings") or [])}
+        normalized, metrics, (row_count, column_count) = await asyncio.to_thread(
+            ap.analyze_dataset, ds_id, "platform", filename, parsed=parsed,
+            mapping=built.get("roles") or None, kind=source.kind)
+        # Provenance travels with the data: the prompt, the report header and the
+        # dataset card all read `meta`, so "where did this come from and when"
+        # survives into anything generated from it.
+        normalized.setdefault("meta", {}).update(
+            {"platform_source": source.key, "platform_label": source.label, "as_of": as_of})
+    except Exception:  # noqa: BLE001 - degrade, never 500 after the row exists
+        logger.exception("analysis_pilot: platform analysis failed for %s", source.key)
+        status, error = "failed", "Could not analyze the platform data."
+
+    updated = await _persist_dataset_analysis(ds_id, session_id, status, error,
+                                              None, normalized, metrics,
+                                              row_count, column_count)
+    return _dataset_out(updated)
+
+
 @router.delete("/pilot/sessions/{session_id}/datasets/{dataset_id}")
 async def delete_dataset(session_id: str, dataset_id: str, request: Request,
                          current_user=Depends(require_admin_or_client)):
@@ -620,6 +742,8 @@ async def delete_dataset(session_id: str, dataset_id: str, request: Request,
         if not row:
             raise HTTPException(status_code=404, detail="Dataset not found")
         await _audit(conn, session_id, current_user, request, "delete_dataset", {"dataset_id": dataset_id})
+    if _is_platform_dataset(row):
+        return {"deleted": True}          # built from live rows; nothing was stored
     try:
         await get_storage().delete_private_file(row["storage_path"])
     except Exception:  # noqa: BLE001
@@ -638,6 +762,10 @@ async def download_dataset(session_id: str, dataset_id: str, request: Request,
             dataset_id, session_id)
         if not row:
             raise HTTPException(status_code=404, detail="Dataset not found")
+        if _is_platform_dataset(row):
+            raise HTTPException(
+                status_code=404,
+                detail="This dataset was built from your platform records — there is no source file.")
         # Source financial documents leaving the system must land in the trail.
         await _audit(conn, session_id, current_user, request, "download_dataset",
                      {"dataset_id": dataset_id, "filename": row["filename"]})

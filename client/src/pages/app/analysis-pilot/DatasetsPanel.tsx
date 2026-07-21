@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
-import { FileSpreadsheet, FileText, Loader2, RefreshCw, Trash2 } from 'lucide-react'
+import { Database, FileSpreadsheet, FileText, Loader2, RefreshCw, Trash2 } from 'lucide-react'
 import { FileUpload } from '../../../components/ui/FileUpload'
 import { HelpHint } from '../../../components/ui/HelpHint'
 import {
-  uploadDataset, patchDataset, deleteDataset,
-  type AnalysisSession, type AnalysisDataset,
+  uploadDataset, patchDataset, deleteDataset, listPlatformSources, loadPlatformDataset,
+  type AnalysisSession, type AnalysisDataset, type PlatformSource,
 } from '../../../api/analysis-pilot/analysisPilot'
 import { type FocusChip } from './shared'
 import { MappingModal } from './MappingModal'
@@ -18,11 +18,22 @@ export function DatasetsPanel({ session, onChange, onFocus }: {
 }) {
   const [busy, setBusy] = useState(false)
   const [retrying, setRetrying] = useState<string | null>(null)
+  const [platform, setPlatform] = useState<PlatformSource[]>([])
+  const [building, setBuilding] = useState<string | null>(null)
   // Store only the id — the modal derives the dataset from the refreshed
   // session, so a mid-review refresh can't resurrect a stale snapshot.
   const [reviewId, setReviewId] = useState<string | null>(null)
   const datasets = session.datasets ?? []
   const review = reviewId ? datasets.find((d) => d.id === reviewId) ?? null : null
+
+  // The registry is small and static per company; fetch once per mount.
+  useEffect(() => {
+    let cancelled = false
+    listPlatformSources()
+      .then((r) => { if (!cancelled) setPlatform(r.sources) })
+      .catch(() => { /* the panel still works as upload-only */ })
+    return () => { cancelled = true }
+  }, [])
 
   // Dataset deleted (or session reloaded without it) while the modal was open.
   useEffect(() => {
@@ -41,6 +52,18 @@ export function DatasetsPanel({ session, onChange, onFocus }: {
       alert(e instanceof Error ? e.message : 'Upload failed.')
     } finally {
       setBusy(false)
+    }
+  }
+
+  const buildFromPlatform = async (source: PlatformSource) => {
+    setBuilding(source.key)
+    try {
+      await loadPlatformDataset(session.id, source.key)
+      onChange()
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Could not build that dataset.')
+    } finally {
+      setBuilding(null)
     }
   }
 
@@ -71,6 +94,29 @@ export function DatasetsPanel({ session, onChange, onFocus }: {
           <p className="text-xs">Drop CSV, XLSX, or a financial PDF here, or <span className="underline">browse</span></p>
         </FileUpload>
       </div>
+      {platform.length > 0 && (
+        <div className="px-2 pb-2 space-y-1">
+          <p className="text-[10px] uppercase tracking-wide text-zinc-600 px-0.5">Or use your own platform data</p>
+          {platform.map((p) => (
+            <button key={p.key} type="button" disabled={!p.available || building !== null}
+              onClick={() => void buildFromPlatform(p)}
+              title={p.available ? p.description : `Needs the ${p.required_feature} module`}
+              className="w-full text-left rounded-lg border border-zinc-800 bg-zinc-900/40 px-2.5 py-1.5
+                         hover:border-emerald-500/40 disabled:opacity-40 disabled:hover:border-zinc-800">
+              <span className="flex items-center gap-2">
+                {building === p.key
+                  ? <Loader2 className="h-3.5 w-3.5 animate-spin text-emerald-500" />
+                  : <Database className="h-3.5 w-3.5 text-zinc-500" />}
+                <span className="text-xs text-zinc-200 truncate flex-1">{p.label}</span>
+                {!p.available && <span className="text-[10px] text-zinc-600">module off</span>}
+              </span>
+            </button>
+          ))}
+          <p className="text-[10px] text-zinc-600 px-0.5">
+            Built as a point-in-time snapshot — refresh by adding it again.
+          </p>
+        </div>
+      )}
       <div className="p-2 pt-0 space-y-1.5 max-h-[62vh] overflow-y-auto">
         {datasets.length === 0 && (
           <p className="text-xs text-zinc-600 p-2">Upload CSV, XLSX, or a financial PDF (10-K, P&L, loss run).</p>
@@ -78,7 +124,11 @@ export function DatasetsPanel({ session, onChange, onFocus }: {
         {datasets.map((d) => (
           <div key={d.id} className="rounded-lg border border-zinc-800 bg-zinc-900/40 px-2.5 py-2">
             <div className="flex items-center gap-2">
-              {d.source_kind === 'pdf' ? <FileText className="h-3.5 w-3.5 text-zinc-500" /> : <FileSpreadsheet className="h-3.5 w-3.5 text-zinc-500" />}
+              {d.source_kind === 'platform'
+                ? <Database className="h-3.5 w-3.5 text-zinc-500" />
+                : d.source_kind === 'pdf'
+                  ? <FileText className="h-3.5 w-3.5 text-zinc-500" />
+                  : <FileSpreadsheet className="h-3.5 w-3.5 text-zinc-500" />}
               <span className="text-xs text-zinc-200 truncate flex-1">{d.filename}</span>
               <button onClick={() => void deleteDataset(session.id, d.id).then(onChange)}
                 className="text-zinc-600 hover:text-red-400"><Trash2 className="h-3.5 w-3.5" /></button>

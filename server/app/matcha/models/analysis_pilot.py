@@ -27,6 +27,15 @@ class DemoDatasetIn(BaseModel):
     demo_key: Literal["volatility", "financial", "insurance", "inventory"]
 
 
+class PlatformDatasetIn(BaseModel):
+    """Build a dataset from the company's own platform records. `source` is a key
+    from `analysis_platform_sources.SOURCES` (validated in the route against the
+    registry, not here — the registry is the single source of truth). `line`
+    applies to loss-run sources."""
+    source: str = Field(..., max_length=40)
+    line: Optional[str] = Field(default=None, max_length=40)
+
+
 class DatasetPatch(BaseModel):
     """Confirm/adjust a dataset before (re)analysis. `mapping` overrides column→
     role (validated against the canonical vocabulary); `column_kinds` marks a
