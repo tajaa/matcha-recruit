@@ -892,6 +892,17 @@ def _doc_records(docs: list[dict]) -> tuple[list[dict], list[dict], list[str]]:
 _NATIVE_PER_SOURCE_CAP = 50
 
 
+# Legal Pilot sources that must NOT reach a broker chat. `gather_native_sources`
+# iterates `legal_defense._SOURCES` wholesale, so anything added there lands here
+# by default — right for agency charges and the termination-lifecycle records
+# (core EPL underwriting context, and brokers already see named discipline
+# records), wrong for leave: who took FMLA is medical-adjacent and belongs to the
+# legal-defense corpus only. The filter lives here, not in the `_SOURCES` tuple,
+# because it is a broker-side policy and two call sites unpack that tuple as a
+# 4-tuple.
+_BROKER_EXCLUDED_SOURCES = {"leave"}
+
+
 async def gather_native_sources(conn, company_id) -> dict:
     """The operational records the platform natively generates for an
     on-platform company — IR/OSHA incidents, ER cases, compliance, discipline,
@@ -913,7 +924,7 @@ async def gather_native_sources(conn, company_id) -> dict:
         )
         features = merge_company_features(row["enabled_features"], row["signup_source"]) if row else {}
         for key, label, fn, enabled in ldef._SOURCES:
-            if not enabled(features):
+            if key in _BROKER_EXCLUDED_SOURCES or not enabled(features):
                 continue
             try:
                 recs = await fn(conn, company_id, None, None, None, None)
@@ -1040,7 +1051,7 @@ def build_corpus(subject_name: str, ctx: dict, docs: list[dict], native: dict | 
 # Grounded AI turn (analyst, not advisor)
 # --------------------------------------------------------------------------- #
 
-_SYSTEM = """You are a commercial P&C insurance analysis assistant working for a licensed insurance broker who is preparing analysis for a client. You ground EVERY statement in the EVIDENCE CORPUS below: the client's platform records (`platform:` IDs), the company's operational records generated natively on the platform (`incident:` / `er_case:` / `compliance_req:` / `compliance_alert:` / `discipline:` / `training:` / `policy_ack:` / `accommodation:` IDs — present only for on-platform clients), the indemnification clauses extracted from the client's contracts (`clause:` IDs), the codified state and federal statutory obligations the client must follow (`jur:` IDs — present only for on-platform clients), and the broker's uploaded documents (`doc:` / `docfig:` IDs).
+_SYSTEM = """You are a commercial P&C insurance analysis assistant working for a licensed insurance broker who is preparing analysis for a client. You ground EVERY statement in the EVIDENCE CORPUS below: the client's platform records (`platform:` IDs), the company's operational records generated natively on the platform (`incident:` / `er_case:` / `compliance_req:` / `compliance_alert:` / `discipline:` / `training:` / `policy_ack:` / `accommodation:` / `charge:` (agency charges — EEOC/NLRB/OSHA/state) / `preterm:` (pre-termination risk reviews) / `separation:` (separation agreements) / `ptclaim:` (post-termination claims) IDs — present only for on-platform clients), the indemnification clauses extracted from the client's contracts (`clause:` IDs), the codified state and federal statutory obligations the client must follow (`jur:` IDs — present only for on-platform clients), and the broker's uploaded documents (`doc:` / `docfig:` IDs).
 
 HARD RULES:
 - Cite ONLY the bracketed IDs that appear in the EVIDENCE CORPUS. NEVER invent a figure, carrier, date, limit, premium, or ID.

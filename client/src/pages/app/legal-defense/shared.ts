@@ -1,7 +1,7 @@
 import type { LucideIcon } from 'lucide-react'
 import {
-  Accessibility, Bell, BookMarked, BookOpenCheck, FileSignature, Gavel, GraduationCap,
-  HardHat, Landmark, ScrollText, Users,
+  Accessibility, Bell, BookMarked, BookOpenCheck, CalendarClock, ClipboardCheck, FileSignature,
+  FileWarning, Gavel, GraduationCap, HardHat, Landmark, ScrollText, Scale, Users,
 } from 'lucide-react'
 import type { Matter, MatterType } from '../../../api/legal-defense/legalDefense'
 
@@ -93,6 +93,11 @@ export const CID_KIND_LABEL: Record<string, string> = {
   bill: 'Pending bill',
   case: 'Case law',
   compliance_alert: 'Compliance alert',
+  leave: 'Leave of absence',
+  charge: 'Agency charge',
+  preterm: 'Pre-termination review',
+  separation: 'Separation agreement',
+  ptclaim: 'Post-termination claim',
 }
 
 /** The evidence subsystems the backend can gather from
@@ -106,6 +111,11 @@ export const SOURCE_META: { key: string; label: string; icon: LucideIcon }[] = [
   { key: 'training', label: 'Training', icon: GraduationCap },
   { key: 'policy_ack', label: 'Policy acks', icon: FileSignature },
   { key: 'accommodations', label: 'Accommodations', icon: Accessibility },
+  { key: 'leave', label: 'Leave', icon: CalendarClock },
+  { key: 'agency_charges', label: 'Agency charges', icon: Scale },
+  { key: 'pre_termination', label: 'Pre-term reviews', icon: ClipboardCheck },
+  { key: 'separations', label: 'Separations', icon: FileWarning },
+  { key: 'post_term_claims', label: 'Post-term claims', icon: Gavel },
   { key: 'law', label: 'Governing law', icon: Landmark },
   { key: 'legislation', label: 'Pending legislation', icon: ScrollText },
   { key: 'case_law', label: 'Case law', icon: BookMarked },

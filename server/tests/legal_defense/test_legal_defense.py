@@ -1115,3 +1115,207 @@ def test_intake_requests_capped_and_coerced(monkeypatch):
     assert out["intake_requests"] == ["a", "b", "c"]     # blanks dropped, capped at 3
     assert out["ready_for_analysis"] is False
     assert "MATERIAL NOT YET IN THE RECORD" in captured["prompt"]
+
+
+# --- employee-linked HR sources (leave / charges / termination lifecycle) -----
+
+_LEAVE_ROW = {
+    "id": "l1", "leave_type": "fmla", "status": "approved",
+    "start_date": "2025-03-01", "end_date": "2025-05-01",
+    "expected_return_date": "2025-05-02", "actual_return_date": None,
+    "intermittent": True, "first_name": "Dana", "last_name": "Reyes",
+    # present on the real table and deliberately never selected — if a future
+    # edit adds it to the SELECT, the assertion below catches the leak.
+    "reason": "chemotherapy for stage II breast cancer",
+}
+_CHARGE_ROW = {
+    "id": "c1", "charge_type": "eeoc", "charge_number": "550-2025-01234",
+    "agency_name": "EEOC Los Angeles District Office", "status": "investigating",
+    "filing_date": "2025-02-10", "resolution_amount": None, "resolution_date": None,
+    "first_name": "Dana", "last_name": "Reyes",
+}
+_PRETERM_ROW = {
+    "id": "p1", "overall_score": 72, "overall_band": "high", "outcome": "proceeded",
+    "is_voluntary": False, "acknowledged": True, "computed_at": "2025-04-01",
+    "first_name": "Dana", "last_name": "Reyes",
+}
+_SEP_ROW = {
+    "id": "s1", "status": "signed", "severance_weeks": 8, "severance_amount": 12000,
+    "is_adea_applicable": True, "is_group_layoff": False,
+    "consideration_period_days": 21, "revocation_period_days": 7,
+    "presented_date": "2025-04-05", "signed_date": "2025-04-20",
+    "effective_date": "2025-04-28", "revoked_date": None,
+    "first_name": "Dana", "last_name": "Reyes",
+}
+_PTCLAIM_ROW = {
+    "id": "q1", "claim_type": "wrongful_termination", "status": "settled",
+    "filed_date": "2025-06-01", "resolution_amount": 45000, "resolution_date": "2025-09-15",
+    "first_name": "Dana", "last_name": "Reyes",
+}
+
+
+class _HRConn:
+    """Returns one row per employee-linked table and records the SQL it saw."""
+    def __init__(self):
+        self.sql: list[str] = []
+
+    async def fetch(self, sql, *args):
+        self.sql.append(sql)
+        for tbl, row in (("leave_requests", _LEAVE_ROW),
+                         ("agency_charges", _CHARGE_ROW),
+                         ("pre_termination_checks", _PRETERM_ROW),
+                         ("separation_agreements", _SEP_ROW),
+                         ("post_termination_claims", _PTCLAIM_ROW)):
+            if tbl in sql:
+                return [row]
+        return []
+
+    async def fetchrow(self, sql, *args):
+        return None
+
+
+def test_src_leave_shape_and_never_leaks_the_reason():
+    conn = _HRConn()
+    recs = asyncio.run(ld._src_leave(conn, "cid", None, None, None, None))
+    assert len(recs) == 1
+    r = recs[0]
+    assert r["cid"] == "leave:l1"
+    assert r["ref"] == "FMLA leave"                       # not "Fmla"
+    assert "Dana Reyes" in r["summary"] and "Approved" in r["summary"]
+    assert "intermittent" in r["summary"]
+    assert "expected return" in r["summary"]              # no actual return yet
+    # free-text medical detail stays out of the corpus, in the record and the SQL
+    assert "chemotherapy" not in r["summary"]
+    assert "lr.reason" not in conn.sql[0] and "denial_reason" not in conn.sql[0]
+    # leave_requests keys on org_id, not company_id
+    assert "lr.org_id = $1" in conn.sql[0]
+
+
+def test_src_agency_charges_shape():
+    recs = asyncio.run(ld._src_agency_charges(_HRConn(), "cid", None, None, None, None))
+    r = recs[0]
+    assert r["cid"] == "charge:c1"
+    assert r["ref"] == "550-2025-01234"
+    assert r["summary"].startswith("EEOC charge")          # acronym, not "Eeoc"
+    assert "Investigating" in r["summary"]
+
+
+def test_src_agency_charges_falls_back_to_agency_then_type():
+    class _Conn(_HRConn):
+        async def fetch(self, sql, *args):
+            return [{**_CHARGE_ROW, "charge_number": None}]
+    assert asyncio.run(ld._src_agency_charges(
+        _Conn(), "cid", None, None, None, None))[0]["ref"].startswith("EEOC Los Angeles")
+
+    class _Bare(_HRConn):
+        async def fetch(self, sql, *args):
+            return [{**_CHARGE_ROW, "charge_number": None, "agency_name": None}]
+    assert asyncio.run(ld._src_agency_charges(
+        _Bare(), "cid", None, None, None, None))[0]["ref"] == "EEOC charge"
+
+
+def test_src_termination_lifecycle_shapes():
+    conn = _HRConn()
+    pre = asyncio.run(ld._src_pre_termination(conn, "cid", None, None, None, None))[0]
+    assert pre["cid"] == "preterm:p1"
+    assert "High" in pre["summary"] and "72" in pre["summary"]
+    assert "involuntary" in pre["summary"]
+
+    sep = asyncio.run(ld._src_separations(conn, "cid", None, None, None, None))[0]
+    assert sep["cid"] == "separation:s1"
+    # the OWBPA windows are the release's validity — they belong in the summary
+    assert "ADEA/OWBPA" in sep["summary"]
+    assert "21-day consideration" in sep["summary"] and "7-day revocation" in sep["summary"]
+    assert "8 week(s) severance" in sep["summary"] and "$12,000" in sep["summary"]
+
+    claim = asyncio.run(ld._src_post_term_claims(conn, "cid", None, None, None, None))[0]
+    assert claim["cid"] == "ptclaim:q1"
+    assert "Settled" in claim["summary"] and "$45,000" in claim["summary"]
+
+
+def test_new_sources_scope_by_employee_and_take_six_positional_args():
+    """Broker Pilot calls every registry fn with six positional args, relying on
+    the `topic` default — a new source with a different signature breaks it."""
+    conn = _HRConn()
+    for fn in (ld._src_leave, ld._src_agency_charges, ld._src_pre_termination,
+               ld._src_separations, ld._src_post_term_claims):
+        asyncio.run(fn(conn, "cid", None, None, None, None))
+    for sql in conn.sql:
+        assert "e.work_location_id" in sql and "e.work_state" in sql   # _scope_employee
+
+
+def test_new_sources_are_registered_and_gated_on_employees():
+    reg = {k: (label, enabled) for k, label, _fn, enabled in ld._SOURCES}
+    for key in ("leave", "agency_charges", "pre_termination", "post_term_claims"):
+        assert reg[key][1]({"employees": True}) is True
+        assert reg[key][1]({}) is False
+    # separations rides its own product flag, not the roster flag
+    assert reg["separations"][1]({"separation_agreements": True}) is True
+    assert reg["separations"][1]({"employees": True}) is False
+
+
+def test_gather_evidence_surfaces_the_new_sources():
+    corpus = asyncio.run(ld.gather_evidence(
+        _HRConn(), "cid", None, None, {"employees": True, "separation_agreements": True},
+    ))
+    for key, cid in (("leave", "leave:l1"), ("agency_charges", "charge:c1"),
+                     ("pre_termination", "preterm:p1"), ("separations", "separation:s1"),
+                     ("post_term_claims", "ptclaim:q1")):
+        assert key in corpus["sources"]
+        assert cid in corpus["index"]
+
+
+def test_disabled_new_sources_are_named_in_the_notes():
+    corpus = asyncio.run(ld.gather_evidence(_HRConn(), "cid", None, None, {}))
+    note = next((n for n in corpus["notes"] if n.startswith("Not included")), "")
+    assert "Leave of absence" in note and "Separation agreements" in note
+    assert "leave" not in corpus["sources"]
+
+
+# --- chain-of-custody appendix ------------------------------------------------
+
+def _audit(n: int) -> list[dict]:
+    return [{"action": "update", "details": {}, "created_at": None,
+             "user_email": f"hr{i}@example.com"} for i in range(n)]
+
+
+def test_custody_table_empty_states_and_escaping():
+    html = ld._custody_table([], "No entries here.")
+    assert "No entries here." in html
+    html = ld._custody_table([{"action": "create", "details": None, "created_at": None,
+                               "user_email": "<script>x</script>"}], "—")
+    assert "<script>" not in html and "&lt;script&gt;" in html
+    # a null actor reads as the system, never as blank
+    assert "System" in ld._custody_table(
+        [{"action": "create", "details": None, "created_at": None, "user_email": None}], "—")
+
+
+def test_custody_table_elides_long_trails_keeping_both_ends():
+    rows = _audit(80)
+    html = ld._custody_table(rows, "—")
+    assert "hr0@example.com" in html                      # first entry kept
+    assert "hr79@example.com" in html                     # last entry kept
+    assert "hr40@example.com" not in html                 # middle elided
+    assert "50 further entries omitted" in html
+    # at the cap exactly, nothing is elided
+    assert "omitted" not in ld._custody_table(_audit(ld._AUDIT_ROW_CAP), "—")
+
+
+def test_discipline_and_er_appendices_render_the_custody_table():
+    disc = ld._discipline_section("discipline:d1", {
+        "discipline_type": "written_warning", "infraction_type": "attendance",
+        "severity": "moderate", "status": "active", "issued_date": None,
+        "review_date": None, "description": "d", "first_name": "A", "last_name": "B",
+        "audit_trail": _audit(2),
+    })
+    assert "Chain of custody" in disc and "hr1@example.com" in disc
+
+    er = ld._er_section("er_case:e1", {
+        "case": {"case_number": "ER-1", "category": "harassment", "status": "open",
+                 "outcome": None, "description": "d"},
+        "notes": [], "audit_trail": _audit(1),
+    })
+    assert "Chain of custody" in er and "hr0@example.com" in er
+    # a record whose audit fetch degraded (no key at all) still renders
+    assert "No audit-trail entries" in ld._er_section("er_case:e1", {
+        "case": {"case_number": "ER-1"}, "notes": []})

@@ -548,3 +548,36 @@ def test_memo_html_renders_structured_sections_in_order():
     # severity ranks the gaps; the unranked one sorts last rather than vanishing
     assert html.index("Critical gap") < html.index("Low-ranked gap") < html.index("Unranked gap")
     assert "sev-high" in html and "sev-low" in html
+
+
+# --- native-source exclusions -------------------------------------------------
+
+def test_broker_native_gather_skips_leave_and_only_leave():
+    """`gather_native_sources` iterates Legal Pilot's registry wholesale, so a
+    new legal-defense source reaches broker chats by default. Leave is
+    medical-adjacent and must not; the termination-lifecycle records and agency
+    charges are EPL underwriting context and must."""
+    import asyncio
+    from app.matcha.services import legal_defense as ldef
+
+    assert bp._BROKER_EXCLUDED_SOURCES == {"leave"}
+    registry_keys = {k for k, _l, _fn, _e in ldef._SOURCES}
+    assert bp._BROKER_EXCLUDED_SOURCES <= registry_keys      # no stale key
+    for key in ("agency_charges", "pre_termination", "separations", "post_term_claims"):
+        assert key not in bp._BROKER_EXCLUDED_SOURCES
+
+    seen: list[str] = []
+
+    class _Conn:
+        async def fetchrow(self, sql, *args):
+            return {"enabled_features": {"employees": True, "separation_agreements": True},
+                    "signup_source": "bespoke"}
+
+        async def fetch(self, sql, *args):
+            seen.append(sql)
+            return []
+
+    asyncio.run(bp.gather_native_sources(_Conn(), "cid"))
+    joined = "\n".join(seen)
+    assert "leave_requests" not in joined                    # never even queried
+    assert "agency_charges" in joined and "separation_agreements" in joined

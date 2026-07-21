@@ -829,6 +829,217 @@ async def _src_accommodations(conn, company_id, start, end, loc_id, state, topic
     } for r in rows]
 
 
+# `_hum` title-cases, which turns statutory acronyms into "Fmla" / "Eeoc" — fine
+# for a status enum, wrong in an attorney-facing record where the acronym IS the
+# statute's name. Only these closed vocabularies need the override.
+_ACRONYM_LABELS = {
+    "fmla": "FMLA", "state_pfml": "state PFML", "unpaid_loa": "unpaid LOA",
+    "eeoc": "EEOC", "nlrb": "NLRB", "osha": "OSHA", "state_agency": "state agency",
+}
+
+
+def _hum_acronym(v) -> str:
+    return _ACRONYM_LABELS.get(v, _hum(v))
+
+
+def _person(r) -> str:
+    """Employee display name from a row carrying first_name/last_name."""
+    name = f"{r['first_name'] or ''} {r['last_name'] or ''}".strip()
+    return name or "an employee"
+
+
+def _money(v) -> str:
+    try:
+        return f"${float(v):,.0f}"
+    except (TypeError, ValueError):
+        return "—"
+
+
+async def _src_leave(conn, company_id, start, end, loc_id, state, topic=_BROAD) -> list[dict]:
+    # Leave is the companion evidence for FMLA-interference and retaliation
+    # theories: what leave was taken, when, and how it was dispositioned is
+    # exactly what the timeline turns on.
+    #
+    # `reason`, `denial_reason` and `notes` are deliberately NOT selected —
+    # free-text medical detail has no business in an AI corpus, and the dates
+    # carry the evidentiary weight without it. The packet's appendix could
+    # surface more (attorney-facing); the model never sees it.
+    #
+    # NOTE: leave_requests keys on `org_id`, not `company_id` (d0a8f93f3fd0).
+    # Window on the leave's span, not its creation: a leave that started before
+    # the window but ran into it is in scope.
+    rows = await conn.fetch(
+        f"""
+        SELECT lr.id, lr.leave_type, lr.status, lr.start_date, lr.end_date,
+               lr.expected_return_date, lr.actual_return_date, lr.intermittent,
+               e.first_name, e.last_name
+        FROM leave_requests lr
+        JOIN employees e ON e.id = lr.employee_id
+        WHERE lr.org_id = $1
+          AND ($2::date IS NULL OR COALESCE(lr.end_date, lr.start_date) >= $2)
+          AND ($3::date IS NULL OR lr.start_date < ($3::date + 1))
+          {_scope_employee(4)}
+        ORDER BY lr.start_date DESC NULLS LAST
+        """,
+        company_id, start, end, loc_id, state,
+    )
+    return [{
+        "cid": f"leave:{r['id']}",
+        "ref": f"{_hum_acronym(r['leave_type'])} leave",
+        "summary": f"{_hum_acronym(r['leave_type'])} leave for {_person(r)} — status {_hum(r['status'])}"
+                   + f", {_dt(r['start_date'])} to "
+                   + (_dt(r["end_date"]) if r["end_date"] else "open-ended")
+                   + (", intermittent" if r["intermittent"] else "")
+                   + (f", returned {_dt(r['actual_return_date'])}" if r["actual_return_date"]
+                      else (f", expected return {_dt(r['expected_return_date'])}"
+                            if r["expected_return_date"] else "")),
+        "when": _dt(r["start_date"]),
+        "when_iso": _iso(r["start_date"]),
+    } for r in rows]
+
+
+async def _src_agency_charges(conn, company_id, start, end, loc_id, state, topic=_BROAD) -> list[dict]:
+    # The most on-topic table the pilot has for its own declared matter types
+    # (eeoc_charge, single_plaintiff, class_action) — prior charge history and
+    # how each resolved. Resolution amounts are included: settlement history is
+    # legitimate defense context, not a secret from counsel.
+    rows = await conn.fetch(
+        f"""
+        SELECT agc.id, agc.charge_type, agc.charge_number, agc.agency_name, agc.status,
+               agc.filing_date, agc.resolution_amount, agc.resolution_date,
+               e.first_name, e.last_name
+        FROM agency_charges agc
+        JOIN employees e ON e.id = agc.employee_id
+        WHERE agc.company_id = $1
+          AND ($2::date IS NULL OR agc.filing_date >= $2)
+          AND ($3::date IS NULL OR agc.filing_date < ($3::date + 1))
+          {_scope_employee(4)}
+        ORDER BY agc.filing_date DESC NULLS LAST
+        """,
+        company_id, start, end, loc_id, state,
+    )
+    return [{
+        "cid": f"charge:{r['id']}",
+        "ref": r["charge_number"] or r["agency_name"] or f"{_hum_acronym(r['charge_type'])} charge",
+        "summary": f"{_hum_acronym(r['charge_type'])} charge"
+                   + (f" filed with {r['agency_name']}" if r["agency_name"] else "")
+                   + f" naming {_person(r)} — status {_hum(r['status'])}"
+                   + (f", resolved {_dt(r['resolution_date'])}" if r["resolution_date"] else "")
+                   + (f" for {_money(r['resolution_amount'])}"
+                      if r["resolution_amount"] is not None else ""),
+        "when": _dt(r["filing_date"]),
+        "when_iso": _iso(r["filing_date"]),
+    } for r in rows]
+
+
+async def _src_pre_termination(conn, company_id, start, end, loc_id, state, topic=_BROAD) -> list[dict]:
+    # Direct evidence that diligence ran BEFORE the separation — the point of the
+    # record. The AI narrative and dimension detail stay out of the corpus; band,
+    # score and outcome say what happened.
+    rows = await conn.fetch(
+        f"""
+        SELECT pt.id, pt.overall_score, pt.overall_band, pt.outcome, pt.is_voluntary,
+               pt.acknowledged, pt.computed_at, e.first_name, e.last_name
+        FROM pre_termination_checks pt
+        JOIN employees e ON e.id = pt.employee_id
+        WHERE pt.company_id = $1
+          AND ($2::date IS NULL OR pt.computed_at >= $2)
+          AND ($3::date IS NULL OR pt.computed_at < ($3::date + 1))
+          {_scope_employee(4)}
+        ORDER BY pt.computed_at DESC NULLS LAST
+        """,
+        company_id, start, end, loc_id, state,
+    )
+    return [{
+        "cid": f"preterm:{r['id']}",
+        "ref": "Pre-termination review",
+        "summary": f"Pre-termination risk review for {_person(r)} — risk band "
+                   f"{_hum(r['overall_band'])} (score {r['overall_score']})"
+                   + (f", outcome {_hum(r['outcome'])}" if r["outcome"] else "")
+                   + (", recorded as a voluntary separation" if r["is_voluntary"]
+                      else ", recorded as an involuntary separation"),
+        "when": _dt(r["computed_at"]),
+        "when_iso": _iso(r["computed_at"]),
+    } for r in rows]
+
+
+async def _src_separations(conn, company_id, start, end, loc_id, state, topic=_BROAD) -> list[dict]:
+    # OWBPA/ADEA compliance lives in these columns — consideration and revocation
+    # windows are the release's validity, so they belong in the summary, not just
+    # the appendix. Window on when the agreement was presented (falling back to
+    # when it was created), which is the act with legal significance.
+    rows = await conn.fetch(
+        f"""
+        SELECT sa.id, sa.status, sa.severance_weeks, sa.severance_amount,
+               sa.is_adea_applicable, sa.is_group_layoff, sa.consideration_period_days,
+               sa.revocation_period_days, sa.presented_date, sa.signed_date,
+               sa.effective_date, sa.revoked_date, e.first_name, e.last_name
+        FROM separation_agreements sa
+        JOIN employees e ON e.id = sa.employee_id
+        WHERE sa.company_id = $1
+          AND ($2::date IS NULL OR COALESCE(sa.presented_date, sa.created_at::date) >= $2)
+          AND ($3::date IS NULL OR COALESCE(sa.presented_date, sa.created_at::date) < ($3::date + 1))
+          {_scope_employee(4)}
+        ORDER BY COALESCE(sa.presented_date, sa.created_at::date) DESC NULLS LAST
+        """,
+        company_id, start, end, loc_id, state,
+    )
+    out = []
+    for r in rows:
+        bits = [f"status {_hum(r['status'])}"]
+        if r["severance_weeks"] is not None:
+            bits.append(f"{r['severance_weeks']} week(s) severance")
+        if r["severance_amount"] is not None:
+            bits.append(_money(r["severance_amount"]))
+        if r["is_adea_applicable"]:
+            bits.append(f"ADEA/OWBPA release ({r['consideration_period_days'] or '—'}-day "
+                        f"consideration, {r['revocation_period_days'] or '—'}-day revocation)")
+        if r["is_group_layoff"]:
+            bits.append("group layoff")
+        if r["presented_date"]:
+            bits.append(f"presented {_dt(r['presented_date'])}")
+        if r["signed_date"]:
+            bits.append(f"signed {_dt(r['signed_date'])}")
+        if r["revoked_date"]:
+            bits.append(f"revoked {_dt(r['revoked_date'])}")
+        out.append({
+            "cid": f"separation:{r['id']}",
+            "ref": "Separation agreement",
+            "summary": f"Separation agreement with {_person(r)} — " + ", ".join(bits),
+            "when": _dt(r["presented_date"]),
+            "when_iso": _iso(r["presented_date"]),
+        })
+    return out
+
+
+async def _src_post_term_claims(conn, company_id, start, end, loc_id, state, topic=_BROAD) -> list[dict]:
+    rows = await conn.fetch(
+        f"""
+        SELECT ptc.id, ptc.claim_type, ptc.status, ptc.filed_date,
+               ptc.resolution_amount, ptc.resolution_date, e.first_name, e.last_name
+        FROM post_termination_claims ptc
+        JOIN employees e ON e.id = ptc.employee_id
+        WHERE ptc.company_id = $1
+          AND ($2::date IS NULL OR ptc.filed_date >= $2)
+          AND ($3::date IS NULL OR ptc.filed_date < ($3::date + 1))
+          {_scope_employee(4)}
+        ORDER BY ptc.filed_date DESC NULLS LAST
+        """,
+        company_id, start, end, loc_id, state,
+    )
+    return [{
+        "cid": f"ptclaim:{r['id']}",
+        "ref": _hum(r["claim_type"]) or "Post-termination claim",
+        "summary": f"{_hum(r['claim_type'])} claim by {_person(r)} after separation — "
+                   f"status {_hum(r['status'])}"
+                   + (f", resolved {_dt(r['resolution_date'])}" if r["resolution_date"] else "")
+                   + (f" for {_money(r['resolution_amount'])}"
+                      if r["resolution_amount"] is not None else ""),
+        "when": _dt(r["filed_date"]),
+        "when_iso": _iso(r["filed_date"]),
+    } for r in rows]
+
+
 async def _src_compliance_alerts(conn, company_id, start, end, loc_id, state, topic=_BROAD) -> list[dict]:
     # Date-filtered (unlike _src_compliance's current-posture snapshot) — this
     # is deliberately a history: it shows the company was monitoring during
@@ -1097,6 +1308,19 @@ _SOURCES = [
      lambda f: bool(f.get("handbooks", True))),
     ("accommodations", "Accommodation cases", _src_accommodations,
      lambda f: bool(f.get("accommodations", True))),
+    # Employee-linked HR history. `employees` is the honest gate for the four
+    # that hang off an employee row (pre_termination's own mount gate is the
+    # same); separations rides its own product flag.
+    ("leave", "Leave of absence (FMLA / PFML / medical)", _src_leave,
+     lambda f: bool(f.get("employees"))),
+    ("agency_charges", "Agency charges (EEOC / NLRB / OSHA / state)", _src_agency_charges,
+     lambda f: bool(f.get("employees"))),
+    ("pre_termination", "Pre-termination risk reviews", _src_pre_termination,
+     lambda f: bool(f.get("employees"))),
+    ("separations", "Separation agreements", _src_separations,
+     lambda f: bool(f.get("separation_agreements"))),
+    ("post_term_claims", "Post-termination claims", _src_post_term_claims,
+     lambda f: bool(f.get("employees"))),
 ]
 
 
@@ -1237,6 +1461,7 @@ HARD RULES:
 - Where the records DO NOT address a point, say so plainly and put it under open_questions — never speculate or fill gaps.
 - Be neutral, precise, and specific. Tie each observation to the records that support it.
 - This is not legal advice; frame everything for attorney review.
+- Employee-linked history carries its own IDs: `leave:` (leave of absence — type, status and dates only; the stated reason is deliberately not in the record), `charge:` (a charge filed with an agency such as the EEOC, NLRB or OSHA), `preterm:` (a pre-termination risk review run before a separation), `separation:` (a separation agreement, including its ADEA/OWBPA consideration and revocation windows), and `ptclaim:` (a claim filed after separation). Report what each shows and its dates; NEVER infer motive, causation, or retaliation from the sequence — chronology is for counsel to interpret.
 - Records with `law:`, `bill:`, or `case:` IDs are LEGAL CONTEXT (governing requirements, pending legislation, externally researched case law) — they describe the legal landscape, NOT the company's conduct. You may cite them to identify which requirements or authorities appear relevant. NEVER conclude the company complied with or violated anything, and NEVER present a `case:` record as precedent analysis — flag it for counsel to evaluate.
 
 INTAKE FIRST — build the case file before you analyze it:
@@ -1819,6 +2044,8 @@ def _er_section(cid: str, data: dict) -> str:
       </div>
       <div class="narr">{_esc(case.get('description'))}</div>
       <table><thead><tr><th>When</th><th>Type</th><th>Entry</th></tr></thead><tbody>{notes}</tbody></table>
+      <h3 style="font-size:11px;margin:10px 0 2px">Chain of custody</h3>
+      {_custody_table(data.get('audit_trail'), 'No audit-trail entries recorded for this case.')}
     """
 
 
@@ -1989,6 +2216,68 @@ async def _detail_accommodation(conn, acc_id: str, company_id) -> dict | None:
     return dict(row) if row else None
 
 
+# Chain-of-custody trails for cited records. Incidents already carry theirs
+# (claims_readiness.build_incident_packet selects ir_audit_log as `timeline`);
+# ER cases and discipline records did not, so the module docstring's promise of
+# "the immutable *_audit_log trails" was only two-thirds true.
+#
+# Packet-time only: audit rows are high-volume and low-semantic-density, so they
+# are worth nothing in the corpus and everything in the appendix — they show a
+# record was created contemporaneously and never retro-edited. No new cids, no
+# gate interaction, and they run only for records the packet already renders.
+_AUDIT_ROW_CAP = 30
+
+
+async def _detail_er_audit(conn, case_id: str) -> list[dict]:
+    rows = await conn.fetch(
+        """SELECT al.action, al.details, al.created_at, u.email AS user_email
+             FROM er_audit_log al
+             LEFT JOIN users u ON u.id = al.user_id
+            WHERE al.case_id = $1
+            ORDER BY al.created_at""",
+        case_id,
+    )
+    return [dict(r) for r in rows]
+
+
+async def _detail_discipline_audit(conn, disc_id: str) -> list[dict]:
+    rows = await conn.fetch(
+        """SELECT al.action, al.details, al.created_at, u.email AS user_email
+             FROM discipline_audit_log al
+             LEFT JOIN users u ON u.id = al.actor_user_id
+            WHERE al.discipline_id = $1
+            ORDER BY al.created_at""",
+        disc_id,
+    )
+    return [dict(r) for r in rows]
+
+
+def _custody_table(rows: list[dict] | None, empty: str) -> str:
+    """Compact chain-of-custody table for one record. Long trails are elided in
+    the middle — the first and last entries are the evidentiary ones (when it was
+    created, when it was last touched); the middle is edit noise."""
+    rows = rows or []
+    if not rows:
+        return (f"<table><thead><tr><th>When</th><th>Who</th><th>Action</th></tr></thead>"
+                f"<tbody><tr><td colspan='3'>{_esc(empty)}</td></tr></tbody></table>")
+    elided = 0
+    if len(rows) > _AUDIT_ROW_CAP:
+        head, tail = _AUDIT_ROW_CAP // 2, _AUDIT_ROW_CAP - _AUDIT_ROW_CAP // 2
+        elided = len(rows) - _AUDIT_ROW_CAP
+        rows = rows[:head] + rows[-tail:]
+    body = "".join(
+        f"<tr><td>{_fmt_dt(r.get('created_at'))}</td>"
+        f"<td>{_esc(r.get('user_email') or 'System')}</td>"
+        f"<td>{_esc(_describe_audit(r))}</td></tr>"
+        for r in rows
+    )
+    if elided:
+        body += (f"<tr><td colspan='3' style='color:#888'>… {elided} further entr"
+                 f"{'y' if elided == 1 else 'ies'} omitted for length …</td></tr>")
+    return ("<table><thead><tr><th>When</th><th>Who</th><th>Action</th></tr></thead>"
+            f"<tbody>{body}</tbody></table>")
+
+
 def _emp_name(d: dict) -> str:
     name = f"{d.get('first_name') or ''} {d.get('last_name') or ''}".strip()
     return name or "—"
@@ -2008,6 +2297,8 @@ def _discipline_section(cid: str, d: dict) -> str:
       <div class="narr">{_esc(d.get('description'))}</div>
       {f"<div class='narr'><b>Expected improvement.</b> {_esc(d.get('expected_improvement'))}</div>" if d.get('expected_improvement') else ""}
       {f"<div class='narr'><b>Outcome.</b> {_esc(d.get('outcome_notes'))}</div>" if d.get('outcome_notes') else ""}
+      <h3 style="font-size:11px;margin:10px 0 2px">Chain of custody</h3>
+      {_custody_table(d.get('audit_trail'), 'No audit-trail entries recorded for this record.')}
     """
 
 
@@ -2174,12 +2465,18 @@ async def build_defense_packet(conn, matter: dict, corpus: dict, memo: dict,
             if d:
                 details[c] = ("incident", d)
         elif c.startswith("er_case:"):
-            d = await _safe_detail(build_er_packet(conn, UUID(c.split(":", 1)[1]), company_id))
+            case_id = c.split(":", 1)[1]
+            d = await _safe_detail(build_er_packet(conn, UUID(case_id), company_id))
             if d:
+                # Ownership was already proved by the packet fetch above, so the
+                # audit fetch needs no company predicate (er_audit_log has none).
+                d["audit_trail"] = await _safe_detail(_detail_er_audit(conn, case_id)) or []
                 details[c] = ("er_case", d)
         elif c.startswith("discipline:"):
-            d = await _safe_detail(_detail_discipline(conn, c.split(":", 1)[1], company_id))
+            disc_id = c.split(":", 1)[1]
+            d = await _safe_detail(_detail_discipline(conn, disc_id, company_id))
             if d:
+                d["audit_trail"] = await _safe_detail(_detail_discipline_audit(conn, disc_id)) or []
                 details[c] = ("discipline", d)
         elif c.startswith("compliance_req:"):
             d = await _safe_detail(_detail_compliance(conn, c.split(":", 1)[1], company_id))
