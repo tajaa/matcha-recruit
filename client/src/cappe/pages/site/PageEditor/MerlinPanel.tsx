@@ -1,7 +1,10 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { AlertCircle, Check, Eye, History, Image, Loader2, Lock, Paperclip, Pencil, Plus, Search, Sparkles, Trash2, Wand2, X } from 'lucide-react'
+import {
+  AlertCircle, Check, Eye, History, Image, Loader2, Lock, MousePointerClick, Paperclip,
+  Pencil, Plus, Search, Slash, Sparkles, Trash2, Wand2, X,
+} from 'lucide-react'
 import { usePremium } from './DesignPrimitives'
 import { dHead } from './styles'
 import {
@@ -129,7 +132,10 @@ function ConversationMenu({ merlin }: { merlin: ReturnType<typeof useMerlin> }) 
                   onBlur={() => { void renameConversation(c.id, draft); setRenaming(null) }}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') { void renameConversation(c.id, draft); setRenaming(null) }
-                    if (e.key === 'Escape') setRenaming(null)
+                    // stopPropagation: MerlinDrawer's own window-level Escape
+                    // listener closes the whole panel — without this,
+                    // canceling a rename took the panel with it.
+                    if (e.key === 'Escape') { e.stopPropagation(); setRenaming(null) }
                   }}
                   className="min-w-0 flex-1 rounded border border-zinc-700 bg-zinc-950 px-1.5 py-1 text-xs text-zinc-100 outline-none focus:border-emerald-500"
                 />
@@ -165,16 +171,175 @@ function ConversationMenu({ merlin }: { merlin: ReturnType<typeof useMerlin> }) 
   )
 }
 
-export function MerlinDrawer({ merlin }: { merlin: ReturnType<typeof useMerlin> }) {
+/** Item shape shared by the slash-command list and every submenu it opens
+ *  (add-section's presets+blocks, theme's presets) — one keyboard/click
+ *  handler drives whichever list is currently showing. */
+type MenuItem = { key: string; title: string; sub?: string; onPick: () => void }
+
+type SlashAction =
+  | { kind: 'prefill'; text: string }
+  | { kind: 'send'; text: string }
+  | { kind: 'submenu'; submenu: 'add-section' | 'theme' }
+
+type SlashCommand = { id: string; label: string; hint: string; action: SlashAction }
+
+// Static top-level commands. `/add-section` and `/theme` open a second list
+// built from the live schema (server registries — sections/presets a hand-
+// written list would drift from); the rest just prefill or send.
+const SLASH_COMMANDS: SlashCommand[] = [
+  {
+    id: 'add-section', label: '/add-section', hint: 'Add a section — contact, about, blog…',
+    action: { kind: 'submenu', submenu: 'add-section' },
+  },
+  {
+    id: 'generate-image', label: '/generate-image', hint: 'Generate an AI image for a section',
+    action: { kind: 'prefill', text: 'Generate an image of ' },
+  },
+  {
+    id: 'restyle', label: '/restyle', hint: 'Restyle the selected section',
+    action: { kind: 'prefill', text: 'Restyle this section to look ' },
+  },
+  {
+    id: 'theme', label: '/theme', hint: 'Switch to a different theme preset',
+    action: { kind: 'submenu', submenu: 'theme' },
+  },
+  {
+    id: 'light-mode', label: '/light-mode', hint: 'Switch the site to light mode',
+    action: { kind: 'send', text: 'Switch the site to light mode.' },
+  },
+  {
+    id: 'dark-mode', label: '/dark-mode', hint: 'Switch the site to dark mode',
+    action: { kind: 'send', text: 'Switch the site to dark mode.' },
+  },
+]
+
+const EXAMPLE_PROMPTS = [
+  'Make this page feel more premium',
+  'Add a testimonials section',
+  'Switch to light mode',
+  'Generate a hero image',
+]
+
+/** The dropdown itself — top-level commands or whichever submenu is open.
+ *  Positioned above the composer (an upward-opening menu, like a real chat
+ *  slash-command palette) so it never covers the textarea it's driven from. */
+function SlashMenu({ items, activeIndex, onHover, onPick }: {
+  items: MenuItem[]
+  activeIndex: number
+  onHover: (i: number) => void
+  onPick: (item: MenuItem) => void
+}) {
+  if (items.length === 0) {
+    return (
+      <div className="absolute bottom-full left-0 right-0 z-20 mb-1 rounded-lg border border-zinc-700 bg-zinc-900 p-2 text-[11px] text-zinc-500 shadow-xl">
+        No matches.
+      </div>
+    )
+  }
+  return (
+    <div className="absolute bottom-full left-0 right-0 z-20 mb-1 max-h-56 overflow-y-auto rounded-lg border border-zinc-700 bg-zinc-900 p-1 shadow-xl">
+      {items.map((item, i) => (
+        <button
+          key={item.key}
+          onMouseEnter={() => onHover(i)}
+          onClick={() => onPick(item)}
+          className={`flex w-full flex-col items-start gap-0 rounded px-2 py-1.5 text-left ${
+            i === activeIndex ? 'bg-zinc-800' : ''
+          }`}
+        >
+          <span className="font-mono text-xs text-emerald-300">{item.title}</span>
+          {item.sub && <span className="text-[11px] text-zinc-500">{item.sub}</span>}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+export function MerlinDrawer({ merlin, selectedLabel }: { merlin: ReturnType<typeof useMerlin>; selectedLabel: string | null }) {
   const premium = usePremium()
   const {
     open, setOpen, messages, send, sending, error, tier, setTier, width, setWidth, setWidthLive,
-    newConversation, status, liveSteps,
+    newConversation, status, liveSteps, schema,
     attachments, addAttachment, removeAttachment, attachmentUploading, attachmentError,
   } = merlin
   const [input, setInput] = useState('')
   const listRef = useRef<HTMLDivElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  // Slash commands. `slashQuery` is only non-null for a bare "/word" with no
+  // space yet — once the user keeps typing past a command (a real sentence
+  // that happens to start with '/') the menu gets out of the way.
+  const [submenu, setSubmenu] = useState<'add-section' | 'theme' | null>(null)
+  const [activeIndex, setActiveIndex] = useState(0)
+  const slashQuery = !submenu && /^\/[a-z-]*$/i.test(input) ? input.slice(1).toLowerCase() : null
+
+  const commandItems: MenuItem[] = useMemo(
+    () => SLASH_COMMANDS
+      .filter((c) => slashQuery !== null && c.id.includes(slashQuery))
+      .map((c) => ({ key: c.id, title: c.label, sub: c.hint, onPick: () => runCommand(c) })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [slashQuery],
+  )
+  const submenuItems: MenuItem[] = useMemo(() => {
+    if (submenu === 'add-section') {
+      const presets = (schema?.sectionPresets ?? []).map((p) => ({
+        key: `preset:${p.name}`, title: p.label, sub: p.blurb,
+        text: `Add a ${p.label} section${p.blurb ? ` — ${p.blurb}.` : '.'}`,
+      }))
+      const plain = Object.entries(schema?.blocks ?? {}).map(([type, b]) => ({
+        key: `block:${type}`, title: b.label, sub: undefined as string | undefined,
+        text: `Add a ${b.label} section.`,
+      }))
+      return [...presets, ...plain].map((it) => ({
+        key: it.key, title: it.title, sub: it.sub, onPick: () => pickText(it.text),
+      }))
+    }
+    if (submenu === 'theme') {
+      return (schema?.themePresets ?? []).map((p) => ({
+        key: `theme:${p.id}`, title: p.name, sub: p.blurb,
+        onPick: () => pickText(`Switch the theme to ${p.name}.`),
+      }))
+    }
+    return []
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [submenu, schema])
+
+  const activeItems = submenu ? submenuItems : commandItems
+  const menuOpen = submenu !== null || (slashQuery !== null && commandItems.length > 0)
+
+  useEffect(() => { setActiveIndex(0) }, [slashQuery, submenu])
+
+  function focusTextarea(cursorAt?: number) {
+    requestAnimationFrame(() => {
+      const el = textareaRef.current
+      if (!el) return
+      el.focus()
+      if (cursorAt !== undefined) el.setSelectionRange(cursorAt, cursorAt)
+    })
+  }
+
+  /** A submenu pick lands as editable text — the user still reviews/adjusts
+   *  before sending, same as a plain typed message. */
+  function pickText(text: string) {
+    setInput(text)
+    setSubmenu(null)
+    focusTextarea(text.length)
+  }
+
+  function runCommand(cmd: SlashCommand) {
+    if (cmd.action.kind === 'submenu') {
+      setSubmenu(cmd.action.submenu)
+      setInput('')
+      return
+    }
+    if (cmd.action.kind === 'prefill') {
+      pickText(cmd.action.text)
+      return
+    }
+    setInput('')
+    void send(cmd.action.text)
+  }
 
   // A locked tier could still be sitting in localStorage from a lapsed plan —
   // show it selected but send lite, matching what the server would clamp to.
@@ -231,6 +396,7 @@ export function MerlinDrawer({ merlin }: { merlin: ReturnType<typeof useMerlin> 
     if (sending || !input.trim()) return
     send(input)
     setInput('')
+    setSubmenu(null)
   }
 
   return (
@@ -259,11 +425,32 @@ export function MerlinDrawer({ merlin }: { merlin: ReturnType<typeof useMerlin> 
       <>
           <div ref={listRef} className="flex-1 space-y-3 overflow-y-auto p-3">
             {messages.length === 0 && (
-              <p className="text-xs text-zinc-500">
-                Tell Merlin what to change — "make the hero darker", "add an FAQ section", "swap the brand color for something warmer".
-                Edits apply live to the preview; nothing saves until you hit Save. ⌘Z undoes a turn's edits
-                (an AI-generated image applies as its own step, right after).
-              </p>
+              <div className="space-y-3">
+                <p className="text-xs text-zinc-500">
+                  Edits apply live to the preview; nothing saves until you hit Save. ⌘Z undoes a turn's
+                  edits (an AI-generated image applies as its own step, right after).
+                </p>
+                <div className="space-y-1">
+                  <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-600">Try asking</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {EXAMPLE_PROMPTS.map((p) => (
+                      <button
+                        key={p}
+                        onClick={() => { setInput(p); focusTextarea(p.length) }}
+                        className="rounded-full border border-zinc-700 px-2.5 py-1 text-[11px] text-zinc-300 hover:border-emerald-600 hover:text-emerald-300"
+                      >
+                        {p}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <p className="flex items-center gap-1.5 text-[11px] text-zinc-600">
+                  <MousePointerClick className="h-3 w-3 shrink-0" /> Select a section in the preview to edit it directly.
+                </p>
+                <p className="flex items-center gap-1.5 text-[11px] text-zinc-600">
+                  <Slash className="h-3 w-3 shrink-0" /> Type <code className="rounded bg-black/30 px-1 py-0.5 font-mono">/</code> for commands — add a section, generate an image, and more.
+                </p>
+              </div>
             )}
             {messages.map((m, i) => (
               <div key={m.id ?? i} className={m.role === 'user' ? 'ml-6' : 'mr-2'}>
@@ -322,6 +509,21 @@ export function MerlinDrawer({ merlin }: { merlin: ReturnType<typeof useMerlin> 
           </div>
 
           <div className="border-t border-zinc-800 p-3">
+            {/* Acknowledges the editor's current selection — "this is what
+                your next message will act on" — so a request like "make this
+                warmer" has an obvious referent instead of the user wondering
+                whether Merlin knows what "this" is. */}
+            {selectedLabel && (
+              <div
+                key={selectedLabel}
+                className="mb-2 flex items-center gap-1.5 rounded-lg border border-emerald-700/30 bg-emerald-500/[0.06] px-2.5 py-1.5 text-[11px] text-emerald-300"
+              >
+                <MousePointerClick className="h-3 w-3 shrink-0" />
+                <span>
+                  Working on <strong className="font-semibold">{selectedLabel}</strong> — what should we do here?
+                </span>
+              </div>
+            )}
             {/* Model tier. Lite is free on every plan; the rest need Pro/Business.
                 Locked options stay visible (and selectable) — the server clamps
                 to lite — so the upgrade path is discoverable instead of hidden. */}
@@ -364,12 +566,50 @@ export function MerlinDrawer({ merlin }: { merlin: ReturnType<typeof useMerlin> 
               </div>
             )}
             {attachmentError && <p className="mb-1 text-[11px] text-red-400">{attachmentError}</p>}
-            <div className="flex gap-2">
+            <div className="relative flex gap-2">
+              {menuOpen && (
+                <SlashMenu
+                  items={activeItems}
+                  activeIndex={activeIndex}
+                  onHover={setActiveIndex}
+                  onPick={(item) => item.onPick()}
+                />
+              )}
               <textarea
+                ref={textareaRef}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit() } }}
-                placeholder="Describe a change, or attach a photo…"
+                onKeyDown={(e) => {
+                  if (menuOpen) {
+                    if (e.key === 'ArrowDown') { e.preventDefault(); setActiveIndex((i) => Math.min(i + 1, activeItems.length - 1)); return }
+                    if (e.key === 'ArrowUp') { e.preventDefault(); setActiveIndex((i) => Math.max(i - 1, 0)); return }
+                    if (e.key === 'Escape') {
+                      // preventDefault alone doesn't stop this reaching the
+                      // panel's own window-level Escape-closes-the-drawer
+                      // listener (below) — without stopPropagation, dismissing
+                      // the command menu closed the whole panel with it.
+                      e.preventDefault()
+                      e.stopPropagation()
+                      setSubmenu(null)
+                      setInput('')
+                      return
+                    }
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault()
+                      activeItems[activeIndex]?.onPick()
+                      return
+                    }
+                    if (e.key === 'Backspace' && submenu && input === '') { setSubmenu(null); return }
+                    return
+                  }
+                  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit() }
+                }}
+                placeholder={
+                  submenu === 'add-section' ? 'Pick a section below, or keep typing…'
+                    : submenu === 'theme' ? 'Pick a theme below, or keep typing…'
+                    : selectedLabel ? `Change this ${selectedLabel} section…`
+                    : 'Describe a change, or type / for commands…'
+                }
                 rows={2}
                 className="w-full resize-none rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
               />

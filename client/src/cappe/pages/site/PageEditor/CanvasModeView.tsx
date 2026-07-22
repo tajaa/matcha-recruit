@@ -7,6 +7,7 @@ import type { useCanvasBridge } from './useCanvasBridge'
 export function CanvasModeView({
   preview, blocks, canvas,
   updateBlock, moveBlock, removeBlock, duplicateBlock, addBlockAt, addBlock,
+  merlinOpen,
 }: {
   preview: string
   blocks: CappeBlock[]
@@ -17,6 +18,13 @@ export function CanvasModeView({
   duplicateBlock: (i: number) => void
   addBlockAt: (type: string, i: number) => void
   addBlock: (type: string) => void
+  /** While Merlin is open, clicking a section still selects it (Merlin's own
+   *  "Working on X" banner + selection context reads `canvas.selBlock`
+   *  exactly as before) — but the manual field-editor popup is suppressed.
+   *  Merlin's panel is now the primary way to act on a selection; showing
+   *  both at once for the same click is exactly the redundant-modal
+   *  confusion Merlin's UX pass exists to remove. */
+  merlinOpen: boolean
 }) {
   const {
     selBlock, setSelBlock, selElement, setSelElement, canvasBp, setCanvasBreakpoint,
@@ -46,39 +54,44 @@ export function CanvasModeView({
       </div>
 
       {/* floating editor — anchored to the clicked element when selected,
-          else a corner card with the Add affordance + hint */}
-      <div
-        className="fixed z-40 hidden max-h-[74vh] w-[360px] overflow-y-auto rounded-xl border border-zinc-700 bg-zinc-900 shadow-2xl shadow-black/60 lg:block"
-        style={selBlock != null ? { top: popPos.top, left: popPos.left } : { bottom: 16, left: 16 }}
-      >
-        {selBlock != null && isCanvasBlock(blocks[selBlock]) ? (
-          <CanvasInspector
-            block={blocks[selBlock]}
-            elementId={selElement}
-            bp={canvasBp}
-            onSetBp={setCanvasBreakpoint}
-            onPatchElement={(id: string, fn: (e: CappeCanvasElement) => CappeCanvasElement) => patchCanvasElement(selBlock, id, fn)}
-            onAddElement={(k: CappeCanvasElement['kind']) => addCanvasElement(selBlock, k)}
-            onRemoveElement={(id: string) => { removeCanvasElement(selBlock, id); postToCanvas({ type: 'cz-clear' }) }}
-            onChangeBlock={(b: CappeBlock) => updateBlock(selBlock, b)}
-            onHeaderPointerDown={startPanelDrag}
-            onClose={() => { setSelBlock(null); setSelElement(null); panelDragged.current = false; postToCanvas({ type: 'cz-clear' }) }}
-          />
-        ) : (
-          <CanvasPanel
-            blocks={blocks}
-            sel={selBlock}
-            onChange={updateBlock}
-            onMove={moveBlock}
-            onRemove={removeBlock}
-            onDuplicate={duplicateBlock}
-            onAddAt={addBlockAt}
-            onAdd={addBlock}
-            onHeaderPointerDown={startPanelDrag}
-            onClose={() => { setSelBlock(null); panelDragged.current = false; postToCanvas({ type: 'cz-clear' }) }}
-          />
-        )}
-      </div>
+          else a corner card with the Add affordance + hint. Hidden while
+          Merlin is open (see the `merlinOpen` prop doc) — a canvas-type
+          block still needs CanvasInspector for its element-level editing
+          (Merlin doesn't touch canvas elements), so that one stays. */}
+      {(!merlinOpen || (selBlock != null && isCanvasBlock(blocks[selBlock]))) && (
+        <div
+          className="fixed z-40 hidden max-h-[74vh] w-[360px] overflow-y-auto rounded-xl border border-zinc-700 bg-zinc-900 shadow-2xl shadow-black/60 lg:block"
+          style={selBlock != null ? { top: popPos.top, left: popPos.left } : { bottom: 16, left: 16 }}
+        >
+          {selBlock != null && isCanvasBlock(blocks[selBlock]) ? (
+            <CanvasInspector
+              block={blocks[selBlock]}
+              elementId={selElement}
+              bp={canvasBp}
+              onSetBp={setCanvasBreakpoint}
+              onPatchElement={(id: string, fn: (e: CappeCanvasElement) => CappeCanvasElement) => patchCanvasElement(selBlock, id, fn)}
+              onAddElement={(k: CappeCanvasElement['kind']) => addCanvasElement(selBlock, k)}
+              onRemoveElement={(id: string) => { removeCanvasElement(selBlock, id); postToCanvas({ type: 'cz-clear' }) }}
+              onChangeBlock={(b: CappeBlock) => updateBlock(selBlock, b)}
+              onHeaderPointerDown={startPanelDrag}
+              onClose={() => { setSelBlock(null); setSelElement(null); panelDragged.current = false; postToCanvas({ type: 'cz-clear' }) }}
+            />
+          ) : (
+            <CanvasPanel
+              blocks={blocks}
+              sel={selBlock}
+              onChange={updateBlock}
+              onMove={moveBlock}
+              onRemove={removeBlock}
+              onDuplicate={duplicateBlock}
+              onAddAt={addBlockAt}
+              onAdd={addBlock}
+              onHeaderPointerDown={startPanelDrag}
+              onClose={() => { setSelBlock(null); panelDragged.current = false; postToCanvas({ type: 'cz-clear' }) }}
+            />
+          )}
+        </div>
+      )}
 
       <div className="flex w-full items-center justify-center p-8 text-center text-sm text-zinc-500 lg:hidden">
         Canvas editing needs a wider screen — switch to Form mode or use a desktop.

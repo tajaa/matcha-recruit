@@ -790,6 +790,9 @@ MERLIN_OPS: tuple[MerlinOp, ...] = (
             'Only use set_theme with key "preset" when the user explicitly asks to change their theme — '
             'it replaces their brand color, fonts, corners and light/dark mode site-wide.',
             '"value" for set_theme "mode" must be "light" or "dark".',
+            'set_theme "mode" is self-sufficient — it repaints every surface color (background, text, '
+            'borders) for the new mode automatically. Do NOT also set_theme individual colors.* keys to '
+            '"fix" a mode switch; that overrides the repaint and can leave the page in the OLD mode\'s colors.',
             "Available theme presets (id — description):\n" + preset_catalog_text(),
             "Good heading/body font pairings for fonts.heading + fonts.body: " + font_pairings_text() + ".",
         ),

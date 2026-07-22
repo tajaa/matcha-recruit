@@ -344,12 +344,16 @@ export function useMerlin(
   // Fetched once and cached for the component's lifetime: the registry it
   // reflects only changes on a deploy. A failed fetch (offline, cold start)
   // just leaves this null — applyMerlinOps falls back to trusting the
-  // server's own validation, today's behavior.
+  // server's own validation, today's behavior. Kept as BOTH a ref (read
+  // synchronously inside `send`, below) and reactive state (`schema`, so the
+  // panel's `/` command menu — block labels, section presets, theme presets —
+  // re-renders once the fetch resolves instead of reading a stale null).
   const schemaRef = useRef<MerlinDesignSchema | null>(null)
+  const [schema, setSchema] = useState<MerlinDesignSchema | null>(null)
   useEffect(() => {
     let cancelled = false
     cappeApi.get<MerlinDesignSchema>('/merlin/schema')
-      .then((s) => { if (!cancelled) schemaRef.current = s })
+      .then((s) => { if (!cancelled) { schemaRef.current = s; setSchema(s) } })
       .catch(() => { /* degrade to unvalidated apply */ })
     return () => { cancelled = true }
   }, [])
@@ -562,7 +566,7 @@ export function useMerlin(
 
   return {
     open, setOpen, messages, send, sending, error, tier, setTier, width, setWidth, setWidthLive,
-    status, liveSteps,
+    status, liveSteps, schema,
     attachments, addAttachment, removeAttachment, attachmentUploading, attachmentError,
     conversationId, conversations, openConversation, newConversation,
     renameConversation, deleteConversation,

@@ -165,6 +165,25 @@
       "expect_ok": [true]
     },
     {
+      "name": "set_theme mode flip clears the stale dark surface palette",
+      "blocks": [],
+      "theme": {
+        "mode": "dark",
+        "colors": { "bg": "#0b0b0f", "surface": "#15151d", "text": "#f5f6f7", "muted": "#a0a4ad", "border": "#262630", "brand": "#a3e635", "accent": "#a3e635", "brandText": "#0b0b0f" }
+      },
+      "ops": [{ "op": "set_theme", "key": "mode", "value": "light" }],
+      "expect_theme": { "mode": "light", "colors": { "brand": "#a3e635", "accent": "#a3e635", "brandText": "#0b0b0f" } },
+      "expect_ok": [true]
+    },
+    {
+      "name": "set_theme mode to its current value is a plain no-op write",
+      "blocks": [],
+      "theme": { "mode": "dark", "colors": { "bg": "#0b0b0f", "brand": "#a3e635" } },
+      "ops": [{ "op": "set_theme", "key": "mode", "value": "dark" }],
+      "expect_theme": { "mode": "dark", "colors": { "bg": "#0b0b0f", "brand": "#a3e635" } },
+      "expect_ok": [true]
+    },
+    {
       "name": "canvas_add appends an element below the existing ones",
       "blocks": [
         {

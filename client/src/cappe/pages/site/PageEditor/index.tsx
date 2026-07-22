@@ -97,6 +97,10 @@ export default function PageEditor() {
     theme: themeEditor.theme,
     selectedBlock: canvas.selBlock != null ? (blocks[canvas.selBlock]?._k as string | undefined) ?? null : null,
   }
+  // Merlin's own acknowledgment of the current selection ("Working on Hero —
+  // what should we do here?") — a display label, not the `_k` used above.
+  const selectedBlockType = canvas.selBlock != null ? blocks[canvas.selBlock]?.type : undefined
+  const selectedLabel = selectedBlockType ? BLOCK_SCHEMAS[selectedBlockType]?.label ?? null : null
 
   // Reverse sync: clicking a page element while the drawer is open probes which
   // theme region governs it; the drawer scrolls to + flashes that control. Only
@@ -325,6 +329,7 @@ export default function PageEditor() {
             duplicateBlock={duplicateBlock}
             addBlockAt={addBlockAt}
             addBlock={addBlock}
+            merlinOpen={merlin.open}
           />
         ) : (
           /* split: form editor | live preview */
@@ -351,7 +356,7 @@ export default function PageEditor() {
           />
         )}
         <ThemeDrawer themeEditor={themeEditor} designerUnlocked={designerUnlocked} bridge={themeBridge} probe={themeProbe} />
-        <MerlinDrawer merlin={merlin} />
+        <MerlinDrawer merlin={merlin} selectedLabel={selectedLabel} />
         </div>
       </div>
     </SiteCtx.Provider>

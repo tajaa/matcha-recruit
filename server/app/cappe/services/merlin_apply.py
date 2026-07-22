@@ -173,6 +173,17 @@ def _apply_theme_op(
         }
         return {**theme, "colors": colors}
 
+    if key == "mode" and value in ("light", "dark") and theme.get("mode") != value:
+        # Mirrors the client's applyThemeOp mode branch — see its comment.
+        # render.py's `_tokens` bases the palette on `mode` then lets explicit
+        # `theme.colors` override it, so a preset's stored dark surface colors
+        # otherwise survive a `mode: light` flip untouched and the screenshot
+        # (and the real page) stays dark while Merlin reports "switched to
+        # light mode". Brand/accent/brandText are identity, not mode — kept.
+        colors = _as_dict(theme.get("colors"))
+        colors = {k: v for k, v in colors.items() if k not in ("bg", "surface", "text", "muted", "border")}
+        return {**theme, "mode": value, "colors": colors}
+
     head, _, sub = key.partition(".")
     if sub:
         bag = _as_dict(theme.get(head))

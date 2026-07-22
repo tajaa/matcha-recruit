@@ -73,8 +73,15 @@ export type MerlinApplyResult = {
  *  callers that don't fetch the schema fall back to today's behavior of
  *  applying whatever the server sent (it already validated group/key/value
  *  server-side — this is a belt-and-braces client check, not the source of
- *  truth). */
-export type MerlinDesignSchema = { design?: Record<string, Record<string, unknown>> }
+ *  truth). `blocks`/`sectionPresets`/`themePresets` are additionally read by
+ *  the panel's `/` command menu — see `build_merlin_schema` in
+ *  `merlin_ops.py` for the full server-side shape this mirrors (a subset). */
+export type MerlinDesignSchema = {
+  design?: Record<string, Record<string, unknown>>
+  blocks?: Record<string, { label: string }>
+  sectionPresets?: { name: string; label: string; blurb: string; blockType: string }[]
+  themePresets?: { id: string; name: string; blurb: string; premium: boolean; mode: string }[]
+}
 
 const blockLabel = (type: unknown): string => BLOCK_SCHEMAS[type as string]?.label ?? String(type ?? 'block')
 
@@ -135,6 +142,17 @@ function applyThemeOp(theme: Record<string, unknown>, key: string, value: unknow
   }
   if (key === 'colors.brand' && typeof value === 'string') {
     return { ...theme, colors: { ...asRecord(theme.colors), brand: value, accent: value, brandText: contrastText(value) } }
+  }
+  if (key === 'mode' && (value === 'light' || value === 'dark') && theme.mode !== value) {
+    // render.py's `_tokens` picks the LIGHT/DARK base palette from `mode`,
+    // then lets explicit `theme.colors` override it — so on a theme whose
+    // preset stored its own surface colors (every dark preset does), writing
+    // `mode` alone changes the flag and nothing else paints. Clear the
+    // SURFACE keys (not brand/accent/brandText — that's identity, not mode)
+    // so the new mode's base actually shows through.
+    const colors = { ...asRecord(theme.colors) }
+    for (const k of ['bg', 'surface', 'text', 'muted', 'border']) delete colors[k]
+    return { ...theme, mode: value, colors }
   }
   const [head, ...rest] = key.split('.')
   if (rest.length) {

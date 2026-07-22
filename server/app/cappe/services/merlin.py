@@ -53,7 +53,9 @@ logger = logging.getLogger(__name__)
 # A theme swap replaces brand/fonts/radius/mode site-wide, so it only fires when
 # the user actually asked for one. Without this the model reached for `preset`
 # on a request that never mentioned themes and nuked the site's look.
-_THEME_INTENT_RE = re.compile(r"\b(theme|preset|palette|colou?r scheme|restyle|redesign)\b", re.I)
+_THEME_INTENT_RE = re.compile(
+    r"\b(theme|preset|palette|colou?r scheme|restyle|redesign|light mode|dark mode)\b", re.I
+)
 _MAX_HISTORY_TURNS = 10
 
 _rate_limiter: Optional[GeminiRateLimiter] = None
