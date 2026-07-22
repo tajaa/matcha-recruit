@@ -92,9 +92,10 @@ async def test_image_generation_routing_and_upload(mock_get_storage):
         thread_id="22222222-2222-2222-2222-222222222222"
     )
 
-    # Verify that the image preview model was called
+    # Verify that the image model was called — GA name, not "-preview" (that
+    # model was shut down 2026-06-25).
     assert len(mock_client.models.calls) == 1
-    assert mock_client.models.calls[0]["model"] == "gemini-3.1-flash-image-preview"
+    assert mock_client.models.calls[0]["model"] == "gemini-3.1-flash-image"
 
     # Verify storage upload was called with expected arguments
     mock_storage.upload_file.assert_called_once()

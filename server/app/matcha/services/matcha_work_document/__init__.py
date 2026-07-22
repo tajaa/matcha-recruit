@@ -1196,7 +1196,9 @@ async def generate_cover_image(
         def _call() -> Optional[tuple[bytes, str]]:
             try:
                 response = client.models.generate_content(
-                    model="gemini-3.1-flash-image-preview",
+                    # GA name — Google shut the preview model down 2026-06-25.
+                    # Matches core.services.image_gen.IMAGE_MODEL.
+                    model="gemini-3.1-flash-image",
                     contents=prompt,
                     config=_genai_types.GenerateContentConfig(
                         response_modalities=["IMAGE", "TEXT"],

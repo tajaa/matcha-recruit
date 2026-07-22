@@ -560,7 +560,12 @@ async def run_merlin_agent(
         return (
             {"placed": True, "url": url,
              "note": "The image attached to this response is what was generated and placed."},
-            {"kind": "image", "label": f"Generated image → {field}"},
+            # image_url lets the panel show what was generated (same field the
+            # screenshot step already uses for its thumbnail) — and now also
+            # drives the panel's "Apply to…" menu, so the user can re-target
+            # the SAME generated image onto a different field/background than
+            # wherever the model happened to place it.
+            {"kind": "image", "label": f"Generated image → {field}", "image_url": url},
             png,
         )
 

@@ -30,7 +30,12 @@ from .storage import get_storage
 
 logger = logging.getLogger(__name__)
 
-IMAGE_MODEL = "gemini-3.1-flash-image-preview"  # matches matcha_work_ai._IMAGE_MODEL
+# GA name, not "-preview" — Google shut the preview model down 2026-06-25
+# (deprecation notice + removal both landed before this codebase migrated).
+# Same weights/pricing under Nano Banana 2's new name. Matches
+# matcha_work_ai._IMAGE_MODEL and matcha_work_document's inline model= arg —
+# keep all three in sync on the next model bump.
+IMAGE_MODEL = "gemini-3.1-flash-image"
 IMAGE_GEN_TIMEOUT = 60  # seconds — outer backstop on the awaited coroutine
 # SDK request timeout in MILLISECONDS — set below IMAGE_GEN_TIMEOUT so the SDK
 # (httpx) aborts the request, unblocking the worker thread, before the outer

@@ -428,7 +428,12 @@ def test_generate_image_tool_places_the_result_and_logs_a_set_field(patched, mon
         {"op": "set_field", "block": "b1", "path": "image", "value": "https://cdn.example.test/g.png"}
     ]
     assert calls[0]["reference_images"] is None
-    assert any(s["kind"] == "image" for s in data["steps"])
+    image_steps = [s for s in data["steps"] if s["kind"] == "image"]
+    assert image_steps
+    # The panel's "Apply to…" menu (and its chat thumbnail) both read this —
+    # without it the model's placement is the ONLY way to see or re-target
+    # what got generated.
+    assert image_steps[0]["image_url"] == "https://cdn.example.test/g.png"
 
 
 def test_generate_image_conditions_on_a_numbered_attachment(patched, monkeypatch):

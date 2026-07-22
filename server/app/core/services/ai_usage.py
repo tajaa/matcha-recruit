@@ -60,6 +60,12 @@ PRICING: dict[tuple[str, str], tuple[float, float]] = {
     # matcha/services/model_pricing.py — ported here so image-gen calls (the
     # editor's Generate button, Merlin's agent-loop generate_image tool) stop
     # logging cost_usd=NULL and showing as "unpriced" in the admin dashboard.
+    # GA name is what every caller sends now (image_gen.IMAGE_MODEL etc. moved
+    # off "-preview" 2026-07-22 — Google shut that model down 2026-06-25).
+    # "-preview" stays priced too: existing ai_usage_log rows still carry it,
+    # and a stale client binary in flight during the deploy would otherwise
+    # start logging unpriced calls.
+    ("gemini", "gemini-3.1-flash-image"): (0.30, 30.00),
     ("gemini", "gemini-3.1-flash-image-preview"): (0.30, 30.00),
 }
 

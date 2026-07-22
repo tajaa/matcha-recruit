@@ -99,8 +99,14 @@ type StoredMessage = {
 const HISTORY_TURNS = 10
 const TIER_KEY = 'cappe:merlin-tier'
 const WIDTH_KEY = 'cappe:merlin-width'
+const EXPANDED_KEY = 'cappe:merlin-expanded'
 export const MERLIN_MIN_WIDTH = 320
-export const MERLIN_MAX_WIDTH = 560
+export const MERLIN_MAX_WIDTH = 720
+// Expanded ("pop out") width: a fraction of the viewport, capped — wide
+// enough to feel like its own editor surface without ever fully covering
+// the live preview it's editing alongside.
+const EXPANDED_WIDTH_RATIO = 0.6
+const EXPANDED_WIDTH_CAP = 900
 
 /** Merlin chat: the transcript lives SERVER-side (migration zzzzcappe22), so a
  *  page can hold several named conversations and they survive a reload. The
@@ -180,7 +186,7 @@ export function useMerlin(
   // Panel width lives here rather than in the drawer because index.tsx needs it
   // for `reservedRight` (the canvas inspector is viewport-fixed and has to clamp
   // clear of the docked panel).
-  const [width, setWidthState] = useState<number>(() => {
+  const [dockedWidth, setDockedWidthState] = useState<number>(() => {
     const saved = Number(localStorage.getItem(WIDTH_KEY))
     return Number.isFinite(saved) && saved >= MERLIN_MIN_WIDTH && saved <= MERLIN_MAX_WIDTH
       ? saved
@@ -194,13 +200,39 @@ export function useMerlin(
    *  thumbnails, and the canvas bridge's `reservedRight` all key off it). A
    *  localStorage write per call would add synchronous disk I/O on top of
    *  that for a value only the FINAL position needs persisted. */
-  const setWidthLive = (px: number) => setWidthState(clampWidth(px))
+  const setWidthLive = (px: number) => setDockedWidthState(clampWidth(px))
   /** Commit — persists to localStorage. Call once a drag ends. */
   const setWidth = (px: number) => {
     const clamped = clampWidth(px)
-    setWidthState(clamped)
+    setDockedWidthState(clamped)
     try { localStorage.setItem(WIDTH_KEY, String(clamped)) } catch { /* ignore quota */ }
   }
+
+  // "Pop out" — widens the panel so it reads as its own editor surface
+  // instead of a narrow sidebar, without detaching into a separate window
+  // (a real window loses the live-preview + editor-state coupling that is
+  // the whole point of Merlin acting directly on the page).
+  const [expanded, setExpandedState] = useState<boolean>(
+    () => localStorage.getItem(EXPANDED_KEY) === '1',
+  )
+  const setExpanded = (v: boolean) => {
+    setExpandedState(v)
+    try { localStorage.setItem(EXPANDED_KEY, v ? '1' : '0') } catch { /* ignore quota */ }
+  }
+  const [expandedWidth, setExpandedWidth] = useState(() =>
+    Math.min(window.innerWidth * EXPANDED_WIDTH_RATIO, EXPANDED_WIDTH_CAP),
+  )
+  useEffect(() => {
+    if (!expanded) return
+    const onResize = () => setExpandedWidth(Math.min(window.innerWidth * EXPANDED_WIDTH_RATIO, EXPANDED_WIDTH_CAP))
+    onResize()
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [expanded])
+  // The EFFECTIVE width — what index.tsx's `reservedRight` and the drawer's
+  // own `style={{ width }}` both read. Callers don't need to know docked vs.
+  // expanded is two different numbers under the hood.
+  const width = expanded ? expandedWidth : dockedWidth
 
   // Live siteId/pageId, read by both the in-flight check in `send` (below)
   // and the persist effect below — both need a ref because `send` closes
@@ -362,6 +394,55 @@ export function useMerlin(
     try {
       await cappeApi.patch(`/merlin/messages/${messageId}/results`, { results })
     } catch { /* cosmetic — the chips just won't survive a reload */ }
+  }
+
+  /** One block a generated (or attached) image can be dropped onto: its own
+   *  image field(s) (hero image, logo, …) plus — every block type, per
+   *  `merlin_ops._v_set_design` — a background. Background is Pro-only
+   *  (`_design` is stripped on save for free plans, same gate the design
+   *  bag is behind everywhere else), so it's simply not offered when the
+   *  target would silently vanish on Save. */
+  const getImageTargets = (premium: boolean) => {
+    const { blocks } = getSnapshot()
+    const blockSchemas = schema?.blocks ?? {}
+    return blocks
+      .filter((b): b is CappeBlock & { _k: string } => typeof b._k === 'string')
+      .map((b) => {
+        const type = String(b.type)
+        const spec = blockSchemas[type]
+        const fields = Object.entries(spec?.fields ?? {})
+          .filter(([, f]) => f.kind === 'image')
+          .map(([field]) => ({
+            field,
+            label: field.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^./, (c) => c.toUpperCase()),
+          }))
+        return { blockId: b._k, blockLabel: spec?.label ?? type, fields, canBackground: premium }
+      })
+      .filter((g) => g.fields.length > 0 || g.canBackground)
+  }
+
+  /** Apply an already-generated (or attached) image URL to a field or a
+   *  background — the "Apply to…" menu's action. Synchronous fold against
+   *  LIVE state, same one-undo-step contract as every other apply here. */
+  const applyImageTo = (url: string, target: { block: string; field: string } | { block: string; background: true }) => {
+    const cur = getSnapshot()
+    const ops: MerlinOp[] = 'field' in target
+      ? [{ op: 'set_field', block: target.block, path: target.field, value: url }]
+      : [
+          { op: 'set_design', block: target.block, group: 'bg', key: 'type', value: 'image' },
+          { op: 'set_design', block: target.block, group: 'bg', key: 'image', value: url },
+        ]
+    const applied = applyMerlinOps(cur.blocks, cur.theme, ops, schemaRef.current ?? undefined)
+    const changed = applied.blocks !== cur.blocks
+    if (changed) {
+      onApply({ blocks: applied.blocks, theme: applied.theme, blocksChanged: true, themeChanged: false })
+    }
+    setMessages((m) => [...m, {
+      role: 'assistant',
+      content: changed ? 'Applied the image.' : "Couldn't apply — that section is gone.",
+      results: applied.results,
+      noChanges: !applied.results.some((r) => r.ok),
+    }])
   }
 
   // Execute generate_image ops sequentially: generate via the endpoint, then
@@ -566,7 +647,8 @@ export function useMerlin(
 
   return {
     open, setOpen, messages, send, sending, error, tier, setTier, width, setWidth, setWidthLive,
-    status, liveSteps, schema,
+    expanded, setExpanded,
+    status, liveSteps, schema, getImageTargets, applyImageTo,
     attachments, addAttachment, removeAttachment, attachmentUploading, attachmentError,
     conversationId, conversations, openConversation, newConversation,
     renameConversation, deleteConversation,

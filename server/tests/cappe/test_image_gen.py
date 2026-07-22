@@ -138,4 +138,6 @@ def test_aspect_ratio_whitelist_mirrors_the_service():
         pytest.skip("google.genai not installed in this environment")
     assert AI_ASPECT_RATIOS == ASPECT_RATIOS
     assert DEFAULT_ASPECT in ASPECT_RATIOS
-    assert IMAGE_MODEL == "gemini-3.1-flash-image-preview"
+    # GA name — the "-preview" model Google shipped this under was shut down
+    # 2026-06-25; a regression back to it means every image-gen call 404s.
+    assert IMAGE_MODEL == "gemini-3.1-flash-image"

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { AlertCircle, ChevronDown, ChevronRight, Cpu, RefreshCw, X } from 'lucide-react'
+import { AlertCircle, ChevronDown, ChevronRight, Cpu, Image, RefreshCw, X } from 'lucide-react'
 import { useAsync } from '../../hooks/useAsync'
 import { getAiUsageCalls, getAiUsageSummary, getAiUsageTimeseries } from '../../api/admin/aiUsage'
 import type {
@@ -26,6 +26,33 @@ const STATUS_CHIPS: { label: string; value: AiUsageStatus | '' }[] = [
 ]
 
 type Selection = { kind: 'feature' | 'model'; value: string } | null
+
+// Every image-generation model this codebase has ever called — the current
+// GA name (core.services.image_gen.IMAGE_MODEL) plus the "-preview" name it
+// shipped under before Google shut that one down 2026-06-25. Matched by
+// prefix so a future "gemini-3.2-flash-image" etc. doesn't need a code
+// change here to keep showing up, and so historical "-preview" rows already
+// in ai_usage_log stay included in the rollup below.
+const IMAGE_MODEL_PREFIX = 'gemini-3.1-flash-image'
+// The one callers actually send today — what clicking the summary card below
+// filters the call log to (a specific "-preview" row is a rounding error of
+// historical traffic by now, not worth a multi-value filter on the backend).
+const CURRENT_IMAGE_MODEL = 'gemini-3.1-flash-image'
+
+function sumImageMetrics(rows: AiUsageModelRollup[]) {
+  const calls = rows.reduce((s, r) => s + r.calls, 0)
+  const cost_usd = rows.some((r) => r.cost_usd != null)
+    ? rows.reduce((s, r) => s + (r.cost_usd ?? 0), 0)
+    : null
+  return {
+    calls,
+    cost_usd,
+    input_tokens: rows.reduce((s, r) => s + r.input_tokens, 0),
+    output_tokens: rows.reduce((s, r) => s + r.output_tokens, 0),
+    errors: rows.reduce((s, r) => s + r.errors, 0),
+    unknown_cost_calls: rows.reduce((s, r) => s + r.unknown_cost_calls, 0),
+  }
+}
 
 function fmtCost(v: number | null): string {
   if (v == null) return '—'
@@ -252,6 +279,13 @@ export default function AiUsage() {
   )
   const { summary, timeseries } = data
   const totals = summary?.totals
+  // Derived, not fetched — `by_model` already carries every model's rollup
+  // for the window, so image-generation spend is just the rows that match.
+  // No new endpoint/query: same data the "By model" table below renders,
+  // pre-summed into its own card row per the ask "make sure /ai-usage has
+  // info about image calls like we do for other aspects".
+  const imageModelRows = summary?.by_model.filter((r) => r.model.startsWith(IMAGE_MODEL_PREFIX)) ?? []
+  const imageTotals = imageModelRows.length ? sumImageMetrics(imageModelRows) : null
 
   // Separate fetch for the call log: it's interaction-driven (selection,
   // status, page) rather than page-level, so it doesn't belong in the
@@ -370,6 +404,44 @@ export default function AiUsage() {
           {totals.unknown_cost_calls} call(s) have unknown cost (unpriced model, or a timeout/error with no
           token count) — the total above is undercounted.
         </p>
+      )}
+
+      {/* Image generation — the editor's Generate button + Merlin's agent-loop
+          generate_image tool, both routed through core.services.image_gen and
+          logged under whichever image model they called. Pulled out of the
+          generic by-model table into its own row: token counts read as noise
+          for an image call (~1290 tokens IS one image, not a lot of text), so
+          "cost per image" is the number that actually answers "what's this
+          costing me" — the by-model/by-feature tables below still have the
+          full breakdown if that's what's needed instead. */}
+      {imageTotals && (
+        <div className="mb-4">
+          <p className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+            <Image size={11} /> Image generation
+          </p>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <StatCard
+              label="Images generated"
+              value={String(imageTotals.calls)}
+              sub="click to filter the call log"
+              active={selection?.kind === 'model' && selection.value === CURRENT_IMAGE_MODEL}
+              onClick={() => selectModel(CURRENT_IMAGE_MODEL)}
+            />
+            <StatCard label="Image spend" value={fmtCost(imageTotals.cost_usd)} />
+            <StatCard
+              label="Avg cost / image"
+              value={imageTotals.calls > 0 && imageTotals.cost_usd != null
+                ? fmtCost(imageTotals.cost_usd / imageTotals.calls)
+                : '—'}
+            />
+            <StatCard label="Image output tokens" value={fmtTokens(imageTotals.output_tokens)} />
+          </div>
+          {imageTotals.unknown_cost_calls > 0 && (
+            <p className="mt-1.5 text-[11px] text-amber-300/90">
+              {imageTotals.unknown_cost_calls} image call(s) have unknown cost — spend above is undercounted.
+            </p>
+          )}
+        </div>
       )}
 
       {timeseries.points.length > 0 && (

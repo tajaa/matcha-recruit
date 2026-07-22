@@ -74,11 +74,13 @@ export type MerlinApplyResult = {
  *  applying whatever the server sent (it already validated group/key/value
  *  server-side — this is a belt-and-braces client check, not the source of
  *  truth). `blocks`/`sectionPresets`/`themePresets` are additionally read by
- *  the panel's `/` command menu — see `build_merlin_schema` in
- *  `merlin_ops.py` for the full server-side shape this mirrors (a subset). */
+ *  the panel's `/` command menu, and `blocks[type].fields` by its "Apply
+ *  image to…" menu (a field with kind "image" is a valid drop target) — see
+ *  `build_merlin_schema` in `merlin_ops.py` for the full server-side shape
+ *  this mirrors (a subset). */
 export type MerlinDesignSchema = {
   design?: Record<string, Record<string, unknown>>
-  blocks?: Record<string, { label: string }>
+  blocks?: Record<string, { label: string; fields?: Record<string, { kind: string }> }>
   sectionPresets?: { name: string; label: string; blurb: string; blockType: string }[]
   themePresets?: { id: string; name: string; blurb: string; premium: boolean; mode: string }[]
 }

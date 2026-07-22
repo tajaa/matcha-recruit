@@ -955,7 +955,10 @@ class GeminiProvider(MatchaWorkAIProvider):
             from ...core.services.storage import get_storage
             from ..services.matcha_work_document import build_matcha_work_thread_storage_prefix
 
-            _IMAGE_MODEL = "gemini-3.1-flash-image-preview"
+            # GA name — Google shut the preview model down 2026-06-25. Matches
+            # core.services.image_gen.IMAGE_MODEL and matcha_work_document's
+            # inline model= arg.
+            _IMAGE_MODEL = "gemini-3.1-flash-image"
 
             def _call_imagen() -> Optional[tuple[bytes, str, str, Optional[dict]]]:
                 try:

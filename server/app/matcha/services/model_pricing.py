@@ -26,7 +26,14 @@ MODEL_PRICING: dict[str, dict[str, Decimal]] = {
         "output_per_1m": Decimal("0.40"),
     },
     # Gemini 3.1 Flash Image — image output tokens are billed at the image
-    # rate (~$30/1M ≈ $0.039 per 1290-token image); placeholder pending GA.
+    # rate (~$30/1M ≈ $0.039 per 1290-token image). GA landed 2026-06-25 as
+    # "gemini-3.1-flash-image" (Nano Banana 2); the "-preview" name it
+    # shipped under is now shut down. Both rows priced — "-preview" for any
+    # already-logged rows that still carry it.
+    "gemini-3.1-flash-image": {
+        "input_per_1m": Decimal("0.30"),
+        "output_per_1m": Decimal("30.00"),
+    },
     "gemini-3.1-flash-image-preview": {
         "input_per_1m": Decimal("0.30"),
         "output_per_1m": Decimal("30.00"),

@@ -2,8 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import {
-  AlertCircle, Check, Eye, History, Image, Loader2, Lock, MousePointerClick, Paperclip,
-  Pencil, Plus, Search, Slash, Sparkles, Trash2, Wand2, X,
+  AlertCircle, Check, Eye, History, Image, Loader2, Lock, Maximize2, Minimize2,
+  MousePointerClick, Paperclip, Pencil, Plus, Search, Slash, Sparkles, Trash2, Wand2, X,
 } from 'lucide-react'
 import { usePremium } from './DesignPrimitives'
 import { dHead } from './styles'
@@ -50,11 +50,80 @@ const STEP_ICONS = {
   image: Image,
 } as const
 
+/** A generated image's "Apply to…" menu — re-target the SAME image onto a
+ *  different field or a section background than wherever the model happened
+ *  to place it. Reuses `merlin.getImageTargets`/`applyImageTo`, so this is a
+ *  thin picker over the same apply path any chat-driven placement uses (one
+ *  undo step, same result chips). */
+function ApplyImageMenu({ url, merlin, premium }: { url: string; merlin: ReturnType<typeof useMerlin>; premium: boolean }) {
+  const [open, setOpen] = useState(false)
+  const boxRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => {
+      if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false)
+    }
+    window.addEventListener('mousedown', onDown)
+    return () => window.removeEventListener('mousedown', onDown)
+  }, [open])
+
+  const targets = open ? merlin.getImageTargets(premium) : []
+
+  return (
+    <div ref={boxRef} className="relative mt-1 inline-block">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="flex items-center gap-1 rounded px-1 py-0.5 text-[10px] font-medium text-emerald-400 hover:bg-zinc-800 hover:text-emerald-300"
+      >
+        <Wand2 className="h-2.5 w-2.5" /> Apply to…
+      </button>
+      {open && (
+        <div className="absolute left-0 z-20 mt-1 max-h-64 w-56 overflow-y-auto rounded-lg border border-zinc-700 bg-zinc-900 p-1 shadow-xl">
+          {targets.length === 0 && (
+            <p className="p-2 text-[11px] text-zinc-500">No sections on this page yet.</p>
+          )}
+          {targets.map((t) => (
+            <div key={t.blockId} className="mb-1 last:mb-0">
+              <p className="px-2 pt-1 text-[10px] font-semibold uppercase tracking-wide text-zinc-500">{t.blockLabel}</p>
+              {t.fields.map((f) => (
+                <button
+                  key={f.field}
+                  onClick={() => { merlin.applyImageTo(url, { block: t.blockId, field: f.field }); setOpen(false) }}
+                  className="block w-full rounded px-2 py-1 text-left text-xs text-zinc-200 hover:bg-zinc-800"
+                >
+                  → {f.label}
+                </button>
+              ))}
+              {t.canBackground && (
+                <button
+                  onClick={() => { merlin.applyImageTo(url, { block: t.blockId, background: true }); setOpen(false) }}
+                  className="block w-full rounded px-2 py-1 text-left text-xs text-zinc-200 hover:bg-zinc-800"
+                >
+                  → Background
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 /** The agent loop's trace for a turn: what it applied, what it rendered, what
  *  it looked at. This is the visible difference between Merlin guessing and
  *  Merlin checking its own work, so it's shown rather than hidden behind a
- *  toggle — but compactly, above the reply it explains. */
-function StepTrail({ steps, live }: { steps: MerlinStep[]; live?: boolean }) {
+ *  toggle — but compactly, above the reply it explains.
+ *
+ *  `merlin`/`premium` are omitted for the LIVE trail (a turn still in
+ *  flight) — applying mid-turn would race the turn's own pending ops. */
+function StepTrail({ steps, live, merlin, premium }: {
+  steps: MerlinStep[]
+  live?: boolean
+  merlin?: ReturnType<typeof useMerlin>
+  premium?: boolean
+}) {
   if (!steps.length) return null
   return (
     <div className="mb-1.5 space-y-1 border-l border-zinc-700/70 pl-2">
@@ -67,13 +136,18 @@ function StepTrail({ steps, live }: { steps: MerlinStep[]; live?: boolean }) {
             <div className="min-w-0">
               <span className={last ? 'text-zinc-300' : ''}>{s.label}</span>
               {s.image_url && (
-                <a href={s.image_url} target="_blank" rel="noreferrer" className="mt-1 block">
-                  <img
-                    src={s.image_url}
-                    alt="Rendered preview Merlin reviewed"
-                    className="max-h-28 w-full rounded border border-zinc-700 object-cover object-top"
-                  />
-                </a>
+                <>
+                  <a href={s.image_url} target="_blank" rel="noreferrer" className="mt-1 block">
+                    <img
+                      src={s.image_url}
+                      alt="Rendered preview Merlin reviewed"
+                      className="max-h-28 w-full rounded border border-zinc-700 object-cover object-top"
+                    />
+                  </a>
+                  {!live && s.kind === 'image' && merlin && (
+                    <ApplyImageMenu url={s.image_url} merlin={merlin} premium={!!premium} />
+                  )}
+                </>
               )}
             </div>
           </div>
@@ -259,6 +333,7 @@ export function MerlinDrawer({ merlin, selectedLabel }: { merlin: ReturnType<typ
   const premium = usePremium()
   const {
     open, setOpen, messages, send, sending, error, tier, setTier, width, setWidth, setWidthLive,
+    expanded, setExpanded,
     newConversation, status, liveSteps, schema,
     attachments, addAttachment, removeAttachment, attachmentUploading, attachmentError,
   } = merlin
@@ -404,11 +479,15 @@ export function MerlinDrawer({ merlin, selectedLabel }: { merlin: ReturnType<typ
       className="relative flex shrink-0 flex-col overflow-hidden border-l border-zinc-800 bg-zinc-900"
       style={{ width }}
     >
-      <div
-        onMouseDown={startResize}
-        title={`Drag to resize (${MERLIN_MIN_WIDTH}–${MERLIN_MAX_WIDTH}px)`}
-        className="absolute inset-y-0 left-0 z-10 w-1 cursor-col-resize hover:bg-emerald-500/40"
-      />
+      {/* Resize handle only makes sense docked — expanded width tracks the
+          viewport (see useMerlin's expandedWidth), not a dragged pixel value. */}
+      {!expanded && (
+        <div
+          onMouseDown={startResize}
+          title={`Drag to resize (${MERLIN_MIN_WIDTH}–${MERLIN_MAX_WIDTH}px)`}
+          className="absolute inset-y-0 left-0 z-10 w-1 cursor-col-resize hover:bg-emerald-500/40"
+        />
+      )}
       <div className="flex items-center justify-between border-b border-zinc-800 p-3">
         <p className={dHead}>Merlin</p>
         <div className="flex items-center gap-1">
@@ -418,6 +497,13 @@ export function MerlinDrawer({ merlin, selectedLabel }: { merlin: ReturnType<typ
               <Plus className="h-4 w-4" />
             </button>
           )}
+          <button
+            onClick={() => setExpanded(!expanded)}
+            className="rounded p-0.5 text-zinc-500 hover:text-zinc-200"
+            title={expanded ? 'Dock' : 'Pop out — edit in a wider workspace'}
+          >
+            {expanded ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+          </button>
           <button onClick={() => setOpen(() => false)} className="rounded p-0.5 text-zinc-500 hover:text-zinc-200" title="Close (Esc)"><X className="h-4 w-4" /></button>
         </div>
       </div>
@@ -454,7 +540,7 @@ export function MerlinDrawer({ merlin, selectedLabel }: { merlin: ReturnType<typ
             )}
             {messages.map((m, i) => (
               <div key={m.id ?? i} className={m.role === 'user' ? 'ml-6' : 'mr-2'}>
-                {m.steps && <StepTrail steps={m.steps} />}
+                {m.steps && <StepTrail steps={m.steps} merlin={merlin} premium={premium} />}
                 {m.attachments && m.attachments.length > 0 && (
                   <div className="mb-1 flex flex-wrap justify-end gap-1">
                     {m.attachments.map((a, j) => (

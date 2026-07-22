@@ -179,10 +179,18 @@ def test_compute_cost_partial_tokens_still_computed():
 
 
 def test_compute_cost_prices_image_model():
-    # Was absent from PRICING, so every image-gen call (the editor's Generate
-    # button and Merlin's agent-loop generate_image tool both go through
-    # core.services.image_gen, which uses this exact model string) logged
-    # cost_usd=NULL and showed as "unpriced" in the admin dashboard.
+    # image_gen.IMAGE_MODEL — every real call (the editor's Generate button,
+    # Merlin's agent-loop generate_image tool) uses this exact string. Was
+    # absent from PRICING entirely at one point, logging cost_usd=NULL and
+    # showing as "unpriced" in the admin dashboard.
+    cost = ai_usage.compute_cost("gemini", "gemini-3.1-flash-image", 1_000_000, 1_000_000, 0)
+    assert cost == pytest.approx(0.30 + 30.00)
+
+
+def test_compute_cost_prices_retired_preview_image_model():
+    # "-preview" was the name this model shipped under before GA (shut down
+    # 2026-06-25) — still priced so pre-migration ai_usage_log rows don't
+    # retroactively show as unpriced.
     cost = ai_usage.compute_cost("gemini", "gemini-3.1-flash-image-preview", 1_000_000, 1_000_000, 0)
     assert cost == pytest.approx(0.30 + 30.00)
 
