@@ -101,7 +101,7 @@ def has_pool() -> bool:
 
 
 @asynccontextmanager
-async def connection_or_direct():
+async def connection_or_direct(*, force_direct: bool = False):
     """A connection that works in BOTH the API and a Celery worker.
 
     For code on the SHARED service path that cannot know which world it is running
@@ -113,11 +113,18 @@ async def connection_or_direct():
     Pooled connection when a pool exists; otherwise a raw one, opened and closed
     per use inside the caller's own loop.
 
+    `force_direct` skips the pool even when one exists. Needed by callers running
+    on a DIFFERENT event loop than the one the pool was created on — an asyncpg
+    pool's connections are bound to their creating loop, and using one from a
+    foreign loop raises "got Future attached to a different loop". The live case
+    is a blocking SDK call inside `asyncio.to_thread` that then spins up its own
+    `asyncio.run()` to record telemetry (see `ai_usage._record`).
+
     Prefer plain `get_connection()` on request paths, and pass an explicit `conn`
     down worker paths. This is for the narrow middle: shared code with no caller
     context.
     """
-    if _pool is not None:
+    if _pool is not None and not force_direct:
         async with get_connection() as conn:
             yield conn
         return

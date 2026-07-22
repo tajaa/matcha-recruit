@@ -174,10 +174,13 @@ def _extract_usage(resp: Any) -> tuple[Optional[int], Optional[int], Optional[in
     )
 
 
-async def _insert_row(row: dict[str, Any]) -> None:
+async def _insert_row(row: dict[str, Any], *, direct: bool = False) -> None:
+    """`direct` forces a raw (non-pooled) connection — set it when this runs on
+    an event loop that is NOT the one the app's pool was created on. See
+    `_record`'s no-running-loop branch."""
     try:
         from ...database import connection_or_direct
-        async with connection_or_direct() as conn:
+        async with connection_or_direct(force_direct=direct) as conn:
             await conn.execute(
                 """
                 INSERT INTO ai_usage_log
@@ -226,7 +229,15 @@ def _record(row: dict[str, Any]) -> None:
         loop = None
     if loop is None:
         try:
-            asyncio.run(_insert_row(row))
+            # direct=True is load-bearing: `asyncio.run` creates a BRAND NEW
+            # loop, and in the API process the app's asyncpg pool belongs to
+            # the main loop. Acquiring from it here raises "got Future
+            # attached to a different loop" and the row is lost — which is
+            # exactly how image generation (the one path that reaches this
+            # branch, via image_gen's `asyncio.to_thread(_generate_sync)`)
+            # silently recorded nothing while every async caller recorded
+            # fine. A raw per-call connection is correct for a foreign loop.
+            asyncio.run(_insert_row(row, direct=True))
         except Exception:  # noqa: BLE001
             logger.warning("ai_usage: failed to record call (sync path)", exc_info=True)
         return

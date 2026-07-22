@@ -250,10 +250,13 @@ class _FakeClient:
 
 @pytest.fixture
 def recorded(monkeypatch):
+    """Captured rows. Each carries `_direct` — whether `_insert_row` was asked
+    for a raw (non-pooled) connection, which the sync path MUST do (see
+    test_sync_path_forces_a_direct_connection)."""
     rows = []
 
-    async def fake_insert(row):
-        rows.append(row)
+    async def fake_insert(row, *, direct=False):
+        rows.append({**row, "_direct": direct})
 
     monkeypatch.setattr(ai_usage, "_insert_row", fake_insert)
     return rows
@@ -295,6 +298,43 @@ def test_sync_generate_content_error_recorded_and_reraised(recorded):
     assert len(recorded) == 1
     assert recorded[0]["status"] == "error"
     assert "boom" in recorded[0]["error"]
+
+
+def test_sync_path_forces_a_direct_connection(recorded):
+    """Regression: the sync path reaches `_record`, which has no running loop
+    and so spins up its own via `asyncio.run`. The app's asyncpg pool belongs
+    to the MAIN loop — acquiring from it on that fresh loop raises "got Future
+    attached to a different loop" and the row is silently lost.
+
+    This is not hypothetical: image generation is exactly this shape
+    (`image_gen.generate_image` → `asyncio.to_thread(_generate_sync)` → a
+    blocking SDK call on a worker thread), so every generated image failed to
+    record while async callers recorded fine.
+    """
+    real = _FakeModels(is_async=False)
+    fake_client = _FakeClient(models_sync=real, models_async=_FakeModels(is_async=True))
+    wrapped = ai_usage.wrap_client(fake_client)
+
+    wrapped.models.generate_content(model="gemini-3.1-flash-image", contents="hi")
+
+    assert len(recorded) == 1
+    assert recorded[0]["_direct"] is True, (
+        "the sync path runs on a foreign event loop and must not touch the pool"
+    )
+
+
+@pytest.mark.asyncio
+async def test_async_path_uses_the_pool(recorded):
+    """The mirror of the above — an async caller IS on the pool's own loop, so
+    it must keep using the pool rather than opening a raw connection per call."""
+    real_async = _FakeModels(is_async=True)
+    fake_client = _FakeClient(models_sync=_FakeModels(is_async=False), models_async=real_async)
+    wrapped = ai_usage.wrap_client(fake_client)
+
+    await wrapped.aio.models.generate_content(model="gemini-3.6-flash", contents="hi")
+
+    assert len(recorded) == 1
+    assert recorded[0]["_direct"] is False
 
 
 @pytest.mark.asyncio
