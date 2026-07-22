@@ -1,17 +1,24 @@
 import { useEffect, useRef, useState } from 'react'
 import { cappeApi } from '../../../api'
+import { postCappeSSE } from '../../../sse'
 import type { CappeBlock } from '../../../types'
 import { applyMerlinOps, type MerlinDesignSchema, type MerlinOp, type MerlinOpResult } from './merlinOps'
 
 export type MerlinTier = 'lite' | 'regular' | 'max'
+/** What the picker offers. 'auto' is not a model — the server resolves it per
+ *  request (`services/merlin_router.py`) and reports which tier it chose. */
+export type MerlinTierChoice = MerlinTier | 'auto'
 
 /** Mirrors MODEL_TIERS in server/app/cappe/services/merlin_catalog.py.
  *  `premium` marks the tiers that need a Pro/Business plan — the server
- *  clamps regardless, this only drives the picker UI. */
-export const MERLIN_TIERS: { id: MerlinTier; label: string; hint: string; premium: boolean }[] = [
+ *  clamps regardless, this only drives the picker UI. Auto is listed first and
+ *  is the default: picking between these is a question about model economics,
+ *  not about the user's website. */
+export const MERLIN_TIERS: { id: MerlinTierChoice; label: string; hint: string; premium: boolean }[] = [
+  { id: 'auto', label: 'Auto', hint: 'Picks the right model for each request', premium: false },
   { id: 'lite', label: 'Lite', hint: 'Fastest, best for small edits', premium: false },
   { id: 'regular', label: 'Regular', hint: 'Balanced — good for most changes', premium: true },
-  { id: 'max', label: 'Max', hint: 'Thinks before editing — best for design work', premium: true },
+  { id: 'max', label: 'Max', hint: 'Looks at the page as it edits — best for design work', premium: true },
 ]
 
 export type MerlinMessage = {
@@ -19,11 +26,45 @@ export type MerlinMessage = {
   content: string
   results?: MerlinOpResult[]
   tier?: MerlinTier
+  /** True when Auto picked `tier` — the panel says "Auto → Max" so the user can
+   *  see the router working rather than guessing whether it does anything. */
+  routed?: boolean
   /** True when the turn changed nothing. The panel renders an explicit "no
    *  changes" marker for these — the model's prose has claimed effects it
    *  never produced ("I've enabled the hero shimmer"), so the UI states the
    *  ground truth rather than trusting the sentence. */
   noChanges?: boolean
+  /** Server row id for an assistant message, used to report back which ops
+   *  actually applied. Absent on optimistic/unrecorded messages. */
+  id?: string
+  /** The agent loop's trace for this turn — what it applied, what it rendered,
+   *  what it looked at. Accumulates live while the turn streams. */
+  steps?: MerlinStep[]
+  /** Images the user attached to this message (place / style-reference /
+   *  generation-input — Merlin infers which from the request text). */
+  attachments?: MerlinAttachment[]
+}
+
+/** An uploaded image, referenced by URL — never inlined as bytes on the
+ *  client. The server re-fetches from ITS OWN storage only (see
+ *  merlin_attachments.py's SSRF guard), so this URL must come from the
+ *  existing `/sites/{id}/upload` endpoint. */
+export type MerlinAttachment = { url: string; mime: string }
+
+/** One tool call in an agent turn. `results` mirrors the op chips; `image_url`
+ *  is set on a `screenshot` step once the shot is stored. */
+export type MerlinStep = {
+  kind: 'ops' | 'screenshot' | 'inspect' | 'critique' | 'image'
+  label: string
+  results?: MerlinOpResult[]
+  image_url?: string
+}
+
+export type MerlinConversation = {
+  id: string
+  title: string
+  created_at: string
+  updated_at: string
 }
 
 type MerlinChatResponse = {
@@ -31,20 +72,43 @@ type MerlinChatResponse = {
   ops: MerlinOp[]
   rejected: { op: unknown; reason: string }[]
   tier?: MerlinTier
+  routed?: boolean
+  conversation_id?: string | null
+  message_id?: string | null
+  steps?: MerlinStep[]
+}
+
+/** Frames from POST /sites/{id}/merlin/agent. The non-agentic tiers come back
+ *  through the same stream as a single `result`, so there is one code path. */
+type AgentFrame =
+  | { type: 'status'; message: string }
+  | { type: 'step'; kind: MerlinStep['kind']; label: string; results?: MerlinOpResult[]; image_url?: string }
+  | { type: 'error'; message: string }
+  | { type: 'result'; data: MerlinChatResponse }
+
+type StoredMessage = {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  results?: MerlinOpResult[] | null
+  tier?: MerlinTier | null
+  steps?: MerlinStep[] | null
+  attachments?: MerlinAttachment[] | null
 }
 
 const HISTORY_TURNS = 10
 const TIER_KEY = 'cappe:merlin-tier'
-const TRANSCRIPT_MAX = 30
+const WIDTH_KEY = 'cappe:merlin-width'
+export const MERLIN_MIN_WIDTH = 320
+export const MERLIN_MAX_WIDTH = 560
 
-const transcriptKey = (siteId?: string, pageId?: string): string | null =>
-  siteId && pageId ? `cappe:merlin-chat:${siteId}:${pageId}` : null
-
-/** Merlin chat: client-held transcript (lost on reload — acceptable for v1),
- *  resent each turn capped at HISTORY_TURNS. Applying is a single-shot
- *  request/response (no SSE — see the plan doc): the panel shows a spinner
- *  for the ~2-5s round trip, then the whole op batch applies at once via
- *  `onApply`, so useEditorHistory records one undo step per turn.
+/** Merlin chat: the transcript lives SERVER-side (migration zzzzcappe22), so a
+ *  page can hold several named conversations and they survive a reload. The
+ *  server reads history from the conversation row; `history` is still sent as
+ *  a fallback for the first turn of a brand-new conversation. Applying is a
+ *  single-shot request/response (no SSE — see the plan doc): the panel shows a
+ *  spinner for the ~2-5s round trip, then the whole op batch applies at once
+ *  via `onApply`, so useEditorHistory records one undo step per turn.
  *
  *  `getSnapshot` MUST read live state (a ref in the caller, not a render-time
  *  closure): ops are validated against the pre-flight snapshot but applied to
@@ -73,16 +137,59 @@ export function useMerlin(
   const [messages, setMessages] = useState<MerlinMessage[]>([])
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  // Lite by default; persisted across pages/sessions like werk's 'mw-model'.
+  // Live progress of an agent turn: the current status line and the tool-call
+  // trace so far. Both clear when the turn's assistant message lands.
+  const [status, setStatus] = useState<string | null>(null)
+  const [liveSteps, setLiveSteps] = useState<MerlinStep[]>([])
+  const abortRef = useRef<AbortController | null>(null)
+  // Images attached to the NEXT message. Uploaded eagerly (through the same
+  // /sites/{id}/upload the field picker uses) so `send` just sends URLs — the
+  // server never accepts inline bytes, only its own storage's URLs.
+  const [attachments, setAttachments] = useState<MerlinAttachment[]>([])
+  const [attachmentUploading, setAttachmentUploading] = useState(false)
+  const [attachmentError, setAttachmentError] = useState<string | null>(null)
+
+  const addAttachment = async (file: File) => {
+    if (!siteId || attachments.length >= 4) return
+    setAttachmentUploading(true)
+    setAttachmentError(null)
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      const res = await cappeApi.upload<{ url: string }>(`/sites/${siteId}/upload`, fd)
+      setAttachments((a) => [...a, { url: res.url, mime: file.type || 'image/png' }])
+    } catch (e) {
+      setAttachmentError(e instanceof Error ? e.message : 'Upload failed')
+    } finally {
+      setAttachmentUploading(false)
+    }
+  }
+  const removeAttachment = (idx: number) => setAttachments((a) => a.filter((_, i) => i !== idx))
+  // Auto by default; persisted across pages/sessions like werk's 'mw-model'.
   // Validated against the current tier list, so a value saved before a tier
   // was retired (e.g. the old 'pro') falls back instead of being sent on.
-  const [tier, setTierState] = useState<MerlinTier>(() => {
+  const [tier, setTierState] = useState<MerlinTierChoice>(() => {
     const saved = localStorage.getItem(TIER_KEY)
-    return MERLIN_TIERS.some((t) => t.id === saved) ? (saved as MerlinTier) : 'lite'
+    return MERLIN_TIERS.some((t) => t.id === saved) ? (saved as MerlinTierChoice) : 'auto'
   })
-  const setTier = (t: MerlinTier) => {
+  const setTier = (t: MerlinTierChoice) => {
     setTierState(t)
     try { localStorage.setItem(TIER_KEY, t) } catch { /* ignore quota */ }
+  }
+
+  // Panel width lives here rather than in the drawer because index.tsx needs it
+  // for `reservedRight` (the canvas inspector is viewport-fixed and has to clamp
+  // clear of the docked panel).
+  const [width, setWidthState] = useState<number>(() => {
+    const saved = Number(localStorage.getItem(WIDTH_KEY))
+    return Number.isFinite(saved) && saved >= MERLIN_MIN_WIDTH && saved <= MERLIN_MAX_WIDTH
+      ? saved
+      : MERLIN_MIN_WIDTH
+  })
+  const setWidth = (px: number) => {
+    const clamped = Math.min(MERLIN_MAX_WIDTH, Math.max(MERLIN_MIN_WIDTH, Math.round(px)))
+    setWidthState(clamped)
+    try { localStorage.setItem(WIDTH_KEY, String(clamped)) } catch { /* ignore quota */ }
   }
 
   // Live siteId/pageId, read by both the in-flight check in `send` (below)
@@ -94,56 +201,125 @@ export function useMerlin(
   const pageIdRef = useRef(pageId)
   pageIdRef.current = pageId
 
+  // The conversation this panel is showing. `null` = a fresh one, opened
+  // server-side by the first turn (which returns its id).
+  const [conversationId, setConversationId] = useState<string | null>(null)
+  const conversationIdRef = useRef<string | null>(null)
+  conversationIdRef.current = conversationId
+  const [conversations, setConversations] = useState<MerlinConversation[]>([])
+
+  const refreshConversations = async (sid: string, pid: string) => {
+    try {
+      const list = await cappeApi.get<MerlinConversation[]>(
+        `/sites/${sid}/pages/${pid}/merlin/conversations`,
+      )
+      if (sid === siteIdRef.current && pid === pageIdRef.current) setConversations(list)
+    } catch { /* the panel still works without the history list */ }
+  }
+
+  const openConversation = async (id: string, opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setMessages([])
+    setConversationId(id)
+    setError(null)
+    try {
+      const detail = await cappeApi.get<{ id: string; messages: StoredMessage[] }>(
+        `/merlin/conversations/${id}`,
+      )
+      // The user may have switched conversations again while this was in
+      // flight — only paint if this is still the open one.
+      if (conversationIdRef.current !== id) return
+      setMessages(
+        detail.messages.map((m) => ({
+          id: m.id,
+          role: m.role,
+          content: m.content,
+          results: m.results ?? undefined,
+          tier: m.tier ?? undefined,
+          // Only claim "no changes" for a turn we have chips for — a message
+          // whose results were never reported back is unknown, not empty.
+          noChanges: m.role === 'assistant' && !!m.results && !m.results.some((r) => r.ok),
+          steps: m.steps ?? undefined,
+          attachments: m.attachments ?? undefined,
+        })),
+      )
+    } catch {
+      setError('Could not load that conversation.')
+    }
+  }
+
+  /** Start a new conversation. The row is only created server-side on the
+   *  first turn, so this is purely local state until then. */
+  const newConversation = () => {
+    setConversationId(null)
+    setMessages([])
+    setError(null)
+  }
+
+  const renameConversation = async (id: string, title: string) => {
+    const trimmed = title.trim().slice(0, 120)
+    if (!trimmed) return
+    setConversations((c) => c.map((x) => (x.id === id ? { ...x, title: trimmed } : x)))
+    try {
+      await cappeApi.patch(`/merlin/conversations/${id}`, { title: trimmed })
+    } catch {
+      if (siteIdRef.current && pageIdRef.current) {
+        void refreshConversations(siteIdRef.current, pageIdRef.current)
+      }
+    }
+  }
+
+  const deleteConversation = async (id: string) => {
+    setConversations((c) => c.filter((x) => x.id !== id))
+    if (conversationIdRef.current === id) newConversation()
+    try {
+      await cappeApi.delete(`/merlin/conversations/${id}`)
+    } catch {
+      if (siteIdRef.current && pageIdRef.current) {
+        void refreshConversations(siteIdRef.current, pageIdRef.current)
+      }
+    }
+  }
+
   // PageEditor is NOT remounted when the route's :pageId changes (no `key` on
   // the route), so without this the transcript — and its ops_summary context —
-  // would bleed from one page into the next. Restores that page's own saved
-  // transcript instead of always clearing (lost-on-reload was acceptable for
-  // v1; losing it on every navigation was needlessly worse).
+  // would bleed from one page into the next. Loads that page's conversation
+  // list and opens the most recent one.
   // Also clear `sending`: an in-flight turn (esp. a slow image generation)
   // belongs to the page it was started on — its apply is pageId-guarded — so
   // don't leave the destination page's panel spinning + re-entry-locked.
   useEffect(() => {
-    const key = transcriptKey(siteId, pageId)
-    let restored: MerlinMessage[] = []
-    if (key) {
-      try {
-        const raw = localStorage.getItem(key)
-        const parsed = raw ? JSON.parse(raw) : null
-        // Guard the shape, not just JSON.parse: a truncated write, a devtools
-        // edit, or a future format change can leave non-array JSON (null,
-        // `{}`, a bare string) in the slot — feeding that to setMessages
-        // crashes the panel's `messages.length` read on the very next render.
-        if (Array.isArray(parsed)) restored = parsed
-      } catch { /* corrupt entry — start fresh rather than throw */ }
-    }
-    setMessages(restored)
+    // An in-flight agent turn belongs to the page it was started on. Its apply
+    // is pageId-guarded either way, but aborting stops the stream (and its
+    // screenshots) rather than letting it run on invisibly.
+    abortRef.current?.abort()
+    abortRef.current = null
+    setMessages([])
+    setConversations([])
+    setConversationId(null)
     setError(null)
+    setStatus(null)
+    setLiveSteps([])
+    setAttachments([])
     setSending(false)
+    if (!siteId || !pageId) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const list = await cappeApi.get<MerlinConversation[]>(
+          `/sites/${siteId}/pages/${pageId}/merlin/conversations`,
+        )
+        // Guard against a navigation landing between the fetch and its
+        // resolution — the same reason `send` re-checks pageIdRef.
+        if (cancelled || siteId !== siteIdRef.current || pageId !== pageIdRef.current) return
+        setConversations(list)
+        if (list.length) await openConversation(list[0].id, { silent: true })
+      } catch { /* start fresh rather than block the panel */ }
+    })()
+    return () => { cancelled = true }
+    // openConversation is redefined every render; listing it would refetch on
+    // every render. siteId/pageId are the real inputs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [siteId, pageId])
-
-  // Persists on every turn, capped so a long-running session doesn't grow the
-  // localStorage entry unboundedly. An empty transcript (fresh page, or after
-  // clearChat) removes the key rather than storing `"[]"`.
-  //
-  // Deps are `[messages]` ONLY — siteId/pageId are read from refs instead.
-  // On navigation, the load effect above and this one both re-run in the
-  // same commit while `messages` still holds the OUTGOING page's transcript
-  // (setMessages from the load effect hasn't applied yet); if this effect
-  // also depended on siteId/pageId it would re-fire in that same commit and
-  // write the outgoing page's messages under the incoming page's key. Firing
-  // only on an actual `messages` change means this effect doesn't run again
-  // until the load effect's setMessages has landed — by which point the refs
-  // already agree with the transcript being persisted.
-  useEffect(() => {
-    const key = transcriptKey(siteIdRef.current, pageIdRef.current)
-    if (!key) return
-    try {
-      if (messages.length) localStorage.setItem(key, JSON.stringify(messages.slice(-TRANSCRIPT_MAX)))
-      else localStorage.removeItem(key)
-    } catch { /* ignore quota */ }
-  }, [messages])
-
-  const clearChat = () => setMessages([])
 
   // Fetched once and cached for the component's lifetime: the registry it
   // reflects only changes on a deploy. A failed fetch (offline, cold start)
@@ -157,6 +333,12 @@ export function useMerlin(
       .catch(() => { /* degrade to unvalidated apply */ })
     return () => { cancelled = true }
   }, [])
+
+  const reportResults = async (messageId: string, results: MerlinOpResult[]) => {
+    try {
+      await cappeApi.patch(`/merlin/messages/${messageId}/results`, { results })
+    } catch { /* cosmetic — the chips just won't survive a reload */ }
+  }
 
   // Execute generate_image ops sequentially: generate via the endpoint, then
   // apply the returned URL as a follow-up set_field to LIVE state (a second
@@ -204,10 +386,19 @@ export function useMerlin(
   const send = async (text: string) => {
     const trimmed = text.trim()
     if (!siteId || !pageId || !trimmed || sending) return
+    const sentAttachments = attachments
     setSending(true)
     setError(null)
-    setMessages((m) => [...m, { role: 'user', content: trimmed }])
+    setStatus(null)
+    setLiveSteps([])
+    setAttachments([])
+    setMessages((m) => [
+      ...m,
+      { role: 'user', content: trimmed, attachments: sentAttachments.length ? sentAttachments : undefined },
+    ])
     const sentForPageId = pageId
+    const abort = new AbortController()
+    abortRef.current = abort
 
     try {
       const { blocks, theme, selectedBlock } = getSnapshot()
@@ -221,15 +412,61 @@ export function useMerlin(
         ops_summary: m.results?.map((r) => r.summary).join('; '),
       }))
 
-      const res = await cappeApi.post<MerlinChatResponse>(`/sites/${siteId}/merlin/chat`, {
-        page_id: pageId,
-        message: trimmed,
-        history,
-        blocks: snapshotBlocks,
-        theme,
-        model_tier: tier,
-        selected_block: selectedBlock ?? null,
-      })
+      // One endpoint for every tier: the SERVER decides whether this turn runs
+      // the agent loop (premium + regular/max) or the single-shot path, and a
+      // single-shot turn arrives as one `result` frame. Keeping the choice
+      // server-side means plan/tier gating lives in one place.
+      // Collected in a holder rather than plain `let`s: TS's control-flow
+      // analysis can't see assignments made inside the frame callback, and
+      // narrows a bare `let` to `never` after the null check below.
+      const collected: { res: MerlinChatResponse | null; error: string | null } = {
+        res: null, error: null,
+      }
+      const steps: MerlinStep[] = []
+
+      await postCappeSSE(
+        `/sites/${siteId}/merlin/agent`,
+        {
+          page_id: pageId,
+          conversation_id: conversationIdRef.current,
+          message: trimmed,
+          history,
+          blocks: snapshotBlocks,
+          theme,
+          model_tier: tier,
+          selected_block: selectedBlock ?? null,
+          attachments: sentAttachments,
+        },
+        (raw) => {
+          const frame = raw as AgentFrame
+          if (frame.type === 'status') setStatus(frame.message)
+          else if (frame.type === 'step') {
+            const { type: _t, ...step } = frame
+            steps.push(step)
+            setLiveSteps([...steps])
+          } else if (frame.type === 'error') collected.error = frame.message
+          else if (frame.type === 'result') collected.res = frame.data
+        },
+        { signal: abort.signal },
+      )
+
+      setStatus(null)
+      const res = collected.res
+      if (!res) {
+        // The stream ended without a result — the error frame (if any) is the
+        // explanation; otherwise the connection dropped.
+        throw new Error(collected.error || 'Merlin failed to respond')
+      }
+      if (collected.error) setError(collected.error)
+
+      // Adopt the conversation the server opened for a first turn, and surface
+      // it in the history list. Done before the navigation guard below: the row
+      // exists regardless of where the user has navigated to.
+      if (res.conversation_id && !conversationIdRef.current) {
+        setConversationId(res.conversation_id)
+        conversationIdRef.current = res.conversation_id
+        void refreshConversations(siteId, sentForPageId)
+      }
 
       // Navigated to a different page while in flight — applying now would
       // overwrite THAT page's content with this one's blocks.
@@ -255,10 +492,18 @@ export function useMerlin(
       const skippedFromServer = (res.rejected || []).map((r) => ({ ok: false, summary: r.reason }))
       const results = [...applied.results, ...skippedFromServer]
       setMessages((m) => [...m, {
-        role: 'assistant', content: res.message, tier: res.tier, results,
+        role: 'assistant', id: res.message_id ?? undefined, content: res.message, tier: res.tier, results,
+        routed: res.routed, steps: res.steps?.length ? res.steps : undefined,
         // An image is still generating — don't declare "no changes" yet.
         noChanges: genOps.length === 0 && !results.some((r) => r.ok),
       }])
+      setLiveSteps([])
+
+      // Only the client knows which ops actually landed (it applies to live
+      // state, which may have drifted during the round trip), so it reports the
+      // chips back for the stored transcript. Fire-and-forget: a failure costs
+      // the chips on a reload, not the edit.
+      if (res.message_id) void reportResults(res.message_id, results)
 
       // Kept inside `send`'s try so `sending` (and the panel spinner) stays true
       // across the slow generation; a per-image assistant note reports each one.
@@ -270,13 +515,25 @@ export function useMerlin(
         await runImageOps(siteId, remapped, sentForPageId)
       }
     } catch (e) {
+      // An aborted turn is a normal interaction (the user navigated away), not
+      // a failure — don't drop an error note into the destination page's panel.
+      if (abort.signal.aborted) return
       const msg = e instanceof Error ? e.message : 'Merlin failed to respond'
       setError(msg)
       setMessages((m) => [...m, { role: 'assistant', content: `Something went wrong: ${msg}` }])
     } finally {
+      if (abortRef.current === abort) abortRef.current = null
+      setStatus(null)
+      setLiveSteps([])
       setSending(false)
     }
   }
 
-  return { open, setOpen, messages, send, sending, error, tier, setTier, clearChat }
+  return {
+    open, setOpen, messages, send, sending, error, tier, setTier, width, setWidth,
+    status, liveSteps,
+    attachments, addAttachment, removeAttachment, attachmentUploading, attachmentError,
+    conversationId, conversations, openConversation, newConversation,
+    renameConversation, deleteConversation,
+  }
 }

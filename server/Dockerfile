@@ -41,6 +41,17 @@ COPY --from=dependencies /usr/local/bin /usr/local/bin
 # Create non-root user
 RUN groupadd -r matcha && useradd -r -g matcha matcha
 
+# Headless Chromium for Merlin's agent loop — it renders the page it is editing
+# and screenshots it so the model can check its own design work
+# (app/cappe/services/browser_pool.py). Installed into a shared path rather than
+# the default ~/.cache so the non-root runtime user can reach it. ~400MB with
+# its system libs; if this layer is ever dropped, Merlin degrades to editing
+# blind rather than failing, so the build stays green either way.
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright
+RUN python -m playwright install --with-deps chromium \
+    && chmod -R a+rX /opt/playwright \
+    && rm -rf /var/lib/apt/lists/*
+
 # Create uploads directory
 RUN mkdir -p /app/uploads && chown -R matcha:matcha /app/uploads
 

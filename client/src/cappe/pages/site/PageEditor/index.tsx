@@ -82,10 +82,11 @@ export default function PageEditor() {
     },
   )
 
-  // The theme drawer (18rem) and Merlin panel (20rem) are real flex siblings,
-  // but the canvas inspector is viewport-`fixed` — tell the bridge to clamp it
-  // clear of whichever docked panel(s) are open.
-  const reservedRight = (themeEditor.themeOpen ? 288 : 0) + (merlin.open ? 320 : 0)
+  // The theme drawer (18rem) and Merlin panel (user-resizable) are real flex
+  // siblings, but the canvas inspector is viewport-`fixed` — tell the bridge to
+  // clamp it clear of whichever docked panel(s) are open. Merlin's width is read
+  // live: a hardcoded 320 leaves the inspector under a widened panel.
+  const reservedRight = (themeEditor.themeOpen ? 288 : 0) + (merlin.open ? merlin.width : 0)
   const canvas = useCanvasBridge(blocks, setBlocks, previewIframeRef, reservedRight, editMode)
 
   // Refresh Merlin's view of live editor state every render. Assigned here

@@ -317,3 +317,77 @@ describe('set_design against a schema (client-side existence check)', () => {
     expect(r.results[0].ok).toBe(true)
   })
 })
+
+// ---------------------------------------------------------------------------
+// Shared parity fixture
+//
+// The agent loop (server/app/cappe/services/merlin_agent.py) folds ops onto a
+// SERVER-side copy of the page so it can render and screenshot the result. That
+// applier — server/app/cappe/services/merlin_apply.py — has to agree with this
+// one, or the model reviews a page the user will never see. Both suites read
+// the same fixture; the server half is tests/cappe/test_merlin_apply.py.
+//
+// Blocks in the fixture carry `id` (the wire shape). The editor keys blocks on
+// `_k`, so the harness maps between the two.
+// ---------------------------------------------------------------------------
+import fixture from '../../../../../../server/tests/cappe/fixtures/merlin_apply_cases.json'
+
+type FixtureCase = {
+  name: string
+  blocks: Record<string, unknown>[]
+  theme: Record<string, unknown>
+  ops: MerlinOp[]
+  expect_ok?: boolean[]
+  expect_blocks?: Record<string, unknown>[]
+  expect_theme?: Record<string, unknown>
+  expect_theme_subset?: Record<string, Record<string, unknown>>
+  expect_block_count?: number
+  expect_element_count?: number
+  expect_last_element_y?: number
+  expect_field?: { index: number; path: string; value: unknown }
+}
+
+/** Wire shape (`id`) → editor shape (`_k`), and back for comparison. */
+const toEditor = (b: Record<string, unknown>): CappeBlock => {
+  const { id, ...rest } = b
+  return { ...rest, _k: id } as unknown as CappeBlock
+}
+const toWire = (b: CappeBlock): Record<string, unknown> => {
+  const { _k, ...rest } = b
+  return { ...rest, id: _k }
+}
+
+describe('shared parity fixture', () => {
+  for (const c of (fixture as { cases: FixtureCase[] }).cases) {
+    it(c.name, () => {
+      const r = applyMerlinOps(c.blocks.map(toEditor), c.theme, c.ops)
+
+      if (c.expect_ok) expect(r.results.map((x) => x.ok)).toEqual(c.expect_ok)
+
+      if (c.expect_blocks) {
+        // Key order differs between the two appliers; compare as objects.
+        expect(r.blocks.map(toWire)).toEqual(
+          c.expect_blocks.map((b) => expect.objectContaining(b)),
+        )
+      }
+      if (c.expect_theme) expect(r.theme).toEqual(c.expect_theme)
+      if (c.expect_theme_subset) {
+        for (const [key, sub] of Object.entries(c.expect_theme_subset)) {
+          expect(r.theme[key]).toMatchObject(sub)
+        }
+      }
+      if (c.expect_block_count !== undefined) expect(r.blocks).toHaveLength(c.expect_block_count)
+      if (c.expect_element_count !== undefined) {
+        expect((r.blocks[0].elements as unknown[]) ?? []).toHaveLength(c.expect_element_count)
+      }
+      if (c.expect_last_element_y !== undefined) {
+        const els = r.blocks[0].elements as { d: { y: number } }[]
+        expect(els[els.length - 1].d.y).toBe(c.expect_last_element_y)
+      }
+      if (c.expect_field) {
+        expect((r.blocks[c.expect_field.index] as Record<string, unknown>)[c.expect_field.path])
+          .toEqual(c.expect_field.value)
+      }
+    })
+  }
+})

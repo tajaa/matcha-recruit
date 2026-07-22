@@ -48,13 +48,27 @@ class ImageGenError(Exception):
     block, timeout, or API error)."""
 
 
-def _generate_sync(prompt: str, aspect_ratio: str) -> tuple[bytes, str]:
+def _generate_sync(
+    prompt: str,
+    aspect_ratio: str,
+    reference_images: list[tuple[bytes, str]] | None = None,
+) -> tuple[bytes, str]:
     """Blocking Gemini image call → (image_bytes, mime). Raises ImageGenError
-    if the response carries no inline image data."""
+    if the response carries no inline image data.
+
+    `reference_images` are `(bytes, mime)` pairs prepended to the prompt, which
+    turns generation into editing: variations of a photo the user attached,
+    a background swap, a restyle. Additive — callers that pass none behave
+    exactly as before."""
     client = get_genai_client(http_options=genai_types.HttpOptions(timeout=_HTTP_TIMEOUT_MS))
+    contents: list = [
+        genai_types.Part.from_bytes(data=data, mime_type=mime)
+        for data, mime in (reference_images or [])
+    ]
+    contents.append(genai_types.Part(text=prompt))
     response = client.models.generate_content(
         model=IMAGE_MODEL,
-        contents=prompt,
+        contents=contents,
         config=genai_types.GenerateContentConfig(
             response_modalities=["IMAGE", "TEXT"],
             image_config=genai_types.ImageConfig(aspect_ratio=aspect_ratio),
@@ -67,15 +81,30 @@ def _generate_sync(prompt: str, aspect_ratio: str) -> tuple[bytes, str]:
     raise ImageGenError("model returned no image")
 
 
-async def generate_image(prompt: str, *, prefix: str, aspect_ratio: str = DEFAULT_ASPECT) -> str:
+async def generate_image(
+    prompt: str,
+    *,
+    prefix: str,
+    aspect_ratio: str = DEFAULT_ASPECT,
+    reference_images: list[tuple[bytes, str]] | None = None,
+    return_bytes: bool = False,
+):
     """Generate an image from ``prompt`` and return a public URL (stored under
     ``prefix`` via the platform storage service → CloudFront).
+
+    ``reference_images`` — `(bytes, mime)` pairs — condition the generation on
+    images the user supplied ("a version of this with a lighter background").
+
+    ``return_bytes`` returns ``(url, image_bytes)`` instead of just the URL, so
+    an agent loop can SHOW the model what it produced and let it retry. Off by
+    default: the ordinary editor button only wants somewhere to point an <img>.
 
     Raises ``ImageGenError`` on no-image / timeout / any SDK failure."""
     ar = aspect_ratio if aspect_ratio in ASPECT_RATIOS else DEFAULT_ASPECT
     try:
         image_bytes, mime = await asyncio.wait_for(
-            asyncio.to_thread(_generate_sync, prompt, ar), timeout=IMAGE_GEN_TIMEOUT
+            asyncio.to_thread(_generate_sync, prompt, ar, reference_images),
+            timeout=IMAGE_GEN_TIMEOUT,
         )
     except ImageGenError:
         raise
@@ -91,7 +120,10 @@ async def generate_image(prompt: str, *, prefix: str, aspect_ratio: str = DEFAUL
     # raises a bare RuntimeError on S3 error, which would otherwise escape as a
     # 500 and break the "never a bare error / never a 500" contract above.
     try:
-        return await get_storage().upload_file(image_bytes, filename, prefix=prefix, content_type=mime)
+        url = await get_storage().upload_file(
+            image_bytes, filename, prefix=prefix, content_type=mime
+        )
     except Exception as exc:  # noqa: BLE001
         logger.warning("generated image upload failed: %s", exc)
         raise ImageGenError("failed to store generated image") from exc
+    return (url, image_bytes) if return_bytes else url

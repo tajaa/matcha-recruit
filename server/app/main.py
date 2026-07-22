@@ -187,6 +187,11 @@ async def lifespan(app: FastAPI):
     # Drains whatever is still buffered (best-effort — analytics is droppable).
     await stop_usage_flusher()
 
+    # Merlin's headless Chromium is a process-wide singleton, launched lazily on
+    # the first agent screenshot — release it so a reload doesn't strand one.
+    from .cappe.services.browser_pool import shutdown as close_merlin_browser
+    await close_merlin_browser()
+
     # Cleanup
     await close_redis_cache()
     await close_notification_manager()

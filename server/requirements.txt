@@ -34,3 +34,7 @@ livekit-api>=0.6
 markdown>=3.5
 segno>=1.6.0
 openpyxl>=3.1
+# Already present transitively (weasyprint); pinned explicitly because Merlin's
+# chat-image path imports it directly to downscale attachments before they go
+# into a prompt. Code degrades to sending the original if it's ever missing.
+Pillow>=10.0

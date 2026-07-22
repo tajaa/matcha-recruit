@@ -49,6 +49,40 @@ function _logout() {
   }
 }
 
+/** Refresh proactively if the token expires within 60s.
+ *
+ *  Use before opening an SSE stream (Merlin's agent turn): a stream can't
+ *  replay a mid-flight 401 the way `request()` does — the body is already
+ *  half-consumed and gone — so the token has to be good before it opens.
+ *  Mirrors `api/client.ts:ensureFreshToken` on the cappe token pair. */
+export async function ensureFreshCappeToken(): Promise<string | null> {
+  const token = localStorage.getItem(ACCESS_KEY)
+  if (!token) return null
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')))
+    const expiresIn = payload.exp - Date.now() / 1000
+    if (expiresIn < 60) {
+      if (!_refreshing) {
+        _refreshing = _tryRefresh().finally(() => { _refreshing = null })
+      }
+      const ok = await _refreshing
+      if (!ok) { _logout(); return null }
+      return localStorage.getItem(ACCESS_KEY)
+    }
+  } catch { /* malformed token — let the request fail normally */ }
+  return token
+}
+
+/** Auth headers for a stream, with the token refreshed first. */
+export async function cappeStreamHeaders(
+  extra?: Record<string, string>,
+): Promise<Record<string, string>> {
+  const token = await ensureFreshCappeToken()
+  return { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(extra ?? {}) }
+}
+
+export const cappeApiBase = BASE
+
 function _buildHeaders(init?: RequestInit, token?: string | null): HeadersInit {
   const isFormData = init?.body instanceof FormData
   return {

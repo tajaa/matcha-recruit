@@ -29,6 +29,7 @@ from ...config import get_settings
 from ...core.services.genai_client import get_genai_client
 from ...core.services.rate_limiter import GeminiRateLimiter
 from .design_gate import is_premium_plan
+from .merlin_attachments import caption_lines
 from .merlin_catalog import (
     BLOCK_FIELDS,
     BLOCK_LABELS,
@@ -245,10 +246,34 @@ def _strip_prompt_noise(block: dict[str, Any]) -> dict[str, Any]:
     return cleaned
 
 
+def build_shared_prompt_sections() -> list[str]:
+    """Op vocabulary + rules + catalogs — the part of the prompt that is the
+    same whether Merlin runs single-shot or as the agent loop
+    (`merlin_agent.py`). Shared so a rule can't apply on one path only."""
+    return [
+        _op_shapes_text(),
+        _rules_text(),
+        "Block catalog (type: allowed fields):\n" + _catalog_text(),
+        "Section design catalog for set_design (group: settings):\n" + _design_catalog_text(),
+    ]
+
+
+def has_theme_intent(message: str) -> bool:
+    """Did the user actually ask about themes this turn? Gates the site-wide
+    preset swap so it can't ride along on an unrelated request."""
+    return bool(_THEME_INTENT_RE.search(message or ""))
+
+
+def strip_prompt_noise(block: dict[str, Any]) -> dict[str, Any]:
+    """Public alias — the agent loop compacts blocks the same way."""
+    return _strip_prompt_noise(block)
+
+
 def _build_prompt(
     *, message: str, history: list[dict[str, Any]], blocks: list[dict[str, Any]],
     theme: dict[str, Any], business_name: Optional[str], business_type: Optional[str],
     feedback: Optional[str], selected_block: Optional[str] = None,
+    attachments: Optional[list[dict[str, Any]]] = None,
 ) -> str:
     parts = [
         _SYSTEM_PROMPT,
@@ -289,6 +314,10 @@ def _build_prompt(
     if feedback:
         parts.append(f"PREVIOUS ATTEMPT FAILED VALIDATION: {feedback}\nFix and return valid JSON only.")
 
+    caption = caption_lines(attachments or [])
+    if caption:
+        parts.append(caption)
+
     parts.append(f"User: {message}")
     return "\n\n".join(parts)
 
@@ -306,6 +335,7 @@ async def run_merlin_turn(
     *, message: str, history: list[dict[str, Any]], blocks: list[dict[str, Any]],
     theme: dict[str, Any], business_name: Optional[str] = None, business_type: Optional[str] = None,
     model_tier: str = DEFAULT_MODEL_TIER, plan: Any = None, selected_block: Optional[str] = None,
+    attachments: Optional[list[dict[str, Any]]] = None,
 ) -> dict[str, Any]:
     """Run one Merlin chat turn. Returns `{"message", "ops", "rejected", "tier"}`.
 
@@ -330,9 +360,7 @@ async def run_merlin_turn(
     # for budget=0). "minimal" is the thinking-off equivalent.
     thinking_cfg = types.ThinkingConfig(thinking_level=tier_cfg.thinking_level)
     premium = is_premium_plan(plan)
-    # Did the user actually ask about themes this turn? Gates the site-wide
-    # preset swap so it can't ride along on an unrelated request.
-    theme_intent = bool(_THEME_INTENT_RE.search(message or ""))
+    theme_intent = has_theme_intent(message)
 
     last_feedback: Optional[str] = None
     final_message = "Sorry, I couldn't process that — try again."
@@ -346,8 +374,16 @@ async def run_merlin_turn(
         prompt = _build_prompt(
             message=message, history=history, blocks=blocks, theme=theme,
             business_name=business_name, business_type=business_type, feedback=last_feedback,
-            selected_block=selected_block,
+            selected_block=selected_block, attachments=attachments,
         )
+        # Attached images ride alongside the text as Parts (never fetched from a
+        # user-given URL — `attachments` here already carries fetched bytes, see
+        # merlin_attachments.load_attachments and the route that calls it).
+        contents: Any = prompt
+        if attachments:
+            contents = [
+                types.Part.from_bytes(data=a["data"], mime_type=a["mime"]) for a in attachments
+            ] + [types.Part(text=prompt)]
         # Everything from the API call through op validation sits inside the
         # try: a hallucinated payload shape must degrade to a retry or an
         # empty-ops response, never escape as a 500 (the never-raises contract).
@@ -356,7 +392,7 @@ async def run_merlin_turn(
                 response = await asyncio.wait_for(
                     client.aio.models.generate_content(
                         model=model,
-                        contents=prompt,
+                        contents=contents,
                         config=types.GenerateContentConfig(
                             response_mime_type="application/json", thinking_config=thinking_cfg,
                         ),

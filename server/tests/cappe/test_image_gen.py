@@ -78,6 +78,55 @@ def test_generate_image_keeps_valid_aspects():
         assert len(v) == 1 and v[0]["aspect"] == a
 
 
+def test_generate_image_reference_images_ride_ahead_of_the_prompt():
+    """Phase 4 (chat image conditioning): reference_images become Part.from_bytes
+    entries BEFORE the text part, so the model sees "here is the input image,
+    here is the instruction" — the order Gemini's image-editing mode expects.
+    Skips if google.genai isn't installed (mirrors the test above)."""
+    try:
+        from google.genai import types as genai_types
+
+        from app.core.services import image_gen
+    except Exception:
+        import pytest
+        pytest.skip("google.genai not installed in this environment")
+
+    captured = {}
+
+    class _FakeModels:
+        def generate_content(self, *, model, contents, config):
+            captured["contents"] = contents
+            candidate = type("C", (), {
+                "content": type("Content", (), {
+                    "parts": [type("Part", (), {
+                        "inline_data": type("Inline", (), {"data": b"PNG", "mime_type": "image/png"})(),
+                    })()],
+                })(),
+            })()
+            return type("Resp", (), {"candidates": [candidate]})()
+
+    class _FakeClient:
+        def __init__(self):
+            self.models = _FakeModels()
+
+    # image_gen imports the NAME `get_genai_client` into its own namespace
+    # (`from .genai_client import get_genai_client`), so patching the source
+    # module's attribute wouldn't reach this call — patch image_gen's own.
+    orig = image_gen.get_genai_client
+    image_gen.get_genai_client = lambda *a, **k: _FakeClient()
+    try:
+        bytes_out, mime = image_gen._generate_sync(
+            "a lake", "16:9", reference_images=[(b"REF", "image/jpeg")]
+        )
+    finally:
+        image_gen.get_genai_client = orig
+
+    assert bytes_out == b"PNG"
+    contents = captured["contents"]
+    assert len(contents) == 2
+    assert isinstance(contents[-1], genai_types.Part) and contents[-1].text == "a lake"
+
+
 def test_aspect_ratio_whitelist_mirrors_the_service():
     """merlin_catalog.AI_ASPECT_RATIOS must match image_gen.ASPECT_RATIOS — they
     are duplicated because merlin_catalog stays SDK-free. Skips if google.genai

@@ -1,0 +1,236 @@
+{
+  "_comment": [
+    "Parity fixture for the two Merlin op appliers.",
+    "server/app/cappe/services/merlin_apply.py (used by the agent loop to build the",
+    "page it screenshots) must agree with",
+    "client/src/cappe/pages/site/PageEditor/merlinOps.ts (which mutates the real",
+    "editor state). If they diverge, the model critiques a page the user will never",
+    "see. Both test suites read THIS file:",
+    "  server:  tests/cappe/test_merlin_apply.py",
+    "  client:  merlinOps.test.ts ('shared parity fixture')",
+    "Blocks carry `id` here; the client harness maps it to `_k` before applying.",
+    "Cases deliberately avoid add_block's default content and set_theme preset — the",
+    "two documented divergences (see merlin_apply.py's module docstring)."
+  ],
+  "cases": [
+    {
+      "name": "set_field edits a scalar",
+      "blocks": [{ "id": "b1", "type": "hero", "heading": "Old", "subheading": "Sub" }],
+      "theme": {},
+      "ops": [{ "op": "set_field", "block": "b1", "path": "heading", "value": "New" }],
+      "expect_blocks": [{ "id": "b1", "type": "hero", "heading": "New", "subheading": "Sub" }],
+      "expect_ok": [true]
+    },
+    {
+      "name": "set_field into a list index",
+      "blocks": [
+        { "id": "b1", "type": "features", "items": [{ "title": "a" }, { "title": "b" }] }
+      ],
+      "theme": {},
+      "ops": [{ "op": "set_field", "block": "b1", "path": "items.1.title", "value": "B!" }],
+      "expect_blocks": [
+        { "id": "b1", "type": "features", "items": [{ "title": "a" }, { "title": "B!" }] }
+      ],
+      "expect_ok": [true]
+    },
+    {
+      "name": "set_field refuses a named key into a list rather than clobbering it",
+      "blocks": [
+        { "id": "b1", "type": "features", "items": [{ "title": "a" }, { "title": "b" }] }
+      ],
+      "theme": {},
+      "ops": [{ "op": "set_field", "block": "b1", "path": "items.title", "value": "oops" }],
+      "expect_blocks": [
+        { "id": "b1", "type": "features", "items": [{ "title": "a" }, { "title": "b" }] }
+      ],
+      "expect_ok": [false]
+    },
+    {
+      "name": "set_field on a missing block is skipped, not fatal",
+      "blocks": [{ "id": "b1", "type": "hero", "heading": "Old" }],
+      "theme": {},
+      "ops": [{ "op": "set_field", "block": "ghost", "path": "heading", "value": "New" }],
+      "expect_blocks": [{ "id": "b1", "type": "hero", "heading": "Old" }],
+      "expect_ok": [false]
+    },
+    {
+      "name": "set_design writes into the design bag",
+      "blocks": [{ "id": "b1", "type": "hero", "heading": "Hi" }],
+      "theme": {},
+      "ops": [{ "op": "set_design", "block": "b1", "group": "bg", "key": "color", "value": "surface" }],
+      "expect_blocks": [
+        { "id": "b1", "type": "hero", "heading": "Hi", "_design": { "bg": { "color": "surface" } } }
+      ],
+      "expect_ok": [true]
+    },
+    {
+      "name": "set_design with an empty value clears the key",
+      "blocks": [
+        { "id": "b1", "type": "hero", "heading": "Hi", "_design": { "bg": { "color": "surface", "pattern": "dots" } } }
+      ],
+      "theme": {},
+      "ops": [{ "op": "set_design", "block": "b1", "group": "bg", "key": "color", "value": "" }],
+      "expect_blocks": [
+        { "id": "b1", "type": "hero", "heading": "Hi", "_design": { "bg": { "pattern": "dots" } } }
+      ],
+      "expect_ok": [true]
+    },
+    {
+      "name": "set_design_bulk merges into every targeted section",
+      "blocks": [
+        { "id": "b1", "type": "hero", "heading": "Hi", "_design": { "bg": { "pattern": "dots" } } },
+        { "id": "b2", "type": "features", "items": [] }
+      ],
+      "theme": {},
+      "ops": [
+        { "op": "set_design_bulk", "blocks": ["b1", "b2"], "design": { "bg": { "color": "surface" } } }
+      ],
+      "expect_blocks": [
+        { "id": "b1", "type": "hero", "heading": "Hi", "_design": { "bg": { "pattern": "dots", "color": "surface" } } },
+        { "id": "b2", "type": "features", "items": [], "_design": { "bg": { "color": "surface" } } }
+      ],
+      "expect_ok": [true]
+    },
+    {
+      "name": "set_design_bulk matching nothing reports a skip",
+      "blocks": [{ "id": "b1", "type": "hero", "heading": "Hi" }],
+      "theme": {},
+      "ops": [{ "op": "set_design_bulk", "blocks": ["ghost"], "design": { "bg": { "color": "surface" } } }],
+      "expect_blocks": [{ "id": "b1", "type": "hero", "heading": "Hi" }],
+      "expect_ok": [false]
+    },
+    {
+      "name": "remove_block drops the section",
+      "blocks": [
+        { "id": "b1", "type": "hero", "heading": "Hi" },
+        { "id": "b2", "type": "faq", "heading": "Q" }
+      ],
+      "theme": {},
+      "ops": [{ "op": "remove_block", "block": "b1" }],
+      "expect_blocks": [{ "id": "b2", "type": "faq", "heading": "Q" }],
+      "expect_ok": [true]
+    },
+    {
+      "name": "move_block reorders",
+      "blocks": [
+        { "id": "b1", "type": "hero", "heading": "Hi" },
+        { "id": "b2", "type": "faq", "heading": "Q" },
+        { "id": "b3", "type": "cta", "heading": "Go" }
+      ],
+      "theme": {},
+      "ops": [{ "op": "move_block", "block": "b3", "to": 0 }],
+      "expect_blocks": [
+        { "id": "b3", "type": "cta", "heading": "Go" },
+        { "id": "b1", "type": "hero", "heading": "Hi" },
+        { "id": "b2", "type": "faq", "heading": "Q" }
+      ],
+      "expect_ok": [true]
+    },
+    {
+      "name": "move_block to its own index is a no-op that still reports ok",
+      "blocks": [
+        { "id": "b1", "type": "hero", "heading": "Hi" },
+        { "id": "b2", "type": "faq", "heading": "Q" }
+      ],
+      "theme": {},
+      "ops": [{ "op": "move_block", "block": "b1", "to": 0 }],
+      "expect_blocks": [
+        { "id": "b1", "type": "hero", "heading": "Hi" },
+        { "id": "b2", "type": "faq", "heading": "Q" }
+      ],
+      "expect_ok": [true]
+    },
+    {
+      "name": "set_theme writes a nested key",
+      "blocks": [],
+      "theme": { "mode": "light" },
+      "ops": [{ "op": "set_theme", "key": "fonts.heading", "value": "Fraunces" }],
+      "expect_theme": { "mode": "light", "fonts": { "heading": "Fraunces" } },
+      "expect_ok": [true]
+    },
+    {
+      "name": "set_theme with a null value deletes the key",
+      "blocks": [],
+      "theme": { "mode": "dark", "radius": "lg" },
+      "ops": [{ "op": "set_theme", "key": "radius", "value": null }],
+      "expect_theme": { "mode": "dark" },
+      "expect_ok": [true]
+    },
+    {
+      "name": "set_theme colors.brand also derives accent",
+      "blocks": [],
+      "theme": { "colors": { "brand": "#111111" } },
+      "ops": [{ "op": "set_theme", "key": "colors.brand", "value": "#cc4400" }],
+      "expect_theme_subset": { "colors": { "brand": "#cc4400", "accent": "#cc4400" } },
+      "expect_ok": [true]
+    },
+    {
+      "name": "canvas_add appends an element below the existing ones",
+      "blocks": [
+        {
+          "id": "b1", "type": "canvas",
+          "elements": [{ "id": "e1", "kind": "text", "text": "hi", "d": { "x": 1, "y": 1, "w": 4, "h": 2 } }]
+        }
+      ],
+      "theme": {},
+      "ops": [{ "op": "canvas_add", "block": "b1", "element": { "kind": "heading", "text": "Title" } }],
+      "expect_element_count": 2,
+      "expect_last_element_y": 3,
+      "expect_ok": [true]
+    },
+    {
+      "name": "canvas_remove drops the element",
+      "blocks": [
+        {
+          "id": "b1", "type": "canvas",
+          "elements": [{ "id": "e1", "kind": "text", "text": "hi", "d": { "x": 1, "y": 1, "w": 4, "h": 2 } }]
+        }
+      ],
+      "theme": {},
+      "ops": [{ "op": "canvas_remove", "block": "b1", "el": "e1" }],
+      "expect_element_count": 0,
+      "expect_ok": [true]
+    },
+    {
+      "name": "canvas_update patches an element",
+      "blocks": [
+        {
+          "id": "b1", "type": "canvas",
+          "elements": [{ "id": "e1", "kind": "text", "text": "hi", "d": { "x": 1, "y": 1, "w": 4, "h": 2 } }]
+        }
+      ],
+      "theme": {},
+      "ops": [{ "op": "canvas_update", "block": "b1", "el": "e1", "patch": { "text": "bye" } }],
+      "expect_element_count": 1,
+      "expect_ok": [true]
+    },
+    {
+      "name": "canvas ops on a non-canvas section are skipped",
+      "blocks": [{ "id": "b1", "type": "hero", "heading": "Hi" }],
+      "theme": {},
+      "ops": [{ "op": "canvas_add", "block": "b1", "element": { "kind": "text", "text": "x" } }],
+      "expect_blocks": [{ "id": "b1", "type": "hero", "heading": "Hi" }],
+      "expect_ok": [false]
+    },
+    {
+      "name": "generate_image is a no-op in the synchronous fold",
+      "blocks": [{ "id": "b1", "type": "hero", "heading": "Hi" }],
+      "theme": {},
+      "ops": [{ "op": "generate_image", "block": "b1", "field": "image", "prompt": "a lake" }],
+      "expect_blocks": [{ "id": "b1", "type": "hero", "heading": "Hi" }],
+      "expect_ok": []
+    },
+    {
+      "name": "a later op resolves an earlier add_block's temp id",
+      "blocks": [{ "id": "b1", "type": "hero", "heading": "Hi" }],
+      "theme": {},
+      "ops": [
+        { "op": "add_block", "type": "faq", "at": 1, "id": "new-1", "content": { "heading": "FAQ" } },
+        { "op": "set_field", "block": "new-1", "path": "heading", "value": "Questions" }
+      ],
+      "expect_ok": [true, true],
+      "expect_block_count": 2,
+      "expect_field": { "index": 1, "path": "heading", "value": "Questions" }
+    }
+  ]
+}

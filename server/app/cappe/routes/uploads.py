@@ -8,11 +8,11 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 
 from ...core.services.image_gen import ImageGenError, generate_image
-from ...core.services.redis_cache import check_rate_limit
 from ...core.services.storage import get_storage
 from ...database import get_connection
 from ..dependencies import require_cappe_account
 from ..models.cappe import CappeAccount, CappeImageGenRequest, CappeUploadResponse
+from ..services import image_quota
 from ..services.design_gate import is_premium_plan
 from ._shared import get_owned_site
 
@@ -23,8 +23,10 @@ _MAX_BYTES = 5 * 1024 * 1024  # 5 MB
 # AI image generation — real per-image cost, so a DAILY per-account quota (not
 # hourly). Free/hosting plans get a taste (upgrade funnel, like Merlin's lite
 # tier); paid plans get headroom. Tunable; the Redis counter keys on account id.
-_IMG_GEN_DAILY_FREE = 3
-_IMG_GEN_DAILY_PAID = 30
+# The quota itself lives in `services/image_quota.py` so Merlin's agent tool
+# spends the SAME allowance as this button rather than a parallel one.
+_IMG_GEN_DAILY_FREE = image_quota.DAILY_FREE
+_IMG_GEN_DAILY_PAID = image_quota.DAILY_PAID
 # NB: no image/svg+xml — SVGs can carry <script>/onload and are served from the
 # tenant origin (*.gummfit.com / <sub>.hey-matcha.com) as product/cover images,
 # so an uploaded SVG is a stored-XSS vector. Raster formats only.
@@ -100,9 +102,9 @@ async def generate_site_image(
     if not prompt:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Describe the image you want")
 
-    daily = _IMG_GEN_DAILY_PAID if is_premium_plan(account.plan) else _IMG_GEN_DAILY_FREE
-    # Raises 429 (with Retry-After) if over the daily allowance.
-    await check_rate_limit(str(account.id), "cappe_image_gen", daily, 86_400)
+    # Raises 429 (with Retry-After) if over the daily allowance. Shared with
+    # Merlin's agent-loop generate_image tool — see services/image_quota.py.
+    await image_quota.check_and_record(str(account.id), premium=is_premium_plan(account.plan))
 
     try:
         url = await generate_image(prompt, prefix="cappe/gen", aspect_ratio=body.aspect_ratio)
