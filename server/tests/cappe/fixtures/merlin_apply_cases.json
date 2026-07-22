@@ -157,11 +157,11 @@
       "expect_ok": [true]
     },
     {
-      "name": "set_theme colors.brand also derives accent",
+      "name": "set_theme colors.brand also derives accent + brandText",
       "blocks": [],
       "theme": { "colors": { "brand": "#111111" } },
       "ops": [{ "op": "set_theme", "key": "colors.brand", "value": "#cc4400" }],
-      "expect_theme_subset": { "colors": { "brand": "#cc4400", "accent": "#cc4400" } },
+      "expect_theme": { "colors": { "brand": "#cc4400", "accent": "#cc4400", "brandText": "#ffffff" } },
       "expect_ok": [true]
     },
     {
@@ -231,6 +231,18 @@
       "expect_ok": [true, true],
       "expect_block_count": 2,
       "expect_field": { "index": 1, "path": "heading", "value": "Questions" }
+    },
+    {
+      "name": "a later op resolves an earlier duplicate_block's temp id",
+      "blocks": [{ "id": "b1", "type": "hero", "heading": "Hi", "_design": {} }],
+      "theme": {},
+      "ops": [
+        { "op": "duplicate_block", "block": "b1", "id": "dup-1" },
+        { "op": "set_field", "block": "dup-1", "path": "heading", "value": "Copy" }
+      ],
+      "expect_ok": [true, true],
+      "expect_block_count": 2,
+      "expect_field": { "index": 1, "path": "heading", "value": "Copy" }
     }
   ]
 }

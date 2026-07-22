@@ -40,7 +40,11 @@ export type MerlinOp =
   // `_k` — so a LATER op in this same turn can target a block before it
   // exists. Server registers it the same way for validation; see tempIdMap.
   | { op: 'add_block'; type: string; at: number; content?: Record<string, unknown>; design?: Record<string, Record<string, unknown>>; preset?: string; id?: string }
-  | { op: 'duplicate_block'; block: string; at?: number }
+  // `id` is a model-assigned temp id for the CLONE, same convention as
+  // add_block's — lets a later op in this same turn address the duplicate
+  // (e.g. "duplicate this, then restyle the copy") rather than only the
+  // original `block`.
+  | { op: 'duplicate_block'; block: string; at?: number; id?: string }
   | { op: 'remove_block'; block: string }
   | { op: 'move_block'; block: string; to: number }
   | { op: 'set_theme'; key: string; value: unknown }
@@ -244,6 +248,7 @@ export function applyMerlinOps(
         if (idx === -1) { results.push({ ok: false, summary: 'Skipped — section no longer exists' }); break }
         const src = nextBlocks[idx]
         const clone = cloneBlock(src)
+        if (op.id) tempIdMap[op.id] = clone._k as string
         const at = op.at !== undefined ? Math.max(0, Math.min(op.at, nextBlocks.length)) : idx + 1
         nextBlocks = [...nextBlocks.slice(0, at), clone, ...nextBlocks.slice(at)]
         results.push({ ok: true, summary: `Duplicated ${blockLabel(src.type)}` })

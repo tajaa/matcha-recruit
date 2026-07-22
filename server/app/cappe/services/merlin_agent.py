@@ -338,6 +338,9 @@ async def run_merlin_agent(
     def elapsed() -> float:
         return time.monotonic() - started
 
+    def time_left() -> float:
+        return bounds.wall_clock - elapsed()
+
     def record_step(step: dict[str, Any]) -> dict[str, Any]:
         steps.append(step)
         return {"type": "step", **step}
@@ -421,6 +424,16 @@ async def run_merlin_agent(
                 {},
                 None,
             )
+        if time_left() <= 0:
+            # The wall-clock bound is only re-checked between loop iterations —
+            # without this, a call that legally started with time left can
+            # still spend up to the shot's own ~20s timeout AFTER the bound is
+            # already gone, doubling the overrun on top of the model call's own.
+            return (
+                {"error": "time budget spent — finish with what you have"},
+                {"kind": "screenshot", "label": "Skipped — out of time"},
+                None,
+            )
         try:
             # render_html is a sync HTML build (WeasyPrint-adjacent string work,
             # not I/O) — off the event loop so it doesn't stall every other
@@ -470,6 +483,17 @@ async def run_merlin_agent(
         """
         nonlocal work_blocks, work_theme
         from ...core.services.image_gen import ImageGenError, generate_image
+
+        if time_left() <= 0:
+            # Same reasoning as do_screenshot's check: generation has its own
+            # ~60s internal timeout, the single biggest contributor to a turn
+            # overrunning its advertised wall-clock bound if allowed to start
+            # after the budget is already gone.
+            return (
+                {"error": "time budget spent — finish with what you have"},
+                {"kind": "image", "label": "Skipped — out of time"},
+                None,
+            )
 
         block_id = args.get("block_id")
         prompt = str(args.get("prompt") or "").strip()
@@ -544,23 +568,37 @@ async def run_merlin_agent(
 
             await rate_limiter.check_limit("cappe_merlin", "agent")
             model_calls += 1
+            # Capped to whatever's left of the wall clock, not the flat
+            # per-call ceiling: a call that legally started at t=119s of a
+            # 120s bound must not still be allowed to run the full 75s —
+            # the loop-top bound check only fires BETWEEN iterations, so the
+            # call's own timeout is what keeps one iteration from blowing
+            # past the tier's advertised ceiling.
+            call_timeout = min(_CALL_TIMEOUT, max(1.0, bounds.wall_clock - elapsed()))
             try:
                 response = await asyncio.wait_for(
                     client.aio.models.generate_content(
                         model=tier_cfg.model, contents=contents, config=config
                     ),
-                    timeout=_CALL_TIMEOUT,
+                    timeout=call_timeout,
                 )
             finally:
                 # Record even on timeout: the request was issued and billed.
                 await rate_limiter.record_call("cappe_merlin", tier)
 
-            calls = [
-                part.function_call
+            # Keep the ORIGINAL parts, not just their `.function_call` — a
+            # thinking model (gemini-3.x) attaches a `thought_signature` to
+            # each function-call part, and the API requires it echoed back on
+            # the next turn or every call past the first 400s with
+            # "Function call is missing a thought_signature". Rebuilding a
+            # bare `Part(function_call=c)` below used to drop it silently.
+            call_parts = [
+                part
                 for candidate in (response.candidates or [])
                 for part in (candidate.content.parts or [] if candidate.content else [])
                 if getattr(part, "function_call", None)
             ]
+            calls = [p.function_call for p in call_parts]
 
             if not calls:
                 # No tool call — the model answered in prose. Treat it as the
@@ -568,12 +606,13 @@ async def run_merlin_agent(
                 final_message = (getattr(response, "text", None) or "").strip() or None
                 break
 
-            # Echo the model's turn back before the responses, or the next call
-            # loses the tool-call context.
+            # Echo the model's own parts back verbatim (thought_signature and
+            # all) before the responses, or the next call loses the tool-call
+            # context.
             contents.append(
                 types.Content(
                     role="model",
-                    parts=[types.Part(function_call=c) for c in calls],
+                    parts=call_parts,
                 )
             )
 
@@ -581,14 +620,23 @@ async def run_merlin_agent(
             image_parts: list[types.Part] = []
             finished = False
 
+            # Gemini's parallel function calling makes no ordering promise
+            # within one batch — `[finish(...), apply_ops(...)]` is a real
+            # shape, not a hypothetical. Breaking on `finish` mid-iteration
+            # used to drop every call after it unexecuted, so a turn could
+            # report "darkened the hero" with an empty op log. Run every
+            # OTHER call in the batch first; honor `finish` only once they've
+            # all executed, so the message it returns describes ops that
+            # actually landed.
+            finish_message: Optional[str] = None
             for call in calls:
                 name = call.name
                 args = dict(call.args or {})
 
                 if name == "finish":
-                    final_message = str(args.get("message") or "").strip() or None
+                    finish_message = str(args.get("message") or "").strip() or None
                     finished = True
-                    break
+                    continue
 
                 if name == "apply_ops":
                     payload, step = do_apply_ops(args)
@@ -614,6 +662,7 @@ async def run_merlin_agent(
                 )
 
             if finished:
+                final_message = finish_message
                 break
 
             contents.append(types.Content(role="user", parts=[*response_parts, *image_parts]))

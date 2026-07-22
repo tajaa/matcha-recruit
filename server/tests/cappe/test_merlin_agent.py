@@ -163,6 +163,26 @@ def test_apply_then_screenshot_then_finish(patched):
     assert models.calls == 3
 
 
+def test_finish_in_the_same_batch_does_not_discard_sibling_calls(patched):
+    """Gemini's parallel function calling makes no ordering promise within one
+    batch — `[finish(...), apply_ops(...)]` is a real shape. `finish` must not
+    short-circuit the batch and drop the ops after it, or the turn reports a
+    change it never actually applied."""
+    frames, _ = patched([
+        [
+            ("finish", {"message": "Darkened the hero."}),
+            ("apply_ops", {"ops": '[{"op":"set_field","block":"b1","path":"heading","value":"New"}]'}),
+        ],
+    ])
+    data = _result(frames)
+
+    assert data["message"] == "Darkened the hero."
+    assert [o["op"] for o in data["ops"]] == ["set_field"], (
+        "the sibling apply_ops call must still execute even though finish "
+        "came first in the batch"
+    )
+
+
 def test_screenshot_is_handed_back_to_the_model_as_an_image(patched):
     """A screenshot the model can't see is a wasted round trip — the PNG must
     ride back on the next request's contents, not just into the step frame."""

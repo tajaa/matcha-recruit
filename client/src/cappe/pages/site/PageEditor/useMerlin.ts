@@ -186,8 +186,18 @@ export function useMerlin(
       ? saved
       : MERLIN_MIN_WIDTH
   })
+  const clampWidth = (px: number) =>
+    Math.min(MERLIN_MAX_WIDTH, Math.max(MERLIN_MIN_WIDTH, Math.round(px)))
+  /** Update the live width without touching localStorage — for a drag in
+   *  progress, where the panel rAF-throttles this but every intermediate
+   *  value is still a full re-render (the message list, its screenshot
+   *  thumbnails, and the canvas bridge's `reservedRight` all key off it). A
+   *  localStorage write per call would add synchronous disk I/O on top of
+   *  that for a value only the FINAL position needs persisted. */
+  const setWidthLive = (px: number) => setWidthState(clampWidth(px))
+  /** Commit — persists to localStorage. Call once a drag ends. */
   const setWidth = (px: number) => {
-    const clamped = Math.min(MERLIN_MAX_WIDTH, Math.max(MERLIN_MIN_WIDTH, Math.round(px)))
+    const clamped = clampWidth(px)
     setWidthState(clamped)
     try { localStorage.setItem(WIDTH_KEY, String(clamped)) } catch { /* ignore quota */ }
   }
@@ -208,6 +218,14 @@ export function useMerlin(
   conversationIdRef.current = conversationId
   const [conversations, setConversations] = useState<MerlinConversation[]>([])
 
+  // Bumped every time the user SWITCHES which conversation the panel is
+  // showing (open/new — not the auto-adopt of a fresh conversation's own id
+  // inside `send`, below). A turn in flight for the conversation the user has
+  // since navigated away from must not land its reply, ops or id-adoption in
+  // whatever conversation is open when it resolves — unlike a page change,
+  // switching conversations does NOT abort the in-flight request.
+  const sessionRef = useRef(0)
+
   const refreshConversations = async (sid: string, pid: string) => {
     try {
       const list = await cappeApi.get<MerlinConversation[]>(
@@ -218,6 +236,7 @@ export function useMerlin(
   }
 
   const openConversation = async (id: string, opts?: { silent?: boolean }) => {
+    sessionRef.current += 1
     if (!opts?.silent) setMessages([])
     setConversationId(id)
     setError(null)
@@ -250,6 +269,7 @@ export function useMerlin(
   /** Start a new conversation. The row is only created server-side on the
    *  first turn, so this is purely local state until then. */
   const newConversation = () => {
+    sessionRef.current += 1
     setConversationId(null)
     setMessages([])
     setError(null)
@@ -348,6 +368,7 @@ export function useMerlin(
     sid: string,
     ops: Extract<MerlinOp, { op: 'generate_image' }>[],
     sentForPageId: string,
+    sentSession: number,
   ) => {
     for (const g of ops) {
       try {
@@ -355,7 +376,7 @@ export function useMerlin(
           `/sites/${sid}/generate-image`,
           { prompt: g.prompt, aspect_ratio: g.aspect || '16:9' },
         )
-        if (sentForPageId !== pageIdRef.current) return
+        if (sentForPageId !== pageIdRef.current || sentSession !== sessionRef.current) return
         const cur = getSnapshot()
         const applied = applyMerlinOps(cur.blocks, cur.theme, [
           { op: 'set_field', block: g.block, path: g.field, value: gen.url },
@@ -371,9 +392,10 @@ export function useMerlin(
           noChanges: !changed,
         }])
       } catch (e) {
-        // Same navigation guard as the success path — don't drop a failure note
-        // into a page the user navigated to during the ~10-30s generation.
-        if (sentForPageId !== pageIdRef.current) return
+        // Same navigation/conversation guard as the success path — don't drop
+        // a failure note into a page or conversation the user left during the
+        // ~10-30s generation.
+        if (sentForPageId !== pageIdRef.current || sentSession !== sessionRef.current) return
         const msg = e instanceof Error ? e.message : 'Image generation failed'
         setMessages((m) => [...m, {
           role: 'assistant', content: `Image generation failed: ${msg}`,
@@ -397,6 +419,7 @@ export function useMerlin(
       { role: 'user', content: trimmed, attachments: sentAttachments.length ? sentAttachments : undefined },
     ])
     const sentForPageId = pageId
+    const sentSession = sessionRef.current
     const abort = new AbortController()
     abortRef.current = abort
 
@@ -457,6 +480,14 @@ export function useMerlin(
         // explanation; otherwise the connection dropped.
         throw new Error(collected.error || 'Merlin failed to respond')
       }
+
+      // The user switched to a different conversation (or started a new one)
+      // while this turn was in flight. A page change aborts the request, but
+      // switching conversations doesn't — so without this, a slow Max turn's
+      // reply, ops and conversation_id land in whatever conversation happens
+      // to be open when it resolves, not the one it was actually sent for.
+      if (sessionRef.current !== sentSession) return
+
       if (collected.error) setError(collected.error)
 
       // Adopt the conversation the server opened for a first turn, and surface
@@ -512,7 +543,7 @@ export function useMerlin(
       // internally for every other op that can target one.
       if (genOps.length) {
         const remapped = genOps.map((g) => ({ ...g, block: applied.tempIdMap[g.block] ?? g.block }))
-        await runImageOps(siteId, remapped, sentForPageId)
+        await runImageOps(siteId, remapped, sentForPageId, sentSession)
       }
     } catch (e) {
       // An aborted turn is a normal interaction (the user navigated away), not
@@ -530,7 +561,7 @@ export function useMerlin(
   }
 
   return {
-    open, setOpen, messages, send, sending, error, tier, setTier, width, setWidth,
+    open, setOpen, messages, send, sending, error, tier, setTier, width, setWidth, setWidthLive,
     status, liveSteps,
     attachments, addAttachment, removeAttachment, attachmentUploading, attachmentError,
     conversationId, conversations, openConversation, newConversation,

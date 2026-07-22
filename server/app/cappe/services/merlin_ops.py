@@ -514,11 +514,30 @@ def _v_generate_image(raw: dict[str, Any], ctx: ValidationCtx) -> Optional[str]:
 
 
 def _v_duplicate_block(raw: dict[str, Any], ctx: ValidationCtx) -> Optional[str]:
-    if _sid(raw.get("block")) not in ctx.by_id:
+    source = ctx.by_id.get(_sid(raw.get("block")))
+    if source is None:
         return "block id not found"
     at = raw.get("at")
     if at is not None and (not isinstance(at, int) or isinstance(at, bool)):
         return "invalid 'at' index"
+    raw_id = raw.get("id")
+    if raw_id is not None:
+        temp_id = _sid(raw_id)
+        if temp_id is None:
+            return "'id' must be a string"
+        if temp_id in ctx.by_id:
+            return f"id '{raw_id}' collides with an existing or already-added block"
+        # Same reasoning as add_block's synthetic registration: without a name
+        # for the CLONE, a later op in this same turn that targets it (learned
+        # via inspect_block, or the "duplicate then restyle the copy" pattern)
+        # has no id to address it by — the server-minted id from apply_ops'
+        # duplicate_block (`srv-<hex>`) is never seen client-side, so that op
+        # would resolve to nothing there even though it validated and applied
+        # fine on the server's working copy.
+        synthetic = {**source, "id": temp_id, "_synthetic": True}
+        ctx.by_id[temp_id] = synthetic
+        if source.get("type") == "canvas":
+            ctx.pending_canvas_count[temp_id] = len(_canvas_elements(source))
     return None
 
 
@@ -727,10 +746,15 @@ MERLIN_OPS: tuple[MerlinOp, ...] = (
     MerlinOp(
         name="duplicate_block",
         validate=_v_duplicate_block,
-        prompt_shape='{"op":"duplicate_block","block":"<id>","at":<index optional, default right after the source>}',
+        prompt_shape=(
+            '{"op":"duplicate_block","block":"<id>","at":<index optional, default right after the source>,'
+            '"id":"<optional short id, e.g. new-1, see add_block>"}'
+        ),
         prompt_rules=(
             "Use duplicate_block for \"copy/duplicate this section\" instead of hand-rebuilding it with "
             "add_block — it copies content AND design in one op.",
+            "If a LATER op in this same turn needs to target the duplicate (e.g. \"duplicate this and "
+            "restyle the copy\"), give duplicate_block an 'id' — same convention as add_block.",
         ),
     ),
     MerlinOp(

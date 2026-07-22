@@ -608,6 +608,23 @@ def test_duplicate_block_invalid_at_rejected():
     assert rejected and "at" in rejected[0]["reason"]
 
 
+def test_duplicate_block_with_id_then_set_design_same_turn():
+    """duplicate_block's `id` registers the clone the same way add_block's
+    does, so "duplicate this section, then restyle the copy" resolves within
+    one turn instead of the second op hitting 'block id not found'."""
+    valid, rejected = _only([
+        {"op": "duplicate_block", "block": "b1", "id": "dup-1"},
+        {"op": "set_design", "block": "dup-1", "group": "bg", "key": "color", "value": "surface"},
+    ])
+    assert not rejected
+    assert len(valid) == 2
+
+
+def test_duplicate_block_id_collides_with_existing_block_rejected():
+    _, rejected = _only([{"op": "duplicate_block", "block": "b1", "id": "b1"}])
+    assert rejected and "collides" in rejected[0]["reason"]
+
+
 # --- set_design_bulk -----------------------------------------------------------
 
 def test_set_design_bulk_explicit_ids_valid():

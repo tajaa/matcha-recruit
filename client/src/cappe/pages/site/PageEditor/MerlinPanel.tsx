@@ -168,7 +168,7 @@ function ConversationMenu({ merlin }: { merlin: ReturnType<typeof useMerlin> }) 
 export function MerlinDrawer({ merlin }: { merlin: ReturnType<typeof useMerlin> }) {
   const premium = usePremium()
   const {
-    open, setOpen, messages, send, sending, error, tier, setTier, width, setWidth,
+    open, setOpen, messages, send, sending, error, tier, setTier, width, setWidth, setWidthLive,
     newConversation, status, liveSteps,
     attachments, addAttachment, removeAttachment, attachmentUploading, attachmentError,
   } = merlin
@@ -193,13 +193,32 @@ export function MerlinDrawer({ merlin }: { merlin: ReturnType<typeof useMerlin> 
 
   // Drag the left edge to resize. Listeners live on the window (not the
   // handle) so the drag survives the pointer outrunning the 4px strip.
+  //
+  // rAF-throttled: a high-poll mouse fires well over 60 mousemove events/sec,
+  // and each one was driving a full re-render (the message list, every
+  // StepTrail screenshot thumbnail, and — because index.tsx derives
+  // reservedRight from this width — the canvas bridge re-running against the
+  // preview iframe) PLUS a synchronous localStorage write. Coalescing to one
+  // update per frame during the drag, and persisting only once on release,
+  // removes both costs without changing the interaction.
   const startResize = (e: React.MouseEvent) => {
     e.preventDefault()
-    const onMove = (ev: MouseEvent) => setWidth(window.innerWidth - ev.clientX)
-    const onUp = () => {
+    let rafId = 0
+    let latestX = e.clientX
+    const applyLive = () => {
+      rafId = 0
+      setWidthLive(window.innerWidth - latestX)
+    }
+    const onMove = (ev: MouseEvent) => {
+      latestX = ev.clientX
+      if (!rafId) rafId = requestAnimationFrame(applyLive)
+    }
+    const onUp = (ev: MouseEvent) => {
       window.removeEventListener('mousemove', onMove)
       window.removeEventListener('mouseup', onUp)
       document.body.style.userSelect = ''
+      if (rafId) cancelAnimationFrame(rafId)
+      setWidth(window.innerWidth - ev.clientX)
     }
     document.body.style.userSelect = 'none'
     window.addEventListener('mousemove', onMove)

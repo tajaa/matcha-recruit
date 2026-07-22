@@ -53,6 +53,12 @@ class ScreenshotUnavailable(RuntimeError):
 _playwright: Any = None
 _browser: Any = None
 _shots_taken = 0
+# Checked-out-but-not-yet-released callers. `_MAX_CONCURRENT` lets two shots
+# run at once, so the age-based recycle in `_get_browser` must not close the
+# browser a SIBLING call is mid-`set_content`/`screenshot` on — gating recycle
+# on this reaching 0 is what prevents that race (see screenshot_html/`finally`
+# for the release side).
+_in_flight = 0
 _lock = asyncio.Lock()
 _semaphore: Optional[asyncio.Semaphore] = None
 
@@ -82,11 +88,16 @@ async def _close_browser() -> None:
 
 
 async def _get_browser() -> Any:
-    """The shared Chromium, launched on first use and recycled periodically."""
-    global _playwright, _browser, _shots_taken
+    """The shared Chromium, launched on first use and recycled periodically.
+
+    Marks the browser checked-out (`_in_flight += 1`) before returning it —
+    the caller MUST release it via `_release_browser()` when done, or the age
+    recycle below stops firing (fresh launches after a crash still work
+    either way, since that branch doesn't consult `_in_flight`)."""
+    global _playwright, _browser, _shots_taken, _in_flight
 
     async with _lock:
-        if _browser is not None and _shots_taken >= _RECYCLE_AFTER:
+        if _browser is not None and _shots_taken >= _RECYCLE_AFTER and _in_flight == 0:
             logger.info("Recycling Merlin browser after %d screenshots", _shots_taken)
             await _close_browser()
 
@@ -99,7 +110,15 @@ async def _get_browser() -> Any:
             except Exception as exc:  # noqa: BLE001 — includes "executable doesn't exist"
                 await _close_browser()
                 raise ScreenshotUnavailable(str(exc)) from exc
+        _in_flight += 1
         return _browser
+
+
+async def _release_browser() -> None:
+    """Pair with `_get_browser()` — always call from a `finally`."""
+    global _in_flight
+    async with _lock:
+        _in_flight = max(0, _in_flight - 1)
 
 
 async def screenshot_html(html: str, viewport: str = DEFAULT_VIEWPORT) -> bytes:
@@ -118,10 +137,17 @@ async def screenshot_html(html: str, viewport: str = DEFAULT_VIEWPORT) -> bytes:
         try:
             context = await browser.new_context(viewport=size, device_scale_factor=1)
             page = await context.new_page()
+            # `domcontentloaded`, not `load`: the rendered HTML can reference
+            # real image/font URLs (CloudFront, a user's own upload), and
+            # `load` waits on every one of them — a slow or dead asset then
+            # burns the whole `_SHOT_TIMEOUT` and looks like a crashed
+            # browser. The 0.4s settle below still covers fonts/entrance
+            # animations; it just doesn't also block on network fetches this
+            # tool was never meant to make (see the docstring above).
             await asyncio.wait_for(
-                page.set_content(html, wait_until="load"), timeout=_SHOT_TIMEOUT
+                page.set_content(html, wait_until="domcontentloaded"), timeout=_SHOT_TIMEOUT
             )
-            # Fonts and entrance animations settle after `load`; without this
+            # Fonts and entrance animations settle after load; without this
             # the shot can catch a mid-reveal section at opacity 0 and the
             # model "sees" an empty page it then tries to fix.
             await asyncio.sleep(0.4)
@@ -144,6 +170,7 @@ async def screenshot_html(html: str, viewport: str = DEFAULT_VIEWPORT) -> bytes:
                     await context.close()
                 except Exception:  # noqa: BLE001
                     pass
+            await _release_browser()
 
 
 async def shutdown() -> None:

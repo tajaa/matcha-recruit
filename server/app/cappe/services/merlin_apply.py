@@ -33,6 +33,7 @@ Two deliberate divergences, both because the data lives client-side only:
 Everything here is pure: no I/O, no DB, no mutation of the caller's lists.
 """
 import copy
+import re
 import uuid
 from typing import Any, Optional
 
@@ -136,6 +137,18 @@ def _next_y(elements: list[dict[str, Any]]) -> int:
     return bottom
 
 
+def _contrast_text(hex_value: str) -> str:
+    """Mirror of the client's `contrastText` (cappeThemes.ts) — readable
+    black/white foreground for a hex background, by relative luminance."""
+    m = re.match(r"^#?([0-9a-fA-F]{6})$", (hex_value or "").strip())
+    if not m:
+        return "#ffffff"
+    n = int(m.group(1), 16)
+    r, g, b = (n >> 16) & 255, (n >> 8) & 255, n & 255
+    lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255
+    return "#10120a" if lum > 0.6 else "#ffffff"
+
+
 def _apply_theme_op(
     theme: dict[str, Any], key: str, value: Any
 ) -> Optional[dict[str, Any]]:
@@ -150,7 +163,14 @@ def _apply_theme_op(
         return {**theme, "preset": preset.id, "mode": preset.mode}
 
     if key == "colors.brand" and isinstance(value, str):
-        colors = {**_as_dict(theme.get("colors")), "brand": value, "accent": value}
+        # Must derive brandText exactly like the client's applyThemeOp, or the
+        # working copy's screenshot renders --brand-fg from the STALE contrast
+        # color while the client's real apply computes the new one — the model
+        # judges a button contrast the user will never actually see.
+        colors = {
+            **_as_dict(theme.get("colors")),
+            "brand": value, "accent": value, "brandText": _contrast_text(value),
+        }
         return {**theme, "colors": colors}
 
     head, _, sub = key.partition(".")
@@ -295,6 +315,17 @@ def apply_ops(
                 continue
             clone = copy.deepcopy(next_blocks[idx])
             clone["id"] = f"srv-{uuid.uuid4().hex[:8]}"
+            # Same reasoning as add_block's temp id, above: without this, a
+            # LATER op in this same turn that targets the clone by a model-
+            # given name (e.g. "duplicate this, then restyle the copy") would
+            # resolve against this srv-generated id on the working copy but
+            # against nothing at all once the op log reaches the client — the
+            # client mints its own random key for the clone and has never
+            # seen this one.
+            temp_id = op.get("id")
+            existing_ids = {b.get("id") for b in next_blocks}
+            if isinstance(temp_id, str) and temp_id and temp_id not in existing_ids:
+                temp_id_map[temp_id] = clone["id"]
             at_raw = op.get("at")
             at = max(0, min(int(at_raw), len(next_blocks))) if isinstance(at_raw, int) else idx + 1
             next_blocks.insert(at, clone)
