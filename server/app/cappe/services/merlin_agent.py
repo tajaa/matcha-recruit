@@ -41,6 +41,7 @@ from typing import Any, AsyncIterator, Optional
 from fastapi import HTTPException
 from google.genai import types
 
+from ...core.services.ai_usage import feature_scope
 from ...core.services.genai_client import get_genai_client
 from ...core.services.rate_limiter import GeminiRateLimiter, RateLimitExceeded
 from ...core.services.storage import get_storage
@@ -531,10 +532,17 @@ async def run_merlin_agent(
                 )
 
         try:
-            url, png = await generate_image(
-                prompt, prefix="cappe/gen", aspect_ratio=aspect or "16:9",
-                reference_images=reference, return_bytes=True,
-            )
+            # Separates agent-driven image spend from the editor's plain
+            # Generate button, which keeps the stack-derived "core.image_gen"
+            # label — both call the same `generate_image`, so without this
+            # override the by-feature rollup couldn't tell them apart. The
+            # scope survives `generate_image`'s internal `asyncio.to_thread`
+            # (contextvars.Context is copied into the worker thread).
+            with feature_scope("cappe.merlin_agent.image"):
+                url, png = await generate_image(
+                    prompt, prefix="cappe/gen", aspect_ratio=aspect or "16:9",
+                    reference_images=reference, return_bytes=True,
+                )
         except ImageGenError as exc:
             return (
                 {"error": f"generation failed: {exc}"},
@@ -576,12 +584,20 @@ async def run_merlin_agent(
             # past the tier's advertised ceiling.
             call_timeout = min(_CALL_TIMEOUT, max(1.0, bounds.wall_clock - elapsed()))
             try:
-                response = await asyncio.wait_for(
-                    client.aio.models.generate_content(
-                        model=tier_cfg.model, contents=contents, config=config
-                    ),
-                    timeout=call_timeout,
-                )
+                # Labeled separately from the stack-derived "cappe.merlin_agent"
+                # (and split by tier): this is the call whose cost actually
+                # grows turn over turn, since `contents` accumulates every
+                # screenshot as image input tokens — the by-feature rollup at
+                # /admin/ai-usage needs to isolate it from the one-off
+                # generate_image tool call below to answer "which part of an
+                # agentic turn costs the most".
+                with feature_scope(f"cappe.merlin_agent.loop.{tier}"):
+                    response = await asyncio.wait_for(
+                        client.aio.models.generate_content(
+                            model=tier_cfg.model, contents=contents, config=config
+                        ),
+                        timeout=call_timeout,
+                    )
             finally:
                 # Record even on timeout: the request was issued and billed.
                 await rate_limiter.record_call("cappe_merlin", tier)

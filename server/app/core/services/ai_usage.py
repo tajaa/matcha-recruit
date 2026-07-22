@@ -17,6 +17,15 @@ v1 known gaps (see admin UI / API docs for how these surface):
   - No per-company attribution — feature-level only. A nullable company_id
     column can be added later without reshaping this module.
 
+The stack-derived label above is per MODULE, not per code path within it — too
+coarse when one module has more than one real cost center (a multi-call agent
+loop vs. its one-off image-generation tool, say). `feature_scope(label)` is the
+escape hatch: it overrides the label for every wrapped call issued inside the
+`with` block, no matter how deep the call chain — including through
+`asyncio.to_thread`, since `contextvars.Context` is copied into the thread.
+Use sparingly (each distinct label is a permanent row in "by feature"); the
+default stack-derived label is right for the other ~100 call sites.
+
 Set AI_USAGE_LOGGING=0 to disable (read once at import; the client is then
 returned unwrapped).
 """
@@ -27,7 +36,9 @@ import logging
 import os
 import sys
 import time
-from typing import Any, Optional
+from contextlib import contextmanager
+from contextvars import ContextVar
+from typing import Any, Iterator, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +55,31 @@ PRICING: dict[tuple[str, str], tuple[float, float]] = {
     ("gemini", "gemini-3.5-flash-lite"): (0.30, 2.50),
     ("gemini", "gemini-3-flash-preview"): (0.50, 3.00),
     ("gemini", "gemini-3.1-flash-lite"): (0.25, 1.50),
+    # Image output bills at the image rate (~$30/1M ≈ $0.039/1290-token image).
+    # Same figure already used for dollar-based billing in
+    # matcha/services/model_pricing.py — ported here so image-gen calls (the
+    # editor's Generate button, Merlin's agent-loop generate_image tool) stop
+    # logging cost_usd=NULL and showing as "unpriced" in the admin dashboard.
+    ("gemini", "gemini-3.1-flash-image-preview"): (0.30, 30.00),
 }
+
+# Overrides `_feature_label()`'s stack-derived label for every wrapped call
+# made inside a `feature_scope(...)` block — see that function and the module
+# docstring. `to_thread` copies the current Context into the worker thread, so
+# a scope entered before an `asyncio.to_thread(...)` call is still visible to
+# the wrapped SDK call running inside it.
+_feature_override: "ContextVar[Optional[str]]" = ContextVar("ai_usage_feature_override", default=None)
+
+
+@contextmanager
+def feature_scope(label: str) -> Iterator[None]:
+    """Attribute every wrapped Gemini call made inside this block to `label`,
+    overriding the default stack-derived one. See the module docstring."""
+    token = _feature_override.set(label)
+    try:
+        yield
+    finally:
+        _feature_override.reset(token)
 
 # Modules dropped from the feature label — purely organizational nesting
 # that's redundant on every path ("app", the src root; "services"/"routes",
@@ -73,7 +108,14 @@ def _feature_label() -> str:
     "app.cappe.services.merlin" -> "cappe.merlin"
     "app.workers.tasks.compliance_checks" -> "workers.tasks.compliance_checks"
     "app.core.services.gemini_compliance" -> "core.gemini_compliance"
+
+    `feature_scope(...)` wins when set — checked first, before the (more
+    expensive) frame walk.
     """
+    override = _feature_override.get()
+    if override is not None:
+        return override[:100]
+
     frame = sys._getframe(1)
     depth = 0
     try:

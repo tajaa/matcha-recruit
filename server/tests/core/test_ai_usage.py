@@ -85,6 +85,62 @@ def test_feature_label_fallback_outside_app():
     assert _call_feature_label_from("some_other_package.thing") == "unknown"
 
 
+# --- feature_scope override --------------------------------------------------
+
+def test_feature_scope_overrides_stack_label(recorded):
+    """The escape hatch for a module with more than one real cost center
+    (e.g. cappe.merlin_agent's loop vs. its generate_image tool) — the
+    override must win over whatever the stack walk would have derived."""
+    real = _FakeModels(is_async=False)
+    fake_client = _FakeClient(models_sync=real, models_async=_FakeModels(is_async=True))
+    wrapped = ai_usage.wrap_client(fake_client)
+
+    with ai_usage.feature_scope("cappe.merlin_agent.image"):
+        wrapped.models.generate_content(model="gemini-3.1-flash-image-preview", contents="hi")
+
+    assert recorded[0]["feature"] == "cappe.merlin_agent.image"
+
+
+def test_feature_scope_resets_after_block(recorded):
+    real = _FakeModels(is_async=False)
+    fake_client = _FakeClient(models_sync=real, models_async=_FakeModels(is_async=True))
+    wrapped = ai_usage.wrap_client(fake_client)
+
+    with ai_usage.feature_scope("scoped.label"):
+        wrapped.models.generate_content(model="gemini-3.5-flash-lite", contents="hi")
+    wrapped.models.generate_content(model="gemini-3.5-flash-lite", contents="hi")
+
+    assert recorded[0]["feature"] == "scoped.label"
+    assert recorded[1]["feature"] != "scoped.label"
+
+
+def test_feature_scope_resets_on_exception(recorded):
+    """A call that raises inside the `with` block must not leak the override
+    into whatever runs after — `finally` in feature_scope is load-bearing."""
+    real = _FakeModels(is_async=False)
+    fake_client = _FakeClient(models_sync=real, models_async=_FakeModels(is_async=True))
+    wrapped = ai_usage.wrap_client(fake_client)
+
+    with pytest.raises(RuntimeError):
+        with ai_usage.feature_scope("scoped.label"):
+            raise RuntimeError("boom")
+
+    wrapped.models.generate_content(model="gemini-3.5-flash-lite", contents="hi")
+    assert recorded[0]["feature"] != "scoped.label"
+
+
+@pytest.mark.asyncio
+async def test_feature_scope_propagates_through_to_thread():
+    """`image_gen.generate_image` runs the SDK call via
+    `asyncio.to_thread(_generate_sync, ...)` — a scope entered on the calling
+    coroutine must still be visible inside that thread, or Merlin's agent-loop
+    image-gen override would silently no-op."""
+    with ai_usage.feature_scope("thread.check"):
+        seen = await asyncio.to_thread(ai_usage._feature_override.get)
+    assert seen == "thread.check"
+    assert ai_usage._feature_override.get() is None
+
+
 # --- cost math -----------------------------------------------------------
 
 def test_compute_cost_known_model():
@@ -120,6 +176,15 @@ def test_compute_cost_partial_tokens_still_computed():
     # thinking_tokens=0 (an explicit int) still prices normally.
     cost = ai_usage.compute_cost("gemini", "gemini-3.5-flash-lite", 100, 100, 0)
     assert cost is not None and cost > 0
+
+
+def test_compute_cost_prices_image_model():
+    # Was absent from PRICING, so every image-gen call (the editor's Generate
+    # button and Merlin's agent-loop generate_image tool both go through
+    # core.services.image_gen, which uses this exact model string) logged
+    # cost_usd=NULL and showed as "unpriced" in the admin dashboard.
+    cost = ai_usage.compute_cost("gemini", "gemini-3.1-flash-image-preview", 1_000_000, 1_000_000, 0)
+    assert cost == pytest.approx(0.30 + 30.00)
 
 
 # --- proxy: fake client -----------------------------------------------------
