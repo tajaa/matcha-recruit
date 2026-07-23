@@ -1,6 +1,5 @@
-import { ArrowLeft, Loader2, MousePointerClick, Pencil, Redo2, Save, Undo2 } from 'lucide-react'
+import { ArrowLeft, Loader2, MousePointerClick, Pencil, Redo2, Save, Sparkles, Undo2 } from 'lucide-react'
 import { EditorHelp } from './EditorHelp'
-import { MerlinButton } from './MerlinPanel'
 import { PromosPanel } from './PromosPanel'
 import { ThemeMenu } from './ThemeMenu'
 import type { useMerlin } from './useMerlin'
@@ -70,19 +69,33 @@ export function EditorToolbar({
             as a flex sibling of the preview, not here. */}
         <ThemeMenu themeEditor={themeEditor} />
 
-        {/* Chat-edit toggle — the panel itself renders in index.tsx as a flex
-            sibling of the preview, not here (same pattern as ThemeMenu). */}
-        <MerlinButton open={merlin.open} setOpen={merlin.setOpen} />
-
-        {canvasUnlocked && (
-          <div className="flex rounded-lg border border-zinc-700 p-0.5">
-            {([['canvas', 'Canvas', MousePointerClick], ['form', 'Form', Pencil]] as const).map(([m, label, Icon]) => (
-              <button key={m} onClick={() => setEditMode(m)} className={`flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium ${editMode === m ? 'bg-emerald-500 text-zinc-950' : 'text-zinc-400 hover:text-zinc-200'}`}>
-                <Icon className="h-3.5 w-3.5" /> {label}
-              </button>
-            ))}
-          </div>
-        )}
+        {/* The three editing surfaces, mutually exclusive — Merlin is the
+            pro-level way to edit; Canvas/Form are the basic sub-editors.
+            Never more than one rendered at once (index.tsx picks exactly
+            one), so this is a single 3-way selector rather than an
+            independent Merlin toggle plus a separate Canvas/Form pair. */}
+        <div className="flex rounded-lg border border-zinc-700 p-0.5">
+          <button
+            onClick={() => merlin.setOpen(() => true)}
+            className={`flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium ${merlin.open ? 'bg-emerald-500 text-zinc-950' : 'text-zinc-400 hover:text-zinc-200'}`}
+          >
+            <Sparkles className="h-3.5 w-3.5" /> Merlin
+          </button>
+          {canvasUnlocked && (
+            <button
+              onClick={() => setEditMode('canvas')}
+              className={`flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium ${!merlin.open && editMode === 'canvas' ? 'bg-emerald-500 text-zinc-950' : 'text-zinc-400 hover:text-zinc-200'}`}
+            >
+              <MousePointerClick className="h-3.5 w-3.5" /> Canvas
+            </button>
+          )}
+          <button
+            onClick={() => setEditMode('form')}
+            className={`flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium ${!merlin.open && editMode === 'form' ? 'bg-emerald-500 text-zinc-950' : 'text-zinc-400 hover:text-zinc-200'}`}
+          >
+            <Pencil className="h-3.5 w-3.5" /> Form
+          </button>
+        </div>
 
         <select value={status} onChange={(e) => setStatus(e.target.value as 'draft' | 'published')} className="rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-sm text-zinc-100">
           <option value="draft">Draft</option>

@@ -16,21 +16,6 @@ import {
   type useMerlin,
 } from './useMerlin'
 
-/** Toolbar toggle only — the panel itself is `MerlinDrawer`, rendered by
- *  index.tsx as a flex sibling of the preview/canvas (same docking pattern as
- *  ThemeMenu/ThemeDrawer), so its width composes into the layout row instead
- *  of overlaying it. */
-export function MerlinButton({ open, setOpen }: { open: boolean; setOpen: (fn: (o: boolean) => boolean) => void }) {
-  return (
-    <button
-      onClick={() => setOpen((o) => !o)}
-      className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-medium ${open ? 'border-emerald-500 text-emerald-400' : 'border-zinc-700 text-zinc-300 hover:bg-zinc-800'}`}
-    >
-      <Sparkles className="h-4 w-4" /> Merlin
-    </button>
-  )
-}
-
 /** Markdown, restyled for a 320-560px dark chat column. Merlin's prose is short
  *  but does use lists and inline code (field paths, color tokens), which read as
  *  literal asterisks and backticks when rendered raw. */

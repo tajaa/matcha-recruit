@@ -11,6 +11,7 @@ import { usePremium } from './DesignPrimitives'
 import { EditorToolbar } from './EditorToolbar'
 import { FormModeView } from './FormModeView'
 import { MerlinDrawer } from './MerlinPanel'
+import { MerlinPreviewView } from './MerlinPreviewView'
 import { ThemeDrawer } from './ThemeMenu'
 import { themeObj } from './themeHelpers'
 import { useCanvasBridge } from './useCanvasBridge'
@@ -339,7 +340,11 @@ export default function PageEditor() {
             overlay), so its width composes into the row instead of stacking
             on top of whatever else is already docked there. */}
         <div className="flex min-h-0 flex-1">
-        {editMode === 'canvas' ? (
+        {merlin.open ? (
+          /* Merlin is the primary editor — Canvas/Form don't render alongside
+             it (see MerlinPreviewView's doc): plain live preview only. */
+          <MerlinPreviewView preview={preview} iframeRef={previewIframeRef} />
+        ) : editMode === 'canvas' ? (
           /* canvas: click a section on the page → a floating editor pops up at it (Pro & Business) */
           <CanvasModeView
             preview={preview}
@@ -351,7 +356,6 @@ export default function PageEditor() {
             duplicateBlock={duplicateBlock}
             addBlockAt={addBlockAt}
             addBlock={addBlock}
-            merlinOpen={merlin.open}
           />
         ) : (
           /* split: form editor | live preview */
