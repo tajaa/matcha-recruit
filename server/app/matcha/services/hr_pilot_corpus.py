@@ -63,6 +63,7 @@ _MAX_TRAINING_PROGRAMS = 40
 _MAX_TRAINING_DETAIL = 15
 _MAX_RECENT_INCIDENTS = 15
 _INCIDENT_LOOKBACK_DAYS = 90
+_MAX_BENEFIT_PLANS = 20
 
 # Namespaces the audit gate will recognise inside brackets. Deliberately a
 # closed list: a bare `[...]` regex also matches markdown link text and the
@@ -74,6 +75,11 @@ _CID_NAMESPACES = (
     # authority note in matcha_work_mode_contexts: these say who/when/status,
     # they never establish a rule.
     "schedule", "training", "incident",
+    # Benefits enrollment — plan offerings + the open-enrollment window.
+    # Company-level and nameless by construction, so (unlike the three above)
+    # it is served to BOTH surfaces: "when does open enrollment close?" is a
+    # core Ask HR question.
+    "benefit",
 )
 _CITATION_RE = re.compile(
     r"\[(" + "|".join(_CID_NAMESPACES) + r")(:[^\]\s]+)?\]"
@@ -221,6 +227,9 @@ async def gather_hr_pilot_grounding(conn, company_id) -> dict:
         out["incidents"] = (
             await _fetch_incidents(conn, company_id) if features.get("incidents") else None
         )
+        out["benefits"] = (
+            await _fetch_benefits(conn, company_id) if features.get("benefits_admin") else None
+        )
     return out
 
 
@@ -367,6 +376,83 @@ async def _fetch_incidents(conn, company_id) -> list[dict]:
     except Exception:  # noqa: BLE001
         logger.warning("hr_pilot_corpus: incident fetch failed for %s", company_id)
         return []
+
+
+async def _fetch_benefits(conn, company_id) -> dict:
+    """Active benefit plans + the open OE window + aggregate election progress.
+
+    Deliberately NAMELESS — no employee is selected anywhere here. That is what
+    lets this group skip `_SUPERVISOR_ONLY_SOURCES` and reach Ask HR: "what does
+    the family tier cost?" and "when does open enrollment close?" are questions
+    every employee is entitled to ask, and a plan's tier price names nobody.
+    Per-employee election status stays in the benefits product (admin review
+    dashboard) with its own access controls."""
+    out: dict = {"plans": [], "open_period": None, "submitted_employees": None,
+                 "active_employees": None, "pending_life_events": 0}
+    try:
+        out["plans"] = [dict(r) for r in await conn.fetch(
+            """
+            SELECT p.id, p.plan_type, p.name, p.carrier_name, p.waivable,
+                   COALESCE(
+                       json_agg(
+                           json_build_object(
+                               'coverage_tier', t.coverage_tier,
+                               'employee_cost', t.employee_cost,
+                               'cost_period', t.cost_period
+                           ) ORDER BY t.coverage_tier
+                       ) FILTER (WHERE t.id IS NOT NULL),
+                       '[]'::json
+                   ) AS tiers
+            FROM benefit_plans p
+            LEFT JOIN benefit_plan_tiers t ON t.plan_id = p.id
+            WHERE p.company_id = $1 AND p.status = 'active'
+            GROUP BY p.id
+            ORDER BY p.plan_type, p.name
+            LIMIT $2
+            """,
+            company_id, _MAX_BENEFIT_PLANS,
+        )]
+    except Exception:  # noqa: BLE001
+        logger.warning("hr_pilot_corpus: benefit-plan fetch failed for %s", company_id)
+
+    try:
+        # Partial unique index guarantees at most one open period per company.
+        period = await conn.fetchrow(
+            """
+            SELECT id, name, starts_on, ends_on, plan_year_start
+            FROM open_enrollment_periods
+            WHERE company_id = $1 AND status = 'open'
+            """,
+            company_id,
+        )
+        if period:
+            out["open_period"] = dict(period)
+            out["submitted_employees"] = await conn.fetchval(
+                """
+                SELECT COUNT(DISTINCT employee_id) FROM benefit_elections
+                WHERE open_enrollment_period_id = $1 AND status IN ('submitted', 'approved')
+                """,
+                period["id"],
+            )
+            out["active_employees"] = await conn.fetchval(
+                """
+                SELECT COUNT(*) FROM employees
+                WHERE org_id = $1 AND employment_status NOT IN ('terminated', 'offboarded')
+                """,
+                company_id,
+            )
+    except Exception:  # noqa: BLE001
+        logger.warning("hr_pilot_corpus: OE-period fetch failed for %s", company_id)
+
+    try:
+        out["pending_life_events"] = await conn.fetchval(
+            "SELECT COUNT(*) FROM life_event_changes WHERE company_id = $1 AND status = 'pending'",
+            company_id,
+        ) or 0
+    except Exception:  # noqa: BLE001
+        logger.warning("hr_pilot_corpus: life-event fetch failed for %s", company_id)
+
+    return out
 
 
 # --------------------------------------------------------------------------- #
@@ -551,6 +637,83 @@ def _incident_records(incidents: list | None) -> list[dict]:
     return recs
 
 
+def _fmt_cost(value, cost_period) -> str:
+    try:
+        amount = f"${float(value):,.2f}"
+    except (TypeError, ValueError):
+        return "cost n/a"
+    return amount + ("/pay period" if cost_period == "per_pay_period" else "/mo")
+
+
+def _benefit_records(benefits: dict | None) -> list[dict]:
+    """Plan offerings + the open OE window + a pending-life-event count.
+
+    Nameless by construction (see `_fetch_benefits`) — this is the one
+    operational group that reaches Ask HR unredacted. Cids: `benefit:plan-<id>`
+    per active plan, `benefit:oe-<id>` for the open window, and the fixed
+    `benefit:life-events-pending` aggregate (a count, not a row — like
+    `profile`, its stability comes from being a singleton)."""
+    benefits = benefits or {}
+    recs: list[dict] = []
+
+    for p in benefits.get("plans") or []:
+        if not isinstance(p, dict) or not p.get("id"):
+            continue
+        tiers = p.get("tiers")
+        if isinstance(tiers, str):
+            import json as _json
+            try:
+                tiers = _json.loads(tiers)
+            except (ValueError, TypeError):
+                tiers = []
+        tier_bits = [
+            f"{_hum(t.get('coverage_tier'))} {_fmt_cost(t.get('employee_cost'), t.get('cost_period'))} employee cost"
+            for t in (tiers or []) if isinstance(t, dict)
+        ]
+        bits = [f"{_hum(p.get('plan_type'))} plan"]
+        if p.get("carrier_name"):
+            bits.append(f"carrier {p['carrier_name']}")
+        if tier_bits:
+            bits.append("tiers: " + ", ".join(tier_bits))
+        bits.append("can be waived" if p.get("waivable") else "cannot be waived")
+        recs.append({
+            "cid": f"benefit:plan-{p['id']}",
+            "ref": f"Benefit plan — {p.get('name')} ({_hum(p.get('plan_type'))})",
+            "summary": "; ".join(bits) + ".",
+            "when": "current offering",
+            "plan_type": p.get("plan_type"),
+        })
+
+    period = benefits.get("open_period")
+    if isinstance(period, dict) and period.get("id"):
+        bits = [f"OPEN now, {_fmt_d(period.get('starts_on'))} → {_fmt_d(period.get('ends_on'))}"]
+        if period.get("plan_year_start"):
+            bits.append(f"coverage effective {_fmt_d(period['plan_year_start'])}")
+        submitted = benefits.get("submitted_employees")
+        active = benefits.get("active_employees")
+        if submitted is not None and active is not None:
+            bits.append(f"{submitted} of {active} active employees have submitted elections")
+        recs.append({
+            "cid": f"benefit:oe-{period['id']}",
+            "ref": f"Open enrollment — {period.get('name')}",
+            "summary": "; ".join(bits) + ".",
+            "when": f"closes {_fmt_d(period.get('ends_on'))}",
+            "ends_on": _fmt_d(period.get("ends_on")),
+        })
+
+    pending = int(benefits.get("pending_life_events") or 0)
+    if pending:
+        recs.append({
+            "cid": "benefit:life-events-pending",
+            "ref": "Qualifying life events — pending review",
+            "summary": (f"{pending} qualifying life-event request(s) await HR review; "
+                        "an approved event opens a personal election window."),
+            "when": "current",
+        })
+
+    return recs
+
+
 def build_hr_pilot_corpus(grounding: dict, reasoning_chains: list | None = None) -> dict:
     """Assemble the HR Pilot citation corpus `{sources, index, notes}`. Pure.
 
@@ -589,6 +752,12 @@ def build_hr_pilot_corpus(grounding: dict, reasoning_chains: list | None = None)
         "label": f"Incidents — last {_INCIDENT_LOOKBACK_DAYS} days",
         "records": _incident_records(grounding.get("incidents")),
     }
+    # Nameless (plans/window/aggregates only) — the one operational group NOT in
+    # _SUPERVISOR_ONLY_SOURCES, so Ask HR employees see it too.
+    sources["benefits"] = {
+        "label": "Benefit plans & open enrollment",
+        "records": _benefit_records(grounding.get("benefits")),
+    }
 
     # Rebuild the flat index over ALL groups. A cid appearing in two groups
     # would silently lose one here — the namespaces are disjoint by
@@ -620,6 +789,14 @@ def build_hr_pilot_corpus(grounding: dict, reasoning_chains: list | None = None)
             "Incident reporting is not enabled for this company — say so if asked "
             "about past incidents."
         )
+    # NB: worded to survive redact_for_employee's note filter — benefits is the
+    # one operational group employees keep, so its notes must not contain the
+    # supervisor-only trigger words ("shifts", "incidents", "training programs").
+    if "benefits" in grounding and grounding.get("benefits") is None:
+        notes.append(
+            "Benefits enrollment is not enabled for this company — say so if asked "
+            "about benefit plans or open enrollment; do not infer plan offerings."
+        )
 
     # Cap-hit notes. A clipped list the model reads as complete is how "nobody
     # else is overdue" gets asserted from a LIMIT.
@@ -645,16 +822,22 @@ def build_hr_pilot_corpus(grounding: dict, reasoning_chains: list | None = None)
             f"Only {_MAX_TRAINING_PROGRAMS} training programs are listed — there may "
             "be more; do not treat the list as the company's full program set."
         )
+    _benefits = grounding.get("benefits") or {}
+    if len(_benefits.get("plans") or []) >= _MAX_BENEFIT_PLANS:
+        notes.append(
+            f"Only the first {_MAX_BENEFIT_PLANS} benefit plans are listed — there "
+            "may be more; do not treat the plan list as complete."
+        )
 
     # Could-not-determine. Distinct from "off": the keys are absent entirely
     # because the feature lookup itself failed, and reporting that as "you don't
     # have this module" would tell a paying customer they lost a product.
     if not grounding.get("features_known", True):
         notes.append(
-            "Operational data (shifts, training, incidents) could not be loaded just "
-            "now — this is a temporary system issue, NOT a statement that the company "
-            "lacks those modules. If asked about them, say the data is briefly "
-            "unavailable and to try again shortly."
+            "Operational data (shifts, training, incidents, benefits) could not be "
+            "loaded just now — this is a temporary system issue, NOT a statement that "
+            "the company lacks those modules. If asked about them, say the data is "
+            "briefly unavailable and to try again shortly."
         )
 
     return {"sources": sources, "index": index, "notes": notes}
@@ -685,6 +868,12 @@ def redact_for_employee(corpus: dict) -> dict:
     have not completed a requirement, `incident:` describes site events. Serving
     those to an employee turns "what's the PTO policy?" into a roster and a list
     of coworkers' compliance failures.
+
+    The `benefits` group deliberately stays: `_fetch_benefits` selects no
+    employee anywhere (plans, the OE window, aggregate counts), and "when does
+    open enrollment close?" is a core Ask HR question. If a per-employee
+    election detail is ever added to that fetch, the group moves into
+    `_SUPERVISOR_ONLY_SOURCES` with it.
 
     Both the group AND its records' cids leave the index, so the citation gate
     drops any attempt to cite them — the model cannot reference what it was

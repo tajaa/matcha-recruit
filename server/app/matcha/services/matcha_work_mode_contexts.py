@@ -47,9 +47,10 @@ def _fmt_pct(value, *, signed: bool = False) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Benefits mode — roster snapshot, open eligibility exceptions, renewal risk.
-# Reads the last-computed state written by services/benefits_eligibility.py
-# (the detectors mutate rows, so a chat turn must not invoke them).
+# Benefits mode — plan catalog + open-enrollment state (benefits_enrollment
+# tables, live rows), plus roster snapshot, open eligibility exceptions and
+# renewal risk (last-computed state written by services/benefits_eligibility.py
+# — those detectors mutate rows, so a chat turn must not invoke them).
 # ---------------------------------------------------------------------------
 
 async def build_benefits_context(company_id: UUID) -> str:
@@ -97,12 +98,74 @@ async def _build_benefits_context_uncached(company_id: UUID) -> str:
             company_id,
         )
 
+        # --- Open-enrollment workflow (benefitoe01 tables — live rows) -------
+        plans = await conn.fetch(
+            """
+            SELECT p.plan_type, p.name, p.carrier_name, p.waivable,
+                   COUNT(t.id) AS tier_count,
+                   MIN(t.employee_cost) AS min_cost, MAX(t.employee_cost) AS max_cost
+            FROM benefit_plans p
+            LEFT JOIN benefit_plan_tiers t ON t.plan_id = p.id
+            WHERE p.company_id=$1 AND p.status='active'
+            GROUP BY p.id
+            ORDER BY p.plan_type, p.name
+            """,
+            company_id,
+        )
+        open_period = await conn.fetchrow(
+            """
+            SELECT id, name, starts_on, ends_on, plan_year_start
+            FROM open_enrollment_periods WHERE company_id=$1 AND status='open'
+            """,
+            company_id,
+        )
+        last_period = None if open_period else await conn.fetchrow(
+            """
+            SELECT name, status, starts_on, ends_on FROM open_enrollment_periods
+            WHERE company_id=$1 ORDER BY starts_on DESC LIMIT 1
+            """,
+            company_id,
+        )
+        election_counts: dict[str, int] = {}
+        unsubmitted_count = 0
+        if open_period:
+            election_counts = {
+                r["status"]: r["n"] for r in await conn.fetch(
+                    "SELECT status, COUNT(*) AS n FROM benefit_elections "
+                    "WHERE open_enrollment_period_id=$1 GROUP BY status",
+                    open_period["id"],
+                )
+            }
+            unsubmitted_count = await conn.fetchval(
+                """
+                SELECT COUNT(*) FROM employees e
+                WHERE e.org_id=$1 AND e.employment_status NOT IN ('terminated','offboarded')
+                  AND e.id NOT IN (
+                      SELECT employee_id FROM benefit_elections
+                      WHERE open_enrollment_period_id=$2 AND status IN ('submitted','approved')
+                  )
+                """,
+                company_id, open_period["id"],
+            )
+        pending_life_events = await conn.fetch(
+            """
+            SELECT le.event_type, le.event_date, le.created_at,
+                   (e.first_name || ' ' || e.last_name) AS employee_name
+            FROM life_event_changes le
+            JOIN employees e ON e.id = le.employee_id
+            WHERE le.company_id=$1 AND le.status='pending'
+            ORDER BY le.created_at DESC
+            """,
+            company_id,
+        )
+
+    has_enrollment = bool(plans or open_period or last_period or pending_life_events)
     if not roster or (roster["total"] or 0) == 0:
-        # No roster ever ingested → nothing to ground on.
-        if not exceptions and not risk_rows:
+        # No roster ever ingested AND no enrollment activity → nothing to ground on.
+        if not exceptions and not risk_rows and not has_enrollment:
             return ""
 
-    lines = ["=== BENEFITS MODE: ROSTER, ELIGIBILITY & RENEWAL RISK (read-only snapshot) ==="]
+    lines = ["=== BENEFITS MODE: PLANS, ENROLLMENT, ELIGIBILITY & RENEWAL RISK (read-only snapshot) ==="]
 
     if roster and (roster["total"] or 0) > 0:
         lines.append(
@@ -111,6 +174,46 @@ async def _build_benefits_context_uncached(company_id: UUID) -> str:
             + (f", avg employer health premium {_fmt_money(roster['avg_premium'])}/mo" if roster["avg_premium"] else "")
             + f". Latest snapshot: {_fmt_date(roster['latest_snapshot'])}."
         )
+
+    lines.append(f"\n--- PLAN CATALOG ({len(plans)} active plans) ---")
+    if not plans:
+        lines.append("No active plans configured. (Plans are set up under /app/benefits — an empty catalog means enrollment cannot offer anything.)")
+    for p in plans:
+        cost = ""
+        if p["tier_count"]:
+            lo, hi = _fmt_money(p["min_cost"]), _fmt_money(p["max_cost"])
+            cost = f", employee cost {lo}–{hi}" if lo != hi else f", employee cost {lo}"
+        lines.append(
+            f"- {p['plan_type']}: {p['name']}"
+            + (f" ({p['carrier_name']})" if p["carrier_name"] else "")
+            + f" — {p['tier_count']} tiers{cost}, {'waivable' if p['waivable'] else 'NOT waivable'}"
+        )
+
+    lines.append("\n--- OPEN ENROLLMENT ---")
+    if open_period:
+        counts_txt = ", ".join(f"{n} {s}" for s, n in sorted(election_counts.items())) or "no elections yet"
+        lines.append(
+            f"OPEN: '{open_period['name']}' {_fmt_date(open_period['starts_on'])} → {_fmt_date(open_period['ends_on'])}"
+            + (f", coverage effective {_fmt_date(open_period['plan_year_start'])}" if open_period["plan_year_start"] else "")
+            + f". Elections: {counts_txt}. {unsubmitted_count} active employees have NOT submitted."
+        )
+    elif last_period:
+        lines.append(
+            f"No period currently open. Most recent: '{last_period['name']}' ({last_period['status']}, "
+            f"{_fmt_date(last_period['starts_on'])} → {_fmt_date(last_period['ends_on'])})."
+        )
+    else:
+        lines.append("No open-enrollment period has ever been created.")
+
+    if pending_life_events:
+        lines.append(f"\n--- PENDING LIFE EVENTS ({len(pending_life_events)} awaiting HR review) ---")
+        for le in pending_life_events[:_MAX_LIST_ROWS]:
+            lines.append(
+                f"- {le['employee_name']}: {le['event_type']} on {_fmt_date(le['event_date'])} "
+                f"(reported {_fmt_date(le['created_at'].date() if le['created_at'] else None)})"
+            )
+        if len(pending_life_events) > _MAX_LIST_ROWS:
+            lines.append(f"...and {len(pending_life_events) - _MAX_LIST_ROWS} more pending.")
 
     gaps = [e for e in exceptions if e["exception_type"] == "new_hire_enrollment_gap"]
     leaks = [e for e in exceptions if e["exception_type"] == "termination_premium_leak"]
@@ -155,9 +258,10 @@ async def _build_benefits_context_uncached(company_id: UUID) -> str:
             )
 
     lines.append(
-        "\nGround every answer in the records above. Figures are the last-computed "
-        "sync state, not live — say so when asked about freshness. Do not invent "
-        "employees, premiums, or exceptions not listed."
+        "\nGround every answer in the records above. Plan/enrollment/life-event rows "
+        "are live; roster, exception and renewal-risk figures are the last-computed "
+        "sync state — say so when asked about freshness. Do not invent employees, "
+        "plans, premiums, or exceptions not listed."
     )
     return "\n".join(lines)
 
@@ -713,8 +817,9 @@ async def _build_hr_pilot_bundle_uncached(company_id: UUID) -> dict:
         "to check with corporate HR."
     )
     lines.append(
-        "\nOPERATIONAL RECORDS vs POLICY — the shift, training and incident records "
-        "above are FACTS about what is currently scheduled, completed or logged. "
+        "\nOPERATIONAL RECORDS vs POLICY — the shift, training, incident and "
+        "benefits-enrollment records above are FACTS about what is currently "
+        "scheduled, completed, logged or offered. "
         "Cite them for who, when, and status. They are NOT policy and never "
         "establish a rule: that someone is scheduled does not make it permitted, "
         "and that a training is unrecorded does not by itself make the person "

@@ -12,8 +12,10 @@ from app.matcha.services.hr_pilot_corpus import (
     audit_citations,
     build_hr_pilot_corpus,
     render_corpus_block,
+    _MAX_BENEFIT_PLANS,
     _MAX_SCHEDULE_SHIFTS,
     _MAX_TRAINING_DETAIL,
+    _benefit_records,
     _floor_records,
     _incident_records,
     _ladder_records,
@@ -460,19 +462,38 @@ def test_incident_records_tolerate_junk():
 
 # --- corpus integration ----------------------------------------------------- #
 
+def _benefit_fixture():
+    return {
+        "plans": [{
+            "id": "eeeeeeee-0000-0000-0000-000000000001", "plan_type": "medical",
+            "name": "Gold PPO", "carrier_name": "Acme Health", "waivable": True,
+            "tiers": [
+                {"coverage_tier": "employee_only", "employee_cost": 120.0, "cost_period": "monthly"},
+                {"coverage_tier": "family", "employee_cost": 480.5, "cost_period": "monthly"},
+            ],
+        }],
+        "open_period": {"id": "ffffffff-0000-0000-0000-000000000001",
+                        "name": "2027 Plan Year", "starts_on": date(2026, 11, 1),
+                        "ends_on": date(2026, 11, 15), "plan_year_start": date(2027, 1, 1)},
+        "submitted_employees": 12,
+        "active_employees": 40,
+        "pending_life_events": 2,
+    }
+
+
 def _ops(grounding, **over):
     g = dict(grounding)
     g.update({"shifts": [_shift()], "training": _training_fixture(),
-              "incidents": [], **over})
+              "incidents": [], "benefits": _benefit_fixture(), **over})
     return g
 
 
-def test_corpus_has_twelve_groups(grounding):
+def test_corpus_has_thirteen_groups(grounding):
     corpus = build_hr_pilot_corpus(_ops(grounding), [])
     assert set(corpus["sources"]) == {
         "profile", "law", "existing_handbook", "existing_policies", "playbook",
         "compliance_floor", "discipline_ladder",
-        "schedule", "training_status", "recent_incidents",
+        "schedule", "training_status", "recent_incidents", "benefits",
         # Minted by the shared `handbook_pilot.build_corpus` and always EMPTY
         # here: `gather_hr_pilot_grounding` doesn't fetch audit gaps or freshness
         # findings (a supervisor needs the rule in force, not a list of where the
@@ -511,11 +532,12 @@ def test_module_off_emits_a_note_but_empty_does_not(grounding):
 
 def test_each_operational_module_has_its_own_off_note(grounding):
     corpus = build_hr_pilot_corpus(
-        _ops(grounding, shifts=None, training=None, incidents=None), [])
+        _ops(grounding, shifts=None, training=None, incidents=None, benefits=None), [])
     notes = " ".join(corpus["notes"]).lower()
     assert "shift scheduling is not enabled" in notes
     assert "training records are not enabled" in notes
     assert "incident reporting is not enabled" in notes
+    assert "benefits enrollment is not enabled" in notes
 
 
 def test_cap_hit_emits_truncation_note(grounding):
@@ -647,3 +669,91 @@ def test_training_program_cap_note(grounding):
                      for i in range(_MAX_TRAINING_PROGRAMS)]
     corpus = build_hr_pilot_corpus(_ops(grounding, training=t), [])
     assert any("training programs are listed" in n for n in corpus["notes"])
+
+
+# --------------------------------------------------------------------------- #
+# Benefits enrollment group — the one operational group Ask HR keeps
+# --------------------------------------------------------------------------- #
+
+def test_benefit_plan_record_carries_tiers_and_waivability():
+    recs = _benefit_records(_benefit_fixture())
+    plan = next(r for r in recs if r["cid"] == "benefit:plan-eeeeeeee-0000-0000-0000-000000000001")
+    assert "Gold PPO" in plan["ref"]
+    assert "$120.00/mo" in plan["summary"]
+    assert "$480.50/mo" in plan["summary"]
+    assert "can be waived" in plan["summary"]
+
+
+def test_benefit_oe_record_states_window_and_progress():
+    recs = _benefit_records(_benefit_fixture())
+    oe = next(r for r in recs if r["cid"] == "benefit:oe-ffffffff-0000-0000-0000-000000000001")
+    assert "2026-11-15" in oe["summary"]
+    assert "coverage effective 2027-01-01" in oe["summary"]
+    assert "12 of 40" in oe["summary"]
+
+
+def test_benefit_life_event_record_is_a_nameless_aggregate():
+    recs = _benefit_records(_benefit_fixture())
+    le = next(r for r in recs if r["cid"] == "benefit:life-events-pending")
+    assert "2 qualifying life-event" in le["summary"]
+
+
+def test_benefit_records_parse_json_tiers():
+    """asyncpg hands json_agg back as a string on some paths."""
+    b = _benefit_fixture()
+    b["plans"][0]["tiers"] = (
+        '[{"coverage_tier": "employee_only", "employee_cost": 120, "cost_period": "per_pay_period"}]'
+    )
+    rec = _benefit_records(b)[0]
+    assert "$120.00/pay period" in rec["summary"]
+
+
+def test_benefit_records_tolerate_junk():
+    assert _benefit_records(None) == []
+    assert _benefit_records({}) == []
+    assert _benefit_records({"plans": ["nope", {"id": None}], "open_period": "junk",
+                             "pending_life_events": 0}) == []
+
+
+def test_benefit_records_name_no_people():
+    """The invariant that lets this group skip _SUPERVISOR_ONLY_SOURCES: no
+    record field carries an employee name — only plans, the window, counts."""
+    for rec in _benefit_records(_benefit_fixture()):
+        assert "employee_name" not in rec
+        assert "assignee_names" not in rec
+
+
+def test_redaction_keeps_benefits_for_employees(grounding):
+    """"When does open enrollment close?" is a core Ask HR question — the
+    benefits group (nameless by construction) must survive redaction while
+    schedule/training/incidents are stripped."""
+    safe = redact_for_employee(build_hr_pilot_corpus(_ops(grounding), []))
+    assert "benefits" in safe["sources"]
+    assert any(c.startswith("benefit:") for c in safe["index"])
+    assert not any(c.startswith(("schedule:", "training:", "incident:")) for c in safe["index"])
+
+
+def test_benefits_off_note_survives_employee_redaction(grounding):
+    """The module-off note is deliberately worded around redact_for_employee's
+    substring filter — if someone rewords it with 'shifts'/'incidents' in it,
+    employees lose the 'we don't have this module' answer."""
+    corpus = build_hr_pilot_corpus(_ops(grounding, benefits=None), [])
+    safe = redact_for_employee(corpus)
+    assert any("Benefits enrollment is not enabled" in n for n in safe["notes"])
+
+
+def test_benefit_plan_cap_note(grounding):
+    b = _benefit_fixture()
+    b["plans"] = [dict(b["plans"][0], id=f"eeeeeeee-0000-0000-0000-{i:012d}")
+                  for i in range(_MAX_BENEFIT_PLANS)]
+    corpus = build_hr_pilot_corpus(_ops(grounding, benefits=b), [])
+    assert any("benefit plans are listed" in n for n in corpus["notes"])
+
+
+def test_audit_gate_resolves_benefit_namespace(grounding):
+    corpus = build_hr_pilot_corpus(_ops(grounding), [])
+    text = ("Open enrollment closes Nov 15 [benefit:oe-ffffffff-0000-0000-0000-000000000001], "
+            "and [benefit:plan-invented] does not exist.")
+    clean, cites, dropped = audit_citations(text, corpus["index"])
+    assert dropped == ["benefit:plan-invented"]
+    assert {c["cid"] for c in cites} == {"benefit:oe-ffffffff-0000-0000-0000-000000000001"}
