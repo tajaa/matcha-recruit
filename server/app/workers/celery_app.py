@@ -47,6 +47,7 @@ celery_app = Celery(
         "app.workers.tasks.broker_risk_alerts",
         "app.workers.tasks.broker_milestones",
         "app.workers.tasks.benefit_eligibility_sync",
+        "app.workers.tasks.benefit_enrollment_notifications",
         "app.workers.tasks.cappe_booking_reminders",
         "app.workers.tasks.cappe_campaign_send",
         "app.workers.tasks.cba_clause_extraction",
@@ -332,6 +333,13 @@ def on_worker_ready(**kwargs):
         run_benefit_eligibility_sync.delay()
     else:
         print("[Worker] Benefit eligibility sync scheduler is disabled, skipping.")
+
+    from app.workers.tasks.benefit_enrollment_notifications import run_benefit_enrollment_notifications
+
+    if _is_scheduler_enabled("benefit_enrollment_notifications"):
+        run_benefit_enrollment_notifications.delay()
+    else:
+        print("[Worker] Benefit enrollment notifications scheduler is disabled, skipping.")
 
     from app.workers.tasks.cappe_booking_reminders import run_cappe_booking_reminders
 

@@ -27,6 +27,8 @@ from decimal import Decimal, InvalidOperation
 from typing import Optional
 from uuid import UUID
 
+from .benefits_enrollment import compute_policy_month
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -47,6 +49,16 @@ CSV_COLUMNS = [
     "start_date", "termination_date", "employment_status",
     "has_benefits_enrollment", "employer_health_premium_monthly", "gross_pay_period",
 ]
+
+
+def is_addressed_by_election(employee_id, addressed_ids: set) -> bool:
+    """Second enrollment-truth source for the new-hire-gap detector: an
+    unresolved roster row (``employee_id`` None, email never matched to an
+    ``employees`` row) is never "addressed" by an election — it keeps the
+    original CSV/Finch-only behavior."""
+    if employee_id is None:
+        return False
+    return employee_id in addressed_ids
 
 
 # ---------------------------------------------------------------------------
@@ -251,6 +263,16 @@ async def detect_eligibility_exceptions(conn, company_id: UUID) -> dict:
     entries = await conn.fetch(
         "SELECT * FROM benefit_roster_entries WHERE company_id = $1", company_id
     )
+    # Second enrollment-truth source: an approved election (incl. an approved
+    # waive — an addressed decision, not a gap) suppresses the new-hire-gap
+    # flag for companies using the open-enrollment workflow. Empty for
+    # CSV/Finch-only companies with no benefit_elections rows — no behavior
+    # change for them.
+    addressed_rows = await conn.fetch(
+        "SELECT DISTINCT employee_id FROM benefit_elections WHERE company_id = $1 AND status = 'approved'",
+        company_id,
+    )
+    addressed_ids = {r["employee_id"] for r in addressed_rows}
 
     detected: dict[str, dict] = {}
     for e in entries:
@@ -261,7 +283,7 @@ async def detect_eligibility_exceptions(conn, company_id: UUID) -> dict:
         premium = float(e["employer_health_premium_monthly"]) if e["employer_health_premium_monthly"] is not None else None
 
         # --- new-hire enrollment gap -------------------------------------
-        if status == "active" and start is not None:
+        if status == "active" and start is not None and not is_addressed_by_election(e["employee_id"], addressed_ids):
             days_elapsed = (today - start).days
             if 0 <= days_elapsed <= NEW_HIRE_GRACE_DAYS and enrolled is not True and not (premium and premium > 0):
                 key = f"new_hire_enrollment_gap:{e['source']}:{e['external_id']}"
@@ -403,7 +425,7 @@ def _turnover(entries: list, today: date) -> tuple[int, int, float]:
 
 async def _upsert_risk_dimension(
     conn, company_id: UUID, dim_type: str, dim_value: str,
-    entries: list, today: date,
+    entries: list, today: date, policy_month: Optional[int] = None,
 ) -> dict:
     headcount, separations, turnover_pct = _turnover(entries, today)
     location = dim_value if dim_type == "location" else None
@@ -446,9 +468,9 @@ async def _upsert_risk_dimension(
             turnover_pct, turnover_baseline_pct, turnover_delta_pct,
             lost_workdays, lost_workdays_baseline, lost_workdays_delta_pct,
             near_misses, behavioral_incidents, headcount, gross_payroll,
-            triggers, computed_at, updated_at
+            policy_month, triggers, computed_at, updated_at
         )
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,NOW(),NOW())
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16::jsonb,NOW(),NOW())
         ON CONFLICT (company_id, dimension_type, dimension_value) DO UPDATE SET
             risk_band = EXCLUDED.risk_band,
             turnover_pct = EXCLUDED.turnover_pct,
@@ -461,6 +483,7 @@ async def _upsert_risk_dimension(
             behavioral_incidents = EXCLUDED.behavioral_incidents,
             headcount = EXCLUDED.headcount,
             gross_payroll = EXCLUDED.gross_payroll,
+            policy_month = EXCLUDED.policy_month,
             triggers = EXCLUDED.triggers,
             computed_at = NOW(),
             updated_at = NOW()
@@ -469,7 +492,7 @@ async def _upsert_risk_dimension(
         turnover_pct, turnover_baseline, turnover_delta,
         inc["lost_workdays"], lost_baseline, lost_delta,
         inc["near_misses"], inc["behavioral"], headcount, gross,
-        json.dumps(triggers),
+        policy_month, json.dumps(triggers),
     )
     return {"risk_band": band, "triggers": triggers, "dimension_type": dim_type, "dimension_value": dim_value}
 
@@ -485,7 +508,18 @@ async def compute_renewal_risk(conn, company_id: UUID) -> dict:
     )
     entries = list(entries)
 
-    results = [await _upsert_risk_dimension(conn, company_id, "company", "", entries, today)]
+    period = await conn.fetchrow(
+        """
+        SELECT plan_year_start FROM open_enrollment_periods
+        WHERE company_id = $1
+        ORDER BY (status = 'open') DESC, plan_year_start DESC NULLS LAST
+        LIMIT 1
+        """,
+        company_id,
+    )
+    policy_month = compute_policy_month(today, period["plan_year_start"]) if period else None
+
+    results = [await _upsert_risk_dimension(conn, company_id, "company", "", entries, today, policy_month)]
 
     by_location: dict[str, list] = {}
     by_department: dict[str, list] = {}
@@ -496,9 +530,9 @@ async def compute_renewal_risk(conn, company_id: UUID) -> dict:
             by_department.setdefault(e["department"], []).append(e)
 
     for loc, rows in by_location.items():
-        results.append(await _upsert_risk_dimension(conn, company_id, "location", loc, rows, today))
+        results.append(await _upsert_risk_dimension(conn, company_id, "location", loc, rows, today, policy_month))
     for dept, rows in by_department.items():
-        results.append(await _upsert_risk_dimension(conn, company_id, "department", dept, rows, today))
+        results.append(await _upsert_risk_dimension(conn, company_id, "department", dept, rows, today, policy_month))
 
     worst = min((r["risk_band"] for r in results), key=lambda b: _BAND_RANK.get(b, 9), default="stable")
     return {"company_band": worst, "dimensions": len(results)}

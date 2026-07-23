@@ -49,6 +49,7 @@ import EscalatedQueries from '../pages/app/ask-expert/EscalatedQueries'
 import Accommodations from '../pages/app/employees/Accommodations'
 import AccommodationDetail from '../pages/app/employees/AccommodationDetail'
 import CompanySettings from '../pages/app/settings/CompanySettings'
+import Benefits from '../pages/app/benefits/Benefits'
 import Discipline from '../pages/app/discipline/Discipline'
 import DisciplineDetail from '../pages/app/discipline/DisciplineDetail'
 import DisciplineSettings from '../pages/app/discipline/DisciplineSettings'
@@ -89,6 +90,7 @@ export default function AppRoutes() {
         <Route path="escalated-queries" element={<EscalatedQueries />} />
         <Route path="accommodations" element={<FeatureGate feature="accommodations" label="Accommodations"><Accommodations /></FeatureGate>} />
         <Route path="accommodations/:caseId" element={<FeatureGate feature="accommodations" label="Accommodations"><AccommodationDetail /></FeatureGate>} />
+        <Route path="benefits" element={<FeatureGate feature="benefits_admin" label="Benefits"><Benefits /></FeatureGate>} />
         <Route path="discipline" element={<FeatureGate feature="discipline" label="Performance Action"><Discipline /></FeatureGate>} />
         <Route path="discipline/:recordId" element={<FeatureGate feature="discipline" label="Performance Action"><DisciplineDetail /></FeatureGate>} />
         <Route path="discipline-settings" element={<FeatureGate feature="discipline" label="Performance Action"><DisciplineSettings /></FeatureGate>} />

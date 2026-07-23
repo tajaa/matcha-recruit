@@ -57,7 +57,7 @@ export const PRODUCT_NAV_CATALOG: Record<string, ProductNavEntry> = {
   i9: { to: '/app/onboarding', icon: FileCheck2, label: 'Onboarding & I-9' },
   cobra: { to: '/app/employees', icon: HeartPulse, label: 'COBRA' },
   separation_agreements: { to: '/app/employees', icon: FileSignature, label: 'Separations' },
-  benefits_admin: { to: '/app/employees', icon: HeartPulse, label: 'Benefits' },
+  benefits_admin: { to: '/app/benefits', icon: HeartPulse, label: 'Benefits' },
 }
 
 /** Nav rows every product gets regardless of features. */

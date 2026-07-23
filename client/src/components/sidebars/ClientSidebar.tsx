@@ -21,6 +21,7 @@ const nav: (NavItem | NavGroup)[] = [
       { to: '/app/employees', icon: Users, label: 'Employees' },
       { to: '/app/employee-schedule', icon: CalendarClock, label: 'Schedule', feature: 'employee_schedule' },
       { to: '/app/onboarding', icon: ClipboardCheck, label: 'Onboarding' },
+      { to: '/app/benefits', icon: HeartPulse, label: 'Benefits', feature: 'benefits_admin' },
       { to: '/app/accommodations', icon: Accessibility, label: 'Accommodations' },
       { to: '/app/discipline', icon: Gavel, label: 'Performance Action', feature: 'discipline' },
       { to: '/app/labor', icon: Handshake, label: 'Labor Relations', feature: 'labor_relations' },
