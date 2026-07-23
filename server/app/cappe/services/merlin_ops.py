@@ -27,6 +27,7 @@ from typing import Any, Callable, Optional
 from .merlin_catalog import (
     AI_ASPECT_RATIOS,
     AI_IMAGE_PROMPT_MAX,
+    AI_IMAGE_SIZES,
     BLOCK_FIELDS,
     BLOCK_TYPES,
     CANVAS_ELEMENT_KINDS,
@@ -510,6 +511,11 @@ def _v_generate_image(raw: dict[str, Any], ctx: ValidationCtx) -> Optional[str]:
     aspect = raw.get("aspect")
     if aspect is not None and not (isinstance(aspect, str) and aspect in AI_ASPECT_RATIOS):
         raw.pop("aspect", None)
+    # Same degrade-don't-fail treatment for resolution; the client-side
+    # executor (runImageOps) falls back to DEFAULT_AI_IMAGE_SIZE when absent.
+    image_size = raw.get("image_size")
+    if image_size is not None and not (isinstance(image_size, str) and image_size in AI_IMAGE_SIZES):
+        raw.pop("image_size", None)
     return None
 
 
@@ -760,13 +766,16 @@ MERLIN_OPS: tuple[MerlinOp, ...] = (
     MerlinOp(
         name="generate_image",
         validate=_v_generate_image,
-        prompt_shape='{"op":"generate_image","block":"<id>","field":"<imageField>","prompt":"<what to depict>","aspect":"16:9"}',
+        prompt_shape='{"op":"generate_image","block":"<id>","field":"<imageField>","prompt":"<what to depict>","aspect":"16:9","image_size":"2K"}',
         prompt_rules=(
             "generate_image creates an AI image and places it in a block's image field "
             "(field defaults to \"image\"; on a hero that's the full-bleed background). Use it when the "
             "user asks to generate/create/imagine a photo or background — NOT for stock the user will "
             "supply. Can target a block added earlier in this same turn if that add_block gave it an \"id\". "
-            "aspect is one of: " + ", ".join(sorted(AI_ASPECT_RATIOS)) + ".",
+            "aspect is one of: " + ", ".join(sorted(AI_ASPECT_RATIOS)) + ". "
+            "image_size is one of: " + ", ".join(AI_IMAGE_SIZES) + " — omit to default to 2K, which is "
+            "sharp enough for a full-bleed section background; only go to 4K if the user explicitly asks "
+            "for maximum quality.",
         ),
     ),
     MerlinOp(

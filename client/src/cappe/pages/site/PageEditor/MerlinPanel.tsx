@@ -2,11 +2,11 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import {
-  AlertCircle, Check, Eye, History, Image, Loader2, Lock, Maximize2, Minimize2,
+  AlertCircle, Check, Eye, FolderOpen, History, Image, Loader2, Lock, Maximize2, Minimize2,
   MousePointerClick, Paperclip, Pencil, Plus, Search, Slash, Sparkles, Trash2, Wand2, X,
 } from 'lucide-react'
+import { AssetLibrary } from './AssetLibrary'
 import { usePremium } from './DesignPrimitives'
-import { dHead } from './styles'
 import {
   MERLIN_MAX_WIDTH,
   MERLIN_MIN_WIDTH,
@@ -157,90 +157,67 @@ function StepTrail({ steps, live, merlin, premium }: {
   )
 }
 
-/** The conversation switcher. Conversations are per page and server-persisted,
- *  so this is the only way back to an older thread. */
-function ConversationMenu({ merlin }: { merlin: ReturnType<typeof useMerlin> }) {
+/** Chats tab body — full conversation history, always visible (replaces the
+ *  old header dropdown, which hid older threads behind a small clock icon).
+ *  Picking one opens it and hands control back to the caller (switch to the
+ *  Merlin tab so the reopened thread is actually visible). */
+function ChatsTab({ merlin, onOpen }: { merlin: ReturnType<typeof useMerlin>; onOpen: () => void }) {
   const { conversations, conversationId, openConversation, newConversation, renameConversation, deleteConversation } = merlin
-  const [listOpen, setListOpen] = useState(false)
   const [renaming, setRenaming] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
-  const boxRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!listOpen) return
-    const onDown = (e: MouseEvent) => {
-      if (boxRef.current && !boxRef.current.contains(e.target as Node)) setListOpen(false)
-    }
-    window.addEventListener('mousedown', onDown)
-    return () => window.removeEventListener('mousedown', onDown)
-  }, [listOpen])
-
-  const current = conversations.find((c) => c.id === conversationId)
 
   return (
-    <div ref={boxRef} className="relative">
+    <div className="flex-1 overflow-y-auto p-2">
       <button
-        onClick={() => setListOpen((o) => !o)}
-        className="flex max-w-[9rem] items-center gap-1 rounded p-0.5 text-[11px] text-zinc-400 hover:text-zinc-200"
-        title="Conversations"
+        onClick={() => { newConversation(); onOpen() }}
+        className="mb-1 flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-xs text-emerald-400 hover:bg-zinc-800"
       >
-        <History className="h-3.5 w-3.5 shrink-0" />
-        <span className="truncate">{current?.title ?? 'New conversation'}</span>
+        <Plus className="h-3.5 w-3.5" /> New conversation
       </button>
-      {listOpen && (
-        <div className="absolute right-0 z-20 mt-1 max-h-72 w-64 overflow-y-auto rounded-lg border border-zinc-700 bg-zinc-900 p-1 shadow-xl">
-          <button
-            onClick={() => { newConversation(); setListOpen(false) }}
-            className="flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-xs text-emerald-400 hover:bg-zinc-800"
-          >
-            <Plus className="h-3.5 w-3.5" /> New conversation
-          </button>
-          {conversations.length > 0 && <div className="my-1 border-t border-zinc-800" />}
-          {conversations.map((c) => (
-            <div key={c.id} className="group flex items-center gap-1 rounded px-1 hover:bg-zinc-800">
-              {renaming === c.id ? (
-                <input
-                  autoFocus
-                  value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                  onBlur={() => { void renameConversation(c.id, draft); setRenaming(null) }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') { void renameConversation(c.id, draft); setRenaming(null) }
-                    // stopPropagation: MerlinDrawer's own window-level Escape
-                    // listener closes the whole panel — without this,
-                    // canceling a rename took the panel with it.
-                    if (e.key === 'Escape') { e.stopPropagation(); setRenaming(null) }
-                  }}
-                  className="min-w-0 flex-1 rounded border border-zinc-700 bg-zinc-950 px-1.5 py-1 text-xs text-zinc-100 outline-none focus:border-emerald-500"
-                />
-              ) : (
-                <>
-                  <button
-                    onClick={() => { void openConversation(c.id); setListOpen(false) }}
-                    className={`min-w-0 flex-1 truncate py-1.5 text-left text-xs ${c.id === conversationId ? 'font-medium text-emerald-300' : 'text-zinc-300'}`}
-                  >
-                    {c.title}
-                  </button>
-                  <button
-                    onClick={() => { setRenaming(c.id); setDraft(c.title) }}
-                    className="shrink-0 p-1 text-zinc-600 opacity-0 hover:text-zinc-200 group-hover:opacity-100"
-                    title="Rename"
-                  >
-                    <Pencil className="h-3 w-3" />
-                  </button>
-                  <button
-                    onClick={() => void deleteConversation(c.id)}
-                    className="shrink-0 p-1 text-zinc-600 opacity-0 hover:text-red-400 group-hover:opacity-100"
-                    title="Delete"
-                  >
-                    <Trash2 className="h-3 w-3" />
-                  </button>
-                </>
-              )}
-            </div>
-          ))}
-        </div>
+      {conversations.length === 0 && (
+        <p className="px-2 py-4 text-center text-[11px] text-zinc-500">No past conversations on this page yet.</p>
       )}
+      {conversations.length > 0 && <div className="my-1 border-t border-zinc-800" />}
+      {conversations.map((c) => (
+        <div key={c.id} className="group flex items-center gap-1 rounded px-1 hover:bg-zinc-800">
+          {renaming === c.id ? (
+            <input
+              autoFocus
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onBlur={() => { void renameConversation(c.id, draft); setRenaming(null) }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') { void renameConversation(c.id, draft); setRenaming(null) }
+                if (e.key === 'Escape') { e.stopPropagation(); setRenaming(null) }
+              }}
+              className="min-w-0 flex-1 rounded border border-zinc-700 bg-zinc-950 px-1.5 py-1 text-xs text-zinc-100 outline-none focus:border-emerald-500"
+            />
+          ) : (
+            <>
+              <button
+                onClick={() => { void openConversation(c.id); onOpen() }}
+                className={`min-w-0 flex-1 truncate py-1.5 text-left text-xs ${c.id === conversationId ? 'font-medium text-emerald-300' : 'text-zinc-300'}`}
+              >
+                {c.title}
+              </button>
+              <button
+                onClick={() => { setRenaming(c.id); setDraft(c.title) }}
+                className="shrink-0 p-1 text-zinc-600 opacity-0 hover:text-zinc-200 group-hover:opacity-100"
+                title="Rename"
+              >
+                <Pencil className="h-3 w-3" />
+              </button>
+              <button
+                onClick={() => void deleteConversation(c.id)}
+                className="shrink-0 p-1 text-zinc-600 opacity-0 hover:text-red-400 group-hover:opacity-100"
+                title="Delete"
+              >
+                <Trash2 className="h-3 w-3" />
+              </button>
+            </>
+          )}
+        </div>
+      ))}
     </div>
   )
 }
@@ -254,6 +231,7 @@ type SlashAction =
   | { kind: 'prefill'; text: string }
   | { kind: 'send'; text: string }
   | { kind: 'submenu'; submenu: 'add-section' | 'theme' }
+  | { kind: 'wizard' }
 
 type SlashCommand = { id: string; label: string; hint: string; action: SlashAction }
 
@@ -267,7 +245,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
   },
   {
     id: 'generate-image', label: '/generate-image', hint: 'Generate an AI image for a section',
-    action: { kind: 'prefill', text: 'Generate an image of ' },
+    action: { kind: 'wizard' },
   },
   {
     id: 'restyle', label: '/restyle', hint: 'Restyle the selected section',
@@ -286,6 +264,104 @@ const SLASH_COMMANDS: SlashCommand[] = [
     action: { kind: 'send', text: 'Switch the site to dark mode.' },
   },
 ]
+
+const WIZARD_STYLES = ['You decide', 'Photorealistic', 'Illustration', '3D render', 'Minimalist', 'Cinematic', 'Watercolor']
+const WIZARD_MOODS = ['You decide', 'Bright & airy', 'Warm', 'Moody', 'Golden hour', 'Studio']
+const WIZARD_ASPECTS: [string, string][] = [
+  ['', 'Auto'], ['16:9', '16:9'], ['1:1', '1:1'], ['9:16', '9:16'], ['4:3', '4:3'], ['3:2', '3:2'],
+]
+const WIZARD_QUALITIES: [string, string][] = [
+  ['1K', '1K'], ['2K', '2K (recommended)'], ['4K', '4K — ~1.5x cost'],
+]
+
+function WizardChips({ options, value, onChange }: { options: string[]; value: string; onChange: (v: string) => void }) {
+  return (
+    <div className="flex flex-wrap gap-1">
+      {options.map((o) => (
+        <button
+          key={o}
+          type="button"
+          onClick={() => onChange(o)}
+          className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${
+            value === o ? 'border-emerald-500 bg-emerald-500/15 text-emerald-300' : 'border-zinc-700 text-zinc-400 hover:bg-zinc-800'
+          }`}
+        >
+          {o}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+/** Guided `/generate-image` — replaces the plain-prefill approach with a few
+ *  quick questions (each with a "You decide" escape hatch) so a vague ask
+ *  doesn't produce a vague image. Composes one message and sends it exactly
+ *  like typed chat — no new wire format, just a friendlier way to build the
+ *  sentence. Selected-section context seeds the description when available. */
+function ImageGenWizard({ selectedLabel, onSend, onCancel }: {
+  selectedLabel: string | null
+  onSend: (text: string) => void
+  onCancel: () => void
+}) {
+  const [desc, setDesc] = useState('')
+  const [style, setStyle] = useState('You decide')
+  const [mood, setMood] = useState('You decide')
+  const [aspect, setAspect] = useState('')
+  const [quality, setQuality] = useState('2K')
+
+  const generate = () => {
+    const what = desc.trim() || (selectedLabel ? `something that fits the ${selectedLabel} section` : 'an image for this page')
+    let text = `Generate an image: ${what}.`
+    text += style === 'You decide' ? ' Pick a style that fits the site.' : ` Style: ${style}.`
+    text += mood === 'You decide' ? ' Pick a mood/lighting that fits the site.' : ` Mood/lighting: ${mood}.`
+    if (aspect) text += ` Aspect ratio ${aspect}.`
+    text += ` Quality: ${quality}.`
+    onSend(text)
+  }
+
+  return (
+    <div className="mb-2 space-y-2 rounded-lg border border-zinc-700 bg-zinc-950/60 p-2.5">
+      <div className="flex items-center justify-between">
+        <span className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-emerald-400">
+          <Image className="h-3 w-3" /> Generate an image
+        </span>
+        <button type="button" onClick={onCancel} className="text-zinc-500 hover:text-zinc-300">
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </div>
+      <textarea
+        value={desc}
+        onChange={(e) => setDesc(e.target.value)}
+        rows={2}
+        placeholder={selectedLabel ? `Describe it — e.g. "a photo for the ${selectedLabel} background"` : 'Describe what to depict…'}
+        className="w-full resize-none rounded-lg border border-zinc-700 bg-zinc-950 px-2.5 py-1.5 text-xs text-zinc-100 placeholder:text-zinc-500 outline-none focus:border-emerald-500"
+      />
+      <div>
+        <p className="mb-1 text-[10px] font-medium text-zinc-500">Style</p>
+        <WizardChips options={WIZARD_STYLES} value={style} onChange={setStyle} />
+      </div>
+      <div>
+        <p className="mb-1 text-[10px] font-medium text-zinc-500">Mood & light</p>
+        <WizardChips options={WIZARD_MOODS} value={mood} onChange={setMood} />
+      </div>
+      <div className="flex items-center gap-2">
+        <select value={aspect} onChange={(e) => setAspect(e.target.value)} className="rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1 text-[11px] text-zinc-200">
+          {WIZARD_ASPECTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+        </select>
+        <select value={quality} onChange={(e) => setQuality(e.target.value)} className="rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1 text-[11px] text-zinc-200" title="Output resolution">
+          {WIZARD_QUALITIES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+        </select>
+        <button
+          type="button"
+          onClick={generate}
+          className="ml-auto flex items-center gap-1.5 rounded-lg bg-emerald-500 px-3 py-1.5 text-xs font-semibold text-zinc-950 hover:bg-emerald-400"
+        >
+          <Sparkles className="h-3.5 w-3.5" /> Generate
+        </button>
+      </div>
+    </div>
+  )
+}
 
 const EXAMPLE_PROMPTS = [
   'Make this page feel more premium',
@@ -335,9 +411,10 @@ export function MerlinDrawer({ merlin, selectedLabel }: { merlin: ReturnType<typ
     open, setOpen, messages, send, sending, error, tier, setTier, width, setWidth, setWidthLive,
     expanded, setExpanded,
     newConversation, status, liveSteps, schema,
-    attachments, addAttachment, removeAttachment, attachmentUploading, attachmentError,
+    attachments, addAttachment, addAttachmentFromUrl, removeAttachment, attachmentUploading, attachmentError,
   } = merlin
   const [input, setInput] = useState('')
+  const [activeTab, setActiveTab] = useState<'chat' | 'assets' | 'chats'>('chat')
   const listRef = useRef<HTMLDivElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -347,6 +424,7 @@ export function MerlinDrawer({ merlin, selectedLabel }: { merlin: ReturnType<typ
   // that happens to start with '/') the menu gets out of the way.
   const [submenu, setSubmenu] = useState<'add-section' | 'theme' | null>(null)
   const [activeIndex, setActiveIndex] = useState(0)
+  const [wizardOpen, setWizardOpen] = useState(false)
   const slashQuery = !submenu && /^\/[a-z-]*$/i.test(input) ? input.slice(1).toLowerCase() : null
 
   const commandItems: MenuItem[] = useMemo(
@@ -408,6 +486,11 @@ export function MerlinDrawer({ merlin, selectedLabel }: { merlin: ReturnType<typ
       setInput('')
       return
     }
+    if (cmd.action.kind === 'wizard') {
+      setWizardOpen(true)
+      setInput('')
+      return
+    }
     if (cmd.action.kind === 'prefill') {
       pickText(cmd.action.text)
       return
@@ -422,10 +505,14 @@ export function MerlinDrawer({ merlin, selectedLabel }: { merlin: ReturnType<typ
 
   useEffect(() => {
     if (!open) return
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(() => false) }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      if (wizardOpen) { setWizardOpen(false); return }
+      setOpen(() => false)
+    }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [open, setOpen])
+  }, [open, setOpen, wizardOpen])
 
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' })
@@ -488,11 +575,29 @@ export function MerlinDrawer({ merlin, selectedLabel }: { merlin: ReturnType<typ
           className="absolute inset-y-0 left-0 z-10 w-1 cursor-col-resize hover:bg-emerald-500/40"
         />
       )}
-      <div className="flex items-center justify-between border-b border-zinc-800 p-3">
-        <p className={dHead}>Merlin</p>
-        <div className="flex items-center gap-1">
-          <ConversationMenu merlin={merlin} />
-          {messages.length > 0 && (
+      <div className="flex items-center justify-between border-b border-zinc-800 px-2 pt-2">
+        <div className="flex items-center gap-0.5">
+          {([
+            { id: 'chat' as const, label: 'Merlin', icon: Sparkles },
+            { id: 'assets' as const, label: 'Assets', icon: Image },
+            { id: 'chats' as const, label: 'Chats', icon: History },
+          ]).map((t) => {
+            const Icon = t.icon
+            return (
+              <button
+                key={t.id}
+                onClick={() => setActiveTab(t.id)}
+                className={`flex items-center gap-1.5 rounded-t-lg border-b-2 px-2.5 py-1.5 text-xs font-medium ${
+                  activeTab === t.id ? 'border-emerald-500 text-emerald-400' : 'border-transparent text-zinc-500 hover:text-zinc-300'
+                }`}
+              >
+                <Icon className="h-3.5 w-3.5" /> {t.label}
+              </button>
+            )
+          })}
+        </div>
+        <div className="flex items-center gap-1 pb-1.5">
+          {activeTab === 'chat' && messages.length > 0 && (
             <button onClick={newConversation} className="rounded p-0.5 text-zinc-500 hover:text-zinc-200" title="New conversation">
               <Plus className="h-4 w-4" />
             </button>
@@ -508,7 +613,15 @@ export function MerlinDrawer({ merlin, selectedLabel }: { merlin: ReturnType<typ
         </div>
       </div>
 
-      <>
+      {activeTab === 'assets' && (
+        <AssetLibrary
+          variant="panel"
+          onPick={(url) => { addAttachmentFromUrl(url); setActiveTab('chat') }}
+          onClose={() => setActiveTab('chat')}
+        />
+      )}
+      {activeTab === 'chats' && <ChatsTab merlin={merlin} onOpen={() => setActiveTab('chat')} />}
+      {activeTab === 'chat' && <>
           <div ref={listRef} className="flex-1 space-y-3 overflow-y-auto p-3">
             {messages.length === 0 && (
               <div className="space-y-3">
@@ -652,7 +765,14 @@ export function MerlinDrawer({ merlin, selectedLabel }: { merlin: ReturnType<typ
               </div>
             )}
             {attachmentError && <p className="mb-1 text-[11px] text-red-400">{attachmentError}</p>}
-            <div className="relative flex gap-2">
+            {wizardOpen && (
+              <ImageGenWizard
+                selectedLabel={selectedLabel}
+                onCancel={() => setWizardOpen(false)}
+                onSend={(text) => { setWizardOpen(false); void send(text) }}
+              />
+            )}
+            <div className={`relative flex gap-2 ${wizardOpen ? 'hidden' : ''}`}>
               {menuOpen && (
                 <SlashMenu
                   items={activeItems}
@@ -700,7 +820,7 @@ export function MerlinDrawer({ merlin, selectedLabel }: { merlin: ReturnType<typ
                 className="w-full resize-none rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
               />
             </div>
-            <div className="mt-2 flex gap-2">
+            <div className="relative mt-2 flex gap-2">
               <input
                 ref={fileRef}
                 type="file"
@@ -721,6 +841,14 @@ export function MerlinDrawer({ merlin, selectedLabel }: { merlin: ReturnType<typ
                 {attachmentUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
               </button>
               <button
+                onClick={() => setActiveTab('assets')}
+                disabled={attachments.length >= 4}
+                title="Attach a past generation or upload from your library"
+                className="flex items-center justify-center rounded-lg border border-zinc-700 px-3 py-1.5 text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
+              >
+                <FolderOpen className="h-4 w-4" />
+              </button>
+              <button
                 onClick={submit}
                 disabled={sending || !input.trim()}
                 className="flex-1 rounded-lg bg-emerald-500 px-3 py-1.5 text-sm font-semibold text-zinc-950 hover:bg-emerald-400 disabled:opacity-50"
@@ -729,7 +857,7 @@ export function MerlinDrawer({ merlin, selectedLabel }: { merlin: ReturnType<typ
               </button>
             </div>
           </div>
-      </>
+      </>}
     </div>
   )
 }

@@ -54,7 +54,7 @@ export type MerlinOp =
   // Server-validated, CLIENT-executed asynchronously: useMerlin generates the
   // image via the endpoint, then applies the URL as a follow-up set_field.
   // applyMerlinOps (a synchronous fold) never mutates state for it.
-  | { op: 'generate_image'; block: string; field: string; prompt: string; aspect?: string }
+  | { op: 'generate_image'; block: string; field: string; prompt: string; aspect?: string; image_size?: string }
 
 export type MerlinOpResult = { ok: boolean; summary: string }
 export type MerlinApplyResult = {

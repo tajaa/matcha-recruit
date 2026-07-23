@@ -400,8 +400,8 @@ def _patch_generate_image(monkeypatch, *, url="https://cdn.example.test/g.png", 
     calls = []
 
     async def _fake_generate_image(prompt, *, prefix, aspect_ratio="16:9",
-                                    reference_images=None, return_bytes=False):
-        calls.append({"prompt": prompt, "reference_images": reference_images})
+                                    reference_images=None, return_bytes=False, image_size=None):
+        calls.append({"prompt": prompt, "reference_images": reference_images, "image_size": image_size})
         if error is not None:
             raise image_gen_mod.ImageGenError(error)
         return (url, png) if return_bytes else url
@@ -428,12 +428,40 @@ def test_generate_image_tool_places_the_result_and_logs_a_set_field(patched, mon
         {"op": "set_field", "block": "b1", "path": "image", "value": "https://cdn.example.test/g.png"}
     ]
     assert calls[0]["reference_images"] is None
+    # Default resolution when the model omits the arg — 2K, not the SDK's own
+    # 1K default, because section backgrounds render full-bleed (render.py).
+    assert calls[0]["image_size"] == "2K"
     image_steps = [s for s in data["steps"] if s["kind"] == "image"]
     assert image_steps
     # The panel's "Apply to…" menu (and its chat thumbnail) both read this —
     # without it the model's placement is the ONLY way to see or re-target
     # what got generated.
     assert image_steps[0]["image_url"] == "https://cdn.example.test/g.png"
+    # Rides along on the step so the route can catalog the generation into
+    # cappe_assets without re-deriving it from the raw tool-call args.
+    assert image_steps[0]["prompt"] == "a warm sunset"
+    assert image_steps[0]["image_size"] == "2K"
+
+
+def test_generate_image_tool_honors_an_explicit_image_size(patched, monkeypatch):
+    calls = _patch_generate_image(monkeypatch)
+    frames, _ = patched([
+        [("generate_image", {"block_id": "b1", "prompt": "a warm sunset", "image_size": "4K"})],
+        [("finish", {"message": "Added an image."})],
+    ])
+    data = _result(frames)
+    assert calls[0]["image_size"] == "4K"
+    image_steps = [s for s in data["steps"] if s["kind"] == "image"]
+    assert image_steps[0]["image_size"] == "4K"
+
+
+def test_generate_image_tool_ignores_an_invalid_image_size(patched, monkeypatch):
+    calls = _patch_generate_image(monkeypatch)
+    patched([
+        [("generate_image", {"block_id": "b1", "prompt": "a warm sunset", "image_size": "8K"})],
+        [("finish", {"message": "Added an image."})],
+    ])
+    assert calls[0]["image_size"] == "2K"
 
 
 def test_generate_image_conditions_on_a_numbered_attachment(patched, monkeypatch):

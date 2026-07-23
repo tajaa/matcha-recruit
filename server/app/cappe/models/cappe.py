@@ -1371,6 +1371,23 @@ class CappeMerlinResultsUpdate(BaseModel):
     results: list[dict[str, Any]] = Field(default_factory=list, max_length=60)
 
 
+class CappeAsset(BaseModel):
+    """A row in the per-site image asset library (`cappe_assets`, migration
+    zzzzcappe23) — a catalog entry over an S3 object that already exists;
+    deleting the row never deletes the blob (see routes/assets.py)."""
+    id: UUID
+    kind: Literal["generated", "upload"]
+    url: str
+    prompt: Optional[str] = None
+    aspect: Optional[str] = None
+    image_size: Optional[str] = None
+    created_at: datetime
+
+
+class CappeAssetList(BaseModel):
+    assets: list[CappeAsset] = Field(default_factory=list)
+
+
 # ===========================================================================
 # Shared
 # ===========================================================================
@@ -1381,7 +1398,10 @@ class CappeUploadResponse(BaseModel):
 
 class CappeImageGenRequest(BaseModel):
     """AI image generation for a site (see routes/uploads.py). prompt is length-
-    capped (abuse guard); aspect_ratio is normalized against image_gen's
-    whitelist server-side, so an unknown value degrades to the default."""
+    capped (abuse guard); aspect_ratio/image_size are normalized against
+    image_gen's whitelists server-side, so an unknown value degrades to the
+    default rather than a 422 — resolution is a quality knob, not worth
+    failing a generation over."""
     prompt: str = Field(min_length=1, max_length=1000)
     aspect_ratio: str = Field(default="16:9", max_length=8)
+    image_size: Optional[str] = Field(default=None, max_length=8)

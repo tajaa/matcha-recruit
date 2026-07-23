@@ -55,7 +55,13 @@ from .merlin import (
 )
 from .merlin_apply import apply_ops
 from .merlin_attachments import caption_lines
-from .merlin_catalog import AI_ASPECT_RATIOS, AI_IMAGE_PROMPT_MAX, MODEL_TIERS
+from .merlin_catalog import (
+    AI_ASPECT_RATIOS,
+    AI_IMAGE_PROMPT_MAX,
+    AI_IMAGE_SIZES,
+    DEFAULT_AI_IMAGE_SIZE,
+    MODEL_TIERS,
+)
 from .merlin_ops import validate_ops
 
 logger = logging.getLogger(__name__)
@@ -182,6 +188,16 @@ def _tool_declarations() -> list[types.FunctionDeclaration]:
                     "aspect": types.Schema(
                         type=types.Type.STRING,
                         enum=sorted(AI_ASPECT_RATIOS),
+                    ),
+                    "image_size": types.Schema(
+                        type=types.Type.STRING,
+                        enum=list(AI_IMAGE_SIZES),
+                        description=(
+                            "Output resolution. Defaults to 2K, which is sharp enough for a "
+                            "full-bleed section background. Use 4K only if the user explicitly "
+                            "asks for maximum quality — it costs about 1.5x more. Use 1K only "
+                            "for a small element where a section background's sharpness doesn't matter."
+                        ),
                     ),
                     "attachment_index": types.Schema(
                         type=types.Type.INTEGER,
@@ -500,6 +516,7 @@ async def run_merlin_agent(
         prompt = str(args.get("prompt") or "").strip()
         field = str(args.get("field") or "image")
         aspect = args.get("aspect") if args.get("aspect") in AI_ASPECT_RATIOS else None
+        image_size = args.get("image_size") if args.get("image_size") in AI_IMAGE_SIZES else DEFAULT_AI_IMAGE_SIZE
 
         target = next((b for b in work_blocks if b.get("id") == block_id), None)
         if target is None:
@@ -542,6 +559,7 @@ async def run_merlin_agent(
                 url, png = await generate_image(
                     prompt, prefix="cappe/gen", aspect_ratio=aspect or "16:9",
                     reference_images=reference, return_bytes=True,
+                    image_size=image_size,
                 )
         except ImageGenError as exc:
             return (
@@ -564,8 +582,13 @@ async def run_merlin_agent(
             # screenshot step already uses for its thumbnail) — and now also
             # drives the panel's "Apply to…" menu, so the user can re-target
             # the SAME generated image onto a different field/background than
-            # wherever the model happened to place it.
-            {"kind": "image", "label": f"Generated image → {field}", "image_url": url},
+            # wherever the model happened to place it. prompt/aspect/image_size
+            # ride along so the route can catalog this generation into
+            # cappe_assets without re-deriving them from the tool-call args.
+            {
+                "kind": "image", "label": f"Generated image → {field}", "image_url": url,
+                "prompt": prompt, "aspect": aspect or "16:9", "image_size": image_size,
+            },
             png,
         )
 

@@ -13,7 +13,11 @@ os.environ.setdefault("LIVE_API", "test-key")
 os.environ.setdefault("DATABASE_URL", "postgresql://test:test@localhost/test")
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret-key-cappe")
 
-from app.cappe.services.merlin_catalog import AI_ASPECT_RATIOS, AI_IMAGE_PROMPT_MAX  # noqa: E402
+from app.cappe.services.merlin_catalog import (  # noqa: E402
+    AI_ASPECT_RATIOS,
+    AI_IMAGE_PROMPT_MAX,
+    AI_IMAGE_SIZES,
+)
 from app.cappe.services.merlin_ops import validate_ops  # noqa: E402
 
 _BLOCKS = [
@@ -76,6 +80,23 @@ def test_generate_image_keeps_valid_aspects():
     for a in AI_ASPECT_RATIOS:
         v, r = _op(block="hero1", prompt="x", aspect=a)
         assert len(v) == 1 and v[0]["aspect"] == a
+
+
+def test_generate_image_drops_unknown_image_size():
+    v, r = _op(block="hero1", prompt="x", image_size="8K")
+    assert len(v) == 1 and not r and "image_size" not in v[0]  # dropped → executor defaults
+
+
+def test_generate_image_drops_non_string_image_size():
+    for bad in (2, 1.5, True, {"x": 1}, ["2K"]):
+        v, r = _op(block="hero1", prompt="x", image_size=bad)
+        assert len(v) == 1 and not r and "image_size" not in v[0], bad
+
+
+def test_generate_image_keeps_valid_image_sizes():
+    for s in AI_IMAGE_SIZES:
+        v, r = _op(block="hero1", prompt="x", image_size=s)
+        assert len(v) == 1 and v[0]["image_size"] == s
 
 
 def test_generate_image_reference_images_ride_ahead_of_the_prompt():
@@ -141,3 +162,89 @@ def test_aspect_ratio_whitelist_mirrors_the_service():
     # GA name — the "-preview" model Google shipped this under was shut down
     # 2026-06-25; a regression back to it means every image-gen call 404s.
     assert IMAGE_MODEL == "gemini-3.1-flash-image"
+
+
+def test_image_size_whitelist_is_a_subset_of_the_service():
+    """AI_IMAGE_SIZES is a CURATED subset of the service's full IMAGE_SIZES —
+    it deliberately excludes "512" (too low-res for Merlin's use, a full-bleed
+    section background or a placed field image), unlike AI_ASPECT_RATIOS which
+    mirrors ASPECT_RATIOS exactly."""
+    try:
+        from app.core.services.image_gen import IMAGE_SIZES
+    except Exception:
+        import pytest
+        pytest.skip("google.genai not installed in this environment")
+    assert set(AI_IMAGE_SIZES) <= IMAGE_SIZES
+    assert "512" not in AI_IMAGE_SIZES
+
+
+def test_generate_image_passes_image_size_through_to_the_sdk_config():
+    """image_size is omitted from ImageConfig when None (existing callers —
+    matcha-work — unaffected) and otherwise normalized/validated."""
+    try:
+        from app.core.services import image_gen
+    except Exception:
+        import pytest
+        pytest.skip("google.genai not installed in this environment")
+
+    captured = {}
+
+    class _FakeModels:
+        def generate_content(self, *, model, contents, config):
+            captured["image_config"] = config.image_config
+            candidate = type("C", (), {
+                "content": type("Content", (), {
+                    "parts": [type("Part", (), {
+                        "inline_data": type("Inline", (), {"data": b"PNG", "mime_type": "image/png"})(),
+                    })()],
+                })(),
+            })()
+            return type("Resp", (), {"candidates": [candidate]})()
+
+    class _FakeClient:
+        def __init__(self):
+            self.models = _FakeModels()
+
+    orig = image_gen.get_genai_client
+    image_gen.get_genai_client = lambda *a, **k: _FakeClient()
+    try:
+        image_gen._generate_sync("a lake", "16:9", image_size="2K")
+        assert captured["image_config"].image_size == "2K"
+        captured.clear()
+        image_gen._generate_sync("a lake", "16:9", image_size=None)
+        assert captured["image_config"].image_size is None
+    finally:
+        image_gen.get_genai_client = orig
+
+
+def test_generate_image_normalizes_and_rejects_invalid_size(monkeypatch):
+    """The async entrypoint lowercases/uppercases and drops an invalid size to
+    None rather than raising — resolution is a quality knob, not worth failing
+    a generation over (mirrors aspect_ratio's degrade-to-default behavior)."""
+    import asyncio
+    try:
+        from app.core.services import image_gen
+    except Exception:
+        import pytest
+        pytest.skip("google.genai not installed in this environment")
+
+    captured = {}
+
+    async def _fake_to_thread(fn, prompt, ar, refs, size):
+        captured["size"] = size
+        return b"PNG", "image/png"
+
+    async def _fake_upload_file(*a, **k):
+        return "https://cdn.example.test/g.png"
+
+    class _FakeStorage:
+        upload_file = staticmethod(_fake_upload_file)
+
+    monkeypatch.setattr(image_gen.asyncio, "to_thread", _fake_to_thread)
+    monkeypatch.setattr(image_gen, "get_storage", lambda: _FakeStorage())
+
+    asyncio.run(image_gen.generate_image("x", prefix="cappe/gen", image_size="2k"))
+    assert captured["size"] == "2K"  # lowercase normalized up
+
+    asyncio.run(image_gen.generate_image("x", prefix="cappe/gen", image_size="8K"))
+    assert captured["size"] is None  # invalid → dropped, not raised

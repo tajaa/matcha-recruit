@@ -1,7 +1,8 @@
 import { useContext, useRef, useState } from 'react'
-import { ChevronDown, ChevronUp, Film, ImagePlus, Loader2, Plus, Sparkles, Trash2 } from 'lucide-react'
+import { ChevronDown, ChevronUp, Film, FolderOpen, ImagePlus, Loader2, Plus, Sparkles, Trash2 } from 'lucide-react'
 import { cappeApi } from '../../../api'
 import { useCappeMe } from '../../../hooks/useCappeMe'
+import { AssetLibrary } from './AssetLibrary'
 import { SiteCtx } from './context'
 import { inputCls } from './styles'
 import type { Field } from './types'
@@ -11,13 +12,21 @@ const AI_ASPECTS: [string, string][] = [
   ['16:9', 'Wide 16:9'], ['1:1', 'Square'], ['4:3', 'Landscape 4:3'],
   ['3:4', 'Portrait 3:4'], ['9:16', 'Tall 9:16'], ['3:2', '3:2'], ['2:3', '2:3'],
 ]
+// Mirror of server IMAGE_SIZES (core/services/image_gen.py) — 2K is the
+// default: section backgrounds render `background-size: cover` full-bleed,
+// and the model's own 1K default reads soft once stretched across one.
+const AI_QUALITIES: [string, string][] = [
+  ['1K', 'Standard (1K)'], ['2K', 'Sharp (2K)'], ['4K', 'Max (4K, ~1.5x cost)'],
+]
 
 export function ImageInput({ value, onChange }: { value: unknown; onChange: (v: string) => void }) {
   const siteId = useContext(SiteCtx)
   const [busy, setBusy] = useState(false)
   const [genOpen, setGenOpen] = useState(false)
+  const [libOpen, setLibOpen] = useState(false)
   const [prompt, setPrompt] = useState('')
   const [aspect, setAspect] = useState('16:9')
+  const [quality, setQuality] = useState('2K')
   const [genBusy, setGenBusy] = useState(false)
   const [genErr, setGenErr] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -43,7 +52,7 @@ export function ImageInput({ value, onChange }: { value: unknown; onChange: (v: 
     setGenBusy(true)
     setGenErr(null)
     try {
-      const res = await cappeApi.post<{ url: string }>(`/sites/${siteId}/generate-image`, { prompt: p, aspect_ratio: aspect })
+      const res = await cappeApi.post<{ url: string }>(`/sites/${siteId}/generate-image`, { prompt: p, aspect_ratio: aspect, image_size: quality })
       onChange(res.url)
       setGenOpen(false)
       setPrompt('')
@@ -56,7 +65,7 @@ export function ImageInput({ value, onChange }: { value: unknown; onChange: (v: 
   }
 
   return (
-    <div>
+    <div className="relative">
       <div className="flex items-center gap-2">
         <input value={url} onChange={(e) => onChange(e.target.value)} placeholder="Image URL" className={inputCls} />
         {url && <img src={url} alt="" className="h-9 w-9 shrink-0 rounded object-cover" />}
@@ -67,6 +76,14 @@ export function ImageInput({ value, onChange }: { value: unknown; onChange: (v: 
           title="Generate with AI"
         >
           <Sparkles className="h-3.5 w-3.5" />
+        </button>
+        <button
+          type="button"
+          onClick={() => setLibOpen((o) => !o)}
+          className={`inline-flex shrink-0 items-center gap-1 rounded-lg border px-2.5 py-2 text-xs font-medium ${libOpen ? 'border-emerald-500 text-emerald-400' : 'border-zinc-700 text-zinc-300 hover:bg-zinc-800'}`}
+          title="Choose from your generated/uploaded images"
+        >
+          <FolderOpen className="h-3.5 w-3.5" />
         </button>
         <button
           type="button"
@@ -85,6 +102,12 @@ export function ImageInput({ value, onChange }: { value: unknown; onChange: (v: 
           onChange={(e) => { const f = e.target.files?.[0]; if (f) upload(f); e.target.value = '' }}
         />
       </div>
+      {libOpen && (
+        <AssetLibrary
+          onPick={(pickedUrl) => { onChange(pickedUrl); setLibOpen(false) }}
+          onClose={() => setLibOpen(false)}
+        />
+      )}
       {genOpen && (
         <div className="mt-2 space-y-2 rounded-lg border border-zinc-800 bg-zinc-950/60 p-2.5">
           <textarea
@@ -98,6 +121,9 @@ export function ImageInput({ value, onChange }: { value: unknown; onChange: (v: 
           <div className="flex items-center gap-2">
             <select value={aspect} onChange={(e) => setAspect(e.target.value)} className={inputCls}>
               {AI_ASPECTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
+            <select value={quality} onChange={(e) => setQuality(e.target.value)} className={inputCls} title="Output resolution">
+              {AI_QUALITIES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
             </select>
             <button
               type="button"

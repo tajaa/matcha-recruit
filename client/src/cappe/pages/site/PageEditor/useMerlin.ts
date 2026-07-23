@@ -170,6 +170,14 @@ export function useMerlin(
       setAttachmentUploading(false)
     }
   }
+  /** Attach a URL that's already stored (an asset-library pick) instead of a
+   *  fresh File — skips the upload round-trip since the object already lives
+   *  in S3. The "edit them later" path: attach a past generation, ask for a
+   *  variation, and the server turns it into a reference image. */
+  const addAttachmentFromUrl = (url: string, mime = 'image/png') => {
+    if (attachments.length >= 4) return
+    setAttachments((a) => [...a, { url, mime }])
+  }
   const removeAttachment = (idx: number) => setAttachments((a) => a.filter((_, i) => i !== idx))
   // Auto by default; persisted across pages/sessions like werk's 'mw-model'.
   // Validated against the current tier list, so a value saved before a tier
@@ -459,7 +467,7 @@ export function useMerlin(
       try {
         const gen = await cappeApi.post<{ url: string }>(
           `/sites/${sid}/generate-image`,
-          { prompt: g.prompt, aspect_ratio: g.aspect || '16:9' },
+          { prompt: g.prompt, aspect_ratio: g.aspect || '16:9', image_size: g.image_size || '2K' },
         )
         if (sentForPageId !== pageIdRef.current || sentSession !== sessionRef.current) return
         const cur = getSnapshot()
@@ -649,7 +657,7 @@ export function useMerlin(
     open, setOpen, messages, send, sending, error, tier, setTier, width, setWidth, setWidthLive,
     expanded, setExpanded,
     status, liveSteps, schema, getImageTargets, applyImageTo,
-    attachments, addAttachment, removeAttachment, attachmentUploading, attachmentError,
+    attachments, addAttachment, addAttachmentFromUrl, removeAttachment, attachmentUploading, attachmentError,
     conversationId, conversations, openConversation, newConversation,
     renameConversation, deleteConversation,
   }

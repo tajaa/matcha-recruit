@@ -46,6 +46,11 @@ _HTTP_TIMEOUT_MS = 55_000
 # stay import-light — no google SDK — so it can't import this one).
 ASPECT_RATIOS = frozenset({"1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"})
 DEFAULT_ASPECT = "16:9"
+# Output resolutions the model accepts (uppercase "K" is load-bearing — the SDK
+# passes this straight through as a free-form string; a lowercase "2k" is
+# silently ignored by the API and the model falls back to its 1K default).
+# Mirror in `cappe/services/merlin_catalog.py:AI_IMAGE_SIZES` (import-light).
+IMAGE_SIZES = frozenset({"512", "1K", "2K", "4K"})
 
 
 class ImageGenError(Exception):
@@ -57,6 +62,7 @@ def _generate_sync(
     prompt: str,
     aspect_ratio: str,
     reference_images: list[tuple[bytes, str]] | None = None,
+    image_size: str | None = None,
 ) -> tuple[bytes, str]:
     """Blocking Gemini image call → (image_bytes, mime). Raises ImageGenError
     if the response carries no inline image data.
@@ -64,19 +70,26 @@ def _generate_sync(
     `reference_images` are `(bytes, mime)` pairs prepended to the prompt, which
     turns generation into editing: variations of a photo the user attached,
     a background swap, a restyle. Additive — callers that pass none behave
-    exactly as before."""
+    exactly as before.
+
+    `image_size` (None/"512"/"1K"/"2K"/"4K") is omitted from the request when
+    None, so existing callers that never pass it get the model's own default
+    (1K) unchanged."""
     client = get_genai_client(http_options=genai_types.HttpOptions(timeout=_HTTP_TIMEOUT_MS))
     contents: list = [
         genai_types.Part.from_bytes(data=data, mime_type=mime)
         for data, mime in (reference_images or [])
     ]
     contents.append(genai_types.Part(text=prompt))
+    image_config_kwargs = {"aspect_ratio": aspect_ratio}
+    if image_size:
+        image_config_kwargs["image_size"] = image_size
     response = client.models.generate_content(
         model=IMAGE_MODEL,
         contents=contents,
         config=genai_types.GenerateContentConfig(
             response_modalities=["IMAGE", "TEXT"],
-            image_config=genai_types.ImageConfig(aspect_ratio=aspect_ratio),
+            image_config=genai_types.ImageConfig(**image_config_kwargs),
         ),
     )
     if response.candidates and response.candidates[0].content and response.candidates[0].content.parts:
@@ -93,6 +106,7 @@ async def generate_image(
     aspect_ratio: str = DEFAULT_ASPECT,
     reference_images: list[tuple[bytes, str]] | None = None,
     return_bytes: bool = False,
+    image_size: str | None = None,
 ):
     """Generate an image from ``prompt`` and return a public URL (stored under
     ``prefix`` via the platform storage service → CloudFront).
@@ -104,11 +118,18 @@ async def generate_image(
     an agent loop can SHOW the model what it produced and let it retry. Off by
     default: the ordinary editor button only wants somewhere to point an <img>.
 
+    ``image_size`` — None/"512"/"1K"/"2K"/"4K". An invalid value is dropped
+    (treated as None, i.e. the model's own default) rather than raising —
+    resolution is a quality knob, not something worth failing a generation over.
+
     Raises ``ImageGenError`` on no-image / timeout / any SDK failure."""
     ar = aspect_ratio if aspect_ratio in ASPECT_RATIOS else DEFAULT_ASPECT
+    size = image_size.strip().upper() if image_size else None
+    if size not in IMAGE_SIZES:
+        size = None
     try:
         image_bytes, mime = await asyncio.wait_for(
-            asyncio.to_thread(_generate_sync, prompt, ar, reference_images),
+            asyncio.to_thread(_generate_sync, prompt, ar, reference_images, size),
             timeout=IMAGE_GEN_TIMEOUT,
         )
     except ImageGenError:

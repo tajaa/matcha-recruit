@@ -3,18 +3,29 @@
 Reuses the platform storage service (S3/CloudFront-transparent). Scoped to an
 owned site; images go under the `cappe` prefix.
 """
+import logging
+from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 
 from ...core.services.image_gen import ImageGenError, generate_image
 from ...core.services.storage import get_storage
 from ...database import get_connection
 from ..dependencies import require_cappe_account
-from ..models.cappe import CappeAccount, CappeImageGenRequest, CappeUploadResponse
-from ..services import image_quota
+from ..models.cappe import (
+    CappeAccount,
+    CappeAsset,
+    CappeAssetList,
+    CappeImageGenRequest,
+    CappeUploadResponse,
+)
+from ..services import cappe_assets, image_quota
 from ..services.design_gate import is_premium_plan
+from ..services.merlin_catalog import AI_IMAGE_SIZES, DEFAULT_AI_IMAGE_SIZE
 from ._shared import get_owned_site
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -61,7 +72,7 @@ async def upload_image(
 ):
     """Upload an image for use on the site. Returns a public URL."""
     async with get_connection() as conn:
-        await get_owned_site(conn, site_id, account.id)
+        site = await get_owned_site(conn, site_id, account.id)
 
     if file.content_type not in _ALLOWED:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported image type")
@@ -78,6 +89,13 @@ async def upload_image(
         prefix="cappe",
         content_type=file.content_type,
     )
+    try:
+        async with get_connection() as conn:
+            await cappe_assets.record(
+                conn, account_id=account.id, site_id=site["id"], kind="upload", url=url,
+            )
+    except Exception as exc:  # noqa: BLE001 — catalog bookkeeping never fails the upload
+        logger.warning("cappe asset catalog insert failed (upload): %s", exc)
     return CappeUploadResponse(url=url)
 
 
@@ -96,7 +114,7 @@ async def generate_site_image(
     counting them is the cheap abuse guard until a real token wallet exists.
     """
     async with get_connection() as conn:
-        await get_owned_site(conn, site_id, account.id)
+        site = await get_owned_site(conn, site_id, account.id)
 
     prompt = body.prompt.strip()
     if not prompt:
@@ -106,13 +124,30 @@ async def generate_site_image(
     # Merlin's agent-loop generate_image tool — see services/image_quota.py.
     await image_quota.check_and_record(str(account.id), premium=is_premium_plan(account.plan))
 
+    # Default to 2K, not the model's own 1K default — section backgrounds
+    # render at `background-size: cover` full-bleed (render.py), and 1K reads
+    # soft once stretched across one. An explicit request wins if valid.
+    size = body.image_size.strip().upper() if body.image_size else None
+    if size not in AI_IMAGE_SIZES:
+        size = DEFAULT_AI_IMAGE_SIZE
+
     try:
-        url = await generate_image(prompt, prefix="cappe/gen", aspect_ratio=body.aspect_ratio)
+        url = await generate_image(
+            prompt, prefix="cappe/gen", aspect_ratio=body.aspect_ratio, image_size=size,
+        )
     except ImageGenError:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="Couldn't generate an image for that prompt — try rephrasing it.",
         )
+    try:
+        async with get_connection() as conn:
+            await cappe_assets.record(
+                conn, account_id=account.id, site_id=site["id"], kind="generated", url=url,
+                prompt=prompt, aspect=body.aspect_ratio, image_size=size,
+            )
+    except Exception as exc:  # noqa: BLE001 — catalog bookkeeping never fails the generation
+        logger.warning("cappe asset catalog insert failed (generate): %s", exc)
     return CappeUploadResponse(url=url)
 
 
@@ -181,3 +216,34 @@ async def upload_video(
         content_type=file.content_type,
     )
     return CappeUploadResponse(url=url)
+
+
+@router.get("/sites/{site_id}/assets", response_model=CappeAssetList)
+async def list_site_assets(
+    site_id: UUID,
+    kind: Optional[str] = Query(default=None, pattern="^(generated|upload)$"),
+    account: CappeAccount = Depends(require_cappe_account),
+):
+    """The site's image asset library — everything generated or uploaded for
+    it, newest first. Backs the editor's image-field "Library" picker and
+    Merlin's "from library" attach."""
+    async with get_connection() as conn:
+        await get_owned_site(conn, site_id, account.id)
+        rows = await cappe_assets.list_assets(conn, site_id, kind=kind)
+    return CappeAssetList(assets=[CappeAsset(**r) for r in rows])
+
+
+@router.delete("/sites/{site_id}/assets/{asset_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_site_asset(
+    site_id: UUID,
+    asset_id: UUID,
+    account: CappeAccount = Depends(require_cappe_account),
+):
+    """Remove one asset from the library. Deletes the catalog row only — the
+    S3 object stays (a live page may still reference its URL); see
+    services/cappe_assets.py."""
+    async with get_connection() as conn:
+        await get_owned_site(conn, site_id, account.id)
+        deleted = await cappe_assets.delete_asset(conn, site_id, asset_id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")

@@ -38,7 +38,7 @@ from ..models.cappe import (
     CappeMerlinConversationUpdate,
     CappeMerlinResultsUpdate,
 )
-from ..services import merlin_store
+from ..services import cappe_assets, merlin_store
 from ..services.design_gate import gate_content, gate_theme, is_premium_plan
 from ..services.merlin import run_merlin_turn
 from ..services.merlin_agent import AGENT_TIERS, run_merlin_agent
@@ -478,6 +478,25 @@ async def merlin_agent(
                     )
                 result["conversation_id"] = str(conversation["id"])
                 result["message_id"] = str(stored["id"])
+            # Catalog anything the agent generated this turn (do_generate_image
+            # rides prompt/aspect/image_size on the step for exactly this).
+            # Best-effort, same reasoning as the upload routes: a broken
+            # catalog insert must never surface as a failed Merlin turn.
+            image_steps = [
+                s for s in (result.get("steps") or [])
+                if s.get("kind") == "image" and s.get("image_url")
+            ]
+            if image_steps:
+                try:
+                    async with get_connection() as conn:
+                        for s in image_steps:
+                            await cappe_assets.record(
+                                conn, account_id=account.id, site_id=site_id, kind="generated",
+                                url=s["image_url"], prompt=s.get("prompt"),
+                                aspect=s.get("aspect"), image_size=s.get("image_size"),
+                            )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("cappe asset catalog insert failed (agent): %s", exc)
             yield _sse({"type": "result", "data": result})
         yield "data: [DONE]\n\n"
 

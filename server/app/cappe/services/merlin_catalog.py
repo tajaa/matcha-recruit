@@ -141,6 +141,15 @@ MAX_OPS_PER_TURN = 20
 AI_ASPECT_RATIOS: frozenset[str] = frozenset({"1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"})
 AI_IMAGE_PROMPT_MAX = 1000  # matches CappeImageGenRequest.prompt max_length
 
+# Output resolutions Merlin's generate_image op/tool may request. Mirror of
+# `core/services/image_gen.py:IMAGE_SIZES` — kept here so op validation/prompt/
+# schema don't drag the google SDK into merlin_ops. "2K" is the default we pass
+# when the caller omits it: section backgrounds render at `background-size:
+# cover` full-bleed (render.py), and the model's own default (1K) reads soft
+# once stretched across a section.
+AI_IMAGE_SIZES: tuple[str, ...] = ("1K", "2K", "4K")
+DEFAULT_AI_IMAGE_SIZE = "2K"
+
 # --- Per-block design bag (`_design`) -----------------------------------------
 # The per-section inspector's vocabulary (motion/bg/layout/colors/type/border/
 # anchor) — where ALL motion and animation lives, so without it Merlin can't
