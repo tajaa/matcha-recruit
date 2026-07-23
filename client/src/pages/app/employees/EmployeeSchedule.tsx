@@ -18,6 +18,7 @@ import {
   fmtTime, fmtDayLabel, toISODate, addDays, startOfWeekSunday,
 } from '../../../types/employeeSchedule'
 import { useEmployeeSchedule } from './useEmployeeSchedule'
+import ScheduleLawPanel from '../../../components/employees/ScheduleLawPanel'
 
 const inputCls = 'bg-zinc-900 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500 w-full'
 
@@ -52,13 +53,17 @@ function conflictPrompt(err: unknown): string | null {
     return `${detail.message ?? 'This shift is already fully staffed.'}\n\nAssign anyway?`
   }
   if (detail?.code === 'schedule_compliance') {
-    // Advisory scheduling-law flags (meal break, overtime, min rest). A hard
-    // minor-hour limit comes back as a 422 (schedule_compliance_block) instead
-    // and is surfaced as a non-overridable error by errorMessage().
-    const lines = (detail.violations ?? []).map(
-      (v) => `• ${v.message}${v.statute ? ` [${v.statute}]` : ''}`,
-    )
-    return `This shift may not comply with scheduling law:\n${lines.join('\n')}\n\nSchedule anyway?`
+    // Advisory scheduling-law flags (meal break, overtime, min rest, Fair
+    // Workweek notice/clopening). A hard minor-hour limit comes back as a 422
+    // (schedule_compliance_block) instead and is surfaced as a non-overridable
+    // error by errorMessage().
+    const violations = detail.violations ?? []
+    const lines = violations.map((v) => `• ${v.message}${v.statute ? ` [${v.statute}]` : ''}`)
+    const allFairWorkweek = violations.length > 0 && violations.every((v) => v.check?.startsWith('fair_workweek_'))
+    const lead = allFairWorkweek
+      ? 'This change may trigger Fair Workweek obligations:'
+      : 'This shift may not comply with scheduling law:'
+    return `${lead}\n${lines.join('\n')}\n\nSchedule anyway?`
   }
   return null
 }
@@ -86,10 +91,15 @@ export default function EmployeeSchedule() {
     // Button-pills were. Only the shell + tab band placement change.
     <div className="overflow-hidden rounded-xl border border-white/[0.06] bg-zinc-950">
       <div className="border-b border-white/[0.06] px-5 py-4">
-        <h1 className="text-2xl font-light tracking-tight text-zinc-50 flex items-center gap-2">
-          <CalendarDays className="h-5 w-5 text-zinc-500" /> Employee Schedule
-        </h1>
-        <p className="text-sm text-zinc-500 mt-1 max-w-2xl">Build weekly shifts over your roster, assign employees, and publish. Generate recurring weeks from reusable templates. Employees see published shifts and can request swaps or time off.</p>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-light tracking-tight text-zinc-50 flex items-center gap-2">
+              <CalendarDays className="h-5 w-5 text-zinc-500" /> Employee Schedule
+            </h1>
+            <p className="text-sm text-zinc-500 mt-1 max-w-2xl">Build weekly shifts over your roster, assign employees, and publish. Generate recurring weeks from reusable templates. Employees see published shifts and can request swaps or time off.</p>
+          </div>
+          <ScheduleLawPanel />
+        </div>
       </div>
 
       <div className="flex items-center gap-1 border-b border-white/[0.06] px-5">
@@ -226,9 +236,41 @@ function ShiftCard({ shift, roster, onPatch, onChanged }: {
       }
     } finally { setBusy(false) }
   }
+  async function removeAssignment(employeeId: string) {
+    setBusy(true)
+    try {
+      onPatch(await unassignEmployee(shift.id, employeeId))
+    } catch (err) {
+      const prompt = conflictPrompt(err)
+      if (!prompt) {
+        toast(errorMessage(err), 'error')
+      } else if (window.confirm(prompt)) {
+        try {
+          onPatch(await unassignEmployee(shift.id, employeeId, true))
+        } catch (forcedErr) {
+          toast(errorMessage(forcedErr), 'error')
+        }
+      }
+    } finally { setBusy(false) }
+  }
   async function remove() {
     setBusy(true)
-    try { await deleteShift(shift.id); onChanged() } catch (err) { toast(errorMessage(err), 'error') } finally { setBusy(false) }
+    try {
+      await deleteShift(shift.id)
+      onChanged()
+    } catch (err) {
+      const prompt = conflictPrompt(err)
+      if (!prompt) {
+        toast(errorMessage(err), 'error')
+      } else if (window.confirm(prompt)) {
+        try {
+          await deleteShift(shift.id, true)
+          onChanged()
+        } catch (forcedErr) {
+          toast(errorMessage(forcedErr), 'error')
+        }
+      }
+    } finally { setBusy(false) }
   }
 
   if (editing) {
@@ -257,7 +299,7 @@ function ShiftCard({ shift, roster, onPatch, onChanged }: {
         {shift.assignments.map((a) => (
           <span key={a.employee_id} className="inline-flex items-center gap-1 bg-zinc-800 rounded-full pl-2 pr-1 py-0.5 text-[11px] text-zinc-200">
             {a.name}
-            <button onClick={() => act(() => unassignEmployee(shift.id, a.employee_id))} disabled={busy} className="text-zinc-500 hover:text-red-400"><X className="h-3 w-3" /></button>
+            <button onClick={() => removeAssignment(a.employee_id)} disabled={busy} className="text-zinc-500 hover:text-red-400"><X className="h-3 w-3" /></button>
           </span>
         ))}
         <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${understaffed ? 'text-amber-400 bg-amber-500/10' : 'text-emerald-400 bg-emerald-500/10'}`}>

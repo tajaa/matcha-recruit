@@ -11,6 +11,7 @@ from app.core.routes.admin.posters import router as _posters
 from app.core.routes.admin.users import router as _users
 from app.core.routes.admin.research import router as _research
 from app.core.routes.admin.products import router as _products
+from app.core.routes.admin.schedule_rules import router as _schedule_rules
 
 # Re-export the internal names other modules + tests import directly (the full
 # external surface, verified by grepping app/ + tests/ for `admin import <name>`).
@@ -23,7 +24,7 @@ from app.core.routes.admin._shared import (  # noqa: F401
 from app.core.models.admin import ProposedCategory  # noqa: F401
 
 router = APIRouter()
-for _r in (_jurisdictions, _companies, _deal_flow, _brokers, _invites, _platform_settings, _posters, _users, _research, _products):
+for _r in (_jurisdictions, _companies, _deal_flow, _brokers, _invites, _platform_settings, _posters, _users, _research, _products, _schedule_rules):
     router.include_router(_r)
 
 __all__ = [

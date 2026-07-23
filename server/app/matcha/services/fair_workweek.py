@@ -289,6 +289,103 @@ def price_event(
             "estimate": float(estimate) if estimate is not None else None, "uncostable_reason": reason}
 
 
+# event → the classify_change `kind` vocabulary the brackets are keyed on.
+_EVENT_TO_KIND = {
+    "retime": "time_change",
+    "cancel": "cancellation",
+    "assign": "added_hours",
+    "unassign": "reduced_hours",
+}
+# Only these events can create a NEW clopening — removing an assignment can't.
+_CLOPENING_EVENTS = ("assign", "retime")
+
+
+def preventive_advisories(
+    *,
+    ordinance: dict[str, Any],
+    applicability: str,
+    event: str,
+    shift_published: bool,
+    starts_at: datetime,
+    now: datetime,
+    min_rest_gap_hours: Optional[float],
+    state: Optional[str] = None,
+) -> list[dict[str, Any]]:
+    """Write-time advisories for a schedule change that may trigger Fair
+    Workweek obligations — the preventive twin of the retrospective exposure
+    engine above. Returns the same violation shape
+    `schedule_compliance.py`'s checks use (`check`/`severity`/`message`/
+    `statute`/`state`), so the existing 409-advisory / force-through machinery
+    on the write path renders these unmodified.
+
+    Deliberately NEVER a block — `severity` is always `"advisory"`. Skips
+    entirely for a draft shift (`shift_published=False`): Fair Workweek
+    obligations attach to a POSTED schedule, and a draft hasn't been posted
+    yet.
+
+    v1 fetches no employee pay_rate on this path (unlike the retrospective
+    engine, which has one already loaded per assignee) — a flat-dollar bracket
+    (NYC) still prices exactly; an `hours_at_rate` bracket (LA) renders
+    count-only wording rather than adding a query to every shift write. The
+    retrospective /schedule-intelligence report is where the precise dollar
+    figure lives.
+    """
+    if not shift_published:
+        return []
+
+    out: list[dict[str, Any]] = []
+    prefix = ""
+    if applicability == "review_industry":
+        prefix = f"This location may be covered by {ordinance['name']} (verify your industry) — "
+
+    kind = _EVENT_TO_KIND.get(event)
+    if kind is not None:
+        notice_days = max(0.0, (starts_at - now).total_seconds() / 86400.0)
+        if notice_days < ordinance["notice_days"]:
+            bracket = _matching_bracket(ordinance, kind, notice_days)
+            if bracket is not None:
+                estimate = predictability_pay_estimate(bracket, None)
+                cost_clause = (
+                    f"may trigger ~${estimate:,.2f} in predictability pay"
+                    if estimate is not None
+                    else "may trigger predictability pay (amount depends on the employee's pay rate)"
+                )
+                out.append({
+                    "check": "fair_workweek_notice", "severity": "advisory",
+                    "message": (
+                        f"{prefix}This change is inside {ordinance['name']}'s "
+                        f"{ordinance['notice_days']}-day notice window ({notice_days:.1f} days' notice) — "
+                        f"{cost_clause}."
+                    ),
+                    "statute": ordinance["citation"], "state": state,
+                })
+
+    clopening = ordinance.get("clopening")
+    if (
+        clopening
+        and event in _CLOPENING_EVENTS
+        and min_rest_gap_hours is not None
+        and min_rest_gap_hours < clopening["rest_hours"]
+    ):
+        estimate = predictability_pay_estimate(clopening["premium"], None)
+        cost_clause = (
+            f"may trigger a ~${estimate:,.2f} clopening premium"
+            if estimate is not None
+            else "may trigger a clopening premium (amount depends on the employee's pay rate)"
+        )
+        out.append({
+            "check": "fair_workweek_clopening", "severity": "advisory",
+            "message": (
+                f"{prefix}Only {min_rest_gap_hours:.1f}h rest before/after this shift — "
+                f"{ordinance['name']} requires {clopening['rest_hours']}h between shifts ('clopening') — "
+                f"{cost_clause}."
+            ),
+            "statute": ordinance["citation"], "state": state,
+        })
+
+    return out
+
+
 def summarize_location_exposure(priced_events: list[dict[str, Any]]) -> dict[str, Any]:
     """Roll up a location's priced events into a total + breakdown. Events with
     no dollar estimate still count toward `event_count`, in their own bucket."""

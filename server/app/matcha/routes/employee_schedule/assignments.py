@@ -12,7 +12,7 @@ from ._shared import (
     assert_employee_in_company, assert_shift_open_for_assignment,
     find_conflicts, raise_conflict, raise_shift_full,
 )
-from ._compliance import check_shift_compliance, raise_for_violations
+from ._compliance import check_shift_compliance, raise_for_violations, _fair_workweek_advisories
 
 router = APIRouter()
 
@@ -43,6 +43,7 @@ async def assign_employee(shift_id: UUID, body: AssignmentCreate,
             starts_at=shift["starts_at"], ends_at=shift["ends_at"],
             break_minutes=shift["break_minutes"] or 0,
             employee_id=body.employee_id, exclude_shift_id=shift_id,
+            fw_event="assign", fw_shift_published=(shift["status"] == "published"),
         )
         raise_for_violations(violations, force=force)
         async with conn.transaction():
@@ -72,10 +73,21 @@ async def assign_employee(shift_id: UUID, body: AssignmentCreate,
 
 @router.delete("/shifts/{shift_id}/assignments/{employee_id}")
 async def unassign_employee(shift_id: UUID, employee_id: UUID,
+                            force: bool = Query(False, description="Unassign despite a Fair Workweek notice advisory"),
                             current_user=Depends(require_admin_or_client)):
     company_id = await require_company_id(current_user)
     async with get_connection() as conn:
         shift = await fetch_shift_for_write(conn, company_id, shift_id)
+        if shift["status"] == "published":
+            # Full check_shift_compliance would also re-run meal-break/OT/minor
+            # checks that don't make sense for a REMOVAL (they exist to gate
+            # scheduling someone, not un-scheduling them) — just the FW half.
+            violations = await _fair_workweek_advisories(
+                conn, company_id, location_id=shift["location_id"],
+                starts_at=shift["starts_at"], ends_at=shift["ends_at"],
+                event="unassign", shift_published=True, min_rest_gap_hours=None,
+            )
+            raise_for_violations(violations, force=force)
         async with conn.transaction():
             await conn.execute(
                 "DELETE FROM schedule_shift_assignments WHERE shift_id = $1 AND employee_id = $2",

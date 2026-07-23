@@ -21,8 +21,12 @@ export function updateShift(id: string, payload: Partial<ShiftPayload>, force = 
   return api.put<Shift>(`/employee-schedule/shifts/${id}${force ? '?force=true' : ''}`, payload)
 }
 
-export function deleteShift(id: string) {
-  return api.delete<{ ok: boolean; id: string }>(`/employee-schedule/shifts/${id}`)
+/** `force` proceeds past a Fair Workweek notice/clopening advisory on a
+ *  published shift — same force-through convention as create/update. */
+export function deleteShift(id: string, force = false) {
+  return api.delete<{ ok: boolean; id: string }>(
+    `/employee-schedule/shifts/${id}${force ? '?force=true' : ''}`,
+  )
 }
 
 export function publishShift(id: string) {
@@ -44,8 +48,36 @@ export function assignEmployee(shiftId: string, employeeId: string, force = fals
   )
 }
 
-export function unassignEmployee(shiftId: string, employeeId: string) {
-  return api.delete<Shift>(`/employee-schedule/shifts/${shiftId}/assignments/${employeeId}`)
+export function unassignEmployee(shiftId: string, employeeId: string, force = false) {
+  return api.delete<Shift>(
+    `/employee-schedule/shifts/${shiftId}/assignments/${employeeId}${force ? '?force=true' : ''}`,
+  )
+}
+
+// ---- Admin: location scheduling-law panel ----
+
+export interface ScheduleLawRules {
+  source: 'curated' | 'catalog_extraction' | 'unmapped'
+  [rule_key: string]: unknown
+}
+
+export interface ScheduleLawStatute {
+  requirement_id: string
+  state: string
+  category: string
+  title: string
+  statute_citation: string | null
+  source_url: string | null
+}
+
+export interface LocationComplianceResponse {
+  state: string | null
+  rules: ScheduleLawRules
+  statutes: ScheduleLawStatute[]
+}
+
+export function fetchLocationCompliance(locationId: string) {
+  return api.get<LocationComplianceResponse>(`/employee-schedule/compliance/location/${locationId}`)
 }
 
 // ---- Admin: templates ----

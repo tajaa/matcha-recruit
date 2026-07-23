@@ -23,7 +23,10 @@ from ._shared import (
     assert_employee_in_company, assert_location_in_company,
     find_conflicts, raise_conflict, shift_snapshot,
 )
-from ._compliance import check_shift_compliance, raise_for_violations
+from ._compliance import (
+    check_shift_compliance, raise_for_violations, _approved_db_rules,
+    _fair_workweek_advisories,
+)
 
 router = APIRouter()
 
@@ -90,9 +93,12 @@ async def location_scheduling_compliance(
         statutes = await schedule_compliance.get_schedule_statutes(
             location_id, company_id, conn=conn,
         )
+        db_rules = None
+        if state and not schedule_compliance.is_curated_state(state):
+            db_rules, _fetch_failed = await _approved_db_rules(conn, state.strip().upper())
     return {
         "state": state,
-        "rules": schedule_compliance.rules_summary(state),
+        "rules": schedule_compliance.rules_summary(state, db_rules),
         "statutes": statutes,
     }
 
@@ -211,6 +217,11 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
         # A break/location edit is compliance-relevant too (meal-break, jurisdiction).
         retimed = new_start != existing["starts_at"] or new_end != existing["ends_at"]
         compliance_relevant = retimed or "break_minutes" in patch or "location_id" in patch
+        # Fair Workweek notice/clopening obligations attach to a POSTED shift's
+        # timing changing, not to break/location edits alone — only pass the
+        # event when the shift's start/end actually moved.
+        fw_event = "retime" if retimed else None
+        fw_shift_published = existing["published_at"] is not None
         forced: dict[str, list[dict]] = {}
         if compliance_relevant and new_status != "cancelled":
             new_break = patch.get("break_minutes", existing["break_minutes"])
@@ -233,6 +244,7 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
                     starts_at=new_start, ends_at=new_end,
                     break_minutes=new_break or 0, employee_id=emp,
                     exclude_shift_id=shift_id,
+                    fw_event=fw_event, fw_shift_published=fw_shift_published,
                 )
                 raise_for_violations(violations, force=force)
                 if violations:
@@ -247,9 +259,24 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
                         starts_at=new_start, ends_at=new_end,
                         break_minutes=new_break or 0,
                         exclude_shift_id=shift_id,
+                        fw_event=fw_event, fw_shift_published=fw_shift_published,
                     ),
                     force=force,
                 )
+        elif new_status == "cancelled" and fw_shift_published:
+            # Cancelling a previously-published shift is skipped by the block
+            # above (`new_status != "cancelled"`), but it's exactly the event
+            # a Fair Workweek ordinance cares about — check it on its own.
+            violations = await check_shift_compliance(
+                conn, company_id, location_id=existing["location_id"],
+                starts_at=existing["starts_at"], ends_at=existing["ends_at"],
+                break_minutes=existing["break_minutes"] or 0,
+                exclude_shift_id=shift_id,
+                fw_event="cancel", fw_shift_published=True,
+            )
+            raise_for_violations(violations, force=force)
+            if violations:
+                forced["cancel"] = violations
 
         # published_at rides along as a patched column — no spliced CASE clause
         # whose hardcoded $10 silently rebinds when a column is added above it.
@@ -293,19 +320,34 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
 
 
 @router.delete("/shifts/{shift_id}")
-async def delete_shift(shift_id: UUID, current_user=Depends(require_admin_or_client)):
+async def delete_shift(shift_id: UUID,
+                       force: bool = Query(False, description="Delete despite a Fair Workweek notice/clopening advisory"),
+                       current_user=Depends(require_admin_or_client)):
     company_id = await require_company_id(current_user)
     async with get_connection() as conn:
         async with conn.transaction():
             existing = await conn.fetchrow(
                 """
-                SELECT starts_at, ends_at, status, published_at, location_id
+                SELECT starts_at, ends_at, status, published_at, location_id, break_minutes
                 FROM schedule_shifts WHERE id = $1 AND company_id = $2
                 """,
                 shift_id, company_id,
             )
             if not existing:
                 raise HTTPException(status_code=404, detail="Shift not found")
+            if existing["published_at"] is not None:
+                # Deleting a published shift is a cancellation for Fair
+                # Workweek purposes — advisory only (never blocks the delete
+                # outright), same force-through convention as every other
+                # scheduling advisory. Only the FW half runs: meal-break/OT
+                # checks gate scheduling someone, and re-raising them on a
+                # shift being REMOVED is noise (same reasoning as unassign).
+                violations = await _fair_workweek_advisories(
+                    conn, company_id, location_id=existing["location_id"],
+                    starts_at=existing["starts_at"], ends_at=existing["ends_at"],
+                    event="cancel", shift_published=True, min_rest_gap_hours=None,
+                )
+                raise_for_violations(violations, force=force)
             result = await conn.execute(
                 "DELETE FROM schedule_shifts WHERE id = $1 AND company_id = $2",
                 shift_id, company_id,

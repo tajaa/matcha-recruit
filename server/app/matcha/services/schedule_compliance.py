@@ -97,8 +97,30 @@ SCHEDULE_CATEGORIES = [
 _EXTREME_SHIFT_HOURS = 12  # an unmapped-state shift past this still warns
 
 
-def rules_for_state(state: Optional[str]) -> dict[str, Any]:
-    """Merged federal + state thresholds. State keys win over the US baseline."""
+def is_curated_state(state: Optional[str]) -> bool:
+    """True when `_SCHEDULING_RULES` hand-curates this state — the
+    catalog-extraction gate (`_approved_db_rules`) is never consulted for
+    these, per `rules_for_state`'s per-state precedence."""
+    st = (state or "").strip().upper()
+    return bool(st) and st in _SCHEDULING_RULES
+
+
+def rules_for_state(
+    state: Optional[str], db_rules: Optional[dict[str, Any]] = None
+) -> dict[str, Any]:
+    """Merged federal + state thresholds. State keys win over the US baseline.
+
+    `db_rules` is the catalog-extraction gate's own contribution — approved
+    rows from `schedule_rule_extraction`, shaped by
+    `routes/employee_schedule/_compliance.py:_approved_db_rules` into this same
+    `{rule_key: value|NO_CAP, "citations": {...}, "_minor_block_grade": {...}}`
+    form. **Per-state precedence, not per-key**: a state present in the
+    hand-curated `_SCHEDULING_RULES` table ignores `db_rules` entirely — mixed
+    provenance within one state (some thresholds hand-verified, others
+    AI-extracted) is unexplainable in the compliance panel, and the curated
+    table is the attorney-facing baseline. `db_rules` only applies to states
+    `_SCHEDULING_RULES` has never covered.
+    """
     merged = dict(_SCHEDULING_RULES["US"])
     merged["citations"] = dict(_SCHEDULING_RULES["US"]["citations"])
     st = (state or "").strip().upper()
@@ -109,15 +131,36 @@ def rules_for_state(state: Optional[str]) -> dict[str, Any]:
                 merged["citations"].update(v)
             else:
                 merged[k] = v
+    elif st and db_rules:
+        for k, v in db_rules.items():
+            if k == "citations":
+                merged["citations"].update(v)
+            else:
+                merged[k] = v
     return merged
 
 
-def rules_summary(state: Optional[str]) -> dict[str, Any]:
+def rules_summary(
+    state: Optional[str], db_rules: Optional[dict[str, Any]] = None
+) -> dict[str, Any]:
     """JSON-safe view of rules_for_state: the NO_CAP sentinel (a bare object(),
-    unserializable) renders as the string 'no_cap'."""
+    unserializable) renders as the string 'no_cap'. Carries a `source` marker
+    so the location-law panel can tell a hand-curated threshold from an
+    approved catalog extraction."""
+    st = (state or "").strip().upper()
+    if st in _SCHEDULING_RULES:
+        source = "curated"
+    elif db_rules:
+        source = "catalog_extraction"
+    else:
+        source = "unmapped"
     return {
-        k: ("no_cap" if v is NO_CAP else v)
-        for k, v in rules_for_state(state).items()
+        "source": source,
+        **{
+            k: ("no_cap" if v is NO_CAP else v)
+            for k, v in rules_for_state(state, db_rules).items()
+            if k != "_minor_block_grade"
+        },
     }
 
 
@@ -196,17 +239,34 @@ def check_min_rest(min_gap_hours: Optional[float], rules: dict, state: str) -> l
 
 
 def check_minor_hours(age: Optional[int], shift_hours: float, week_hours: Optional[float],
-                      rules: dict, state: str) -> list[dict]:
-    """Minor hour caps → BLOCK. Age unknown (no DOB) ⇒ no result (can't assert)."""
+                      rules: dict, state: str,
+                      *, block_grade: Optional[dict[str, bool]] = None) -> list[dict]:
+    """Minor hour caps. Age unknown (no DOB) ⇒ no result (can't assert).
+
+    `block_grade` distinguishes the hand-curated caps (US/CA — always BLOCK,
+    the historical behavior, preserved by leaving this `None`) from
+    catalog-extraction-derived caps, which are advisory by default and BLOCK
+    only for the specific `rule_key` a human explicitly marked block-grade
+    (`schedule_rule_extraction` / the admin review surface) — an approved
+    citation is not by itself license for a non-overridable 422 across an
+    entire bulk-approved state.
+    """
     if age is None or age >= 18:
         return []
     statute = _cite(rules, "minor_hours")
     if age < 16:
         day_cap = rules.get("minor_u16_day_hours")
         week_cap = rules.get("minor_u16_week_hours")
+        day_key, week_key = "minor_u16_day_hours", "minor_u16_week_hours"
     else:  # 16-17
         day_cap = rules.get("minor_16_17_day_hours")
         week_cap = rules.get("minor_16_17_week_hours")
+        day_key, week_key = "minor_16_17_day_hours", "minor_16_17_week_hours"
+
+    def _severity(rule_key: str) -> str:
+        if block_grade is None:
+            return "block"
+        return "block" if block_grade.get(rule_key) else "advisory"
 
     # NO_CAP = the law affirmatively imposes no limit for this bracket (e.g.
     # FLSA for 16-17) — a determination, not a gap. Treat as "no cap to check".
@@ -233,14 +293,14 @@ def check_minor_hours(age: Optional[int], shift_hours: float, week_hours: Option
     out: list[dict] = []
     if day_cap is not None and shift_hours > day_cap:
         out.append(_violation(
-            "minor_hours", "block",
+            "minor_hours", _severity(day_key),
             f"Employee is {age} — a {shift_hours:.1f}h shift exceeds the "
             f"{day_cap}h daily limit for minors.",
             statute, state,
         ))
     if week_cap is not None and week_hours is not None and week_hours > week_cap:
         out.append(_violation(
-            "minor_hours", "block",
+            "minor_hours", _severity(week_key),
             f"Employee is {age} — {week_hours:.1f}h this week exceeds the "
             f"{week_cap}h weekly limit for minors.",
             statute, state,
@@ -256,24 +316,35 @@ def evaluate_shift_for_employee(
     week_hours: Optional[float] = None,
     min_rest_gap_hours: Optional[float] = None,
     age: Optional[int] = None,
+    db_rules: Optional[dict[str, Any]] = None,
 ) -> list[dict]:
     """Run every applicable check for one (shift, employee) pair.
 
     All args are plain values — no DB. `week_hours`/`min_rest_gap_hours`/`age`
     are optional; a None simply skips that check (the route supplies what it has).
+    `db_rules` is the caller's fetch of this state's APPROVED catalog-extraction
+    thresholds (see `rules_for_state`); ignored for states `_SCHEDULING_RULES`
+    already curates.
     """
     st = (state or "").strip().upper()
-    rules = rules_for_state(st)
+    rules = rules_for_state(st, db_rules)
+    block_grade = rules.get("_minor_block_grade")
     out: list[dict] = []
     out += check_meal_break(shift_hours, break_minutes, rules, st)
     out += check_daily_overtime(shift_hours, rules, st)
     out += check_weekly_hours(week_hours, rules, st)
     out += check_min_rest(min_rest_gap_hours, rules, st)
-    out += check_minor_hours(age, shift_hours, week_hours, rules, st)
+    out += check_minor_hours(age, shift_hours, week_hours, rules, st, block_grade=block_grade)
 
-    # Unmapped-state safety net: an extreme shift in a state we have no rules for
-    # must not read as clear.
-    if not out and st and st not in _SCHEDULING_RULES and shift_hours >= _EXTREME_SHIFT_HOURS:
+    # Unmapped-state safety net: an extreme shift in a state we have no rules
+    # for must not read as clear. Partial DB coverage (e.g. only weekly OT was
+    # approved) must not silence this — it fires unless the meal-break trigger
+    # OR the daily-OT cap is actually determined.
+    meal_or_ot_determined = (
+        rules.get("meal_break_after_hours") is not None or rules.get("daily_ot_hours") is not None
+    )
+    if (not out and st and st not in _SCHEDULING_RULES and not meal_or_ot_determined
+            and shift_hours >= _EXTREME_SHIFT_HOURS):
         out.append(_violation(
             "unmapped_state", "advisory",
             f"{shift_hours:.1f}h shift in {st}, which has no researched scheduling "

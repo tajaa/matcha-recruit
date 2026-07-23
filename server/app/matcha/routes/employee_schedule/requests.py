@@ -107,7 +107,7 @@ async def review_request(request_id: UUID, body: RequestReview,
                         detail=f"Swap target is {target['employment_status']} and cannot be scheduled",
                     )
                 window = await conn.fetchrow(
-                    "SELECT starts_at, ends_at, location_id, break_minutes "
+                    "SELECT starts_at, ends_at, location_id, break_minutes, status "
                     "FROM schedule_shifts WHERE id = $1 AND company_id = $2",
                     req["shift_id"], company_id,
                 )
@@ -129,6 +129,11 @@ async def review_request(request_id: UUID, body: RequestReview,
                         break_minutes=window["break_minutes"] or 0,
                         employee_id=req["target_employee_id"],
                         exclude_shift_id=req["shift_id"],
+                        # The target gaining this shift is an admin-executed
+                        # assignment write like any other, so it gets the same
+                        # Fair Workweek notice/clopening check an ordinary
+                        # assign does.
+                        fw_event="assign", fw_shift_published=(window["status"] == "published"),
                     )
                     raise_for_violations(swap_violations, force=body.force)
 

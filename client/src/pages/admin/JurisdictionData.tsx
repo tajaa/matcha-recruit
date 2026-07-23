@@ -20,6 +20,7 @@ import QualityTab from './JurisdictionData/QualityTab'
 import PreemptionTab from './JurisdictionData/PreemptionTab'
 import ApiSourcesTab from './JurisdictionData/ApiSourcesTab'
 import BookmarksTab from './JurisdictionData/BookmarksTab'
+import ScheduleRulesTab from './JurisdictionData/ScheduleRulesTab'
 
 // ── Component ──────────────────────────────────────────────────────────────────
 
@@ -241,6 +242,7 @@ export default function JurisdictionData() {
           { id: 'preemption' as Tab, label: 'Preemption' },
           { id: 'api-sources' as Tab, label: 'API Sources' },
           { id: 'bookmarks' as Tab, label: 'Bookmarks' },
+          { id: 'schedule-rules' as Tab, label: 'Schedule Rules' },
         ]).map((t) => (
           <Button key={t.id} variant={tab === t.id ? 'secondary' : 'ghost'} size="sm" onClick={() => setTab(t.id)}>
             {t.label}
@@ -329,6 +331,8 @@ export default function JurisdictionData() {
           onToggleBookmark={toggleBookmark}
         />
       )}
+
+      {tab === 'schedule-rules' && <ScheduleRulesTab />}
 
       {/* Profile Editor Modal */}
       <ProfileEditorModal

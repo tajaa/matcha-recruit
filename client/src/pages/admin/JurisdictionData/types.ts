@@ -1,6 +1,6 @@
 // Local types for the Jurisdiction Data admin page
 
-export type Tab = 'explorer' | 'policies' | 'quality' | 'evals' | 'key-index' | 'integrity' | 'penalties' | 'preemption' | 'bookmarks' | 'api-sources'
+export type Tab = 'explorer' | 'policies' | 'quality' | 'evals' | 'key-index' | 'integrity' | 'penalties' | 'preemption' | 'bookmarks' | 'api-sources' | 'schedule-rules'
 
 export type SourceCount = {
   research_source: string
