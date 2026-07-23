@@ -20,9 +20,11 @@ from app.matcha.services.hr_pilot_corpus import (
     _incident_records,
     _ladder_records,
     _schedint_records,
+    _schedlaw_records,
     _schedule_records,
     _training_records,
     _MAX_SCHEDINT_COVERAGE_RECORDS,
+    _MAX_SCHEDLAW_RECORDS,
 )
 
 
@@ -490,7 +492,7 @@ def _ops(grounding, **over):
     return g
 
 
-def test_corpus_has_fourteen_groups(grounding):
+def test_corpus_has_fifteen_groups(grounding):
     corpus = build_hr_pilot_corpus(_ops(grounding), [])
     assert set(corpus["sources"]) == {
         "profile", "law", "existing_handbook", "existing_policies", "playbook",
@@ -505,6 +507,8 @@ def test_corpus_has_fourteen_groups(grounding):
         # "schedule_intelligence" key, same as the other operational groups
         # when their feature fetch never ran).
         "schedint",
+        # Scheduling law — also empty (no "schedule_law" key in the fixture).
+        "schedlaw",
     }
 
 
@@ -868,3 +872,116 @@ def test_schedint_module_off_note_is_stripped_for_employees(grounding):
     corpus = build_hr_pilot_corpus(_ops(grounding, schedule_intelligence=None), [])
     safe = redact_for_employee(corpus)
     assert not any("Schedule Intelligence" in n for n in safe["notes"])
+
+
+# --------------------------------------------------------------------------- #
+# Scheduling law group — grounds in the SAME source the write-path gate
+# enforces (schedule_compliance.rules_for_state), shared with Ask HR.
+# --------------------------------------------------------------------------- #
+
+def _schedlaw_fixture():
+    return [
+        {
+            "kind": "state_rules", "state": "CA",
+            "summary": {
+                "source": "curated",
+                "meal_break_after_hours": 5, "meal_break_minutes": 30,
+                "daily_ot_hours": 8, "weekly_ot_hours": 40,
+                "minor_16_17_day_hours": "no_cap",
+                "citations": {
+                    "meal_break": "Cal. Lab. Code § 512",
+                    "daily_overtime": "Cal. Lab. Code § 510",
+                },
+            },
+        },
+        {
+            "kind": "fair_workweek", "state": "CA", "city": "Los Angeles",
+            "location_name": "Sunset Smile Dental — Wilshire", "applicability": "review_industry",
+            "ordinance_name": "LA City Fair Work Week Ordinance",
+            "citation": "L.A. Municipal Code ch. XVIII, art. 8 (Ord. No. 187482)",
+            "notice_days": 14, "clopening_rest_hours": 10,
+        },
+    ]
+
+
+def test_schedlaw_records_render_state_thresholds_with_citations():
+    recs = _schedlaw_records(_schedlaw_fixture())
+    by_cid = {r["cid"]: r for r in recs}
+    assert "schedlaw:CA-meal_break_after_hours" in by_cid
+    assert "Cal. Lab. Code § 512" in by_cid["schedlaw:CA-meal_break_after_hours"]["summary"]
+    assert "5h shift" in by_cid["schedlaw:CA-meal_break_after_hours"]["summary"]
+    assert "Cal. Lab. Code § 510" in by_cid["schedlaw:CA-daily_ot_hours"]["summary"]
+
+
+def test_schedlaw_records_render_no_cap_as_no_limit():
+    recs = _schedlaw_records(_schedlaw_fixture())
+    rec = next(r for r in recs if r["cid"] == "schedlaw:CA-minor_16_17_day_hours")
+    assert "no limit under law" in rec["summary"]
+
+
+def test_schedlaw_records_skip_undetermined_keys():
+    recs = _schedlaw_records(_schedlaw_fixture())
+    cids = {r["cid"] for r in recs}
+    # weekly_ot_hours is present in the fixture but many keys are NOT
+    # (e.g. minor_u16_day_hours) — those must not appear as records at all.
+    assert "schedlaw:CA-minor_u16_day_hours" not in cids
+
+
+def test_schedlaw_records_meta_keys_never_mint_a_record():
+    # "citations" and "source" are summary meta, not rule keys — a bug that
+    # iterated summary.keys() instead of the fixed label map would emit them.
+    recs = _schedlaw_records(_schedlaw_fixture())
+    assert not any("citations" in r["cid"] or "source" in r["cid"] for r in recs)
+
+
+def test_schedlaw_records_render_fair_workweek_ordinance():
+    recs = _schedlaw_records(_schedlaw_fixture())
+    rec = next(r for r in recs if r["cid"] == "schedlaw:fw-CA-los-angeles")
+    assert "14-day" in rec["summary"]
+    assert "10h rest" in rec["summary"]
+    assert "verify industry" in rec["summary"]  # review_industry caveat
+    assert "L.A. Municipal Code" in rec["summary"]
+
+
+def test_schedlaw_records_tolerate_junk():
+    assert _schedlaw_records(None) == []
+    assert _schedlaw_records([]) == []
+    assert _schedlaw_records([{"kind": "unknown"}, "not a dict"]) == []
+
+
+def test_schedlaw_records_respect_cap():
+    many_states = [
+        {"kind": "state_rules", "state": f"S{i}",
+         "summary": {"source": "curated", "daily_ot_hours": 8,
+                     "citations": {"daily_overtime": "cited"}}}
+        for i in range(_MAX_SCHEDLAW_RECORDS + 5)
+    ]
+    assert len(_schedlaw_records(many_states)) == _MAX_SCHEDLAW_RECORDS
+
+
+def test_schedlaw_present_in_corpus_and_survives_redaction(grounding):
+    corpus = build_hr_pilot_corpus(_ops(grounding, schedule_law=_schedlaw_fixture()), [])
+    assert "schedlaw" in corpus["sources"]
+    assert any(c.startswith("schedlaw:") for c in corpus["index"])
+
+    safe = redact_for_employee(corpus)
+    assert "schedlaw" in safe["sources"]
+    assert any(c.startswith("schedlaw:") for c in safe["index"])
+
+
+def test_schedlaw_module_off_note_and_it_survives_redaction(grounding):
+    corpus = build_hr_pilot_corpus(_ops(grounding, schedule_law=None), [])
+    assert any("Scheduling-law data is not enabled" in n for n in corpus["notes"])
+    safe = redact_for_employee(corpus)
+    assert any("Scheduling-law data is not enabled" in n for n in safe["notes"])
+
+
+def test_schedlaw_audit_gate_resolves_real_citation_and_drops_invented(grounding):
+    corpus = build_hr_pilot_corpus(_ops(grounding, schedule_law=_schedlaw_fixture()), [])
+    text = (
+        "The meal-break rule is [schedlaw:CA-meal_break_after_hours], and "
+        "[schedlaw:CA-invented] does not exist."
+    )
+    clean, cites, dropped = audit_citations(text, corpus["index"])
+    assert dropped == ["schedlaw:CA-invented"]
+    assert {c["cid"] for c in cites} == {"schedlaw:CA-meal_break_after_hours"}

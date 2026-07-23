@@ -817,6 +817,16 @@ async def _build_hr_pilot_bundle_uncached(company_id: UUID) -> dict:
         "to check with corporate HR."
     )
     lines.append(
+        "\nSCHEDULING LAW — for questions about hours, breaks, overtime, rest gaps, "
+        "minor-hour caps, or Fair Workweek notice/clopening at a specific location, "
+        "prefer `schedlaw:` records over `floor:` records: `schedlaw:` is generated "
+        "from the SAME merged source (hand-curated + admin-approved catalog "
+        "extraction) that the scheduling system's own write-path gate enforces, so "
+        "citing it guarantees your answer matches what the platform will actually "
+        "allow. `floor:` resolves the same law through a different, broader "
+        "compliance pipeline and can occasionally disagree on the exact figure."
+    )
+    lines.append(
         "\nOPERATIONAL RECORDS vs POLICY — the shift, training, incident and "
         "benefits-enrollment records above are FACTS about what is currently "
         "scheduled, completed, logged or offered. "

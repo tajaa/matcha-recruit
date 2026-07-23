@@ -65,6 +65,43 @@ _MAX_RECENT_INCIDENTS = 15
 _INCIDENT_LOOKBACK_DAYS = 90
 _MAX_BENEFIT_PLANS = 20
 _MAX_SCHEDINT_COVERAGE_RECORDS = 10
+_MAX_SCHEDLAW_RECORDS = 30
+
+# rule_key -> (label, unit) — mirrors client/src/components/employees/ScheduleLawPanel.tsx's
+# RULE_LABELS so the HR Pilot answer and the admin-facing law panel describe
+# the same eleven fields the same way.
+_SCHEDLAW_RULE_LABELS: dict[str, tuple[str, str]] = {
+    "meal_break_after_hours": ("meal break required after", "h shift"),
+    "meal_break_minutes": ("meal break duration", "min"),
+    "second_meal_after_hours": ("second meal break after", "h shift"),
+    "daily_ot_hours": ("daily overtime after", "h"),
+    "daily_doubletime_hours": ("daily double-time after", "h"),
+    "weekly_ot_hours": ("weekly overtime after", "h"),
+    "min_rest_between_shifts_hours": ("minimum rest between shifts", "h"),
+    "minor_u16_day_hours": ("under-16 daily cap", "h"),
+    "minor_u16_week_hours": ("under-16 weekly cap", "h"),
+    "minor_16_17_day_hours": ("16-17yo daily cap", "h"),
+    "minor_16_17_week_hours": ("16-17yo weekly cap", "h"),
+}
+
+# rule_key -> the citation-lookup name `schedule_compliance._cite` reads
+# (`rules["citations"][name]`) — duplicated from
+# `routes/employee_schedule/_compliance.py:_RULE_KEY_TO_CHECK` rather than
+# imported, since that lives in a route package and services must not reach
+# into routes.
+_SCHEDLAW_RULE_KEY_TO_CHECK = {
+    "meal_break_after_hours": "meal_break",
+    "meal_break_minutes": "meal_break",
+    "second_meal_after_hours": "meal_break",
+    "daily_ot_hours": "daily_overtime",
+    "daily_doubletime_hours": "daily_overtime",
+    "weekly_ot_hours": "weekly_overtime",
+    "min_rest_between_shifts_hours": "min_rest",
+    "minor_u16_day_hours": "minor_hours",
+    "minor_u16_week_hours": "minor_hours",
+    "minor_16_17_day_hours": "minor_hours",
+    "minor_16_17_week_hours": "minor_hours",
+}
 
 # Namespaces the audit gate will recognise inside brackets. Deliberately a
 # closed list: a bare `[...]` regex also matches markdown link text and the
@@ -85,6 +122,10 @@ _CID_NAMESPACES = (
     # it is served to BOTH surfaces: "when does open enrollment close?" is a
     # core Ask HR question.
     "benefit",
+    # Enforced scheduling-law thresholds (meal break/OT/rest/minor caps) +
+    # Fair Workweek ordinances — state-level law, no employee data, served to
+    # BOTH surfaces like benefit. See services/schedule_compliance.py.
+    "schedlaw",
 )
 _CITATION_RE = re.compile(
     r"\[(" + "|".join(_CID_NAMESPACES) + r")(:[^\]\s]+)?\]"
@@ -239,6 +280,10 @@ async def gather_hr_pilot_grounding(conn, company_id) -> dict:
             await _fetch_schedule_intelligence(conn, company_id, features)
             if features.get("schedule_intelligence") and features.get("employee_schedule")
             else None
+        )
+        out["schedule_law"] = (
+            await _fetch_schedule_law(conn, company_id, features)
+            if features.get("employee_schedule") else None
         )
     return out
 
@@ -491,6 +536,88 @@ async def _fetch_schedule_intelligence(conn, company_id, features: dict) -> dict
         )
     except Exception:  # noqa: BLE001
         logger.warning("hr_pilot_corpus: schedule-intelligence coverage fetch failed for %s", company_id)
+    return out
+
+
+async def _fetch_schedule_law(conn, company_id, features: dict) -> list[dict]:
+    """Per-state ENFORCED scheduling-law thresholds — the same merged
+    curated + catalog-extraction source `schedule_compliance.rules_for_state`
+    feeds the write-path gate, plus any Fair Workweek ordinance covering the
+    company's locations (`fair_workweek.ordinance_for_location`).
+
+    This is deliberately a SEPARATE pipeline from the `floor:` group (which
+    reads the raw jurisdiction catalog via precedence resolution): a state in
+    the hand-curated `_SCHEDULING_RULES` table ignores catalog/db_rules
+    entirely (`rules_for_state`'s per-state precedence), so `floor:` and the
+    gate can disagree. Grounding here instead guarantees HR Pilot's citation
+    always matches what the scheduling system will actually enforce.
+
+    Company-wide, not per-thread-location — same aggregation level every
+    other HR Pilot group uses."""
+    from . import schedule_compliance
+    from . import fair_workweek
+
+    out: list[dict] = []
+    try:
+        loc_rows = await conn.fetch(
+            "SELECT DISTINCT state, city, name FROM business_locations "
+            "WHERE company_id = $1 AND state IS NOT NULL",
+            company_id,
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning("hr_pilot_corpus: schedule-law location fetch failed for %s", company_id)
+        return out
+
+    industry = None
+    try:
+        company = await conn.fetchrow("SELECT industry FROM companies WHERE id = $1", company_id)
+        industry = company["industry"] if company else None
+    except Exception:  # noqa: BLE001
+        logger.warning("hr_pilot_corpus: schedule-law industry fetch failed for %s", company_id)
+
+    seen_states: set[str] = set()
+    for loc in loc_rows:
+        state = (loc["state"] or "").strip().upper()
+        if not state:
+            continue
+        if state not in seen_states:
+            seen_states.add(state)
+            db_rules = None
+            if not schedule_compliance.is_curated_state(state):
+                try:
+                    rows = await conn.fetch(
+                        """
+                        SELECT rule_key, rule_value, no_rule, citation
+                        FROM schedule_rule_extractions
+                        WHERE state = $1 AND review_status = 'approved' AND is_active = true
+                        """,
+                        state,
+                    )
+                    if rows:
+                        db_rules = {"citations": {}}
+                        for r in rows:
+                            db_rules[r["rule_key"]] = (
+                                schedule_compliance.NO_CAP if r["no_rule"] else float(r["rule_value"])
+                            )
+                            check_name = _SCHEDLAW_RULE_KEY_TO_CHECK.get(r["rule_key"])
+                            if check_name:
+                                db_rules["citations"][check_name] = r["citation"]
+                except Exception:  # noqa: BLE001
+                    logger.warning(
+                        "hr_pilot_corpus: schedule-law catalog fetch failed for %s/%s", company_id, state,
+                    )
+            summary = schedule_compliance.rules_summary(state, db_rules)
+            out.append({"kind": "state_rules", "state": state, "summary": summary})
+
+        ordinance, applicability = fair_workweek.ordinance_for_location(loc["state"], loc["city"], industry)
+        if ordinance is not None:
+            out.append({
+                "kind": "fair_workweek", "state": state, "city": loc["city"],
+                "location_name": loc["name"], "applicability": applicability,
+                "ordinance_name": ordinance["name"], "citation": ordinance["citation"],
+                "notice_days": ordinance["notice_days"],
+                "clopening_rest_hours": (ordinance.get("clopening") or {}).get("rest_hours"),
+            })
     return out
 
 
@@ -753,6 +880,50 @@ def _benefit_records(benefits: dict | None) -> list[dict]:
     return recs
 
 
+def _schedlaw_records(data: list[dict] | None) -> list[dict]:
+    """Enforced scheduling-law thresholds + Fair Workweek ordinances, one
+    record per determined fact. Iterates the FIXED `_SCHEDLAW_RULE_LABELS`
+    map — never the summary dict's own keys — so meta fields the summary
+    carries (`citations`, `source`) can never mint a garbage record."""
+    recs: list[dict] = []
+    for item in data or []:
+        if not isinstance(item, dict):
+            continue
+        if item.get("kind") == "state_rules":
+            state = item.get("state")
+            summary = item.get("summary") or {}
+            citations = summary.get("citations") or {}
+            for rule_key, (label, unit) in _SCHEDLAW_RULE_LABELS.items():
+                value = summary.get(rule_key)
+                if value is None:
+                    continue
+                display = "no limit under law" if value == "no_cap" else f"{value}{unit}"
+                citation = citations.get(_SCHEDLAW_RULE_KEY_TO_CHECK.get(rule_key, ""))
+                cite_clause = f", cites {citation}" if citation else ""
+                recs.append({
+                    "cid": f"schedlaw:{state}-{rule_key}",
+                    "ref": f"Scheduling law — {state} {label}",
+                    "summary": f"{state}: {label} {display}{cite_clause}.",
+                    "when": "current law",
+                })
+        elif item.get("kind") == "fair_workweek":
+            state = item.get("state")
+            city_slug = str(item.get("city") or "").strip().lower().replace(" ", "-")
+            prefix = "" if item.get("applicability") == "covered" else "may apply (verify industry) — "
+            bits = [f"{prefix}{item.get('ordinance_name')} requires {item.get('notice_days')}-day schedule notice"]
+            if item.get("clopening_rest_hours"):
+                bits.append(f'{item["clopening_rest_hours"]}h rest between shifts ("clopening")')
+            recs.append({
+                "cid": f"schedlaw:fw-{state}-{city_slug}",
+                "ref": f"Fair Workweek — {item.get('location_name') or item.get('city')}",
+                "summary": "; ".join(bits) + f", cites {item.get('citation')}.",
+                "when": "current law",
+            })
+        if len(recs) >= _MAX_SCHEDLAW_RECORDS:
+            break
+    return recs
+
+
 def _schedint_records(data: dict | None) -> list[dict]:
     """Schedule Intelligence headlines: incident-correlation, Fair Workweek
     exposure per location, and per-shift qualified-coverage gaps.
@@ -870,6 +1041,12 @@ def build_hr_pilot_corpus(grounding: dict, reasoning_chains: list | None = None)
         "label": "Schedule Intelligence — analytics",
         "records": _schedint_records(grounding.get("schedule_intelligence")),
     }
+    # Nameless (state-level law + ordinances, no employee data) — like
+    # benefits, NOT in _SUPERVISOR_ONLY_SOURCES, so Ask HR employees keep it.
+    sources["schedlaw"] = {
+        "label": "Scheduling law — enforced thresholds",
+        "records": _schedlaw_records(grounding.get("schedule_law")),
+    }
 
     # Rebuild the flat index over ALL groups. A cid appearing in two groups
     # would silently lose one here — the namespaces are disjoint by
@@ -915,6 +1092,13 @@ def build_hr_pilot_corpus(grounding: dict, reasoning_chains: list | None = None)
             "if asked about staffing/incident correlation, Fair Workweek exposure, or "
             "qualified-coverage gaps; do not infer any of it."
         )
+    # Worded to survive redact_for_employee's note filter (schedlaw stays for
+    # employees) — must not contain "shifts"/"incidents"/"training programs".
+    if "schedule_law" in grounding and grounding.get("schedule_law") is None:
+        notes.append(
+            "Scheduling-law data is not enabled for this company — say so if asked "
+            "about break, overtime, or rest requirements; do not infer them."
+        )
 
     # Cap-hit notes. A clipped list the model reads as complete is how "nobody
     # else is overdue" gets asserted from a LIMIT.
@@ -927,6 +1111,11 @@ def build_hr_pilot_corpus(grounding: dict, reasoning_chains: list | None = None)
         notes.append(
             f"Only the {_MAX_RECENT_INCIDENTS} most recent incidents are listed — "
             "there may be more."
+        )
+    if len(sources["schedlaw"]["records"]) >= _MAX_SCHEDLAW_RECORDS:
+        notes.append(
+            f"Only the first {_MAX_SCHEDLAW_RECORDS} scheduling-law records are listed — "
+            "there may be more; do not treat the list as complete."
         )
     _training = grounding.get("training") or {}
     if (len(_training.get("overdue") or []) >= _MAX_TRAINING_DETAIL
@@ -960,9 +1149,10 @@ def build_hr_pilot_corpus(grounding: dict, reasoning_chains: list | None = None)
     if not grounding.get("features_known", True):
         notes.append(
             "Operational data (shifts, training, incidents, benefits, Schedule "
-            "Intelligence) could not be loaded just now — this is a temporary system "
-            "issue, NOT a statement that the company lacks those modules. If asked "
-            "about them, say the data is briefly unavailable and to try again shortly."
+            "Intelligence, scheduling law) could not be loaded just now — this is a "
+            "temporary system issue, NOT a statement that the company lacks those "
+            "modules. If asked about them, say the data is briefly unavailable and to "
+            "try again shortly."
         )
 
     return {"sources": sources, "index": index, "notes": notes}
