@@ -55,6 +55,17 @@ def test_output_is_capped_to_the_request_models_prompt_max():
     assert len(out) <= AI_IMAGE_PROMPT_MAX
 
 
+def test_quality_direction_survives_a_maxed_out_user_prompt():
+    """A description already at the length cap must not swallow the whole
+    budget — the style/mood/baseline clauses (the point of this function) are
+    reserved first and the DESCRIPTION is trimmed, not the direction."""
+    out = build_image_prompt("x" * AI_IMAGE_PROMPT_MAX, style="Cinematic", mood="Golden hour")
+    assert len(out) <= AI_IMAGE_PROMPT_MAX
+    assert "cinematic photography" in out.lower()
+    assert "golden hour lighting" in out.lower()
+    assert "no text, no watermarks" in out
+
+
 def test_never_returns_the_raw_prompt_unmodified():
     """The whole point: even a bare call gains quality direction, so a
     generation is never sent to Gemini as the user's literal words alone."""

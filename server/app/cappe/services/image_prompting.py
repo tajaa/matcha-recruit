@@ -61,12 +61,20 @@ def build_image_prompt(prompt: str, *, style: str | None = None, mood: str | Non
     style/mood direction (chip label, free text, or omitted/"you decide").
 
     `prompt` is the user's own description of WHAT to depict — never rewritten,
-    only appended to. Length-capped to the same bound the request model
-    enforces on the raw prompt, so a maxed-out description plus clauses can't
-    balloon past what's reasonable to send the model."""
-    parts = [prompt.strip()]
-    parts.append(f"Style: {_clause(style, _STYLE_CLAUSES, _STYLE_DEFAULT)}.")
-    parts.append(f"Mood and lighting: {_clause(mood, _MOOD_CLAUSES, _MOOD_DEFAULT)}.")
-    parts.append(_BASELINE + ".")
-    composed = " ".join(p for p in parts if p)
-    return composed[:AI_IMAGE_PROMPT_MAX]
+    only appended to. The whole output is capped to the same bound the request
+    model enforces on the raw prompt; the cap is spent on the DESCRIPTION, not
+    the clauses — a maxed-out user prompt has its tail trimmed to leave room for
+    the style/mood/baseline direction, rather than the direction (the point of
+    this function) being sliced off the end."""
+    suffix = " ".join([
+        f"Style: {_clause(style, _STYLE_CLAUSES, _STYLE_DEFAULT)}.",
+        f"Mood and lighting: {_clause(mood, _MOOD_CLAUSES, _MOOD_DEFAULT)}.",
+        _BASELINE + ".",
+    ])
+    # Reserve the suffix's room (+1 for the join space) before truncating the
+    # description. The suffix is bounded (style/mood capped at 120 each by the
+    # request model, baseline is fixed), so this budget is always comfortably
+    # positive — the final cap is belt-and-suspenders.
+    head_budget = max(0, AI_IMAGE_PROMPT_MAX - len(suffix) - 1)
+    head = prompt.strip()[:head_budget]
+    return f"{head} {suffix}".strip()[:AI_IMAGE_PROMPT_MAX]

@@ -332,6 +332,10 @@ def test_every_tier_maps_to_a_real_model():
     ("make this section animate the main text somehow", False),
     ("make the heading bigger", False),
     ("add an FAQ after the features", False),
+    # A mode flip is NOT theme intent — set_theme `mode` is always allowed, and
+    # matching this would only re-permit a full preset swap on the phrasing.
+    ("switch the site to light mode", False),
+    ("use dark mode instead", False),
     # Genuine theme requests.
     ("switch to the midnight theme", True),
     ("change my color scheme", True),

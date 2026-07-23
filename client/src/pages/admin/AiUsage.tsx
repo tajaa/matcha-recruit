@@ -44,13 +44,18 @@ function sumImageMetrics(rows: AiUsageModelRollup[]) {
   const cost_usd = rows.some((r) => r.cost_usd != null)
     ? rows.reduce((s, r) => s + (r.cost_usd ?? 0), 0)
     : null
+  const unknown_cost_calls = rows.reduce((s, r) => s + r.unknown_cost_calls, 0)
   return {
     calls,
     cost_usd,
+    // Only the PRICED calls contributed to cost_usd, so the average divides by
+    // those — dividing the partial cost by the full call count (which includes
+    // unpriced/errored rows) would bias "avg cost / image" below the true value.
+    priced_calls: calls - unknown_cost_calls,
     input_tokens: rows.reduce((s, r) => s + r.input_tokens, 0),
     output_tokens: rows.reduce((s, r) => s + r.output_tokens, 0),
     errors: rows.reduce((s, r) => s + r.errors, 0),
-    unknown_cost_calls: rows.reduce((s, r) => s + r.unknown_cost_calls, 0),
+    unknown_cost_calls,
   }
 }
 
@@ -430,8 +435,8 @@ export default function AiUsage() {
             <StatCard label="Image spend" value={fmtCost(imageTotals.cost_usd)} />
             <StatCard
               label="Avg cost / image"
-              value={imageTotals.calls > 0 && imageTotals.cost_usd != null
-                ? fmtCost(imageTotals.cost_usd / imageTotals.calls)
+              value={imageTotals.priced_calls > 0 && imageTotals.cost_usd != null
+                ? fmtCost(imageTotals.cost_usd / imageTotals.priced_calls)
                 : '—'}
             />
             <StatCard label="Image output tokens" value={fmtTokens(imageTotals.output_tokens)} />

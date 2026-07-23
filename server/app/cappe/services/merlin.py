@@ -53,8 +53,13 @@ logger = logging.getLogger(__name__)
 # A theme swap replaces brand/fonts/radius/mode site-wide, so it only fires when
 # the user actually asked for one. Without this the model reached for `preset`
 # on a request that never mentioned themes and nuked the site's look.
+#
+# Deliberately does NOT match "light mode"/"dark mode": theme_intent gates only
+# the `preset` key (set_theme `mode` is always allowed), so matching mode-flip
+# phrasing would buy nothing except re-permitting a full preset swap — the exact
+# silent-restyle this guard exists to prevent — on a bare "switch to light mode".
 _THEME_INTENT_RE = re.compile(
-    r"\b(theme|preset|palette|colou?r scheme|restyle|redesign|light mode|dark mode)\b", re.I
+    r"\b(theme|preset|palette|colou?r scheme|restyle|redesign)\b", re.I
 )
 _MAX_HISTORY_TURNS = 10
 
