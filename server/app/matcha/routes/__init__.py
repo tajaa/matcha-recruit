@@ -35,6 +35,7 @@ from .er_copilot import router as er_copilot_router, public_router as er_copilot
 from .help_assistant import router as help_assistant_router
 from .ir_incidents import router as ir_incidents_router
 from .employee_schedule import router as employee_schedule_router
+from .schedule_intelligence import router as schedule_intelligence_router
 from .ir_surveys import router as ir_surveys_router
 from .dashboard import router as dashboard_router
 from .fractional_hr import router as fractional_hr_router
@@ -186,6 +187,11 @@ matcha_router.include_router(driver_risk_router, prefix="/driver-risk", tags=["d
 matcha_router.include_router(employee_schedule_router, prefix="/employee-schedule",
                              tags=["employee-schedule"],
                              dependencies=[Depends(require_feature("employee_schedule"))])
+# Schedule Intelligence — analytics over the schedule data (paid add-on). Each
+# endpoint checks `employee_schedule` itself rather than double-gating the mount.
+matcha_router.include_router(schedule_intelligence_router, prefix="/schedule-intelligence",
+                             tags=["schedule-intelligence"],
+                             dependencies=[Depends(require_feature("schedule_intelligence"))])
 matcha_router.include_router(tcor_router, prefix="/tcor", tags=["tcor"],
                              dependencies=[Depends(require_feature("tcor"))])
 matcha_router.include_router(coi_router, prefix="/coi", tags=["coi"],

@@ -6,7 +6,7 @@ assignment). The registry itself is asserted so a new source can't ship without
 a feature gate.
 """
 
-from datetime import date
+from datetime import date, datetime, timezone
 
 from app.matcha.services import analysis_platform_sources as ps
 from app.matcha.services.analysis_packs import insurance, mapping, parse
@@ -116,6 +116,59 @@ def test_loss_runs_tolerate_junk_and_empty():
 
 
 # --- registry -----------------------------------------------------------------
+
+# --- scheduling weekly series --------------------------------------------------
+
+def _shift(starts_at, *, hours=8.0, required=2, assigned=2, status="published"):
+    ends_at = starts_at.replace(hour=min(starts_at.hour + int(hours), 23))
+    return {"starts_at": starts_at, "ends_at": ends_at, "break_minutes": 0,
+            "status": status, "required_staff": required, "assigned_count": assigned,
+            "duration_hours": hours}
+
+
+def test_schedule_weekly_zero_fills_quiet_weeks_and_flags_understaffing():
+    as_of = date(2026, 3, 1)  # a Sunday
+    shifts = [
+        _shift(datetime(2026, 3, 1, 9, tzinfo=timezone.utc), hours=8.0, required=3, assigned=2),
+        _shift(datetime(2026, 3, 1, 17, tzinfo=timezone.utc), hours=6.0, required=2, assigned=2),
+    ]
+    result = ps.schedule_weekly_series(shifts, [], as_of)
+    assert result["periods"][-1] == "2026-03-01"
+    idx = len(result["periods"]) - 1
+    assert result["series"]["Shifts"][idx] == 2.0
+    assert result["series"]["Scheduled hours"][idx] == 14.0
+    assert result["series"]["Understaffed shifts"][idx] == 1.0
+    # Every earlier week with nothing on file is a zero, not absent.
+    assert len(result["periods"]) == ps._SCHEDULE_WEEKS
+    assert result["series"]["Shifts"][0] == 0.0
+
+
+def test_schedule_weekly_excludes_cancelled_shifts():
+    """A cancelled shift contributes nothing — with no other activity that
+    week (or any other), this is the all-zero case, same as `ir_monthly_series`
+    with no incidents: no series at all, not a flat line of zeros."""
+    as_of = date(2026, 3, 1)
+    shifts = [_shift(datetime(2026, 3, 1, 9, tzinfo=timezone.utc), status="cancelled")]
+    result = ps.schedule_weekly_series(shifts, [], as_of)
+    assert result["series"] == {}
+
+
+def test_schedule_weekly_counts_only_employer_initiated_changes():
+    as_of = date(2026, 3, 1)
+    changes = [
+        {"employee_initiated": False, "created_at": datetime(2026, 3, 1, 12, tzinfo=timezone.utc)},
+        {"employee_initiated": True, "created_at": datetime(2026, 3, 1, 12, tzinfo=timezone.utc)},
+        {"employee_initiated": False, "created_at": None},  # unresolvable, must not crash
+    ]
+    result = ps.schedule_weekly_series([], changes, as_of)
+    assert result["series"]["Employer-initiated changes"][-1] == 1.0
+
+
+def test_schedule_weekly_with_nothing_on_file_yields_no_series():
+    assert ps.schedule_weekly_series([], [], date(2026, 3, 1)) == {
+        "series": {}, "periods": [], "roles": {}, "warnings": [], "as_of": "2026-03-01",
+    }
+
 
 def test_every_source_declares_a_real_feature_gate_and_kind():
     from app.core.feature_flags import DEFAULT_COMPANY_FEATURES

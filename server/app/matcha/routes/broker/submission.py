@@ -25,6 +25,7 @@ from ...services import (
     loss_development as ld, property_sov, property_cat,
     property_exposure as property_exp, property_recommendations as property_recs,
     property_risk as property_risk_svc, risk_index, driver_risk,
+    schedule_intelligence as si,
 )
 from ..ir_incidents import compute_wc_metrics
 from .portfolio import _assert_broker_owns_company
@@ -177,13 +178,14 @@ async def _company_features(conn, company_id: UUID) -> dict:
 
 async def _tenant_context(conn, user_id, company_id: UUID, *,
                           include_risk_index: bool = False,
-                          include_fleet: bool = False) -> dict:
+                          include_fleet: bool = False,
+                          include_schedule_intel: bool = False) -> dict:
     """Common submission context for an on-platform (tenant) client.
 
-    ``include_risk_index`` / ``include_fleet`` are off by default: only Broker
-    Pilot grounds on the composite index and the fleet, and the
-    packet/preview/coverage-gap paths would otherwise pay for engine runs they
-    never read."""
+    ``include_risk_index`` / ``include_fleet`` / ``include_schedule_intel`` are
+    off by default: only Broker Pilot grounds on the composite index, the
+    fleet, and schedule intelligence, and the packet/preview/coverage-gap paths
+    would otherwise pay for engine runs they never read."""
     meta = await _assert_broker_owns_company(conn, user_id, company_id)
     broker_id = await _broker_id(conn, user_id)
     m = await compute_wc_metrics(conn, company_id)
@@ -233,10 +235,25 @@ async def _tenant_context(conn, user_id, company_id: UUID, *,
     # reads as a spotless record — grounding an underwriter narrative on
     # "grade A fleet" that is really "nobody filled this in".
     fleet = None
-    if include_fleet:
+    schedule_intel = None
+    if include_fleet or include_schedule_intel:
         features = await _safe(_company_features(conn, company_id), {}, "features")
-        if features.get("driver_risk"):
+        if include_fleet and features.get("driver_risk"):
             fleet = await _safe(driver_risk.build_fleet(conn, company_id), None, "driver_risk")
+        # Gated on the CLIENT's own `schedule_intelligence` flag — same reasoning
+        # as fleet above, plus `employee_schedule` itself (the endpoints degrade
+        # to `available: false` without it; grounding an underwriter narrative
+        # on an empty engine run would be worse than omitting the section).
+        if (include_schedule_intel and features.get("schedule_intelligence")
+                and features.get("employee_schedule")):
+            schedule_intel = await _safe(
+                si.build_overview(
+                    conn, company_id,
+                    credential_templates_enabled=bool(features.get("credential_templates")),
+                    training_enabled=bool(features.get("training")),
+                ),
+                None, "schedule_intelligence",
+            )
     return {
         "name": meta["name"],
         "industry": m.get("industry"),
@@ -261,6 +278,7 @@ async def _tenant_context(conn, user_id, company_id: UUID, *,
         "loss_development": loss_dev,
         "risk_index": risk_idx,
         "fleet": fleet,
+        "schedule_intelligence": schedule_intel,
     }
 
 

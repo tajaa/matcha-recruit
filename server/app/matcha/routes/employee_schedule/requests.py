@@ -161,7 +161,21 @@ async def review_request(request_id: UUID, body: RequestReview,
                         current_user.id,
                     )
 
-            audit_details: dict = {"request_type": req["request_type"]}
+            shift_starts_at = None
+            if req["shift_id"] is not None:
+                shift_starts_at = await conn.fetchval(
+                    "SELECT starts_at FROM schedule_shifts WHERE id = $1 AND company_id = $2",
+                    req["shift_id"], company_id,
+                )
+            audit_details: dict = {
+                "request_type": req["request_type"],
+                "shift_id": str(req["shift_id"]) if req["shift_id"] else None,
+                "employee_id": str(req["employee_id"]),
+                "target_employee_id": (
+                    str(req["target_employee_id"]) if req["target_employee_id"] else None
+                ),
+                "shift_starts_at": shift_starts_at.isoformat() if shift_starts_at else None,
+            }
             if new_status == "approved" and is_swap_with_target and swap_violations:
                 audit_details["compliance_override"] = swap_violations
             await log_audit(conn, company_id, "request", request_id, current_user.id,

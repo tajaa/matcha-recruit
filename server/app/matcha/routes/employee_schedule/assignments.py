@@ -56,7 +56,13 @@ async def assign_employee(shift_id: UUID, body: AssignmentCreate,
                 company_id, shift_id, body.employee_id, current_user.id,
             )
             await log_audit(conn, company_id, "assignment", shift_id, current_user.id,
-                            "assignment.create", {"employee_id": str(body.employee_id)})
+                            "assignment.create", {
+                                "employee_id": str(body.employee_id),
+                                "shift_starts_at": shift["starts_at"].isoformat(),
+                                "shift_ends_at": shift["ends_at"].isoformat(),
+                                "shift_status": shift["status"],
+                                "location_id": str(shift["location_id"]) if shift["location_id"] else None,
+                            })
             if violations:  # forced advisories — record the override on the log
                 await log_audit(conn, company_id, "assignment", shift_id, current_user.id,
                                 "assignment.compliance_override",
@@ -69,12 +75,18 @@ async def unassign_employee(shift_id: UUID, employee_id: UUID,
                             current_user=Depends(require_admin_or_client)):
     company_id = await require_company_id(current_user)
     async with get_connection() as conn:
-        await fetch_shift_for_write(conn, company_id, shift_id)
+        shift = await fetch_shift_for_write(conn, company_id, shift_id)
         async with conn.transaction():
             await conn.execute(
                 "DELETE FROM schedule_shift_assignments WHERE shift_id = $1 AND employee_id = $2",
                 shift_id, employee_id,
             )
             await log_audit(conn, company_id, "assignment", shift_id, current_user.id,
-                            "assignment.delete", {"employee_id": str(employee_id)})
+                            "assignment.delete", {
+                                "employee_id": str(employee_id),
+                                "shift_starts_at": shift["starts_at"].isoformat(),
+                                "shift_ends_at": shift["ends_at"].isoformat(),
+                                "shift_status": shift["status"],
+                                "location_id": str(shift["location_id"]) if shift["location_id"] else None,
+                            })
         return await fetch_shift_by_id(conn, company_id, shift_id)

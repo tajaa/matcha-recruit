@@ -251,6 +251,18 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     # matcha_lite_essentials config, where there's no employee roster to log
     # injured persons against. Gates the ir_incidents osha.py sub-router.
     "osha_logs": True,
+    # Schedule Intelligence — analytics over the employee_schedule data no
+    # scheduling competitor offers: incident-correlation (do incidents cluster
+    # on understaffed shifts?), Fair Workweek / predictive-scheduling $
+    # exposure computed from actual schedule-change history, a discipline
+    # "pretext shield" (attendance write-ups against employees whose own
+    # schedule the employer kept churning), and per-shift qualified coverage
+    # (credential/training currency, not just headcount). Read-time only, no
+    # new tables. Requires `employee_schedule` data to be useful — each
+    # endpoint checks that flag itself and returns `available: false` rather
+    # than double-gating the mount. Gates /schedule-intelligence +
+    # /app/schedule-intelligence. Default off; admin-toggle; NOT bundled.
+    "schedule_intelligence": False,
 }
 
 # Tier-defining features that should always be on for a given signup_source,

@@ -111,6 +111,21 @@ def _iso(value: Any) -> Optional[str]:
     return str(value)
 
 
+def shift_snapshot(row) -> dict:
+    """Before/after change-detail shape for schedule_audit_log.
+
+    Feeds the Schedule Intelligence engine's Fair Workweek / instability
+    analysis, which needs to know what a shift looked like before a change —
+    the plain audit log recorded only which fields changed, not their values.
+    """
+    return {
+        "starts_at": _iso(row["starts_at"]),
+        "ends_at": _iso(row["ends_at"]),
+        "status": row["status"],
+        "location_id": str(row["location_id"]) if row["location_id"] else None,
+    }
+
+
 async def fetch_shifts(
     conn,
     company_id: UUID,

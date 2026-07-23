@@ -19,8 +19,10 @@ from app.matcha.services.hr_pilot_corpus import (
     _floor_records,
     _incident_records,
     _ladder_records,
+    _schedint_records,
     _schedule_records,
     _training_records,
+    _MAX_SCHEDINT_COVERAGE_RECORDS,
 )
 
 
@@ -488,7 +490,7 @@ def _ops(grounding, **over):
     return g
 
 
-def test_corpus_has_thirteen_groups(grounding):
+def test_corpus_has_fourteen_groups(grounding):
     corpus = build_hr_pilot_corpus(_ops(grounding), [])
     assert set(corpus["sources"]) == {
         "profile", "law", "existing_handbook", "existing_policies", "playbook",
@@ -499,6 +501,10 @@ def test_corpus_has_thirteen_groups(grounding):
         # findings (a supervisor needs the rule in force, not a list of where the
         # handbook falls short). Empty groups render nothing in the prompt.
         "handbook_audit", "handbook_freshness",
+        # Schedule Intelligence — empty here too (`grounding` fixture has no
+        # "schedule_intelligence" key, same as the other operational groups
+        # when their feature fetch never ran).
+        "schedint",
     }
 
 
@@ -757,3 +763,108 @@ def test_audit_gate_resolves_benefit_namespace(grounding):
     clean, cites, dropped = audit_citations(text, corpus["index"])
     assert dropped == ["benefit:plan-invented"]
     assert {c["cid"] for c in cites} == {"benefit:oe-ffffffff-0000-0000-0000-000000000001"}
+
+
+# --------------------------------------------------------------------------- #
+# Schedule Intelligence group — supervisor-only, directional-framed
+# --------------------------------------------------------------------------- #
+
+def _schedint_fixture():
+    return {
+        "incidents": {
+            "days": 180, "suppressed": False, "n_incidents": 20, "n_shifts": 100,
+            "by_staffing": {
+                "understaffed": {"shifts": 10, "incidents": 8, "incident_rate": 0.8},
+                "adequate": {"shifts": 90, "incidents": 12, "incident_rate": 0.1333},
+            },
+        },
+        "fair_workweek": {
+            "days": 90,
+            "locations": [{
+                "location_id": "loc-1", "name": "Downtown", "applicability": "covered",
+                "event_count": 3, "costed_event_count": 3, "uncostable_event_count": 0,
+                "exposure_estimate": 150.0,
+                "ordinance": {"name": "NYC Fair Workweek Law", "citation": "N.Y.C. Admin. Code § 20-1201 et seq."},
+            }],
+        },
+        "coverage": {
+            "shifts": [
+                {"shift_id": "s1", "starts_at": datetime(2026, 2, 1, 9, 0),
+                 "required_staff": 3, "assigned": 3, "qualified": 2, "lapsed_employee_ids": ["e1"]},
+                {"shift_id": "s2", "starts_at": datetime(2026, 2, 2, 9, 0),
+                 "required_staff": 2, "assigned": 2, "qualified": 2, "lapsed_employee_ids": []},
+            ],
+        },
+    }
+
+
+def test_schedint_records_render_incidents_fw_and_coverage_gaps():
+    recs = _schedint_records(_schedint_fixture())
+    cids = {r["cid"] for r in recs}
+    assert "schedint:incidents" in cids
+    assert "schedint:fair-workweek.loc-1" in cids
+    assert "schedint:coverage.s1" in cids  # has a lapse
+    assert "schedint:coverage.s2" not in cids  # fully qualified — no gap
+
+    incident_rec = next(r for r in recs if r["cid"] == "schedint:incidents")
+    assert "understaffed" in incident_rec["summary"].lower()
+    assert "directional" in incident_rec["summary"].lower()
+
+    fw_rec = next(r for r in recs if r["cid"] == "schedint:fair-workweek.loc-1")
+    assert "$150.00" in fw_rec["summary"]
+    assert "N.Y.C. Admin. Code" in fw_rec["summary"]
+    assert "not legal advice" in fw_rec["summary"].lower()
+
+
+def test_schedint_records_report_suppressed_incidents_as_counts_only():
+    data = _schedint_fixture()
+    data["incidents"] = {"days": 180, "suppressed": True, "n_incidents": 3, "n_shifts": 20}
+    rec = next(r for r in _schedint_records(data) if r["cid"] == "schedint:incidents")
+    assert "counts only" in rec["summary"].lower()
+
+
+def test_schedint_records_skip_unmapped_locations():
+    data = _schedint_fixture()
+    data["fair_workweek"]["locations"][0]["applicability"] = "unmapped"
+    recs = _schedint_records(data)
+    assert not any(r["cid"].startswith("schedint:fair-workweek") for r in recs)
+
+
+def test_schedint_records_tolerate_junk():
+    assert _schedint_records(None) == []
+    assert _schedint_records({}) == []
+
+
+def test_schedint_coverage_cap_note(grounding):
+    coverage = {"shifts": [
+        {"shift_id": f"s{i}", "starts_at": datetime(2026, 2, 1, 9, 0),
+         "required_staff": 2, "assigned": 2, "qualified": 1, "lapsed_employee_ids": ["e1"]}
+        for i in range(_MAX_SCHEDINT_COVERAGE_RECORDS + 1)
+    ]}
+    si_data = {"incidents": None, "fair_workweek": {"locations": []}, "coverage": coverage}
+    corpus = build_hr_pilot_corpus(_ops(grounding, schedule_intelligence=si_data), [])
+    assert any("coverage-gap list is capped" in n for n in corpus["notes"])
+    assert len(corpus["sources"]["schedint"]["records"]) == _MAX_SCHEDINT_COVERAGE_RECORDS
+
+
+def test_schedint_module_off_note(grounding):
+    corpus = build_hr_pilot_corpus(_ops(grounding, schedule_intelligence=None), [])
+    assert any("Schedule Intelligence analytics are not enabled" in n for n in corpus["notes"])
+
+
+def test_schedint_redacted_away_from_employees(grounding):
+    corpus = build_hr_pilot_corpus(_ops(grounding, schedule_intelligence=_schedint_fixture()), [])
+    assert "schedint" in corpus["sources"]
+    assert any(c.startswith("schedint:") for c in corpus["index"])
+
+    safe = redact_for_employee(corpus)
+    assert "schedint" not in safe["sources"]
+    assert not any(c.startswith("schedint:") for c in safe["index"])
+
+
+def test_schedint_module_off_note_is_stripped_for_employees(grounding):
+    """Unlike benefits (nameless, employee-facing), schedint is supervisor-only —
+    an employee must not learn the company lacks/has this internal tool either."""
+    corpus = build_hr_pilot_corpus(_ops(grounding, schedule_intelligence=None), [])
+    safe = redact_for_employee(corpus)
+    assert not any("Schedule Intelligence" in n for n in safe["notes"])

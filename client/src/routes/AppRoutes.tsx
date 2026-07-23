@@ -33,6 +33,7 @@ import ControlsEvidence from '../pages/app/risk/ControlsEvidence'
 import LimitAdequacy from '../pages/app/limit-adequacy/LimitAdequacy'
 import DriverRisk from '../pages/app/risk/DriverRisk'
 import EmployeeSchedule from '../pages/app/employees/EmployeeSchedule'
+import ScheduleIntelligence from '../pages/app/employees/ScheduleIntelligence'
 import Tcor from '../pages/app/risk/Tcor'
 import Coi from '../pages/app/risk/Coi'
 import Insurance from '../pages/app/risk/Insurance'
@@ -73,6 +74,7 @@ export default function AppRoutes() {
         <Route path="employees/:employeeId" element={<FeatureGate feature="employees" label="Employees"><EmployeeDetail /></FeatureGate>} />
         <Route path="onboarding" element={<Onboarding />} />
         <Route path="employee-schedule" element={<FeatureGate feature="employee_schedule" label="Employee Schedule"><EmployeeSchedule /></FeatureGate>} />
+        <Route path="schedule-intelligence" element={<FeatureGate feature="schedule_intelligence" label="Schedule Intelligence"><ScheduleIntelligence /></FeatureGate>} />
         <Route path="er-copilot" element={<FeatureGate feature="er_copilot" label="ER Copilot"><ERCopilot /></FeatureGate>} />
         <Route path="er-copilot/:caseId" element={<FeatureGate feature="er_copilot" label="ER Copilot"><ERCaseDetail /></FeatureGate>} />
         <Route path="compliance" element={<FeatureGate anyOf={['compliance', 'compliance_lite']} label="Compliance"><Compliance /></FeatureGate>} />

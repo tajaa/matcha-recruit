@@ -64,6 +64,7 @@ _MAX_TRAINING_DETAIL = 15
 _MAX_RECENT_INCIDENTS = 15
 _INCIDENT_LOOKBACK_DAYS = 90
 _MAX_BENEFIT_PLANS = 20
+_MAX_SCHEDINT_COVERAGE_RECORDS = 10
 
 # Namespaces the audit gate will recognise inside brackets. Deliberately a
 # closed list: a bare `[...]` regex also matches markdown link text and the
@@ -75,6 +76,10 @@ _CID_NAMESPACES = (
     # authority note in matcha_work_mode_contexts: these say who/when/status,
     # they never establish a rule.
     "schedule", "training", "incident",
+    # Schedule Intelligence — analytics over the scheduling data (understaffing
+    # x incident correlation, Fair Workweek exposure, qualified-coverage gaps).
+    # Supervisor-only: see _SUPERVISOR_ONLY_SOURCES.
+    "schedint",
     # Benefits enrollment — plan offerings + the open-enrollment window.
     # Company-level and nameless by construction, so (unlike the three above)
     # it is served to BOTH surfaces: "when does open enrollment close?" is a
@@ -229,6 +234,11 @@ async def gather_hr_pilot_grounding(conn, company_id) -> dict:
         )
         out["benefits"] = (
             await _fetch_benefits(conn, company_id) if features.get("benefits_admin") else None
+        )
+        out["schedule_intelligence"] = (
+            await _fetch_schedule_intelligence(conn, company_id, features)
+            if features.get("schedule_intelligence") and features.get("employee_schedule")
+            else None
         )
     return out
 
@@ -452,6 +462,35 @@ async def _fetch_benefits(conn, company_id) -> dict:
     except Exception:  # noqa: BLE001
         logger.warning("hr_pilot_corpus: life-event fetch failed for %s", company_id)
 
+    return out
+
+
+async def _fetch_schedule_intelligence(conn, company_id, features: dict) -> dict:
+    """Schedule Intelligence headlines: incident correlation, Fair Workweek
+    exposure, qualified-coverage gaps. Reuses `services/schedule_intelligence.py`
+    wholesale (same builders the /schedule-intelligence endpoints call) rather
+    than re-querying — this IS the analytics engine, not a re-derivation of it.
+    Each of the three sub-fetches degrades independently so one failing query
+    doesn't blank the whole group."""
+    from . import schedule_intelligence as si
+
+    out: dict = {"incidents": None, "fair_workweek": None, "coverage": None}
+    try:
+        out["incidents"] = await si.build_incident_correlation(conn, company_id)
+    except Exception:  # noqa: BLE001
+        logger.warning("hr_pilot_corpus: schedule-intelligence incident fetch failed for %s", company_id)
+    try:
+        out["fair_workweek"] = await si.build_fair_workweek_exposure(conn, company_id)
+    except Exception:  # noqa: BLE001
+        logger.warning("hr_pilot_corpus: schedule-intelligence fair-workweek fetch failed for %s", company_id)
+    try:
+        out["coverage"] = await si.build_qualified_coverage(
+            conn, company_id,
+            credential_templates_enabled=bool(features.get("credential_templates")),
+            training_enabled=bool(features.get("training")),
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning("hr_pilot_corpus: schedule-intelligence coverage fetch failed for %s", company_id)
     return out
 
 
@@ -714,6 +753,75 @@ def _benefit_records(benefits: dict | None) -> list[dict]:
     return recs
 
 
+def _schedint_records(data: dict | None) -> list[dict]:
+    """Schedule Intelligence headlines: incident-correlation, Fair Workweek
+    exposure per location, and per-shift qualified-coverage gaps.
+
+    Every summary repeats the directional/estimate framing in-line — these are
+    the same figures a business admin sees on the Schedule Intelligence page,
+    and the model must not present them as more certain out of context."""
+    recs: list[dict] = []
+    data = data or {}
+
+    incidents = data.get("incidents") or {}
+    if incidents:
+        if incidents.get("suppressed"):
+            summary = (
+                f"Too few incidents/shifts in the last {incidents.get('days')} days for a "
+                f"reliable comparison — {incidents.get('n_incidents')} incidents across "
+                f"{incidents.get('n_shifts')} shifts (counts only)."
+            )
+        else:
+            under = (incidents.get("by_staffing") or {}).get("understaffed") or {}
+            ok = (incidents.get("by_staffing") or {}).get("adequate") or {}
+            summary = (
+                f"Understaffed shifts: {under.get('incidents', 0)} incidents / "
+                f"{under.get('shifts', 0)} shifts (rate {under.get('incident_rate')}); "
+                f"adequately staffed: {ok.get('incidents', 0)} incidents / {ok.get('shifts', 0)} "
+                f"shifts (rate {ok.get('incident_rate')}). Directional, not a causal claim."
+            )
+        recs.append({
+            "cid": "schedint:incidents",
+            "ref": "Schedule Intelligence — incident correlation",
+            "summary": summary,
+            "when": "current",
+        })
+
+    for loc in (data.get("fair_workweek") or {}).get("locations") or []:
+        if loc.get("applicability") == "unmapped" or not loc.get("event_count"):
+            continue
+        ordinance = loc.get("ordinance") or {}
+        estimate = loc.get("exposure_estimate")
+        summary = (
+            f"{loc.get('event_count')} schedule-change event(s) under {ordinance.get('name')} "
+            f"({ordinance.get('citation')})"
+            + (f" — estimated exposure ${estimate:,.2f}" if estimate is not None
+               else " — dollar estimate unavailable (no pay-rate data)")
+            + f". Applicability: {loc.get('applicability')}. Directional estimate, not legal advice."
+        )
+        recs.append({
+            "cid": f"schedint:fair-workweek.{loc['location_id']}",
+            "ref": f"Fair Workweek exposure — {loc.get('name')}",
+            "summary": summary,
+            "when": "current",
+        })
+
+    coverage_shifts = (data.get("coverage") or {}).get("shifts") or []
+    gap_shifts = [s for s in coverage_shifts if s.get("qualified", 0) < s.get("assigned", 0)]
+    for s in gap_shifts[:_MAX_SCHEDINT_COVERAGE_RECORDS]:
+        recs.append({
+            "cid": f"schedint:coverage.{s['shift_id']}",
+            "ref": f"Qualified-coverage gap — {_fmt_dt(s.get('starts_at'))}",
+            "summary": (
+                f"{s.get('qualified')}/{s.get('assigned')} assigned staff are currently "
+                f"qualified for this shift (needs {s.get('required_staff')}) — a credential "
+                "or training item has lapsed for at least one assignee."
+            ),
+            "when": _fmt_dt(s.get("starts_at")),
+        })
+    return recs
+
+
 def build_hr_pilot_corpus(grounding: dict, reasoning_chains: list | None = None) -> dict:
     """Assemble the HR Pilot citation corpus `{sources, index, notes}`. Pure.
 
@@ -758,6 +866,10 @@ def build_hr_pilot_corpus(grounding: dict, reasoning_chains: list | None = None)
         "label": "Benefit plans & open enrollment",
         "records": _benefit_records(grounding.get("benefits")),
     }
+    sources["schedint"] = {
+        "label": "Schedule Intelligence — analytics",
+        "records": _schedint_records(grounding.get("schedule_intelligence")),
+    }
 
     # Rebuild the flat index over ALL groups. A cid appearing in two groups
     # would silently lose one here — the namespaces are disjoint by
@@ -797,6 +909,12 @@ def build_hr_pilot_corpus(grounding: dict, reasoning_chains: list | None = None)
             "Benefits enrollment is not enabled for this company — say so if asked "
             "about benefit plans or open enrollment; do not infer plan offerings."
         )
+    if "schedule_intelligence" in grounding and grounding.get("schedule_intelligence") is None:
+        notes.append(
+            "Schedule Intelligence analytics are not enabled for this company — say so "
+            "if asked about staffing/incident correlation, Fair Workweek exposure, or "
+            "qualified-coverage gaps; do not infer any of it."
+        )
 
     # Cap-hit notes. A clipped list the model reads as complete is how "nobody
     # else is overdue" gets asserted from a LIMIT.
@@ -828,16 +946,23 @@ def build_hr_pilot_corpus(grounding: dict, reasoning_chains: list | None = None)
             f"Only the first {_MAX_BENEFIT_PLANS} benefit plans are listed — there "
             "may be more; do not treat the plan list as complete."
         )
+    _schedint_coverage_shifts = ((grounding.get("schedule_intelligence") or {}).get("coverage") or {}).get("shifts") or []
+    _schedint_gap_count = sum(1 for s in _schedint_coverage_shifts if s.get("qualified", 0) < s.get("assigned", 0))
+    if _schedint_gap_count > _MAX_SCHEDINT_COVERAGE_RECORDS:
+        notes.append(
+            f"Schedule Intelligence coverage-gap list is capped at {_MAX_SCHEDINT_COVERAGE_RECORDS} "
+            "shifts — there may be more gaps than shown."
+        )
 
     # Could-not-determine. Distinct from "off": the keys are absent entirely
     # because the feature lookup itself failed, and reporting that as "you don't
     # have this module" would tell a paying customer they lost a product.
     if not grounding.get("features_known", True):
         notes.append(
-            "Operational data (shifts, training, incidents, benefits) could not be "
-            "loaded just now — this is a temporary system issue, NOT a statement that "
-            "the company lacks those modules. If asked about them, say the data is "
-            "briefly unavailable and to try again shortly."
+            "Operational data (shifts, training, incidents, benefits, Schedule "
+            "Intelligence) could not be loaded just now — this is a temporary system "
+            "issue, NOT a statement that the company lacks those modules. If asked "
+            "about them, say the data is briefly unavailable and to try again shortly."
         )
 
     return {"sources": sources, "index": index, "notes": notes}
@@ -848,14 +973,20 @@ def build_hr_pilot_corpus(grounding: dict, reasoning_chains: list | None = None)
 # on shift and who is overdue on training is the job), an employee is not: they
 # name coworkers, their training failures, and incidents at their site.
 #
-# The last two describe the EMPLOYER's own shortfalls: a graded handbook gap and
-# a section the law has moved under. `gather_hr_pilot_grounding` doesn't fetch
-# them today (only Handbook Pilot does), so both groups are empty here — they are
-# listed anyway because `build_corpus` is shared, and the day anyone wires them
-# in, the default must not be that an employee's "what's the PTO policy?" comes
-# back with a list of where the company's handbook is non-compliant.
+# `handbook_audit`/`handbook_freshness` describe the EMPLOYER's own shortfalls:
+# a graded handbook gap and a section the law has moved under.
+# `gather_hr_pilot_grounding` doesn't fetch them today (only Handbook Pilot
+# does), so both groups are empty here — they are listed anyway because
+# `build_corpus` is shared, and the day anyone wires them in, the default must
+# not be that an employee's "what's the PTO policy?" comes back with a list of
+# where the company's handbook is non-compliant.
+#
+# `schedint` (Schedule Intelligence) is supervisor-only for the same
+# other-people reason as the first three: its records name understaffed
+# shifts, per-location Fair Workweek exposure, and which specific employees
+# have a lapsed credential/training item blocking a shift.
 _SUPERVISOR_ONLY_SOURCES = ("schedule", "training_status", "recent_incidents",
-                            "handbook_audit", "handbook_freshness")
+                            "handbook_audit", "handbook_freshness", "schedint")
 
 
 def redact_for_employee(corpus: dict) -> dict:
@@ -894,7 +1025,8 @@ def redact_for_employee(corpus: dict) -> dict:
         n for n in (corpus.get("notes") or [])
         if not any(w in n for w in ("Shift scheduling", "Training records",
                                     "Incident reporting", "shifts", "incidents",
-                                    "training programs", "Training detail"))
+                                    "training programs", "Training detail",
+                                    "Schedule Intelligence"))
     ]
     return {"sources": sources, "index": index, "notes": notes}
 

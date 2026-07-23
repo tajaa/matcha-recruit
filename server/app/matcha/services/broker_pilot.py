@@ -874,6 +874,35 @@ def _platform_records(ctx: dict) -> list[dict]:
                 f"{name}: {'; '.join(dbits)}.",
                 when=str(d.get("review_date") or "current"))
 
+    # Schedule Intelligence — headline only (the tenant's own /schedule-
+    # intelligence page has the drill-down). Tenant only, and only when the
+    # client owns `schedule_intelligence` (`_tenant_context` gates the fetch).
+    schedint = ctx.get("schedule_intelligence") or {}
+    modules = schedint.get("modules") if isinstance(schedint, dict) else None
+    if isinstance(modules, dict):
+        inc = modules.get("incidents") or {}
+        if not inc.get("suppressed") and inc.get("by_staffing"):
+            under = (inc["by_staffing"] or {}).get("understaffed") or {}
+            bits = [f"{under.get('incidents', 0)} incident(s) on {under.get('shifts', 0)} "
+                    f"understaffed shift(s) (rate {under.get('incident_rate')})"]
+        else:
+            bits = [f"{inc.get('n_incidents', 0)} incident(s) across "
+                    f"{inc.get('n_shifts', 0)} scheduled shift(s) — too few for a rate"]
+        fw = modules.get("fair_workweek") or {}
+        if fw.get("total_exposure_estimate") is not None:
+            bits.append(f"Fair Workweek exposure estimate ${fw['total_exposure_estimate']:,.2f} "
+                        f"across {fw.get('location_count', 0)} location(s)")
+        elif fw.get("location_count"):
+            bits.append(f"{fw['location_count']} location(s) under a Fair Workweek ordinance "
+                        "(no priced events this window)")
+        cov = modules.get("coverage") or {}
+        if cov.get("shifts_with_lapses"):
+            bits.append(f"{cov['shifts_with_lapses']} upcoming shift(s) with a qualified-"
+                        "coverage gap (credential/training lapse)")
+        add("platform:schedule", "Schedule Intelligence — staffing risk",
+            "; ".join(bits) + ". Directional estimate computed from the tenant's own "
+            "scheduling data — not a causal claim, payroll figure, or legal advice.")
+
     # Composite risk index — headline + per-component sub-records, mirroring the
     # EPL block above. Tenant only: `_external_context` has no company row to
     # compute it from, so the key is simply absent for off-platform clients.
@@ -1137,6 +1166,7 @@ HARD RULES:
 - On `jur:` records: these are the client's CODIFIED state and federal statutory obligations (e.g. final-pay timing, pay-transparency, anti-discrimination). Cite the statute when a point turns on the law, and never state a legal conclusion, opine on whether the client is compliant, or give legal advice — surface the obligation and route the judgment to counsel.
 - On property and index records: `platform:property.cat` (catastrophe tiers), `platform:property.exposure` (modeled AAL/PML), `platform:property.plan.<n>` (ranked property fixes) and `platform:property.risk` (TIV-weighted score) are the platform's own property analytics, and `platform:risk` plus `platform:risk.<component>` are its composite risk index. These are the platform's models, not carrier output — cite them as the platform's figures, and where a record says a tier is a directional baseline rather than a documented probability, repeat that qualifier when you use it.
 - On `platform:fleet` and `platform:fleet.<driver>` records: these are the commercial-auto driver-risk view, scored from MVR data the EMPLOYER recorded — not a pulled motor-vehicle record and not carrier output. Say that whenever you rely on them, and treat a named driver's tier as the platform's score, not a finding about that person.
+- On `platform:schedule`: a directional estimate computed from the tenant's own scheduling data (understaffing/incident correlation, Fair Workweek exposure, qualified-coverage gaps) — never a causal claim, a payroll figure, or legal advice. Repeat that framing whenever you rely on it.
 - Raw document text (DOCUMENT TEXT blocks) belongs to its `doc:` ID — cite that ID when using it.
 
 ANSWER SHAPE — a short lead answer, then three reviewable lists. The broker reads

@@ -27,6 +27,7 @@ export const PRODUCT_NAV_CATALOG: Record<string, ProductNavEntry> = {
   carrier_quotes: { to: '/app/ir/insurance', icon: ShieldCheck, label: 'Insurance' },
   employees: { to: '/app/employees', icon: Users, label: 'Employees' },
   employee_schedule: { to: '/app/employee-schedule', icon: CalendarDays, label: 'Schedule' },
+  schedule_intelligence: { to: '/app/schedule-intelligence', icon: BarChart3, label: 'Schedule Intelligence' },
   handbooks: { to: '/app/handbooks', icon: FileText, label: 'Handbooks' },
   handbook_audit: { to: '/app/handbooks', icon: FileSearch, label: 'Handbook Audit' },
   handbook_pilot: { to: '/app/handbook-pilot', icon: Sparkles, label: 'Handbook Pilot' },

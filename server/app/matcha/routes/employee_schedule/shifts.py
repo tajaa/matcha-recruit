@@ -21,7 +21,7 @@ from ...services import schedule_compliance
 from ._shared import (
     require_company_id, log_audit, fetch_shifts, fetch_roster, fetch_shift_by_id,
     assert_employee_in_company, assert_location_in_company,
-    find_conflicts, raise_conflict,
+    find_conflicts, raise_conflict, shift_snapshot,
 )
 from ._compliance import check_shift_compliance, raise_for_violations
 
@@ -155,7 +155,12 @@ async def create_shift(body: ShiftCreate,
                     company_id, shift_id, emp_id, current_user.id,
                 )
             await log_audit(conn, company_id, "shift", shift_id, current_user.id,
-                            "shift.create", {"starts_at": body.starts_at.isoformat()})
+                            "shift.create", {
+                                "starts_at": body.starts_at.isoformat(),
+                                "ends_at": body.ends_at.isoformat(),
+                                "location_id": str(body.location_id) if body.location_id else None,
+                                "status": "draft",
+                            })
             if forced:
                 await log_audit(conn, company_id, "shift", shift_id, current_user.id,
                                 "shift.compliance_override", {"forced": forced})
@@ -255,6 +260,16 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
             else:
                 patch["published_at"] = None
 
+        before = shift_snapshot(existing)
+        new_location = patch.get("location_id", existing["location_id"])
+        after = {
+            "starts_at": new_start.isoformat(),
+            "ends_at": new_end.isoformat(),
+            "status": new_status,
+            "location_id": str(new_location) if new_location else None,
+        }
+        was_published = existing["published_at"] is not None
+
         set_sql, params = build_patch(patch, first_param=3)
         async with conn.transaction():
             await conn.execute(
@@ -265,7 +280,12 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
                 shift_id, company_id, *params,
             )
             await log_audit(conn, company_id, "shift", shift_id, current_user.id,
-                            "shift.update", {"fields": sorted(patch)})
+                            "shift.update", {
+                                "fields": sorted(patch),
+                                "before": before,
+                                "after": after,
+                                "was_published": was_published,
+                            })
             if forced:
                 await log_audit(conn, company_id, "shift", shift_id, current_user.id,
                                 "shift.compliance_override", {"forced": forced})
@@ -277,6 +297,15 @@ async def delete_shift(shift_id: UUID, current_user=Depends(require_admin_or_cli
     company_id = await require_company_id(current_user)
     async with get_connection() as conn:
         async with conn.transaction():
+            existing = await conn.fetchrow(
+                """
+                SELECT starts_at, ends_at, status, published_at, location_id
+                FROM schedule_shifts WHERE id = $1 AND company_id = $2
+                """,
+                shift_id, company_id,
+            )
+            if not existing:
+                raise HTTPException(status_code=404, detail="Shift not found")
             result = await conn.execute(
                 "DELETE FROM schedule_shifts WHERE id = $1 AND company_id = $2",
                 shift_id, company_id,
@@ -284,7 +313,10 @@ async def delete_shift(shift_id: UUID, current_user=Depends(require_admin_or_cli
             if result == "DELETE 0":
                 raise HTTPException(status_code=404, detail="Shift not found")
             await log_audit(conn, company_id, "shift", shift_id, current_user.id,
-                            "shift.delete", {})
+                            "shift.delete", {
+                                "before": shift_snapshot(existing),
+                                "was_published": existing["published_at"] is not None,
+                            })
     return {"ok": True, "id": str(shift_id)}
 
 

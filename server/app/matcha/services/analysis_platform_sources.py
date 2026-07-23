@@ -27,8 +27,8 @@ Adding a source = append one ``PlatformSource``. The shaping functions are pure
 from __future__ import annotations
 
 import logging
-from collections import namedtuple
-from datetime import date
+from collections import defaultdict, namedtuple
+from datetime import date, timedelta, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +40,7 @@ PlatformSource = namedtuple(
 _IR_MONTHS = 24              # trailing window for the incident series
 _MAX_IR_TYPES = 8            # per-type series kept; the rest fold into the total
 _TOTAL_LABEL = "All incidents"
+_SCHEDULE_WEEKS = 26          # trailing window for the scheduling series
 
 
 # --------------------------------------------------------------------------- #
@@ -203,6 +204,69 @@ def loss_run_series(snapshots: list[dict]) -> dict:
     }
 
 
+def _week_start(d: date) -> date:
+    """Sunday-anchored week start — same convention as `schedule_rules.py` /
+    `_compliance.py`'s weekly-overtime window, so this series buckets the same
+    weeks the scheduling UI and compliance advisories do."""
+    return d - timedelta(days=(d.weekday() + 1) % 7)
+
+
+def schedule_weekly_series(shift_rows: list[dict], classified_changes: list[dict], as_of: date) -> dict:
+    """(shift rows + already-classified audit-log changes) -> zero-filled
+    weekly series: total scheduled hours, shift count, understaffed-shift
+    count, and employer-initiated schedule changes.
+
+    Same zero-fill invariant as `ir_monthly_series`: a week within the window
+    with nothing on file is 0, not absent — dropping it would shorten the
+    series against its own period labels. `classified_changes` are pre-run
+    through `schedule_intelligence_stats.classify_audit_row` (kept here as
+    plain dicts with `employee_initiated` + `created_at` so this function
+    stays DB-free); employee-initiated churn (an approved swap/drop/
+    unavailability request) is excluded — it isn't the employer changing the
+    schedule."""
+    if not shift_rows and not classified_changes:
+        return {"series": {}, "periods": [], "roles": {}, "warnings": [], "as_of": as_of.isoformat()}
+
+    this_week = _week_start(as_of)
+    week_starts = [this_week - timedelta(weeks=i) for i in range(_SCHEDULE_WEEKS - 1, -1, -1)]
+    periods = [w.isoformat() for w in week_starts]
+    slot = {w: i for i, w in enumerate(week_starts)}
+
+    hours = [0.0] * len(periods)
+    shift_counts = [0] * len(periods)
+    understaffed = [0] * len(periods)
+    for s in shift_rows or []:
+        starts_at = s.get("starts_at")
+        if starts_at is None or s.get("status") == "cancelled":
+            continue
+        idx = slot.get(_week_start(starts_at.astimezone(timezone.utc).date()))
+        if idx is None:
+            continue
+        shift_counts[idx] += 1
+        hours[idx] += float(s.get("duration_hours") or 0.0)
+        if (s.get("assigned_count") or 0) < (s.get("required_staff") or 0):
+            understaffed[idx] += 1
+
+    changes = [0] * len(periods)
+    for c in classified_changes or []:
+        if c.get("employee_initiated") or c.get("created_at") is None:
+            continue
+        idx = slot.get(_week_start(c["created_at"].astimezone(timezone.utc).date()))
+        if idx is not None:
+            changes[idx] += 1
+
+    if not any(shift_counts) and not any(changes):
+        return {"series": {}, "periods": [], "roles": {}, "warnings": [], "as_of": as_of.isoformat()}
+
+    series = {
+        "Scheduled hours": [round(h, 1) for h in hours],
+        "Shifts": [float(c) for c in shift_counts],
+        "Understaffed shifts": [float(c) for c in understaffed],
+        "Employer-initiated changes": [float(c) for c in changes],
+    }
+    return {"series": series, "periods": periods, "roles": {}, "warnings": [], "as_of": as_of.isoformat()}
+
+
 # --------------------------------------------------------------------------- #
 # Builders (one query each)
 # --------------------------------------------------------------------------- #
@@ -276,6 +340,63 @@ def _hum_line(line) -> str:
     return str(line or "").replace("_", " ").strip().title()
 
 
+async def build_schedule_weekly(conn, company_id, **_opts) -> dict:
+    from . import fair_workweek
+    from .schedule_intelligence_stats import classify_audit_row
+
+    as_of = await conn.fetchval("SELECT CURRENT_DATE") or date.today()
+    window_start = as_of - timedelta(weeks=_SCHEDULE_WEEKS)
+
+    shift_rows = await conn.fetch(
+        """
+        SELECT s.starts_at, s.ends_at, s.break_minutes, s.status, s.required_staff,
+               (SELECT COUNT(*) FROM schedule_shift_assignments a
+                WHERE a.shift_id = s.id AND a.status <> 'declined') AS assigned_count
+        FROM schedule_shifts s
+        WHERE s.company_id = $1 AND s.starts_at >= $2
+        """,
+        company_id, window_start,
+    )
+    shifts = []
+    for r in shift_rows:
+        d = dict(r)
+        d["duration_hours"] = max(
+            0.0, (d["ends_at"] - d["starts_at"]).total_seconds() / 3600.0 - (d["break_minutes"] or 0) / 60.0
+        )
+        shifts.append(d)
+
+    change_rows = await conn.fetch(
+        """
+        SELECT entity_id, action, details, created_at FROM schedule_audit_log
+        WHERE company_id = $1 AND action = ANY($2::text[]) AND created_at >= $3
+        """,
+        company_id, list(fair_workweek.RELEVANT_ACTIONS), window_start,
+    )
+    approval_rows = await conn.fetch(
+        """
+        SELECT details, created_at FROM schedule_audit_log
+        WHERE company_id = $1 AND action IN ('request.approved', 'request.denied')
+          AND created_at >= $2
+        """,
+        company_id, window_start - timedelta(days=1),
+    )
+    approvals_by_shift: dict = defaultdict(list)
+    for r in approval_rows:
+        shift_id = (r["details"] or {}).get("shift_id")
+        if shift_id:
+            approvals_by_shift[str(shift_id)].append(r["created_at"])
+
+    classified = [
+        classify_audit_row(
+            {"entity_id": r["entity_id"], "action": r["action"], "details": r["details"] or {},
+             "created_at": r["created_at"]},
+            approvals_by_shift,
+        )
+        for r in change_rows
+    ]
+    return schedule_weekly_series(shifts, classified, as_of)
+
+
 SOURCES: list[PlatformSource] = [
     PlatformSource(
         key="ir_monthly",
@@ -294,6 +415,16 @@ SOURCES: list[PlatformSource] = [
         required_feature="incidents",
         kind="loss_run",
         build=build_loss_runs,
+    ),
+    PlatformSource(
+        key="schedule_weekly",
+        label="Scheduling — weekly hours & understaffing",
+        description=(f"Scheduled hours, shift counts, understaffed-shift counts, and "
+                     f"employer-initiated schedule changes per week for the last "
+                     f"{_SCHEDULE_WEEKS} weeks."),
+        required_feature="schedule_intelligence",
+        kind="timeseries",
+        build=build_schedule_weekly,
     ),
 ]
 
