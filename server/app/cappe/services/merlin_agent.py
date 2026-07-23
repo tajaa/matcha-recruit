@@ -58,6 +58,7 @@ from .merlin_attachments import caption_lines
 from .merlin_catalog import (
     AI_ASPECT_RATIOS,
     AI_IMAGE_PROMPT_MAX,
+    AI_IMAGE_SIZE_COST_ESTIMATE,
     AI_IMAGE_SIZES,
     DEFAULT_AI_IMAGE_SIZE,
     MODEL_TIERS,
@@ -170,6 +171,10 @@ def _tool_declarations() -> list[types.FunctionDeclaration]:
             name="generate_image",
             description=(
                 "Generate an AI image and set it as an existing block's image field. "
+                "Expand the user's request into a full photographic brief before calling "
+                "this — subject, setting, framing/composition, and lighting — rather than "
+                "forwarding their bare phrase; a one-line prompt tends to produce a "
+                "generic, low-quality result. "
                 "If the user attached photo(s), pass attachment_index (1-based, matching "
                 "the numbered attachments in the instructions) to use it as a reference — "
                 "for a variation, a background change, or restyling their own photo. "
@@ -499,7 +504,8 @@ async def run_merlin_agent(
         op) — the whole point of the tool is that the model sees what it made.
         """
         nonlocal work_blocks, work_theme
-        from ...core.services.image_gen import ImageGenError, generate_image
+        from ...core.services.image_gen import IMAGE_MODEL, ImageGenError, generate_image
+        from .image_prompting import build_image_prompt
 
         if time_left() <= 0:
             # Same reasoning as do_screenshot's check: generation has its own
@@ -556,8 +562,12 @@ async def run_merlin_agent(
             # scope survives `generate_image`'s internal `asyncio.to_thread`
             # (contextvars.Context is copied into the worker thread).
             with feature_scope("cappe.merlin_agent.image"):
+                # The model already wrote a detailed brief (tool description
+                # asks for one); build_image_prompt still adds the baseline
+                # quality/no-text/no-watermark clause every generation here
+                # gets, same as the wizard's direct path.
                 url, png = await generate_image(
-                    prompt, prefix="cappe/gen", aspect_ratio=aspect or "16:9",
+                    build_image_prompt(prompt), prefix="cappe/gen", aspect_ratio=aspect or "16:9",
                     reference_images=reference, return_bytes=True,
                     image_size=image_size,
                 )
@@ -575,6 +585,7 @@ async def run_merlin_agent(
         work_blocks, work_theme = applied.blocks, applied.theme
         op_log.append({"op": "set_field", "block": block_id, "path": field, "value": url})
 
+        cost = AI_IMAGE_SIZE_COST_ESTIMATE.get(image_size, "")
         return (
             {"placed": True, "url": url,
              "note": "The image attached to this response is what was generated and placed."},
@@ -585,8 +596,12 @@ async def run_merlin_agent(
             # wherever the model happened to place it. prompt/aspect/image_size
             # ride along so the route can catalog this generation into
             # cappe_assets without re-deriving them from the tool-call args.
+            # model/cost are folded into the label — the only thing the panel
+            # actually renders — so "which model, roughly what did that cost"
+            # is visible in the transcript itself, not just on /admin/ai-usage.
             {
-                "kind": "image", "label": f"Generated image → {field}", "image_url": url,
+                "kind": "image", "label": f"Generated image ({image_size}, {IMAGE_MODEL}, {cost}) → {field}",
+                "image_url": url,
                 "prompt": prompt, "aspect": aspect or "16:9", "image_size": image_size,
             },
             png,
@@ -692,7 +707,14 @@ async def run_merlin_agent(
                     if png is not None:
                         image_parts.append(types.Part.from_bytes(data=png, mime_type="image/png"))
                 elif name == "generate_image":
-                    yield {"type": "status", "message": "Generating an image…"}
+                    from ...core.services.image_gen import IMAGE_MODEL as _IMG_MODEL
+
+                    _size = args.get("image_size") if args.get("image_size") in AI_IMAGE_SIZES else DEFAULT_AI_IMAGE_SIZE
+                    _cost = AI_IMAGE_SIZE_COST_ESTIMATE.get(_size, "")
+                    yield {
+                        "type": "status",
+                        "message": f"Generating image — {_IMG_MODEL} · {_size} ({_cost})…",
+                    }
                     payload, step, png = await do_generate_image(args)
                     if png is not None:
                         image_parts.append(types.Part.from_bytes(data=png, mime_type="image/png"))

@@ -22,6 +22,7 @@ from ..models.cappe import (
 )
 from ..services import cappe_assets, image_quota
 from ..services.design_gate import is_premium_plan
+from ..services.image_prompting import build_image_prompt
 from ..services.merlin_catalog import AI_IMAGE_SIZES, DEFAULT_AI_IMAGE_SIZE
 from ._shared import get_owned_site
 
@@ -131,9 +132,19 @@ async def generate_site_image(
     if size not in AI_IMAGE_SIZES:
         size = DEFAULT_AI_IMAGE_SIZE
 
+    # Every generation is reshaped into a fuller photographic brief before it
+    # reaches Gemini — a site owner's bare "a nice photo for my bakery" is
+    # honest but not the professional prompt that produces a sharp, on-brand
+    # image. style/mood (wizard chips or free text) become explicit clauses;
+    # omitted ones degrade to a generic "fits a professional business site"
+    # direction — never a no-op passthrough of the raw prompt. The user's OWN
+    # words (`prompt`) still go to `cappe_assets` below unmodified — what they
+    # asked for, not what we sent the model.
+    gemini_prompt = build_image_prompt(prompt, style=body.style, mood=body.mood)
+
     try:
         url = await generate_image(
-            prompt, prefix="cappe/gen", aspect_ratio=body.aspect_ratio, image_size=size,
+            gemini_prompt, prefix="cappe/gen", aspect_ratio=body.aspect_ratio, image_size=size,
         )
     except ImageGenError:
         raise HTTPException(

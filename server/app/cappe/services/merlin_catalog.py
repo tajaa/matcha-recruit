@@ -150,6 +150,16 @@ AI_IMAGE_PROMPT_MAX = 1000  # matches CappeImageGenRequest.prompt max_length
 AI_IMAGE_SIZES: tuple[str, ...] = ("1K", "2K", "4K")
 DEFAULT_AI_IMAGE_SIZE = "2K"
 
+# Rough per-image cost by resolution, shown live while a generation is in
+# flight (Merlin's status line, the wizard) so spend isn't a surprise you only
+# discover on /admin/ai-usage afterward. Derived from the model's documented
+# output-token cost per resolution (512→747, 1K→1120, 2K→1680, 4K→2520 tokens)
+# at the $30/M output-token price in ai_usage.py's PRICING table — kept as a
+# rounded display string here, not a computed one, so this module stays
+# import-light (no pricing-table import) and the number reads as the
+# approximation it is ("~$0.05"), not a false-precision total.
+AI_IMAGE_SIZE_COST_ESTIMATE: dict[str, str] = {"1K": "~$0.03", "2K": "~$0.05", "4K": "~$0.08"}
+
 # --- Per-block design bag (`_design`) -----------------------------------------
 # The per-section inspector's vocabulary (motion/bg/layout/colors/type/border/
 # anchor) — where ALL motion and animation lives, so without it Merlin can't

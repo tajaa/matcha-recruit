@@ -498,6 +498,62 @@ export function useMerlin(
     }
   }
 
+  /** Direct generation from the wizard — bypasses the agent loop entirely
+   *  (no Gemini reasoning about placement; the user already specified style/
+   *  mood/aspect/quality themselves). POSTs straight to `/generate-image` —
+   *  the server reshapes prompt+style+mood into the actual Gemini prompt
+   *  (`image_prompting.build_image_prompt`) — shows the model/size as the
+   *  live status line (same slot the agent loop's status frames use), and
+   *  lands the result as an assistant message carrying an `image` step, so
+   *  the existing thumbnail + "Apply to…" menu (and drag-to-section) handle
+   *  placement. Nothing is auto-applied to a section — that was the
+   *  complaint this replaces (an agent turn placing a generated image
+   *  wherever it guessed, when nothing was selected). */
+  const generateImage = async (opts: {
+    prompt: string
+    style?: string
+    mood?: string
+    aspect?: string
+    size?: string
+  }) => {
+    if (!siteId || sending) return
+    const size = opts.size || '2K'
+    const sentForPageId = pageIdRef.current
+    const sentSession = sessionRef.current
+    setSending(true)
+    setError(null)
+    setStatus(`Generating image — gemini-3.1-flash-image · ${size}…`)
+    setLiveSteps([])
+    setMessages((m) => [...m, { role: 'user', content: `Generate an image: ${opts.prompt}` }])
+    try {
+      const gen = await cappeApi.post<{ url: string }>(
+        `/sites/${siteId}/generate-image`,
+        {
+          prompt: opts.prompt, aspect_ratio: opts.aspect || '16:9', image_size: size,
+          style: opts.style, mood: opts.mood,
+        },
+      )
+      if (sentForPageId !== pageIdRef.current || sentSession !== sessionRef.current) return
+      setMessages((m) => [...m, {
+        role: 'assistant',
+        content: `Generated a ${size} image. Use "Apply to…" below, or drag it onto a section in the preview to set it as the background.`,
+        steps: [{ kind: 'image', label: `Generated image (${size})`, image_url: gen.url }],
+      }])
+    } catch (e) {
+      if (sentForPageId !== pageIdRef.current || sentSession !== sessionRef.current) return
+      const msg = e instanceof Error ? e.message : 'Image generation failed'
+      setMessages((m) => [...m, {
+        role: 'assistant', content: `Image generation failed: ${msg}`,
+        results: [{ ok: false, summary: 'Generation failed' }], noChanges: true,
+      }])
+    } finally {
+      if (sentForPageId === pageIdRef.current && sentSession === sessionRef.current) {
+        setSending(false)
+        setStatus(null)
+      }
+    }
+  }
+
   const send = async (text: string) => {
     const trimmed = text.trim()
     if (!siteId || !pageId || !trimmed || sending) return
@@ -656,7 +712,7 @@ export function useMerlin(
   return {
     open, setOpen, messages, send, sending, error, tier, setTier, width, setWidth, setWidthLive,
     expanded, setExpanded,
-    status, liveSteps, schema, getImageTargets, applyImageTo,
+    status, liveSteps, schema, getImageTargets, applyImageTo, generateImage,
     attachments, addAttachment, addAttachmentFromUrl, removeAttachment, attachmentUploading, attachmentError,
     conversationId, conversations, openConversation, newConversation,
     renameConversation, deleteConversation,

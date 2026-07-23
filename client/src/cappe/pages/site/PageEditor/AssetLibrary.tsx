@@ -106,14 +106,25 @@ export function AssetLibrary({
             No images yet — generate or upload one and it'll show up here.
           </p>
         )}
+        {panel && assets.length > 0 && (
+          <p className="mb-2 text-[10px] text-zinc-600">
+            Drag an image onto a section in the preview to set it as the background.
+          </p>
+        )}
         {!loading && assets.length > 0 && (
           <div className={panel ? 'grid grid-cols-3 gap-2' : 'grid grid-cols-4 gap-1.5'}>
             {assets.map((a) => (
               <div key={a.id} className="group relative">
                 <button
                   type="button"
+                  draggable
+                  onDragStart={(e) => {
+                    e.dataTransfer.setData('text/uri-list', a.url)
+                    e.dataTransfer.setData('text/plain', a.url)
+                    e.dataTransfer.effectAllowed = 'copy'
+                  }}
                   onClick={() => onPick(a.url)}
-                  className="block aspect-square w-full overflow-hidden rounded border border-zinc-800 hover:border-emerald-500"
+                  className="block aspect-square w-full cursor-grab overflow-hidden rounded border border-zinc-800 hover:border-emerald-500 active:cursor-grabbing"
                   title={a.prompt || a.url}
                 >
                   <img src={a.url} alt="" className="h-full w-full object-cover" />

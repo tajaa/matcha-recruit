@@ -53,7 +53,6 @@ export default function PageEditor() {
   // ── Canvas mode (Pro & Business): click-on-page editing via the preview iframe.
   const canvasUnlocked = usePremium()
   const [editMode, setEditMode] = useState<'form' | 'canvas'>('form')
-  useEffect(() => { if (canvasUnlocked) setEditMode('canvas') }, [canvasUnlocked])
 
   // ── Merlin (Pro & Business): chat-edit the page. Auto-applies ops to
   // `blocks`/theme state — nothing persists until Save.
@@ -82,12 +81,35 @@ export default function PageEditor() {
     },
   )
 
+  // Merlin opens by default for Pro/Business — the editor used to default
+  // straight into Canvas mode instead, which fights Merlin's own gate (it
+  // suppresses the floating field editor whenever Merlin is open, so
+  // section clicks looked broken). Free accounts stay on Form + Merlin
+  // closed, unchanged.
+  useEffect(() => { if (canvasUnlocked) merlin.setOpen(() => true) }, [canvasUnlocked])
+  // Explicitly picking a mode in the toolbar closes Merlin, so the mode the
+  // user asked for actually behaves the way that mode behaves (see above).
+  const setEditModeAndCloseMerlin = (m: 'form' | 'canvas') => {
+    setEditMode(m)
+    merlin.setOpen(() => false)
+  }
+
   // The theme drawer (18rem) and Merlin panel (user-resizable) are real flex
   // siblings, but the canvas inspector is viewport-`fixed` — tell the bridge to
   // clamp it clear of whichever docked panel(s) are open. Merlin's width is read
   // live: a hardcoded 320 leaves the inspector under a widened panel.
   const reservedRight = (themeEditor.themeOpen ? 288 : 0) + (merlin.open ? merlin.width : 0)
-  const canvas = useCanvasBridge(blocks, setBlocks, previewIframeRef, reservedRight, editMode)
+  // A dropped asset sets that section's background — same one-undo-step path
+  // as the panel's "Apply to…" menu (merlin.applyImageTo). Background is a
+  // Pro/Business design feature (getImageTargets' canBackground gate mirrors
+  // this); a free-plan drop is a silent no-op rather than a dead-end upsell
+  // mid-drag.
+  const handleDropImage = (blockIdx: number, url: string) => {
+    const key = blocks[blockIdx]?._k as string | undefined
+    if (!key || !canvasUnlocked) return
+    merlin.applyImageTo(url, { block: key, background: true })
+  }
+  const canvas = useCanvasBridge(blocks, setBlocks, previewIframeRef, reservedRight, editMode, handleDropImage)
 
   // Refresh Merlin's view of live editor state every render. Assigned here
   // rather than at the useRef because `canvas` (the block selection) is
@@ -301,7 +323,7 @@ export default function PageEditor() {
           merlin={merlin}
           canvasUnlocked={canvasUnlocked}
           editMode={editMode}
-          setEditMode={setEditMode}
+          setEditMode={setEditModeAndCloseMerlin}
           status={status}
           setStatus={setStatus}
           saving={saving}

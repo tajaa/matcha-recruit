@@ -137,7 +137,19 @@ function StepTrail({ steps, live, merlin, premium }: {
               <span className={last ? 'text-zinc-300' : ''}>{s.label}</span>
               {s.image_url && (
                 <>
-                  <a href={s.image_url} target="_blank" rel="noreferrer" className="mt-1 block">
+                  <a
+                    href={s.image_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className={`mt-1 block ${s.kind === 'image' ? 'cursor-grab active:cursor-grabbing' : ''}`}
+                    draggable={s.kind === 'image'}
+                    onDragStart={s.kind === 'image' ? (e) => {
+                      e.dataTransfer.setData('text/uri-list', s.image_url as string)
+                      e.dataTransfer.setData('text/plain', s.image_url as string)
+                      e.dataTransfer.effectAllowed = 'copy'
+                    } : undefined}
+                    title={s.kind === 'image' ? 'Drag onto a section to set as its background' : undefined}
+                  >
                     <img
                       src={s.image_url}
                       alt="Rendered preview Merlin reviewed"
@@ -274,49 +286,69 @@ const WIZARD_QUALITIES: [string, string][] = [
   ['1K', '1K'], ['2K', '2K (recommended)'], ['4K', '4K — ~1.5x cost'],
 ]
 
-function WizardChips({ options, value, onChange }: { options: string[]; value: string; onChange: (v: string) => void }) {
+/** Chips PLUS a free-text input sharing one value: picking a chip fills the
+ *  input, typing anything (including clearing it back to empty) overrides —
+ *  there's no separate "custom" mode to switch into. Empty/"You decide" both
+ *  mean the same thing to the server (`image_prompting.build_image_prompt`'s
+ *  default clause), so this never needs to special-case which one is active. */
+function WizardChipsWithInput({
+  options, value, onChange, placeholder,
+}: {
+  options: string[]
+  value: string
+  onChange: (v: string) => void
+  placeholder: string
+}) {
   return (
-    <div className="flex flex-wrap gap-1">
-      {options.map((o) => (
-        <button
-          key={o}
-          type="button"
-          onClick={() => onChange(o)}
-          className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${
-            value === o ? 'border-emerald-500 bg-emerald-500/15 text-emerald-300' : 'border-zinc-700 text-zinc-400 hover:bg-zinc-800'
-          }`}
-        >
-          {o}
-        </button>
-      ))}
+    <div className="space-y-1.5">
+      <div className="flex flex-wrap gap-1">
+        {options.map((o) => (
+          <button
+            key={o}
+            type="button"
+            onClick={() => onChange(o === 'You decide' ? '' : o)}
+            className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${
+              value === o || (o === 'You decide' && !value)
+                ? 'border-emerald-500 bg-emerald-500/15 text-emerald-300'
+                : 'border-zinc-700 text-zinc-400 hover:bg-zinc-800'
+            }`}
+          >
+            {o}
+          </button>
+        ))}
+      </div>
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-2.5 py-1.5 text-[11px] text-zinc-100 placeholder:text-zinc-500 outline-none focus:border-emerald-500"
+      />
     </div>
   )
 }
 
-/** Guided `/generate-image` — replaces the plain-prefill approach with a few
- *  quick questions (each with a "You decide" escape hatch) so a vague ask
- *  doesn't produce a vague image. Composes one message and sends it exactly
- *  like typed chat — no new wire format, just a friendlier way to build the
- *  sentence. Selected-section context seeds the description when available. */
-function ImageGenWizard({ selectedLabel, onSend, onCancel }: {
+/** Guided `/generate-image` — a few quick questions (each with a "You decide"
+ *  escape hatch AND a free-text override) so a vague ask doesn't produce a
+ *  vague image, without forcing a pick from a fixed list. Generates DIRECTLY
+ *  (`merlin.generateImage`) rather than composing an English sentence and
+ *  sending it through the agent — the whole point is the user already told
+ *  us style/mood/aspect/quality structurally; re-parsing that out of prose
+ *  server-side would be strictly lossier. Selected-section context seeds the
+ *  description placeholder when available. */
+function ImageGenWizard({ selectedLabel, onGenerate, onCancel }: {
   selectedLabel: string | null
-  onSend: (text: string) => void
+  onGenerate: (opts: { prompt: string; style?: string; mood?: string; aspect?: string; size?: string }) => void
   onCancel: () => void
 }) {
   const [desc, setDesc] = useState('')
-  const [style, setStyle] = useState('You decide')
-  const [mood, setMood] = useState('You decide')
+  const [style, setStyle] = useState('')
+  const [mood, setMood] = useState('')
   const [aspect, setAspect] = useState('')
   const [quality, setQuality] = useState('2K')
 
   const generate = () => {
-    const what = desc.trim() || (selectedLabel ? `something that fits the ${selectedLabel} section` : 'an image for this page')
-    let text = `Generate an image: ${what}.`
-    text += style === 'You decide' ? ' Pick a style that fits the site.' : ` Style: ${style}.`
-    text += mood === 'You decide' ? ' Pick a mood/lighting that fits the site.' : ` Mood/lighting: ${mood}.`
-    if (aspect) text += ` Aspect ratio ${aspect}.`
-    text += ` Quality: ${quality}.`
-    onSend(text)
+    const prompt = desc.trim() || (selectedLabel ? `something that fits the ${selectedLabel} section` : 'an image for this page')
+    onGenerate({ prompt, style: style.trim() || undefined, mood: mood.trim() || undefined, aspect: aspect || undefined, size: quality })
   }
 
   return (
@@ -338,11 +370,11 @@ function ImageGenWizard({ selectedLabel, onSend, onCancel }: {
       />
       <div>
         <p className="mb-1 text-[10px] font-medium text-zinc-500">Style</p>
-        <WizardChips options={WIZARD_STYLES} value={style} onChange={setStyle} />
+        <WizardChipsWithInput options={WIZARD_STYLES} value={style} onChange={setStyle} placeholder="Or describe a style…" />
       </div>
       <div>
         <p className="mb-1 text-[10px] font-medium text-zinc-500">Mood & light</p>
-        <WizardChips options={WIZARD_MOODS} value={mood} onChange={setMood} />
+        <WizardChipsWithInput options={WIZARD_MOODS} value={mood} onChange={setMood} placeholder="Or describe a mood/lighting…" />
       </div>
       <div className="flex items-center gap-2">
         <select value={aspect} onChange={(e) => setAspect(e.target.value)} className="rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1 text-[11px] text-zinc-200">
@@ -769,7 +801,7 @@ export function MerlinDrawer({ merlin, selectedLabel }: { merlin: ReturnType<typ
               <ImageGenWizard
                 selectedLabel={selectedLabel}
                 onCancel={() => setWizardOpen(false)}
-                onSend={(text) => { setWizardOpen(false); void send(text) }}
+                onGenerate={(opts) => { setWizardOpen(false); void merlin.generateImage(opts) }}
               />
             )}
             <div className={`relative flex gap-2 ${wizardOpen ? 'hidden' : ''}`}>

@@ -1486,6 +1486,7 @@ _CANVAS_JS = """<style>
 .cz-editable .cz-canvas .cz-cv-wrap{min-height:96px}
 .cz-editable a.cz-el,.cz-editable .cz-el img{-webkit-user-drag:none;user-drag:none}
 .cz-theme-hl{outline:2px solid #10b981 !important;outline-offset:2px !important;transition:outline-color .15s}
+.cz-editable [data-cz-block].cz-drop-target{outline:3px dashed #10b981;outline-offset:-3px;background:rgba(16,185,129,.08)}
 </style>
 <script>(function(){
 var editing=null,origText='',cancelEdit=false,dragging=false,dragFrom=-1,downY=0,downIdx=-1,moved=false,dropLine=null;
@@ -1638,6 +1639,38 @@ document.addEventListener('pointerup',function(e){
     post({type:'cz-editing-end'});dragging=false;setTimeout(function(){moved=false;},0);
   }
   downIdx=-1;
+});
+// Drag an external image (an asset-library thumbnail, a chat-generated image)
+// onto a section to set it as that section's background — a native HTML5
+// drag, NOT the pointer-based drag-reorder above (that's for reordering
+// sections, entirely within this frame; this drag originates in the PARENT
+// document, so only the standard dragover/drop events fire in here at all).
+var dropTargetEl=null;
+function clearDropTarget(){if(dropTargetEl){dropTargetEl.classList.remove('cz-drop-target');dropTargetEl=null;}}
+document.addEventListener('dragover',function(e){
+  // Not gated on restrictMode (Form mode) — setting a section's background is
+  // orthogonal to the canvas-only affordances that flag suppresses (freeform
+  // element drag/resize, inline text edit), and works from either mode.
+  if(themeMode)return;
+  var b=e.target.closest&&e.target.closest('[data-cz-block]');
+  if(!b){clearDropTarget();return;}
+  e.preventDefault();
+  if(b!==dropTargetEl){clearDropTarget();dropTargetEl=b;b.classList.add('cz-drop-target');}
+});
+document.addEventListener('dragleave',function(e){
+  // Only clear when the pointer actually left the highlighted block (not a
+  // bubbled leave from a child element re-entering a sibling).
+  if(dropTargetEl&&(!e.relatedTarget||!dropTargetEl.contains(e.relatedTarget)))clearDropTarget();
+});
+document.addEventListener('drop',function(e){
+  if(themeMode)return;
+  var b=e.target.closest&&e.target.closest('[data-cz-block]');
+  clearDropTarget();
+  if(!b||!e.dataTransfer)return;
+  e.preventDefault();
+  var url=e.dataTransfer.getData('text/uri-list')||e.dataTransfer.getData('text/plain');
+  if(!url)return;
+  post({type:'cz-drop-image',block:idxOf(b),url:url});
 });
 window.addEventListener('message',function(e){
   var d=e.data||{};

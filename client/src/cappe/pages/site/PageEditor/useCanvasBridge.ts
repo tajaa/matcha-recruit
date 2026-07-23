@@ -17,6 +17,11 @@ export function useCanvasBridge(
    *  sync) but must suppress canvas-only affordances (inline edit, drag-reorder,
    *  element drag/resize) — told to the iframe via `cz-mode`. */
   editMode: 'form' | 'canvas' = 'canvas',
+  /** An asset (AssetLibrary thumbnail, a Merlin-generated image) was dropped
+   *  onto a section in the preview — set as that section's background. Lives
+   *  outside this hook (it needs `merlin.applyImageTo`, a sibling hook in
+   *  index.tsx), so it's a callback rather than local state here. */
+  onDropImage?: (blockIdx: number, url: string) => void,
 ) {
   const [selBlock, setSelBlock] = useState<number | null>(null)
   const [selElement, setSelElement] = useState<string | null>(null)  // freeform canvas: selected element id
@@ -64,6 +69,8 @@ export function useCanvasBridge(
   const postToCanvas = (msg: unknown) => iframeRef.current?.contentWindow?.postMessage(msg, '*')
   const editModeRef = useRef(editMode)
   editModeRef.current = editMode
+  const onDropImageRef = useRef(onDropImage)
+  onDropImageRef.current = onDropImage
   // Re-assert the interaction mode whenever it changes, and once more when a
   // fresh runtime signals ready (the iframe fully reloads on most edits, which
   // would otherwise silently reset restrictMode to its 'canvas' default).
@@ -146,6 +153,18 @@ export function useCanvasBridge(
           setSelBlock(d.to)
           setSelElement(null)  // a freeform element selection doesn't survive a section move
           break
+        case 'cz-drop-image': {
+          // Only accept https URLs — the dropped value comes from the
+          // sandboxed iframe's dataTransfer, sourced from our own draggable
+          // thumbnails, but it's still untrusted input crossing a frame
+          // boundary. Block index is validated by the eventual `_k` lookup
+          // in index.tsx (an out-of-range index there is just a no-op).
+          const url = typeof d.url === 'string' ? d.url : ''
+          if (url.startsWith('https://') && typeof d.block === 'number') {
+            onDropImageRef.current?.(d.block, url)
+          }
+          break
+        }
         case 'cz-editing-start':
           suspendPreview.current = true
           break
