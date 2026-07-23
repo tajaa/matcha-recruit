@@ -107,7 +107,12 @@ export function useCanvasBridge(
             if (isCanvasBlock(blocksRef.current[sb]) && selElementRef.current) postToCanvas({ type: 'cz-elem-highlight', id: selElementRef.current })
             else postToCanvas({ type: 'cz-highlight', block: sb })
           }
-          if (canvasBpRef.current === 'm') postToCanvas({ type: 'cz-bp', bp: 'm' })
+          // Only canvas mode ever narrows the iframe for the mobile breakpoint
+          // (CanvasModeView); replaying it while a fresh runtime loads under
+          // Form's restrict-mode (Form itself, or Merlin riding 'form' — see
+          // index.tsx) would activate the mobile @media layout inside a
+          // full-width iframe with no way to toggle back.
+          if (editModeRef.current === 'canvas' && canvasBpRef.current === 'm') postToCanvas({ type: 'cz-bp', bp: 'm' })
           break
         }
         case 'cz-select': {

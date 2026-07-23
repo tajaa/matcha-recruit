@@ -110,7 +110,12 @@ export default function PageEditor() {
     if (!key || !canvasUnlocked) return
     merlin.applyImageTo(url, { block: key, background: true })
   }
-  const canvas = useCanvasBridge(blocks, setBlocks, previewIframeRef, reservedRight, editMode, handleDropImage)
+  // Merlin's preview is a read-only-by-chat surface (see MerlinPreviewView's
+  // doc) — it must ride the same 'form' restrict-mode as Form mode (hover +
+  // click-select for the selectedBlock context above, but no inline edit /
+  // drag-reorder / element move-resize), regardless of whichever sub-editor
+  // was active before Merlin opened.
+  const canvas = useCanvasBridge(blocks, setBlocks, previewIframeRef, reservedRight, merlin.open ? 'form' : editMode, handleDropImage)
 
   // Refresh Merlin's view of live editor state every render. Assigned here
   // rather than at the useRef because `canvas` (the block selection) is
