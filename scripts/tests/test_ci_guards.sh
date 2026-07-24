@@ -12,6 +12,13 @@
 #      version from GITHUB_RUN_NUMBER instead, and must NOT touch the counter
 #      file (the runner FS is ephemeral — writing it there accomplishes
 #      nothing and would mask the bug if anyone later relies on it).
+#   3. A tracked path with git mode 160000 (a gitlink) and no matching entry
+#      in .gitmodules broke deploy run 30132023532: actions/checkout runs
+#      `git submodule foreach --recursive` during auth teardown, which is
+#      fatal under persist-credentials:false (the code-review hardening) —
+#      it had been failing silently in the post-job step before that. Root
+#      cause was docs/references/handbooks/{basecamp,sparksuite}-handbook
+#      getting `git clone`d instead of downloaded as plain files.
 #
 # No test framework: this is bash testing bash. Run:
 #   ./scripts/tests/test_ci_guards.sh
@@ -130,6 +137,32 @@ run_build_version_case "laptop path increments existing counter (480 -> 481)" ""
 run_build_version_case "laptop path resets garbage counter value to 1" "" "abc" "1" "1"
 
 ################################################################################
+# Case 7 — no gitlink (git mode 160000) may exist without a .gitmodules entry
+# that resolves it. `git submodule foreach` (which actions/checkout runs
+# during auth teardown) fails immediately on any unresolvable gitlink, and
+# under persist-credentials:false that failure is fatal, not a swallowed
+# post-step annotation.
+################################################################################
+gitlink_paths="$(cd "$REPO_ROOT" && git ls-files -s | awk '$1 == "160000" { print $4 }')"
+
+if [ -z "$gitlink_paths" ]; then
+    check "no unresolvable gitlinks in the index (no 160000 entries at all)" 0
+else
+    gitmodules_file="$REPO_ROOT/.gitmodules"
+    all_resolved=0
+    if [ -f "$gitmodules_file" ]; then
+        all_resolved=1
+        while IFS= read -r p; do
+            [ -z "$p" ] && continue
+            grep -qF "path = $p" "$gitmodules_file" || all_resolved=0
+        done <<< "$gitlink_paths"
+    fi
+    if [ "$all_resolved" = "1" ]; then
+        check "all gitlinks resolve via .gitmodules" 0
+    else
+        check "all gitlinks resolve via .gitmodules (found: $(echo "$gitlink_paths" | tr '\n' ' '))" 1
+    fi
+fi
 echo
 echo "----------------------------------------"
 echo "PASS: $PASS  FAIL: $FAIL"

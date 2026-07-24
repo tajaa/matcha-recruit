@@ -5,7 +5,7 @@ This directory contains high-quality employee handbooks and culture memos for re
 ## Complete Handbooks (PDF / Repo)
 - **[Valve Handbook](Valve_NewEmployeeHandbook.pdf):** Famous for flat hierarchy and culture-first onboarding.
 - **[Basecamp Handbook](basecamp-handbook/):** A repo-based handbook focused on straightforward, human policies.
-- **[Sparksuite Handbook](sparksuite-handbook/):** A modern, transparent template for tech companies.
+- **Sparksuite Handbook** (local-only, not vendored — clone `sparksuite/handbook` into `sparksuite-handbook/` if needed): a modern, transparent template for tech companies.
 
 ## Culture & Policy Summaries (Markdown)
 - **[Netflix Culture](netflix-culture.md):** Focuses on "Freedom & Responsibility" and high performance.

@@ -122,7 +122,8 @@
           "path": "sparksuite-handbook",
           "type": "directory",
           "industry": "Technology",
-          "highlight": "Modern, transparent policy modules"
+          "highlight": "Modern, transparent policy modules",
+          "local_only": true
         }
       ]
     }

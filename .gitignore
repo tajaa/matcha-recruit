@@ -160,6 +160,13 @@ security-audit-6-10.md
 docs/SECURITY_AUDIT_2026-06-10.md
 docs/plans/SECURITY_AUDIT_PLAN_2026-07-05.md
 
+# Sparksuite handbook — a 12MB upstream website repo (PDFs/HTML/yarn.lock) kept
+# as a local reference clone, deliberately not vendored into this repo. Was
+# previously a broken gitlink (mode 160000 with no .gitmodules), which made
+# `git submodule foreach` — and therefore actions/checkout — fail. See
+# docs/references/handbooks/README.md.
+docs/references/handbooks/sparksuite-handbook/
+
 # Going forward: throwaway working notes go in scratch/ (never tracked)
 # instead of new per-filename entries above.
 /scratch/
