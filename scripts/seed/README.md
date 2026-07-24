@@ -39,5 +39,18 @@ Rules (the runner enforces 1–2, you enforce the rest):
    `DEMO-<PACK>-` in a natural key (`incident_number`, `name`, email
    local-part). Undo is then
    `DELETE FROM x WHERE col LIKE 'DEMO-<PACK>-%'`.
+   For tables with no taggable text natural key (most tenant-scoped rows —
+   they key on a UUID PK), pin every `id` under a shared UUID prefix instead
+   (e.g. `b09e11e5-0001-...`) and undo with
+   `DELETE FROM x WHERE id::text LIKE '<prefix>-%'`. See
+   `benefits_sunset_dental.sql` for the pattern.
 5. **Idempotent where cheap** — `ON CONFLICT DO NOTHING` on tagged natural
    keys, so a re-run after a partial failure is safe.
+
+## Packs
+
+- `benefits_sunset_dental.sql` — Sunset Smile Dental Group demo benefits
+  (plan catalog, a closed + an open enrollment period, elections in every
+  status, roster + eligibility exceptions, renewal-risk radar). Undo:
+  `benefits_sunset_dental.undo.sql`. Linted by
+  `server/tests/seed_packs/test_benefits_sunset_dental_pack.py`.

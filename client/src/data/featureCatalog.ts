@@ -30,6 +30,7 @@ export const FEATURE_GROUPS: { label: string; features: Record<string, string> }
       discipline: 'Performance Action',
       employee_schedule: 'Employee Schedule (shift scheduling — assignments, templates, swap/drop requests)',
       schedule_intelligence: 'Schedule Intelligence (incident correlation, Fair Workweek exposure, qualified coverage — needs Employee Schedule too)',
+      benefits_admin: 'Benefits (roster ingest, eligibility exceptions, renewal-risk radar)',
     },
   },
   {
