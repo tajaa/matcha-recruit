@@ -87,7 +87,7 @@ async def list_business_registrations(
 ):
     """List all business registrations with optional status/tier filters."""
     async with get_connection() as conn:
-        query = _BUSINESS_REGISTRATION_SELECT + " WHERE comp.owner_id IS NOT NULL"
+        query = await _business_registration_select(conn) + " WHERE comp.owner_id IS NOT NULL"
         params: list = []
 
         if not include_deleted:
@@ -120,8 +120,9 @@ async def list_business_registrations(
 async def get_business_registration(company_id: UUID):
     """Get details of a specific business registration."""
     async with get_connection() as conn:
+        query = await _business_registration_select(conn)
         row = await conn.fetchrow(
-            _BUSINESS_REGISTRATION_SELECT + " WHERE comp.id = $1 AND comp.owner_id IS NOT NULL",
+            query + " WHERE comp.id = $1 AND comp.owner_id IS NOT NULL",
             company_id,
         )
 

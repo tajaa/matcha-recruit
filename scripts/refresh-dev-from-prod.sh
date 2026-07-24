@@ -119,10 +119,31 @@ ${YELLOW}This will REPLACE the dev database with a copy of PRODUCTION.${NC}
   anonymize PII: $ANON_STATUS
   non-preserved dev user password becomes: $DEV_LOGIN_PASSWORD
   preserved real logins (keep real email + password): ${DEV_PRESERVE_EMAILS:-(none)}
+  first step after confirm: push test-tenant edits dev -> prod (sync-test-tenants.sh)
   dry run (clone+anonymize into staging, NO swap): $DRY_RUN
 EOF
 read -r -p "Type 'refresh-dev' to proceed: " CONFIRM
 [[ "$CONFIRM" == "refresh-dev" ]] || { echo "Aborted."; exit 0; }
+
+# Test tenants (Sunset Smile Dental Group, 720 Behavioral, Onc, ...) can have
+# dev-only edits at this moment — this refresh is about to REPLACE dev
+# wholesale from a prod snapshot, which would silently destroy them. Push
+# dev's current state to prod FIRST, so the fresh clone this script builds
+# carries it right back in. If the push fails, abort before anything is
+# touched — that's a fail-safe compared to trying to restore afterward.
+# --require-push turns sync-test-tenants.sh's normally-quiet --auto skip
+# paths (lock held, dev PG unreachable, tunnel failed) into hard failures —
+# a silent skip here would read as "nothing to push" and let the refresh
+# proceed to destroy dev-only edits that were never actually synced.
+if [[ "$DRY_RUN" != true ]]; then
+    echo "==> Pushing test tenants dev -> prod first (refresh would otherwise destroy dev-only edits)..."
+    if ! "$REPO_ROOT/scripts/sync-test-tenants.sh" --auto --require-push; then
+        echo "${RED}Test-tenant sync failed — aborting refresh. Dev-only test-tenant edits" \
+             "would be destroyed by continuing. Run ./scripts/sync-test-tenants.sh by hand," \
+             "fix whatever failed, then retry.${NC}"
+        exit 1
+    fi
+fi
 
 # --- Render the anonymizer with a real bcrypt(cost 10) hash -----------------
 echo "${YELLOW}Generating dev password hash (bcrypt, matching app/core/services/auth.py)...${NC}"
@@ -211,7 +232,22 @@ ddev -tA -d "$DB_NAME" -c "SELECT 'companies='||count(*) FROM companies UNION AL
 if [[ "$SKIP_ANON" == true ]]; then
     echo "      anonymization SKIPPED — dev holds REAL prod data by request; leak check not applicable."
 else
-    LEAK=$(ddev -tA -d "$DB_NAME" -c "SELECT count(*) FROM users WHERE email NOT LIKE '%@example.com' AND email <> ALL(ARRAY[${PRESERVE_SQL}]::text[]);")
+    # is_test-company users are also intentionally real post-scrub (see the
+    # note atop anonymize_dev.sql) — exclude them the same way the anonymizer
+    # itself does. Column may not exist yet if prod hasn't run testacct01, so
+    # this degrades to the plain (pre-is_test) check rather than aborting the
+    # refresh over a migration that just hasn't landed.
+    HAS_IS_TEST=$(ddev -tA -d "$DB_NAME" -c "SELECT 1 FROM information_schema.columns WHERE table_name='companies' AND column_name='is_test';")
+    if [[ "$HAS_IS_TEST" == "1" ]]; then
+        LEAK=$(ddev -tA -d "$DB_NAME" -c "SELECT count(*) FROM users WHERE email NOT LIKE '%@example.com' AND email <> ALL(ARRAY[${PRESERVE_SQL}]::text[])
+            AND id NOT IN (
+              SELECT user_id FROM clients WHERE user_id IS NOT NULL AND company_id IN (SELECT id FROM companies WHERE is_test)
+              UNION
+              SELECT user_id FROM employees WHERE user_id IS NOT NULL AND org_id IN (SELECT id FROM companies WHERE is_test)
+            );")
+    else
+        LEAK=$(ddev -tA -d "$DB_NAME" -c "SELECT count(*) FROM users WHERE email NOT LIKE '%@example.com' AND email <> ALL(ARRAY[${PRESERVE_SQL}]::text[]);")
+    fi
     echo "      non-reserved user emails, excl. preserved (must be 0): $LEAK"
     [[ "$LEAK" == "0" ]] || { echo "${RED}PII LEAK DETECTED — anonymizer missed rows.${NC}"; exit 1; }
 fi

@@ -341,4 +341,16 @@ if [ "$HOTFIX" = false ]; then
 fi
 show_status
 
+# Test tenants (Sunset Smile Dental Group, 720 Behavioral, Onc, ...) stay in
+# sync dev<->prod by riding every normal deploy — see scripts/sync_tenants.py
+# for the merge engine and scripts/sync-test-tenants.sh for the wrapper this
+# calls. Skipped on --hotfix (nothing but the swap) and when only --agent was
+# deployed (UPDATE_MATCHA false means no backend/frontend code moved).
+# Never fails the deploy: a sync problem is surfaced, not blocking.
+if [ "$HOTFIX" = false ] && [ "$UPDATE_MATCHA" = true ]; then
+    log_info "Syncing test tenants (dev <-> prod)..."
+    "$(dirname "$0")/sync-test-tenants.sh" --auto \
+        || log_warn "Test-tenant sync failed (deploy unaffected). Run ./scripts/sync-test-tenants.sh manually."
+fi
+
 log_success "Deployment complete!"

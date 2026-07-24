@@ -19,6 +19,13 @@ client_secret*.json
 gmail_token.json
 token.json
 
+# Generated tenant-sync SQL (written by scripts/sync_tenants.py on every deploy)
+scripts/sql/sync_to_prod.sql
+scripts/sql/sync_to_prod.undo.sql
+scripts/sql/sync_to_dev.sql
+scripts/sql/sync_to_dev.undo.sql
+scripts/sql/sync_admin_updates.sql
+
 # Generated research artifacts
 server/scripts/*_gaps.md
 server/scripts/*_compliance.md

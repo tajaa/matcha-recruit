@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { ArrowLeft, Loader2, Users, Shield, AlertTriangle, Scale, FileText, Activity, Zap } from 'lucide-react'
 import { api } from '../../../api/client'
+import { useToast } from '../../../components/ui/Toast'
 import type { Overview, Registration, Tab } from './types'
 import { relTime } from './shared'
 import { EmployeeSyncPanel } from './EmployeeSyncPanel'
@@ -62,6 +63,7 @@ export default function AdminCompanyDetail() {
   const [loading, setLoading] = useState(true)
   const [tab, setTab] = useState<Tab>('employees')
   const [runningAssessment, setRunningAssessment] = useState(false)
+  const { toast } = useToast()
 
   useEffect(() => {
     if (!companyId) return
@@ -76,6 +78,23 @@ export default function AdminCompanyDetail() {
       })
       .finally(() => setLoading(false))
   }, [companyId])
+
+  async function handleToggleIsTest() {
+    if (!companyId || !registration) return
+    const next = !registration.is_test
+    if (next && !window.confirm(
+      'Mark this company as a test/demo tenant?\n\n' +
+      '- Its data will be automatically synced dev <-> prod on every deploy (sync-test-tenants.sh).\n' +
+      '- It will be EXEMPTED from PII anonymization when dev is refreshed from prod (anonymize_dev.sql) — only do this for real demo data, never a live customer.'
+    )) return
+    try {
+      await api.patch(`/admin/companies/${companyId}`, { is_test: next })
+      setRegistration({ ...registration, is_test: next })
+      toast(next ? 'Marked as test tenant — syncs dev <-> prod on every deploy' : 'Unmarked test tenant')
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Failed to update test-tenant flag', 'error')
+    }
+  }
 
   async function handleRunAssessment() {
     if (!companyId) return
@@ -111,6 +130,24 @@ export default function AdminCompanyDetail() {
             <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded border ${co.status === 'approved' ? 'bg-emerald-900/30 text-emerald-400 border-emerald-800/40' : 'bg-amber-900/30 text-amber-400 border-amber-800/40'}`}>
               {co.status}
             </span>
+            {registration && (
+              <button
+                type="button"
+                onClick={handleToggleIsTest}
+                className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded border transition-colors ${
+                  registration.is_test
+                    ? 'bg-amber-900/30 text-amber-400 border-amber-800/40'
+                    : 'bg-zinc-900/40 text-zinc-600 border-zinc-800 hover:text-zinc-400'
+                }`}
+                title={
+                  registration.is_test
+                    ? 'Test/demo tenant — synced automatically between dev and prod on every deploy. Click to unmark.'
+                    : 'Click to mark as a test/demo tenant (auto-synced dev <-> prod on every deploy).'
+                }
+              >
+                {registration.is_test ? 'Test' : 'Mark as test'}
+              </button>
+            )}
             {registration?.is_suspended && (
               <span
                 className="text-[10px] font-bold uppercase px-2 py-0.5 rounded border bg-red-900/30 text-red-400 border-red-800/40"

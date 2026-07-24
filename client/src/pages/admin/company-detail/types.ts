@@ -19,6 +19,7 @@ export type Registration = {
   owner_user_id: string | null
   signup_source: string | null
   is_personal: boolean
+  is_test: boolean
   is_suspended: boolean
   deleted_at: string | null
   subscription: {

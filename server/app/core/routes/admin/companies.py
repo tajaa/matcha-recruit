@@ -551,7 +551,7 @@ async def get_employee_admin(employee_id: UUID):
 
 
 @router.patch("/companies/{company_id}", dependencies=[Depends(require_admin)])
-async def update_company_admin(company_id: UUID, body: CompanyProfileUpdate):
+async def update_company_admin(company_id: UUID, body: CompanyProfileUpdate, current_user=Depends(require_admin)):
     """Update company profile fields."""
     fields = body.model_dump(exclude_none=True)
     if not fields:
@@ -565,12 +565,35 @@ async def update_company_admin(company_id: UUID, body: CompanyProfileUpdate):
     values.append(company_id)
 
     async with get_connection() as conn:
+        # `is_test` opts a company out of PII anonymization (anonymize_dev.sql)
+        # AND into unattended bidirectional writes to live prod on every
+        # deploy (sync-test-tenants.sh --auto). Flipping it TRUE on a real,
+        # currently-paying customer would silently do both. An active Stripe
+        # subscription is the clean signal: bespoke/Pro contract customers
+        # (invoiced, no mw_subscriptions row) and un-monetized demo companies
+        # both pass through untouched.
+        if fields.get("is_test") is True:
+            has_active_sub = await conn.fetchval(
+                "SELECT 1 FROM mw_subscriptions WHERE company_id = $1 AND status = 'active' LIMIT 1",
+                company_id,
+            )
+            if has_active_sub:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Cannot mark is_test=true: company has an active paid subscription. "
+                           "Cancel the subscription first if this is genuinely a demo/test tenant.",
+                )
         row = await conn.fetchrow(
             f"UPDATE companies SET {', '.join(set_clauses)} WHERE id = ${len(values)} RETURNING id",
             *values,
         )
         if not row:
             raise HTTPException(status_code=404, detail="Company not found")
+    if "is_test" in fields:
+        logger.info(
+            "Admin set companies.is_test: company=%s is_test=%s admin=%s",
+            company_id, fields["is_test"], current_user.id,
+        )
     from app.matcha.services.matcha_work_document import invalidate_company_profile_cache
     invalidate_company_profile_cache(company_id)
     return {"ok": True}

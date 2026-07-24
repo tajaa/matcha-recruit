@@ -153,6 +153,36 @@ RESERVED_EMAIL = re.compile(
 EMAIL = re.compile(r"[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}", re.I)
 DDL_WORD = re.compile(r"\b(create|drop|alter|truncate|grant|revoke)\b", re.I)
 
+
+def make_email_scrubber():
+    """Deterministic, injective non-reserved-email -> @example.com mapping.
+
+    Shared with scripts/sync_tenants.py: the bidirectional merge engine needs
+    to compare a dev-side row (real-looking email) against a prod-side row
+    that was already pushed through this exact scrub, so both sides must fold
+    through the identical mapping or every such row would "differ" forever.
+
+    Returns (scrub(match) -> str, mapping dict) — mapping is populated as
+    scrub() is called (e.g. via EMAIL.sub(scrub, text)).
+    """
+    mapping: dict[str, str] = {}
+
+    def scrub(m):
+        addr = m.group(0)
+        if RESERVED_EMAIL.search(addr):
+            return addr
+        if addr not in mapping:
+            # The domain has to survive into the local part or the mapping
+            # stops being injective: amara.osei@360bh.com and
+            # amara.osei@360bh.org would both become amara.osei@example.com
+            # and collide on users_email_key.
+            local, domain = addr.split("@", 1)
+            slug = re.sub(r"[^a-z0-9]+", "-", domain.lower()).strip("-")
+            mapping[addr] = f"{local}+{slug}@example.com"
+        return mapping[addr]
+
+    return scrub, mapping
+
 # "skip"   — additive only; a row prod already has is left exactly as prod has it.
 # "update" — dev wins on rows this export mentions. Correct for TEST tenants,
 #            where dev is the source of truth. Never deletes either way: a prod
@@ -325,7 +355,19 @@ def topo_order(tables, fks):
 def lit(v):
     if v is None:
         return "NULL"
-    return "'" + str(v).replace("'", "''") + "'"
+    s = str(v)
+    if "\n" in s or "\r" in s or "\\" in s:
+        # E-string keeps every emitted statement on ONE physical line, so
+        # seed-prod.sh's line-anchored GUARD 1/1b regexes see real statement
+        # structure and not a narrative field's embedded newline. Order
+        # matters: backslashes doubled first, or a literal "\n" in the data
+        # would double-escape wrong.
+        s = (s.replace("\\", "\\\\")
+              .replace("'", "''")
+              .replace("\n", "\\n")
+              .replace("\r", "\\r"))
+        return "E'" + s + "'"
+    return "'" + s.replace("'", "''") + "'"
 
 
 async def fetch_as_text(conn, table, cols, pk, keys):
@@ -416,7 +458,12 @@ async def emit(conn, collector, order, self_ref_cols, targets_desc):
         if fixups:
             lines.append(f"-- {table}: self-references, applied after the rows exist")
             lines.extend(fixups)
-        if table in POST_HOOKS:
+        if table in POST_HOOKS and text_rows:
+            # Gated on text_rows: an unconditional append here means the
+            # generated file always contains at least one UPDATE line (the
+            # position re-derive), even when this table has zero rows —
+            # which made sync-test-tenants.sh's has_mutations() check
+            # permanently true and its "already in sync" log branch dead.
             lines.append("")
             lines.append(POST_HOOKS[table])
         stats.append((table, len(text_rows)))
@@ -506,26 +553,8 @@ async def main():
 
     # Scrub before the file is written, so the .sql on disk is the thing that
     # gets reviewed and applied — no "remember to also pass the flag" step.
-    scrubbed = 0
     if args.scrub_emails:
-        mapping: dict[str, str] = {}
-
-        def _scrub(m):
-            nonlocal scrubbed
-            addr = m.group(0)
-            if RESERVED_EMAIL.search(addr):
-                return addr
-            if addr not in mapping:
-                # The domain has to survive into the local part or the mapping
-                # stops being injective: amara.osei@360bh.com and
-                # amara.osei@360bh.org would both become amara.osei@example.com
-                # and collide on users_email_key.
-                local, domain = addr.split("@", 1)
-                slug = re.sub(r"[^a-z0-9]+", "-", domain.lower()).strip("-")
-                mapping[addr] = f"{local}+{slug}@example.com"
-            scrubbed += 1
-            return mapping[addr]
-
+        _scrub, mapping = make_email_scrubber()
         body = [EMAIL.sub(_scrub, line) for line in body]
         undo = [EMAIL.sub(_scrub, line) for line in undo]
         targets_desc.append(

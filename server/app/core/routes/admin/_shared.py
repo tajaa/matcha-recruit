@@ -119,7 +119,7 @@ __all__ = [
     "FALLBACK_ALLOWED_CITIES_BY_STATE",
     "FALLBACK_CITY_ALIASES",
     "KNOWN_FEATURES",
-    "_BUSINESS_REGISTRATION_SELECT",
+    "_business_registration_select",
     "VALID_BROKER_STATUSES",
     "VALID_BROKER_SUPPORT_ROUTING",
     "VALID_BROKER_BILLING_MODES",
@@ -228,7 +228,7 @@ KNOWN_FEATURES = {
 }
 
 
-_BUSINESS_REGISTRATION_SELECT = """
+_BUSINESS_REGISTRATION_SELECT_TEMPLATE = """
     SELECT
         comp.id,
         comp.name as company_name,
@@ -237,6 +237,7 @@ _BUSINESS_REGISTRATION_SELECT = """
         comp.size as company_size,
         comp.signup_source,
         comp.is_personal,
+        {is_test_col},
         comp.deleted_at,
         u.id as owner_user_id,
         u.email as owner_email,
@@ -269,6 +270,32 @@ _BUSINESS_REGISTRATION_SELECT = """
         LIMIT 1
     ) sub ON TRUE
 """
+
+
+_is_test_column_exists_cache: bool | None = None
+
+
+async def _business_registration_select(conn: asyncpg.Connection) -> str:
+    """Render `_BUSINESS_REGISTRATION_SELECT_TEMPLATE`, degrading gracefully
+    if migration `testacct01` (companies.is_test) hasn't reached this DB yet.
+
+    Deploy ordering isn't guaranteed: `update-ec2.sh` ships backend code
+    independently of `migrate-prod.sh`. A prior version of this query hard-
+    selected `comp.is_test`, so a backend deployed ahead of its migration
+    500'd every `/admin/business-registrations` call outright — the
+    `_row_to_registration` fallback (`row.get("is_test") or False`) never
+    ran because the query failed before returning a row. Cached for the
+    process lifetime; `is_test` only ever appears (migrations don't get
+    un-applied), so there's no need to recheck once true.
+    """
+    global _is_test_column_exists_cache
+    if _is_test_column_exists_cache is None:
+        _is_test_column_exists_cache = bool(await conn.fetchval(
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_name = 'companies' AND column_name = 'is_test'"
+        ))
+    is_test_col = "comp.is_test" if _is_test_column_exists_cache else "FALSE AS is_test"
+    return _BUSINESS_REGISTRATION_SELECT_TEMPLATE.format(is_test_col=is_test_col)
 
 
 VALID_BROKER_STATUSES = {"pending", "active", "suspended", "terminated"}
@@ -540,6 +567,7 @@ def _row_to_registration(row) -> BusinessRegistrationResponse:
         created_at=row["created_at"],
         signup_source=row["signup_source"],
         is_personal=bool(row["is_personal"]),
+        is_test=bool(row.get("is_test") or False),
         is_suspended=bool(row["is_suspended"]),
         deleted_at=row["deleted_at"],
         subscription=sub,

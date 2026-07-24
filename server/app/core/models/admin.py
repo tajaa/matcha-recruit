@@ -129,6 +129,7 @@ class BusinessRegistrationResponse(BaseModel):
     created_at: datetime
     signup_source: Optional[str] = None
     is_personal: bool = False
+    is_test: bool = False
     is_suspended: bool = False
     deleted_at: Optional[datetime] = None
     subscription: Optional[SubscriptionSummary] = None
@@ -417,6 +418,7 @@ class CompanyProfileUpdate(BaseModel):
     size: Optional[str] = None
     headquarters_state: Optional[str] = None
     headquarters_city: Optional[str] = None
+    is_test: Optional[bool] = None
 
 
 class ErrorLogItem(BaseModel):

@@ -21,6 +21,16 @@
 #   --allow-real-emails  permit email addresses outside the RFC 2606 reserved
 #                        domains (blocked by default — realistic fake domains
 #                        cause real bounce-storms; see CLAUDE.md)
+#   --yes                skip GUARD 4's typed confirm. Only honored when the
+#                        env var MATCHA_SYNC_AUTONOMOUS=1 is ALSO set — double
+#                        keyed on purpose so this can't be casually passed to
+#                        an interactive invocation. Reserved for
+#                        scripts/sync-test-tenants.sh --auto, where the SQL is
+#                        machine-generated, rooted exclusively at is_test
+#                        companies, restricted to descend-reachable rows
+#                        (never a shared parent), never deletes, and still
+#                        goes through guards 1/1b/2/3 + the pre-image undo
+#                        file written before this runs.
 #
 # Guardrails, each one a real incident:
 #   1. DDL block         — a seed once CREATE TABLE'd on live prod
@@ -45,6 +55,7 @@ UNDO=0
 DEV=0
 ALLOW_DDL=0
 ALLOW_REAL_EMAILS=0
+ASSUME_YES=0
 
 for arg in "$@"; do
   case "$arg" in
@@ -53,7 +64,8 @@ for arg in "$@"; do
     --dev)               DEV=1 ;;
     --allow-ddl)         ALLOW_DDL=1 ;;
     --allow-real-emails) ALLOW_REAL_EMAILS=1 ;;
-    -h|--help)           sed -n '2,34p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --yes)               ASSUME_YES=1 ;;
+    -h|--help)           sed -n '2,41p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*)                  echo "Unknown flag: $arg" >&2; exit 1 ;;
     *)
       if [[ -n "$SEEDFILE" ]]; then echo "Only one seed file allowed" >&2; exit 1; fi
@@ -97,9 +109,52 @@ esac
 # GUARD 1 — no DDL in a seed. Schema changes go through migrate-prod.sh.
 # (Strips SQL comments first so a mention of DROP in a comment doesn't trip.)
 # ---------------------------------------------------------------------------
-STRIPPED="$(sed 's/--.*$//' "$SQL_TMP")"
+# A naive `sed 's/--.*$//'` is NOT safe as a general-purpose comment
+# stripper once lit() (export-dev-data.py) started emitting multi-line
+# values as single-line E'' strings: a literal "--" inside prose ("reported
+# 3--4 times") reads as a comment-start and truncates the rest of that
+# physical line — including anything after it, like a later email address
+# GUARD 2 needs to see. strip_sql_comments_outside_literals() strips real
+# `--` comments while walking single-quoted string literals correctly
+# (doubled '' = an escaped quote, matching lit()/psql convention), so
+# content genuinely inside a string literal is preserved verbatim.
+strip_sql_comments_outside_literals() {
+  python3 -c '
+import sys
+s = sys.stdin.read()
+out = []
+i, n = 0, len(s)
+in_str = False
+while i < n:
+    c = s[i]
+    if in_str:
+        if c == "\x27":
+            if i + 1 < n and s[i + 1] == "\x27":
+                out.append("\x27\x27"); i += 2; continue
+            in_str = False
+        out.append(c); i += 1; continue
+    if c == "\x27":
+        in_str = True
+        out.append(c); i += 1; continue
+    if c == "-" and i + 1 < n and s[i + 1] == "-":
+        j = s.find("\n", i)
+        i = n if j == -1 else j
+        continue
+    out.append(c); i += 1
+sys.stdout.write("".join(out))
+'
+}
+STRIPPED="$(strip_sql_comments_outside_literals < "$SQL_TMP")"
+# GUARDs 1 and 1b additionally scan a literal-stripped copy: a data value can
+# legitimately contain "...done; begin next phase..." (demo/narrative text)
+# and that must not read as SQL. Comments are stripped the same
+# literal-aware way first, THEN literals are blanked, so a "--" inside
+# prose can't eat a later real statement either. GUARD 2 (emails)
+# deliberately keeps scanning $STRIPPED (comments removed, literals intact),
+# since the values it's checking for LIVE inside string literals.
+STRIPPED_NOLIT="$(echo "$STRIPPED" | sed "s/'[^']*'/''/g")"
 if [[ "$ALLOW_DDL" != "1" ]]; then
-  DDL_HITS="$(echo "$STRIPPED" | grep -inE '\b(create|drop|alter|truncate|grant|revoke)\b' || true)"
+  DDL_HITS="$(echo "$STRIPPED_NOLIT" | grep -inE '\b(create|drop|alter|truncate|grant|revoke)\b' || true)"
   if [[ -n "$DDL_HITS" ]]; then
     echo "ABORT: seed contains DDL/privilege statements:" >&2
     echo "$DDL_HITS" | head -10 | sed 's/^/    /' >&2
@@ -118,7 +173,7 @@ fi
 # CASE … END expressions don't false-positive; bare `END;` (COMMIT synonym)
 # is left to the runtime savepoint canary below for the same reason.
 # ---------------------------------------------------------------------------
-TXN_HITS="$(echo "$STRIPPED" | grep -inE '(^|;)[[:space:]]*(begin|commit|rollback|savepoint|release|start[[:space:]]+transaction|end[[:space:]]+(transaction|work)|prepare[[:space:]]+transaction)\b' || true)"
+TXN_HITS="$(echo "$STRIPPED_NOLIT" | grep -inE '(^|;)[[:space:]]*(begin|commit|rollback|savepoint|release|start[[:space:]]+transaction|end[[:space:]]+(transaction|work)|prepare[[:space:]]+transaction)\b' || true)"
 if [[ -n "$TXN_HITS" ]]; then
   echo "ABORT: seed contains transaction-control statements:" >&2
   echo "$TXN_HITS" | head -10 | sed 's/^/    /' >&2
@@ -179,13 +234,19 @@ echo
 
 # ---------------------------------------------------------------------------
 # GUARD 4 — typed confirmation for real prod writes.
+#
+# --yes bypasses this ONLY when MATCHA_SYNC_AUTONOMOUS=1 is also set (double
+# key — see the --yes help text above). Any other combination falls through
+# to the normal prompt, including a bare --yes with the env var unset.
 # ---------------------------------------------------------------------------
-if [[ "$DEV" != "1" && "$DRY_RUN" != "1" ]]; then
+if [[ "$DEV" != "1" && "$DRY_RUN" != "1" && ! ("$ASSUME_YES" == "1" && "${MATCHA_SYNC_AUTONOMOUS:-}" == "1") ]]; then
   read -r -p "This WRITES TO LIVE PROD. Type 'seed prod' to proceed: " confirm
   if [[ "$confirm" != "seed prod" ]]; then
     echo "Aborted. Nothing was applied."
     exit 1
   fi
+elif [[ "$DEV" != "1" && "$DRY_RUN" != "1" ]]; then
+  echo "GUARD 4 bypassed: --yes + MATCHA_SYNC_AUTONOMOUS=1 (autonomous test-tenant sync)."
 fi
 
 # ---------------------------------------------------------------------------

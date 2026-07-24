@@ -22,6 +22,7 @@ type Company = {
   owner_name: string
   signup_source: string | null
   is_personal: boolean
+  is_test: boolean
   is_suspended: boolean
   deleted_at: string | null
   subscription: {
@@ -280,6 +281,14 @@ export default function Companies() {
                 <>
                   <Link to={`/admin/companies/${c.id}`} className="font-medium text-zinc-100 hover:text-emerald-400 transition-colors">{c.company_name}</Link>
                   <p className="text-xs text-zinc-500">{c.owner_email}</p>
+                  {c.is_test && (
+                    <span
+                      className="inline-block mt-1 mr-1 text-[10px] px-1.5 py-0.5 rounded border border-amber-500/40 bg-amber-500/10 text-amber-300"
+                      title="Test/demo tenant — synced automatically between dev and prod on every deploy."
+                    >
+                      TEST
+                    </span>
+                  )}
                   {c.is_suspended && (
                     <span
                       className="inline-block mt-1 text-[10px] px-1.5 py-0.5 rounded border border-red-500/40 bg-red-500/10 text-red-300"
