@@ -19,6 +19,7 @@ calculation.
 
 from __future__ import annotations
 
+import json
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
@@ -49,6 +50,18 @@ _ATTENDANCE_LOOKBACK_DAYS = 90
 _PRETEXT_LOOKBACK_MONTHS = 6
 
 
+def _details(raw: Any) -> dict:
+    """schedule_audit_log.details is jsonb, but asyncpg hands it back as a raw
+    JSON string (no codec registered on the pool) — every reader has to parse
+    it itself, same convention as feature_flags.merge_company_features."""
+    if isinstance(raw, str):
+        try:
+            return json.loads(raw) or {}
+        except json.JSONDecodeError:
+            return {}
+    return raw or {}
+
+
 # ── Module 1: incident × schedule correlation ────────────────────────────
 
 async def build_incident_correlation(conn, company_id: UUID, *, days: int = 180) -> dict[str, Any]:
@@ -61,7 +74,7 @@ async def build_incident_correlation(conn, company_id: UUID, *, days: int = 180)
         FROM ir_incidents
         WHERE company_id = $1 AND occurred_at >= $2 AND location_id IS NOT NULL
         """,
-        company_id, window_start,
+        company_id, window_start.replace(tzinfo=None),  # occurred_at is naive UTC (no tz column)
     )
     incidents = [dict(r) for r in incident_rows]
 
@@ -186,7 +199,7 @@ async def build_fair_workweek_exposure(conn, company_id: UUID, *, days: int = 90
     )
     approvals_by_shift: dict[str, list[datetime]] = defaultdict(list)
     for r in approval_rows:
-        details = r["details"] or {}
+        details = _details(r["details"])
         shift_id = details.get("shift_id")
         if shift_id:
             approvals_by_shift[str(shift_id)].append(r["created_at"])
@@ -194,7 +207,7 @@ async def build_fair_workweek_exposure(conn, company_id: UUID, *, days: int = 90
     raw_events = []
     shift_ids_needing_assignees: set[str] = set()
     for r in change_rows:
-        row = {"entity_id": r["entity_id"], "action": r["action"], "details": r["details"] or {},
+        row = {"entity_id": r["entity_id"], "action": r["action"], "details": _details(r["details"]),
                "created_at": r["created_at"]}
         event = fair_workweek.classify_change(row, approvals_by_shift)
         if event is None:
@@ -329,19 +342,19 @@ async def _employee_change_metrics(conn, company_id: UUID, employee_id: UUID,
         """
         SELECT entity_id, action, details, created_at FROM schedule_audit_log
         WHERE company_id = $1 AND action IN ('request.approved', 'request.denied')
-          AND created_at >= $2 AND created_at < ($3 + interval '1 day')
+          AND created_at >= $2 AND created_at < ($3::timestamptz + interval '1 day')
         """,
         company_id, start - timedelta(days=1), end,
     )
     approvals_by_shift: dict[str, list[datetime]] = defaultdict(list)
     for r in approval_rows:
-        shift_id = (r["details"] or {}).get("shift_id")
+        shift_id = _details(r["details"]).get("shift_id")
         if shift_id:
             approvals_by_shift[str(shift_id)].append(r["created_at"])
 
     classified = [
         stats.classify_audit_row(
-            {"entity_id": r["entity_id"], "action": r["action"], "details": r["details"] or {},
+            {"entity_id": r["entity_id"], "action": r["action"], "details": _details(r["details"]),
              "created_at": r["created_at"]},
             approvals_by_shift,
         )
@@ -432,7 +445,7 @@ async def build_qualified_coverage(
         emp_uuids = [UUID(e) for e in all_employee_ids]
         req_rows = await conn.fetch(
             """
-            SELECT ecr.employee_id, ct.name AS credential_name, ecr.due_date
+            SELECT ecr.employee_id, ct.label AS credential_name, ecr.due_date
             FROM employee_credential_requirements ecr
             JOIN employees e ON e.id = ecr.employee_id
             LEFT JOIN credential_types ct ON ct.id = ecr.credential_type_id

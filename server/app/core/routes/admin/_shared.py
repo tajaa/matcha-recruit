@@ -224,6 +224,7 @@ KNOWN_FEATURES = {
     "workforce_compliance", "risk_profile", "resident_care", "controls_evidence",
     "limit_adequacy", "driver_risk", "ir_voice_intake", "legal_defense",
     "handbook_pilot", "analysis_pilot", "hr_pilot", "employee_schedule",
+    "schedule_intelligence",
 }
 
 

@@ -3,6 +3,7 @@ import {
   IconPeople, IconSeal, IconSetup, IconShield,
   IconSteps, IconTraining, IconTrend,
 } from '../sidebars/nav-icons'
+import { CalendarClock, BarChart3 } from 'lucide-react'
 import SidebarShell from '../sidebars/SidebarShell'
 import type { NavItem, NavGroup } from '../sidebars/SidebarShell'
 import { useMe } from '../../hooks/useMe'
@@ -50,6 +51,8 @@ const nav: (NavItem | NavGroup)[] = [
       { to: '/app/discipline', icon: IconSteps, label: 'Performance Action', feature: 'discipline' },
       { to: '/app/credential-templates', icon: IconSeal, label: 'Credentialing', feature: 'credential_templates' },
       { to: '/app/workforce-compliance', icon: IconAudit, label: 'Workforce Compliance', feature: 'workforce_compliance' },
+      { to: '/app/employee-schedule', icon: CalendarClock, label: 'Schedule', feature: 'employee_schedule' },
+      { to: '/app/schedule-intelligence', icon: BarChart3, label: 'Schedule Intelligence', feature: 'schedule_intelligence' },
     ],
   },
   {

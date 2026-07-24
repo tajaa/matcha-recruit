@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { BarChart2, AlertTriangle, Scale, ShieldCheck, BadgeCheck } from 'lucide-react'
-import { Card, MetricStrip, PillTabs, Badge } from '../../../components/ui'
+import { Card, MetricStrip, PillTabs, Badge, HelpHint } from '../../../components/ui'
 import { RegisterSpinner } from '../../../components/register/registerKit'
 import { useAsync } from '../../../hooks/useAsync'
 import {
@@ -119,8 +119,9 @@ function IncidentsPanel() {
 
   return (
     <Card className="p-5 space-y-4">
-      <h3 className="text-sm font-medium text-zinc-200 tracking-wide">
+      <h3 className="text-sm font-medium text-zinc-200 tracking-wide flex items-center gap-1.5">
         Do incidents cluster on understaffed shifts?
+        <HelpHint text="Cross-references your incident reports against the staffing level of the shift they occurred on. A meaningfully higher incident rate on understaffed shifts is a signal worth acting on — not a causal claim (there's no time-clock data, only what was scheduled). Fatigue flags call out incidents where the involved employee had under 10 hours' rest before the shift, or was on a 6+ consecutive-day scheduled streak." />
       </h3>
       {d.suppressed ? (
         <p className="text-sm text-zinc-500">
@@ -196,6 +197,7 @@ function FairWorkweekPanel() {
     <Card className="p-5 space-y-4">
       <h3 className="text-sm font-medium text-zinc-200 tracking-wide flex items-center gap-2">
         <Scale className="h-4 w-4 text-zinc-500" /> Fair Workweek / predictive-scheduling exposure
+        <HelpHint text="Prices out your own late shift changes (retimes, cancellations, added/reduced hours) against the predictability-pay brackets in Fair Workweek ordinances covering your locations (NYC, LA today). A change made with less notice than the ordinance requires gets a dollar estimate. Directional, not a payroll calculation — verify with counsel before budgeting against it." />
       </h3>
       {d.locations.length === 0 && d.unmapped_locations.length === 0 && (
         <p className="text-sm text-zinc-500">No locations on file yet.</p>
@@ -240,6 +242,7 @@ function PretextPanel() {
     <Card className="p-5 space-y-4">
       <h3 className="text-sm font-medium text-zinc-200 tracking-wide flex items-center gap-2">
         <ShieldCheck className="h-4 w-4 text-zinc-500" /> Discipline pretext shield
+        <HelpHint text="Flags attendance discipline records where the employee's own schedule was changed frequently — and often on short notice — by the employer in the run-up to the write-up. Disciplining attendance against a schedule you yourself destabilized is a pattern plaintiffs' counsel can use to argue pretext. Advisory only, not a legal determination — review flagged records before relying on them." />
       </h3>
       <p className="text-xs text-zinc-500">{d.data_note}</p>
       {d.flagged.length === 0 ? (
@@ -285,6 +288,7 @@ function CoveragePanel() {
     <Card className="p-5 space-y-4">
       <h3 className="text-sm font-medium text-zinc-200 tracking-wide flex items-center gap-2">
         <BadgeCheck className="h-4 w-4 text-zinc-500" /> Qualified coverage — next {d.days} days
+        <HelpHint text="Checks every assignee on an upcoming published shift against their credential requirements and training records — anyone with an expired credential or overdue training due before the shift date is flagged as lapsed. Reflects what's on file as of now; verify against the source system before relying on it for a compliance decision." />
       </h3>
       {gapShifts.length === 0 ? (
         <p className="text-sm text-zinc-500">Every assigned employee is currently qualified for their upcoming shifts.</p>
