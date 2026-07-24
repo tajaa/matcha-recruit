@@ -29,6 +29,12 @@ readonly GUMMLOCAL_BACKEND_DIR="${REPO_ROOT}/gumm-local/server"
 readonly GUMMLOCAL_FRONTEND_DIR="${REPO_ROOT}/gumm-local/client"
 readonly AGENT_DIR="${REPO_ROOT}/server/agent"
 readonly LANDING_BUILD_VERSION_FILE="${SCRIPT_DIR}/.landing-build-version"
+# CI has no persisted counter (.landing-build-version is gitignored, and the
+# runner FS is ephemeral anyway), so CI builds derive from GITHUB_RUN_NUMBER
+# instead. The offset keeps CI above the laptop counter's current value (480
+# as of 2026-07-24) so the footer marker is monotonic across both paths and
+# never regresses.
+readonly CI_BUILD_VERSION_OFFSET=500
 
 # Default values
 PUSH_TO_ECR=true
@@ -85,6 +91,12 @@ log_section() {
 
 bump_landing_build_version() {
     log_section "Bumping Landing Build Version"
+
+    if [ -n "${GITHUB_RUN_NUMBER:-}" ]; then
+        LANDING_BUILD_VERSION=$((GITHUB_RUN_NUMBER + CI_BUILD_VERSION_OFFSET))
+        log_success "Landing build version set to v${LANDING_BUILD_VERSION} (CI run #${GITHUB_RUN_NUMBER})"
+        return
+    fi
 
     local current_version="0"
     if [ -f "$LANDING_BUILD_VERSION_FILE" ]; then
@@ -767,17 +779,22 @@ main() {
 # Script Entry Point
 ################################################################################
 
-parse_args "$@"
+# Guarded so scripts/tests/test_ci_guards.sh can `source` this file (to reach
+# bump_landing_build_version directly) without triggering parse_args/main and
+# kicking off a real docker build.
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+    parse_args "$@"
 
-if [ "$BUILD_BACKEND" = false ] && \
-   [ "$BUILD_FRONTEND" = false ] && \
-   [ "$BUILD_GUMMFIT_BACKEND" = false ] && \
-   [ "$BUILD_GUMMFIT_FRONTEND" = false ] && \
-   [ "$BUILD_GUMMLOCAL_BACKEND" = false ] && \
-   [ "$BUILD_GUMMLOCAL_FRONTEND" = false ] && \
-   [ "$BUILD_AGENT" = false ]; then
-    log_error "No build targets selected"
-    exit 1
+    if [ "$BUILD_BACKEND" = false ] && \
+       [ "$BUILD_FRONTEND" = false ] && \
+       [ "$BUILD_GUMMFIT_BACKEND" = false ] && \
+       [ "$BUILD_GUMMFIT_FRONTEND" = false ] && \
+       [ "$BUILD_GUMMLOCAL_BACKEND" = false ] && \
+       [ "$BUILD_GUMMLOCAL_FRONTEND" = false ] && \
+       [ "$BUILD_AGENT" = false ]; then
+        log_error "No build targets selected"
+        exit 1
+    fi
+
+    main
 fi
-
-main

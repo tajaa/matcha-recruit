@@ -30,7 +30,16 @@ def upgrade() -> None:
     op.execute(
         "ALTER TABLE companies ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ"
     )
-    op.execute("UPDATE companies SET updated_at = created_at WHERE updated_at IS NULL")
+    op.execute(
+        # created_at is nullable (database.py:868) and is `timestamp without
+        # time zone`, while updated_at is timestamptz — the implicit cast
+        # would resolve the naive value against the session TimeZone. These
+        # were written by NOW() on UTC hosts, so pin the interpretation to
+        # UTC rather than inheriting whatever TZ the migration runs under.
+        "UPDATE companies "
+        "SET updated_at = COALESCE(created_at AT TIME ZONE 'UTC', NOW()) "
+        "WHERE updated_at IS NULL"
+    )
     op.execute("ALTER TABLE companies ALTER COLUMN updated_at SET NOT NULL")
     op.execute("ALTER TABLE companies ALTER COLUMN updated_at SET DEFAULT NOW()")
     op.execute(
@@ -43,9 +52,11 @@ def upgrade() -> None:
         $$ LANGUAGE plpgsql
         """
     )
+    # Two separate op.execute calls: alembic's asyncpg driver prepares each
+    # statement, and a prepared statement cannot contain multiple commands.
+    op.execute("DROP TRIGGER IF EXISTS trg_companies_updated_at ON companies")
     op.execute(
         """
-        DROP TRIGGER IF EXISTS trg_companies_updated_at ON companies;
         CREATE TRIGGER trg_companies_updated_at
             BEFORE UPDATE ON companies
             FOR EACH ROW

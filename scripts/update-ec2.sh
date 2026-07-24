@@ -348,9 +348,30 @@ show_status
 # deployed (UPDATE_MATCHA false means no backend/frontend code moved).
 # Never fails the deploy: a sync problem is surfaced, not blocking.
 if [ "$HOTFIX" = false ] && [ "$UPDATE_MATCHA" = true ]; then
-    log_info "Syncing test tenants (dev <-> prod)..."
-    "$(dirname "$0")/sync-test-tenants.sh" --auto \
-        || log_warn "Test-tenant sync failed (deploy unaffected). Run ./scripts/sync-test-tenants.sh manually."
+    if [ "${CI:-}" = "true" ] || [ "${GITHUB_ACTIONS:-}" = "true" ]; then
+        # GH Actions runner has no local dev Postgres — the sync would quietly
+        # no-op anyway (--auto treats dev-unreachable as a skip); say so
+        # explicitly instead of relying on that.
+        log_info "Tenant sync skipped in CI (needs local dev DB) — run ./scripts/sync-test-tenants.sh from the laptop."
+        # $GITHUB_STEP_SUMMARY renders in the Actions tab and the GitHub
+        # mobile app — the two places a dispatched deploy is actually watched
+        # from, so put the reminder where it won't be missed.
+        if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+            {
+                echo "### Test-tenant sync pending"
+                echo
+                echo "Deployed from CI, which has no local dev Postgres. Run on the Mac:"
+                echo
+                echo '```'
+                echo './scripts/sync-test-tenants.sh --auto'
+                echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+        fi
+    else
+        log_info "Syncing test tenants (dev <-> prod)..."
+        "$(dirname "$0")/sync-test-tenants.sh" --auto \
+            || log_warn "Test-tenant sync failed (deploy unaffected). Run ./scripts/sync-test-tenants.sh manually."
+    fi
 fi
 
 log_success "Deployment complete!"

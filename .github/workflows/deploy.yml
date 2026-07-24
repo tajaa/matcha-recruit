@@ -1,127 +1,100 @@
 name: Build and Deploy
 
+# Manual only. No pull_request trigger (dropped deliberately — PR builds burned
+# runner time and this workflow's deploy leg must never be reachable from a PR).
+# Trigger: Actions tab / GitHub mobile app / `gh workflow run deploy.yml -f target=matcha`
 on:
-  # Deploy is MANUAL only — merging to main must NOT auto-deploy to prod.
-  # Trigger from the Actions tab (Build and Deploy → Run workflow) or:
-  #   gh workflow run deploy.yml --ref main
   workflow_dispatch:
-  # PRs still build images for validation; the deploy-to-ec2 job is gated to
-  # workflow_dispatch, so a PR never touches prod.
-  pull_request:
-    branches:
-      - main
+    inputs:
+      target:
+        description: "What to deploy"
+        type: choice
+        default: matcha
+        options:
+          - matcha      # backend + worker + frontend
+          - backend     # backend + worker only
+          - frontend    # frontend only (no backup, no worker stop)
+      hotfix:
+        description: "Hotfix mode — pull + swap only (skip nginx sync, backup, pruning; 5s worker stop)"
+        type: boolean
+        default: false
+
+# Never two deploys at once; a second dispatch queues instead of racing the swap.
+concurrency:
+  group: prod-deploy
+  cancel-in-progress: false
 
 env:
   AWS_REGION: us-west-1
+  AWS_ACCOUNT_ID: "010438494410"
 
 jobs:
-  build-and-push:
-    name: Build and Push Docker Images
-    runs-on: ubuntu-latest
-    # Skip CI docker builds for cloud-agent PRs (branch prefix `claude/`) —
-    # these are code-review-only PRs, not meant to trigger build/deploy CI.
-    if: ${{ !startsWith(github.head_ref, 'claude/') }}
+  build:
+    name: Build and Push Images
+    # Public repo => arm64-native runner is free. No QEMU: images are linux/arm64
+    # and so is this machine.
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
     permissions:
-      id-token: write
+      id-token: write   # OIDC -> AWS_ROLE_ARN (ECR push only)
       contents: read
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-        with:
-          platforms: linux/arm64
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f  # v3
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a  # v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Build and push images
-        env:
-          AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
-          AWS_REGION: ${{ env.AWS_REGION }}
-          ECR_BACKEND_REPO: matcha-backend
-          ECR_FRONTEND_REPO: matcha-frontend
+      - name: Build and push
         run: |
           chmod +x ./scripts/build-and-push.sh
-          ./scripts/build-and-push.sh --deploy
+          # REGISTRY_CACHE auto-enables under $CI (build-and-push.sh line 41),
+          # pushing :buildcache tags to the same ECR repos the role can write.
+          case "${{ inputs.target }}" in
+            backend)  ./scripts/build-and-push.sh --backend-only ;;
+            frontend) ./scripts/build-and-push.sh --frontend-only ;;
+            *)        ./scripts/build-and-push.sh ;;
+          esac
 
-      - name: Output image tags
-        run: |
-          echo "Backend: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/matcha-backend:latest"
-          echo "Frontend: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/matcha-frontend:latest"
-
-  deploy-to-ec2:
-    name: Deploy to EC2
-    needs: build-and-push
+  deploy:
+    name: Blue-green deploy to EC2
+    needs: build
     runs-on: ubuntu-latest
-    # Manual deploy only. Prod is never restarted by a push or a PR — only by
-    # an explicit `workflow_dispatch`.
-    if: github.event_name == 'workflow_dispatch'
+    # A foreground ssh deploy that gets SIGHUP'd mid-swap can leave prod with
+    # no worker container. Generous cap: the concurrency group above already
+    # prevents a second deploy from racing, so a slow run just costs runner
+    # minutes, not correctness.
+    timeout-minutes: 45
+    # No AWS permissions on purpose: ECR login for the pull happens ON the host
+    # via the host's own credentials (update-ec2.sh ecr_login). This job only
+    # needs SSH.
     permissions:
-      id-token: write
       contents: read
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+      # persist-credentials: false — steps in a job share a filesystem, and
+      # this job also writes the prod EC2 private key to $RUNNER_TEMP; no
+      # reason for a stray .git/config token to sit next to it.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
+          persist-credentials: false
 
-      - name: Backup database before deploy
+      - name: Write SSH key
         env:
-          INSTANCE_ID: ${{ secrets.EC2_INSTANCE_ID }}
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
         run: |
-          # Run backup script before deployment
-          COMMAND_ID=$(aws ssm send-command \
-            --instance-ids "$INSTANCE_ID" \
-            --document-name "AWS-RunShellScript" \
-            --parameters 'commands=["bash ~/backup-postgres.sh >> ~/backup.log 2>&1"]' \
-            --query 'Command.CommandId' \
-            --output text)
+          install -m 600 /dev/null "$RUNNER_TEMP/ec2.pem"
+          printf '%s\n' "$EC2_SSH_KEY" > "$RUNNER_TEMP/ec2.pem"
 
-          # Wait for backup to complete (timeout 120s)
-          echo "Waiting for backup to complete..."
-          aws ssm wait command-executed \
-            --instance-id "$INSTANCE_ID" \
-            --command-id "$COMMAND_ID" || true
-
-          # Check backup status
-          STATUS=$(aws ssm get-command-invocation \
-            --instance-id "$INSTANCE_ID" \
-            --command-id "$COMMAND_ID" \
-            --query 'Status' \
-            --output text)
-
-          if [ "$STATUS" != "Success" ]; then
-            echo "::warning::Database backup returned status: $STATUS - check ~/backup.log on EC2"
-          else
-            echo "Database backup completed successfully"
+      - name: Deploy (update-ec2.sh, verbatim laptop path)
+        env:
+          SSH_KEY: ${{ runner.temp }}/ec2.pem
+        run: |
+          chmod +x ./scripts/update-ec2.sh
+          FLAGS="--${{ inputs.target }}"
+          if [ "${{ inputs.hotfix }}" = "true" ]; then
+            FLAGS="$FLAGS --hotfix"
           fi
-
-      - name: Deploy to EC2 via SSM
-        env:
-          INSTANCE_ID: ${{ secrets.EC2_INSTANCE_ID }}
-          AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
-        run: |
-          # Send command to EC2 via SSM
-          aws ssm send-command \
-            --instance-ids "$INSTANCE_ID" \
-            --document-name "AWS-RunShellScript" \
-            --parameters "commands=[
-              'cd ~/matcha',
-              'aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com',
-              'docker-compose pull',
-              'docker-compose down',
-              'docker-compose up -d',
-              'docker system prune -f'
-            ]" \
-            --output text
+          ./scripts/update-ec2.sh $FLAGS
