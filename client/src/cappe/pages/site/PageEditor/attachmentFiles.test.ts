@@ -53,6 +53,19 @@ describe('imageFilesFromClipboard', () => {
     expect(imageFilesFromClipboard(clipboard([shot], [{ kind: 'file', file: shot }]))).toHaveLength(1)
   })
 
+  it('does not double-count when each accessor mints its own File object', () => {
+    // Chrome's real behavior: clipboardData.files[0] and items[i].getAsFile()
+    // are DISTINCT File objects for one bitmap, created a moment apart — so
+    // lastModified differs and only name+size identifies them as the same shot.
+    const fromFiles = new File([new Uint8Array([1, 2, 3])], 'image.png', {
+      type: 'image/png', lastModified: 1000,
+    })
+    const fromItems = new File([new Uint8Array([1, 2, 3])], 'image.png', {
+      type: 'image/png', lastModified: 1007,
+    })
+    expect(imageFilesFromClipboard(clipboard([fromFiles], [{ kind: 'file', file: fromItems }]))).toHaveLength(1)
+  })
+
   it('ignores pasted text', () => {
     expect(imageFilesFromClipboard(clipboard([], [{ kind: 'string', file: null }]))).toEqual([])
   })

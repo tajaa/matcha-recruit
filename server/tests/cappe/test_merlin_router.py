@@ -124,6 +124,22 @@ def test_quoted_complex_word_does_not_trigger_the_complex_hint():
     assert verdict != "max"
 
 
+def test_a_complex_hint_beats_the_selected_block_shortcut():
+    """The selected-block fallback is length-only, so it must run LAST: a short
+    ask against an already-selected section ("make this look professional") is
+    exactly the visual-judgment request the screenshot loop exists for."""
+    assert merlin_router._heuristic("make this look professional", has_selected_block=True) == "max"
+
+
+def test_contraction_apostrophes_are_not_read_as_quote_delimiters():
+    """Two contractions in one message would otherwise bracket everything
+    between them — stripping the hint word and silently downgrading the turn."""
+    verdict = merlin_router._heuristic(
+        "don't make this look professional, it's urgent", has_selected_block=False,
+    )
+    assert verdict == "max"
+
+
 @pytest.mark.asyncio
 async def test_a_short_message_without_a_selection_is_not_assumed_trivial(classifier):
     """Without a selected section even a short message may mean a page-wide

@@ -147,7 +147,7 @@ _UNGATED_SCHEMES = ("data:", "about:", "blob:")
 _ALLOWED_EXTERNAL_HOSTS = ("fonts.googleapis.com", "fonts.gstatic.com")
 
 
-async def _route_guard(route: Any) -> None:
+async def _route_guard(route: Any, blocked_hosts: set[str]) -> None:
     request = route.request
     url = request.url
     if url.startswith(_UNGATED_SCHEMES):
@@ -160,13 +160,19 @@ async def _route_guard(route: Any) -> None:
     if domain and url.startswith(f"https://{domain}/"):
         await route.continue_()
         return
+    # Record what got dropped so the caller can tell the model its shot may be
+    # missing real content (an external image/logo the page legitimately
+    # references) rather than let it mistake a blocked fetch for a rendering
+    # bug and "fix" a section that looks fine to the actual site visitor.
+    host = url.split("://", 1)[-1].split("/", 1)[0] if "://" in url else url
+    blocked_hosts.add(host)
     await route.abort()
 
 
 async def screenshot_html(
     html: str, viewport: str = DEFAULT_VIEWPORT, *, focus_block: Optional[int] = None,
-) -> bytes:
-    """Render an HTML document and return a JPEG of the fold.
+) -> tuple[bytes, list[str]]:
+    """Render an HTML document and return (a JPEG of the fold, blocked external hosts).
 
     The document is set with `set_content` rather than navigated to, so
     nothing here can point the TOP-LEVEL request at an arbitrary URL. The
@@ -174,7 +180,10 @@ async def screenshot_html(
     separate concern — `_route_guard` gates every one of those to this
     deployment's own storage domain; anything else is aborted rather than
     fetched, which also skips the network round trip for third-party assets
-    the shot never needed to wait on.
+    the shot never needed to wait on. The hosts it aborted are returned
+    alongside the image — a blocked logo/hero image renders as blank in the
+    shot, and the caller needs to be able to say so rather than pass a
+    silently-incomplete render off as ground truth.
 
     `focus_block` scrolls to the section carrying `data-cz-block="<index>"`
     (rendered when the caller passes `render_site_html(..., block_anchors=True)`)
@@ -185,6 +194,7 @@ async def screenshot_html(
     """
     size = VIEWPORTS.get(viewport, VIEWPORTS[DEFAULT_VIEWPORT])
     global _shots_taken
+    blocked_hosts: set[str] = set()
 
     async with _get_semaphore():
         browser = await _get_browser()
@@ -192,7 +202,7 @@ async def screenshot_html(
         try:
             context = await browser.new_context(viewport=size, device_scale_factor=1)
             page = await context.new_page()
-            await page.route("**/*", _route_guard)
+            await page.route("**/*", lambda route: _route_guard(route, blocked_hosts))
             # `domcontentloaded`, not `load`: the rendered HTML can reference
             # real image/font URLs (CloudFront, a user's own upload), and
             # `load` waits on every one of them — a slow or dead asset then
@@ -232,7 +242,7 @@ async def screenshot_html(
                 timeout=_SHOT_TIMEOUT,
             )
             _shots_taken += 1
-            return png
+            return png, sorted(blocked_hosts)
         except ScreenshotUnavailable:
             raise
         except Exception as exc:  # noqa: BLE001

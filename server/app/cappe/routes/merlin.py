@@ -267,10 +267,8 @@ class _PreparedTurn:
     conversation: Optional[dict]
     history: list[dict[str, Any]]
     attachments: list[dict[str, Any]]
-    page_uuid: Optional[UUID]
     tier: str
     routed: bool
-    premium: bool
     agentic: bool
 
 
@@ -351,7 +349,7 @@ async def _prepare_turn(
 
     return _PreparedTurn(
         site=site, conversation=conversation, history=history, attachments=attachments,
-        page_uuid=page_uuid, tier=tier, routed=routed, premium=premium, agentic=agentic,
+        tier=tier, routed=routed, agentic=agentic,
     )
 
 
@@ -497,9 +495,11 @@ async def merlin_agent(
             first `await`."""
             nonlocal persisted
             async with persist_lock:
-                if persisted or prep.conversation is None:
+                if persisted:
                     return
                 persisted = True
+                if prep.conversation is None:
+                    return
                 async with get_connection() as conn:
                     stored = await merlin_store.add_message(
                         conn,
@@ -598,6 +598,17 @@ async def merlin_agent(
             if result is not None and not persisted:
                 try:
                     await asyncio.shield(persist(result))
+                except asyncio.CancelledError:
+                    # The disconnect path: this await itself gets cancelled
+                    # (the shielded persist() task keeps running detached
+                    # regardless — the write still lands), but CancelledError
+                    # is a BaseException, not Exception, so it never reached
+                    # the branch below and this log line never fired on
+                    # exactly the path it exists to observe. Re-raise after
+                    # logging — this generator is being torn down and must
+                    # not swallow its own cancellation.
+                    logger.warning("Merlin post-disconnect persist failed: cancelled")
+                    raise
                 except Exception as exc:  # noqa: BLE001 — best-effort recovery write
                     logger.warning("Merlin post-disconnect persist failed: %s", exc)
 

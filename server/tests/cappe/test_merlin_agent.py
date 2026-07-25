@@ -114,7 +114,7 @@ def patched(monkeypatch):
             shot_calls.append({"viewport": viewport, "focus_block": focus_block})
             if screenshot_error is not None:
                 raise bp.ScreenshotUnavailable(screenshot_error)
-            return screenshot
+            return screenshot, []
 
         monkeypatch.setattr(bp, "screenshot_html", _shot)
 

@@ -561,7 +561,7 @@ async def run_merlin_agent(
             # not I/O) — off the event loop so it doesn't stall every other
             # request while a Max turn takes up to 5 shots.
             html = await asyncio.to_thread(render_html, work_blocks, work_theme)
-            png = await screenshot_html(html, viewport, focus_block=focus_index)
+            png, blocked_hosts = await screenshot_html(html, viewport, focus_block=focus_index)
         except ScreenshotUnavailable as exc:
             # Chromium missing or crashed. The turn continues blind rather than
             # failing — that's still today's behavior, not a regression.
@@ -594,9 +594,18 @@ async def run_merlin_agent(
             )
         except Exception as exc:  # noqa: BLE001 — cosmetic, never fails the turn
             logger.info("Merlin screenshot upload skipped: %s", exc)
+        note = "The image attached to this response is the page as it now stands."
+        if blocked_hosts:
+            # Tell the model explicitly rather than let it infer a rendering
+            # bug from a blank area — those hosts are blocked for SSRF safety
+            # (see browser_pool._route_guard), not broken on the real site.
+            note += (
+                f" Fetches to these external hosts were blocked for this preview and will "
+                f"render blank or missing here even though they load fine for real visitors: "
+                f"{', '.join(blocked_hosts)}. Do not 'fix' a section for that reason alone."
+            )
         return (
-            {"rendered": True, "viewport": viewport,
-             "note": "The image attached to this response is the page as it now stands."},
+            {"rendered": True, "viewport": viewport, "note": note},
             step,
             png,
         )
@@ -835,7 +844,7 @@ async def run_merlin_agent(
                 final_message = finish_message
                 break
 
-            if image_parts and _KEEP_RECENT_SHOTS >= 0:
+            if image_parts:
                 # This batch is about to become the newest image-bearing turn —
                 # prune every earlier one down past the keep count BEFORE
                 # appending it, so "most recent" always means "as of the turn

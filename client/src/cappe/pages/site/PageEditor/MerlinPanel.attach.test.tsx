@@ -2,7 +2,7 @@
 // focus outside it must both reach the same addAttachments the paperclip uses.
 // Run:  npm run test:run -- MerlinPanel.attach
 import { fireEvent, render, screen } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MerlinDrawer } from './MerlinPanel'
 import type { useMerlin } from './useMerlin'
 
@@ -50,11 +50,19 @@ const transfer = (files: File[]) => ({ types: ['Files'], files, items: [] })
 
 const panel = () => screen.getByText('Merlin').closest('div.relative') as HTMLElement
 
+const originalScrollTo = Element.prototype.scrollTo
+
 beforeEach(() => {
   // jsdom has no layout, so the transcript's scroll-to-bottom effect throws.
   Element.prototype.scrollTo = vi.fn()
   addAttachments.mockReset()
   render(<MerlinDrawer merlin={merlin()} selectedLabel={null} />)
+})
+
+afterEach(() => {
+  // Vitest can reuse this worker across test files — an unrestored stub on
+  // the DOM prototype would leak into every later test in the run.
+  Element.prototype.scrollTo = originalScrollTo
 })
 
 describe('drop', () => {

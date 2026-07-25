@@ -34,14 +34,32 @@ export function isImageFile(file: File): boolean {
   return /\.(png|jpe?g|gif|webp|bmp|heic|heif|tiff?)$/i.test(file.name || '')
 }
 
+const EXT_TO_MIME: Record<string, string> = {
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp',
+}
+
+/** The effective mime a browser's empty `file.type` (some drops, Windows
+ *  clipboard images) should be treated as, guessed from the extension — so a
+ *  no-MIME PNG that's already small enough is recognized as "already fine"
+ *  instead of always taking the lossy re-encode path below. Empty string
+ *  (unknown extension) if nothing matches. */
+function effectiveMime(file: File): string {
+  if (file.type) return file.type
+  const ext = (file.name || '').split('.').pop()?.toLowerCase() ?? ''
+  return EXT_TO_MIME[ext] ?? ''
+}
+
 /** Image files out of a drop or a paste, in the order they arrived. */
 export function imageFilesFrom(files: ArrayLike<File> | null | undefined): File[] {
   return Array.from(files ?? []).filter(isImageFile)
 }
 
 /** Images on a clipboard payload. `clipboardData.files` is empty for a
- *  screenshot paste in some browsers, so read the item list too and dedupe on
- *  identity — Chrome populates both for the same bitmap. */
+ *  screenshot paste in some browsers, so read the item list too and dedupe
+ *  against it — Chrome mints a DISTINCT File object per accessor for the same
+ *  underlying bitmap, so `lastModified` (each stamped at object-creation time,
+ *  a moment apart) is not a stable identity key; name+size alone is what's
+ *  actually invariant across the two reads of one clipboard payload. */
 export function imageFilesFromClipboard(data: DataTransfer | null): File[] {
   if (!data) return []
   const out: File[] = imageFilesFrom(data.files)
@@ -49,7 +67,7 @@ export function imageFilesFromClipboard(data: DataTransfer | null): File[] {
     if (item.kind !== 'file') continue
     const file = item.getAsFile()
     if (!file || !isImageFile(file)) continue
-    if (!out.some((f) => f.name === file.name && f.size === file.size && f.lastModified === file.lastModified)) {
+    if (!out.some((f) => f.name === file.name && f.size === file.size)) {
       out.push(file)
     }
   }
@@ -77,7 +95,7 @@ function toBlob(canvas: HTMLCanvasElement, quality: number): Promise<Blob | null
  *  Never throws: the caller reports one message per rejected file rather than
  *  failing the whole drop. */
 export async function prepareImageFile(file: File): Promise<File | null> {
-  const alreadyFine = ALLOWED_IMAGE_MIMES.includes(file.type) && file.size <= MAX_ATTACHMENT_BYTES
+  const alreadyFine = ALLOWED_IMAGE_MIMES.includes(effectiveMime(file)) && file.size <= MAX_ATTACHMENT_BYTES
   if (alreadyFine) return file
 
   let source: ImageBitmap | HTMLImageElement

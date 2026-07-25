@@ -986,18 +986,19 @@ def validate_ops(
             rejected.append({"op": raw, "reason": f"unknown op '{raw.get('op')}'"})
             continue
 
+        # A delegating validator (apply_style_recipe → set_design_bulk,
+        # apply_section_preset → add_block) rewrites raw["op"] plus several
+        # other keys (type/content/design) IN PLACE before handing off to the
+        # real op's validator (see _v_apply_style_recipe / _v_apply_section_
+        # preset). Snapshot BEFORE validating, not just the op name after: if
+        # the delegate rejects, the rejection (and the retry feedback
+        # _rejection_feedback in merlin.py builds from it) must describe the
+        # op the model actually sent, not the expanded shape a rewritten "op"
+        # alone would still leave behind.
+        original_raw = dict(raw)
         reason = op.validate(raw, ctx)
         if reason:
-            # A delegating validator (apply_style_recipe → set_design_bulk,
-            # apply_section_preset → add_block) rewrites raw["op"] IN PLACE
-            # before handing off to the real op's validator (see
-            # _v_apply_style_recipe / _v_apply_section_preset). If THAT
-            # rejects, restore the name the model actually called before
-            # recording it — otherwise the rejection (and the retry feedback
-            # _rejection_feedback in merlin.py builds from it) coaches the
-            # model to fix an op it never sent.
-            raw["op"] = original_op_name
-            rejected.append({"op": raw, "reason": reason})
+            rejected.append({"op": original_raw, "reason": reason})
         else:
             valid.append(raw)
 

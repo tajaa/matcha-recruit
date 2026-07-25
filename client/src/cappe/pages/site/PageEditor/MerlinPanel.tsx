@@ -630,7 +630,11 @@ export function MerlinDrawer({ merlin, selectedLabel }: { merlin: ReturnType<typ
   if (!open) return null
 
   const submit = () => {
-    if (sending || !input.trim()) return
+    // attachmentUploading is also checked here: a paste/drop re-encodes and
+    // uploads before `attachments` gets the entry (see useMerlin's
+    // addAttachments), so hitting Enter in that window sent the message with
+    // no attachment and the image landed on the NEXT message instead.
+    if (sending || attachmentUploading || !input.trim()) return
     send(input)
     setInput('')
     setSubmenu(null)
@@ -796,7 +800,7 @@ export function MerlinDrawer({ merlin, selectedLabel }: { merlin: ReturnType<typ
                     and this offer doesn't reappear on reload. */}
                 {m.role === 'assistant' && m.id && m.ops && m.ops.length > 0 && !m.results && (
                   <button
-                    onClick={() => applyRecoveredOps(m.id as string, m.ops as MerlinOp[])}
+                    onClick={() => void applyRecoveredOps(m.id as string, m.ops as MerlinOp[])}
                     className="mt-1.5 flex items-center gap-1 rounded-full border border-emerald-700/40 bg-emerald-500/[0.08] px-2 py-0.5 text-[10px] font-medium text-emerald-300 hover:bg-emerald-500/[0.14]"
                   >
                     <Wand2 className="h-2.5 w-2.5" /> Apply these changes — this reply never reached you
@@ -976,7 +980,7 @@ export function MerlinDrawer({ merlin, selectedLabel }: { merlin: ReturnType<typ
               </button>
               <button
                 onClick={submit}
-                disabled={sending || !input.trim()}
+                disabled={sending || attachmentUploading || !input.trim()}
                 className="flex-1 rounded-lg bg-emerald-500 px-3 py-1.5 text-sm font-semibold text-zinc-950 hover:bg-emerald-400 disabled:opacity-50"
               >
                 {sending ? 'Sending…' : 'Send'}

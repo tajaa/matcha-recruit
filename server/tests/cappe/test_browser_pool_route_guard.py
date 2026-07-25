@@ -45,7 +45,7 @@ class _FakeRoute:
 
 async def _check(url: str) -> _FakeRoute:
     route = _FakeRoute(url)
-    await _route_guard(route)
+    await _route_guard(route, set())
     return route
 
 
@@ -92,6 +92,16 @@ async def test_an_arbitrary_external_host_is_aborted():
     fetched from inside the VPC just because a screenshot was requested."""
     route = await _check("https://attacker.example.test/track.png")
     assert route.aborted and not route.continued
+
+
+@pytest.mark.asyncio
+async def test_aborted_host_is_recorded_for_the_caller():
+    """screenshot_html hands blocked_hosts back to the agent loop so it can
+    tell the model a blank area is a blocked fetch, not a rendering bug."""
+    blocked_hosts: set = set()
+    route = _FakeRoute("https://attacker.example.test/track.png")
+    await _route_guard(route, blocked_hosts)
+    assert blocked_hosts == {"attacker.example.test"}
 
 
 @pytest.mark.asyncio

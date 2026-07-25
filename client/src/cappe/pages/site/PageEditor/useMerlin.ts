@@ -112,6 +112,37 @@ const HISTORY_MESSAGES = 20
 const TIER_KEY = 'cappe:merlin-tier'
 const WIDTH_KEY = 'cappe:merlin-width'
 const EXPANDED_KEY = 'cappe:merlin-expanded'
+const PENDING_RESULTS_KEY = 'cappe:merlin-pending-results'
+
+/** A `reportResults` PATCH that never made it — see `reportResults` below for
+ *  why this exists. `attempts` caps retries across page loads so a message
+ *  that's gone (deleted conversation) doesn't grow this forever. */
+type PendingResult = { id: string; results: MerlinOpResult[]; attempts: number }
+
+function readPendingResults(): PendingResult[] {
+  try {
+    const raw = localStorage.getItem(PENDING_RESULTS_KEY)
+    return raw ? (JSON.parse(raw) as PendingResult[]) : []
+  } catch {
+    return []
+  }
+}
+function writePendingResults(list: PendingResult[]) {
+  try {
+    if (list.length) localStorage.setItem(PENDING_RESULTS_KEY, JSON.stringify(list))
+    else localStorage.removeItem(PENDING_RESULTS_KEY)
+  } catch { /* ignore quota */ }
+}
+async function patchResultsOnce(messageId: string, results: MerlinOpResult[]): Promise<boolean> {
+  try {
+    await cappeApi.patch(`/merlin/messages/${messageId}/results`, { results })
+    return true
+  } catch {
+    return false
+  }
+}
+const _PATCH_RETRY_DELAYS_MS = [500, 1500]
+const _PENDING_RESULT_MAX_ATTEMPTS = 5
 export const MERLIN_MIN_WIDTH = 320
 export const MERLIN_MAX_WIDTH = 720
 // Expanded ("pop out") width: a fraction of the viewport, capped — wide
@@ -179,6 +210,15 @@ export function useMerlin(
       return next
     })
   }
+  // Slots claimed by an addAttachments call that's still uploading — not yet
+  // in attachmentsRef (which only advances on a resolved upload). Without
+  // this, two overlapping calls (a paste landing while an earlier drop is
+  // still uploading) each read the same "4 free slots" and can together
+  // accept up to 2×MAX_ATTACHMENTS; the server then silently drops everything
+  // past index 4. Reserved synchronously at the top of addAttachments, before
+  // any await, so the second call's room computation always sees the first
+  // call's claim.
+  const inFlightAttachmentsRef = useRef(0)
 
   /** Attach one or more image files — the file picker, a ⌘V paste and a drop
    *  all land here. Oversized/odd-format files are re-encoded client-side
@@ -191,13 +231,14 @@ export function useMerlin(
   const addAttachments = async (files: File[]) => {
     if (!siteId || files.length === 0) return
     setAttachmentError(null)
-    const room = MAX_ATTACHMENTS - attachmentsRef.current.length
+    const room = MAX_ATTACHMENTS - attachmentsRef.current.length - inFlightAttachmentsRef.current
     if (room <= 0) {
       setAttachmentError(`Up to ${MAX_ATTACHMENTS} images per message.`)
       return
     }
     const accepted = files.slice(0, room)
     const overflow = files.length - accepted.length
+    inFlightAttachmentsRef.current += accepted.length
     setAttachmentUploading(true)
     const failed: string[] = []
     try {
@@ -217,6 +258,7 @@ export function useMerlin(
         }
       }
     } finally {
+      inFlightAttachmentsRef.current -= accepted.length
       setAttachmentUploading(false)
     }
     const notes: string[] = []
@@ -375,9 +417,20 @@ export function useMerlin(
    *  button conditions on, so setting it here is what makes the offer go
    *  away once acted on — reported back via the existing PATCH endpoint so
    *  a reload doesn't show the same offer again. */
-  const applyRecoveredOps = (messageId: string, ops: MerlinOp[]) => {
+  const applyRecoveredOps = async (messageId: string, ops: MerlinOp[]) => {
+    // Same split as `send`: generate_image is server-validated but CLIENT-
+    // executed (a slow async round-trip), and applyMerlinOps is a synchronous
+    // fold that treats it as a no-op. Feeding the whole log to applyMerlinOps
+    // here silently dropped the recovered turn's image — the generation
+    // never re-ran, yet the turn was still stamped "no changes" and reported
+    // back as such, closing the recovery offer over work that was discarded.
+    const genOps = ops.filter(
+      (o): o is Extract<MerlinOp, { op: 'generate_image' }> => o.op === 'generate_image',
+    )
+    const syncOps = ops.filter((o) => o.op !== 'generate_image')
+
     const cur = getSnapshot()
-    const applied = applyMerlinOps(cur.blocks, cur.theme, ops, schemaRef.current ?? undefined)
+    const applied = applyMerlinOps(cur.blocks, cur.theme, syncOps, schemaRef.current ?? undefined)
     const changed = applied.blocks !== cur.blocks || applied.theme !== cur.theme
     if (changed) {
       onApply({
@@ -386,9 +439,16 @@ export function useMerlin(
       })
     }
     setMessages((m) => m.map((msg) => (
-      msg.id === messageId ? { ...msg, results: applied.results, noChanges: !applied.results.some((r) => r.ok) } : msg
+      msg.id === messageId
+        ? { ...msg, results: applied.results, noChanges: genOps.length === 0 && !applied.results.some((r) => r.ok) }
+        : msg
     )))
     void reportResults(messageId, applied.results)
+
+    if (genOps.length && siteIdRef.current) {
+      const remapped = genOps.map((g) => ({ ...g, block: applied.tempIdMap[g.block] ?? g.block }))
+      await runImageOps(siteIdRef.current, remapped, pageIdRef.current ?? '', sessionRef.current)
+    }
   }
 
   /** Start a new conversation. The row is only created server-side on the
@@ -483,11 +543,48 @@ export function useMerlin(
     return () => { cancelled = true }
   }, [])
 
+  /** Report which ops actually applied, so the stored transcript's `results`
+   *  gets set and the panel's "Apply these changes" recovery offer (gated on
+   *  `ops set, results unset` — see MerlinMessage.ops) doesn't show for a turn
+   *  that DID reach the client and got applied normally. That offer exists for
+   *  a turn whose reply never arrived at all, but on the wire this PATCH is
+   *  indistinguishable from that shape until it succeeds: a failed PATCH (a
+   *  blip, or the tab closing in the ~100ms window right after apply) leaves
+   *  the stored row looking exactly like an unreached turn, and clicking
+   *  "Apply" on it replays ops that already landed. Retried with backoff, and
+   *  queued to localStorage on final failure so the NEXT load of this panel
+   *  (any page) finishes reporting it before the offer can ever render for a
+   *  turn this client already applied. */
   const reportResults = async (messageId: string, results: MerlinOpResult[]) => {
-    try {
-      await cappeApi.patch(`/merlin/messages/${messageId}/results`, { results })
-    } catch { /* cosmetic — the chips just won't survive a reload */ }
+    if (await patchResultsOnce(messageId, results)) return
+    for (const delay of _PATCH_RETRY_DELAYS_MS) {
+      await new Promise((r) => setTimeout(r, delay))
+      if (await patchResultsOnce(messageId, results)) return
+    }
+    const pending = readPendingResults().filter((p) => p.id !== messageId)
+    pending.push({ id: messageId, results, attempts: 0 })
+    writePendingResults(pending)
   }
+
+  // Flush anything a previous session couldn't report (see reportResults
+  // above) — once per mount, independent of siteId/pageId since a pending
+  // entry may belong to a different page than whichever one loads first.
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      const pending = readPendingResults()
+      if (!pending.length) return
+      const remaining: PendingResult[] = []
+      for (const p of pending) {
+        if (cancelled) { remaining.push(p); continue }
+        if (await patchResultsOnce(p.id, p.results)) continue
+        const attempts = p.attempts + 1
+        if (attempts < _PENDING_RESULT_MAX_ATTEMPTS) remaining.push({ ...p, attempts })
+      }
+      if (!cancelled) writePendingResults(remaining)
+    })()
+    return () => { cancelled = true }
+  }, [])
 
   /** One block a generated (or attached) image can be dropped onto: its own
    *  image field(s) (hero image, logo, …) plus — every block type, per

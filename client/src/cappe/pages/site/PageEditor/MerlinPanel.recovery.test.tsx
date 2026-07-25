@@ -5,7 +5,7 @@
 // if empty).
 // Run:  npm run test:run -- MerlinPanel.recovery
 import { fireEvent, render, screen } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MerlinDrawer } from './MerlinPanel'
 import type { MerlinMessage } from './useMerlin'
 import type { useMerlin } from './useMerlin'
@@ -57,9 +57,17 @@ const merlinWith = (messages: MerlinMessage[]) => ({
   applyRecoveredOps,
 } as unknown as ReturnType<typeof useMerlin>)
 
+const originalScrollTo = Element.prototype.scrollTo
+
 beforeEach(() => {
   Element.prototype.scrollTo = vi.fn()
   applyRecoveredOps.mockReset()
+})
+
+afterEach(() => {
+  // Vitest can reuse this worker across test files — an unrestored stub on
+  // the DOM prototype would leak into every later test in the run.
+  Element.prototype.scrollTo = originalScrollTo
 })
 
 describe('unrecovered turn', () => {
