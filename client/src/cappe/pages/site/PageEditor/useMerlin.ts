@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { cappeApi } from '../../../api'
 import { postCappeSSE } from '../../../sse'
 import type { CappeBlock } from '../../../types'
+import { MAX_ATTACHMENTS, prepareImageFile } from './attachmentFiles'
 import { applyMerlinOps, type MerlinDesignSchema, type MerlinOp, type MerlinOpResult } from './merlinOps'
 
 export type MerlinTier = 'lite' | 'regular' | 'max'
@@ -154,31 +155,76 @@ export function useMerlin(
   const [attachments, setAttachments] = useState<MerlinAttachment[]>([])
   const [attachmentUploading, setAttachmentUploading] = useState(false)
   const [attachmentError, setAttachmentError] = useState<string | null>(null)
+  // `attachments` is read between awaits inside addAttachments (a drop can carry
+  // several files), where the state variable is a stale closure — the second
+  // file would see the count from before the first one landed and blow past the
+  // 4-image cap. Every write goes through updateAttachments so the ref is the
+  // one truth about how many slots are left.
+  const attachmentsRef = useRef<MerlinAttachment[]>([])
+  const updateAttachments = (fn: (prev: MerlinAttachment[]) => MerlinAttachment[]) => {
+    setAttachments((prev) => {
+      const next = fn(prev)
+      attachmentsRef.current = next
+      return next
+    })
+  }
 
-  const addAttachment = async (file: File) => {
-    if (!siteId || attachments.length >= 4) return
-    setAttachmentUploading(true)
+  /** Attach one or more image files — the file picker, a ⌘V paste and a drop
+   *  all land here. Oversized/odd-format files are re-encoded client-side
+   *  first (see attachmentFiles.ts); a Retina screenshot is routinely past the
+   *  route's 5 MB cap, which is exactly the case this path exists for.
+   *
+   *  Uploads run one at a time: four parallel 5 MB POSTs to the same site are
+   *  worse for the user than four quick sequential ones, and sequencing keeps
+   *  attachment order matching drop order (the model refers to them by index). */
+  const addAttachments = async (files: File[]) => {
+    if (!siteId || files.length === 0) return
     setAttachmentError(null)
+    const room = MAX_ATTACHMENTS - attachmentsRef.current.length
+    if (room <= 0) {
+      setAttachmentError(`Up to ${MAX_ATTACHMENTS} images per message.`)
+      return
+    }
+    const accepted = files.slice(0, room)
+    const overflow = files.length - accepted.length
+    setAttachmentUploading(true)
+    const failed: string[] = []
     try {
-      const fd = new FormData()
-      fd.append('file', file)
-      const res = await cappeApi.upload<{ url: string }>(`/sites/${siteId}/upload`, fd)
-      setAttachments((a) => [...a, { url: res.url, mime: file.type || 'image/png' }])
-    } catch (e) {
-      setAttachmentError(e instanceof Error ? e.message : 'Upload failed')
+      for (const raw of accepted) {
+        const file = await prepareImageFile(raw)
+        if (!file) {
+          failed.push(raw.name || 'image')
+          continue
+        }
+        try {
+          const fd = new FormData()
+          fd.append('file', file)
+          const res = await cappeApi.upload<{ url: string }>(`/sites/${siteId}/upload`, fd)
+          updateAttachments((a) => [...a, { url: res.url, mime: file.type || 'image/png' }])
+        } catch (e) {
+          failed.push(e instanceof Error ? e.message : (raw.name || 'image'))
+        }
+      }
     } finally {
       setAttachmentUploading(false)
     }
+    const notes: string[] = []
+    if (failed.length) notes.push(`Couldn't attach ${failed.join(', ')}`)
+    if (overflow > 0) notes.push(`${overflow} skipped — max ${MAX_ATTACHMENTS} per message`)
+    setAttachmentError(notes.length ? notes.join(' · ') : null)
   }
   /** Attach a URL that's already stored (an asset-library pick) instead of a
    *  fresh File — skips the upload round-trip since the object already lives
    *  in S3. The "edit them later" path: attach a past generation, ask for a
    *  variation, and the server turns it into a reference image. */
   const addAttachmentFromUrl = (url: string, mime = 'image/png') => {
-    if (attachments.length >= 4) return
-    setAttachments((a) => [...a, { url, mime }])
+    if (attachmentsRef.current.length >= MAX_ATTACHMENTS) {
+      setAttachmentError(`Up to ${MAX_ATTACHMENTS} images per message.`)
+      return
+    }
+    updateAttachments((a) => [...a, { url, mime }])
   }
-  const removeAttachment = (idx: number) => setAttachments((a) => a.filter((_, i) => i !== idx))
+  const removeAttachment = (idx: number) => updateAttachments((a) => a.filter((_, i) => i !== idx))
   // Auto by default; persisted across pages/sessions like werk's 'mw-model'.
   // Validated against the current tier list, so a value saved before a tier
   // was retired (e.g. the old 'pro') falls back instead of being sent on.
@@ -359,7 +405,7 @@ export function useMerlin(
     setError(null)
     setStatus(null)
     setLiveSteps([])
-    setAttachments([])
+    updateAttachments(() => [])
     setSending(false)
     if (!siteId || !pageId) return
     let cancelled = false
@@ -562,7 +608,7 @@ export function useMerlin(
     setError(null)
     setStatus(null)
     setLiveSteps([])
-    setAttachments([])
+    updateAttachments(() => [])
     setMessages((m) => [
       ...m,
       { role: 'user', content: trimmed, attachments: sentAttachments.length ? sentAttachments : undefined },
@@ -713,7 +759,8 @@ export function useMerlin(
     open, setOpen, messages, send, sending, error, tier, setTier, width, setWidth, setWidthLive,
     expanded, setExpanded,
     status, liveSteps, schema, getImageTargets, applyImageTo, generateImage,
-    attachments, addAttachment, addAttachmentFromUrl, removeAttachment, attachmentUploading, attachmentError,
+    attachments, addAttachments, addAttachmentFromUrl, removeAttachment,
+    attachmentUploading, attachmentError,
     conversationId, conversations, openConversation, newConversation,
     renameConversation, deleteConversation,
   }

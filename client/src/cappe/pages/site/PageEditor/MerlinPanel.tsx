@@ -2,10 +2,11 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import {
-  AlertCircle, Check, Eye, FolderOpen, History, Image, Loader2, Lock, Maximize2, Minimize2,
-  MousePointerClick, Paperclip, Pencil, Plus, Search, Slash, Sparkles, Trash2, Wand2, X,
+  AlertCircle, Check, Eye, FolderOpen, History, Image, ImagePlus, Loader2, Lock, Maximize2,
+  Minimize2, MousePointerClick, Paperclip, Pencil, Plus, Search, Slash, Sparkles, Trash2, Wand2, X,
 } from 'lucide-react'
 import { AssetLibrary } from './AssetLibrary'
+import { ALLOWED_IMAGE_MIMES, MAX_ATTACHMENTS, imageFilesFrom, imageFilesFromClipboard } from './attachmentFiles'
 import { usePremium } from './DesignPrimitives'
 import {
   MERLIN_MAX_WIDTH,
@@ -428,13 +429,69 @@ export function MerlinDrawer({ merlin, selectedLabel }: { merlin: ReturnType<typ
     open, setOpen, messages, send, sending, error, tier, setTier, width, setWidth, setWidthLive,
     expanded, setExpanded,
     newConversation, status, liveSteps, schema,
-    attachments, addAttachment, addAttachmentFromUrl, removeAttachment, attachmentUploading, attachmentError,
+    attachments, addAttachments, addAttachmentFromUrl, removeAttachment, attachmentUploading, attachmentError,
   } = merlin
   const [input, setInput] = useState('')
   const [activeTab, setActiveTab] = useState<'chat' | 'assets' | 'chats'>('chat')
   const listRef = useRef<HTMLDivElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  // Screenshot → chat, without the round trip through the desktop. A macOS
+  // ⌘⇧⌃4 never touches disk (clipboard only), so paste is the shorter path;
+  // drop covers the file that did land on the desktop. Both end up in the same
+  // upload the paperclip uses.
+  const [dragging, setDragging] = useState(false)
+  // dragenter/dragleave fire for every child element the pointer crosses, so a
+  // boolean flips off the moment the cursor moves from the panel onto the
+  // textarea inside it. Depth-count instead: only the outermost leave clears.
+  const dragDepth = useRef(0)
+  const panelRef = useRef<HTMLDivElement>(null)
+  // The window listener below is registered once per open, not per render, so
+  // it reads the current addAttachments through a ref rather than closing over
+  // a stale one (the hook returns a fresh function each render).
+  const addAttachmentsRef = useRef(addAttachments)
+  addAttachmentsRef.current = addAttachments
+  const dragHasFiles = (e: React.DragEvent) => Array.from(e.dataTransfer.types ?? []).includes('Files')
+
+  const onPanelPaste = (e: React.ClipboardEvent) => {
+    const images = imageFilesFromClipboard(e.clipboardData)
+    if (images.length === 0) return  // plain text paste — leave it alone
+    e.preventDefault()
+    setActiveTab('chat')
+    void addAttachments(images)
+  }
+  const onPanelDrop = (e: React.DragEvent) => {
+    dragDepth.current = 0
+    setDragging(false)
+    if (!dragHasFiles(e)) return
+    e.preventDefault()
+    const images = imageFilesFrom(e.dataTransfer.files)
+    if (images.length === 0) return
+    setActiveTab('chat')
+    void addAttachments(images)
+  }
+
+  // ⌘V with the panel open but focus still on the preview/canvas. Without this
+  // the user has to click into the textarea first, which is most of the
+  // friction the paste path exists to remove. Scoped hard: a paste aimed at
+  // some OTHER editable (a field in the editor, a rename box) is left alone,
+  // and one aimed inside the panel is already handled by onPanelPaste above.
+  useEffect(() => {
+    if (!open) return
+    const onPaste = (e: ClipboardEvent) => {
+      const target = e.target as HTMLElement | null
+      if (panelRef.current && target && panelRef.current.contains(target)) return
+      if (target?.closest('input, textarea, select, [contenteditable="true"]')) return
+      const images = imageFilesFromClipboard(e.clipboardData)
+      if (images.length === 0) return
+      e.preventDefault()
+      setActiveTab('chat')
+      void addAttachmentsRef.current(images)
+    }
+    window.addEventListener('paste', onPaste)
+    return () => window.removeEventListener('paste', onPaste)
+  }, [open])
 
   // Slash commands. `slashQuery` is only non-null for a bare "/word" with no
   // space yet — once the user keeps typing past a command (a real sentence
@@ -580,9 +637,43 @@ export function MerlinDrawer({ merlin, selectedLabel }: { merlin: ReturnType<typ
 
   return (
     <div
+      ref={panelRef}
       className="relative flex shrink-0 flex-col overflow-hidden border-l border-zinc-800 bg-zinc-900"
       style={{ width }}
+      onPaste={onPanelPaste}
+      onDragEnter={(e) => {
+        if (!dragHasFiles(e)) return
+        e.preventDefault()
+        dragDepth.current += 1
+        setDragging(true)
+      }}
+      onDragOver={(e) => {
+        if (!dragHasFiles(e)) return
+        // Without preventDefault on dragover the browser refuses the drop and
+        // navigates to the file instead — the whole editor unloads.
+        e.preventDefault()
+        e.dataTransfer.dropEffect = 'copy'
+      }}
+      onDragLeave={(e) => {
+        if (!dragHasFiles(e)) return
+        dragDepth.current = Math.max(0, dragDepth.current - 1)
+        if (dragDepth.current === 0) setDragging(false)
+      }}
+      onDrop={onPanelDrop}
     >
+      {dragging && (
+        // pointer-events-none is load-bearing: an overlay that takes hits
+        // becomes the drag target mid-drag, firing leave/enter against itself.
+        <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center bg-zinc-950/80 p-4">
+          <div className="flex flex-col items-center gap-2 rounded-xl border-2 border-dashed border-emerald-500 px-6 py-8 text-center">
+            <ImagePlus className="h-6 w-6 text-emerald-400" />
+            <p className="text-sm font-medium text-emerald-300">Drop to attach</p>
+            <p className="text-[11px] text-zinc-400">
+              Up to {MAX_ATTACHMENTS} images — place them, match their style, or riff on them
+            </p>
+          </div>
+        </div>
+      )}
       {/* Resize handle only makes sense docked — expanded width tracks the
           viewport (see useMerlin's expandedWidth), not a dragged pixel value. */}
       {!expanded && (
@@ -662,6 +753,9 @@ export function MerlinDrawer({ merlin, selectedLabel }: { merlin: ReturnType<typ
                 </div>
                 <p className="flex items-center gap-1.5 text-[11px] text-zinc-600">
                   <MousePointerClick className="h-3 w-3 shrink-0" /> Select a section in the preview to edit it directly.
+                </p>
+                <p className="flex items-center gap-1.5 text-[11px] text-zinc-600">
+                  <ImagePlus className="h-3 w-3 shrink-0" /> Paste (⌘V) or drop a screenshot anywhere in this panel to attach it.
                 </p>
                 <p className="flex items-center gap-1.5 text-[11px] text-zinc-600">
                   <Slash className="h-3 w-3 shrink-0" /> Type <code className="rounded bg-black/30 px-1 py-0.5 font-mono">/</code> for commands — add a section, generate an image, and more.
@@ -841,25 +935,25 @@ export function MerlinDrawer({ merlin, selectedLabel }: { merlin: ReturnType<typ
               <input
                 ref={fileRef}
                 type="file"
-                accept="image/jpeg,image/png,image/gif,image/webp"
+                multiple
+                accept={ALLOWED_IMAGE_MIMES.join(',')}
                 className="hidden"
                 onChange={(e) => {
-                  const file = e.target.files?.[0]
-                  if (file) void addAttachment(file)
+                  void addAttachments(imageFilesFrom(e.target.files))
                   e.target.value = ''
                 }}
               />
               <button
                 onClick={() => fileRef.current?.click()}
-                disabled={attachmentUploading || attachments.length >= 4}
-                title="Attach a photo — place it, use it as a style reference, or generate variations of it"
+                disabled={attachmentUploading || attachments.length >= MAX_ATTACHMENTS}
+                title="Attach photos — or just paste (⌘V) or drag a screenshot into this panel"
                 className="flex items-center justify-center rounded-lg border border-zinc-700 px-3 py-1.5 text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
               >
                 {attachmentUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
               </button>
               <button
                 onClick={() => setActiveTab('assets')}
-                disabled={attachments.length >= 4}
+                disabled={attachments.length >= MAX_ATTACHMENTS}
                 title="Attach a past generation or upload from your library"
                 className="flex items-center justify-center rounded-lg border border-zinc-700 px-3 py-1.5 text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
               >
