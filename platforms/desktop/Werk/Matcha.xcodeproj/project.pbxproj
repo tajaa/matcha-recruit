@@ -113,6 +113,9 @@
 		AA11BB22CC33DD44EE550002 /* ProjectListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE660002 /* ProjectListView.swift */; };
 		AA11BB22CC33DD44EE550003 /* ProjectDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE660003 /* ProjectDetailView.swift */; };
 		AA11BB22CC33DD44EE550004 /* SectionEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE660004 /* SectionEditorView.swift */; };
+		AA11BB22CC33DD44EE55S003 /* SectionEditorView+Media.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE66S003 /* SectionEditorView+Media.swift */; };
+		AA11BB22CC33DD44EE55S002 /* SectionEditorView+Toolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE66S002 /* SectionEditorView+Toolbar.swift */; };
+		AA11BB22CC33DD44EE55S001 /* SectionEditorView+Comments.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE66S001 /* SectionEditorView+Comments.swift */; };
 		AA11BB22CC33DD44EE550005 /* CollaboratorPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE660005 /* CollaboratorPanelView.swift */; };
 		AA11BB22CC33DD44EE550006 /* AgentPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE660006 /* AgentPanelView.swift */; };
 		AA11BB22CC33DD44EE550007 /* ComplianceDecisionTreeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE660007 /* ComplianceDecisionTreeView.swift */; };
@@ -120,6 +123,10 @@
 		AA11BB22CC33DD44EE550009 /* InboxView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE660009 /* InboxView.swift */; };
 		AA11BB22CC33DD44EE55000A /* InboxComposeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE66000A /* InboxComposeView.swift */; };
 		AA11BB22CC33DD44EE55000B /* KanbanBoardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE66000B /* KanbanBoardView.swift */; };
+		AA11BB22CC33DD44EE55K004 /* KanbanReplay.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE66K004 /* KanbanReplay.swift */; };
+		AA11BB22CC33DD44EE55K003 /* KanbanColumns.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE66K003 /* KanbanColumns.swift */; };
+		AA11BB22CC33DD44EE55K002 /* KanbanBoardView+Toolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE66K002 /* KanbanBoardView+Toolbar.swift */; };
+		AA11BB22CC33DD44EE55K001 /* KanbanBoardView+Columns.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE66K001 /* KanbanBoardView+Columns.swift */; };
 		AA11BB22CC33DD44EE55000C /* ProjectFilesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE66000C /* ProjectFilesView.swift */; };
 		AA11BB22CC33DD44EE55000D /* MarkdownTextEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE66000D /* MarkdownTextEditor.swift */; };
 		AA11BB22CC33DD44EE550099 /* CollabProjectWizardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE660099 /* CollabProjectWizardView.swift */; };
@@ -142,6 +149,10 @@
 		B5C42564C5AE69F7F5EC9ED7 /* ChatFormatting.swift in Sources */ = {isa = PBXBuildFile; fileRef = E085813A9C91596871E4CA7A /* ChatFormatting.swift */; };
 		B5C6D7E8F9A0112B3C4D5E6F /* InventoryPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6D7E8F9A0B1223C4D5E6F70 /* InventoryPanelView.swift */; };
 		B5FB3A85E25775E2AF4AAE5E /* AppState+Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0273A4834997732F3B373320 /* AppState+Theme.swift */; };
+		A5A5A5A5A5A5A5A5A5A5B004 /* AppState+Polling.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5A5A5A5A5A5A5A5A5A5C004 /* AppState+Polling.swift */; };
+		A5A5A5A5A5A5A5A5A5A5B003 /* AppState+Notifications.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5A5A5A5A5A5A5A5A5A5C003 /* AppState+Notifications.swift */; };
+		A5A5A5A5A5A5A5A5A5A5B002 /* AppState+RealtimeHandlers.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5A5A5A5A5A5A5A5A5A5C002 /* AppState+RealtimeHandlers.swift */; };
+		A5A5A5A5A5A5A5A5A5A5B001 /* AppState+Session.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5A5A5A5A5A5A5A5A5A5C001 /* AppState+Session.swift */; };
 		B66274A51FD5BFEC6FC84CDC /* ProjectDetailViewModel+Elements.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CD4A9D11B1B6EBD173C43B5 /* ProjectDetailViewModel+Elements.swift */; };
 		B8EF0BA967250612BA7375C9 /* ScreenplayPaginator.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8716FBE42A3D81F48ED44B1 /* ScreenplayPaginator.swift */; };
 		BAB40B9B334D0AA1E7925213 /* BillingUsageModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = B06A176992AA39C8E304EFD0 /* BillingUsageModels.swift */; };
@@ -274,6 +285,10 @@
 
 /* Begin PBXFileReference section */
 		0273A4834997732F3B373320 /* AppState+Theme.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "AppState+Theme.swift"; sourceTree = "<group>"; };
+		A5A5A5A5A5A5A5A5A5A5C004 /* AppState+Polling.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppState+Polling.swift"; sourceTree = "<group>"; };
+		A5A5A5A5A5A5A5A5A5A5C003 /* AppState+Notifications.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppState+Notifications.swift"; sourceTree = "<group>"; };
+		A5A5A5A5A5A5A5A5A5A5C002 /* AppState+RealtimeHandlers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppState+RealtimeHandlers.swift"; sourceTree = "<group>"; };
+		A5A5A5A5A5A5A5A5A5A5C001 /* AppState+Session.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppState+Session.swift"; sourceTree = "<group>"; };
 		038BF0DE631CE5E12A4B6A83 /* ProjectElementsView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProjectElementsView.swift; sourceTree = "<group>"; };
 		043A0A515D971904874F82FA /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		0B03E99B58F986725B43CD7A /* AuthViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthViewModel.swift; sourceTree = "<group>"; };
@@ -360,6 +375,9 @@
 		AA11BB22CC33DD44EE660002 /* ProjectListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectListView.swift; sourceTree = "<group>"; };
 		AA11BB22CC33DD44EE660003 /* ProjectDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectDetailView.swift; sourceTree = "<group>"; };
 		AA11BB22CC33DD44EE660004 /* SectionEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SectionEditorView.swift; sourceTree = "<group>"; };
+		AA11BB22CC33DD44EE66S003 /* SectionEditorView+Media.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SectionEditorView+Media.swift"; sourceTree = "<group>"; };
+		AA11BB22CC33DD44EE66S002 /* SectionEditorView+Toolbar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SectionEditorView+Toolbar.swift"; sourceTree = "<group>"; };
+		AA11BB22CC33DD44EE66S001 /* SectionEditorView+Comments.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SectionEditorView+Comments.swift"; sourceTree = "<group>"; };
 		AA11BB22CC33DD44EE660005 /* CollaboratorPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CollaboratorPanelView.swift; sourceTree = "<group>"; };
 		AA11BB22CC33DD44EE660006 /* AgentPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentPanelView.swift; sourceTree = "<group>"; };
 		AA11BB22CC33DD44EE660007 /* ComplianceDecisionTreeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComplianceDecisionTreeView.swift; sourceTree = "<group>"; };
@@ -367,6 +385,10 @@
 		AA11BB22CC33DD44EE660009 /* InboxView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxView.swift; sourceTree = "<group>"; };
 		AA11BB22CC33DD44EE66000A /* InboxComposeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxComposeView.swift; sourceTree = "<group>"; };
 		AA11BB22CC33DD44EE66000B /* KanbanBoardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KanbanBoardView.swift; sourceTree = "<group>"; };
+		AA11BB22CC33DD44EE66K004 /* KanbanReplay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KanbanReplay.swift; sourceTree = "<group>"; };
+		AA11BB22CC33DD44EE66K003 /* KanbanColumns.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KanbanColumns.swift; sourceTree = "<group>"; };
+		AA11BB22CC33DD44EE66K002 /* KanbanBoardView+Toolbar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "KanbanBoardView+Toolbar.swift"; sourceTree = "<group>"; };
+		AA11BB22CC33DD44EE66K001 /* KanbanBoardView+Columns.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "KanbanBoardView+Columns.swift"; sourceTree = "<group>"; };
 		AA11BB22CC33DD44EE66000C /* ProjectFilesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectFilesView.swift; sourceTree = "<group>"; };
 		AA11BB22CC33DD44EE66000D /* MarkdownTextEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownTextEditor.swift; sourceTree = "<group>"; };
 		AA11BB22CC33DD44EE660099 /* CollabProjectWizardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CollabProjectWizardView.swift; sourceTree = "<group>"; };
@@ -673,6 +695,9 @@
 				AA11BB22CC33DD44EE660DBB /* DisciplineWorkflowBar.swift */,
 				AA11BB22CC33DD44EE660DBC /* NotificationsPopoverView.swift */,
 				AA11BB22CC33DD44EE660004 /* SectionEditorView.swift */,
+				AA11BB22CC33DD44EE66S003 /* SectionEditorView+Media.swift */,
+				AA11BB22CC33DD44EE66S002 /* SectionEditorView+Toolbar.swift */,
+				AA11BB22CC33DD44EE66S001 /* SectionEditorView+Comments.swift */,
 				AA11BB22CC33DD44EE660005 /* CollaboratorPanelView.swift */,
 				AA11BB22CC33DD44EE660099 /* CollabProjectWizardView.swift */,
 				AA11BB22CC33DD44EE660006 /* AgentPanelView.swift */,
@@ -683,6 +708,10 @@
 				BB01CC22DD33EE44FF660002 /* BlogEditorView.swift */,
 				BB01CC22DD33EE44FF660003 /* MarkdownPreviewView.swift */,
 				AA11BB22CC33DD44EE66000B /* KanbanBoardView.swift */,
+				AA11BB22CC33DD44EE66K004 /* KanbanReplay.swift */,
+				AA11BB22CC33DD44EE66K003 /* KanbanColumns.swift */,
+				AA11BB22CC33DD44EE66K002 /* KanbanBoardView+Toolbar.swift */,
+				AA11BB22CC33DD44EE66K001 /* KanbanBoardView+Columns.swift */,
 				CA11AB01AB01AB01AB01000A /* KanbanListView.swift */,
 				DEADBEEF000000000000F001 /* AIComposeBar.swift */,
 				DEADBEEF000000000000F002 /* AttachmentRow.swift */,
@@ -926,6 +955,10 @@
 				EF7F875E51859F0196E4CB23 /* ContentViewSidebars.swift */,
 				C2EA646E28D8B03AC9B68E63 /* AppStateModels.swift */,
 				0273A4834997732F3B373320 /* AppState+Theme.swift */,
+				A5A5A5A5A5A5A5A5A5A5C004 /* AppState+Polling.swift */,
+				A5A5A5A5A5A5A5A5A5A5C003 /* AppState+Notifications.swift */,
+				A5A5A5A5A5A5A5A5A5A5C002 /* AppState+RealtimeHandlers.swift */,
+				A5A5A5A5A5A5A5A5A5A5C001 /* AppState+Session.swift */,
 				80C811C4F0D76528E1435659 /* AppState+Tabs.swift */,
 			);
 			path = App;
@@ -1298,6 +1331,9 @@
 				AA11BB22CC33DD44EE550DBB /* DisciplineWorkflowBar.swift in Sources */,
 				AA11BB22CC33DD44EE550DBC /* NotificationsPopoverView.swift in Sources */,
 				AA11BB22CC33DD44EE550004 /* SectionEditorView.swift in Sources */,
+				AA11BB22CC33DD44EE55S003 /* SectionEditorView+Media.swift in Sources */,
+				AA11BB22CC33DD44EE55S002 /* SectionEditorView+Toolbar.swift in Sources */,
+				AA11BB22CC33DD44EE55S001 /* SectionEditorView+Comments.swift in Sources */,
 				AA11BB22CC33DD44EE550005 /* CollaboratorPanelView.swift in Sources */,
 				AA11BB22CC33DD44EE550099 /* CollabProjectWizardView.swift in Sources */,
 				AA11BB22CC33DD44EE550006 /* AgentPanelView.swift in Sources */,
@@ -1306,6 +1342,10 @@
 				AA11BB22CC33DD44EE550009 /* InboxView.swift in Sources */,
 				AA11BB22CC33DD44EE55000A /* InboxComposeView.swift in Sources */,
 				AA11BB22CC33DD44EE55000B /* KanbanBoardView.swift in Sources */,
+				AA11BB22CC33DD44EE55K004 /* KanbanReplay.swift in Sources */,
+				AA11BB22CC33DD44EE55K003 /* KanbanColumns.swift in Sources */,
+				AA11BB22CC33DD44EE55K002 /* KanbanBoardView+Toolbar.swift in Sources */,
+				AA11BB22CC33DD44EE55K001 /* KanbanBoardView+Columns.swift in Sources */,
 				CA11AB01AB01AB01AB010009 /* KanbanListView.swift in Sources */,
 				DEADBEEF000000000000B001 /* AIComposeBar.swift in Sources */,
 				DEADBEEF000000000000B002 /* AttachmentRow.swift in Sources */,
@@ -1446,6 +1486,10 @@
 				B34B2A45CBE54D19CDF7D313 /* TypingBubbleView.swift in Sources */,
 				3ADC1A37514702BC2F141FA6 /* AppStateModels.swift in Sources */,
 				B5FB3A85E25775E2AF4AAE5E /* AppState+Theme.swift in Sources */,
+				A5A5A5A5A5A5A5A5A5A5B004 /* AppState+Polling.swift in Sources */,
+				A5A5A5A5A5A5A5A5A5A5B003 /* AppState+Notifications.swift in Sources */,
+				A5A5A5A5A5A5A5A5A5A5B002 /* AppState+RealtimeHandlers.swift in Sources */,
+				A5A5A5A5A5A5A5A5A5A5B001 /* AppState+Session.swift in Sources */,
 				74D7570AF92483A279339C53 /* AppState+Tabs.swift in Sources */,
 				8DA37E55EDEBBF213FC4F6D6 /* ChannelDetailView+Messages.swift in Sources */,
 				3E9E0C1BB3656B86327BC446 /* ChannelDetailView+Actions.swift in Sources */,
