@@ -34,6 +34,8 @@ function sourceLabel(record: TrainingRecord): { text: string; link?: string } {
       return { text: 'Recurring compliance cadence' }
     case 'bulk_assign':
       return { text: 'Bulk-assigned by an admin' }
+    case 'schedule':
+      return { text: 'Assigned from scheduling' }
     default:
       return { text: 'Manually assigned' }
   }

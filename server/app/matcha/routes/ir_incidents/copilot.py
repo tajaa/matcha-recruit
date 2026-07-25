@@ -2238,7 +2238,13 @@ async def accept_copilot_card(
                     }
 
                 elif action_type == "assign_training":
+                    from app.core.feature_flags import get_company_features
                     from app.matcha.services.training_assignment import assign_training
+
+                    features = await get_company_features(company_id, conn=conn)
+                    if not features.get("training"):
+                        yield _sse({"type": "error", "detail": "Training feature is not enabled for this company"})
+                        return
 
                     requirement_id = action.get("requirement_id")
                     if not requirement_id:

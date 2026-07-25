@@ -997,15 +997,29 @@ async def _auto_map_policy_violations(incident_id: str, company_id: str):
 
 _WORD_RE = re.compile(r"[a-z]+")
 
+# Generic terms that recur across unrelated training subjects ("Fire Safety"
+# vs "Ladder Safety" vs "Harassment Prevention Training") — excluded from the
+# overlap so a topic and a requirement don't score as a match on nothing but
+# a shared vocabulary word neither is actually about.
+_GENERIC_TRAINING_TERMS = {
+    "safety", "training", "workplace", "prevention", "program", "policy",
+    "procedures", "compliance", "awareness", "annual", "required", "course",
+}
+
 
 def _score_training_match(topic: str, requirement_title: str, requirement_type: str) -> float:
     """Word-overlap confidence in [0, 1] between a recommended training topic
     and a training_requirements row. Deterministic — no Gemini call, so the
     assign_training card built from a confident match carries no
-    hallucination risk (unlike policy_mapping, which is a full LLM call)."""
-    topic_words = set(_WORD_RE.findall(topic.lower()))
+    hallucination risk (unlike policy_mapping, which is a full LLM call).
+
+    Generic terms are stripped from both sides before scoring — otherwise any
+    two-word topic sharing one generic word ("ladder safety" vs "Fire Safety")
+    clears the threshold on incidental vocabulary rather than real overlap."""
+    topic_words = set(_WORD_RE.findall(topic.lower())) - _GENERIC_TRAINING_TERMS
     title_words = set(_WORD_RE.findall((requirement_title or "").lower()))
     title_words |= set(_WORD_RE.findall((requirement_type or "").replace("_", " ").lower()))
+    title_words -= _GENERIC_TRAINING_TERMS
     if not topic_words or not title_words:
         return 0.0
     return len(topic_words & title_words) / len(topic_words)

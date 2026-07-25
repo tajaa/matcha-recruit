@@ -273,6 +273,14 @@ async def issue_record(
     async with get_connection() as conn:
         await _load_employee(conn, body.employee_id, company_id)
 
+        if body.remedial_requirement_id is not None:
+            requirement = await conn.fetchval(
+                "SELECT id FROM training_requirements WHERE id = $1 AND company_id = $2",
+                body.remedial_requirement_id, company_id,
+            )
+            if not requirement:
+                raise HTTPException(status_code=404, detail="Training requirement not found")
+
         # The gate runs here, server-side, on every issue — never trusting what
         # the client previewed. A block is a statutory prohibition, so there is
         # no acknowledge-and-proceed path for it: the write is refused.

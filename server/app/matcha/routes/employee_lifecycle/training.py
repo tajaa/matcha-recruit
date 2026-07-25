@@ -11,6 +11,7 @@ from datetime import date, datetime, timedelta
 from typing import Any, Optional
 from uuid import UUID, uuid4
 
+import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
@@ -378,25 +379,33 @@ async def update_rule(
     user: CurrentUser = Depends(require_admin_or_client),
     company_id: UUID = Depends(get_client_company_id),
 ):
-    """Update a training-assignment rule."""
+    """Update a training-assignment rule.
+
+    True PATCH over `model_fields_set`: only the fields the caller sent are
+    written, so an explicit null clears a nullable filter column (work_states,
+    departments, due_days, incident_types, min_severity, roles) instead of
+    being indistinguishable from "not provided" — the only prior escape was
+    soft-deleting and recreating the rule.
+    """
     if not company_id:
         raise HTTPException(status_code=404, detail="Rule not found")
+
+    patch = body.model_dump(exclude_unset=True)
+    if not patch:
+        raise HTTPException(status_code=400, detail="No updates provided")
+
+    if "applies_to" in patch and patch["applies_to"] not in {"all", "supervisor", "nonsupervisor"}:
+        raise HTTPException(status_code=400, detail="Invalid applies_to")
+    if "is_active" in patch and patch["is_active"] is None:
+        raise HTTPException(status_code=400, detail="is_active cannot be cleared")
 
     updates = []
     params: list = []
     idx = 1
-    for field_name in (
-        "work_states", "applies_to", "departments", "due_days",
-        "incident_types", "min_severity", "is_active", "roles",
-    ):
-        value = getattr(body, field_name)
-        if value is not None:
-            updates.append(f"{field_name} = ${idx}")
-            params.append(value)
-            idx += 1
-
-    if not updates:
-        raise HTTPException(status_code=400, detail="No updates provided")
+    for field_name, value in patch.items():
+        updates.append(f"{field_name} = ${idx}")
+        params.append(value)
+        idx += 1
 
     updates.append("updated_at = NOW()")
     params.append(rule_id)
@@ -484,22 +493,28 @@ async def create_record(
             if not req:
                 raise HTTPException(status_code=404, detail="Training requirement not found")
 
-        row = await conn.fetchrow(
-            """
-            INSERT INTO training_records
-                (company_id, employee_id, requirement_id, title, training_type, due_date, provider, notes)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-            RETURNING *
-            """,
-            company_id,
-            body.employee_id,
-            body.requirement_id,
-            body.title,
-            body.training_type,
-            body.due_date,
-            body.provider,
-            body.notes,
-        )
+        try:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO training_records
+                    (company_id, employee_id, requirement_id, title, training_type, due_date, provider, notes)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                RETURNING *
+                """,
+                company_id,
+                body.employee_id,
+                body.requirement_id,
+                body.title,
+                body.training_type,
+                body.due_date,
+                body.provider,
+                body.notes,
+            )
+        except asyncpg.UniqueViolationError:
+            raise HTTPException(
+                status_code=409,
+                detail="This employee already has an open assignment for that requirement",
+            )
         return _record_to_dict(row)
 
 

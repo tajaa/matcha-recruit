@@ -359,6 +359,7 @@ async def check_shift_compliance(
     fw_shift_published: bool = False,
     shift_kind: str = "work",
     training_requirement_id: Optional[UUID] = None,
+    lapse_items: Optional[list[dict]] = None,
 ) -> list[dict]:
     """Assemble context + evaluate. Returns violations (never raises). When
     `employee_id` is None (shift not yet assigned), only shift-intrinsic checks
@@ -370,7 +371,13 @@ async def check_shift_compliance(
     notice-window-relevant change (e.g. the compliance-panel preview).
 
     `shift_kind`/`training_requirement_id`: for a `kind='training'` shift, the
-    training-lapse check excludes the requirement the shift itself teaches."""
+    training-lapse check excludes the requirement the shift itself teaches.
+
+    `lapse_items`: pass this employee's pre-fetched `fetch_lapse_items` rows
+    (from a single batched call over the whole employee list) to skip this
+    call's own feature-lookup + lapse-item query — callers looping over many
+    employees (create_shift, update_shift) would otherwise re-resolve company
+    features and re-query training/credential lapses once per employee."""
     state, city = await _location_state(conn, company_id, location_id)
     worked = _hours(starts_at, ends_at, break_minutes)
 
@@ -424,13 +431,22 @@ async def check_shift_compliance(
         shift_published=fw_shift_published, min_rest_gap_hours=min_rest,
     )
     if employee_id is not None:
-        violations += await _training_lapse_advisories(
-            conn, company_id, employee_id,
-            shift_date=starts_at.astimezone(timezone.utc).date(),
-            exclude_requirement_id=(
-                training_requirement_id if shift_kind == "training" else None
-            ),
-        )
+        if lapse_items is not None:
+            violations += shape_lapse_advisories(
+                lapse_items,
+                shift_date=starts_at.astimezone(timezone.utc).date(),
+                exclude_requirement_id=(
+                    training_requirement_id if shift_kind == "training" else None
+                ),
+            )
+        else:
+            violations += await _training_lapse_advisories(
+                conn, company_id, employee_id,
+                shift_date=starts_at.astimezone(timezone.utc).date(),
+                exclude_requirement_id=(
+                    training_requirement_id if shift_kind == "training" else None
+                ),
+            )
     return violations
 
 

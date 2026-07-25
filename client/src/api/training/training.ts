@@ -23,6 +23,7 @@ export type TrainingSourceType =
   | 'discipline'
   | 'credential'
   | 'cadence'
+  | 'schedule'
 
 export type TrainingRecord = {
   id: string

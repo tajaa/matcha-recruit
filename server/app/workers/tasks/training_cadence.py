@@ -22,6 +22,7 @@ from datetime import date, timedelta
 
 from ..celery_app import celery_app
 from ..utils import get_db_connection, scheduler_settings_row
+from app.core.feature_flags import get_company_features
 from app.matcha.services.training_assignment import resolve_audience, assign_training
 
 
@@ -153,14 +154,17 @@ async def _dispatch_training_cadence() -> dict:
                    req.is_active AS req_is_active
             FROM training_assignment_rules r
             JOIN training_requirements req ON req.id = r.requirement_id
-            JOIN companies c ON c.id = r.company_id
             WHERE r.trigger = 'schedule' AND r.is_active = TRUE
-              AND COALESCE((c.enabled_features->>'training')::boolean, FALSE) = TRUE
             """
         )
         for rule in rule_rows:
             if not rule["req_is_active"]:
                 continue
+
+            features = await get_company_features(rule["company_id"], conn=conn)
+            if not features.get("training"):
+                continue
+
             employee_ids = await resolve_audience(
                 conn,
                 rule["company_id"],
@@ -168,6 +172,24 @@ async def _dispatch_training_cadence() -> dict:
                 work_states=rule["work_states"],
                 departments=rule["departments"],
             )
+            if not employee_ids:
+                continue
+
+            # Drop anyone who already has an active or unexpired-completed
+            # record for this requirement — otherwise this pass reassigns the
+            # same requirement to the same employee every hourly worker
+            # restart forever (mirrors pass (a)'s NOT EXISTS guard above).
+            already_covered = await conn.fetch(
+                """
+                SELECT employee_id FROM training_records
+                WHERE requirement_id = $1 AND employee_id = ANY($2)
+                  AND status IN ('assigned', 'in_progress', 'completed')
+                  AND (expiration_date IS NULL OR expiration_date > CURRENT_DATE)
+                """,
+                rule["req_id"], employee_ids,
+            )
+            covered_ids = {r["employee_id"] for r in already_covered}
+            employee_ids = [eid for eid in employee_ids if eid not in covered_ids]
             if not employee_ids:
                 continue
             due_date = date.today() + timedelta(days=rule["due_days"]) if rule["due_days"] else None

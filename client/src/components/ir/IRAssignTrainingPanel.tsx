@@ -45,9 +45,11 @@ export function IRAssignTrainingPanel({ incidentId }: { incidentId: string }) {
       setLastResult(
         result.assigned_count
           ? `Assigned to ${result.assigned_count} employee(s).`
-          : result.already_open_count
-            ? `Already assigned to ${result.already_open_count} employee(s) — due date pulled in where needed.`
-            : 'No matching employees to assign.',
+          : result.accelerated_count
+            ? `Already assigned to ${result.accelerated_count} employee(s) — due date pulled in.`
+            : result.already_open_count
+              ? `Already assigned to ${result.already_open_count} employee(s) — no change needed.`
+              : 'No matching employees to assign.',
       )
       setRequirementId(''); setDueDate(''); setNote(''); setShowAssign(false)
     } catch (e) {

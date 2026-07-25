@@ -163,11 +163,14 @@ async def generate_from_template(template_id: UUID, body: GenerateFromTemplate,
         # all of them — check once. Unassigned drafts, so no per-employee (minor)
         # checks and nothing to BLOCK; surfaced as warnings, not a 409 (a bulk
         # 409 would make generation unusable).
+        # Generated shifts are always kind='work' — templates have no
+        # training_requirement_id column to teach a training-kind shift.
         compliance_warnings = (
             await check_shift_compliance(
                 conn, company_id, location_id=tpl["location_id"],
                 starts_at=starts[0], ends_at=ends[0],
                 break_minutes=tpl["break_minutes"] or 0,
+                shift_kind="work",
             )
             if created else []
         )

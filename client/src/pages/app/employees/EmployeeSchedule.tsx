@@ -20,6 +20,7 @@ import {
 } from '../../../types/employeeSchedule'
 import { useEmployeeSchedule } from './useEmployeeSchedule'
 import ScheduleLawPanel from '../../../components/employees/ScheduleLawPanel'
+import { useMe } from '../../../hooks/useMe'
 
 const inputCls = 'bg-zinc-900 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500 w-full'
 
@@ -391,6 +392,8 @@ function ShiftForm({ day, shift, onDone, onSaved, onCancel }: {
   onCancel: () => void
 }) {
   const { toast } = useToast()
+  const { hasFeature } = useMe()
+  const trainingEnabled = hasFeature('training')
   const editing = !!shift
   const [start, setStart] = useState(shift ? shift.starts_at.slice(11, 16) : '09:00')
   const [end, setEnd] = useState(shift ? shift.ends_at.slice(11, 16) : '17:00')
@@ -404,9 +407,9 @@ function ShiftForm({ day, shift, onDone, onSaved, onCancel }: {
   const [requirementId, setRequirementId] = useState('')
   const [requirements, setRequirements] = useState<TrainingRequirement[]>([])
   useEffect(() => {
-    if (editing) return
+    if (editing || !trainingEnabled) return
     trainingApi.listRequirements().then(setRequirements).catch(() => setRequirements([]))
-  }, [editing])
+  }, [editing, trainingEnabled])
 
   const overnight = end <= start
 
@@ -491,7 +494,7 @@ function ShiftForm({ day, shift, onDone, onSaved, onCancel }: {
         <span className="text-[10px] text-zinc-500 uppercase tracking-wide">Staff needed</span>
         <input value={required} onChange={(e) => setRequired(e.target.value)} className={`${inputCls} mt-0.5`} />
       </label>
-      {!editing && (
+      {!editing && trainingEnabled && (
         <label className="block">
           <span className="text-[10px] text-zinc-500 uppercase tracking-wide">Kind</span>
           <div className="mt-0.5 flex rounded-lg border border-zinc-700 overflow-hidden text-xs">
@@ -500,7 +503,7 @@ function ShiftForm({ day, shift, onDone, onSaved, onCancel }: {
           </div>
         </label>
       )}
-      {!editing && kind === 'training' && (
+      {!editing && trainingEnabled && kind === 'training' && (
         <label className="block">
           <span className="text-[10px] text-zinc-500 uppercase tracking-wide">Training requirement</span>
           <select value={requirementId} onChange={(e) => setRequirementId(e.target.value)} className={`${inputCls} mt-0.5`}>

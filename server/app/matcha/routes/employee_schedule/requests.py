@@ -16,7 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from app.database import get_connection
 from ...dependencies import require_admin_or_client
 from ...models.employee_schedule import RequestReview
-from ...services.training_assignment import evaluate_scheduled_role_rules
+from ...services.training_assignment import evaluate_scheduled_role_rules, assign_training
 from ._shared import (
     require_company_id, log_audit, serialize_request, REQUEST_SELECT,
     INACTIVE_EMPLOYMENT_STATUSES, find_conflicts, raise_conflict,
@@ -182,6 +182,26 @@ async def review_request(request_id: UUID, body: RequestReview,
                         except Exception:
                             logger.exception(
                                 "scheduled_role training rules failed for shift %s",
+                                req["shift_id"],
+                            )
+                    elif window is not None and window["kind"] == "training" and window["training_requirement_id"]:
+                        try:
+                            requirement = await conn.fetchrow(
+                                "SELECT id, title, training_type, frequency_months "
+                                "FROM training_requirements WHERE id = $1 AND company_id = $2",
+                                window["training_requirement_id"], company_id,
+                            )
+                            if requirement:
+                                await assign_training(
+                                    conn, company_id, dict(requirement), [req["target_employee_id"]],
+                                    source_type="schedule", source_ref=req["shift_id"],
+                                    source_note=f"Scheduled training session {window['starts_at'].date().isoformat()}",
+                                    due_date=window["starts_at"].astimezone(timezone.utc).date(),
+                                    assigned_by=current_user.id,
+                                )
+                        except Exception:
+                            logger.exception(
+                                "training assignment failed for swapped-in training shift %s",
                                 req["shift_id"],
                             )
 

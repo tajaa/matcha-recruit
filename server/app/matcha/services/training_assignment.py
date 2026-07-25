@@ -452,6 +452,21 @@ async def evaluate_scheduled_role_rules(
         if not rule_matches_scheduled_role(dict(rule), dict(employee), shift_role):
             continue
 
+        # Skip if the employee already has an active or unexpired-completed
+        # record for this requirement — otherwise every later shift into a
+        # matching role reassigns it again once the prior one is completed.
+        already_covered = await conn.fetchval(
+            """
+            SELECT 1 FROM training_records
+            WHERE requirement_id = $1 AND employee_id = $2
+              AND status IN ('assigned', 'in_progress', 'completed')
+              AND (expiration_date IS NULL OR expiration_date > CURRENT_DATE)
+            """,
+            rule["req_id"], employee_id,
+        )
+        if already_covered:
+            continue
+
         due_date = shift_start
         if rule["due_days"] is not None:
             candidate = date.today() + timedelta(days=rule["due_days"])

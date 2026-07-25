@@ -19,8 +19,9 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
+from app.core.feature_flags import get_company_features
 from app.database import get_connection
-from app.matcha.dependencies import get_client_company_id, require_admin_or_client
+from app.matcha.dependencies import get_client_company_id, require_admin_or_client, require_feature
 from app.matcha.models.ir_incident import (
     CorrectiveAction,
     CorrectiveActionCreate,
@@ -158,6 +159,9 @@ async def create_corrective_action(
 
         training_requirement_id = None
         if payload.action_type == "training" and payload.training_requirement_id:
+            features = await get_company_features(incident["company_id"], conn=conn)
+            if not features.get("training"):
+                raise HTTPException(status_code=403, detail="Training feature required for training corrective actions")
             requirement = await conn.fetchrow(
                 "SELECT id, title, training_type, frequency_months "
                 "FROM training_requirements WHERE id = $1 AND company_id = $2",
@@ -437,7 +441,11 @@ class AssignTrainingResponse(BaseModel):
     requirement_id: UUID
 
 
-@router.post("/{incident_id}/assign-training", response_model=AssignTrainingResponse)
+@router.post(
+    "/{incident_id}/assign-training",
+    response_model=AssignTrainingResponse,
+    dependencies=[Depends(require_feature("training"))],
+)
 async def assign_training_from_incident(
     incident_id: UUID,
     payload: AssignTrainingRequest,
@@ -517,7 +525,7 @@ async def assign_training_from_incident(
     )
 
 
-@router.get("/{incident_id}/trainings")
+@router.get("/{incident_id}/trainings", dependencies=[Depends(require_feature("training"))])
 async def list_incident_trainings(
     incident_id: UUID,
     current_user=Depends(require_admin_or_client),

@@ -155,6 +155,18 @@ async def create_shift(body: ShiftCreate,
             if not training_requirement:
                 raise HTTPException(status_code=404, detail="Training requirement not found")
 
+        # Hoist the feature lookup + batch the lapse-item fetch over the whole
+        # employee list — otherwise check_shift_compliance re-resolves company
+        # features and re-queries training/credential lapses once per employee.
+        lapse_map: dict = {}
+        if body.employee_ids:
+            company_features = await get_company_features(company_id, conn=conn)
+            lapse_map = await schedule_intelligence.fetch_lapse_items(
+                conn, company_id, list(dict.fromkeys(body.employee_ids)),
+                credential_templates_enabled=bool(company_features.get("credential_templates")),
+                training_enabled=bool(company_features.get("training")),
+            )
+
         forced: dict[str, list[dict]] = {}
         for emp_id in body.employee_ids:
             await assert_employee_in_company(conn, company_id, emp_id)
@@ -169,6 +181,7 @@ async def create_shift(body: ShiftCreate,
                 starts_at=body.starts_at, ends_at=body.ends_at,
                 break_minutes=body.break_minutes or 0, employee_id=emp_id,
                 shift_kind=body.kind, training_requirement_id=body.training_requirement_id,
+                lapse_items=lapse_map.get(str(emp_id), []),
             )
             raise_for_violations(violations, force=force)
             if violations:
@@ -252,7 +265,8 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
     async with get_connection() as conn:
         existing = await conn.fetchrow(
             """
-            SELECT starts_at, ends_at, status, published_at, break_minutes, location_id
+            SELECT starts_at, ends_at, status, published_at, break_minutes, location_id,
+                   kind, training_requirement_id
             FROM schedule_shifts WHERE id = $1 AND company_id = $2
             """,
             shift_id, company_id,
@@ -297,6 +311,16 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
                 "SELECT employee_id FROM schedule_shift_assignments WHERE shift_id = $1",
                 shift_id,
             )
+            # Same hoist-and-batch as create_shift: one feature lookup + one
+            # batched lapse fetch for every assignee, not one each.
+            lapse_map: dict = {}
+            if assignees:
+                company_features = await get_company_features(company_id, conn=conn)
+                lapse_map = await schedule_intelligence.fetch_lapse_items(
+                    conn, company_id, [row["employee_id"] for row in assignees],
+                    credential_templates_enabled=bool(company_features.get("credential_templates")),
+                    training_enabled=bool(company_features.get("training")),
+                )
             for row in assignees:
                 emp = row["employee_id"]
                 if retimed and not force:
@@ -312,6 +336,8 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
                     break_minutes=new_break or 0, employee_id=emp,
                     exclude_shift_id=shift_id,
                     fw_event=fw_event, fw_shift_published=fw_shift_published,
+                    shift_kind=existing["kind"], training_requirement_id=existing["training_requirement_id"],
+                    lapse_items=lapse_map.get(str(emp), []),
                 )
                 raise_for_violations(violations, force=force)
                 if violations:
@@ -327,6 +353,7 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
                         break_minutes=new_break or 0,
                         exclude_shift_id=shift_id,
                         fw_event=fw_event, fw_shift_published=fw_shift_published,
+                        shift_kind=existing["kind"], training_requirement_id=existing["training_requirement_id"],
                     ),
                     force=force,
                 )
