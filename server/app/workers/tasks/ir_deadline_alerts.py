@@ -2,7 +2,7 @@
 
 The IR product was the only major domain without a deadline worker — compliance,
 legal, grievance, leave, and discipline all have one. This adds the missing
-piece: four best-effort sweeps that nudge owners/admins so nothing rots silently.
+piece: five best-effort sweeps that nudge owners/admins so nothing rots silently.
 
   1. CAPA due/overdue      — ir_corrective_actions past (or nearing) due_date.
   2. Stale critical/high   — critical/high incidents sitting untouched.
@@ -10,11 +10,13 @@ piece: four best-effort sweeps that nudge owners/admins so nothing rots silently
                                as the 300A/ITA deadline (Mar 2) approaches.
   4. OSHA emergency window — the 8/24hr fatality/hospitalization clock, promoted
                              from a static Copilot card to a tracked email.
+  5. Training overdue      — training_records assigned from an incident
+                             (source_type='incident') still open past due_date.
 
 Runs on the shared worker restart cadence; gated on
 scheduler_settings.task_key = 'ir_deadline_alerts' (seeded DISABLED, migration
 irdl01). Idempotent: CAPA dedupes on ir_corrective_actions.reminder_sent_at;
-sweeps 2–4 dedupe via ir_deadline_alert_log (incident_id, alert_kind, sent_on).
+sweeps 2–5 dedupe via ir_deadline_alert_log (incident_id, alert_kind, sent_on).
 """
 
 import asyncio
@@ -339,6 +341,82 @@ async def _sweep_osha_emergency(conn, email_service, today, limit) -> dict:
     return {"osha_emergency_sent": sent, "osha_emergency_checked": len(rows)}
 
 
+async def _sweep_training_overdue(conn, email_service, today, limit) -> dict:
+    """Nudge admins on incident-sourced training still open past due_date.
+
+    Only source_type='incident' records — the routine cadence/bulk-assign
+    training queue is a separate concern (owned by the training feature
+    itself, not IR). Bundled one email per incident (not per training
+    record) so an incident with several overdue trainees doesn't spam the
+    admin inbox; dedup ledger keys on incident_id like sweeps 2-4.
+    """
+    rows = await conn.fetch(
+        """
+        SELECT i.id AS incident_id, i.incident_number, i.title AS incident_title,
+               i.company_id, comp.name AS company_name,
+               tr.title AS training_title, tr.due_date,
+               e.first_name, e.last_name
+        FROM training_records tr
+        JOIN ir_incidents i ON i.id = tr.source_ref
+        JOIN companies comp ON comp.id = tr.company_id
+        JOIN employees e ON e.id = tr.employee_id
+        WHERE tr.source_type = 'incident'
+          AND tr.status IN ('assigned', 'in_progress')
+          AND tr.due_date IS NOT NULL
+          AND tr.due_date < $1
+        ORDER BY i.id, tr.due_date ASC
+        LIMIT $2
+        """,
+        today, limit,
+    )
+
+    by_incident: dict = {}
+    for r in rows:
+        by_incident.setdefault(r["incident_id"], []).append(r)
+
+    sent = 0
+    for incident_id, incident_rows in by_incident.items():
+        if await _already_sent(conn, incident_id, "training_overdue", today):
+            continue
+        first = incident_rows[0]
+        recipients = await get_company_admin_contacts(conn, first["company_id"])
+        if not recipients:
+            continue
+        detail = [
+            ("Incident", f"{first['incident_number']} — {first['incident_title']}"),
+        ] + [
+            (
+                f"{r['first_name'] or ''} {r['last_name'] or ''}".strip() or "Employee",
+                f"{r['training_title']} — due {r['due_date'].strftime('%B %d, %Y')}",
+            )
+            for r in incident_rows
+        ]
+        any_ok = False
+        for rc in recipients:
+            try:
+                ok = await email_service.send_ir_deadline_reminder(
+                    to_email=rc["email"],
+                    to_name=rc["name"],
+                    company_name=first["company_name"] or "Your company",
+                    subject=f"[{first['company_name']}] Overdue training from incident {first['incident_number']}",
+                    headline=(
+                        f"{len(incident_rows)} training assignment(s) from this "
+                        "incident are overdue."
+                    ),
+                    detail_lines=detail,
+                    incident_id=str(incident_id),
+                    cta_label="Open Incident",
+                    urgent=False,
+                )
+                any_ok = any_ok or bool(ok)
+            except Exception as exc:  # noqa: BLE001
+                print(f"[IR Deadline Alerts] Training overdue email error to {rc['email']}: {exc}")
+        if any_ok:
+            await _record_sent(conn, incident_id, first["company_id"], "training_overdue", today)
+            sent += 1
+    return {"training_overdue_sent": sent, "training_overdue_checked": len(rows)}
+
+
 async def _run_ir_deadline_alerts() -> dict:
     from app.core.services.email import EmailService
     from app.config import get_settings
@@ -366,6 +444,7 @@ async def _run_ir_deadline_alerts() -> dict:
         result.update(await _sweep_stale_incidents(conn, email_service, today, limit))
         result.update(await _sweep_unclassified_recordable(conn, email_service, today, limit))
         result.update(await _sweep_osha_emergency(conn, email_service, today, limit))
+        result.update(await _sweep_training_overdue(conn, email_service, today, limit))
         return result
     finally:
         await conn.close()

@@ -465,7 +465,7 @@ async def _build_training_context_uncached(company_id: UUID) -> str:
         )
         overdue_rows = await conn.fetch(
             """
-            SELECT tr.title, tr.due_date, e.first_name, e.last_name
+            SELECT tr.title, tr.due_date, tr.source_type, e.first_name, e.last_name
             FROM training_records tr
             JOIN employees e ON e.id = tr.employee_id
             WHERE tr.company_id=$1 AND tr.status IN ('assigned','in_progress')
@@ -478,7 +478,7 @@ async def _build_training_context_uncached(company_id: UUID) -> str:
         )
         expiring = await conn.fetch(
             """
-            SELECT tr.title, tr.expiration_date, e.first_name, e.last_name
+            SELECT tr.title, tr.expiration_date, tr.source_type, e.first_name, e.last_name
             FROM training_records tr
             JOIN employees e ON e.id = tr.employee_id
             WHERE tr.company_id=$1 AND tr.status='completed'
@@ -563,7 +563,8 @@ async def _build_training_context_uncached(company_id: UUID) -> str:
         if len(programs) > _MAX_LIST_ROWS:
             lines.append(f"...and {len(programs) - _MAX_LIST_ROWS} more active programs.")
         for r in overdue_rows:
-            lines.append(f"  · OVERDUE: {r['first_name']} {r['last_name']} — {r['title']} (due {_fmt_date(r['due_date'])})")
+            remedial = " [remedial — post-incident/discipline]" if r["source_type"] in ("incident", "discipline") else ""
+            lines.append(f"  · OVERDUE: {r['first_name']} {r['last_name']} — {r['title']} (due {_fmt_date(r['due_date'])}){remedial}")
         # The detail rows are LIMIT-capped; say so, or the model reads a
         # truncated list as the complete one.
         if total_overdue > len(overdue_rows):
@@ -571,7 +572,8 @@ async def _build_training_context_uncached(company_id: UUID) -> str:
         if expiring:
             lines.append("Completions expiring within 60 days:")
             for r in expiring:
-                lines.append(f"  · {r['first_name']} {r['last_name']} — {r['title']} expires {_fmt_date(r['expiration_date'])}")
+                remedial = " [remedial — post-incident/discipline]" if r["source_type"] in ("incident", "discipline") else ""
+                lines.append(f"  · {r['first_name']} {r['last_name']} — {r['title']} expires {_fmt_date(r['expiration_date'])}{remedial}")
             if len(expiring) == _MAX_LIST_ROWS:
                 lines.append(f"  · (list capped at {_MAX_LIST_ROWS} — more completions may be expiring.)")
 

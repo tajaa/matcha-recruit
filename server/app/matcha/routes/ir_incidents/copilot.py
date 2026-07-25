@@ -51,6 +51,7 @@ from ._shared import (
     build_osha_recordable_query_card,
     build_privacy_case_query_card,
     build_root_cause_text_card,
+    build_assign_training_card,
     compose_root_cause_text,
     log_audit,
     next_case_step,
@@ -803,7 +804,7 @@ async def _close_incident_via_copilot(
     row = await conn.fetchrow(
         """
         SELECT status, osha_recordable, category_data, root_cause,
-               incident_type, severity
+               incident_type, severity, company_id, involved_employee_ids
         FROM ir_incidents WHERE id = $1
         """,
         incident_id,
@@ -952,6 +953,25 @@ async def _close_incident_via_copilot(
             """,
             incident_id,
         )
+
+    # Auto-assign training per training_assignment_rules(trigger='incident').
+    # Best-effort — a rule-matching failure must never block the close.
+    if row and row["company_id"]:
+        try:
+            from app.matcha.services.training_assignment import on_incident_closed
+
+            await on_incident_closed(
+                conn,
+                row["company_id"],
+                {
+                    "id": incident_id,
+                    "incident_type": row["incident_type"],
+                    "severity": row["severity"],
+                    "involved_employee_ids": row["involved_employee_ids"] or [],
+                },
+            )
+        except Exception:
+            logger.exception("Failed to auto-assign incident training for %s", incident_id)
 
     return {
         "already_closed": False,
@@ -1963,6 +1983,42 @@ async def accept_copilot_card(
                                 event_summary = "Generated recommended corrective actions."
                             else:
                                 event_summary = "No corrective actions to recommend for this incident."
+
+                            # Best-effort: if a recommended training topic
+                            # confidently matched an existing requirement and
+                            # the incident has involved employees, emit a
+                            # second (additional, non-blocking) transcript
+                            # card suggesting the assignment. Doesn't touch
+                            # next_card — this turn's response still carries
+                            # the corrective-actions card; the training card
+                            # surfaces on the next transcript fetch.
+                            try:
+                                involved_ids = incident.get("involved_employee_ids") or []
+                                if involved_ids:
+                                    mapping_row = await conn.fetchrow(
+                                        "SELECT analysis_data FROM ir_incident_analysis "
+                                        "WHERE incident_id = $1 AND analysis_type = 'training_mapping' "
+                                        "ORDER BY generated_at DESC LIMIT 1",
+                                        incident_id,
+                                    )
+                                    mapping_data = _safe_json_loads(mapping_row["analysis_data"], {}) if mapping_row else {}
+                                    matches = (mapping_data or {}).get("matches") or []
+                                    if matches:
+                                        best = max(matches, key=lambda m: m.get("confidence", 0))
+                                        training_card = build_assign_training_card(
+                                            requirement_id=best["requirement_id"],
+                                            requirement_title=best["title"],
+                                            trainee_count=len(involved_ids),
+                                            reasoning=best.get("reasoning"),
+                                        )
+                                        await _emit_chain_card(
+                                            conn, incident_id=incident_id, card=training_card,
+                                            created_by=current_user.id,
+                                        )
+                            except Exception:
+                                logger.exception(
+                                    "Failed to emit assign_training card for incident %s", incident_id,
+                                )
                         except Exception as exc:
                             logger.exception("recommendations analysis failed for incident %s", incident_id)
                             event_summary = f"Recommendations failed: {exc}"
@@ -2180,6 +2236,53 @@ async def accept_copilot_card(
                         "previous_value": None,
                         "new_value": int(doc_count),
                     }
+
+                elif action_type == "assign_training":
+                    from app.core.feature_flags import get_company_features
+                    from app.matcha.services.training_assignment import assign_training
+
+                    features = await get_company_features(company_id, conn=conn)
+                    if not features.get("training"):
+                        yield _sse({"type": "error", "detail": "Training feature is not enabled for this company"})
+                        return
+
+                    requirement_id = action.get("requirement_id")
+                    if not requirement_id:
+                        yield _sse({"type": "error", "detail": "Card has no requirement_id"})
+                        return
+                    requirement = await conn.fetchrow(
+                        "SELECT id, title, training_type, frequency_months "
+                        "FROM training_requirements WHERE id = $1 AND company_id = $2 AND is_active = true",
+                        str(requirement_id), str(company_id),
+                    )
+                    if not requirement:
+                        yield _sse({"type": "error", "detail": "Training requirement not found"})
+                        return
+                    employee_ids = action.get("employee_ids") or incident.get("involved_employee_ids") or []
+                    if not employee_ids:
+                        event_summary = "No involved employees to assign training to."
+                    else:
+                        outcome = await assign_training(
+                            conn,
+                            company_id,
+                            dict(requirement),
+                            employee_ids,
+                            source_type="incident",
+                            source_ref=incident_id,
+                            source_note="Assigned via IR Copilot",
+                            assigned_by=current_user.id,
+                        )
+                        event_summary = (
+                            f"Assigned “{requirement['title']}” to {outcome.assigned} employee(s)."
+                            if outcome.assigned
+                            else "Training already assigned to the involved employee(s)."
+                        )
+                        event_extra = {
+                            "field": "training",
+                            "field_label": "Training",
+                            "previous_value": None,
+                            "new_value": outcome.assigned,
+                        }
 
                 else:
                     yield _sse({"type": "error", "detail": f"Unknown action type: {action_type}"})

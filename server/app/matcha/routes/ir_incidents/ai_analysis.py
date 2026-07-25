@@ -19,6 +19,7 @@ step 10.
 import asyncio
 import json
 import logging
+import re
 from datetime import timedelta
 from typing import Optional
 from uuid import UUID
@@ -533,6 +534,8 @@ async def run_recommendations_inline(
             summary=result["summary"],
             generated_at=result["generated_at"],
             from_cache=True,
+            training_recommended=bool(result.get("training_recommended")),
+            training_topics=result.get("training_topics") or [],
         )
 
     try:
@@ -574,10 +577,15 @@ async def run_recommendations_inline(
             ip_address,
         )
 
+    if result.get("training_recommended") and row.get("company_id"):
+        await _auto_map_training_topics(str(incident_id), str(row["company_id"]))
+
     return RecommendationsAnalysis(
         recommendations=[RecommendationItem(**r) for r in result["recommendations"]],
         summary=result["summary"],
         generated_at=result["generated_at"],
+        training_recommended=bool(result.get("training_recommended")),
+        training_topics=result.get("training_topics") or [],
     )
 
 
@@ -650,6 +658,8 @@ async def analyze_recommendations(
                 summary=result["summary"],
                 generated_at=result["generated_at"],
                 from_cache=True,
+                training_recommended=bool(result.get("training_recommended")),
+                training_topics=result.get("training_topics") or [],
             )
             yield _sse({"type": "cached", "message": "Using cached analysis result", "result": rec.model_dump(mode='json')})
             yield "data: [DONE]\n\n"
@@ -684,6 +694,8 @@ async def analyze_recommendations(
                     generated_at=result_data["generated_at"],
                     from_cache=True,
                     cache_reason=str(e),
+                    training_recommended=bool(result_data.get("training_recommended")),
+                    training_topics=result_data.get("training_topics") or [],
                 )
                 yield _sse({"type": "cached", "message": f"AI failed, using stale cache: {e}", "result": rec.model_dump(mode='json')})
                 yield "data: [DONE]\n\n"
@@ -718,10 +730,15 @@ async def analyze_recommendations(
                 request.client.host if request.client else None,
             )
 
+        if result.get("training_recommended") and row.get("company_id"):
+            await _auto_map_training_topics(str(incident_id), str(row["company_id"]))
+
         rec = RecommendationsAnalysis(
             recommendations=[RecommendationItem(**r) for r in result["recommendations"]],
             summary=result["summary"],
             generated_at=result["generated_at"],
+            training_recommended=bool(result.get("training_recommended")),
+            training_topics=result.get("training_topics") or [],
         )
         yield _sse({"type": "complete", "result": rec.model_dump(mode='json')})
         yield "data: [DONE]\n\n"
@@ -976,6 +993,107 @@ async def _auto_map_policy_violations(incident_id: str, company_id: str):
             )
     except Exception as e:
         logger.warning(f"Auto policy mapping failed for incident {incident_id}: {e}")
+
+
+_WORD_RE = re.compile(r"[a-z]+")
+
+# Generic terms that recur across unrelated training subjects ("Fire Safety"
+# vs "Ladder Safety" vs "Harassment Prevention Training") — excluded from the
+# overlap so a topic and a requirement don't score as a match on nothing but
+# a shared vocabulary word neither is actually about.
+_GENERIC_TRAINING_TERMS = {
+    "safety", "training", "workplace", "prevention", "program", "policy",
+    "procedures", "compliance", "awareness", "annual", "required", "course",
+}
+
+
+def _score_training_match(topic: str, requirement_title: str, requirement_type: str) -> float:
+    """Word-overlap confidence in [0, 1] between a recommended training topic
+    and a training_requirements row. Deterministic — no Gemini call, so the
+    assign_training card built from a confident match carries no
+    hallucination risk (unlike policy_mapping, which is a full LLM call).
+
+    Generic terms are stripped from both sides before scoring — otherwise any
+    two-word topic sharing one generic word ("ladder safety" vs "Fire Safety")
+    clears the threshold on incidental vocabulary rather than real overlap."""
+    topic_words = set(_WORD_RE.findall(topic.lower())) - _GENERIC_TRAINING_TERMS
+    title_words = set(_WORD_RE.findall((requirement_title or "").lower()))
+    title_words |= set(_WORD_RE.findall((requirement_type or "").replace("_", " ").lower()))
+    title_words -= _GENERIC_TRAINING_TERMS
+    if not topic_words or not title_words:
+        return 0.0
+    return len(topic_words & title_words) / len(topic_words)
+
+
+# Minimum word-overlap score to treat a topic<->requirement pair as a real
+# match rather than incidental term overlap (e.g. both mentioning "safety").
+_TRAINING_MATCH_THRESHOLD = 0.34
+
+
+async def _auto_map_training_topics(incident_id: str, company_id: str):
+    """Background task: match AI-recommended training_topics (from the most
+    recent 'recommendations' analysis) against the company's active
+    training_requirements. Mirrors _auto_map_policy_violations' storage
+    pattern (upsert into ir_incident_analysis) but the matching is pure code,
+    not a second Gemini call — see _score_training_match."""
+    try:
+        async with get_connection() as conn:
+            cached = await conn.fetchrow(
+                """
+                SELECT analysis_data FROM ir_incident_analysis
+                WHERE incident_id = $1 AND analysis_type = 'recommendations'
+                ORDER BY generated_at DESC LIMIT 1
+                """,
+                incident_id,
+            )
+            rec_data = _safe_json_loads(cached["analysis_data"], {}) if cached else {}
+            topics = (rec_data or {}).get("training_topics") or []
+
+            matches = []
+            if topics:
+                requirements = await conn.fetch(
+                    "SELECT id, title, training_type FROM training_requirements "
+                    "WHERE company_id = $1 AND is_active = true",
+                    company_id,
+                )
+                for topic in topics:
+                    best_req = None
+                    best_score = 0.0
+                    for req in requirements:
+                        score = _score_training_match(topic, req["title"], req["training_type"])
+                        if score > best_score:
+                            best_score = score
+                            best_req = req
+                    if best_req and best_score >= _TRAINING_MATCH_THRESHOLD:
+                        matches.append({
+                            "topic": topic,
+                            "requirement_id": str(best_req["id"]),
+                            "title": best_req["title"],
+                            "confidence": round(best_score, 2),
+                            "reasoning": f"Matched shared terms with recommended topic “{topic}”.",
+                        })
+
+            result = {
+                "matches": matches,
+                "summary": (
+                    f"{len(matches)} of {len(topics)} recommended training topic(s) "
+                    "matched an existing requirement." if topics
+                    else "No training topics recommended for this incident."
+                ),
+                "generated_at": _utc_now_naive().isoformat(),
+            }
+            await conn.execute(
+                """
+                INSERT INTO ir_incident_analysis (incident_id, analysis_type, analysis_data)
+                VALUES ($1, 'training_mapping', $2)
+                ON CONFLICT (incident_id, analysis_type)
+                DO UPDATE SET analysis_data = $2, generated_at = now()
+                """,
+                incident_id,
+                json.dumps(result),
+            )
+    except Exception as e:
+        logger.warning(f"Auto training mapping failed for incident {incident_id}: {e}")
 
 
 @router.get("/{incident_id}/policy-mapping", response_model=PolicyMappingAnalysis)

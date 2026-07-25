@@ -63,6 +63,10 @@ class IssueRequest(BaseModel):
     occurrence_dates: list[date] = Field(default_factory=list)
     situation: Optional[str] = None
     advisory_ack_reason: Optional[str] = None
+    # Optional remedial training assigned in the same transaction as issuance.
+    # Output-only — the compliance gate above never consults this; assigning
+    # training is a consequence of issuing, not an input to legality.
+    remedial_requirement_id: Optional[UUID] = None
 
 
 class DraftRequest(BaseModel):
@@ -269,6 +273,14 @@ async def issue_record(
     async with get_connection() as conn:
         await _load_employee(conn, body.employee_id, company_id)
 
+        if body.remedial_requirement_id is not None:
+            requirement = await conn.fetchval(
+                "SELECT id FROM training_requirements WHERE id = $1 AND company_id = $2",
+                body.remedial_requirement_id, company_id,
+            )
+            if not requirement:
+                raise HTTPException(status_code=404, detail="Training requirement not found")
+
         # The gate runs here, server-side, on every issue — never trusting what
         # the client previewed. A block is a statutory prohibition, so there is
         # no acknowledge-and-proceed path for it: the write is refused.
@@ -327,6 +339,7 @@ async def issue_record(
             situation_narrative=body.situation,
             compliance_check=verdict,
             advisory_ack_reason=body.advisory_ack_reason,
+            remedial_requirement_id=body.remedial_requirement_id,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -399,7 +412,17 @@ async def get_record(
         raise HTTPException(status_code=403, detail="No company associated with this account")
     async with get_connection() as conn:
         record = await _ensure_record_in_company(conn, discipline_id, company_id)
-    return _serialize_record(record)
+        remedial_training = None
+        if record.get("remedial_requirement_id"):
+            remedial_training = await conn.fetchrow(
+                "SELECT id, status, due_date, completed_date FROM training_records "
+                "WHERE source_type = 'discipline' AND source_ref = $1 "
+                "ORDER BY created_at DESC LIMIT 1",
+                discipline_id,
+            )
+    result = _serialize_record(record)
+    result["remedial_training"] = _serialize_record(dict(remedial_training)) if remedial_training else None
+    return result
 
 
 @router.get("/records/{discipline_id}/audit-log")

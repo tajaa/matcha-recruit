@@ -77,8 +77,9 @@ def _canonical_analysis_type(raw: Optional[str]) -> Optional[str]:
     return None
 
 # Action types the orchestrator may emit and the accept endpoint dispatches.
-# The last three (quick_reply, numeric_input, osha_emergency_alert) are
-# emitted by the backend OSHA recordable chain — not by Gemini — but live
+# quick_reply, numeric_input, osha_emergency_alert, request_documents, and
+# assign_training are emitted by deterministic backend card builders — never
+# by Gemini (the prompt schema below only advertises the first 5) — but live
 # in the allowlist so the response filter keeps them when round-tripped
 # through transcript fetches.
 IR_ACTION_TYPES = {
@@ -92,6 +93,7 @@ IR_ACTION_TYPES = {
     "text_input",
     "osha_emergency_alert",
     "request_documents",
+    "assign_training",
 }
 
 # Mirrors copilot.py:_handle_quick_reply allowed_by_kind. Filter uses

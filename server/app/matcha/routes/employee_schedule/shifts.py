@@ -4,12 +4,14 @@ Owns the package `router`; templates/assignments/requests attach their own
 routers in __init__.py. Business-facing (admin/client), tenant-isolated.
 """
 
+import logging
 from datetime import date, datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.database import get_connection
+from app.core.feature_flags import get_company_features
 from ...dependencies import require_admin_or_client
 from ...models.employee_schedule import (
     ShiftCreate, ShiftUpdate, PublishRange,
@@ -17,7 +19,8 @@ from ...models.employee_schedule import (
 from ...services.schedule_rules import (
     build_patch, summarize_shifts as _summarize, week_bounds as _week_bounds,
 )
-from ...services import schedule_compliance
+from ...services import schedule_compliance, schedule_intelligence
+from ...services.training_assignment import evaluate_scheduled_role_rules, assign_training
 from ._shared import (
     require_company_id, log_audit, fetch_shifts, fetch_roster, fetch_shift_by_id,
     assert_employee_in_company, assert_location_in_company,
@@ -27,6 +30,8 @@ from ._compliance import (
     check_shift_compliance, raise_for_violations, _approved_db_rules,
     _fair_workweek_advisories,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -68,10 +73,35 @@ async def get_week(
         # publish touches.
         shifts = await fetch_shifts(conn, company_id, lo, hi, starts_within=True)
         roster = await fetch_roster(conn, company_id)
+
+        features = await get_company_features(company_id, conn=conn)
+        training_enabled = bool(features.get("training"))
+        credential_templates_enabled = bool(features.get("credential_templates"))
+        roster_flags = None
+        if (training_enabled or credential_templates_enabled) and roster:
+            emp_uuids = [UUID(e["id"]) for e in roster]
+            lapses = await schedule_intelligence.fetch_lapse_items(
+                conn, company_id, emp_uuids,
+                credential_templates_enabled=credential_templates_enabled,
+                training_enabled=training_enabled,
+            )
+            today = datetime.now(timezone.utc).date()
+            roster_flags = {
+                emp_id: {
+                    "overdue_training": sum(
+                        1 for it in items if it["source"] == "training" and it["date"] and it["date"] < today
+                    ),
+                    "lapsed_credentials": sum(
+                        1 for it in items if it["source"] != "training" and it["date"] and it["date"] < today
+                    ),
+                }
+                for emp_id, items in lapses.items()
+            }
     return {
         "week_start": start.isoformat(),
         "shifts": shifts,
         "roster": roster,
+        "roster_flags": roster_flags,
         "summary": _summarize(shifts),
     }
 
@@ -110,6 +140,33 @@ async def create_shift(body: ShiftCreate,
     company_id = await require_company_id(current_user)
     async with get_connection() as conn:
         await assert_location_in_company(conn, company_id, body.location_id)
+        training_requirement = None
+        if body.kind == "training":
+            features = await get_company_features(company_id, conn=conn)
+            if not features.get("training"):
+                raise HTTPException(
+                    status_code=403, detail="Training feature required for training shifts"
+                )
+            training_requirement = await conn.fetchrow(
+                "SELECT id, title, training_type, frequency_months "
+                "FROM training_requirements WHERE id = $1 AND company_id = $2",
+                body.training_requirement_id, company_id,
+            )
+            if not training_requirement:
+                raise HTTPException(status_code=404, detail="Training requirement not found")
+
+        # Hoist the feature lookup + batch the lapse-item fetch over the whole
+        # employee list — otherwise check_shift_compliance re-resolves company
+        # features and re-queries training/credential lapses once per employee.
+        lapse_map: dict = {}
+        if body.employee_ids:
+            company_features = await get_company_features(company_id, conn=conn)
+            lapse_map = await schedule_intelligence.fetch_lapse_items(
+                conn, company_id, list(dict.fromkeys(body.employee_ids)),
+                credential_templates_enabled=bool(company_features.get("credential_templates")),
+                training_enabled=bool(company_features.get("training")),
+            )
+
         forced: dict[str, list[dict]] = {}
         for emp_id in body.employee_ids:
             await assert_employee_in_company(conn, company_id, emp_id)
@@ -123,6 +180,8 @@ async def create_shift(body: ShiftCreate,
                 conn, company_id, location_id=body.location_id,
                 starts_at=body.starts_at, ends_at=body.ends_at,
                 break_minutes=body.break_minutes or 0, employee_id=emp_id,
+                shift_kind=body.kind, training_requirement_id=body.training_requirement_id,
+                lapse_items=lapse_map.get(str(emp_id), []),
             )
             raise_for_violations(violations, force=force)
             if violations:
@@ -142,13 +201,15 @@ async def create_shift(body: ShiftCreate,
                 """
                 INSERT INTO schedule_shifts
                     (company_id, location_id, role, department, starts_at, ends_at,
-                     break_minutes, required_staff, color, notes, created_by)
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+                     break_minutes, required_staff, color, notes, kind,
+                     training_requirement_id, created_by)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
                 RETURNING id
                 """,
                 company_id, body.location_id, body.role, body.department,
                 body.starts_at, body.ends_at, body.break_minutes, body.required_staff,
-                body.color, body.notes, current_user.id,
+                body.color, body.notes, body.kind, body.training_requirement_id,
+                current_user.id,
             )
             for emp_id in dict.fromkeys(body.employee_ids):
                 await conn.execute(
@@ -160,6 +221,25 @@ async def create_shift(body: ShiftCreate,
                     """,
                     company_id, shift_id, emp_id, current_user.id,
                 )
+                if body.kind == "training" and training_requirement is not None:
+                    await assign_training(
+                        conn, company_id, dict(training_requirement), [emp_id],
+                        source_type="schedule", source_ref=shift_id,
+                        source_note=f"Scheduled training session {body.starts_at.date().isoformat()}",
+                        due_date=body.starts_at.astimezone(timezone.utc).date(),
+                        assigned_by=current_user.id,
+                    )
+                elif body.kind == "work":
+                    try:
+                        await evaluate_scheduled_role_rules(
+                            conn, company_id, emp_id,
+                            shift_id=shift_id, shift_role=body.role,
+                            shift_start=body.starts_at.astimezone(timezone.utc).date(),
+                        )
+                    except Exception:
+                        logger.exception(
+                            "scheduled_role training rules failed for shift %s", shift_id
+                        )
             await log_audit(conn, company_id, "shift", shift_id, current_user.id,
                             "shift.create", {
                                 "starts_at": body.starts_at.isoformat(),
@@ -185,7 +265,8 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
     async with get_connection() as conn:
         existing = await conn.fetchrow(
             """
-            SELECT starts_at, ends_at, status, published_at, break_minutes, location_id
+            SELECT starts_at, ends_at, status, published_at, break_minutes, location_id,
+                   kind, training_requirement_id
             FROM schedule_shifts WHERE id = $1 AND company_id = $2
             """,
             shift_id, company_id,
@@ -230,6 +311,16 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
                 "SELECT employee_id FROM schedule_shift_assignments WHERE shift_id = $1",
                 shift_id,
             )
+            # Same hoist-and-batch as create_shift: one feature lookup + one
+            # batched lapse fetch for every assignee, not one each.
+            lapse_map: dict = {}
+            if assignees:
+                company_features = await get_company_features(company_id, conn=conn)
+                lapse_map = await schedule_intelligence.fetch_lapse_items(
+                    conn, company_id, [row["employee_id"] for row in assignees],
+                    credential_templates_enabled=bool(company_features.get("credential_templates")),
+                    training_enabled=bool(company_features.get("training")),
+                )
             for row in assignees:
                 emp = row["employee_id"]
                 if retimed and not force:
@@ -245,6 +336,8 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
                     break_minutes=new_break or 0, employee_id=emp,
                     exclude_shift_id=shift_id,
                     fw_event=fw_event, fw_shift_published=fw_shift_published,
+                    shift_kind=existing["kind"], training_requirement_id=existing["training_requirement_id"],
+                    lapse_items=lapse_map.get(str(emp), []),
                 )
                 raise_for_violations(violations, force=force)
                 if violations:
@@ -260,6 +353,7 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
                         break_minutes=new_break or 0,
                         exclude_shift_id=shift_id,
                         fw_event=fw_event, fw_shift_published=fw_shift_published,
+                        shift_kind=existing["kind"], training_requirement_id=existing["training_requirement_id"],
                     ),
                     force=force,
                 )

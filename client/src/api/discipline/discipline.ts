@@ -52,8 +52,17 @@ export type DisciplineRecord = {
   compliance_check: ComplianceVerdict | null
   advisory_ack_reason: string | null
   situation_narrative: string | null
+  remedial_requirement_id: string | null
   created_at: string
   updated_at: string
+  /** Only present on GET /discipline/records/{id} — the linked training
+   *  record's current status, when remedial_requirement_id was set at issue. */
+  remedial_training?: {
+    id: string
+    status: string
+    due_date: string | null
+    completed_date: string | null
+  } | null
 }
 
 /** A statutory prohibition on this discipline. Not overridable — the server
@@ -166,6 +175,8 @@ export type DisciplineIssueInput = DisciplineRecommendInput & {
   occurrence_dates?: string[]
   situation?: string
   advisory_ack_reason?: string
+  /** Optional remedial training assigned in the same transaction as issuance. */
+  remedial_requirement_id?: string
 }
 
 export type DisciplineDraftInput = {

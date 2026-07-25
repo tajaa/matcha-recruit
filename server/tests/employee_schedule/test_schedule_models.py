@@ -135,3 +135,36 @@ def test_template_create_requires_a_time_window():
 
     tpl = TemplateCreate(name="Day", start_time=time(9), end_time=time(17), days_of_week=[1, 3])
     assert tpl.required_staff == 1 and tpl.break_minutes == 0
+
+
+# ── training-as-shift (kind) ─────────────────────────────────────────────────
+
+REQ_ID = "11111111-1111-1111-1111-111111111111"
+
+
+def test_default_kind_is_work_and_requirement_is_optional():
+    shift = ShiftCreate(starts_at="2026-07-13T09:00:00Z", ends_at="2026-07-13T17:00:00Z")
+    assert shift.kind == "work"
+    assert shift.training_requirement_id is None
+
+
+def test_training_kind_without_requirement_id_is_rejected():
+    with pytest.raises(ValidationError):
+        ShiftCreate(starts_at="2026-07-13T09:00:00Z", ends_at="2026-07-13T17:00:00Z", kind="training")
+
+
+def test_work_kind_with_requirement_id_is_rejected():
+    with pytest.raises(ValidationError):
+        ShiftCreate(
+            starts_at="2026-07-13T09:00:00Z", ends_at="2026-07-13T17:00:00Z",
+            kind="work", training_requirement_id=REQ_ID,
+        )
+
+
+def test_valid_training_shift():
+    shift = ShiftCreate(
+        starts_at="2026-07-13T09:00:00Z", ends_at="2026-07-13T17:00:00Z",
+        kind="training", training_requirement_id=REQ_ID,
+    )
+    assert shift.kind == "training"
+    assert str(shift.training_requirement_id) == REQ_ID

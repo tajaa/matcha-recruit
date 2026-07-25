@@ -761,7 +761,8 @@ async def _src_training(conn, company_id, start, end, loc_id, state, topic=_BROA
     # theory. They are also small; noise isn't the failure mode here.
     rows = await conn.fetch(
         f"""
-        SELECT tr.id, tr.title, tr.training_type, tr.status, tr.completed_date, tr.expiration_date
+        SELECT tr.id, tr.title, tr.training_type, tr.status, tr.completed_date,
+               tr.expiration_date, tr.source_type, tr.source_ref
         FROM training_records tr
         JOIN employees e ON e.id = tr.employee_id
         WHERE tr.company_id = $1
@@ -776,7 +777,12 @@ async def _src_training(conn, company_id, start, end, loc_id, state, topic=_BROA
         "cid": f"training:{r['id']}",
         "ref": _hum(r["training_type"]) or "Training",
         "summary": f"{r['title']} — status {_hum(r['status'])}"
-                   + (f", expires {_dt(r['expiration_date'])}" if r["expiration_date"] else ""),
+                   + (f", expires {_dt(r['expiration_date'])}" if r["expiration_date"] else "")
+                   # Remedial provenance is exactly the "we responded" fact a
+                   # defense memo wants to cite — surface it in the summary
+                   # line rather than only on the detail fetch.
+                   + (f" — assigned after {r['source_type']} "
+                      f"{r['source_ref']}" if r["source_type"] in ("incident", "discipline") and r["source_ref"] else ""),
         "when": _dt(r["completed_date"]),
         "when_iso": _iso(r["completed_date"]),
     } for r in rows]

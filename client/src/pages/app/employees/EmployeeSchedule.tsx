@@ -10,8 +10,9 @@ import {
   assignEmployee, unassignEmployee, fetchTemplates, createTemplate, deleteTemplate,
   generateFromTemplate, fetchRequests, reviewRequest,
 } from '../../../api/employees/employeeSchedule'
+import { trainingApi, type TrainingRequirement } from '../../../api/training/training'
 import type {
-  Shift, RosterEmployee, ShiftTemplate, ScheduleRequest, ShiftPayload,
+  Shift, RosterEmployee, ShiftTemplate, ScheduleRequest, ShiftPayload, RosterFlags,
 } from '../../../types/employeeSchedule'
 import {
   STATUS_TONE, REQUEST_TONE, errorMessage,
@@ -19,6 +20,7 @@ import {
 } from '../../../types/employeeSchedule'
 import { useEmployeeSchedule } from './useEmployeeSchedule'
 import ScheduleLawPanel from '../../../components/employees/ScheduleLawPanel'
+import { useMe } from '../../../hooks/useMe'
 
 const inputCls = 'bg-zinc-900 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500 w-full'
 
@@ -74,6 +76,7 @@ export default function EmployeeSchedule() {
     weekStart, setWeekStart,
     shifts,
     roster,
+    rosterFlags,
     summary,
     loading,
     publishing,
@@ -144,6 +147,7 @@ export default function EmployeeSchedule() {
                   day={day}
                   shifts={shifts.filter((s) => s.starts_at.slice(0, 10) === day)}
                   roster={roster}
+                  rosterFlags={rosterFlags}
                   onPatch={patchShift}
                   onChanged={reload}
                 />
@@ -177,8 +181,9 @@ function Stat({ label, value, tone }: { label: string; value: number | string; t
   )
 }
 
-function DayColumn({ day, shifts, roster, onPatch, onChanged }: {
-  day: string; shifts: Shift[]; roster: RosterEmployee[]; onPatch: (s: Shift) => void; onChanged: () => void
+function DayColumn({ day, shifts, roster, rosterFlags, onPatch, onChanged }: {
+  day: string; shifts: Shift[]; roster: RosterEmployee[]; rosterFlags: RosterFlags | null
+  onPatch: (s: Shift) => void; onChanged: () => void
 }) {
   const [adding, setAdding] = useState(false)
   return (
@@ -195,15 +200,16 @@ function DayColumn({ day, shifts, roster, onPatch, onChanged }: {
         )}
         {shifts.length === 0 && !adding && <p className="text-[11px] text-zinc-700 py-2">No shifts</p>}
         {shifts.map((s) => (
-          <ShiftCard key={s.id} shift={s} roster={roster} onPatch={onPatch} onChanged={onChanged} />
+          <ShiftCard key={s.id} shift={s} roster={roster} rosterFlags={rosterFlags} onPatch={onPatch} onChanged={onChanged} />
         ))}
       </div>
     </div>
   )
 }
 
-function ShiftCard({ shift, roster, onPatch, onChanged }: {
-  shift: Shift; roster: RosterEmployee[]; onPatch: (s: Shift) => void; onChanged: () => void
+function ShiftCard({ shift, roster, rosterFlags, onPatch, onChanged }: {
+  shift: Shift; roster: RosterEmployee[]; rosterFlags: RosterFlags | null
+  onPatch: (s: Shift) => void; onChanged: () => void
 }) {
   const { toast } = useToast()
   const [busy, setBusy] = useState(false)
@@ -290,18 +296,32 @@ function ShiftCard({ shift, roster, onPatch, onChanged }: {
     <div className={`rounded-lg border p-2.5 ${shift.status === 'cancelled' ? 'border-red-500/20 bg-red-500/5 opacity-70' : 'border-zinc-800 bg-zinc-900/60'}`}>
       <div className="flex items-center justify-between gap-1">
         <span className="text-sm font-medium text-zinc-100">{fmtTime(shift.starts_at)}–{fmtTime(shift.ends_at)}</span>
-        <span className={`px-1.5 py-0.5 rounded-full border text-[9px] font-semibold uppercase ${STATUS_TONE[shift.status]}`}>{shift.status}</span>
+        <span className="flex items-center gap-1">
+          {shift.kind === 'training' && (
+            <span className="px-1.5 py-0.5 rounded-full border text-[9px] font-semibold uppercase text-sky-400 bg-sky-500/10 border-sky-500/20">Training</span>
+          )}
+          <span className={`px-1.5 py-0.5 rounded-full border text-[9px] font-semibold uppercase ${STATUS_TONE[shift.status]}`}>{shift.status}</span>
+        </span>
       </div>
       {(shift.role || shift.department) && (
         <div className="text-[11px] text-zinc-400 mt-0.5 truncate">{[shift.role, shift.department].filter(Boolean).join(' · ')}</div>
       )}
       <div className="mt-2 flex flex-wrap gap-1">
-        {shift.assignments.map((a) => (
-          <span key={a.employee_id} className="inline-flex items-center gap-1 bg-zinc-800 rounded-full pl-2 pr-1 py-0.5 text-[11px] text-zinc-200">
-            {a.name}
-            <button onClick={() => removeAssignment(a.employee_id)} disabled={busy} className="text-zinc-500 hover:text-red-400"><X className="h-3 w-3" /></button>
-          </span>
-        ))}
+        {shift.assignments.map((a) => {
+          const flags = rosterFlags?.[a.employee_id]
+          const lapseCount = (flags?.overdue_training ?? 0) + (flags?.lapsed_credentials ?? 0)
+          return (
+            <span key={a.employee_id} className="inline-flex items-center gap-1 bg-zinc-800 rounded-full pl-2 pr-1 py-0.5 text-[11px] text-zinc-200">
+              {a.name}
+              {lapseCount > 0 && (
+                <span className="text-amber-400" title={`${flags?.overdue_training ?? 0} overdue training, ${flags?.lapsed_credentials ?? 0} lapsed credential(s)`}>
+                  ⚠ {lapseCount}
+                </span>
+              )}
+              <button onClick={() => removeAssignment(a.employee_id)} disabled={busy} className="text-zinc-500 hover:text-red-400"><X className="h-3 w-3" /></button>
+            </span>
+          )
+        })}
         <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${understaffed ? 'text-amber-400 bg-amber-500/10' : 'text-emerald-400 bg-emerald-500/10'}`}>
           {shift.assignments.length}/{shift.required_staff}
         </span>
@@ -314,7 +334,15 @@ function ShiftCard({ shift, roster, onPatch, onChanged }: {
           onChange={(e) => { if (e.target.value) { assign(e.target.value); setPickerOpen(false) } }}
         >
           <option value="">Select employee…</option>
-          {available.map((e) => <option key={e.id} value={e.id}>{e.name}{e.job_title ? ` — ${e.job_title}` : ''}</option>)}
+          {available.map((e) => {
+            const flags = rosterFlags?.[e.id]
+            const lapseCount = (flags?.overdue_training ?? 0) + (flags?.lapsed_credentials ?? 0)
+            return (
+              <option key={e.id} value={e.id}>
+                {e.name}{e.job_title ? ` — ${e.job_title}` : ''}{lapseCount > 0 ? ` — ⚠ ${lapseCount} lapsed` : ''}
+              </option>
+            )
+          })}
         </select>
       )}
 
@@ -364,6 +392,8 @@ function ShiftForm({ day, shift, onDone, onSaved, onCancel }: {
   onCancel: () => void
 }) {
   const { toast } = useToast()
+  const { hasFeature } = useMe()
+  const trainingEnabled = hasFeature('training')
   const editing = !!shift
   const [start, setStart] = useState(shift ? shift.starts_at.slice(11, 16) : '09:00')
   const [end, setEnd] = useState(shift ? shift.ends_at.slice(11, 16) : '17:00')
@@ -371,20 +401,39 @@ function ShiftForm({ day, shift, onDone, onSaved, onCancel }: {
   const [required, setRequired] = useState(String(shift?.required_staff ?? 1))
   const [busy, setBusy] = useState(false)
 
+  // Training-as-shift: kind is immutable after create (no field on
+  // ShiftUpdate), so the toggle only renders for a brand-new shift.
+  const [kind, setKind] = useState<'work' | 'training'>('work')
+  const [requirementId, setRequirementId] = useState('')
+  const [requirements, setRequirements] = useState<TrainingRequirement[]>([])
+  useEffect(() => {
+    if (editing || !trainingEnabled) return
+    trainingApi.listRequirements().then(setRequirements).catch(() => setRequirements([]))
+  }, [editing, trainingEnabled])
+
   const overnight = end <= start
 
   function buildPayload(): ShiftPayload {
     const startDay = editing ? shift!.starts_at.slice(0, 10) : day
     const endDay = overnight ? addDays(startDay, 1) : startDay
-    return {
+    const payload: ShiftPayload = {
       starts_at: `${startDay}T${start}:00Z`,
       ends_at: `${endDay}T${end}:00Z`,
       role: role.trim() || null,
       required_staff: Math.max(1, Math.round(Number(required) || 1)),
     }
+    if (!editing && kind === 'training' && requirementId) {
+      payload.kind = 'training'
+      payload.training_requirement_id = requirementId
+    }
+    return payload
   }
 
   async function save() {
+    if (!editing && kind === 'training' && !requirementId) {
+      toast('Select a training requirement for this session', 'error')
+      return
+    }
     setBusy(true)
     try {
       const payload = buildPayload()
@@ -445,6 +494,24 @@ function ShiftForm({ day, shift, onDone, onSaved, onCancel }: {
         <span className="text-[10px] text-zinc-500 uppercase tracking-wide">Staff needed</span>
         <input value={required} onChange={(e) => setRequired(e.target.value)} className={`${inputCls} mt-0.5`} />
       </label>
+      {!editing && trainingEnabled && (
+        <label className="block">
+          <span className="text-[10px] text-zinc-500 uppercase tracking-wide">Kind</span>
+          <div className="mt-0.5 flex rounded-lg border border-zinc-700 overflow-hidden text-xs">
+            <button type="button" onClick={() => setKind('work')} className={`flex-1 px-2 py-1.5 ${kind === 'work' ? 'bg-zinc-700 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'}`}>Work</button>
+            <button type="button" onClick={() => setKind('training')} className={`flex-1 px-2 py-1.5 ${kind === 'training' ? 'bg-sky-600 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}>Training</button>
+          </div>
+        </label>
+      )}
+      {!editing && trainingEnabled && kind === 'training' && (
+        <label className="block">
+          <span className="text-[10px] text-zinc-500 uppercase tracking-wide">Training requirement</span>
+          <select value={requirementId} onChange={(e) => setRequirementId(e.target.value)} className={`${inputCls} mt-0.5`}>
+            <option value="">Select requirement…</option>
+            {requirements.map((r) => <option key={r.id} value={r.id}>{r.title}</option>)}
+          </select>
+        </label>
+      )}
       <div className="flex items-center gap-1.5">
         <button onClick={save} disabled={busy} className="inline-flex items-center gap-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium rounded-lg px-2.5 py-1.5 disabled:opacity-50">{busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} {editing ? 'Save' : 'Add'}</button>
         <button onClick={onCancel} className="text-xs text-zinc-400 hover:text-zinc-100 px-2.5 py-1.5 rounded-lg border border-zinc-700">Cancel</button>

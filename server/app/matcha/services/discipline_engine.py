@@ -23,6 +23,7 @@ from typing import Any, Optional
 from uuid import UUID
 
 from ...database import get_connection
+from .training_assignment import assign_training as _assign_training
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +98,7 @@ RECORD_COLUMNS = """
     signature_requested_at, signature_completed_at,
     signature_envelope_id, signed_pdf_storage_path,
     meeting_held_at, occurrence_dates, compliance_check,
-    advisory_ack_reason, situation_narrative,
+    advisory_ack_reason, situation_narrative, remedial_requirement_id,
     created_at, updated_at
 """
 
@@ -374,6 +375,7 @@ async def issue_discipline_with_supersede(
     situation_narrative: Optional[str] = None,
     compliance_check: Optional[dict[str, Any]] = None,
     advisory_ack_reason: Optional[str] = None,
+    remedial_requirement_id: Optional[UUID] = None,
 ) -> dict[str, Any]:
     """Insert new record, flip prior actives to escalated, write audit log.
 
@@ -410,14 +412,14 @@ async def issue_discipline_with_supersede(
                     status, documents, infraction_type, severity, lookback_months,
                     expires_at, escalated_from_id, override_level, override_reason,
                     signature_status, occurrence_dates, situation_narrative,
-                    compliance_check, advisory_ack_reason
+                    compliance_check, advisory_ack_reason, remedial_requirement_id
                 )
                 VALUES (
                     $1, $2, $3, $4, $5, $6, $7, $8,
                     'draft', $9::jsonb, $10, $11, $12::int,
                     ($4::date)::timestamptz + make_interval(months => $12::int),
                     $13, $14, $15, 'pending',
-                    $16::date[], $17, $18::jsonb, $19
+                    $16::date[], $17, $18::jsonb, $19, $20
                 )
                 RETURNING {RECORD_COLUMNS}
                 """,
@@ -430,9 +432,28 @@ async def issue_discipline_with_supersede(
                 situation_narrative,
                 json.dumps(compliance_check) if compliance_check is not None else None,
                 advisory_ack_reason,
+                remedial_requirement_id,
             )
 
             new_id = row["id"]
+
+            if remedial_requirement_id is not None:
+                requirement = await conn.fetchrow(
+                    "SELECT id, title, training_type, frequency_months "
+                    "FROM training_requirements WHERE id = $1 AND company_id = $2",
+                    remedial_requirement_id, company_id,
+                )
+                if requirement:
+                    await _assign_training(
+                        conn,
+                        company_id,
+                        dict(requirement),
+                        [employee_id],
+                        source_type="discipline",
+                        source_ref=new_id,
+                        source_note=f"Remedial training from discipline record {new_id}",
+                        assigned_by=actor_user_id,
+                    )
 
             # Flip superseded actives → escalated
             if supersede_ids:

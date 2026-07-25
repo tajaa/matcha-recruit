@@ -13,12 +13,15 @@ company_id filter (the company-wide list + by-id routes).
 """
 import logging
 from datetime import date, datetime, timezone
+from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel
 
+from app.core.feature_flags import get_company_features
 from app.database import get_connection
-from app.matcha.dependencies import get_client_company_id, require_admin_or_client
+from app.matcha.dependencies import get_client_company_id, require_admin_or_client, require_feature
 from app.matcha.models.ir_incident import (
     CorrectiveAction,
     CorrectiveActionCreate,
@@ -39,6 +42,7 @@ _CA_SELECT = """
     ca.id, ca.incident_id, ca.description, ca.action_type, ca.priority,
     ca.assigned_to, ca.assignee_name, ca.due_date, ca.status,
     ca.completed_at, ca.verified_by, ca.verified_at, ca.effectiveness,
+    ca.training_requirement_id,
     ca.created_by, ca.created_at, ca.updated_at,
     COALESCE(cl.name, u.email) AS assigned_to_name
 """
@@ -105,6 +109,7 @@ def _row_to_action(row) -> CorrectiveAction:
         verified_by=row["verified_by"],
         verified_at=row["verified_at"],
         effectiveness=row["effectiveness"],
+        training_requirement_id=row["training_requirement_id"],
         created_by=row["created_by"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
@@ -147,15 +152,31 @@ async def create_corrective_action(
     """Create a structured corrective/preventive action on an incident."""
     async with get_connection() as conn:
         incident = await _get_incident_with_company_check(
-            conn, incident_id, current_user, columns="id, company_id"
+            conn, incident_id, current_user,
+            columns="id, company_id, involved_employee_ids",
         )
         await _assert_assignable(conn, payload.assigned_to, incident["company_id"])
+
+        training_requirement_id = None
+        if payload.action_type == "training" and payload.training_requirement_id:
+            features = await get_company_features(incident["company_id"], conn=conn)
+            if not features.get("training"):
+                raise HTTPException(status_code=403, detail="Training feature required for training corrective actions")
+            requirement = await conn.fetchrow(
+                "SELECT id, title, training_type, frequency_months "
+                "FROM training_requirements WHERE id = $1 AND company_id = $2",
+                str(payload.training_requirement_id), str(incident["company_id"]),
+            )
+            if not requirement:
+                raise HTTPException(status_code=404, detail="Training requirement not found")
+            training_requirement_id = requirement["id"]
+
         row = await conn.fetchrow(
             """
             INSERT INTO ir_corrective_actions
                 (incident_id, company_id, description, action_type, priority,
-                 assigned_to, assignee_name, due_date, created_by)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                 assigned_to, assignee_name, due_date, created_by, training_requirement_id)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             RETURNING id
             """,
             str(incident_id),
@@ -167,7 +188,30 @@ async def create_corrective_action(
             (payload.assignee_name or None),
             payload.due_date,
             str(current_user.id),
+            training_requirement_id,
         )
+
+        if training_requirement_id and incident["involved_employee_ids"]:
+            try:
+                from app.matcha.services.training_assignment import assign_training
+
+                await assign_training(
+                    conn,
+                    incident["company_id"],
+                    dict(requirement),
+                    incident["involved_employee_ids"],
+                    source_type="incident",
+                    source_ref=incident_id,
+                    due_date=payload.due_date,
+                    assigned_by=current_user.id,
+                    source_note=f"CAPA on incident {incident_id}",
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to assign training from CAPA %s on incident %s",
+                    row["id"], incident_id,
+                )
+
         await log_audit(
             conn,
             str(incident_id),
@@ -246,6 +290,15 @@ async def update_corrective_action(
             add("due_date", payload.due_date)
         if "effectiveness" in fields:
             add("effectiveness", payload.effectiveness)
+        if "training_requirement_id" in fields:
+            if payload.training_requirement_id:
+                req_exists = await conn.fetchval(
+                    "SELECT id FROM training_requirements WHERE id = $1 AND company_id = $2",
+                    str(payload.training_requirement_id), str(company_id),
+                )
+                if not req_exists:
+                    raise HTTPException(status_code=404, detail="Training requirement not found")
+            add("training_requirement_id", str(payload.training_requirement_id) if payload.training_requirement_id else None)
 
         now = datetime.now(timezone.utc)
         if "status" in fields and payload.status is not None:
@@ -363,3 +416,147 @@ async def list_open_corrective_actions(
     return OpenCorrectiveActionsResponse(
         actions=actions, total=len(actions), overdue_count=overdue_count
     )
+
+
+# ---------------------------------------------------------------------------
+# Assign training — the admin-triggered path (B2). Independent of CAPA: an
+# admin can assign training straight from the incident without first creating
+# a corrective action. When corrective_action_id is given, that CAPA is
+# stamped action_type='training' + training_requirement_id so it shows the
+# same linkage the CAPA-first path (create_corrective_action, above) produces.
+# ---------------------------------------------------------------------------
+
+class AssignTrainingRequest(BaseModel):
+    requirement_id: UUID
+    employee_ids: Optional[list[UUID]] = None
+    due_date: Optional[date] = None
+    note: Optional[str] = None
+    corrective_action_id: Optional[UUID] = None
+
+
+class AssignTrainingResponse(BaseModel):
+    assigned_count: int
+    accelerated_count: int
+    already_open_count: int
+    requirement_id: UUID
+
+
+@router.post(
+    "/{incident_id}/assign-training",
+    response_model=AssignTrainingResponse,
+    dependencies=[Depends(require_feature("training"))],
+)
+async def assign_training_from_incident(
+    incident_id: UUID,
+    payload: AssignTrainingRequest,
+    request: Request,
+    current_user=Depends(require_admin_or_client),
+):
+    """Assign a training requirement to this incident's involved employees
+    (or an explicit subset). Defaults employee_ids to
+    ir_incidents.involved_employee_ids — witnesses and no-roster ir_people
+    aren't real `employees` rows and can't be targeted here.
+    """
+    async with get_connection() as conn:
+        incident = await _get_incident_with_company_check(
+            conn, incident_id, current_user,
+            columns="id, company_id, involved_employee_ids",
+        )
+        company_id = incident["company_id"]
+
+        requirement = await conn.fetchrow(
+            "SELECT id, title, training_type, frequency_months "
+            "FROM training_requirements WHERE id = $1 AND company_id = $2 AND is_active = true",
+            str(payload.requirement_id), str(company_id),
+        )
+        if not requirement:
+            raise HTTPException(status_code=404, detail="Training requirement not found")
+
+        employee_ids = payload.employee_ids or list(incident["involved_employee_ids"] or [])
+        if not employee_ids:
+            raise HTTPException(
+                status_code=400,
+                detail="No employees to assign — pass employee_ids or add involved employees to the incident",
+            )
+
+        if payload.corrective_action_id:
+            action_row = await conn.fetchrow(
+                "SELECT id FROM ir_corrective_actions WHERE id = $1 AND incident_id = $2 AND company_id = $3",
+                str(payload.corrective_action_id), str(incident_id), str(company_id),
+            )
+            if not action_row:
+                raise HTTPException(status_code=404, detail="Corrective action not found")
+            await conn.execute(
+                "UPDATE ir_corrective_actions SET action_type = 'training', "
+                "training_requirement_id = $1, updated_at = NOW() WHERE id = $2",
+                str(requirement["id"]), str(payload.corrective_action_id),
+            )
+
+        from app.matcha.services.training_assignment import assign_training
+
+        outcome = await assign_training(
+            conn,
+            company_id,
+            dict(requirement),
+            employee_ids,
+            source_type="incident",
+            source_ref=incident_id,
+            source_note=payload.note or f"Assigned from incident {incident_id}",
+            due_date=payload.due_date,
+            assigned_by=current_user.id,
+        )
+
+        await log_audit(
+            conn,
+            str(incident_id),
+            str(current_user.id),
+            "training_assigned",
+            "training_record",
+            str(requirement["id"]),
+            {"assigned_count": outcome.assigned, "employee_count": len(employee_ids)},
+            request.client.host if request.client else None,
+        )
+
+    return AssignTrainingResponse(
+        assigned_count=outcome.assigned,
+        accelerated_count=outcome.accelerated,
+        already_open_count=outcome.already_open,
+        requirement_id=requirement["id"],
+    )
+
+
+@router.get("/{incident_id}/trainings", dependencies=[Depends(require_feature("training"))])
+async def list_incident_trainings(
+    incident_id: UUID,
+    current_user=Depends(require_admin_or_client),
+):
+    """Training records this incident triggered (source_type='incident')."""
+    async with get_connection() as conn:
+        incident = await _get_incident_with_company_check(
+            conn, incident_id, current_user, columns="id, company_id"
+        )
+        rows = await conn.fetch(
+            """
+            SELECT r.id, r.employee_id, r.title, r.status, r.due_date,
+                   r.completed_date, r.source_note,
+                   e.first_name, e.last_name
+            FROM training_records r
+            JOIN employees e ON e.id = r.employee_id
+            WHERE r.company_id = $1 AND r.source_type = 'incident' AND r.source_ref = $2
+            ORDER BY r.created_at DESC
+            """,
+            str(incident["company_id"]), str(incident_id),
+        )
+        return [
+            {
+                "id": str(r["id"]),
+                "employee_id": str(r["employee_id"]),
+                "employee_name": f"{r['first_name'] or ''} {r['last_name'] or ''}".strip(),
+                "title": r["title"],
+                "status": r["status"],
+                "due_date": r["due_date"].isoformat() if r["due_date"] else None,
+                "completed_date": r["completed_date"].isoformat() if r["completed_date"] else None,
+                "source_note": r["source_note"],
+            }
+            for r in rows
+        ]

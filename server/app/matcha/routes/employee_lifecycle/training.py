@@ -11,6 +11,7 @@ from datetime import date, datetime, timedelta
 from typing import Any, Optional
 from uuid import UUID, uuid4
 
+import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
@@ -24,6 +25,9 @@ from app.matcha.services.training_grading import (
     grade_quiz as _grade_quiz_pure,
     parse_jsonb as _parse_jsonb,
     sanitize_lesson_template as _sanitize_lesson_template,
+)
+from app.matcha.services.training_assignment import (
+    assign_training as _assign_training,
 )
 from app.core.models.auth import CurrentUser
 
@@ -249,6 +253,207 @@ async def delete_requirement(
 
 
 # ---------------------------------------------------------------------------
+# Assignment rules — replace hand-driven bulk-assign with trigger-based
+# auto-assignment (new hire / incident close / scheduled cadence).
+# ---------------------------------------------------------------------------
+
+VALID_RULE_TRIGGERS = {"new_hire", "incident", "schedule", "scheduled_role"}
+
+
+class TrainingRuleCreate(BaseModel):
+    requirement_id: UUID
+    trigger: str
+    work_states: Optional[list[str]] = None
+    applies_to: str = "all"
+    departments: Optional[list[str]] = None
+    due_days: Optional[int] = None
+    incident_types: Optional[list[str]] = None
+    min_severity: Optional[str] = None
+    roles: Optional[list[str]] = None
+
+
+class TrainingRuleUpdate(BaseModel):
+    work_states: Optional[list[str]] = None
+    applies_to: Optional[str] = None
+    departments: Optional[list[str]] = None
+    due_days: Optional[int] = None
+    incident_types: Optional[list[str]] = None
+    min_severity: Optional[str] = None
+    is_active: Optional[bool] = None
+    roles: Optional[list[str]] = None
+
+
+def _rule_to_dict(row) -> dict:
+    return {
+        "id": str(row["id"]),
+        "company_id": str(row["company_id"]),
+        "requirement_id": str(row["requirement_id"]),
+        "trigger": row["trigger"],
+        "work_states": list(row["work_states"]) if row["work_states"] else None,
+        "applies_to": row["applies_to"],
+        "departments": list(row["departments"]) if row["departments"] else None,
+        "due_days": row["due_days"],
+        "incident_types": list(row["incident_types"]) if row["incident_types"] else None,
+        "min_severity": row["min_severity"],
+        "roles": list(row["roles"]) if row["roles"] else None,
+        "is_active": row["is_active"],
+        "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+        "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
+    }
+
+
+@router.post("/rules")
+async def create_rule(
+    body: TrainingRuleCreate,
+    user: CurrentUser = Depends(require_admin_or_client),
+    company_id: UUID = Depends(get_client_company_id),
+):
+    """Create a training-assignment rule (new_hire / incident / schedule trigger)."""
+    if not company_id:
+        raise HTTPException(status_code=400, detail="No company found")
+
+    if body.trigger not in VALID_RULE_TRIGGERS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid trigger. Must be one of: {sorted(VALID_RULE_TRIGGERS)}",
+        )
+    if body.applies_to not in {"all", "supervisor", "nonsupervisor"}:
+        raise HTTPException(status_code=400, detail="Invalid applies_to")
+
+    async with get_connection() as conn:
+        requirement = await conn.fetchval(
+            "SELECT id FROM training_requirements WHERE id = $1 AND company_id = $2",
+            body.requirement_id,
+            company_id,
+        )
+        if not requirement:
+            raise HTTPException(status_code=404, detail="Training requirement not found")
+
+        row = await conn.fetchrow(
+            """
+            INSERT INTO training_assignment_rules
+                (company_id, requirement_id, trigger, work_states, applies_to,
+                 departments, due_days, incident_types, min_severity, roles, created_by)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            RETURNING *
+            """,
+            company_id,
+            body.requirement_id,
+            body.trigger,
+            body.work_states,
+            body.applies_to,
+            body.departments,
+            body.due_days,
+            body.incident_types,
+            body.min_severity,
+            body.roles,
+            user.id,
+        )
+        return _rule_to_dict(row)
+
+
+@router.get("/rules")
+async def list_rules(
+    is_active: bool = Query(default=True),
+    user: CurrentUser = Depends(require_admin_or_client),
+    company_id: UUID = Depends(get_client_company_id),
+):
+    """List training-assignment rules for the company."""
+    if not company_id:
+        return []
+
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            "SELECT * FROM training_assignment_rules WHERE company_id = $1 AND is_active = $2 "
+            "ORDER BY created_at DESC",
+            company_id,
+            is_active,
+        )
+        return [_rule_to_dict(r) for r in rows]
+
+
+@router.put("/rules/{rule_id}")
+async def update_rule(
+    rule_id: UUID,
+    body: TrainingRuleUpdate,
+    user: CurrentUser = Depends(require_admin_or_client),
+    company_id: UUID = Depends(get_client_company_id),
+):
+    """Update a training-assignment rule.
+
+    True PATCH over `model_fields_set`: only the fields the caller sent are
+    written, so an explicit null clears a nullable filter column (work_states,
+    departments, due_days, incident_types, min_severity, roles) instead of
+    being indistinguishable from "not provided" — the only prior escape was
+    soft-deleting and recreating the rule.
+    """
+    if not company_id:
+        raise HTTPException(status_code=404, detail="Rule not found")
+
+    patch = body.model_dump(exclude_unset=True)
+    if not patch:
+        raise HTTPException(status_code=400, detail="No updates provided")
+
+    if "applies_to" in patch and patch["applies_to"] not in {"all", "supervisor", "nonsupervisor"}:
+        raise HTTPException(status_code=400, detail="Invalid applies_to")
+    if "is_active" in patch and patch["is_active"] is None:
+        raise HTTPException(status_code=400, detail="is_active cannot be cleared")
+
+    updates = []
+    params: list = []
+    idx = 1
+    for field_name, value in patch.items():
+        updates.append(f"{field_name} = ${idx}")
+        params.append(value)
+        idx += 1
+
+    updates.append("updated_at = NOW()")
+    params.append(rule_id)
+    params.append(company_id)
+
+    row = await _execute_update(
+        f"""
+        UPDATE training_assignment_rules
+        SET {', '.join(updates)}
+        WHERE id = ${idx} AND company_id = ${idx + 1}
+        RETURNING *
+        """,
+        params,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Rule not found")
+
+    return _rule_to_dict(row)
+
+
+@router.delete("/rules/{rule_id}")
+async def delete_rule(
+    rule_id: UUID,
+    user: CurrentUser = Depends(require_admin_or_client),
+    company_id: UUID = Depends(get_client_company_id),
+):
+    """Soft-delete a training-assignment rule (set is_active=false)."""
+    if not company_id:
+        raise HTTPException(status_code=404, detail="Rule not found")
+
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            UPDATE training_assignment_rules
+            SET is_active = false, updated_at = NOW()
+            WHERE id = $1 AND company_id = $2
+            RETURNING id
+            """,
+            rule_id,
+            company_id,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Rule not found")
+
+        return {"status": "deleted", "rule_id": str(rule_id)}
+
+
+# ---------------------------------------------------------------------------
 # Records CRUD
 # ---------------------------------------------------------------------------
 
@@ -288,22 +493,28 @@ async def create_record(
             if not req:
                 raise HTTPException(status_code=404, detail="Training requirement not found")
 
-        row = await conn.fetchrow(
-            """
-            INSERT INTO training_records
-                (company_id, employee_id, requirement_id, title, training_type, due_date, provider, notes)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-            RETURNING *
-            """,
-            company_id,
-            body.employee_id,
-            body.requirement_id,
-            body.title,
-            body.training_type,
-            body.due_date,
-            body.provider,
-            body.notes,
-        )
+        try:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO training_records
+                    (company_id, employee_id, requirement_id, title, training_type, due_date, provider, notes)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                RETURNING *
+                """,
+                company_id,
+                body.employee_id,
+                body.requirement_id,
+                body.title,
+                body.training_type,
+                body.due_date,
+                body.provider,
+                body.notes,
+            )
+        except asyncpg.UniqueViolationError:
+            raise HTTPException(
+                status_code=409,
+                detail="This employee already has an open assignment for that requirement",
+            )
         return _record_to_dict(row)
 
 
@@ -352,43 +563,20 @@ async def bulk_assign(
         if not employees:
             return {"assigned_count": 0, "requirement_id": str(body.requirement_id), "message": "No matching active employees found"}
 
-        assigned_date = date.today()
-        due_date = None
-        if requirement["frequency_months"]:
-            due_date = assigned_date + timedelta(days=requirement["frequency_months"] * 30)
-
-        # Build batch VALUES and use ON CONFLICT to skip existing active assignments
-        values_parts = []
-        params = [
+        outcome = await _assign_training(
+            conn,
             company_id,
-            requirement["id"],
-            requirement["title"],
-            requirement["training_type"],
-            assigned_date,
-            due_date,
-            user.id,  # assigned_by
-        ]
-        base_idx = len(params) + 1
-        for i, emp in enumerate(employees):
-            values_parts.append(f"($1, ${base_idx + i}, $2, $3, $4, $5, $6, $7)")
-            params.append(emp["id"])
-
-        result = await conn.execute(
-            f"""
-            INSERT INTO training_records
-                (company_id, employee_id, requirement_id, title, training_type,
-                 assigned_date, due_date, assigned_by)
-            VALUES {', '.join(values_parts)}
-            ON CONFLICT (employee_id, requirement_id)
-                WHERE status IN ('assigned', 'in_progress')
-            DO NOTHING
-            """,
-            *params,
+            dict(requirement),
+            [emp["id"] for emp in employees],
+            source_type="bulk_assign",
+            assigned_by=user.id,
         )
-        # asyncpg returns "INSERT 0 N" where N is rows inserted
-        count = int(result.split()[-1]) if result else 0
 
-        return {"assigned_count": count, "requirement_id": str(body.requirement_id)}
+        return {
+            "assigned_count": outcome.assigned,
+            "requirement_id": str(body.requirement_id),
+            **({"accelerated_count": outcome.accelerated} if outcome.accelerated else {}),
+        }
 
 
 @router.get("/records")
@@ -524,6 +712,47 @@ async def update_record(
 
         if not row:
             raise HTTPException(status_code=404, detail="Record not found")
+
+        return _record_to_dict(row)
+
+
+class WaiveRequest(BaseModel):
+    reason: str = Field(..., min_length=1, max_length=2000)
+
+
+@router.post("/records/{record_id}/waive")
+async def waive_record(
+    record_id: UUID,
+    body: WaiveRequest,
+    user: CurrentUser = Depends(require_admin_or_client),
+    company_id: UUID = Depends(get_client_company_id),
+):
+    """Waive a training record with a reason — parity with
+    `employee_credential_requirements.waived_at/by/waiver_reason`. Only an
+    open (assigned/in_progress) record can be waived."""
+    if not company_id:
+        raise HTTPException(status_code=404, detail="Record not found")
+
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            UPDATE training_records
+            SET status = 'waived', waived_at = NOW(), waived_by = $1,
+                waiver_reason = $2, updated_at = NOW()
+            WHERE id = $3 AND company_id = $4
+              AND status IN ('assigned', 'in_progress')
+            RETURNING *
+            """,
+            user.id,
+            body.reason,
+            record_id,
+            company_id,
+        )
+        if not row:
+            raise HTTPException(
+                status_code=404,
+                detail="Record not found or not in a waivable status",
+            )
 
         return _record_to_dict(row)
 
@@ -669,6 +898,12 @@ def _record_to_dict(row) -> dict:
         "certificate_number": row["certificate_number"],
         "score": float(row["score"]) if row["score"] is not None else None,
         "notes": row["notes"],
+        "source_type": row["source_type"],
+        "source_ref": str(row["source_ref"]) if row["source_ref"] else None,
+        "source_note": row["source_note"],
+        "waived_at": row["waived_at"].isoformat() if row["waived_at"] else None,
+        "waived_by": str(row["waived_by"]) if row["waived_by"] else None,
+        "waiver_reason": row["waiver_reason"],
         "created_at": row["created_at"].isoformat() if row["created_at"] else None,
         "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
     }

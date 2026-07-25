@@ -531,6 +531,17 @@ async def bulk_upload_employees_csv(
                     background_tasks=background_tasks,
                 )
 
+                # Auto-assign new-hire training per training_assignment_rules
+                try:
+                    from app.matcha.services.training_assignment import evaluate_new_hire_rules
+
+                    await evaluate_new_hire_rules(conn, company_id, employee["id"])
+                except Exception:
+                    logger.exception(
+                        "[BulkUpload] Row %d: failed to auto-assign new-hire training for %s",
+                        row_num, email,
+                    )
+
                 # Schedule Google Workspace / Slack provisioning
                 run_google = google_workspace_auto_provision
                 run_slack = slack_auto_provision

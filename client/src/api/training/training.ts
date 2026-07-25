@@ -14,6 +14,17 @@ export type TrainingRequirement = {
   updated_at: string | null
 }
 
+export type TrainingSourceType =
+  | 'manual'
+  | 'bulk_assign'
+  | 'rule'
+  | 'new_hire'
+  | 'incident'
+  | 'discipline'
+  | 'credential'
+  | 'cadence'
+  | 'schedule'
+
 export type TrainingRecord = {
   id: string
   company_id: string
@@ -30,6 +41,29 @@ export type TrainingRecord = {
   certificate_number: string | null
   score: number | null
   notes: string | null
+  source_type: TrainingSourceType
+  source_ref: string | null
+  source_note: string | null
+  waived_at: string | null
+  waived_by: string | null
+  waiver_reason: string | null
+  created_at: string | null
+  updated_at: string | null
+}
+
+export type TrainingRule = {
+  id: string
+  company_id: string
+  requirement_id: string
+  trigger: 'new_hire' | 'incident' | 'schedule' | 'scheduled_role'
+  work_states: string[] | null
+  applies_to: 'all' | 'supervisor' | 'nonsupervisor'
+  departments: string[] | null
+  due_days: number | null
+  incident_types: string[] | null
+  min_severity: string | null
+  roles: string[] | null
+  is_active: boolean
   created_at: string | null
   updated_at: string | null
 }
@@ -116,6 +150,15 @@ export const trainingApi = {
   listRequirements: () => api.get<TrainingRequirement[]>('/training/requirements'),
   getRequirement: (id: string) => api.get<TrainingRequirement>(`/training/requirements/${id}`),
   getRecord: (id: string) => api.get<TrainingRecord>(`/training/records/${id}`),
+  createRecord: (body: {
+    employee_id: string
+    requirement_id?: string
+    title: string
+    training_type: string
+    due_date?: string
+    provider?: string
+    notes?: string
+  }) => api.post<TrainingRecord>('/training/records', body),
   bulkAssign: (requirement_id: string) =>
     api.post<{ assigned_count: number; requirement_id: string; message?: string }>(
       '/training/records/bulk-assign',
@@ -133,6 +176,24 @@ export const trainingApi = {
   overdue: () => api.get<TrainingOverdueRow[]>('/training/overdue'),
   certificateUrl: (record_id: string) =>
     api.get<{ url: string }>(`/training/records/${record_id}/certificate-url`),
+  waiveRecord: (record_id: string, reason: string) =>
+    api.post<TrainingRecord>(`/training/records/${record_id}/waive`, { reason }),
+  listRules: (is_active = true) =>
+    api.get<TrainingRule[]>(`/training/rules?is_active=${is_active}`),
+  createRule: (body: {
+    requirement_id: string
+    trigger: 'new_hire' | 'incident' | 'schedule' | 'scheduled_role'
+    work_states?: string[]
+    applies_to?: 'all' | 'supervisor' | 'nonsupervisor'
+    departments?: string[]
+    due_days?: number
+    incident_types?: string[]
+    min_severity?: string
+    roles?: string[]
+  }) => api.post<TrainingRule>('/training/rules', body),
+  updateRule: (rule_id: string, body: Partial<Omit<TrainingRule, 'id' | 'company_id' | 'requirement_id' | 'trigger' | 'created_at' | 'updated_at'>>) =>
+    api.put<TrainingRule>(`/training/rules/${rule_id}`, body),
+  deleteRule: (rule_id: string) => api.delete<{ status: string }>(`/training/rules/${rule_id}`),
 }
 
 // Employee-side

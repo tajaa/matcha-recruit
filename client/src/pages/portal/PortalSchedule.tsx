@@ -150,7 +150,12 @@ function ShiftCard({ shift, onChanged }: { shift: Shift; onChanged: () => void }
     <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-3">
       <div className="flex items-center gap-3">
         <div className="flex-1 min-w-0">
-          <div className="text-sm font-medium text-zinc-100">{fmtTime(shift.starts_at)}–{fmtTime(shift.ends_at)}</div>
+          <div className="text-sm font-medium text-zinc-100 flex items-center gap-1.5">
+            {fmtTime(shift.starts_at)}–{fmtTime(shift.ends_at)}
+            {shift.kind === 'training' && (
+              <span className="px-1.5 py-0.5 rounded-full border text-[9px] font-semibold uppercase text-sky-400 bg-sky-500/10 border-sky-500/20">Training</span>
+            )}
+          </div>
           {(shift.role || shift.department) && <div className="text-[11px] text-zinc-500 truncate">{[shift.role, shift.department].filter(Boolean).join(' · ')}</div>}
         </div>
         <button onClick={() => setMode(mode === 'swap' ? null : 'swap')} className="inline-flex items-center gap-1 text-[11px] text-zinc-400 hover:text-zinc-100"><Repeat className="h-3.5 w-3.5" /> Swap</button>

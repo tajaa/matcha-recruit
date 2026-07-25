@@ -1050,6 +1050,30 @@ async def update_incident(
             request.client.host if request.client else None,
         )
 
+        # Auto-assign training per training_assignment_rules(trigger='incident')
+        # on the real open->closed transition only (not a no-op PUT that
+        # merely re-sends status='closed' on an already-closed incident).
+        # Inline (not BackgroundTasks) because it needs this same `conn` —
+        # `assign_training` is pool-free-safe by taking a connection, not
+        # opening its own, and this transaction's connection closes with the
+        # `async with` block before any background task would run.
+        if status_changed and row["status"] == "closed" and row.get("company_id"):
+            try:
+                from app.matcha.services.training_assignment import on_incident_closed
+
+                await on_incident_closed(
+                    conn,
+                    row["company_id"],
+                    {
+                        "id": row["id"],
+                        "incident_type": row.get("incident_type"),
+                        "severity": row.get("severity"),
+                        "involved_employee_ids": row.get("involved_employee_ids") or [],
+                    },
+                )
+            except Exception:
+                logger.exception("Failed to auto-assign incident training for %s", incident_id)
+
         # Re-sync per-person identity when the people-bearing fields change.
         # Gather from the returned row so the reporter (not editable here) is
         # preserved across the delete-and-reinsert. Best-effort.

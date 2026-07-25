@@ -130,6 +130,25 @@ export default function DisciplineDetail() {
             </Section>
           )}
 
+          {record.remedial_training && (
+            <Section label="Remedial training">
+              <div className="flex items-center gap-2 text-sm">
+                <Badge variant={record.remedial_training.status === 'completed' ? 'success' : 'warning'}>
+                  {record.remedial_training.status.replace(/_/g, ' ')}
+                </Badge>
+                {record.remedial_training.completed_date ? (
+                  <span className="text-zinc-400">
+                    Completed {new Date(record.remedial_training.completed_date).toLocaleDateString()}
+                  </span>
+                ) : record.remedial_training.due_date ? (
+                  <span className="text-zinc-400">
+                    Due {new Date(record.remedial_training.due_date).toLocaleDateString()}
+                  </span>
+                ) : null}
+              </div>
+            </Section>
+          )}
+
           <SignatureWorkflow
             record={record}
             employeeName={employeeFullName(employee)}
