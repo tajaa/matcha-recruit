@@ -2,26 +2,21 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { PRODUCTS } from "./data";
 import { ASH, BONE, DISPLAY, LINE_D, NOIR } from "./theme";
+import { CONTAINER, EYEBROW, EYEBROW_END, SECTION_Y } from "./layout";
 import { Reveal } from "./PageChrome";
 
 export function ProductIndex() {
   const [hovered, setHovered] = useState<number | null>(null);
 
   return (
-    <section id="index" className="scroll-mt-16 py-20 sm:py-28">
-      <div className="max-w-[1600px] mx-auto w-full px-6 sm:px-10 lg:px-16 xl:px-24">
+    <section id="index" className={`scroll-mt-16 ${SECTION_Y}`}>
+      <div className={CONTAINER}>
         <Reveal>
           <div className="flex items-baseline justify-between mb-2">
-            <h2
-              className="text-[11px] tracking-[0.3em] font-mono uppercase"
-              style={{ color: ASH }}
-            >
+            <h2 className={EYEBROW} style={{ color: ASH }}>
               Four ways in
             </h2>
-            <span
-              className="text-[11px] tracking-[0.3em] font-mono uppercase"
-              style={{ color: ASH }}
-            >
+            <span className={EYEBROW_END} style={{ color: ASH }}>
               Index
             </span>
           </div>
@@ -44,7 +39,7 @@ export function ProductIndex() {
                 }}
               >
                 <span
-                  className="font-mono text-sm sm:text-base self-start pt-2 sm:pt-4 transition-colors duration-300"
+                  className="font-mk-mono text-sm sm:text-base self-start pt-2 sm:pt-4 transition-colors duration-300"
                   style={{ color: active ? NOIR : p.accent }}
                 >
                   {p.n}
@@ -74,7 +69,7 @@ export function ProductIndex() {
                 </div>
 
                 <span
-                  className="hidden sm:inline-flex items-center gap-2 font-mono text-sm uppercase tracking-[0.2em] justify-self-end transition-all duration-300"
+                  className="hidden sm:inline-flex items-center gap-2 font-mk-mono text-sm uppercase tracking-[0.2em] justify-self-end transition-all duration-300"
                   style={{
                     color: active ? NOIR : BONE,
                     opacity: active ? 1 : 0.55,

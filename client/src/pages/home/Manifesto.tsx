@@ -1,24 +1,19 @@
-import { DISPLAY, MATCHA, NOIR } from "./theme";
+import { BONE, DISPLAY, NOIR } from "./theme";
+import { CONTAINER, EYEBROW, EYEBROW_END, SECTION_Y } from "./layout";
 import { Reveal } from "./PageChrome";
 
 export function Manifesto() {
   return (
-    <section
-      style={{ backgroundColor: MATCHA, color: NOIR }}
-      className="py-24 sm:py-36"
-    >
-      <div className="max-w-[1400px] mx-auto px-6 sm:px-10 lg:px-16 xl:px-24">
+    <section style={{ backgroundColor: BONE, color: NOIR }} className={SECTION_Y}>
+      <div className={CONTAINER}>
         <Reveal>
-          {/* Folio row — same double-hairline motif as the hero masthead, in
-              ink, so the inverted section reads as the next spread of the same
-              magazine rather than a different site. */}
+          {/* Folio row — the double-hairline motif that used to open the hero.
+              The hero dropped it to reclaim the fold; it survives here, where
+              the inverted spread is the one place the magazine conceit still
+              earns its keep. */}
           <div className="flex items-baseline justify-between pb-3">
-            <span className="text-[11px] tracking-[0.3em] font-mono uppercase">
-              The point
-            </span>
-            <span className="text-[11px] tracking-[0.3em] font-mono uppercase tabular-nums">
-              02
-            </span>
+            <span className={EYEBROW}>The point</span>
+            <span className={`${EYEBROW_END} tabular-nums`}>02</span>
           </div>
           <div style={{ height: 1, backgroundColor: "rgba(14,14,12,0.35)" }} />
           <div

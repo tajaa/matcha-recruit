@@ -1,190 +1,158 @@
-import { useRef } from 'react'
-import { motion, useInView } from 'framer-motion'
-
-import { InstrumentFrame } from './InstrumentFrame'
-import { PulseDot } from './PulseDot'
-import { useCountUp, useLoopCycle } from './hooks'
-import { CARD_LINE, CARD_MUTED, CARD_TEXT, DISPLAY, GREEN } from './theme'
+import { ASH, BONE, LINE_D } from '../../home/theme'
+import { InstrumentFrame, useCyclingIndex, useReducedMotion } from '../../home/instruments/shared'
 
 // ---------------------------------------------------------------------------
-// Pillars — four full-width editorial rows (≈ two pages of scroll). Each
-// pillar alternates copy / instrument sides and gets its own bespoke
-// grayscale diagram, with one green mark for the node it resolves to and an
-// oversized ghost numeral bleeding off the copy side. Grayscale everywhere.
+// Three pillar instruments (pillar 04 renders AgentReasoningAnimation instead
+// — see PillarsGrid.tsx). Rebuilt on the shared noir InstrumentFrame so they
+// get real lift/glow/pulse chrome instead of a flat bordered box.
+//
+// Unlike the old versions, every element here PAINTS COMPLETE AT REST — ambient
+// cycling only changes which item is highlighted (color/opacity of an already-
+// rendered element), never whether something exists at all. Motion that starts
+// from opacity:0/width:0 screenshots as an empty instrument, which is exactly
+// what the pre-rebuild audit flagged on this page and on /matcha-compliance.
 // ---------------------------------------------------------------------------
 
-// 01 — incident intake, resolved to routed. No pipeline detail.
+const EHS_ACCENT = '#d9b65f'
+const GRC_ACCENT = '#E2725B'
+const ER_ACCENT = '#86efac'
+
+// 01 — incident lifecycle. Base state (3 static steps + connector) always
+// visible; cycling only moves which step is "active".
 function IntakeInstrument() {
-  const ref = useRef(null)
-  const inView = useInView(ref, { margin: '-40px' })
-  const cycle = useLoopCycle(inView)
-  const words = ['Reported.', 'Scored.', 'Routed.']
+  const reduce = useReducedMotion()
+  const step = useCyclingIndex(3, 1800, reduce)
+  const steps = ['Reported', 'Scored', 'Routed']
   return (
-    <InstrumentFrame caption="Incident · intake" foot="Every report categorized, scored, and routed">
-      <div ref={ref} className="flex flex-col items-center text-center gap-4 py-3">
-        <PulseDot size={10} />
-        <p key={cycle} style={{ fontFamily: DISPLAY, fontWeight: 400, fontSize: '1.6rem', color: CARD_TEXT, lineHeight: 1.2 }}>
-          {words.map((w, i) => (
-            <motion.span
-              key={w}
-              className="inline-block mr-2"
-              initial={{ opacity: 0, y: 8 }}
-              animate={inView ? { opacity: 1, y: 0 } : {}}
-              transition={{ duration: 0.4, delay: 0.15 + i * 0.22, ease: 'easeOut' }}
-            >
-              {w}
-            </motion.span>
-          ))}
-        </p>
-      </div>
-      <div className="mt-6 pt-5 border-t flex items-center justify-between" style={{ borderColor: CARD_LINE }}>
-        <span className="text-[10px] font-mono uppercase tracking-wider" style={{ color: CARD_MUTED }}>Atlanta — Store 7</span>
-        <span className="text-[11px] font-mono" style={{ color: CARD_TEXT }}>In the right hands</span>
-      </div>
-    </InstrumentFrame>
-  )
-}
-
-// 02 — compliance monitor rows, one flagged.
-function ComplianceInstrument() {
-  const ref = useRef(null)
-  const inView = useInView(ref, { margin: '-40px' })
-  const cycle = useLoopCycle(inView)
-  const rows = [
-    { j: 'A', label: 'Wage & hour rules', status: 'clear' },
-    { j: 'B', label: 'Break requirements', status: 'flag' },
-    { j: 'C', label: 'Leave policies', status: 'clear' },
-    { j: 'D', label: 'Scheduling rules', status: 'clear' },
-  ]
-  return (
-    <InstrumentFrame caption="Compliance · monitor" foot="Deltas flagged before they take effect">
-      <div ref={ref}>
-        <div key={cycle} className="flex flex-col gap-3.5">
-          {rows.map((r, i) => {
-            const lit = r.status === 'flag'
+    <InstrumentFrame label="Incident · intake" accent={EHS_ACCENT}>
+      <div className="px-5 pt-6 pb-5">
+        <div className="flex items-center justify-center gap-3">
+          {steps.map((s, i) => {
+            const active = i <= step
             return (
-              <motion.div
-                key={r.label}
-                className="flex items-center gap-3"
-                initial={{ opacity: 0, x: -8 }}
-                animate={inView ? { opacity: 1, x: 0 } : {}}
-                transition={{ duration: 0.4, delay: i * 0.12, ease: 'easeOut' }}
-              >
-                <span className="w-9 shrink-0 text-[9px] font-mono uppercase tracking-wider" style={{ color: CARD_MUTED }}>{r.j}</span>
-                <span className="flex-1 min-w-0 text-[12px] truncate" style={{ color: lit ? CARD_TEXT : CARD_MUTED, fontWeight: lit ? 600 : 400 }}>{r.label}</span>
-                {lit ? (
-                  <motion.span
-                    className="flex items-center gap-1.5 shrink-0"
-                    initial={{ opacity: 0 }}
-                    animate={inView ? { opacity: 1 } : {}}
-                    transition={{ duration: 0.3, delay: i * 0.12 + 0.35 }}
+              <div key={s} className="flex items-center gap-3">
+                <div className="flex flex-col items-center gap-2">
+                  <span
+                    className="rounded-full transition-colors duration-500"
+                    style={{
+                      width: 8,
+                      height: 8,
+                      backgroundColor: active ? EHS_ACCENT : LINE_D,
+                      boxShadow: active ? `0 0 8px ${EHS_ACCENT}` : 'none',
+                    }}
+                  />
+                  <span
+                    className="text-[10px] font-mono uppercase tracking-wider transition-colors duration-500"
+                    style={{ color: active ? BONE : ASH }}
                   >
-                    <PulseDot size={6} />
-                    <span className="text-[9px] font-mono uppercase tracking-wider" style={{ color: GREEN }}>Flagged</span>
-                  </motion.span>
-                ) : (
-                  <span className="text-[9px] font-mono uppercase tracking-wider shrink-0" style={{ color: CARD_MUTED }}>Clear</span>
+                    {s}
+                  </span>
+                </div>
+                {i < steps.length - 1 && (
+                  <span
+                    className="h-px w-8 transition-colors duration-500"
+                    style={{ backgroundColor: i < step ? EHS_ACCENT : LINE_D }}
+                  />
                 )}
-              </motion.div>
+              </div>
             )
           })}
         </div>
       </div>
-    </InstrumentFrame>
-  )
-}
-
-// 03 — case cluster: pattern detection surfaces a repeat.
-function CaseInstrument() {
-  const ref = useRef(null)
-  const inView = useInView(ref, { margin: '-40px' })
-  const cycle = useLoopCycle(inView)
-  // 5×3 scatter; the lit cells trace a repeat cluster, in scan order.
-  const litOrder = [2, 7, 12]
-  const litRank = new Map(litOrder.map((cell, i) => [cell, i]))
-  return (
-    <InstrumentFrame caption="Cases · pattern" foot="Repeat behavior surfaced across the record">
-      <div ref={ref}>
-        <div key={cycle}>
-          <div className="grid grid-cols-5 gap-y-4 gap-x-3 place-items-center py-1">
-            {Array.from({ length: 15 }).map((_, i) => {
-              const rank = litRank.get(i)
-              return rank === undefined ? (
-                <motion.span
-                  key={i}
-                  className="block rounded-full"
-                  style={{ width: 6, height: 6, backgroundColor: CARD_LINE }}
-                  initial={{ opacity: 0 }}
-                  animate={inView ? { opacity: 1 } : {}}
-                  transition={{ duration: 0.4, delay: 0.02 * i }}
-                />
-              ) : (
-                <motion.span
-                  key={i}
-                  initial={{ opacity: 0, scale: 0.4 }}
-                  animate={inView ? { opacity: 1, scale: 1 } : {}}
-                  transition={{ duration: 0.35, delay: 0.5 + rank * 0.3, ease: 'backOut' }}
-                >
-                  <PulseDot size={8} />
-                </motion.span>
-              )
-            })}
-          </div>
-          <motion.div
-            className="mt-5 pt-5 border-t flex items-center justify-between"
-            style={{ borderColor: CARD_LINE }}
-            initial={{ opacity: 0 }}
-            animate={inView ? { opacity: 1 } : {}}
-            transition={{ duration: 0.4, delay: 0.5 + litOrder.length * 0.3 }}
-          >
-            <span className="text-[10px] font-mono uppercase tracking-wider" style={{ color: GREEN }}>Pattern found</span>
-            <span className="text-[11px] font-mono" style={{ color: CARD_TEXT }}>A repeat, one location</span>
-          </motion.div>
-        </div>
+      <div className="px-5 pb-4 pt-3 border-t flex items-center justify-between" style={{ borderColor: LINE_D }}>
+        <span className="text-[10px] font-mono uppercase tracking-wider" style={{ color: ASH }}>Atlanta — Store 7</span>
+        <span className="text-[11px] font-mono" style={{ color: BONE }}>In the right hands</span>
       </div>
     </InstrumentFrame>
   )
 }
 
-// 04 — domains feeding a single composite risk index.
-function ConvergenceInstrument() {
-  const ref = useRef(null)
-  const inView = useInView(ref, { margin: '-40px' })
-  const cycle = useLoopCycle(inView)
-  const riskIndex = useCountUp(72, inView, 1100, cycle)
-  const domains = [
-    { label: 'EHS', w: 70 },
-    { label: 'GRC', w: 54 },
-    { label: 'ER', w: 62 },
+// 02 — compliance monitor rows, always rendered; cycling moves which row is
+// flagged.
+function GovernanceInstrument() {
+  const reduce = useReducedMotion()
+  const flaggedIndex = useCyclingIndex(4, 2600, reduce)
+  const rows = [
+    { j: 'A', label: 'Wage & hour rules' },
+    { j: 'B', label: 'Break requirements' },
+    { j: 'C', label: 'Leave policies' },
+    { j: 'D', label: 'Scheduling rules' },
   ]
   return (
-    <InstrumentFrame caption="Risk · composite" foot="Every domain rolled into one live index">
-      <div ref={ref}>
-        <div key={cycle} className="flex items-center gap-6">
-          <div className="flex-1 flex flex-col gap-3">
-            {domains.map((d, i) => (
-              <div key={d.label} className="flex items-center gap-3">
-                <span className="w-9 shrink-0 text-[9px] font-mono uppercase tracking-wider text-right" style={{ color: CARD_MUTED }}>{d.label}</span>
-                <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: CARD_LINE }}>
-                  <motion.div
-                    className="h-full rounded-full"
-                    style={{ backgroundColor: CARD_MUTED }}
-                    initial={{ width: 0 }}
-                    animate={inView ? { width: `${d.w}%` } : {}}
-                    transition={{ duration: 0.8, delay: i * 0.15, ease: [0.16, 1, 0.3, 1] }}
+    <InstrumentFrame label="Compliance · monitor" accent={GRC_ACCENT}>
+      <div className="px-5 pt-5 pb-5 flex flex-col gap-3.5">
+        {rows.map((r, i) => {
+          const lit = i === flaggedIndex
+          return (
+            <div key={r.label} className="flex items-center gap-3">
+              <span className="w-9 shrink-0 text-[9px] font-mono uppercase tracking-wider" style={{ color: ASH }}>{r.j}</span>
+              <span
+                className="flex-1 min-w-0 text-[12px] truncate transition-colors duration-500"
+                style={{ color: lit ? BONE : ASH, fontWeight: lit ? 600 : 400 }}
+              >
+                {r.label}
+              </span>
+              <span
+                className="flex items-center gap-1.5 shrink-0 text-[9px] font-mono uppercase tracking-wider transition-colors duration-500"
+                style={{ color: lit ? GRC_ACCENT : ASH }}
+              >
+                {lit && (
+                  <span
+                    className="w-1.5 h-1.5 rounded-full home-pulse"
+                    style={{ backgroundColor: GRC_ACCENT }}
                   />
-                </div>
-              </div>
-            ))}
-          </div>
-          <span className="text-[11px] font-mono" style={{ color: CARD_MUTED }}>→</span>
-          <div className="flex flex-col items-center gap-1 shrink-0">
-            <div className="flex items-baseline gap-1">
-              <span className="tabular-nums leading-none" style={{ fontFamily: DISPLAY, fontWeight: 400, fontSize: '2.75rem', color: GREEN }}>{riskIndex}</span>
+                )}
+                {lit ? 'Flagged' : 'Clear'}
+              </span>
             </div>
-            <span className="text-[9px] font-mono uppercase tracking-wider" style={{ color: CARD_MUTED }}>Risk index</span>
-          </div>
+          )
+        })}
+      </div>
+      <div className="px-5 pb-4 pt-3 border-t" style={{ borderColor: LINE_D }}>
+        <span className="text-[10px] font-mono uppercase tracking-[0.12em]" style={{ color: ASH }}>
+          Deltas flagged before they take effect
+        </span>
+      </div>
+    </InstrumentFrame>
+  )
+}
+
+// 03 — case cluster. All 15 nodes always rendered; cycling moves which 3-node
+// cluster (in scan order) is highlighted as the detected repeat.
+const CLUSTERS = [
+  [2, 7, 12],
+  [1, 6, 11],
+  [3, 8, 13],
+]
+
+function CaseInstrument() {
+  const reduce = useReducedMotion()
+  const clusterIndex = useCyclingIndex(CLUSTERS.length, 3000, reduce)
+  const lit = new Set(CLUSTERS[clusterIndex])
+  return (
+    <InstrumentFrame label="Cases · pattern" accent={ER_ACCENT}>
+      <div className="px-5 pt-6 pb-5">
+        <div className="grid grid-cols-5 gap-y-4 gap-x-3 place-items-center py-1">
+          {Array.from({ length: 15 }).map((_, i) => {
+            const active = lit.has(i)
+            return (
+              <span
+                key={i}
+                className="block rounded-full transition-all duration-500"
+                style={{
+                  width: active ? 8 : 6,
+                  height: active ? 8 : 6,
+                  backgroundColor: active ? ER_ACCENT : LINE_D,
+                  boxShadow: active ? `0 0 8px ${ER_ACCENT}` : 'none',
+                }}
+              />
+            )
+          })}
         </div>
+      </div>
+      <div className="px-5 pb-4 pt-3 border-t flex items-center justify-between" style={{ borderColor: LINE_D }}>
+        <span className="text-[10px] font-mono uppercase tracking-wider" style={{ color: ER_ACCENT }}>Pattern found</span>
+        <span className="text-[11px] font-mono" style={{ color: BONE }}>A repeat, one location</span>
       </div>
     </InstrumentFrame>
   )
@@ -192,7 +160,6 @@ function ConvergenceInstrument() {
 
 export const INSTRUMENTS: Record<string, () => React.ReactElement> = {
   ehs: IntakeInstrument,
-  grc: ComplianceInstrument,
+  grc: GovernanceInstrument,
   er: CaseInstrument,
-  convergence: ConvergenceInstrument,
 }

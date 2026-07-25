@@ -13,12 +13,21 @@ export default function ComplianceSignup() {
   const [searchParams] = useSearchParams()
   const brokerRef = searchParams.get('ref')
   const inviteToken = searchParams.get('invite_token')
+  // Seeded from the landing page's pricing calculator (?headcount=&jurisdictions=),
+  // e.g. hey-matcha.com/matcha-compliance → "Start now". Sanitized to a positive
+  // integer string here; the existing overLimit check below still gates the
+  // real max once pricing loads, so an out-of-range query param just falls
+  // through to that same UI rather than needing a second bound here.
+  const seedIntParam = (key: string) => {
+    const raw = Number(searchParams.get(key))
+    return Number.isFinite(raw) && raw >= 1 ? String(Math.round(raw)) : ''
+  }
   const [companyName, setCompanyName] = useState('')
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [headcount, setHeadcount] = useState('')
-  const [jurisdictions, setJurisdictions] = useState('')
+  const [headcount, setHeadcount] = useState(() => seedIntParam('headcount'))
+  const [jurisdictions, setJurisdictions] = useState(() => seedIntParam('jurisdictions'))
   const [industry, setIndustry] = useState('')
   const [industryOther, setIndustryOther] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -44,12 +53,15 @@ export default function ComplianceSignup() {
 
   const pricing = useMatchaLitePricing('matcha_compliance')
   const maxHeadcount = pricing?.max_headcount ?? 300
+  const minHeadcount = pricing?.min_headcount ?? 1
 
   const seatInvite = inviteInfo?.valid === true
   const comped = !!inviteToken || seatInvite
   const hc = parseInt(headcount, 10)
   const jc = parseInt(jurisdictions, 10)
-  const headcountValid = !isNaN(hc) && hc >= 1
+  // Was `hc >= 1` — checkout 400s below pricing.min_headcount (server-side),
+  // so a value the form accepted could still fail at payment.
+  const headcountValid = !isNaN(hc) && hc >= minHeadcount
   const jurisdictionCount = !isNaN(jc) && jc >= 0 ? jc : 0
   const overLimit = headcountValid && !comped && hc > maxHeadcount
   const price = headcountValid && !overLimit && !comped && pricing ? computeLitePriceDollars(hc, pricing) : null

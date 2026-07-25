@@ -9,7 +9,7 @@ import {
   Sparkles,
   Users,
 } from "lucide-react";
-import { ASH, BONE, DISPLAY, LINE_D, MATCHA } from "../theme";
+import { ASH, BONE, DISPLAY, LINE_D } from "../theme";
 import {
   InstrumentFrame,
   VBH,
@@ -83,7 +83,7 @@ export function PlatformInstrument() {
   ];
 
   return (
-    <InstrumentFrame label="Composite Risk Index" accent={MATCHA}>
+    <InstrumentFrame label="Composite Risk Index" accent={BONE}>
       {/* Two-column: left = the index + its loss curve + the AI layer,
           right = the per-domain breakdown, so the card fills its width.
           Stacks to one column below sm so nothing gets crushed on phones. */}
@@ -165,7 +165,7 @@ export function PlatformInstrument() {
               x2={scanX * VBW}
               y1={0}
               y2={VBH}
-              stroke={MATCHA}
+              stroke={BONE}
               strokeWidth={1.5}
               opacity={0.45}
             />
@@ -190,7 +190,7 @@ export function PlatformInstrument() {
         >
           <Sparkles
             className="w-3.5 h-3.5 mt-0.5 shrink-0"
-            style={{ color: MATCHA }}
+            style={{ color: BONE }}
           />
           <div className="min-w-0">
             <div className="flex items-center gap-1.5 mb-1">
@@ -202,7 +202,7 @@ export function PlatformInstrument() {
               </span>
               <span
                 className="home-pulse w-1 h-1 rounded-full"
-                style={{ backgroundColor: MATCHA }}
+                style={{ backgroundColor: BONE }}
               />
             </div>
             <AnimatePresence mode="wait">

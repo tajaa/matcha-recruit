@@ -11,12 +11,18 @@ export default function MatchaLiteSignup() {
   const [searchParams] = useSearchParams()
   const brokerRef = searchParams.get('ref')
   const inviteToken = searchParams.get('invite_token')
+  // Seeded from the landing page's pricing calculator
+  // (?headcount=&essentials=), e.g. hey-matcha.com/matcha-lite → "Start now".
+  const seedIntParam = (key: string) => {
+    const raw = Number(searchParams.get(key))
+    return Number.isFinite(raw) && raw >= 1 ? String(Math.round(raw)) : ''
+  }
   const [companyName, setCompanyName] = useState('')
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [headcount, setHeadcount] = useState('')
-  const [essentials, setEssentials] = useState(false)
+  const [headcount, setHeadcount] = useState(() => seedIntParam('headcount'))
+  const [essentials, setEssentials] = useState(() => searchParams.get('essentials') === 'true')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [inviteInfo, setInviteInfo] = useState<
@@ -40,11 +46,14 @@ export default function MatchaLiteSignup() {
 
   const pricing = useMatchaLitePricing(essentials ? 'matcha_lite_essentials' : 'matcha_lite')
   const maxHeadcount = pricing?.max_headcount ?? 300
+  const minHeadcount = pricing?.min_headcount ?? 1
 
   const seatInvite = inviteInfo?.valid === true
   const comped = !!inviteToken || seatInvite
   const hc = parseInt(headcount, 10)
-  const headcountValid = !isNaN(hc) && hc >= 1
+  // Was `hc >= 1` — checkout 400s below pricing.min_headcount server-side,
+  // so a value the form accepted could still fail at payment.
+  const headcountValid = !isNaN(hc) && hc >= minHeadcount
   const overLimit = headcountValid && !comped && hc > maxHeadcount
   const price = headcountValid && !overLimit && !comped && pricing ? computeLitePriceDollars(hc, pricing) : null
 

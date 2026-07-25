@@ -1,181 +1,104 @@
-import { useRef } from 'react'
-import { motion, useInView } from 'framer-motion'
-import { BAND_COLOR, RADAR_ROWS } from './data'
-import type { RiskBand } from './types'
-import { BG, DISPLAY, GREEN, INK, MUTED } from './theme'
+import { Link } from 'react-router-dom'
+import { ArrowRight } from 'lucide-react'
+import { AMBER, ASH, BONE, DISPLAY, LEAF, LINE_D } from '../../home/theme'
+import { CONTAINER } from '../../home/layout'
+import { BookInstrument } from './BookInstrument'
 
+/**
+ * Left-aligned editorial, matching Compliance/Platform/Lite's recipe exactly:
+ * same CONTAINER, same top-padding math (nav is 64px), headline static/opaque
+ * at first paint. Replaces the old skeuomorphic "Book Risk Console" hero —
+ * that console lived in its own charcoal material system and needed a
+ * non-wrapping ~700px module rack, so it never fit this column and read as a
+ * different product from the rest of the (already noir) page below it.
+ */
 export function Hero({ onBookClick }: { onBookClick: () => void }) {
   return (
-    <section className="relative w-full overflow-hidden" style={{ backgroundColor: BG }}>
-      <div
-        className="absolute inset-0 pointer-events-none"
-        style={{
-          background:
-            'radial-gradient(ellipse 70% 80% at 85% 40%, rgba(31,29,26,0.06) 0%, rgba(31,29,26,0) 65%)',
-        }}
-      />
+    <section className="home-hero relative w-full flex flex-col">
+      <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
+        <div
+          className="absolute"
+          style={{
+            left: '-12%',
+            top: '-18%',
+            width: '62%',
+            height: '72%',
+            background:
+              'radial-gradient(50% 50% at 50% 50%, rgba(245,181,69,0.055) 0%, transparent 70%)',
+          }}
+        />
+        <div
+          className="absolute"
+          style={{
+            right: '-14%',
+            bottom: '-22%',
+            width: '58%',
+            height: '68%',
+            background:
+              'radial-gradient(50% 50% at 50% 50%, rgba(163,197,125,0.05) 0%, transparent 70%)',
+          }}
+        />
+      </div>
 
-      <div className="relative z-10 max-w-[1440px] mx-auto px-6 sm:px-10 pt-36 pb-20">
-        <div className="grid lg:grid-cols-[1.15fr_1fr] gap-12 lg:gap-20 items-center">
-          <div className="max-w-xl">
+      <div
+        className={`home-hero-body relative ${CONTAINER} flex-1 flex flex-col justify-center pt-[88px] sm:pt-[96px] pb-10`}
+      >
+        <div className="grid grid-cols-1 lg:grid-cols-[1.1fr_1fr] gap-10 lg:gap-14 items-center">
+          <div>
             <div
-              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full mb-8"
-              style={{ backgroundColor: 'rgba(31,29,26,0.06)', color: MUTED }}
+              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full mb-6"
+              style={{ border: `1px solid ${LINE_D}`, color: ASH }}
             >
-              <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: GREEN }} />
-              <span className="text-[11px] uppercase tracking-wider font-medium">
+              <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: LEAF }} />
+              <span className="text-[10px] sm:text-[11px] font-mk-mono uppercase tracking-[0.18em]">
                 For P&amp;C brokers
               </span>
             </div>
+
             <h1
-              className="leading-[0.95] tracking-tight"
-              style={{
-                fontFamily: DISPLAY,
-                fontWeight: 400,
-                color: INK,
-                fontSize: 'clamp(2.75rem, 6vw, 5.25rem)',
-              }}
+              className="tracking-[-0.02em] text-[clamp(2.1rem,4.4vw,3.6rem)]"
+              style={{ fontFamily: DISPLAY, fontWeight: 300, lineHeight: 1.08, color: BONE }}
             >
-              The intelligence layer for your whole book.
+              The <span style={{ color: LEAF, fontStyle: 'italic' }}>intelligence</span> layer for
+              your whole <span style={{ color: AMBER, fontStyle: 'italic' }}>book</span>.
             </h1>
+
             <p
-              className="mt-6 max-w-lg"
-              style={{ color: MUTED, fontSize: 'clamp(1rem, 1.15vw, 1.125rem)', lineHeight: 1.55 }}
+              className="home-fade-fast mt-6 max-w-lg text-[1.05rem] sm:text-[1.2rem] tracking-[-0.011em]"
+              style={{ fontFamily: DISPLAY, fontWeight: 300, lineHeight: 1.45, color: ASH }}
             >
-              Your clients run a live safety intake system. You get back what no
-              carrier portal gives you — real-time TRIR, DART, and loss trends,
-              plus risk alerts and suggested actions, across every account you
-              manage.
+              Your clients run live safety and compliance intake. You get the book back as one
+              ranked view — which accounts are deteriorating, who needs the loss-control call, and
+              a submission packet already built when renewal comes.
             </p>
-            <div className="mt-10 flex items-center gap-4 flex-wrap">
+
+            <div className="home-fade-fast mt-9 flex flex-wrap items-center gap-3 sm:gap-5" style={{ animationDelay: '80ms' }}>
               <button
+                type="button"
                 onClick={onBookClick}
-                className="inline-flex items-center px-7 h-12 rounded-full text-[15px] font-medium transition-opacity hover:opacity-90 cursor-pointer"
-                style={{ backgroundColor: INK, color: BG }}
+                className="inline-flex items-center justify-center gap-2 px-6 h-12 rounded-full text-[15px] font-medium transition-opacity hover:opacity-90 cursor-pointer"
+                style={{ backgroundColor: LEAF, color: '#14210B' }}
               >
-                Book a Walkthrough
+                Book a walkthrough
+                <ArrowRight className="w-4 h-4" />
               </button>
+              <Link
+                to="/matcha-platform"
+                className="inline-flex items-center h-12 text-[15px] transition-opacity hover:opacity-60"
+                style={{ color: BONE }}
+              >
+                See the platform →
+              </Link>
             </div>
           </div>
 
-          <BookRiskCurveCard />
-        </div>
-      </div>
-    </section>
-  )
-}
-
-// Animated hero card — kept from the original page (colorful risk bands).
-function BookRiskCurveCard() {
-  const ref = useRef(null)
-  const inView = useInView(ref, { amount: 0.3 })
-
-  const counts = RADAR_ROWS.reduce(
-    (acc, r) => ({ ...acc, [r.band]: (acc[r.band] ?? 0) + 1 }),
-    {} as Record<RiskBand, number>,
-  )
-
-  return (
-    <div
-      ref={ref}
-      className="relative rounded-xl overflow-hidden border"
-      style={{
-        borderColor: 'rgba(0,0,0,0.08)',
-        backgroundColor: '#0e0d0b',
-        boxShadow: '0 40px 80px -20px rgba(31, 29, 26, 0.28)',
-      }}
-    >
-      <div
-        className="px-5 sm:px-6 py-4 flex items-center justify-between border-b"
-        style={{ borderColor: 'rgba(255,255,255,0.06)' }}
-      >
-        <div className="flex items-center gap-2.5">
-          <span className="relative flex w-2 h-2">
-            <motion.span
-              className="absolute inline-flex w-full h-full rounded-full"
-              style={{ backgroundColor: '#6ee7a8' }}
-              animate={inView ? { opacity: [0.6, 0, 0.6], scale: [1, 2.4, 1] } : { opacity: 0.6 }}
-              transition={{ duration: 2.2, repeat: Infinity, ease: 'easeOut' }}
-            />
-            <span className="relative inline-flex w-2 h-2 rounded-full" style={{ backgroundColor: '#6ee7a8' }} />
-          </span>
-          <span className="text-[10px] font-mono uppercase tracking-[0.18em]" style={{ color: '#e4ded2' }}>
-            Book Risk Curve
-          </span>
-        </div>
-        <span className="text-[9px] font-mono uppercase tracking-wider" style={{ color: '#6a737d' }}>
-          Book · 24 clients
-        </span>
-      </div>
-
-      <div className="relative">
-        <motion.div
-          aria-hidden
-          className="absolute inset-x-0 pointer-events-none z-10"
-          style={{
-            height: '38%',
-            background:
-              'linear-gradient(180deg, rgba(110,231,168,0) 0%, rgba(110,231,168,0.10) 50%, rgba(110,231,168,0) 100%)',
-          }}
-          animate={inView ? { top: ['-38%', '100%'] } : { top: '-38%' }}
-          transition={{ duration: 3.4, repeat: Infinity, ease: 'linear' }}
-        />
-
-        <ul>
-          {RADAR_ROWS.map((r, i) => {
-            const volatile = r.band !== 'stable'
-            return (
-              <motion.li
-                key={r.client}
-                className="px-5 sm:px-6 py-3.5 flex items-center justify-between gap-3 border-b"
-                style={{ borderColor: 'rgba(255,255,255,0.045)' }}
-                initial={{ opacity: 0, y: 6 }}
-                animate={inView ? { opacity: 1, y: 0 } : { opacity: 0, y: 6 }}
-                transition={{ duration: 0.5, delay: i * 0.12, ease: 'easeOut' }}
-              >
-                <div className="min-w-0">
-                  <div className="text-[13px] truncate" style={{ color: 'rgba(245,242,237,0.92)' }}>
-                    {r.client}
-                  </div>
-                  <div className="text-[11px] mt-0.5 font-mono" style={{ color: 'rgba(245,242,237,0.4)' }}>
-                    {r.metric}
-                  </div>
-                </div>
-                <div className="flex items-center gap-2.5 shrink-0">
-                  <span className="text-[10px] font-mono tabular-nums" style={{ color: 'rgba(245,242,237,0.5)' }}>
-                    {r.delta}
-                  </span>
-                  <motion.span
-                    className="text-[9px] font-medium uppercase tracking-wider px-2 py-1 rounded"
-                    style={{
-                      color: BAND_COLOR[r.band],
-                      backgroundColor: `${BAND_COLOR[r.band]}1f`,
-                    }}
-                    animate={inView && volatile ? { opacity: [1, 0.45, 1] } : { opacity: 1 }}
-                    transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut', delay: i * 0.2 }}
-                  >
-                    {r.band}
-                  </motion.span>
-                </div>
-              </motion.li>
-            )
-          })}
-        </ul>
-      </div>
-
-      <div
-        className="px-5 sm:px-6 py-3.5 flex items-center gap-4"
-        style={{ backgroundColor: 'rgba(255,255,255,0.015)' }}
-      >
-        {(['critical', 'elevated', 'stable'] as RiskBand[]).map((band) => (
-          <div key={band} className="flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: BAND_COLOR[band] }} />
-            <span className="text-[10px] font-mono tabular-nums" style={{ color: 'rgba(245,242,237,0.55)' }}>
-              {counts[band] ?? 0} {band}
-            </span>
+          <div className="home-fade-fast" style={{ animationDelay: '160ms' }}>
+            <BookInstrument />
           </div>
-        ))}
+        </div>
       </div>
-    </div>
+
+      <div aria-hidden style={{ height: 1, backgroundColor: LINE_D }} />
+    </section>
   )
 }

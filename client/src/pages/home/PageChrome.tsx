@@ -2,6 +2,19 @@ import { useEffect, useRef, useState } from "react";
 import { LEAF } from "./theme";
 import { useReducedMotion } from "./instruments/shared";
 
+/**
+ * Noir page chrome while mounted (see `[data-marketing-noir]` in index.css) —
+ * overscroll bounce stays noir instead of flashing white, and anchor scrolls
+ * glide. Any page on the noir surface (home, and now Compliance) must call this;
+ * `pages/landing/StartQualify.tsx` is the cautionary example that forgot it.
+ */
+export function useMarketingNoir() {
+  useEffect(() => {
+    document.documentElement.setAttribute("data-marketing-noir", "");
+    return () => document.documentElement.removeAttribute("data-marketing-noir");
+  }, []);
+}
+
 export function GrainOverlay() {
   return (
     <div
@@ -80,10 +93,6 @@ export function PageStyle() {
         0%, 100% { opacity: 1; transform: scale(1); }
         50% { opacity: 0.45; transform: scale(0.8); }
       }
-      @keyframes homeScrollCue {
-        0%, 100% { opacity: 0.25; transform: translateY(0); }
-        50% { opacity: 0.9; transform: translateY(5px); }
-      }
       @keyframes showcaseProgress {
         from { transform: scaleX(0); }
         to { transform: scaleX(1); }
@@ -98,8 +107,11 @@ export function PageStyle() {
       }
       .home-rise > span { display: inline-block; animation: homeRise 0.9s cubic-bezier(0.16,1,0.3,1) both; }
       .home-fade { opacity: 0; animation: homeFadeUp 1s cubic-bezier(0.16,1,0.3,1) forwards; }
+      /* Hero entrance. 0.42s, not the 1s .home-fade: the hero's elements are
+         staggered 60/140/240ms apart and a 1s fade meant the conversion element
+         wasn't fully opaque until 3.3s. Everything settles under 700ms now. */
+      .home-fade-fast { opacity: 0; animation: homeFadeUp 0.42s cubic-bezier(0.16,1,0.3,1) forwards; }
       .home-pulse { animation: homePulse 2.4s ease-in-out infinite; }
-      .home-scroll-cue { animation: homeScrollCue 1.8s ease-in-out infinite; }
       .home-float { animation: homeFloat 7s ease-in-out infinite; }
       .home-caret { animation: homeCaret 1.05s step-end infinite; }
       .home-reveal {
@@ -112,6 +124,33 @@ export function PageStyle() {
       /* Brand text selection — background only, so ink stays ink on the bone
          sections and bone stays bone on noir. */
       .home-root ::selection { background: rgba(163,197,125,0.32); }
+      /* iOS Safari paints a translucent grey box over any tapped link/button.
+         On a noir editorial surface it reads as a rendering fault, and every
+         control here already has its own :active/hover treatment. */
+      .home-root a, .home-root button, .home-root input, .home-root summary {
+        -webkit-tap-highlight-color: transparent;
+      }
+      /* Short landscape — a phone rotated. The hero's stacked deck row is
+         taller than the viewport there, which pushed the email capture (the
+         page's one conversion point) fully below the fold: 364px of content in
+         a 340px viewport on an iPhone 12. Compress the fold rather than let the
+         conversion element fall off it. Height-keyed, not width-keyed, so a
+         landscape tablet with real height keeps the normal layout. */
+      @media (orientation: landscape) and (max-height: 520px) {
+        .home-hero-body { padding-top: 78px; padding-bottom: 16px; }
+        .home-hero h1 { font-size: clamp(1.5rem, 3.6vw, 2.5rem); }
+        .home-hero-deck {
+          margin-top: 1.25rem;
+          flex-direction: row;
+          align-items: flex-end;
+          justify-content: space-between;
+          gap: 2rem;
+        }
+        .home-hero-deck > p { font-size: 1.05rem; }
+        .home-hero-capture { width: 330px; flex-shrink: 0; }
+        /* Supplementary, and the fold has no room for it rotated. */
+        .home-hero-proof { display: none; }
+      }
       /* Keyboard focus in the page aesthetic instead of the UA default ring. */
       .home-root :is(a, button, input):focus-visible {
         outline: 1px solid ${LEAF};
@@ -119,8 +158,8 @@ export function PageStyle() {
         border-radius: 2px;
       }
       @media (prefers-reduced-motion: reduce) {
-        .home-rise > span, .home-fade { animation: none !important; opacity: 1 !important; transform: none !important; }
-        .home-pulse, .home-scroll-cue, .home-float { animation: none !important; }
+        .home-rise > span, .home-fade, .home-fade-fast { animation: none !important; opacity: 1 !important; transform: none !important; }
+        .home-pulse, .home-float { animation: none !important; }
         .home-caret { animation: none !important; opacity: 1 !important; }
         .home-reveal { transition: none !important; opacity: 1 !important; transform: none !important; }
       }
