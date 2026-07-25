@@ -132,7 +132,10 @@ async def _derived_scores(conn, company_id: UUID, features: dict) -> dict[str, d
     tr = await conn.fetchrow(
         """
         SELECT COUNT(*) AS assigned,
-               COUNT(*) FILTER (WHERE status = 'completed') AS completed
+               COUNT(*) FILTER (WHERE status = 'completed') AS completed,
+               COUNT(*) FILTER (
+                   WHERE status = 'completed' AND source_type IN ('incident', 'discipline')
+               ) AS remedial_completed
         FROM training_records
         WHERE company_id = $1
           AND (training_type = 'harassment_prevention'
@@ -142,10 +145,17 @@ async def _derived_scores(conn, company_id: UUID, features: dict) -> dict[str, d
     )
     assigned = int(tr["assigned"] or 0)
     completed = int(tr["completed"] or 0)
+    remedial_completed = int(tr["remedial_completed"] or 0)
     if assigned > 0:
         rate = _rate(completed, assigned)
         score = round(rate * 100)
         detail = f"{completed}/{assigned} completions ({round(rate * 100)}%)"
+        # Remedial training (assigned in response to an incident or discipline
+        # record, not routine cadence) is the strongest EPL defensibility
+        # signal — "we trained the crew after the incident" — so it's called
+        # out separately rather than folded into the raw completion count.
+        if remedial_completed:
+            detail += f", {remedial_completed} of which were remedial (post-incident/discipline)"
     else:
         score = 0
         detail = "No anti-harassment training" + ("" if features.get("training") else " (training not enabled)")

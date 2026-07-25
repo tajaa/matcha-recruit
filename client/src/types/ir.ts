@@ -9,7 +9,7 @@ export type IRStatus = 'reported' | 'investigating' | 'action_required' | 'resol
 
 // ── Corrective Actions (CAPA) — mirrors ir_corrective_actions ──
 
-export type CorrectiveActionType = 'corrective' | 'preventive'
+export type CorrectiveActionType = 'corrective' | 'preventive' | 'training'
 export type CorrectiveActionPriority = 'immediate' | 'short_term' | 'long_term'
 export type CorrectiveActionStatus = 'open' | 'in_progress' | 'completed' | 'verified' | 'cancelled'
 export type CorrectiveActionEffectiveness = 'effective' | 'ineffective' | 'pending'
@@ -29,6 +29,7 @@ export type CorrectiveAction = {
   verified_by: string | null
   verified_at: string | null
   effectiveness: CorrectiveActionEffectiveness | null
+  training_requirement_id: string | null
   created_by: string | null
   created_at: string
   updated_at: string
@@ -41,6 +42,7 @@ export type CorrectiveActionCreate = {
   priority?: CorrectiveActionPriority
   assignee_name?: string | null
   due_date?: string | null
+  training_requirement_id?: string | null
 }
 
 export type CorrectiveActionListResponse = {

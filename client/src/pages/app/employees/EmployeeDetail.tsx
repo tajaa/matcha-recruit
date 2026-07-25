@@ -7,12 +7,14 @@ import { CredentialManager } from '../../../components/employees/CredentialManag
 import { NewHirePacket } from '../../../components/employees/NewHirePacket'
 import { LeaveEligibilityPanel } from '../../../components/employees/LeaveEligibilityPanel'
 import SupervisorToggle from '../../../components/employees/SupervisorToggle'
+import { EmployeeTrainingPanel } from '../../../components/employees/EmployeeTrainingPanel'
 import { useEmployeeDetail } from '../../../hooks/employees/useEmployeeDetail'
+import { useMe } from '../../../hooks/useMe'
 import { typeLabel, statusLabel } from '../../../types/employee'
 
 const STATUS_OPTIONS = Object.entries(statusLabel).map(([value, label]) => ({ value, label }))
 
-type Tab = 'profile' | 'onboarding' | 'credentials' | 'leave'
+type Tab = 'profile' | 'onboarding' | 'credentials' | 'leave' | 'training'
 
 type FieldOption = { value: string; label: string }
 type ProfileField = { key: string; label: string; type?: string; options?: FieldOption[] }
@@ -51,10 +53,13 @@ export default function EmployeeDetail() {
     employee, loading, error,
     updateEmployee, updateStatus, deleteEmployee,
   } = useEmployeeDetail(employeeId!)
+  const { hasFeature } = useMe()
   // Deep-link support: the compliance risk cockpit links straight to the
   // relevant tab (?tab=credentials) and pay editor (?edit=1).
   const [searchParams] = useSearchParams()
-  const TABS_VALID: Tab[] = ['profile', 'onboarding', 'credentials', 'leave']
+  const TABS_VALID: Tab[] = hasFeature('training')
+    ? ['profile', 'onboarding', 'credentials', 'leave', 'training']
+    : ['profile', 'onboarding', 'credentials', 'leave']
   const initialTab = searchParams.get('tab') as Tab | null
   const [tab, setTab] = useState<Tab>(initialTab && TABS_VALID.includes(initialTab) ? initialTab : 'profile')
   const [editing, setEditing] = useState(searchParams.get('edit') === '1')
@@ -136,7 +141,7 @@ export default function EmployeeDetail() {
         <div className="col-span-2">
           {/* Tabs */}
           <div className="flex gap-1 mb-4">
-            {(['profile', 'onboarding', 'credentials', 'leave'] as const).map((t) => (
+            {TABS_VALID.map((t) => (
               <Button
                 key={t}
                 variant={tab === t ? 'primary' : 'ghost'}
@@ -218,6 +223,9 @@ export default function EmployeeDetail() {
             )}
             {tab === 'leave' && (
               <LeaveEligibilityPanel employeeId={employeeId!} />
+            )}
+            {tab === 'training' && (
+              <EmployeeTrainingPanel employeeId={employeeId!} />
             )}
           </Card>
         </div>

@@ -1489,7 +1489,7 @@ _UPCOMING_SOURCES: list[dict] = [
         "category": "training",
         "sql": """
             SELECT tr.id::text,
-                   COALESCE(e.first_name || ' ' || e.last_name, 'Employee') || ' — ' || tr.course_name AS title,
+                   COALESCE(e.first_name || ' ' || e.last_name, 'Employee') || ' — ' || tr.title AS title,
                    tr.status AS subtitle,
                    tr.due_date::date AS deadline
             FROM training_records tr

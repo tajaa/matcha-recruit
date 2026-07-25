@@ -255,7 +255,7 @@ class IRPersonHistory(BaseModel):
 # Corrective Action (CAPA) Models
 # ===========================================
 
-CorrectiveActionType = Literal["corrective", "preventive"]
+CorrectiveActionType = Literal["corrective", "preventive", "training"]
 CorrectiveActionPriority = Literal["immediate", "short_term", "long_term"]
 CorrectiveActionStatus = Literal["open", "in_progress", "completed", "verified", "cancelled"]
 CorrectiveActionEffectiveness = Literal["effective", "ineffective", "pending"]
@@ -285,6 +285,9 @@ class CorrectiveAction(BaseModel):
     verified_by: Optional[UUID] = None
     verified_at: Optional[datetime] = None
     effectiveness: Optional[CorrectiveActionEffectiveness] = None
+    # Set when action_type='training' and this CAPA is what assigned the
+    # training (see routes/ir_incidents/capa.py + services/training_assignment.py).
+    training_requirement_id: Optional[UUID] = None
     created_by: Optional[UUID] = None
     created_at: datetime
     updated_at: datetime
@@ -300,6 +303,7 @@ class CorrectiveActionCreate(BaseModel):
     assigned_to: Optional[UUID] = None
     assignee_name: Optional[str] = None
     due_date: Optional[date] = None
+    training_requirement_id: Optional[UUID] = None
 
 
 class CorrectiveActionUpdate(BaseModel):
@@ -317,6 +321,7 @@ class CorrectiveActionUpdate(BaseModel):
     due_date: Optional[date] = None
     status: Optional[CorrectiveActionStatus] = None
     effectiveness: Optional[CorrectiveActionEffectiveness] = None
+    training_requirement_id: Optional[UUID] = None
 
 
 class CorrectiveActionListResponse(BaseModel):
@@ -418,6 +423,12 @@ class RecommendationsAnalysis(BaseModel):
     generated_at: datetime
     from_cache: bool = False
     cache_reason: Optional[str] = None
+    # The recommendations prompt has always asked Gemini for these two — they
+    # were parsed and silently dropped before this field existed. Additive
+    # with defaults so legacy cached ir_incident_analysis rows (generated
+    # before this field existed) still parse.
+    training_recommended: bool = False
+    training_topics: list[str] = Field(default_factory=list)
 
 
 class ScoreBreakdown(BaseModel):
@@ -916,7 +927,7 @@ IRCopilotMessageType = Literal["text", "card", "event"]
 IRCopilotActionType = Literal[
     "run_analysis", "set_field", "request_info", "escalate", "close_incident",
     "quick_reply", "numeric_input", "text_input", "osha_emergency_alert",
-    "request_documents",
+    "request_documents", "assign_training",
 ]
 
 
@@ -957,6 +968,11 @@ class IRCopilotCardAction(BaseModel):
     # osha_emergency_alert: informational + acknowledgment.
     phone: Optional[str] = None
     deadline: Optional[str] = None
+    # assign_training: requirement to assign + optional explicit trainee list
+    # (unset => defaults to the incident's involved_employee_ids at accept
+    # time, same default as POST /assign-training).
+    requirement_id: Optional[UUID] = None
+    employee_ids: Optional[list[UUID]] = None
 
 
 class IRCopilotCard(BaseModel):

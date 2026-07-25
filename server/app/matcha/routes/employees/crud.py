@@ -620,6 +620,19 @@ async def create_employee(
         except Exception:
             logger.exception("Failed to auto-create credential tasks for employee %s", row["id"])
 
+        # Auto-assign new-hire training per training_assignment_rules
+        try:
+            from app.matcha.services.training_assignment import evaluate_new_hire_rules
+
+            outcome = await evaluate_new_hire_rules(conn, company_id, row["id"])
+            if outcome.assigned:
+                logger.info(
+                    "Assigned %d new-hire training record(s) for employee %s",
+                    outcome.assigned, row["id"],
+                )
+        except Exception:
+            logger.exception("Failed to auto-assign new-hire training for employee %s", row["id"])
+
         google_workspace_auto_provision = False
         slack_auto_provision = False
         try:

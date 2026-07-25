@@ -360,6 +360,36 @@ def build_treatment_query_card() -> dict:
         },
     }
 
+def build_assign_training_card(*, requirement_id: str, requirement_title: str,
+                                trainee_count: int, reasoning: Optional[str] = None) -> dict:
+    """Suggest assigning a training requirement to this incident's involved
+    employees. Deterministic — built from a `training_mapping` analysis
+    match, never LLM-proposed (the recommendations prompt schema doesn't
+    advertise `assign_training`; see ir_ai_orchestrator.py). Accepting calls
+    services.training_assignment.assign_training with source_type='incident'.
+    """
+    plural = "employee" if trainee_count == 1 else "employees"
+    return {
+        "id": "assign_training",
+        "title": "Assign training",
+        "recommendation": (
+            f"Assign “{requirement_title}” to the {trainee_count} "
+            f"involved {plural} on this incident."
+        ),
+        "rationale": reasoning or (
+            "The AI-recommended training topics match an existing training "
+            "requirement. Accept to assign it, or skip to choose a different one."
+        ),
+        "priority": "medium",
+        "blockers": [],
+        "action": {
+            "type": "assign_training",
+            "label": "Assign training",
+            "requirement_id": requirement_id,
+        },
+    }
+
+
 def build_request_documents_card() -> dict:
     """Prompt the user to attach supporting documents to the incident.
 

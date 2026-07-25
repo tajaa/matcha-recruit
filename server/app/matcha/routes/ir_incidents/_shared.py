@@ -56,6 +56,7 @@ from ._cards import (  # noqa: E402,F401
     build_request_documents_card,
     build_investigation_notes_card,
     build_osha_clean_description_card,
+    build_assign_training_card,
 )
 
 

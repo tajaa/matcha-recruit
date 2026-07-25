@@ -869,6 +869,17 @@ async def _sync_single_employee(
             except Exception:
                 logger.exception("[HRIS] Failed to assign credential requirements for %s", email)
 
+    # Auto-assign new-hire training per training_assignment_rules — INSERT
+    # branch only, mirroring the credential fan-out's "new employee" intent
+    # (an UPDATE here is a routine profile sync, not a hire).
+    if action_label == "created":
+        try:
+            from .training_assignment import evaluate_new_hire_rules
+
+            await evaluate_new_hire_rules(conn, company_id, employee_id)
+        except Exception:
+            logger.exception("[HRIS] Failed to auto-assign new-hire training for %s", email)
+
     # Upsert external identity
     hris_id = normalized.get("hris_id")
     if hris_id:

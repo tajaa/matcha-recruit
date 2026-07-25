@@ -13,6 +13,7 @@ import { IRPolicyMappingPanel } from '../../../components/ir/IRPolicyMappingPane
 import { IRConsistencyGuidancePanel } from '../../../components/ir/IRConsistencyGuidancePanel'
 import { IRDocumentPanel } from '../../../components/ir/IRDocumentPanel'
 import { IRCorrectiveActionsPanel } from '../../../components/ir/IRCorrectiveActionsPanel'
+import { IRAssignTrainingPanel } from '../../../components/ir/IRAssignTrainingPanel'
 import { ShareWithBrokerButton } from '../../../components/ir/ShareWithBrokerButton'
 import { IRInterviewScheduler } from '../../../components/ir/IRInterviewScheduler'
 import { IREscalationForm } from '../../../components/ir/IREscalationForm'
@@ -317,6 +318,10 @@ export default function IRDetail() {
                 {/* Structured, accountable corrective actions (CAPA). The
                     free-text notes below stay as an optional catch-all. */}
                 <IRCorrectiveActionsPanel incidentId={incidentId!} />
+
+                {hasFeature('training') && (
+                  <IRAssignTrainingPanel incidentId={incidentId!} />
+                )}
 
                 <details className="group">
                   <summary className="text-xs font-medium text-zinc-500 uppercase tracking-wide cursor-pointer select-none hover:text-zinc-400">

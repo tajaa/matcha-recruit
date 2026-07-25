@@ -7,6 +7,8 @@ import {
   useDisciplineRecommendation,
 } from '../../hooks/discipline/useDiscipline'
 import { disciplineApi } from '../../api/discipline/discipline'
+import { trainingApi, type TrainingRequirement } from '../../api/training/training'
+import { useMe } from '../../hooks/useMe'
 import type {
   ComplianceVerdict,
   DisciplineLevel,
@@ -89,6 +91,9 @@ export default function IssueDisciplineModal({
   const [verdict, setVerdict] = useState<ComplianceVerdict | null>(null)
   const [verdictLoading, setVerdictLoading] = useState(false)
   const [ackReason, setAckReason] = useState('')
+  const [remedialRequirementId, setRemedialRequirementId] = useState('')
+  const [trainingRequirements, setTrainingRequirements] = useState<TrainingRequirement[]>([])
+  const { hasFeature } = useMe()
 
   useEffect(() => {
     if (!open) return
@@ -96,6 +101,11 @@ export default function IssueDisciplineModal({
       .then((rows) => setEmployees(Array.isArray(rows) ? rows : []))
       .catch(() => setEmployees([]))
   }, [open])
+
+  useEffect(() => {
+    if (!open || !hasFeature('training')) return
+    trainingApi.listRequirements().then(setTrainingRequirements).catch(() => setTrainingRequirements([]))
+  }, [open, hasFeature])
 
   useEffect(() => {
     if (!open) {
@@ -115,6 +125,7 @@ export default function IssueDisciplineModal({
       setDraftConcerns([])
       setVerdict(null)
       setAckReason('')
+      setRemedialRequirementId('')
       reset()
     }
   }, [open, prefilledEmployeeId, reset])
@@ -227,6 +238,7 @@ export default function IssueDisciplineModal({
         override_level: overrideEnabled,
         override_reason: overrideEnabled ? overrideReason : undefined,
         advisory_ack_reason: ackReason.trim() || undefined,
+        remedial_requirement_id: remedialRequirementId || undefined,
       })
       onIssued?.(record)
       onClose()
@@ -364,6 +376,16 @@ export default function IssueDisciplineModal({
           value={reviewDate}
           onChange={(e) => setReviewDate(e.target.value)}
         />
+
+        {hasFeature('training') && trainingRequirements.length > 0 && (
+          <Select
+            label="Remedial training (optional)"
+            value={remedialRequirementId}
+            onChange={(e) => setRemedialRequirementId(e.target.value)}
+            placeholder="No training assigned"
+            options={trainingRequirements.map((r) => ({ value: r.id, label: r.title }))}
+          />
+        )}
 
         <CompliancePanel
           verdict={verdict}

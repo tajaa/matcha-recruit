@@ -1,9 +1,14 @@
-"""Celery task — auto-assign CA SB 1343 training records.
+"""Celery task — auto-assign training records.
 
-Two queries:
+Three passes:
   (a) Initial assignment for CA employees past their 6-month new-hire window
-      who have no active record.
-  (b) Renewal for completed records expiring within 60 days.
+      who have no active record (CA SB 1343 hardcode — unchanged).
+  (b) Renewal for completed records expiring within 60 days (also CA-only,
+      unchanged).
+  (c) Company-authored `training_assignment_rules` rows with
+      `trigger='schedule'` — the general-purpose replacement for (a)/(b) for
+      anything that isn't SB 1343. (a)/(b) stay as-is rather than being
+      migrated onto rules, to avoid a behavior change for existing tenants.
 
 Gated on `scheduler_settings.training_cadence.enabled` (default false from
 schema migration). Re-dispatched by celery_app.@worker_ready every 15 minutes
@@ -13,9 +18,11 @@ After each insert batch, fans out assignment emails (best-effort).
 """
 
 import asyncio
+from datetime import date, timedelta
 
 from ..celery_app import celery_app
 from ..utils import get_db_connection, scheduler_settings_row
+from app.matcha.services.training_assignment import resolve_audience, assign_training
 
 
 async def _send_assignment_email(employee_email: str, employee_name: str, training_title: str, due_date) -> None:
@@ -133,6 +140,54 @@ async def _dispatch_training_cadence() -> dict:
         )
         inserted_renewal = len(renewal_rows)
 
+        # (c) Schedule-trigger rules — general-purpose replacement for (a)/(b)
+        # for anything besides CA SB 1343. One rule = one recurring
+        # requirement; due_date = today + due_days (or the requirement's own
+        # frequency_months if the rule doesn't set due_days).
+        inserted_rule = 0
+        rule_rows = await conn.fetch(
+            """
+            SELECT r.*, req.id AS req_id, req.title AS req_title,
+                   req.training_type AS req_training_type,
+                   req.frequency_months AS req_frequency_months,
+                   req.is_active AS req_is_active
+            FROM training_assignment_rules r
+            JOIN training_requirements req ON req.id = r.requirement_id
+            JOIN companies c ON c.id = r.company_id
+            WHERE r.trigger = 'schedule' AND r.is_active = TRUE
+              AND COALESCE((c.enabled_features->>'training')::boolean, FALSE) = TRUE
+            """
+        )
+        for rule in rule_rows:
+            if not rule["req_is_active"]:
+                continue
+            employee_ids = await resolve_audience(
+                conn,
+                rule["company_id"],
+                applies_to=rule["applies_to"],
+                work_states=rule["work_states"],
+                departments=rule["departments"],
+            )
+            if not employee_ids:
+                continue
+            due_date = date.today() + timedelta(days=rule["due_days"]) if rule["due_days"] else None
+            requirement = {
+                "id": rule["req_id"],
+                "title": rule["req_title"],
+                "training_type": rule["req_training_type"],
+                "frequency_months": rule["req_frequency_months"],
+            }
+            outcome = await assign_training(
+                conn,
+                rule["company_id"],
+                requirement,
+                employee_ids,
+                source_type="rule",
+                source_ref=rule["id"],
+                due_date=due_date,
+            )
+            inserted_rule += outcome.assigned
+
         # Best-effort notifications (won't roll back DB inserts on email failure)
         all_assignments = [*initial_rows, *renewal_rows]
         for r in all_assignments:
@@ -157,6 +212,7 @@ async def _dispatch_training_cadence() -> dict:
     summary = {
         "initial_assigned": inserted_initial,
         "renewals": inserted_renewal,
+        "rule_assigned": inserted_rule,
         "notifications_sent": notifications_sent,
     }
     print(f"[Training Cadence] {summary}")

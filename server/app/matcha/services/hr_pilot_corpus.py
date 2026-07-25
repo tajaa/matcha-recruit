@@ -373,7 +373,7 @@ async def _fetch_training(conn, company_id) -> dict:
         # dashboard.py:1636 but does not exist on this table.
         out["overdue"] = [dict(r) for r in await conn.fetch(
             """
-            SELECT tr.id, tr.title, tr.due_date, e.first_name, e.last_name, e.job_title
+            SELECT tr.id, tr.title, tr.due_date, tr.source_type, e.first_name, e.last_name, e.job_title
             FROM training_records tr
             JOIN employees e ON e.id = tr.employee_id
             WHERE tr.company_id=$1 AND tr.status IN ('assigned','in_progress')
@@ -390,7 +390,7 @@ async def _fetch_training(conn, company_id) -> dict:
     try:
         out["expiring"] = [dict(r) for r in await conn.fetch(
             """
-            SELECT tr.id, tr.title, tr.expiration_date, e.first_name, e.last_name, e.job_title
+            SELECT tr.id, tr.title, tr.expiration_date, tr.source_type, e.first_name, e.last_name, e.job_title
             FROM training_records tr
             JOIN employees e ON e.id = tr.employee_id
             WHERE tr.company_id=$1 AND tr.status='completed'
@@ -753,10 +753,12 @@ def _training_records(training: dict | None) -> list[dict]:
         if not isinstance(r, dict) or not r.get("id"):
             continue
         who = f"{r.get('first_name') or ''} {r.get('last_name') or ''}".strip() or "employee"
+        remedial = r.get("source_type") in ("incident", "discipline")
         recs.append({
             "cid": f"training:{r['id']}",
             "ref": f"Overdue training — {who}",
-            "summary": f"{who} has not completed {r.get('title')}; was due {_fmt_d(r.get('due_date'))}.",
+            "summary": f"{who} has not completed {r.get('title')}; was due {_fmt_d(r.get('due_date'))}."
+                       + (" (remedial — assigned after an incident/discipline record)" if remedial else ""),
             "when": _fmt_d(r.get("due_date")),
             "status": "overdue",
         })
@@ -765,11 +767,13 @@ def _training_records(training: dict | None) -> list[dict]:
         if not isinstance(r, dict) or not r.get("id"):
             continue
         who = f"{r.get('first_name') or ''} {r.get('last_name') or ''}".strip() or "employee"
+        remedial = r.get("source_type") in ("incident", "discipline")
         recs.append({
             "cid": f"training:{r['id']}",
             "ref": f"Expiring training — {who}",
             "summary": (f"{who} completed {r.get('title')}, but it expires "
-                        f"{_fmt_d(r.get('expiration_date'))}."),
+                        f"{_fmt_d(r.get('expiration_date'))}.")
+                       + (" (remedial — assigned after an incident/discipline record)" if remedial else ""),
             "when": _fmt_d(r.get("expiration_date")),
             "status": "expiring",
         })

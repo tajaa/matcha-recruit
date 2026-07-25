@@ -13,6 +13,7 @@ export type CopilotCardActionType =
   | 'text_input'
   | 'osha_emergency_alert'
   | 'request_documents'
+  | 'assign_training'
 
 export type CopilotCardChoice = {
   label: string
@@ -44,6 +45,10 @@ export type CopilotCardAction = {
   // osha_emergency_alert: informational + acknowledgment.
   phone?: string
   deadline?: string
+  // assign_training: requirement to assign (employee_ids omitted => defaults
+  // to the incident's involved employees server-side).
+  requirement_id?: string
+  employee_ids?: string[]
 }
 
 export type CopilotCard = {
