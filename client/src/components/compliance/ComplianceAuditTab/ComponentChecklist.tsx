@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { fetchRequirementComponents, attestRequirementComponent } from '../../../api/compliance/compliance'
 import type { RequirementComponentChecklist as Checklist } from '../../../types/compliance'
-import { STATUS_LABEL, STATUS_CLASS } from './componentStatus'
+import { STATUS_LABEL, STATUS_CLASS, rollupComponents } from './componentStatus'
 import { AuditRevealModal } from './AuditRevealModal'
 
 type Props = {
@@ -11,7 +11,19 @@ type Props = {
   readOnly?: boolean
   /** For the animation's header card — already fetched onto the row. */
   employeeCount?: number | null
+  /** Called after a successful attestation so the owning surface can refetch
+   *  its own rollups (the Audit tab's statute/location coverage numbers come
+   *  from a separate one-shot fetch and would otherwise stay pre-attest until
+   *  a full page reload). */
+  onAttested?: () => void
 }
+
+// The reveal is a full-screen one-time flourish, and the Audit tab mounts one
+// checklist per (statute, location) row. Expanding two first-time rows back to
+// back would otherwise stack two overlays with two animation loops, and only
+// the last one answers ESC. Module-scoped because the constraint is global to
+// the page, not to any one checklist.
+let autoRevealActive = false
 
 function safeGet(key: string): string | null {
   try { return localStorage.getItem(key) } catch { return null }
@@ -25,7 +37,9 @@ function safeSet(key: string, value: string): void {
 // control — never as a gap. The engine underneath is blind-never-violating
 // (compliance_status.py) and this card must not contradict that by reusing
 // "GAP" copy for the absence of a record.
-export function ComponentChecklist({ locationId, catalogId, readOnly, employeeCount }: Props) {
+export function ComponentChecklist({
+  locationId, catalogId, readOnly, employeeCount, onAttested,
+}: Props) {
   const [checklist, setChecklist] = useState<Checklist | null>(null)
   const [loading, setLoading] = useState(true)
   // Load failures are fatal (nothing rendered underneath to fall back to) and
@@ -39,7 +53,17 @@ export function ComponentChecklist({ locationId, catalogId, readOnly, employeeCo
   const [revealOpen, setRevealOpen] = useState(false)
   const [runId, setRunId] = useState(0)
   const didAutoOpen = useRef(false)
+  // True only while THIS checklist holds the page-wide auto-reveal slot, so
+  // the release below can't free a slot another row is using.
+  const ownsAutoReveal = useRef(false)
   const seenKey = `matcha_audit_reveal_seen:${locationId}:${catalogId}`
+
+  function releaseAutoReveal() {
+    if (ownsAutoReveal.current) {
+      ownsAutoReveal.current = false
+      autoRevealActive = false
+    }
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -49,15 +73,20 @@ export function ComponentChecklist({ locationId, catalogId, readOnly, employeeCo
       .then((data) => {
         if (cancelled) return
         setChecklist(data)
-        if (!didAutoOpen.current && !safeGet(seenKey)) {
+        // Not-yet-seen AND nobody else is mid-reveal. When suppressed the seen
+        // marker is deliberately NOT written — the row keeps its first-open
+        // flourish for next time rather than silently losing it.
+        if (!didAutoOpen.current && !safeGet(seenKey) && !autoRevealActive) {
           didAutoOpen.current = true
+          ownsAutoReveal.current = true
+          autoRevealActive = true
           safeSet(seenKey, '1')
           setRevealOpen(true)
         }
       })
       .catch(() => { if (!cancelled) setLoadError('Could not load the component checklist.') })
       .finally(() => { if (!cancelled) setLoading(false) })
-    return () => { cancelled = true }
+    return () => { cancelled = true; releaseAutoReveal() }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [locationId, catalogId])
 
@@ -68,10 +97,17 @@ export function ComponentChecklist({ locationId, catalogId, readOnly, employeeCo
       const updated = await attestRequirementComponent(locationId, catalogId, componentKey, {
         status: 'compliant',
       })
-      setChecklist((prev) => prev && {
-        ...prev,
-        components: prev.components.map((c) => (c.component_key === componentKey ? updated : c)),
+      setChecklist((prev) => {
+        if (!prev) return prev
+        const components = prev.components.map(
+          (c) => (c.component_key === componentKey ? updated : c),
+        )
+        // Recomputed, not carried over: the coverage line above the list reads
+        // `checklist.summary`, so reusing the server's pre-attest summary
+        // prints "0/5 known" over a row that just flipped to Compliant.
+        return { ...prev, components, summary: rollupComponents(components) }
       })
+      onAttested?.()
     } catch {
       setAttestError('Could not save that attestation.')
     } finally {
@@ -96,7 +132,7 @@ export function ComponentChecklist({ locationId, catalogId, readOnly, employeeCo
     <div className="px-4 py-3 bg-white/[0.015] border-t border-white/[0.06]">
       <AuditRevealModal
         open={revealOpen}
-        onClose={() => setRevealOpen(false)}
+        onClose={() => { setRevealOpen(false); releaseAutoReveal() }}
         checklist={checklist}
         employeeCount={employeeCount}
         runId={runId}

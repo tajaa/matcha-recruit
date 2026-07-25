@@ -1,4 +1,5 @@
 export { useComplianceData } from './useComplianceData'
+export { useComplianceAudit } from './useComplianceAudit'
 export { useLocationDetail } from './useLocationDetail'
 export { useComplianceCheck } from './useComplianceCheck'
 export { useComplianceRequirements } from './useComplianceRequirements'

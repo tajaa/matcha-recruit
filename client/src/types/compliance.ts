@@ -236,7 +236,7 @@ export interface ComplianceRequirement {
   min_wage_violation_count: number | null
   is_pinned: boolean
   /** True when this requirement decomposes into a per-clause checklist
-   *  (requirement_components) — render a disclosure and lazy-fetch it. */
+   *  (requirement_components) — render an "Audit →" link to the Audit tab. */
   has_components?: boolean
 }
 
@@ -294,6 +294,41 @@ export interface RequirementComponentChecklist {
   components: RequirementComponent[]
   summary: RequirementComponentSummary
   exposure: RequirementExposure | null
+}
+
+/** One location's coverage on one decomposed statute — a row inside a
+ *  ComplianceAuditStatute card. */
+export interface ComplianceAuditLocationRow {
+  location_id: string
+  location_label: string
+  employee_count: number | null
+  summary: RequirementComponentSummary
+}
+
+/** One decomposed statute, rolled up across every location it applies to and
+ *  is visible at. `summary` is the rollup over `locations` below — never a
+ *  separate computation, so the card total can't drift from its rows. */
+export interface ComplianceAuditStatute {
+  jurisdiction_requirement_id: string
+  title: string
+  statute_citation: string | null
+  category: string | null
+  authority_level: string | null
+  authority_name: string | null
+  component_count: number
+  locations: ComplianceAuditLocationRow[]
+  summary: RequirementComponentSummary
+  exposure: RequirementExposure | null
+}
+
+/** The company-wide Audit tab: every statute with a clause decomposition
+ *  visible to this tenant somewhere, plus a company-wide rollup. Empty
+ *  `statutes` is the default for any tenant with no decomposed statute in
+ *  its jurisdictions — not an error state. */
+export interface ComplianceAuditOverview {
+  statutes: ComplianceAuditStatute[]
+  summary: RequirementComponentSummary
+  location_count: number
 }
 
 export interface VerificationSource {

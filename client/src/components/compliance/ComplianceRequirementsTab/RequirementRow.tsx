@@ -1,12 +1,9 @@
-import { useState } from 'react'
-import { ChevronDown, ChevronRight } from 'lucide-react'
 import { EmployeesTooltip } from '../EmployeesTooltip'
 import { requirementAuthority } from '../../../hooks/compliance/useComplianceRequirements'
 import type { Authority } from '../../../hooks/compliance/useComplianceRequirements'
 import type { ComplianceRequirement } from '../../../types/compliance'
 import { JURISDICTION_LEVEL_LABELS, RATE_TYPE_LABELS } from '../../../api/compliance/compliance'
 import { isFuture } from './helpers'
-import { ComponentChecklist } from './ComponentChecklist'
 
 type Props = {
   req: ComplianceRequirement
@@ -14,15 +11,15 @@ type Props = {
   highlightId: string | null
   readOnly?: boolean
   onPin: (requirementId: string, isPinned: boolean) => void
-  locationId: string | null
+  /** Jump to the Audit tab focused on this statute. Absent in read-only/preview
+   *  contexts (compliance_lite taste, the Lite blur preview) where there is no
+   *  Audit tab to jump to. */
+  onOpenAudit?: (catalogId: string) => void
 }
 
-export function RequirementRow({ req, knownAuthorities, highlightId, readOnly, onPin, locationId }: Props) {
+export function RequirementRow({ req, knownAuthorities, highlightId, readOnly, onPin, onOpenAudit }: Props) {
   const authority = requirementAuthority(req, knownAuthorities)
-  // Lazy: the checklist only fetches once this row is actually opened, not on
-  // every row in the (often long) requirements list.
-  const [open, setOpen] = useState(false)
-  const canExpand = req.has_components && locationId != null
+  const canAudit = req.has_components && !!req.jurisdiction_requirement_id && !!onOpenAudit
   return (
     <div key={req.id} data-req-id={req.id}
       className={`px-4 py-3 transition-colors ${
@@ -32,18 +29,7 @@ export function RequirementRow({ req, knownAuthorities, highlightId, readOnly, o
       }`}>
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium text-zinc-200 flex items-center gap-1.5">
-            {canExpand && (
-              <button
-                type="button"
-                onClick={() => setOpen((o) => !o)}
-                aria-label={open ? 'Collapse checklist' : 'Expand checklist'}
-                className="text-zinc-500 hover:text-zinc-300 transition-colors shrink-0">
-                {open ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
-              </button>
-            )}
-            <span>{req.title}</span>
-          </p>
+          <p className="text-sm font-medium text-zinc-200">{req.title}</p>
           <div className="flex flex-wrap items-center gap-2 mt-1">
             <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/[0.04] text-zinc-400 border border-white/[0.08]">
               {JURISDICTION_LEVEL_LABELS[authority.level] || authority.level}
@@ -112,6 +98,12 @@ export function RequirementRow({ req, knownAuthorities, highlightId, readOnly, o
               {b.level} floor: {b.citation}
             </span>
           ))}
+          {canAudit && (
+            <button type="button" onClick={() => onOpenAudit!(req.jurisdiction_requirement_id!)}
+              className="text-[11px] text-zinc-600 hover:text-amber-400 transition-colors">
+              Audit &rarr;
+            </button>
+          )}
           {!readOnly && (
             <button type="button" onClick={() => onPin(req.id, !req.is_pinned)}
               className={`text-[11px] transition-colors ${req.is_pinned ? 'text-amber-400' : 'text-zinc-600 hover:text-amber-400'}`}>
@@ -135,14 +127,6 @@ export function RequirementRow({ req, knownAuthorities, highlightId, readOnly, o
           </span>
         )}
       </div>
-      {open && canExpand && req.jurisdiction_requirement_id && locationId && (
-        <ComponentChecklist
-          locationId={locationId}
-          catalogId={req.jurisdiction_requirement_id}
-          readOnly={readOnly}
-          employeeCount={req.affected_employee_count}
-        />
-      )}
     </div>
   )
 }

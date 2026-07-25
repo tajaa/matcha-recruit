@@ -568,6 +568,41 @@ class RequirementComponentChecklist(BaseModel):
     exposure: Optional[RequirementExposure] = None
 
 
+class ComplianceAuditLocationRow(BaseModel):
+    """One location's coverage on one decomposed statute — a row inside a
+    ComplianceAuditStatute card."""
+    location_id: str
+    location_label: str
+    employee_count: Optional[int] = None
+    summary: RequirementStatusSummary
+
+
+class ComplianceAuditStatute(BaseModel):
+    """One decomposed statute, rolled up across every location it applies to
+    and is visible at. `summary` is the rollup over every location row below —
+    never a separate computation, so the card total can't drift from its rows."""
+    jurisdiction_requirement_id: str
+    title: str
+    statute_citation: Optional[str] = None
+    category: Optional[str] = None
+    authority_level: Optional[str] = None
+    authority_name: Optional[str] = None
+    component_count: int = 0
+    locations: List[ComplianceAuditLocationRow]
+    summary: RequirementStatusSummary
+    exposure: Optional[RequirementExposure] = None
+
+
+class ComplianceAuditOverview(BaseModel):
+    """The company-wide Audit tab: every statute with a clause decomposition
+    that is actually visible to this tenant somewhere, plus a company-wide
+    rollup. Empty `statutes` is the default for any tenant with no decomposed
+    statute in its jurisdictions — not an error state."""
+    statutes: List[ComplianceAuditStatute]
+    summary: RequirementStatusSummary
+    location_count: int = 0
+
+
 class AttestComponentRequest(BaseModel):
     status: Literal["compliant", "non_compliant", "in_progress", "unknown"]
     note: Optional[str] = None

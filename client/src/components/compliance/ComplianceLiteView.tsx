@@ -154,7 +154,6 @@ export function ComplianceLiteView() {
                     loading={detail.loading}
                     onPin={noop}
                     checkMessages={[]}
-                    locationId={selectedId}
                     facilityAttributes={selectedLoc.facility_attributes}
                     readOnly
                     previewCategoryLimit={2}

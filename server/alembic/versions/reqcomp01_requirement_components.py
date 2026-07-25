@@ -42,11 +42,41 @@ down_revision = "penaltyauth01"
 branch_labels = None
 depends_on = None
 
-# The real, environment-specific name of the constraint reqstatus01 created via
-# a bare `UNIQUE (location_id, jurisdiction_requirement_id)` column constraint
-# (Postgres auto-names these; verified against the running dev DB rather than
-# guessed, since a name off by one character makes DROP CONSTRAINT IF EXISTS a
-# silent no-op and the old constraint would keep colliding with component rows).
+# reqstatus01 created the old constraint via a bare
+# `UNIQUE (location_id, jurisdiction_requirement_id)` column constraint, which
+# Postgres auto-names. Do NOT drop it by name: a name off by one character
+# (different PG version's truncation, a hand-recreated constraint, a restore
+# that renamed it) makes DROP CONSTRAINT IF EXISTS a silent no-op — the
+# migration then reports success and the FIRST tenant to open a checklist gets
+# a 500 on the second component INSERT for the same (location, catalog), with
+# no failed migration to point at. Drop by SHAPE instead: every UNIQUE
+# constraint on exactly those two columns, whatever it is called.
+_DROP_OLD_UNIQUE_BY_SHAPE = """
+DO $$
+DECLARE r RECORD;
+BEGIN
+    FOR r IN
+        SELECT c.conname
+        FROM pg_constraint c
+        WHERE c.conrelid = 'requirement_compliance_status'::regclass
+          AND c.contype = 'u'
+          AND (
+              SELECT array_agg(a.attname::text ORDER BY a.attname)
+              FROM unnest(c.conkey) AS k(attnum)
+              JOIN pg_attribute a
+                ON a.attrelid = c.conrelid AND a.attnum = k.attnum
+          ) = ARRAY['jurisdiction_requirement_id', 'location_id']
+    LOOP
+        EXECUTE format(
+            'ALTER TABLE requirement_compliance_status DROP CONSTRAINT %I', r.conname
+        );
+    END LOOP;
+END $$;
+"""
+
+# The name reqstatus01's constraint carries on every environment checked so far.
+# Only `downgrade()` uses it — restoring the constraint has to pick some name,
+# and reusing the original one keeps a down/up round-trip a no-op.
 _OLD_UNIQUE = "requirement_compliance_status_location_id_jurisdiction_requ_key"
 
 
@@ -87,9 +117,7 @@ def upgrade():
         "ADD COLUMN IF NOT EXISTS component_key VARCHAR(48)"
     )
 
-    op.execute(
-        f'ALTER TABLE requirement_compliance_status DROP CONSTRAINT IF EXISTS "{_OLD_UNIQUE}"'
-    )
+    op.execute(_DROP_OLD_UNIQUE_BY_SHAPE)
     op.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS ux_req_status_loc_cat_component "
         "ON requirement_compliance_status "
@@ -106,8 +134,7 @@ def downgrade():
         "DELETE FROM requirement_compliance_status WHERE component_key IS NOT NULL"
     )
     op.execute(
-        "ALTER TABLE requirement_compliance_status "
-        "ADD CONSTRAINT requirement_compliance_status_location_id_jurisdiction_requ_key "
+        f'ALTER TABLE requirement_compliance_status ADD CONSTRAINT "{_OLD_UNIQUE}" '
         "UNIQUE (location_id, jurisdiction_requirement_id)"
     )
     op.execute(

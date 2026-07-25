@@ -277,10 +277,11 @@ async def _derive_wvp_training(
 
     Same blind/in-progress/compliant shape as `_derive_harassment_training`,
     plus a lapse check: SB 553 training is annual, so "88 assigned, 88
-    completed" is not "compliant" if 87 of those completions are 18 months
-    stale. MAX(completed_date) only proves *someone* trained recently, not
-    that everyone did — this counts how many completions are still inside the
-    12-month window (`current_completed`) vs completed-but-stale (`lapsed`).
+    completed" is not "compliant" if 87 of those people last trained 18 months
+    ago. Every count here is PER ACTIVE EMPLOYEE (see the ctx query) — one
+    person's three yearly completions are one current employee, not two lapses
+    — keyed on each employee's most recent completion: inside the 12-month
+    window (`current_completed`), undated, or stale (`lapsed`).
     """
     tr = ctx.get("wvp_training")
     if tr is None or int(tr["assigned"] or 0) == 0:
@@ -296,8 +297,8 @@ async def _derive_wvp_training(
 
     current = int(tr["current_completed"] or 0)
     undated = int(tr["completed_undated"] or 0)
-    # Every completed record is exactly one of: inside the 12mo window
-    # (current), missing a date (undated), or outside the window (lapsed).
+    # Every employee who has completed is exactly one of: last completion
+    # inside the 12mo window (current), undated, or outside it (lapsed).
     lapsed = completed - current - undated
     last = tr["last_completed"]
     oldest = tr["oldest_completed"]
@@ -500,6 +501,11 @@ async def _build_context(
     build = CTX_GROUPS if groups is None else set(groups)
     ctx: Dict[str, Any] = {
         "employees": {}, "training": None, "incidents": {}, "wvp_training": None,
+        # workforce group — seeded here so the docstring's promise holds for it
+        # too. A derivation written as ctx["locations"] (the direct-index style
+        # the older derivations use) would otherwise KeyError on an unbuilt
+        # group, and reconcile swallows that into a silent `unknown`.
+        "locations": {}, "pay_transparency": {}, "pay_equity": None, "biometrics": {},
     }
 
     if "employees" in build and features.get("employees"):
@@ -544,20 +550,39 @@ async def _build_context(
     # is filtered to harassment/EEO training and says nothing about workplace
     # violence) — reusing it would silently grade the wrong thing.
     if "wvp_training" in build and features.get("training"):
+        # Counted PER EMPLOYEE, not per record. training_records accumulates one
+        # row per employee per annual cycle (the active-assignment unique index
+        # only covers status IN ('assigned','in_progress'), so completions pile
+        # up), and terminated employees' history never goes away. Counting rows
+        # scores last year's on-time completion as this year's lapse — a company
+        # that trains exactly on schedule would be reported non_compliant, which
+        # is precisely the manufactured violation this module must never emit.
+        # Waived rows are dropped (no obligation) and terminated employees with
+        # them, so a departed worker can't pin the verdict at in_progress.
         ctx["wvp_training"] = await conn.fetchrow(
             """
+            WITH per_employee AS (
+                SELECT tr.employee_id,
+                       BOOL_OR(tr.status = 'completed') AS ever_completed,
+                       MAX(tr.completed_date) FILTER (WHERE tr.status = 'completed')
+                         AS last_completed
+                FROM training_records tr
+                JOIN employees e ON e.id = tr.employee_id
+                WHERE tr.company_id = $1
+                  AND tr.status <> 'waived'
+                  AND e.termination_date IS NULL
+                  AND (tr.training_type = 'workplace_violence'
+                       OR LOWER(tr.title) ~ '(workplace violence|wvp|sb ?553)')
+                GROUP BY tr.employee_id
+            )
             SELECT COUNT(*) AS assigned,
-                   COUNT(*) FILTER (WHERE status = 'completed') AS completed,
-                   COUNT(*) FILTER (WHERE status = 'completed' AND completed_date >= $2)
-                     AS current_completed,
-                   COUNT(*) FILTER (WHERE status = 'completed' AND completed_date IS NULL)
+                   COUNT(*) FILTER (WHERE ever_completed) AS completed,
+                   COUNT(*) FILTER (WHERE last_completed >= $2) AS current_completed,
+                   COUNT(*) FILTER (WHERE ever_completed AND last_completed IS NULL)
                      AS completed_undated,
-                   MIN(completed_date) FILTER (WHERE status = 'completed') AS oldest_completed,
-                   MAX(completed_date) AS last_completed
-            FROM training_records
-            WHERE company_id = $1
-              AND (training_type = 'workplace_violence'
-                   OR LOWER(title) ~ '(workplace violence|wvp|sb ?553)')
+                   MIN(last_completed) AS oldest_completed,
+                   MAX(last_completed) AS last_completed
+            FROM per_employee
             """,
             company_id,
             date.today() - timedelta(days=_ANNUAL_TRAINING_WINDOW_DAYS),
@@ -620,7 +645,9 @@ async def reconcile_requirement_status(
     """
     if features is None:
         from ..feature_flags import get_company_features  # local: avoids a cycle
-        features = await get_company_features(company_id)
+        # conn=, always: the caller already holds one, and acquiring a second
+        # under it deadlocks the pool at concurrency == pool_size.
+        features = await get_company_features(company_id, conn=conn)
 
     # The codified gate, same as every tenant-facing read. Without it a status —
     # and the issue it raises — could attach to a catalog row the tenant cannot
@@ -834,7 +861,9 @@ async def reconcile_component_status(
     """
     if features is None:
         from ..feature_flags import get_company_features  # local: avoids a cycle
-        features = await get_company_features(company_id)
+        # conn=, always: the caller already holds one, and acquiring a second
+        # under it deadlocks the pool at concurrency == pool_size.
+        features = await get_company_features(company_id, conn=conn)
 
     from .compliance_service import codified_gate_sql
 
@@ -1059,3 +1088,180 @@ async def attest_component_status(
         json.dumps({"note": note}),
     )
     return {"status": status, "basis": "attested"}
+
+
+# ── company-wide audit overview ──────────────────────────────────────────────
+
+async def get_company_audit_overview(
+    conn, company_id: UUID, *, features: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Every decomposed requirement projected to this company, grouped by
+    statute then location — the Audit tab's one aggregate read.
+
+    Four steps, in this order because the order is what keeps it both correct
+    and cheap:
+
+    1. Short-circuit on whether ANY component row is even projected. Empty for
+       every tenant except one with a decomposed statute in its jurisdictions
+       (today: CA only) — that tenant pays one query and zero pipeline runs.
+    2. One company-wide reconcile (never per-location — `_context_groups_for`
+       already narrows `_build_context` to the single aggregate the surviving
+       derivation reads).
+    3. One grouped status read, joined to `requirement_components` so orphaned
+       component rows cannot count, and ordered so the rendering is stable.
+    4. A visibility pass, ONLY for the locations named by BOTH steps above.
+       This cannot be collapsed into a single query: `_filter_with_preemption`
+       / `_filter_city_level_requirements` are set-relative — they decide by
+       comparing sibling requirement rows in the same category group — so a
+       query narrowed to one catalog row cannot reproduce the answer. Same
+       invariant `_assert_component_requirement_visible` enforces on the
+       checklist endpoints: the Audit tab must never show a requirement the
+       Requirements tab hides. Step 3's status rows are then assembled and
+       dropped against this visible set.
+    """
+    if features is None:
+        from ..feature_flags import get_company_features  # local: avoids a cycle
+        # conn=, always: the caller already holds one, and acquiring a second
+        # under it deadlocks the pool at concurrency == pool_size.
+        features = await get_company_features(company_id, conn=conn)
+
+    from .compliance_service import codified_gate_sql
+
+    # (1) Short-circuit.
+    candidate_rows = await conn.fetch(
+        f"""
+        SELECT DISTINCT cr.location_id, cat.id AS catalog_id
+        FROM compliance_requirements cr
+        JOIN business_locations bl ON bl.id = cr.location_id
+        JOIN jurisdiction_requirements cat ON cat.id = cr.jurisdiction_requirement_id
+        JOIN requirement_components rc ON rc.jurisdiction_requirement_id = cat.id
+        WHERE bl.company_id = $1 AND COALESCE(bl.is_active, true) = true
+          {await codified_gate_sql("cat", conn=conn)}
+        """,
+        company_id,
+    )
+    if not candidate_rows:
+        return {"statutes": [], "summary": rollup([]), "location_count": 0}
+
+    # (2) One company-wide reconcile.
+    await reconcile_component_status(conn, company_id, features=features)
+
+    # (3) Grouped status read.
+    #
+    # Joined to `requirement_components`, not just filtered on
+    # `component_key IS NOT NULL`: there is no FK on that column and nothing
+    # deletes stale rows, so a component removed or renamed by a later seed
+    # revision leaves status rows behind that would go on counting toward the
+    # statute and location rollups — reporting summary.total = 6 against a live
+    # component_count of 5, with the orphan's frozen status skewing both.
+    #
+    # ORDER BY is load-bearing, not cosmetic: the dicts assembled below keep
+    # insertion order, so without it two identical requests can render the
+    # statute cards — and the location rows inside them — in different orders.
+    # An unordered scan guarantees nothing, and the UPDATEs reconcile just ran
+    # relocate heap tuples. Sorted on ids as well as labels so ties are stable.
+    status_rows = await conn.fetch(
+        """
+        SELECT rcs.location_id, rcs.jurisdiction_requirement_id AS catalog_id,
+               rcs.component_key, rcs.status, rcs.basis,
+               cat.title, cat.statute_citation, cat.category,
+               j.level::text  AS authority_level,
+               j.display_name AS authority_display_name,
+               (SELECT count(*) FROM requirement_components rc2
+                  WHERE rc2.jurisdiction_requirement_id = cat.id) AS component_count,
+               bl.name AS location_name, bl.city, bl.state
+        FROM requirement_compliance_status rcs
+        JOIN requirement_components rc
+          ON rc.jurisdiction_requirement_id = rcs.jurisdiction_requirement_id
+         AND rc.component_key = rcs.component_key
+        JOIN jurisdiction_requirements cat ON cat.id = rcs.jurisdiction_requirement_id
+        JOIN business_locations bl ON bl.id = rcs.location_id
+        LEFT JOIN jurisdictions j ON j.id = cat.jurisdiction_id
+        WHERE rcs.company_id = $1
+          AND rcs.component_key IS NOT NULL
+        ORDER BY cat.title, cat.id, bl.name, bl.id, rc.sort_order, rc.component_key
+        """,
+        company_id,
+    )
+
+    # (4) Visibility, only for locations that survived BOTH step 1 and step 3 —
+    # a candidate location with no component status row at all contributes
+    # nothing downstream, and this pipeline run is the expensive part of the
+    # endpoint (a projection query, two set-relative filters and the roster
+    # scan in get_employee_impact_for_location, per location).
+    # get_location_requirements already filters `l.company_id = $2`, so nothing
+    # here can leak a foreign location.
+    from .compliance_service import get_location_requirements
+
+    candidate_locations = {r["location_id"] for r in candidate_rows}
+    pipeline_locations = sorted(
+        candidate_locations & {r["location_id"] for r in status_rows}, key=str
+    )
+    visible_catalog_ids: Dict[UUID, set] = {}
+    employee_counts: Dict[UUID, Optional[int]] = {}
+    for loc_id in pipeline_locations:
+        reqs = await get_location_requirements(loc_id, company_id, conn=conn)
+        visible_catalog_ids[loc_id] = {
+            UUID(r.jurisdiction_requirement_id) for r in reqs
+            if r.jurisdiction_requirement_id and r.has_components
+        }
+        # Every row for a location carries the same total_affected — harvest
+        # it off whichever row exists rather than a second query.
+        employee_counts[loc_id] = reqs[0].affected_employee_count if reqs else None
+
+    from .compliance_service import _authority_label
+    from .compliance_risk import loc_label
+
+    # statute_id -> {"header": {...}, "locations": {loc_id: [status_rows]}}
+    # loc_meta is captured alongside — every row for a location carries the
+    # same bl.name/city/state, so the first row seen for it is as good as any.
+    by_statute: Dict[UUID, Dict[str, Any]] = {}
+    loc_meta: Dict[UUID, Dict[str, Any]] = {}
+    for row in status_rows:
+        loc_id, cat_id = row["location_id"], row["catalog_id"]
+        if cat_id not in visible_catalog_ids.get(loc_id, set()):
+            continue  # hidden by preemption / industry / codified gate at this location
+        loc_meta.setdefault(loc_id, {
+            "name": row["location_name"], "city": row["city"], "state": row["state"],
+        })
+        entry = by_statute.setdefault(cat_id, {"header": row, "locations": {}})
+        entry["locations"].setdefault(loc_id, []).append(
+            {"status": row["status"], "basis": row["basis"]}
+        )
+
+    statutes: List[Dict[str, Any]] = []
+    all_rows_for_company: List[Dict[str, Any]] = []
+    for cat_id, entry in by_statute.items():
+        header = entry["header"]
+        location_rows = []
+        statute_rows: List[Dict[str, Any]] = []
+        for loc_id, rows in entry["locations"].items():
+            statute_rows.extend(rows)
+            location_rows.append({
+                "location_id": str(loc_id),
+                "location_label": loc_label(loc_meta[loc_id]),
+                "employee_count": employee_counts.get(loc_id),
+                "summary": rollup(rows),
+            })
+        statutes.append({
+            "jurisdiction_requirement_id": str(cat_id),
+            "title": header["title"],
+            "statute_citation": header["statute_citation"],
+            "category": header["category"],
+            "authority_level": header["authority_level"],
+            "authority_name": _authority_label(header["authority_level"], header["authority_display_name"]),
+            "component_count": header["component_count"],
+            "locations": location_rows,
+            "summary": rollup(statute_rows),
+        })
+        all_rows_for_company.extend(statute_rows)
+
+    return {
+        "statutes": statutes,
+        # The locations actually RENDERED, not the pre-visibility candidate set:
+        # a location whose only decomposed statute is preempted or filtered out
+        # for this industry has no row in `statutes[].locations`, and counting
+        # it here prints "1 statute · 3 locations" above a single location row.
+        "location_count": len(loc_meta),
+        "summary": rollup(all_rows_for_company),
+    }

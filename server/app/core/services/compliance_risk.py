@@ -54,7 +54,7 @@ _CREDENTIAL_LABELS = {
 _SEV_RANK = {"critical": 0, "high": 1, "moderate": 2}
 
 
-def _loc_label(row) -> str:
+def loc_label(row) -> str:
     name = row.get("name")
     city, state = row.get("city"), row.get("state")
     if name:
@@ -351,7 +351,7 @@ async def get_compliance_risk_summary(company_id: UUID) -> ComplianceRiskSummary
                             title=f"{name} paid below the applicable minimum",
                             detail=detail,
                             employee_names=[name],
-                            location_label=_loc_label(loc),
+                            location_label=loc_label(loc),
                             penalty=penalty,
                             statute_citation=citation,
                             recommendation=rec,
@@ -436,7 +436,7 @@ async def get_compliance_risk_summary(company_id: UUID) -> ComplianceRiskSummary
                         "high" if r["severity"] == "high" else "moderate")
                     num = r["incident_number"] or "incident"
                     loc = loc_by_id.get(r["location_id"])
-                    label = _loc_label(loc) if loc else r["location"]
+                    label = loc_label(loc) if loc else r["location"]
                     if r["osha_recordable"] is None:
                         rec = f"Determine OSHA recordability for {num} and complete the investigation before the 300A deadline."
                     else:
@@ -487,7 +487,7 @@ async def get_compliance_risk_summary(company_id: UUID) -> ComplianceRiskSummary
                     title=r["title"] or "Critical compliance alert",
                     detail=r["message"],
                     employee_names=[],
-                    location_label=_loc_label(loc) if loc else None,
+                    location_label=loc_label(loc) if loc else None,
                     recommendation=r["action_required"],
                     link=None,  # in-page → Alerts tab
                     deadline=r["deadline"].isoformat() if r["deadline"] else None,
@@ -551,7 +551,7 @@ async def get_compliance_risk_summary(company_id: UUID) -> ComplianceRiskSummary
                     title=r["title"] or "Requirement not met",
                     detail=ev.get("rule"),
                     employee_names=[e.get("name") for e in (ev.get("examples") or []) if e.get("name")],
-                    location_label=_loc_label(loc) if loc else None,
+                    location_label=loc_label(loc) if loc else None,
                     penalty=penalty,
                     statute_citation=r["statute_citation"],
                     recommendation=None,

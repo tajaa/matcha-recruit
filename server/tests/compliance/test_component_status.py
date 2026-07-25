@@ -155,6 +155,29 @@ def test_training_lapsed_outranks_undated():
     assert ev["lapsed"] == 3
 
 
+# ── the ctx query counts PEOPLE, not rows ───────────────────────────────────
+
+def test_wvp_context_query_is_per_employee():
+    """training_records accumulates a row per employee per annual cycle, so a
+    record-level COUNT scores last year's on-time completion as this year's
+    lapse: 10 employees trained in 2024, 2025 and 2026 read as 30 completions,
+    10 current, 20 "lapsed" — non_compliant for a company that trains exactly
+    on schedule. Guard the SQL shape, since the derivation above is fed a
+    pre-aggregated ctx and cannot see this.
+    """
+    src = inspect.getsource(cs._build_context)
+    wvp = src[src.index('if "wvp_training" in build'):src.index('if "workforce" in build')]
+    assert "GROUP BY tr.employee_id" in wvp
+    # Terminated employees' history must not go on driving a live verdict, and
+    # a waived row must not pin `assigned` above `completed` forever.
+    assert "e.termination_date IS NULL" in wvp
+    assert "tr.status <> 'waived'" in wvp
+    # `last_completed` is evidence shown to the user — an unfiltered
+    # MAX(completed_date) can source it from a record that was never completed
+    # (nothing in the schema ties completed_date to status).
+    assert "MAX(tr.completed_date) FILTER (WHERE tr.status = 'completed')" in wvp
+
+
 # ── violent_incident_log is attest-only (the ILIKE-derivation removal) ─────
 
 def test_incident_log_has_no_derivation():

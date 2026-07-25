@@ -8,9 +8,6 @@ export type Props = {
   onPin: (requirementId: string, isPinned: boolean) => void
   checkMessages: ComplianceCheckMessage[]
   facilityAttributes?: FacilityAttributes | null
-  /** The location these requirements belong to — needed to fetch a
-   *  requirement's component checklist (locationId + catalog id). */
-  locationId: string | null
   /** Read-only mode (compliance_lite taste) — hide Pin (the pin endpoint is
    *  Pro-gated and would 403). */
   readOnly?: boolean
@@ -24,6 +21,9 @@ export type Props = {
    *  this location's list. */
   targetReq?: { id: string; title?: string | null } | null
   onTargetConsumed?: () => void
+  /** Jump to the company-wide Audit tab, focused on this statute's card. Absent
+   *  where there is no Audit tab to jump to (compliance_lite taste, previews). */
+  onOpenAudit?: (catalogId: string) => void
 }
 
 export type GroupBy = 'topic' | 'jurisdiction'
@@ -39,5 +39,5 @@ export type CategoryRowShared = {
   /** Read-only mode — hide Pin. */
   readOnly?: boolean
   onPin: (requirementId: string, isPinned: boolean) => void
-  locationId: string | null
+  onOpenAudit?: (catalogId: string) => void
 }

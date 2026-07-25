@@ -24,7 +24,7 @@ export function CategoryRow({
   highlightId,
   readOnly,
   onPin,
-  locationId,
+  onOpenAudit,
 }: Props) {
   const key = `${keyPrefix}${cat}`
   return (
@@ -59,7 +59,7 @@ export function CategoryRow({
                 highlightId={highlightId}
                 readOnly={readOnly}
                 onPin={onPin}
-                locationId={locationId}
+                onOpenAudit={onOpenAudit}
               />
             ))
           )}

@@ -9,6 +9,7 @@ import { useRiskSummary } from '../../../hooks/compliance/useRiskSummary'
 import { ComplianceLocationList } from '../../../components/compliance/ComplianceLocationList'
 import { ComplianceLocationModal } from '../../../components/compliance/ComplianceLocationModal'
 import { ComplianceRequirementsTab } from '../../../components/compliance/ComplianceRequirementsTab'
+import { ComplianceAuditTab } from '../../../components/compliance/ComplianceAuditTab'
 import { ComplianceAlertsTab } from '../../../components/compliance/ComplianceAlertsTab'
 import { ComplianceUpcomingTab } from '../../../components/compliance/ComplianceUpcomingTab'
 import { ComplianceHistoryTab } from '../../../components/compliance/ComplianceHistoryTab'
@@ -27,11 +28,12 @@ import { ComplianceLiteView } from '../../../components/compliance/ComplianceLit
 import { CLINICAL_ENTITY_TYPES } from '../../../types/compliance'
 import type { BusinessLocation, LocationCreate, ComplianceActionPlanUpdate } from '../../../types/compliance'
 
-type Tab = 'overview' | 'requirements' | 'credentials' | 'alerts' | 'upcoming' | 'history' | 'posters' | 'payer-policies' | 'protocol-analysis' | 'policy-drafting'
+type Tab = 'overview' | 'requirements' | 'audit' | 'credentials' | 'alerts' | 'upcoming' | 'history' | 'posters' | 'payer-policies' | 'protocol-analysis' | 'policy-drafting'
 
 const TABS: { value: Tab; label: string }[] = [
   { value: 'overview', label: 'Overview' },
   { value: 'requirements', label: 'Requirements' },
+  { value: 'audit', label: 'Audit' },
   { value: 'credentials', label: 'Certifications & Licenses' },
   { value: 'alerts', label: 'Alerts' },
   { value: 'upcoming', label: 'Upcoming' },
@@ -71,12 +73,21 @@ function ComplianceFull() {
   // rides along as the fallback when the catalog row isn't in the location's
   // materialized list.
   const [targetReq, setTargetReq] = useState<{ id: string; title?: string | null } | null>(null)
+  // A statute to focus on the Audit tab, set from a Requirements row's
+  // "Audit →" link. Audit is company-wide (no location context), so this
+  // needs no location-selection dance the way targetReq does.
+  const [auditTarget, setAuditTarget] = useState<string | null>(null)
 
   // Open a requirement cited by the regulatory Q&A: jump to the Requirements
   // tab (selecting a location if none is), and mark the row to focus.
   const openSourceRequirement = useCallback((requirementId: string, title?: string | null) => {
     setTab('requirements')
     setTargetReq({ id: requirementId, title })
+  }, [])
+
+  const openAudit = useCallback((catalogId: string) => {
+    setTab('audit')
+    setAuditTarget(catalogId)
   }, [])
 
   const data = useComplianceData(selectedId)
@@ -256,10 +267,19 @@ function ComplianceFull() {
         <ComplianceCredentialsTab companyId={searchParams.get('company_id') || undefined} />
       )}
 
+      {/* Audit — company-wide, like Overview/Credentials: every decomposed
+          statute across every location, not scoped to the selected one. */}
+      {tab === 'audit' && (
+        <ComplianceAuditTab
+          targetCatalogId={auditTarget}
+          onTargetConsumed={() => setAuditTarget(null)}
+        />
+      )}
+
       {/* Location-contextual tabs. This grid used to carry the page's only
           frame; the page frame now provides it, so it keeps the split and its
           divider but drops the border/bg that would nest a frame in a frame. */}
-      {tab !== 'overview' && tab !== 'credentials' && (
+      {tab !== 'overview' && tab !== 'credentials' && tab !== 'audit' && (
         <div className="-m-5 md:grid md:grid-cols-3">
           {/* Left: location list */}
           <div className="border-b border-white/[0.06] p-4 md:col-span-1 md:border-b-0 md:border-r">
@@ -321,10 +341,10 @@ function ComplianceFull() {
                     loading={detail.loading}
                     onPin={handlePinRequirement}
                     checkMessages={check.messages}
-                    locationId={selectedId}
                     facilityAttributes={selectedLoc?.facility_attributes}
                     targetReq={targetReq}
                     onTargetConsumed={() => setTargetReq(null)}
+                    onOpenAudit={openAudit}
                   />
                 )}
                 {tab === 'alerts' && (
