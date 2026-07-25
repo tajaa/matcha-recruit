@@ -78,6 +78,33 @@ export const CAROUSEL_PRODUCTS: Product[] = [
   PRODUCTS[0], // 01 Full Platform
 ];
 
+/**
+ * Above-the-fold proof. The page previously carried NO credibility signal
+ * anywhere — no logos, no metrics, no social proof — so a visitor was asked for
+ * a work email on the strength of one claim and four product names.
+ *
+ * ⚠️ TODO(matcha): the entries below are deliberately NOT metrics or customer
+ * names. Nothing in this repo establishes either, and inventing them on a live
+ * marketing page is a real-world claim we can't support. They are `claim` items
+ * restating capabilities already asserted in PRODUCTS above.
+ *
+ * Replace with the real thing before this earns its keep — a metric you can
+ * defend ("14,000 incidents logged"), or customer logos (which need written
+ * permission, and want fixed-height grayscale treatment at 60% opacity).
+ * `HeroProof` renders nothing on an empty array, so a half-populated strip can
+ * never ship as a row of em-dashes.
+ */
+export type ProofItem =
+  | { kind: "metric"; value: string; label: string }
+  | { kind: "logo"; name: string; src: string }
+  | { kind: "claim"; text: string };
+
+export const HERO_PROOF: ProofItem[] = [
+  { kind: "claim", text: "Multi-state jurisdictional tracking" },
+  { kind: "claim", text: "OSHA 300 logs built in" },
+  { kind: "claim", text: "Senior practitioners, in the room" },
+];
+
 export const HOME_JSON_LD = {
   "@context": "https://schema.org",
   "@type": "Organization",

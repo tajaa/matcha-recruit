@@ -98,6 +98,10 @@ export function PageStyle() {
       }
       .home-rise > span { display: inline-block; animation: homeRise 0.9s cubic-bezier(0.16,1,0.3,1) both; }
       .home-fade { opacity: 0; animation: homeFadeUp 1s cubic-bezier(0.16,1,0.3,1) forwards; }
+      /* Hero entrance. 0.42s, not the 1s .home-fade: the hero's elements are
+         staggered 60/140/240ms apart and a 1s fade meant the conversion element
+         wasn't fully opaque until 3.3s. Everything settles under 700ms now. */
+      .home-fade-fast { opacity: 0; animation: homeFadeUp 0.42s cubic-bezier(0.16,1,0.3,1) forwards; }
       .home-pulse { animation: homePulse 2.4s ease-in-out infinite; }
       .home-scroll-cue { animation: homeScrollCue 1.8s ease-in-out infinite; }
       .home-float { animation: homeFloat 7s ease-in-out infinite; }
@@ -119,7 +123,7 @@ export function PageStyle() {
         border-radius: 2px;
       }
       @media (prefers-reduced-motion: reduce) {
-        .home-rise > span, .home-fade { animation: none !important; opacity: 1 !important; transform: none !important; }
+        .home-rise > span, .home-fade, .home-fade-fast { animation: none !important; opacity: 1 !important; transform: none !important; }
         .home-pulse, .home-scroll-cue, .home-float { animation: none !important; }
         .home-caret { animation: none !important; opacity: 1 !important; }
         .home-reveal { transition: none !important; opacity: 1 !important; transform: none !important; }

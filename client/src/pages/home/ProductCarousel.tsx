@@ -17,25 +17,49 @@ export const INSTRUMENT_COMPONENTS = [
 ];
 export const SHOWCASE_INTERVAL = 6000;
 
-export function ProductCarousel({
-  startDelayMs = 0,
-}: {
-  startDelayMs?: number;
-}) {
+export function ProductCarousel() {
   const [index, setIndex] = useState(0);
   const [direction, setDirection] = useState(1);
   const [paused, setPaused] = useState(false);
   const reduceMotion = useReducedMotion();
 
-  // The hero fades the carousel in after the headline finishes typing. Hold
-  // the autoplay clock until then, or the first slide burns most of its turn
-  // off-screen and swaps almost as soon as the visitor sees it.
-  const [started, setStarted] = useState(startDelayMs === 0);
+  // Autoplay starts when the carousel is actually ON SCREEN, not on a fixed
+  // timer. It used to take a `startDelayMs` matched to the hero's entrance
+  // chain, which fired whether or not anyone had scrolled to it — so the first
+  // slide could burn its whole turn unseen. Now that this lives below the fold,
+  // a timer would be wrong essentially always.
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [started, setStarted] = useState(false);
   useEffect(() => {
-    if (started) return;
-    const t = window.setTimeout(() => setStarted(true), startDelayMs);
-    return () => window.clearTimeout(t);
-  }, [started, startDelayMs]);
+    const el = rootRef.current;
+    if (!el) return;
+    const io = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setStarted(true);
+          io.disconnect();
+        }
+      },
+      { threshold: 0.35 },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+
+  // Respect intent: once the visitor drives the carousel themselves, stop
+  // yanking it out from under them. This is the one that actually matters.
+  const [manual, setManual] = useState(false);
+
+  // A backgrounded tab kept churning framer-motion slide transitions nobody
+  // could see.
+  const [hidden, setHidden] = useState(
+    typeof document !== "undefined" && document.visibilityState === "hidden",
+  );
+  useEffect(() => {
+    const onVis = () => setHidden(document.visibilityState === "hidden");
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, []);
 
   const goTo = (next: number, dir: number) => {
     setDirection(dir);
@@ -45,12 +69,14 @@ export function ProductCarousel({
     );
   };
 
+  const autoplay = started && !paused && !manual && !hidden && !reduceMotion;
+
   useEffect(() => {
-    if (paused || reduceMotion || !started) return;
+    if (!autoplay) return;
     const t = window.setInterval(() => goTo(index + 1, 1), SHOWCASE_INTERVAL);
     return () => window.clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [paused, index, reduceMotion, started]);
+  }, [autoplay, index]);
 
   const slide = CAROUSEL_PRODUCTS[index];
   const Instrument = INSTRUMENT_COMPONENTS[index];
@@ -89,6 +115,7 @@ export function ProductCarousel({
 
   return (
     <div
+      ref={rootRef}
       onMouseEnter={() => setPaused(true)}
       onMouseLeave={() => setPaused(false)}
     >
@@ -107,7 +134,7 @@ export function ProductCarousel({
                 className="flex items-start gap-3 min-w-0"
               >
                 <span
-                  className="font-mono text-sm shrink-0 pt-1"
+                  className="font-mk-mono text-sm shrink-0 pt-1"
                   style={{ color: slide.accent }}
                 >
                   {slide.n}
@@ -127,7 +154,7 @@ export function ProductCarousel({
                   </h3>
                   {slide.subheader && (
                     <p
-                      className="text-[11px] sm:text-[12px] font-mono uppercase tracking-[0.14em] mt-1"
+                      className="text-[11px] sm:text-[12px] font-mk-mono uppercase tracking-[0.14em] mt-1"
                       style={{ color: ASH }}
                     >
                       {slide.subheader}
@@ -139,7 +166,7 @@ export function ProductCarousel({
           </div>
           <Link
             to={slide.to}
-            className="text-[13px] font-mono uppercase tracking-[0.18em] shrink-0 transition-opacity hover:opacity-60 mt-4 self-start"
+            className="text-[13px] font-mk-mono uppercase tracking-[0.18em] shrink-0 transition-opacity hover:opacity-60 mt-4 self-start"
             style={{ color: ASH }}
           >
             View →
@@ -180,14 +207,17 @@ export function ProductCarousel({
             key={i}
             type="button"
             aria-label={`Go to ${s.name}`}
-            onClick={() => goTo(i, i > index ? 1 : -1)}
+            onClick={() => {
+              setManual(true);
+              goTo(i, i > index ? 1 : -1);
+            }}
             className="relative h-1.5 rounded-full overflow-hidden transition-all duration-300 cursor-pointer"
             style={{
               width: i === index ? 28 : 8,
               backgroundColor: i === index ? "rgba(245,242,237,0.18)" : LINE_D,
             }}
           >
-            {i === index && !paused && !reduceMotion && started && (
+            {i === index && autoplay && (
               <span
                 key={index}
                 className="absolute inset-0 origin-left"
@@ -197,7 +227,7 @@ export function ProductCarousel({
                 }}
               />
             )}
-            {i === index && (paused || reduceMotion || !started) && (
+            {i === index && !autoplay && (
               <span
                 className="absolute inset-0"
                 style={{ backgroundColor: s.accent }}

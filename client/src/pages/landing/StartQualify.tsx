@@ -4,6 +4,7 @@ import { ArrowLeft, ArrowRight, Check, Loader2 } from "lucide-react";
 import MarketingFooter from "./MarketingFooter";
 import { useSEO } from "../../hooks/useSEO";
 import { ASH, BONE, DISPLAY, LINE_D, NOIR } from "../home/theme";
+import { CONTAINER, EYEBROW, EYEBROW_END } from "../home/layout";
 import { GrainOverlay, PageStyle } from "../home/PageChrome";
 import {
   HEADCOUNT_OPTIONS,
@@ -109,17 +110,17 @@ export default function StartQualify() {
       <PageStyle />
       <GrainOverlay />
 
-      <div className="max-w-[1600px] mx-auto w-full px-6 sm:px-10 lg:px-16 xl:px-24 pt-[76px] sm:pt-[84px]">
+      <div className={`${CONTAINER} pt-[76px] sm:pt-[84px]`}>
         <div className="grid grid-cols-2 items-center pb-3">
           <Link
             to="/"
-            className="text-[10.5px] tracking-[0.28em] font-mono uppercase transition-opacity hover:opacity-60"
+            className={`${EYEBROW} transition-opacity hover:opacity-60`}
             style={{ color: ASH }}
           >
             ← Matcha
           </Link>
           <span
-            className="justify-self-end text-[10.5px] tracking-[0.28em] font-mono uppercase tabular-nums"
+            className={`justify-self-end ${EYEBROW_END} tabular-nums`}
             style={{ color: ASH }}
           >
             {needsEmail && step === 0 ? "Find your starting line" : email}
@@ -133,7 +134,7 @@ export default function StartQualify() {
       </div>
 
       <main className="flex-1 flex items-center">
-        <div className="max-w-[1600px] mx-auto w-full px-6 sm:px-10 lg:px-16 xl:px-24 py-20">
+        <div className={`${CONTAINER} py-20`}>
           <div className="max-w-[820px] mx-auto">
             {done ? (
               <Done email={email} />
@@ -210,7 +211,7 @@ export default function StartQualify() {
                     type="button"
                     onClick={back}
                     disabled={step === 0}
-                    className="inline-flex items-center gap-2.5 text-[11px] font-mono uppercase tracking-[0.22em] transition-opacity hover:opacity-60 disabled:opacity-0 disabled:pointer-events-none"
+                    className="inline-flex items-center gap-2.5 text-[11px] font-mk-mono uppercase tracking-[0.22em] transition-opacity hover:opacity-60 disabled:opacity-0 disabled:pointer-events-none"
                     style={{ color: ASH }}
                   >
                     <ArrowLeft className="w-4 h-4" strokeWidth={1.5} />
@@ -224,7 +225,7 @@ export default function StartQualify() {
                     className="group inline-flex items-center gap-3.5 disabled:opacity-50"
                   >
                     <span
-                      className="text-[11px] font-mono uppercase tracking-[0.22em]"
+                      className="text-[11px] font-mk-mono uppercase tracking-[0.22em]"
                       style={{ color: BONE }}
                     >
                       {step < totalSteps - 1
@@ -277,7 +278,7 @@ function Progress({ step, total }: { step: number; total: number }) {
         />
       ))}
       <span
-        className="ml-3 text-[10.5px] font-mono uppercase tracking-[0.22em] tabular-nums"
+        className="ml-3 text-[11px] font-mk-mono uppercase tracking-[0.22em] tabular-nums"
         style={{ color: ASH }}
       >
         {String(step + 1).padStart(2, "0")} / {String(total).padStart(2, "0")}
@@ -383,7 +384,7 @@ function Done({ email }: { email: string }) {
       </p>
       <Link
         to="/"
-        className="text-[11px] font-mono uppercase tracking-[0.22em] transition-opacity hover:opacity-60"
+        className="text-[11px] font-mk-mono uppercase tracking-[0.22em] transition-opacity hover:opacity-60"
         style={{ color: BONE }}
       >
         ← Back to Matcha

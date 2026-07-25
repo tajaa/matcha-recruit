@@ -6,6 +6,7 @@ import { HOME_JSON_LD } from "./data";
 import { BONE, NOIR } from "./theme";
 import { GrainOverlay, PageStyle } from "./PageChrome";
 import { Hero } from "./Hero";
+import { ShowcaseSection } from "./ShowcaseSection";
 import { ProductIndex } from "./ProductIndex";
 import { Manifesto } from "./Manifesto";
 import { CTABand } from "./CTABand";
@@ -86,6 +87,7 @@ export default function Home() {
       />
 
       <Hero />
+      <ShowcaseSection />
       <ProductIndex />
       <Manifesto />
       <CTABand onDemoClick={openPricing} />

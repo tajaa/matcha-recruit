@@ -1,42 +1,63 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { ChevronDown } from "lucide-react";
-import { AMBER, ASH, BONE, DISPLAY, LEAF, LINE_D, MATCHA } from "./theme";
+import { AMBER, ASH, BONE, DISPLAY, LEAF, LINE_D } from "./theme";
+import { CONTAINER } from "./layout";
 import { useReducedMotion } from "./instruments/shared";
 import { StartCapture } from "./StartCapture";
+import { HeroProof } from "./HeroProof";
 
-// The carousel and its four instruments are the ONLY framer-motion importers on
-// the apex route (~60-110 KB gz), and it renders below the fold behind a
-// CAROUSEL_DELAY_S animation delay. Lazy-loading it keeps framer out of the
-// eager `/` chunk without changing what the visitor sees: the chunk lands long
-// before the delay elapses.
-const ProductCarousel = lazy(() =>
-  import("./ProductCarousel").then((m) => ({ default: m.ProductCarousel })),
-);
+/**
+ * Entrance choreography, in ms.
+ *
+ * The headline is absent from this table on purpose: it is STATIC and OPAQUE at
+ * first paint. It is the LCP element, and Chrome re-records text LCP as the
+ * block grows — the old character-by-character typewriter therefore pushed LCP
+ * to ~2.14s before any network cost, against a 2.5s "good" threshold, for a
+ * purely decorative reason. Anything that animates opacity from 0 is
+ * disqualified from being the LCP candidate, so entrance motion belongs to
+ * everything BELOW the headline and nothing else.
+ *
+ * The other half of the old chain was a conversion bug: every delay was derived
+ * from the typing constants, so StartCapture — described in its own file as
+ * "the page's one conversion point" — began appearing at 2.32s and was fully
+ * opaque at 3.32s. It is now settled at 560ms.
+ */
+const BEAT = {
+  subhead: 60,
+  capture: 140,
+  proof: 240,
+} as const;
 
-// The headline types itself out like a terminal. Segments keep the per-word
-// styling (italic accents) that the old static markup had.
-const HEADLINE: { text: string; style?: React.CSSProperties }[] = [
-  { text: "We run the whole " },
-  { text: "risk", style: { color: AMBER, fontStyle: "italic" } },
-  { text: " & " },
-  { text: "people", style: { color: MATCHA, fontStyle: "italic" } },
-  { text: " function." },
-];
-const HEADLINE_CHARS = HEADLINE.reduce((n, s) => n + s.text.length, 0);
-const TYPE_MS = 38;
-const TYPE_DELAY_MS = 620;
-
-// The hero reveals in sequence rather than all at once: masthead, then the
-// headline types, then the deck row, then the carousel. Deriving the last two
-// from the typing constants keeps the cadence right if the headline changes.
-const TYPED_DONE_S = (TYPE_DELAY_MS + HEADLINE_CHARS * TYPE_MS) / 1000;
-const MASTHEAD_DELAY_S = 0.15;
-const DECK_DELAY_S = TYPED_DONE_S + 0.18;
-const CAROUSEL_DELAY_S = DECK_DELAY_S + 0.55;
+/**
+ * The one editorial flourish that survives, because it is LCP-safe: the two
+ * accent words paint in bone with the rest of the headline (so the LCP text is
+ * complete at t=0) and only their HUE moves afterwards. No layout, no opacity.
+ */
+const ACCENT_SETTLE_MS = 200;
 
 export function Hero() {
+  const reduceMotion = useReducedMotion();
+  const [accented, setAccented] = useState(reduceMotion);
+
+  useEffect(() => {
+    if (reduceMotion) return setAccented(true);
+    const t = window.setTimeout(() => setAccented(true), ACCENT_SETTLE_MS);
+    return () => window.clearTimeout(t);
+  }, [reduceMotion]);
+
+  const accent = (color: string): React.CSSProperties => ({
+    color: accented ? color : BONE,
+    fontStyle: "italic",
+    transition: reduceMotion ? undefined : "color 600ms cubic-bezier(0.16,1,0.3,1)",
+  });
+
   return (
-    <section className="relative w-full min-h-[100svh] flex flex-col">
+    // 88svh, not 100: with the masthead and the carousel both gone the hero's
+    // content no longer fills a full viewport, and a rigid 100svh left ~230px
+    // of dead space under the proof strip that read as unfinished rather than
+    // airy. Letting the showcase peek above the fold also signals scrollability
+    // better than the chevron does.
+    <section className="relative w-full min-h-[88svh] flex flex-col">
       {/* Atmosphere — two whisper-quiet radial glows (leaf upper-left, amber
           lower-right, echoing the headline accents) lift the canvas off flat
           noir. Kept behind the content by DOM order; blur is baked into the
@@ -69,188 +90,84 @@ export function Hero() {
         />
       </div>
 
-      {/* Masthead row */}
-      <div className="max-w-[1600px] mx-auto w-full px-6 sm:px-10 lg:px-16 xl:px-24 pt-[76px] sm:pt-[84px]">
-        <div
-          className="home-fade"
-          style={{ animationDelay: `${MASTHEAD_DELAY_S}s` }}
+      {/* The masthead row that used to sit here ("Managing your risk" /
+          "Volatility · Researchers" / "Vol. 01") is gone. Its left label was
+          repeated verbatim in the deck copy 60px below, its centre label meant
+          nothing to an HR-compliance buyer, and its double hairline visually
+          severed the nav from the headline. It cost ~52px of fold plus 80px of
+          top padding — reclaimed here for the headline and the proof strip.
+          The magazine folio motif survives where it still earns its place, in
+          Manifesto.tsx. */}
+      <div
+        className={`relative ${CONTAINER} flex-1 flex flex-col justify-center pt-[104px] sm:pt-[112px] pb-10`}
+      >
+        {/* ONE <h1>, in normal flow, full text, opaque. The old implementation
+            rendered two — a hidden full-text copy to reserve height plus a
+            visible absolutely-positioned typed one — which duplicated the
+            headline for crawlers and made the LCP candidate paint blank.
+
+            Single clamp, no breakpoint: the old pair capped at 4.6rem below xl
+            and 3.4rem above it, so dragging the window across 1280px shrank the
+            headline by 35% at one pixel of resize. */}
+        <h1
+          className="tracking-[-0.02em] text-[clamp(2.4rem,5.6vw,5rem)] max-w-[19ch] sm:max-w-none"
+          style={{ fontFamily: DISPLAY, fontWeight: 300, lineHeight: 1.02 }}
         >
-          <div className="grid grid-cols-2 sm:grid-cols-3 items-center pb-3">
-            <span
-              className="flex items-center gap-2.5 text-[10.5px] tracking-[0.28em] font-mono uppercase"
-              style={{ color: ASH }}
-            >
-              <span
-                className="w-1 h-1 rounded-full shrink-0"
-                style={{ backgroundColor: LEAF }}
-              />
-              Managing your risk
-            </span>
-            <span
-              className="hidden sm:block justify-self-center text-[10.5px] tracking-[0.28em] font-mono uppercase"
-              style={{ color: ASH }}
-            >
-              Volatility · Researchers
-            </span>
-            <span
-              className="justify-self-end text-[10.5px] tracking-[0.28em] font-mono uppercase tabular-nums"
-              style={{ color: ASH }}
-            >
-              Vol. 01
-            </span>
-          </div>
-          {/* magazine folio — double hairline under the masthead row */}
-          <div style={{ height: 1, backgroundColor: LINE_D }} />
-          <div
-            className="mt-[3px]"
-            style={{ height: 1, backgroundColor: LINE_D, opacity: 0.45 }}
-          />
-        </div>
-      </div>
+          We run the whole <span style={accent(AMBER)}>risk</span> &amp;{" "}
+          <span style={accent(LEAF)}>people</span> function.
+        </h1>
 
-      {/* Headline + supporting content, stacked at every breakpoint — the
-          carousel sits full-width below the headline/CTAs instead of
-          fighting them for space in a side-by-side column. */}
-      <div className="relative max-w-[1600px] mx-auto w-full px-6 sm:px-10 lg:px-16 xl:px-24 flex-1 flex flex-col justify-center py-8 sm:py-10">
-        <div>
-          <div>
-            <TypedHeadline />
-
-            {/* Deck row — editorial band under the headline: hairline rule,
-                tagline left, work-email capture right. The capture sits above
-                the fold on purpose: it's the page's one conversion point. */}
-            <div
-              className="mt-10 pt-7 border-t flex flex-col lg:flex-row lg:items-end lg:justify-between gap-8 lg:gap-16 home-fade"
-              style={{
-                borderColor: LINE_D,
-                animationDelay: `${DECK_DELAY_S}s`,
-              }}
-            >
-              <p
-                className="max-w-3xl text-[1.35rem] sm:text-[1.75rem] tracking-[-0.011em]"
-                style={{
-                  fontFamily: DISPLAY,
-                  fontWeight: 300,
-                  color: BONE,
-                  lineHeight: 1.42,
-                }}
-              >
-                <span style={{ color: "#FFFFFF" }}>
-                  Managing your risk before your risk manages you.
-                </span>{" "}
-                <span style={{ color: ASH, fontStyle: "italic" }}>
-                  Workplace safety, compliance, and risk analysis.
-                </span>
-              </p>
-              <StartCapture />
-            </div>
-          </div>
-
-          <div
-            className="mt-14 home-fade w-full max-w-[1360px] mx-auto"
-            style={{ animationDelay: `${CAROUSEL_DELAY_S}s` }}
+        {/* Deck row — subhead left, conversion right. `md:` is the band the
+            homepage skipped entirely: this used to be `flex-col lg:flex-row`,
+            so from 768-1023px the capture stacked full-width under a narrow
+            paragraph on a viewport with room for both. */}
+        <div className="mt-9 flex flex-col md:flex-row md:items-end md:justify-between gap-8 md:gap-12 lg:gap-16">
+          <p
+            className="home-fade-fast max-w-2xl text-[1.25rem] sm:text-[1.6rem] tracking-[-0.011em]"
+            style={{
+              fontFamily: DISPLAY,
+              fontWeight: 300,
+              lineHeight: 1.42,
+              animationDelay: `${BEAT.subhead}ms`,
+            }}
           >
-            {/* No spinner: the slot is already blank during the CSS fade-in
-                delay, and a fallback would flash where nothing was shown. */}
-            <Suspense fallback={null}>
-              <ProductCarousel startDelayMs={CAROUSEL_DELAY_S * 1000} />
-            </Suspense>
+            <span style={{ color: "#FFFFFF" }}>
+              Managing your risk before your risk manages you.
+            </span>{" "}
+            <span style={{ color: ASH, fontStyle: "italic" }}>
+              Workplace safety, compliance, and risk analysis.
+            </span>
+          </p>
+
+          <div
+            className="home-fade-fast w-full md:w-[360px] lg:w-[420px] shrink-0"
+            style={{ animationDelay: `${BEAT.capture}ms` }}
+          >
+            <StartCapture />
           </div>
         </div>
+
+        <HeroProof
+          className="home-fade-fast mt-12"
+          style={{ animationDelay: `${BEAT.proof}ms` }}
+        />
       </div>
 
-      {/* Scroll cue — blinking chevron so it reads as "there's more below" */}
+      {/* Scroll cue — in normal flow as the section's last flex child, not
+          `absolute bottom-14`. The content block above is `flex-1`, so the cue
+          is pushed to the bottom of the 100svh section and cannot land on top
+          of content at any viewport height. The absolute version overlapped the
+          carousel on laptop-height screens. */}
       <a
-        href="#index"
-        aria-label="Scroll to products"
-        className="home-scroll-cue absolute bottom-14 left-1/2 -translate-x-1/2 z-10 hover:opacity-100"
+        href="#showcase"
+        aria-label="Scroll to product showcase"
+        className="home-scroll-cue mx-auto shrink-0 pb-10 hover:opacity-100"
         style={{ color: ASH }}
       >
         <ChevronDown className="w-8 h-8" strokeWidth={1.5} />
       </a>
+
+      <div aria-hidden style={{ height: 1, backgroundColor: LINE_D }} />
     </section>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Typed headline
-// ---------------------------------------------------------------------------
-
-function TypedHeadline() {
-  const reduceMotion = useReducedMotion();
-  const [typed, setTyped] = useState(0);
-
-  useEffect(() => {
-    if (reduceMotion) {
-      setTyped(HEADLINE_CHARS);
-      return;
-    }
-    let timer = 0;
-    const start = window.setTimeout(() => {
-      timer = window.setInterval(() => {
-        setTyped((n) => {
-          if (n >= HEADLINE_CHARS) {
-            window.clearInterval(timer);
-            return n;
-          }
-          return n + 1;
-        });
-      }, TYPE_MS);
-    }, TYPE_DELAY_MS);
-    return () => {
-      window.clearTimeout(start);
-      window.clearInterval(timer);
-    };
-  }, [reduceMotion]);
-
-  const cls =
-    "tracking-[-0.02em] text-[clamp(1.7rem,5.2vw,4.6rem)] xl:text-[clamp(1.9rem,3.4vw,3.4rem)]";
-  const font: React.CSSProperties = {
-    fontFamily: DISPLAY,
-    fontWeight: 300,
-    lineHeight: 1.02,
-    whiteSpace: "pre-wrap",
-  };
-
-  // Reveal by slicing each segment against a running character cursor.
-  let cursor = 0;
-
-  return (
-    // A hidden full-text copy holds the final height so the deck row and
-    // carousel below don't reflow line-by-line as the headline types.
-    <div className="relative">
-      <h1 aria-hidden className={cls} style={{ ...font, visibility: "hidden" }}>
-        {HEADLINE.map((s, i) => (
-          <span key={i} style={s.style}>
-            {s.text}
-          </span>
-        ))}
-      </h1>
-      <h1
-        className={`${cls} absolute inset-0`}
-        style={font}
-        aria-label={HEADLINE.map((s) => s.text).join("")}
-      >
-        {HEADLINE.map((s, i) => {
-          const shown = s.text.slice(0, Math.max(0, typed - cursor));
-          cursor += s.text.length;
-          return (
-            <span key={i} style={s.style}>
-              {shown}
-            </span>
-          );
-        })}
-        <span
-          aria-hidden
-          className="home-caret inline-block align-baseline"
-          style={{
-            width: "0.055em",
-            height: "0.78em",
-            marginLeft: "0.05em",
-            backgroundColor: AMBER,
-          }}
-        />
-      </h1>
-    </div>
   );
 }

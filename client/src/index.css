@@ -51,6 +51,12 @@
   --color-ivory-muted: #6B6760;
   --color-ivory-line: #E4DED2;
   --font-display: 'Fraunces', Georgia, 'Times New Roman', serif;
+  /* Marketing eyebrow mono. DELIBERATELY NOT `--font-mono`: `font-mono` is used
+     ~827x across 264 files, overwhelmingly in dense admin/data tables where a
+     wide display mono like Space Mono destroys numeric alignment. Namespaced so
+     the landing gets a real typeface while `font-mono` keeps the UA stack.
+     Consumed as `font-mk-mono` — see pages/home/layout.ts:EYEBROW. */
+  --font-mk-mono: 'Space Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 html, body {
