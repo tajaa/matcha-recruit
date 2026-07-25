@@ -54,6 +54,11 @@ _COMPLEX_HINTS = re.compile(
     r"modern|beautiful|stunning|cohesive|rework|whole page|entire (page|site))\b",
     re.I,
 )
+# A quoted phrase is CONTENT the user wants edited, not their own description
+# of the request — "remove the word 'professional' from the heading" is a
+# one-field copy tweak, not a design judgment, even though the quoted text
+# contains a complex-sounding word. Stripped before _COMPLEX_HINTS runs.
+_QUOTED_RE = re.compile(r"[\"'][^\"']*[\"']")
 
 _CLASSIFIER_PROMPT = """Classify how much work a website-editing request needs. Answer ONLY with JSON:
 {"complexity": "trivial" | "standard" | "complex"}
@@ -68,15 +73,24 @@ When unsure, answer "complex" — an overworked answer is recoverable, an underw
 
 
 def _heuristic(message: str, has_selected_block: bool) -> Optional[str]:
-    """A free verdict where one is obvious, else None (ask the classifier)."""
+    """A free verdict where one is obvious, else None (ask the classifier).
+
+    Trivial is checked FIRST: a short edit against an already-selected section
+    is a copy/field tweak regardless of which words it happens to contain, so
+    it must not lose to a complex-sounding word appearing later in the same
+    short message. Only once that's ruled out does a complex hint escalate to
+    `max` — matched against the message with any QUOTED substrings removed,
+    so "remove the word 'professional' from the heading" routes on the
+    request itself, not on the word the user wants gone.
+    """
     text = (message or "").strip()
     if not text:
         return DEFAULT_MODEL_TIER
-    if _COMPLEX_HINTS.search(text):
-        return "max"
     words = text.split()
     if len(words) <= _TRIVIAL_WORD_MAX and (has_selected_block or _TRIVIAL_HINTS.search(text)):
         return "lite"
+    if _COMPLEX_HINTS.search(_QUOTED_RE.sub(" ", text)):
+        return "max"
     return None
 
 

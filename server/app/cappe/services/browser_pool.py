@@ -25,6 +25,8 @@ import asyncio
 import logging
 from typing import Any, Optional
 
+from ...config import get_settings
+
 logger = logging.getLogger(__name__)
 
 # Desktop matches the editor's own preview width; mobile is a common phone
@@ -36,6 +38,16 @@ VIEWPORTS: dict[str, dict[str, int]] = {
     "mobile": {"width": 390, "height": 844},
 }
 DEFAULT_VIEWPORT = "desktop"
+
+# Shots go to the model as image input tokens and to storage as transcript
+# thumbnails. JPEG at q80 is a fraction of PNG's bytes for a judgment the model
+# makes at tile resolution anyway — the difference a designer would notice
+# (colour relationships, contrast, whether a section reads) survives it intact.
+# Exported so callers declare ONE mime: a Part labelled image/png over JPEG
+# bytes is a lie the model has no way to catch.
+SHOT_MIME = "image/jpeg"
+SHOT_EXT = "jpg"
+_SHOT_QUALITY = 80
 
 _MAX_CONCURRENT = 2
 # Chromium leaks over a long-lived process; recycle on a shot count rather than
@@ -121,12 +133,55 @@ async def _release_browser() -> None:
         _in_flight = max(0, _in_flight - 1)
 
 
-async def screenshot_html(html: str, viewport: str = DEFAULT_VIEWPORT) -> bytes:
-    """Render an HTML document and return a PNG of the fold.
+# `set_content` means the TOP-LEVEL document is never fetched over the
+# network — but the HTML it sets is a rendered Cappe page, and a page's own
+# content (a business's logo URL, a generated image) is user-controlled. Left
+# ungated, Chromium would issue THOSE fetches for real, from inside the VPC,
+# on every screenshot — a live SSRF surface, not a hypothetical one, on a tool
+# an agent loop drives. Block-listed by default: this deployment's own
+# storage domain, plus the two font hosts the renderer itself hardcodes
+# (never user-controlled — see render.py's `<link>` tags) get through;
+# browser-internal schemes (data:/about:/blob:) are never real fetches and
+# are always allowed. Everything else is aborted.
+_UNGATED_SCHEMES = ("data:", "about:", "blob:")
+_ALLOWED_EXTERNAL_HOSTS = ("fonts.googleapis.com", "fonts.gstatic.com")
 
-    The document is set with `set_content` rather than navigated to, so nothing
-    here can be pointed at a URL — an agent-driven screenshot tool must not
-    become an SSRF surface.
+
+async def _route_guard(route: Any) -> None:
+    request = route.request
+    url = request.url
+    if url.startswith(_UNGATED_SCHEMES):
+        await route.continue_()
+        return
+    if any(url.startswith(f"https://{host}/") for host in _ALLOWED_EXTERNAL_HOSTS):
+        await route.continue_()
+        return
+    domain = getattr(get_settings(), "cloudfront_domain", None)
+    if domain and url.startswith(f"https://{domain}/"):
+        await route.continue_()
+        return
+    await route.abort()
+
+
+async def screenshot_html(
+    html: str, viewport: str = DEFAULT_VIEWPORT, *, focus_block: Optional[int] = None,
+) -> bytes:
+    """Render an HTML document and return a JPEG of the fold.
+
+    The document is set with `set_content` rather than navigated to, so
+    nothing here can point the TOP-LEVEL request at an arbitrary URL. The
+    rendered HTML's own subresource fetches (image `src`, font `url()`) are a
+    separate concern — `_route_guard` gates every one of those to this
+    deployment's own storage domain; anything else is aborted rather than
+    fetched, which also skips the network round trip for third-party assets
+    the shot never needed to wait on.
+
+    `focus_block` scrolls to the section carrying `data-cz-block="<index>"`
+    (rendered when the caller passes `render_site_html(..., block_anchors=True)`)
+    before shooting, so a shot of section 6 of 8 shows section 6 rather than
+    always the top fold — best-effort: a miss (section removed mid-turn, no
+    match) falls back to shooting wherever the page already is, never fails
+    the shot over it.
     """
     size = VIEWPORTS.get(viewport, VIEWPORTS[DEFAULT_VIEWPORT])
     global _shots_taken
@@ -137,6 +192,7 @@ async def screenshot_html(html: str, viewport: str = DEFAULT_VIEWPORT) -> bytes:
         try:
             context = await browser.new_context(viewport=size, device_scale_factor=1)
             page = await context.new_page()
+            await page.route("**/*", _route_guard)
             # `domcontentloaded`, not `load`: the rendered HTML can reference
             # real image/font URLs (CloudFront, a user's own upload), and
             # `load` waits on every one of them — a slow or dead asset then
@@ -147,12 +203,20 @@ async def screenshot_html(html: str, viewport: str = DEFAULT_VIEWPORT) -> bytes:
             await asyncio.wait_for(
                 page.set_content(html, wait_until="domcontentloaded"), timeout=_SHOT_TIMEOUT
             )
+            if focus_block is not None:
+                try:
+                    await page.locator(f'[data-cz-block="{int(focus_block)}"]').first.scroll_into_view_if_needed(
+                        timeout=2000
+                    )
+                except Exception as exc:  # noqa: BLE001 — degrade to the fold, never fail the shot
+                    logger.info("Merlin screenshot focus_block=%s scroll skipped: %s", focus_block, exc)
             # Fonts and entrance animations settle after load; without this
             # the shot can catch a mid-reveal section at opacity 0 and the
             # model "sees" an empty page it then tries to fix.
             await asyncio.sleep(0.4)
             png = await asyncio.wait_for(
-                page.screenshot(type="png", full_page=False), timeout=_SHOT_TIMEOUT
+                page.screenshot(type="jpeg", quality=_SHOT_QUALITY, full_page=False),
+                timeout=_SHOT_TIMEOUT,
             )
             _shots_taken += 1
             return png

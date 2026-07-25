@@ -94,6 +94,13 @@ def test_unknown_recipe_rejected_with_the_known_keys():
 def test_apply_style_recipe_refused_on_non_premium():
     valid, rejected = _apply("soft-elevate", premium=False)
     assert not valid and "Pro feature" in rejected[0]["reason"]
+    # _v_apply_style_recipe rewrites raw["op"] to "set_design_bulk" IN PLACE
+    # before delegating to _v_set_design_bulk (which is what actually refused
+    # this on the premium gate) — the rejection must still name the op the
+    # model called, not the one it got rewritten into, or the retry feedback
+    # built from this (merlin._rejection_feedback) coaches a fix for an op
+    # that was never sent.
+    assert rejected[0]["op"]["op"] == "apply_style_recipe"
 
 
 def test_apply_style_recipe_targets_explicit_ids():

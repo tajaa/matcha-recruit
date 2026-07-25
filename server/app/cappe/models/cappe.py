@@ -1343,6 +1343,13 @@ class CappeMerlinStoredMessage(BaseModel):
     # Agent tool-loop trace (phase 2) and chat image uploads (phase 4).
     steps: Optional[list[dict[str, Any]]] = None
     attachments: Optional[list[dict[str, Any]]] = None
+    # The validated op log for an ASSISTANT message (migration zzzzcappe24) —
+    # set alongside `results` when the client reported back what it applied,
+    # but ALSO set (with `results` still None) when a disconnect meant the
+    # client never got the chance to apply anything. That combination is what
+    # the panel reads as "this turn's changes were never applied — offer to
+    # apply them now" rather than a normal completed turn.
+    ops: Optional[list[dict[str, Any]]] = None
     tier: Optional[str] = None
     created_at: datetime
 

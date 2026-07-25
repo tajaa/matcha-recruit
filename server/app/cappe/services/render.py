@@ -308,13 +308,19 @@ def _responsive_layout_style(layout: dict, cls: str) -> str:
     return f"<style>{''.join(blocks)}</style>" if blocks else ""
 
 
-def _apply_design(html_str: str, design: Any, *, block_index: Any = None, editable: bool = False) -> str:
+def _apply_design(
+    html_str: str, design: Any, *, block_index: Any = None, editable: bool = False, anchors: bool = False,
+) -> str:
     """Post-process a block's HTML: merge designer classes/attrs/style into its
     first <section> tag and inject background media layers. When `editable`, also
-    tag the section with `data-cz-block` for the canvas selection runtime. No-op
-    on published output (no design + not editable)."""
+    tag the section with `data-cz-block` for the canvas selection runtime — and
+    same tag, independently, when `anchors` (the Merlin agent loop's screenshot
+    target: it needs `data-cz-block` to scroll a section into view, but must NOT
+    get the rest of the editable-mode output — the canvas editor runtime and
+    `data-cz-field` tags — which `editable` alone would carry along). No-op on
+    published output (no design + not editable + not anchors)."""
     has_design = isinstance(design, dict) and bool(design)
-    tag_block = editable and block_index is not None
+    tag_block = (editable or anchors) and block_index is not None
     if not has_design and not tag_block:
         return html_str
     m = _SECTION_RE.search(html_str)
@@ -2223,7 +2229,7 @@ _RENDERERS = {
 _EDITABLE_AWARE: frozenset[str] = frozenset({"hero", "cta", "text", "split", "features"})
 
 
-def _render_block(block, t, index=None, editable=False):
+def _render_block(block, t, index=None, editable=False, anchors=False):
     if not isinstance(block, dict):
         return ""
     btype = block.get("type")
@@ -2231,7 +2237,9 @@ def _render_block(block, t, index=None, editable=False):
     # dispatched here rather than through _RENDERERS' (block, t[, editable]) shape.
     if btype == "canvas":
         raw = _canvas(block, t, editable, index if index is not None else 0)
-        return _apply_design(raw, block.get("_design"), block_index=index, editable=editable) if raw else raw
+        return _apply_design(
+            raw, block.get("_design"), block_index=index, editable=editable, anchors=anchors,
+        ) if raw else raw
     fn = _RENDERERS.get(btype)
     if fn:
         raw = fn(block, t, editable) if btype in _EDITABLE_AWARE else fn(block, t)
@@ -2240,7 +2248,7 @@ def _render_block(block, t, index=None, editable=False):
         raw = _text({"body": body}, t) if body else ""
     if not raw:
         return raw
-    return _apply_design(raw, block.get("_design"), block_index=index, editable=editable)
+    return _apply_design(raw, block.get("_design"), block_index=index, editable=editable, anchors=anchors)
 
 
 # ── head / footer (business identity + SEO from meta_config) ────────────────
@@ -2463,7 +2471,7 @@ def _promos(meta: dict, t: dict) -> tuple[str, str, str]:
 
 
 def render_site_html(site: dict, page: dict, nav_pages: list[dict], preview: bool = False, editable: bool = False,
-                     locations: list[dict] | None = None) -> str:
+                     locations: list[dict] | None = None, block_anchors: bool = False) -> str:
     t = _tokens(site.get("theme_config"))
     c = t["colors"]
     slug = site.get("slug") or ""
@@ -2495,7 +2503,13 @@ def render_site_html(site: dict, page: dict, nav_pages: list[dict], preview: boo
     content = page.get("content") or {}
     blocks = content.get("blocks") if isinstance(content, dict) else None
     blocks = blocks if isinstance(blocks, list) else []
-    body_html = "".join(_render_block(b, t, i, editable) for i, b in enumerate(blocks)) or _text({"body": page.get("title")}, t)
+    # `block_anchors` is the Merlin agent loop's screenshot target, NOT the
+    # canvas editor (`editable`) — it wants `data-cz-block` so a shot can
+    # scroll to the section being edited, without the editor runtime/
+    # data-cz-field tags `editable` also carries. See _apply_design.
+    body_html = "".join(
+        _render_block(b, t, i, editable, block_anchors) for i, b in enumerate(blocks)
+    ) or _text({"body": page.get("title")}, t)
 
     nav_links = "".join(
         f'<a href="{"/" if p["slug"] in ("home", home_slug) else "/p/" + _esc(p["slug"])}">{_esc(p["title"])}</a>'

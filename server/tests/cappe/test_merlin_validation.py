@@ -146,6 +146,20 @@ def test_remove_block_unknown_id_rejected():
     assert not valid and rejected
 
 
+def test_remove_block_unregisters_id_for_later_ops_in_the_same_turn():
+    """A later op in the same batch targeting a block removed earlier in
+    that batch must get a real rejection at validation time, not validate
+    clean here and only surface as a Skipped chip once apply_ops actually
+    runs — feedback the model never sees at validation time."""
+    valid, rejected = _only([
+        {"op": "remove_block", "block": "b1"},
+        {"op": "set_field", "block": "b1", "path": "heading", "value": "New"},
+    ])
+    assert len(valid) == 1 and valid[0]["op"] == "remove_block"
+    assert len(rejected) == 1
+    assert rejected[0]["reason"] == "block id not found"
+
+
 def test_move_block_missing_to_rejected():
     valid, rejected = _only([{"op": "move_block", "block": "b1"}])
     assert not valid and rejected

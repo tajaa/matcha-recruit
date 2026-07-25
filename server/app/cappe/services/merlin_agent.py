@@ -45,6 +45,7 @@ from ...core.services.ai_usage import feature_scope
 from ...core.services.genai_client import get_genai_client
 from ...core.services.rate_limiter import GeminiRateLimiter, RateLimitExceeded
 from ...core.services.storage import get_storage
+from .browser_pool import SHOT_EXT, SHOT_MIME
 from .design_gate import is_premium_plan
 from . import image_quota
 from .merlin import (
@@ -60,6 +61,7 @@ from .merlin_catalog import (
     AI_IMAGE_PROMPT_MAX,
     AI_IMAGE_SIZE_COST_ESTIMATE,
     AI_IMAGE_SIZES,
+    BLOCK_LABELS,
     DEFAULT_AI_IMAGE_SIZE,
     MODEL_TIERS,
 )
@@ -93,7 +95,28 @@ _BOUNDS: dict[str, _Bounds] = {
 # can't consume the whole turn.
 _CALL_TIMEOUT = 75.0
 
-_MAX_HISTORY_TURNS = 10
+# MESSAGES, not turns — matches merlin_store.HISTORY_MESSAGES / merlin.py's
+# own constant of the same corrected name (see that file's comment: named
+# _MAX_HISTORY_TURNS at 10 while already meaning messages, this slice never
+# actually trimmed anything since the store query already capped there first).
+_MAX_HISTORY_MESSAGES = 20
+
+# `MERLIN_OPS`' MAX_OPS_PER_TURN (merlin_ops.py) caps a single apply_ops CALL —
+# the single-shot path's only call. The agent loop can call apply_ops several
+# times in one turn (fix, screenshot, fix again), and op_log accumulates
+# across all of them uncapped — a `max` turn could legitimately reach ~180 ops
+# in one client-side undo step while the prompt tells the model "at most 20".
+# This is the actual per-TURN ceiling; comfortably above one call's cap so a
+# normal multi-fix turn never bumps it, but low enough that a runaway turn
+# still force-finishes instead of handing the client a page-sized diff.
+_MAX_TURN_OPS = 60
+
+# Screenshots pile up as image Parts in `contents` and are re-sent whole on
+# EVERY later model call — a `max` turn's 5th shot means the 6th-10th calls
+# each pay for 5 images even though only the newest one is relevant to what
+# the model is judging right now. Keep just the most recent.
+_KEEP_RECENT_SHOTS = 1
+_STALE_SHOT_NOTE = "[an earlier screenshot was here — judge from the most recent one below]"
 
 
 # ---------------------------------------------------------------------------
@@ -136,10 +159,13 @@ def _tool_declarations() -> list[types.FunctionDeclaration]:
             name="render_screenshot",
             description=(
                 "Render the page AS IT NOW STANDS (original content plus every op you "
-                "have applied this turn) and return a screenshot of the top fold. Use "
-                "it to CHECK YOUR OWN WORK: is the section actually visible, does the "
-                "text read against its background, does it look designed or does it "
-                "look like a debug overlay? If something is wrong, fix it with more ops."
+                "have applied this turn) and return a screenshot. Use it to CHECK YOUR "
+                "OWN WORK: is the section actually visible, does the text read against "
+                "its background, does it look designed or does it look like a debug "
+                "overlay? If something is wrong, fix it with more ops. "
+                "ALWAYS pass block_id for the section you changed — without it you get "
+                "only the top fold, which shows nothing if you edited a section further "
+                "down the page."
             ),
             parameters=types.Schema(
                 type=types.Type.OBJECT,
@@ -148,6 +174,14 @@ def _tool_declarations() -> list[types.FunctionDeclaration]:
                         type=types.Type.STRING,
                         enum=["desktop", "mobile"],
                         description="Which viewport to render. Defaults to desktop.",
+                    ),
+                    "block_id": types.Schema(
+                        type=types.Type.STRING,
+                        description=(
+                            "Scroll to and center this block's section before shooting — "
+                            "the id of the section you just changed. Omit only when "
+                            "judging the page as a whole (e.g. after a theme swap)."
+                        ),
                     ),
                 },
             ),
@@ -242,14 +276,18 @@ Unlike a one-shot editor, you can SEE the page. Work in a loop:
 1. Decide what the request means in DESIGN terms, given the section's current \
 content and the site's theme (mode, colors, existing design).
 2. Call apply_ops with the ops that express it.
-3. Call render_screenshot and LOOK at the result. Judge it as a designer would: is the \
-change visible at all? Does text read against its background? Do cards still sit apart \
-from the section behind them? Does it look intentional, or does it look like a debug overlay?
+3. Call render_screenshot WITH block_id SET TO THE SECTION YOU CHANGED, and LOOK at the \
+result. Judge it as a designer would: is the change visible at all? Does text read against \
+its background? Do cards still sit apart from the section behind them? Does it look \
+intentional, or does it look like a debug overlay?
 4. If it is wrong, fix it with more ops and screenshot again. If it is right, call finish.
 
-Checking your work is the point of this loop — a change you never looked at is a guess. \
-For any visual/design request, screenshot at least once before finishing. For a pure copy \
-edit (changing words only) a screenshot is optional.
+Checking your work is the point of this loop — a change you never looked at is a guess, and a \
+screenshot that isn't scrolled to the section you edited shows nothing (a page has several \
+sections; only the one you named with block_id is guaranteed to be in frame). For any visual/ \
+design request, screenshot at least once before finishing, always with block_id set to what you \
+changed. For a pure copy edit (changing words only) a screenshot is optional; omit block_id only \
+when judging the WHOLE page (e.g. after a theme swap).
 
 Never claim in `finish` that you did something you did not actually apply. If you could not \
 do what was asked, apply nothing and say so plainly — that is far better than substituting \
@@ -261,7 +299,7 @@ a different change."""
 # ---------------------------------------------------------------------------
 
 def _history_text(history: list[dict[str, Any]]) -> Optional[str]:
-    trimmed = history[-_MAX_HISTORY_TURNS:]
+    trimmed = history[-_MAX_HISTORY_MESSAGES:]
     if not trimmed:
         return None
     lines = []
@@ -309,6 +347,27 @@ def _build_system_prompt(
     if convo:
         parts.append(convo)
     return "\n\n".join(parts)
+
+
+def _has_inline_image(part: types.Part) -> bool:
+    return getattr(part, "inline_data", None) is not None
+
+
+def _strip_stale_images(content: types.Content) -> types.Content:
+    """Replace a past turn's image Part(s) with one text placeholder.
+
+    Every OTHER part is kept verbatim — in particular `function_response`
+    parts, which the API requires one-per-call for the call they answer;
+    dropping one breaks every model call after it, not just the image
+    bookkeeping. A no-op (returns the same object) when there's nothing to
+    strip, so re-running this over an already-stripped turn is harmless.
+    """
+    parts = list(content.parts or [])
+    kept = [p for p in parts if not _has_inline_image(p)]
+    if len(kept) == len(parts):
+        return content
+    kept.append(types.Part(text=_STALE_SHOT_NOTE))
+    return types.Content(role=content.role, parts=kept)
 
 
 async def run_merlin_agent(
@@ -381,6 +440,11 @@ async def run_merlin_agent(
     ]
     first_parts.append(types.Part(text=message))
     contents: list[types.Content] = [types.Content(role="user", parts=first_parts)]
+    # Indices into `contents` of past turns still carrying an image Part —
+    # user-attached photos are NOT tracked here (they're the request itself,
+    # not a screenshot to prune) — only entries appended after a tool-call
+    # batch below. See _strip_stale_images / _KEEP_RECENT_SHOTS.
+    image_bearing_indices: list[int] = []
 
     # --- tool implementations ------------------------------------------------
 
@@ -397,9 +461,31 @@ async def run_merlin_agent(
         if not isinstance(parsed, list):
             return {"error": "ops must be a JSON array"}, {}
 
+        # `validate_ops`' own MAX_OPS_PER_TURN caps a single CALL. The agent
+        # loop can call apply_ops several times in one turn, and op_log
+        # accumulates across all of them — this is the actual per-TURN
+        # ceiling, which no single call's own limit can see.
+        remaining = _MAX_TURN_OPS - len(op_log)
+        if remaining <= 0:
+            return (
+                {"error": f"op budget for this turn is spent ({_MAX_TURN_OPS}) — call finish with what you have"},
+                {},
+            )
+        overflow_rejections: list[dict[str, Any]] = []
+        if len(parsed) > remaining:
+            overflow, parsed = parsed[remaining:], parsed[:remaining]
+            overflow_rejections = [
+                {
+                    "op": o if isinstance(o, dict) else {"op": str(o)},
+                    "reason": f"turn exceeded the {_MAX_TURN_OPS}-op budget for this turn",
+                }
+                for o in overflow
+            ]
+
         valid, rejections = validate_ops(
             parsed, work_blocks, premium=premium, theme_intent=theme_intent
         )
+        rejections = [*rejections, *overflow_rejections]
         applied = apply_ops(work_blocks, work_theme, valid)
         work_blocks, work_theme = applied.blocks, applied.theme
 
@@ -456,12 +542,26 @@ async def run_merlin_agent(
                 {"kind": "screenshot", "label": "Skipped — out of time"},
                 None,
             )
+        # Resolve block_id to its render index — render_html enumerates
+        # work_blocks in the same order screenshot_html's focus_block indexes
+        # into (see render_site_html's block_anchors). A stale/unknown id
+        # degrades to None (top-fold shot), never an error — the model asking
+        # to look is more important than it naming the id exactly right.
+        block_id = args.get("block_id")
+        focus_index = next(
+            (i for i, b in enumerate(work_blocks) if isinstance(b, dict) and b.get("id") == block_id),
+            None,
+        ) if isinstance(block_id, str) and block_id else None
+        focus_label = BLOCK_LABELS.get(
+            next((b.get("type") for b in work_blocks if isinstance(b, dict) and b.get("id") == block_id), None)
+        ) if focus_index is not None else None
+
         try:
             # render_html is a sync HTML build (WeasyPrint-adjacent string work,
             # not I/O) — off the event loop so it doesn't stall every other
             # request while a Max turn takes up to 5 shots.
             html = await asyncio.to_thread(render_html, work_blocks, work_theme)
-            png = await screenshot_html(html, viewport)
+            png = await screenshot_html(html, viewport, focus_block=focus_index)
         except ScreenshotUnavailable as exc:
             # Chromium missing or crashed. The turn continues blind rather than
             # failing — that's still today's behavior, not a regression.
@@ -479,14 +579,18 @@ async def run_merlin_agent(
                 None,
             )
         screenshots += 1
-        step = {"kind": "screenshot", "label": f"Rendered {viewport} preview"}
+        step = {
+            "kind": "screenshot",
+            "label": f"Rendered {viewport} preview — {focus_label}" if focus_label
+            else f"Rendered {viewport} preview",
+        }
         # Store the shot so the transcript can show what Merlin actually looked
         # at — the difference between "it says it checked" and seeing the frame
         # it checked. Best-effort: no storage configured just means no thumbnail.
         try:
             step["image_url"] = await get_storage().upload_file(
-                png, f"shot_{secrets.token_hex(8)}.png",
-                prefix="cappe/merlin-shots", content_type="image/png",
+                png, f"shot_{secrets.token_hex(8)}.{SHOT_EXT}",
+                prefix="cappe/merlin-shots", content_type=SHOT_MIME,
             )
         except Exception as exc:  # noqa: BLE001 — cosmetic, never fails the turn
             logger.info("Merlin screenshot upload skipped: %s", exc)
@@ -705,7 +809,7 @@ async def run_merlin_agent(
                     yield {"type": "status", "message": "Rendering the page…"}
                     payload, step, png = await do_screenshot(args)
                     if png is not None:
-                        image_parts.append(types.Part.from_bytes(data=png, mime_type="image/png"))
+                        image_parts.append(types.Part.from_bytes(data=png, mime_type=SHOT_MIME))
                 elif name == "generate_image":
                     from ...core.services.image_gen import IMAGE_MODEL as _IMG_MODEL
 
@@ -731,7 +835,21 @@ async def run_merlin_agent(
                 final_message = finish_message
                 break
 
+            if image_parts and _KEEP_RECENT_SHOTS >= 0:
+                # This batch is about to become the newest image-bearing turn —
+                # prune every earlier one down past the keep count BEFORE
+                # appending it, so "most recent" always means "as of the turn
+                # that's about to be sent", not last call's newest.
+                keep_existing = max(_KEEP_RECENT_SHOTS - 1, 0)
+                stale = image_bearing_indices[: len(image_bearing_indices) - keep_existing] \
+                    if keep_existing else image_bearing_indices
+                for i in stale:
+                    contents[i] = _strip_stale_images(contents[i])
+                image_bearing_indices = image_bearing_indices[len(stale):]
+
             contents.append(types.Content(role="user", parts=[*response_parts, *image_parts]))
+            if image_parts:
+                image_bearing_indices.append(len(contents) - 1)
 
     except RateLimitExceeded:
         raise

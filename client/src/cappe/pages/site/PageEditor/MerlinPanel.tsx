@@ -8,6 +8,7 @@ import {
 import { AssetLibrary } from './AssetLibrary'
 import { ALLOWED_IMAGE_MIMES, MAX_ATTACHMENTS, imageFilesFrom, imageFilesFromClipboard } from './attachmentFiles'
 import { usePremium } from './DesignPrimitives'
+import type { MerlinOp } from './merlinOps'
 import {
   MERLIN_MAX_WIDTH,
   MERLIN_MIN_WIDTH,
@@ -428,7 +429,7 @@ export function MerlinDrawer({ merlin, selectedLabel }: { merlin: ReturnType<typ
   const {
     open, setOpen, messages, send, sending, error, tier, setTier, width, setWidth, setWidthLive,
     expanded, setExpanded,
-    newConversation, status, liveSteps, schema,
+    newConversation, status, liveSteps, schema, applyRecoveredOps,
     attachments, addAttachments, addAttachmentFromUrl, removeAttachment, attachmentUploading, attachmentError,
   } = merlin
   const [input, setInput] = useState('')
@@ -786,6 +787,20 @@ export function MerlinDrawer({ merlin, selectedLabel }: { merlin: ReturnType<typ
                     {m.routed ? 'Auto → ' : ''}
                     {MERLIN_TIERS.find((t) => t.id === m.tier)?.label ?? m.tier}
                   </p>
+                )}
+                {/* A turn whose ops were persisted (migration zzzzcappe24) but
+                    never reached this client — a disconnect between the agent
+                    loop finishing and the SSE frame arriving. `results` is
+                    unset for exactly this shape (a normal completed turn
+                    always has it, even if empty), so once acted on it's set
+                    and this offer doesn't reappear on reload. */}
+                {m.role === 'assistant' && m.id && m.ops && m.ops.length > 0 && !m.results && (
+                  <button
+                    onClick={() => applyRecoveredOps(m.id as string, m.ops as MerlinOp[])}
+                    className="mt-1.5 flex items-center gap-1 rounded-full border border-emerald-700/40 bg-emerald-500/[0.08] px-2 py-0.5 text-[10px] font-medium text-emerald-300 hover:bg-emerald-500/[0.14]"
+                  >
+                    <Wand2 className="h-2.5 w-2.5" /> Apply these changes — this reply never reached you
+                  </button>
                 )}
                 {m.results && m.results.length > 0 && (
                   <div className="mt-1.5 flex flex-wrap gap-1">

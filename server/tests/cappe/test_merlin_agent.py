@@ -15,6 +15,7 @@ loop's contract rather than any model behavior:
 
 Run from server/:  ./venv/bin/python -m pytest tests/cappe/test_merlin_agent.py -q
 """
+import json
 import os
 from typing import Any
 
@@ -107,7 +108,10 @@ def patched(monkeypatch):
 
         import app.cappe.services.browser_pool as bp
 
-        async def _shot(html, viewport="desktop"):
+        shot_calls: list[dict[str, Any]] = []
+
+        async def _shot(html, viewport="desktop", *, focus_block=None):
+            shot_calls.append({"viewport": viewport, "focus_block": focus_block})
             if screenshot_error is not None:
                 raise bp.ScreenshotUnavailable(screenshot_error)
             return screenshot
@@ -134,6 +138,7 @@ def patched(monkeypatch):
         import asyncio
 
         frames = asyncio.run(_collect())
+        fake.aio.models.shot_calls = shot_calls
         return frames, fake.aio.models
 
     return _run
@@ -199,6 +204,85 @@ def test_screenshot_is_handed_back_to_the_model_as_an_image(patched):
         if getattr(p, "inline_data", None) is not None
     ]
     assert image_parts, "the screenshot must be attached as an image part"
+    # JPEG, not PNG — a screenshot is judged at tile resolution, and the bytes
+    # difference is real money across a multi-shot turn (browser_pool.SHOT_MIME).
+    assert image_parts[0].inline_data.mime_type == merlin_agent.SHOT_MIME
+
+
+def test_only_the_most_recent_screenshot_still_carries_pixels(patched):
+    """Every screenshot rides in `contents` and is re-sent whole on EVERY later
+    model call — an unpruned turn's 3rd shot means the 4th call still pays for
+    shots 1 and 2 as image tokens even though only the newest one matters to
+    what's being judged right now. Only the latest should still be an image;
+    earlier ones degrade to a text placeholder, and — because the API requires
+    one function_response per call — every call's function_response must
+    still be there regardless."""
+    frames, models = patched([
+        [("render_screenshot", {})],
+        [("render_screenshot", {})],
+        [("render_screenshot", {})],
+        [("finish", {"message": "Done."})],
+    ], model_tier="max")
+    _result(frames)
+
+    all_parts = [p for content in models.received[-1] for p in (content.parts or [])]
+    image_parts = [p for p in all_parts if getattr(p, "inline_data", None) is not None]
+    function_responses = [p for p in all_parts if getattr(p, "function_response", None) is not None]
+    stale_notes = [p for p in all_parts if getattr(p, "text", None) == merlin_agent._STALE_SHOT_NOTE]
+
+    assert len(image_parts) == 1, "only the newest screenshot should still carry pixels"
+    assert len(function_responses) == 3, "every screenshot call must still be answered"
+    assert len(stale_notes) == 2, "pruned screenshots become a placeholder, not a silent gap"
+
+
+_MANY_BLOCKS = [
+    {"id": "b1", "type": "hero", "heading": "Old"},
+    {"id": "b2", "type": "features"},
+    {"id": "b3", "type": "faq"},
+]
+
+
+def test_render_screenshot_resolves_block_id_to_its_render_index(patched):
+    """block_id must map to the position render_html enumerates blocks in —
+    that's what browser_pool.screenshot_html's focus_block indexes into
+    (data-cz-block="<index>", from render_site_html(..., block_anchors=True))
+    to scroll the shot to the section actually being judged, not always the
+    top fold."""
+    frames, models = patched(
+        [
+            [("render_screenshot", {"block_id": "b3"})],
+            [("finish", {"message": "Done."})],
+        ],
+        blocks=_MANY_BLOCKS,
+    )
+    _result(frames)
+
+    assert models.shot_calls[0]["focus_block"] == 2
+
+
+def test_render_screenshot_without_block_id_shoots_the_fold(patched):
+    """Omitting block_id (judging the whole page, e.g. after a theme swap)
+    must not resolve to some accidental index."""
+    frames, models = patched([
+        [("render_screenshot", {})],
+        [("finish", {"message": "Done."})],
+    ], blocks=_MANY_BLOCKS)
+    _result(frames)
+
+    assert models.shot_calls[0]["focus_block"] is None
+
+
+def test_render_screenshot_unknown_block_id_degrades_to_the_fold(patched):
+    """A stale or hallucinated id must not fail the shot — the turn still
+    gets a screenshot, just of whatever the fold shows."""
+    frames, models = patched([
+        [("render_screenshot", {"block_id": "does-not-exist"})],
+        [("finish", {"message": "Done."})],
+    ], blocks=_MANY_BLOCKS)
+    data = _result(frames)
+
+    assert models.shot_calls[0]["focus_block"] is None
+    assert any(s["kind"] == "screenshot" and "Rendered" in s["label"] for s in data["steps"])
 
 
 def test_ops_accumulate_and_later_calls_see_earlier_ones(patched):
@@ -264,6 +348,57 @@ def test_screenshot_budget_is_enforced_within_the_turn(patched):
 
     rendered = [s for s in data["steps"] if s["kind"] == "screenshot" and "Rendered" in s["label"]]
     assert len(rendered) == merlin_agent._BOUNDS["regular"].screenshots
+
+
+def _set_field_ops(n: int, offset: int = 0) -> str:
+    """`n` independently-valid set_field ops against b1 — a cheap way to fill
+    an apply_ops call without needing n distinct blocks."""
+    return json.dumps([
+        {"op": "set_field", "block": "b1", "path": "heading", "value": f"v{offset + i}"}
+        for i in range(n)
+    ])
+
+
+def test_turn_op_budget_is_enforced_across_calls(patched):
+    """MAX_OPS_PER_TURN (merlin_ops.py) caps one apply_ops CALL. This is the
+    separate per-TURN cap — op_log accumulates across every call the loop
+    makes this turn, which a single call's own cap can't see. Three calls of
+    the per-call max (20 each) exactly spend the 60-op turn budget; a fourth
+    call must be refused outright, not partially applied.
+
+    A budget-exhausted call returns only an error payload (no step frame —
+    there's nothing to report having applied), so the assertion is on the
+    accumulated op log rather than the steps list; the model still gets the
+    error back as that call's function_response and the loop keeps running,
+    which is why a 5th (finish) call still completes normally."""
+    assert merlin_agent._MAX_TURN_OPS == 60
+    frames, models = patched([
+        [("apply_ops", {"ops": _set_field_ops(20, offset=0)})],
+        [("apply_ops", {"ops": _set_field_ops(20, offset=20)})],
+        [("apply_ops", {"ops": _set_field_ops(20, offset=40)})],
+        [("apply_ops", {"ops": _set_field_ops(1, offset=60)})],
+        [("finish", {"message": "Done."})],
+    ], model_tier="max")
+    data = _result(frames)
+
+    assert len(data["ops"]) == 60, "the turn must not exceed its own op budget"
+    assert models.calls == 5, "the refused 4th call doesn't stop the loop"
+
+
+def test_turn_op_budget_truncates_a_call_that_straddles_the_limit(patched):
+    """A call that starts under budget but asks for more than remains gets the
+    overflow rejected with a reason, not silently dropped — same "truncate and
+    report" behavior validate_ops itself uses for MAX_OPS_PER_TURN."""
+    frames, _ = patched([
+        [("apply_ops", {"ops": _set_field_ops(50, offset=0)})],  # 10 left in budget
+        [("apply_ops", {"ops": _set_field_ops(15, offset=50)})],  # asks for 15
+        [("finish", {"message": "Done."})],
+    ], model_tier="max")
+    data = _result(frames)
+
+    assert len(data["ops"]) == 60
+    reasons = " ".join(r["reason"] for r in data["rejected"])
+    assert "60" in reasons or "budget" in reasons, data["rejected"]
 
 
 def test_missing_chromium_degrades_to_editing_blind(patched):

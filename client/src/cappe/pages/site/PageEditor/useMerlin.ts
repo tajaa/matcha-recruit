@@ -44,6 +44,13 @@ export type MerlinMessage = {
   /** Images the user attached to this message (place / style-reference /
    *  generation-input — Merlin infers which from the request text). */
   attachments?: MerlinAttachment[]
+  /** The validated op log for an assistant turn (server migration
+   *  zzzzcappe24) — persisted so a turn survives a disconnect that happened
+   *  before the client ever got its `result` frame. Set ALONGSIDE `results`
+   *  once ops apply normally; a message with `ops` but no `results` is one
+   *  that never reached the client that asked for it — the panel offers
+   *  "Apply these changes" for exactly that shape (see `applyRecoveredOps`). */
+  ops?: MerlinOp[]
 }
 
 /** An uploaded image, referenced by URL — never inlined as bytes on the
@@ -95,6 +102,7 @@ type StoredMessage = {
   tier?: MerlinTier | null
   steps?: MerlinStep[] | null
   attachments?: MerlinAttachment[] | null
+  ops?: MerlinOp[] | null
 }
 
 const HISTORY_TURNS = 10
@@ -342,14 +350,42 @@ export function useMerlin(
           tier: m.tier ?? undefined,
           // Only claim "no changes" for a turn we have chips for — a message
           // whose results were never reported back is unknown, not empty.
+          // An unrecovered turn (ops but no results — see `ops` below) is
+          // exactly that "unknown" case, not "no changes": don't mark it.
           noChanges: m.role === 'assistant' && !!m.results && !m.results.some((r) => r.ok),
           steps: m.steps ?? undefined,
           attachments: m.attachments ?? undefined,
+          ops: m.ops ?? undefined,
         })),
       )
     } catch {
       setError('Could not load that conversation.')
     }
+  }
+
+  /** Recover a turn whose ops were persisted (server migration zzzzcappe24)
+   *  but never reached this client — a disconnect between the agent loop
+   *  finishing and the SSE frame arriving. Same one-undo-step fold every
+   *  other apply here uses (`applyImageTo`, `send`'s own sync-ops branch),
+   *  just targeting a PAST message instead of appending a new one: the
+   *  message's own `results` is what the panel's "Apply these changes"
+   *  button conditions on, so setting it here is what makes the offer go
+   *  away once acted on — reported back via the existing PATCH endpoint so
+   *  a reload doesn't show the same offer again. */
+  const applyRecoveredOps = (messageId: string, ops: MerlinOp[]) => {
+    const cur = getSnapshot()
+    const applied = applyMerlinOps(cur.blocks, cur.theme, ops, schemaRef.current ?? undefined)
+    const changed = applied.blocks !== cur.blocks || applied.theme !== cur.theme
+    if (changed) {
+      onApply({
+        blocks: applied.blocks, theme: applied.theme,
+        blocksChanged: applied.blocks !== cur.blocks, themeChanged: applied.theme !== cur.theme,
+      })
+    }
+    setMessages((m) => m.map((msg) => (
+      msg.id === messageId ? { ...msg, results: applied.results, noChanges: !applied.results.some((r) => r.ok) } : msg
+    )))
+    void reportResults(messageId, applied.results)
   }
 
   /** Start a new conversation. The row is only created server-side on the
@@ -758,7 +794,7 @@ export function useMerlin(
   return {
     open, setOpen, messages, send, sending, error, tier, setTier, width, setWidth, setWidthLive,
     expanded, setExpanded,
-    status, liveSteps, schema, getImageTargets, applyImageTo, generateImage,
+    status, liveSteps, schema, getImageTargets, applyImageTo, generateImage, applyRecoveredOps,
     attachments, addAttachments, addAttachmentFromUrl, removeAttachment,
     attachmentUploading, attachmentError,
     conversationId, conversations, openConversation, newConversation,
