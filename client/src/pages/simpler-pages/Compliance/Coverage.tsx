@@ -20,15 +20,15 @@ export function Coverage() {
       <div className={CONTAINER}>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-16 items-center">
           <Reveal>
-            <h2 className={EYEBROW} style={{ color: ASH }}>
+            <span className={EYEBROW} style={{ color: ASH }}>
               {COVERAGE_EYEBROW}
-            </h2>
-            <p
+            </span>
+            <h2
               className="mt-4 text-[1.7rem] sm:text-[2.1rem] tracking-[-0.015em]"
               style={{ fontFamily: DISPLAY, fontWeight: 300, lineHeight: 1.2, color: BONE }}
             >
               {COVERAGE_HEADING}
-            </p>
+            </h2>
             <p className="mt-5 text-[1rem] sm:text-[1.05rem]" style={{ color: ASH, lineHeight: 1.6 }}>
               {COVERAGE_BODY}
             </p>

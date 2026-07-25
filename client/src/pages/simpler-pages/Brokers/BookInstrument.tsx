@@ -38,8 +38,32 @@ function BookCurve() {
   const rafRef = useRef(0)
   const lastRef = useRef(0)
 
+  // Gate the rAF loop on both in-view and tab-visibility, same fix
+  // ProductCarousel.tsx applies (IntersectionObserver + visibilitychange) —
+  // without it this re-renders ~8x/sec forever, including scrolled past and
+  // with the tab backgrounded.
+  const wrapRef = useRef<HTMLDivElement>(null)
+  const [visible, setVisible] = useState(false)
+  const [hidden, setHidden] = useState(
+    typeof document !== 'undefined' && document.visibilityState === 'hidden',
+  )
+
   useEffect(() => {
-    if (reduceMotion) return
+    const el = wrapRef.current
+    if (!el) return
+    const io = new IntersectionObserver(([entry]) => setVisible(entry.isIntersecting), { threshold: 0.1 })
+    io.observe(el)
+    return () => io.disconnect()
+  }, [])
+
+  useEffect(() => {
+    const onVis = () => setHidden(document.visibilityState === 'hidden')
+    document.addEventListener('visibilitychange', onVis)
+    return () => document.removeEventListener('visibilitychange', onVis)
+  }, [])
+
+  useEffect(() => {
+    if (reduceMotion || !visible || hidden) return
     const FPS = 8
     const step = (now: number) => {
       if (now - lastRef.current > 1000 / FPS) {
@@ -50,14 +74,14 @@ function BookCurve() {
     }
     rafRef.current = requestAnimationFrame(step)
     return () => cancelAnimationFrame(rafRef.current)
-  }, [reduceMotion])
+  }, [reduceMotion, visible, hidden])
 
   const { line, area } = curvePath(phase)
   const expectedX = VBW * EXPECTED_X_FRAC
   const pmlX = VBW * PML_X_FRAC
 
   return (
-    <div className="relative">
+    <div ref={wrapRef} className="relative">
       <svg viewBox={`0 0 ${VBW} ${VBH}`} preserveAspectRatio="none" className="w-full h-[86px]">
         <defs>
           <linearGradient id="brokerCurveFill" x1="0" y1="0" x2="1" y2="0">

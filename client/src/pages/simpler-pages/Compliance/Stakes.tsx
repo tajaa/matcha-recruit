@@ -16,15 +16,15 @@ export function Stakes() {
       <div className={CONTAINER}>
         <Reveal>
           <div className="max-w-2xl mb-3">
-            <h2 className={EYEBROW} style={{ color: ASH }}>
+            <span className={EYEBROW} style={{ color: ASH }}>
               {STAKES_EYEBROW}
-            </h2>
-            <p
+            </span>
+            <h2
               className="mt-4 text-[1.6rem] sm:text-[2rem] tracking-[-0.015em]"
               style={{ fontFamily: DISPLAY, fontWeight: 300, lineHeight: 1.2, color: BONE }}
             >
               {STAKES_HEADING}
-            </p>
+            </h2>
             <p className="mt-4 text-[1rem] sm:text-[1.1rem]" style={{ color: ASH, lineHeight: 1.55 }}>
               {STAKES_BRIDGE}
             </p>

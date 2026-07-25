@@ -29,13 +29,14 @@ export function PricingCalculator({ onContactClick }: { onContactClick: () => vo
 
   const minHeadcount = pricing?.min_headcount ?? 1;
   const maxHeadcount = pricing?.max_headcount ?? 300;
+  const clampedHeadcount = Math.min(Math.max(headcount, minHeadcount), maxHeadcount);
   const overLimit = headcount > maxHeadcount;
   const underMin = headcount < minHeadcount;
   const price =
     pricing && !overLimit && !underMin ? computeLitePriceDollars(headcount, pricing) : null;
 
   const signupParams = new URLSearchParams(searchParams);
-  signupParams.set("headcount", String(headcount));
+  signupParams.set("headcount", String(clampedHeadcount));
   signupParams.set("jurisdictions", String(jurisdictions));
   const signupHref = `/compliance/signup?${signupParams.toString()}`;
 
@@ -44,15 +45,15 @@ export function PricingCalculator({ onContactClick }: { onContactClick: () => vo
       <div className={CONTAINER}>
         <Reveal>
           <div className="max-w-2xl mb-10 sm:mb-12">
-            <h2 className={EYEBROW} style={{ color: ASH }}>
+            <span className={EYEBROW} style={{ color: ASH }}>
               {PRICING_EYEBROW}
-            </h2>
-            <p
+            </span>
+            <h2
               className="mt-4 text-[1.7rem] sm:text-[2.1rem] tracking-[-0.015em]"
               style={{ fontFamily: DISPLAY, fontWeight: 300, lineHeight: 1.2, color: BONE }}
             >
               {PRICING_HEADING}
-            </p>
+            </h2>
           </div>
         </Reveal>
 
@@ -65,14 +66,14 @@ export function PricingCalculator({ onContactClick }: { onContactClick: () => vo
                     Employees
                   </span>
                   <span className="tabular-nums" style={{ fontFamily: DISPLAY, color: BONE, fontSize: "1.1rem" }}>
-                    {headcount}
+                    {clampedHeadcount}
                   </span>
                 </span>
                 <input
                   type="range"
-                  min={1}
+                  min={minHeadcount}
                   max={maxHeadcount}
-                  value={Math.min(headcount, maxHeadcount)}
+                  value={clampedHeadcount}
                   onChange={(e) => setHeadcount(Number(e.target.value))}
                   className="w-full accent-[#A3C57D]"
                 />
@@ -105,7 +106,7 @@ export function PricingCalculator({ onContactClick }: { onContactClick: () => vo
               {overLimit ? (
                 <>
                   <div className="text-[15px]" style={{ color: BONE }}>
-                    300+ employees needs a plan we'll size with you.
+                    {maxHeadcount}+ employees needs a plan we'll size with you.
                   </div>
                   <button
                     type="button"
@@ -116,6 +117,10 @@ export function PricingCalculator({ onContactClick }: { onContactClick: () => vo
                     Talk to us
                   </button>
                 </>
+              ) : underMin ? (
+                <div className="text-[15px]" style={{ color: ASH }}>
+                  {minHeadcount}+ employees to price this plan.
+                </div>
               ) : (
                 <>
                   <div className="flex items-baseline gap-1.5">

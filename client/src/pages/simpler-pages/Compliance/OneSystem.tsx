@@ -1,9 +1,9 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { BadgeCheck, Bell, FileText, Library, ListChecks, Scale, Sparkles } from "lucide-react";
-import { ASH, BONE, DISPLAY, LEAF, LINE_D } from "../../home/theme";
+import { ASH, BONE, DISPLAY, LEAF, LINE_D, SURFACE } from "../../home/theme";
 import { CONTAINER, EYEBROW, SECTION_Y } from "../../home/layout";
 import { Reveal } from "../../home/PageChrome";
-import { InstrumentFrame, gridCellBorderStyle, useCyclingIndex, useReducedMotion } from "../../home/instruments/shared";
+import { InstrumentFrame, useCyclingIndex, useReducedMotion } from "../../home/instruments/shared";
 import { COMPLIANCE_COPILOT } from "../../home/instruments/ComplianceInstrument";
 import { CAPABILITIES, ONE_SYSTEM_EYEBROW, ONE_SYSTEM_HEADING, ONE_SYSTEM_SUB, type CapabilityItem } from "./data";
 
@@ -33,15 +33,15 @@ export function OneSystem() {
       <div className={CONTAINER}>
         <Reveal>
           <div className="max-w-2xl mb-12 sm:mb-16">
-            <h2 className={EYEBROW} style={{ color: ASH }}>
+            <span className={EYEBROW} style={{ color: ASH }}>
               {ONE_SYSTEM_EYEBROW}
-            </h2>
-            <p
+            </span>
+            <h2
               className="mt-4 text-[1.8rem] sm:text-[2.4rem] tracking-[-0.015em]"
               style={{ fontFamily: DISPLAY, fontWeight: 300, lineHeight: 1.15, color: BONE }}
             >
               {ONE_SYSTEM_HEADING}
-            </p>
+            </h2>
             <p className="mt-4 text-[1rem] sm:text-[1.1rem]" style={{ color: ASH, lineHeight: 1.55 }}>
               {ONE_SYSTEM_SUB}
             </p>
@@ -51,16 +51,16 @@ export function OneSystem() {
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-10 lg:gap-14 items-start">
           <Reveal delayMs={80}>
             <div
-              className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 rounded-xl overflow-hidden border"
-              style={{ borderColor: LINE_D }}
+              className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-px rounded-xl overflow-hidden"
+              style={{ backgroundColor: LINE_D }}
             >
-              {CAPABILITIES.map((c, i) => {
+              {CAPABILITIES.map((c) => {
                 const Icon = ICONS[c.icon];
                 return (
                   <div
                     key={c.id}
                     className="p-6"
-                    style={gridCellBorderStyle(i, CAPABILITIES.length, 3)}
+                    style={{ backgroundColor: SURFACE }}
                   >
                     <Icon className="w-5 h-5 mb-4" strokeWidth={1.5} style={{ color: LEAF }} />
                     <h3 className="text-[15px] mb-1.5" style={{ color: BONE, fontWeight: 500 }}>
