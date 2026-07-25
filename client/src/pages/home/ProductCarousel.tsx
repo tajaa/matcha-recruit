@@ -26,8 +26,12 @@ export function ProductCarousel() {
   // Autoplay starts when the carousel is actually ON SCREEN, not on a fixed
   // timer. It used to take a `startDelayMs` matched to the hero's entrance
   // chain, which fired whether or not anyone had scrolled to it — so the first
-  // slide could burn its whole turn unseen. Now that this lives below the fold,
-  // a timer would be wrong essentially always.
+  // slide could burn its whole turn unseen.
+  //
+  // threshold 0.2, not 0.35: the showcase now sits at the fold edge by design
+  // (see ShowcaseSection), so on a laptop only the instrument's top third is
+  // visible at rest. At 0.35 a visitor looking straight at a live product
+  // surface would watch it sit frozen on slide 1 until they scrolled.
   const rootRef = useRef<HTMLDivElement>(null);
   const [started, setStarted] = useState(false);
   useEffect(() => {
@@ -40,7 +44,7 @@ export function ProductCarousel() {
           io.disconnect();
         }
       },
-      { threshold: 0.35 },
+      { threshold: 0.2 },
     );
     io.observe(el);
     return () => io.disconnect();

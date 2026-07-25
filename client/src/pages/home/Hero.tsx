@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { ChevronDown } from "lucide-react";
 import { AMBER, ASH, BONE, DISPLAY, LEAF, LINE_D } from "./theme";
 import { CONTAINER } from "./layout";
 import { useReducedMotion } from "./instruments/shared";
@@ -52,12 +51,13 @@ export function Hero() {
   });
 
   return (
-    // 88svh, not 100: with the masthead and the carousel both gone the hero's
-    // content no longer fills a full viewport, and a rigid 100svh left ~230px
-    // of dead space under the proof strip that read as unfinished rather than
-    // airy. Letting the showcase peek above the fold also signals scrollability
-    // better than the chevron does.
-    <section className="home-hero relative w-full min-h-[88svh] flex flex-col">
+    // NO viewport-height floor. 100svh, then 88svh, both forced dead space under
+    // the proof strip AND pushed the showcase — the strongest asset on the page,
+    // and the thing the hero is asking you to believe — entirely below the fold.
+    // The hero is now exactly as tall as its content (~400px at 1440x800), so
+    // the showcase's top ~300px lands above the fold on a 13" laptop. That peek
+    // is also the scroll affordance, which is why the chevron cue is gone.
+    <section className="home-hero relative w-full flex flex-col">
       {/* Atmosphere — two whisper-quiet radial glows (leaf upper-left, amber
           lower-right, echoing the headline accents) lift the canvas off flat
           noir. Kept behind the content by DOM order; blur is baked into the
@@ -99,7 +99,7 @@ export function Hero() {
           The magazine folio motif survives where it still earns its place, in
           Manifesto.tsx. */}
       <div
-        className={`home-hero-body relative ${CONTAINER} flex-1 flex flex-col justify-center pt-[104px] sm:pt-[112px] pb-10`}
+        className={`home-hero-body relative ${CONTAINER} flex-1 flex flex-col justify-center pt-[88px] sm:pt-[96px] pb-7`}
       >
         {/* ONE <h1>, in normal flow, full text, opaque. The old implementation
             rendered two — a hidden full-text copy to reserve height plus a
@@ -121,7 +121,7 @@ export function Hero() {
             homepage skipped entirely: this used to be `flex-col lg:flex-row`,
             so from 768-1023px the capture stacked full-width under a narrow
             paragraph on a viewport with room for both. */}
-        <div className="home-hero-deck mt-9 flex flex-col md:flex-row md:items-end md:justify-between gap-8 md:gap-12 lg:gap-16">
+        <div className="home-hero-deck mt-8 flex flex-col md:flex-row md:items-end md:justify-between gap-8 md:gap-12 lg:gap-16">
           <p
             className="home-fade-fast max-w-2xl text-[1.25rem] sm:text-[1.6rem] tracking-[-0.011em]"
             style={{
@@ -148,26 +148,15 @@ export function Hero() {
         </div>
 
         <HeroProof
-          className="home-hero-proof home-fade-fast mt-12"
+          className="home-hero-proof home-fade-fast mt-9"
           style={{ animationDelay: `${BEAT.proof}ms` }}
         />
       </div>
 
-      {/* Scroll cue — in normal flow as the section's last flex child, not
-          `absolute bottom-14`. The content block above is `flex-1`, so the cue
-          is pushed to the bottom of the 100svh section and cannot land on top
-          of content at any viewport height. The absolute version overlapped the
-          carousel on laptop-height screens. */}
-      <a
-        href="#showcase"
-        aria-label="Scroll to product showcase"
-        // px-4 widens the hit area to 64px; the icon alone was 32px wide.
-        className="home-scroll-cue mx-auto shrink-0 px-4 pb-10 hover:opacity-100"
-        style={{ color: ASH }}
-      >
-        <ChevronDown className="w-8 h-8" strokeWidth={1.5} />
-      </a>
-
+      {/* The animated chevron that used to sit here is gone with the viewport
+          floor that created the room for it. It cost ~72px of fold to say
+          "there is more below" — which a half-visible product showcase says
+          better, and for free. */}
       <div aria-hidden style={{ height: 1, backgroundColor: LINE_D }} />
     </section>
   );

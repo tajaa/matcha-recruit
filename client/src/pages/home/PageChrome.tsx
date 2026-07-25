@@ -80,10 +80,6 @@ export function PageStyle() {
         0%, 100% { opacity: 1; transform: scale(1); }
         50% { opacity: 0.45; transform: scale(0.8); }
       }
-      @keyframes homeScrollCue {
-        0%, 100% { opacity: 0.25; transform: translateY(0); }
-        50% { opacity: 0.9; transform: translateY(5px); }
-      }
       @keyframes showcaseProgress {
         from { transform: scaleX(0); }
         to { transform: scaleX(1); }
@@ -103,7 +99,6 @@ export function PageStyle() {
          wasn't fully opaque until 3.3s. Everything settles under 700ms now. */
       .home-fade-fast { opacity: 0; animation: homeFadeUp 0.42s cubic-bezier(0.16,1,0.3,1) forwards; }
       .home-pulse { animation: homePulse 2.4s ease-in-out infinite; }
-      .home-scroll-cue { animation: homeScrollCue 1.8s ease-in-out infinite; }
       .home-float { animation: homeFloat 7s ease-in-out infinite; }
       .home-caret { animation: homeCaret 1.05s step-end infinite; }
       .home-reveal {
@@ -129,8 +124,7 @@ export function PageStyle() {
          conversion element fall off it. Height-keyed, not width-keyed, so a
          landscape tablet with real height keeps the normal layout. */
       @media (orientation: landscape) and (max-height: 520px) {
-        .home-hero { min-height: 0; }
-        .home-hero-body { padding-top: 82px; padding-bottom: 20px; }
+        .home-hero-body { padding-top: 78px; padding-bottom: 16px; }
         .home-hero h1 { font-size: clamp(1.5rem, 3.6vw, 2.5rem); }
         .home-hero-deck {
           margin-top: 1.25rem;
@@ -142,7 +136,7 @@ export function PageStyle() {
         .home-hero-deck > p { font-size: 1.05rem; }
         .home-hero-capture { width: 330px; flex-shrink: 0; }
         /* Supplementary, and the fold has no room for it rotated. */
-        .home-hero-proof, .home-root .home-scroll-cue { display: none; }
+        .home-hero-proof { display: none; }
       }
       /* Keyboard focus in the page aesthetic instead of the UA default ring. */
       .home-root :is(a, button, input):focus-visible {
@@ -152,7 +146,7 @@ export function PageStyle() {
       }
       @media (prefers-reduced-motion: reduce) {
         .home-rise > span, .home-fade, .home-fade-fast { animation: none !important; opacity: 1 !important; transform: none !important; }
-        .home-pulse, .home-scroll-cue, .home-float { animation: none !important; }
+        .home-pulse, .home-float { animation: none !important; }
         .home-caret { animation: none !important; opacity: 1 !important; }
         .home-reveal { transition: none !important; opacity: 1 !important; transform: none !important; }
       }

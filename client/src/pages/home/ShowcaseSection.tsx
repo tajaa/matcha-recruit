@@ -12,25 +12,27 @@ const ProductCarousel = lazy(() =>
 );
 
 /**
- * The product showcase, moved out of the hero (2026-07-25).
+ * The product showcase — its own section rather than a block inside the hero
+ * (2026-07-25), but deliberately NOT below the fold.
  *
- * It is the strongest asset on the page, and burying it one scroll gesture down
- * is a real cost — but keeping it above the fold cost more. The hero is now
- * headline + subhead + capture + proof, which is already a full fold at 800px
- * viewport height; with the carousel in there too, `min-h-[100svh]` was a
- * broken promise and the conversion element drifted toward the fold edge on
- * 13" laptops. The carousel also competed with the capture at the exact moment
- * of decision.
+ * Two forces: the carousel competed with the email capture when both sat in one
+ * hero block, and it is also the single most persuasive thing on the page — a
+ * visitor who never sees a product surface has been sold nothing. The
+ * resolution is sequence, not exile: the hero is content-height (no svh floor,
+ * no chevron), and this section's top padding is small enough that the eyebrow
+ * plus the top ~300px of the instrument sit inside a 800px fold. The capture
+ * gets the visitor's first, undivided beat; the product is visible in the same
+ * glance and finishes on one scroll gesture.
  *
- * Reversible: drop <ProductCarousel /> back into Hero's container if it tests
- * worse.
+ * So the padding here is load-bearing, not rhythm: the shared SECTION_Y scale
+ * (py-20 sm:py-28 md:py-32) would push the carousel back off the fold.
  */
 export function ShowcaseSection() {
   return (
-    <section id="showcase" className="scroll-mt-16 pt-16 sm:pt-20 md:pt-24">
+    <section id="showcase" className="scroll-mt-16 pt-9 sm:pt-11 md:pt-12">
       <div className={CONTAINER}>
         <Reveal>
-          <div className="flex items-baseline justify-between mb-8">
+          <div className="flex items-baseline justify-between mb-6">
             <h2 className={EYEBROW} style={{ color: ASH }}>
               What it looks like
             </h2>
