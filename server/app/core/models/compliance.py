@@ -536,12 +536,26 @@ class RequirementComponent(BaseModel):
     severity: str = "important"
     sort_order: int = 0
     derivable: bool = False
+    # The Derivation.source_label for a derivable component (e.g.
+    # "training_records") — server-side single source of truth for the
+    # audit-reveal UI's "Screening <source>" strip, so the client never has
+    # to keep its own component_key -> table map in sync with this registry.
+    derivation_source: Optional[str] = None
     status: str = "unknown"
     basis: Optional[str] = None
     evidence: Dict[str, Any] = Field(default_factory=dict)
     attested_note: Optional[str] = None
     attested_at: Optional[str] = None
     derived_at: Optional[str] = None
+
+
+class RequirementExposure(BaseModel):
+    """Directional statutory-penalty context for a decomposed requirement —
+    reuses the same RiskPenalty shape + provenance rules compliance_risk.py's
+    issue penalties carry (source_url/citation only from the bound authority
+    row, never the model-writable metadata blob)."""
+    penalty: Optional[RiskPenalty] = None
+    directional: bool = True
 
 
 class RequirementComponentChecklist(BaseModel):
@@ -551,7 +565,7 @@ class RequirementComponentChecklist(BaseModel):
     statute_citation: Optional[str] = None
     components: List[RequirementComponent]
     summary: RequirementStatusSummary
-    exposure: Optional[Dict[str, Any]] = None
+    exposure: Optional[RequirementExposure] = None
 
 
 class AttestComponentRequest(BaseModel):

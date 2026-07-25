@@ -41,8 +41,8 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence, Tuple
+from datetime import date, datetime, timedelta, timezone
+from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 from uuid import UUID
 
 logger = logging.getLogger(__name__)
@@ -64,11 +64,21 @@ class Derivation:
     None (-> unknown), never `compliant` (we'd be certifying an unmeasured thing)
     and never `non_compliant` (we'd be inventing a violation from an unsold
     feature).
+
+    ``context_group`` names the `_build_context` group this derivation reads —
+    used to narrow which groups get built for a given candidate-row set (a
+    checklist read for one requirement has no business scanning the whole
+    company's roster for a derivation it never calls). ``source_label`` is the
+    human-readable source shown in the audit-reveal UI ("Screening
+    training_records") — kept server-side so the client never has to
+    re-implement this registry.
     """
     key: str
     fn: Callable[..., Awaitable[DerivationResult]]
     label: str
     required_feature: Optional[str] = None
+    context_group: Optional[str] = None
+    source_label: Optional[str] = None
 
 
 # ── pure rules (unit-tested, no DB) ─────────────────────────────────────────
@@ -245,9 +255,20 @@ async def _derive_injury_recordkeeping(
 
 
 # ── SB 553 component derivations ────────────────────────────────────────────
-# Two of the five WVP obligations are provable from data already held; the
-# other three (written plan, hazard assessment, annual review) have no system
-# record and stay attest-only — see COMPONENT_DERIVATIONS below.
+# One of the five WVP obligations is provable from data already held; the
+# other four (written plan, violent incident log, hazard assessment, annual
+# review) have no system record and stay attest-only — see
+# COMPONENT_DERIVATIONS below.
+#
+# The violent-incident-log obligation (§6401.9(c)) used to be "derived" from a
+# free-text ILIKE match against ir_incidents — but a matching incident title
+# proves an incident was mentioned, not that the STATUTE's log (with its
+# required fields and 5-year retention) exists. That is exactly the overclaim
+# this module's invariants exist to block, so it stays attest-only until a
+# structured WVP-log field exists to derive it from.
+
+_ANNUAL_TRAINING_WINDOW_DAYS = 396  # 12 months + slack
+
 
 async def _derive_wvp_training(
     conn, *, company_id: UUID, location_id: UUID, row: Dict[str, Any], ctx: Dict[str, Any]
@@ -255,63 +276,59 @@ async def _derive_wvp_training(
     """Annual workplace-violence-prevention training, from training_records.
 
     Same blind/in-progress/compliant shape as `_derive_harassment_training`,
-    plus a lapse check: SB 553 training is annual, so "completed once, years
-    ago" is not "compliant" the way a one-time policy acknowledgment would be.
+    plus a lapse check: SB 553 training is annual, so "88 assigned, 88
+    completed" is not "compliant" if 87 of those completions are 18 months
+    stale. MAX(completed_date) only proves *someone* trained recently, not
+    that everyone did — this counts how many completions are still inside the
+    12-month window (`current_completed`) vs completed-but-stale (`lapsed`).
     """
     tr = ctx.get("wvp_training")
     if tr is None or int(tr["assigned"] or 0) == 0:
         return None  # Nothing assigned: cannot tell trained-and-unrecorded from
         # untrained. Blind, not violating.
-    assigned, completed = int(tr["assigned"]), int(tr["completed"] or 0)
+    assigned = int(tr["assigned"])
+    completed = int(tr["completed"] or 0)
     if completed < assigned:
         return "in_progress", {
             "rule": "annual WVP training assigned but incomplete",
             "completed": completed, "assigned": assigned,
         }
+
+    current = int(tr["current_completed"] or 0)
+    undated = int(tr["completed_undated"] or 0)
+    # Every completed record is exactly one of: inside the 12mo window
+    # (current), missing a date (undated), or outside the window (lapsed).
+    lapsed = completed - current - undated
     last = tr["last_completed"]
-    if last is not None:
-        from datetime import date, timedelta
-        if date.today() - last > timedelta(days=396):  # 12mo + slack
-            return "non_compliant", {
-                "rule": "annual WVP training lapsed (over 12 months since last completion)",
-                "last_completed": last.isoformat(),
-            }
+    oldest = tr["oldest_completed"]
+
+    if lapsed > 0:
+        return "non_compliant", {
+            "rule": "annual WVP training lapsed for one or more employees "
+                    "(over 12 months since their last completion)",
+            "lapsed": lapsed, "completed": completed, "assigned": assigned,
+            "oldest_completed": oldest.isoformat() if oldest else None,
+        }
+    if undated > 0:
+        # Completed but with no date on file: cannot prove it falls inside the
+        # 12-month window, so it cannot count as currently compliant — but it
+        # is also not proof of a lapse. Blind on currency, not violating.
+        return "in_progress", {
+            "rule": "annual WVP training completed but undated — cannot confirm currency",
+            "undated": undated, "completed": completed, "assigned": assigned,
+        }
     return "compliant", {
-        "rule": "annual WVP training complete",
+        "rule": "annual WVP training complete and current",
         "completed": completed, "assigned": assigned,
         "last_completed": last.isoformat() if last else None,
-    }
-
-
-async def _derive_wvp_incident_log(
-    conn, *, company_id: UUID, location_id: UUID, row: Dict[str, Any], ctx: Dict[str, Any]
-) -> DerivationResult:
-    """Violent-incident log, inferred from IR incidents tagged 'behavioral'
-    whose title/description mention violence or threats.
-
-    ir_incidents has no dedicated 'violence' incident_type (the CHECK
-    constraint allows only safety/behavioral/property/near_miss/other), so this
-    is a text-match proxy, not a structured field — deliberately conservative:
-    it can prove a log exists (evidence found), it can never prove one doesn't
-    (no matches could mean no incidents, or incidents logged under different
-    wording — either way, blind, not violating).
-    """
-    inc = ctx.get("violence_incidents", {}).get(location_id)
-    if not inc or int(inc["total"] or 0) == 0:
-        return None
-    return "compliant", {
-        "rule": "violent-incident log has entries",
-        "matched_incidents": int(inc["total"]),
     }
 
 
 COMPONENT_DERIVATIONS: Dict[str, Derivation] = {
     "wvp_training": Derivation(
         "wvp_training", _derive_wvp_training, "SB 553 annual training",
-        required_feature="training"),
-    "wvp_incident_log": Derivation(
-        "wvp_incident_log", _derive_wvp_incident_log, "SB 553 violent incident log",
-        required_feature="incidents"),
+        required_feature="training", context_group="wvp_training",
+        source_label="training_records"),
 }
 
 
@@ -405,30 +422,32 @@ DERIVATIONS: Dict[str, Derivation] = {
     d.key: d
     for d in (
         Derivation("state_minimum_wage", _derive_minimum_wage, "Minimum wage",
-                   required_feature="employees"),
+                   required_feature="employees", context_group="employees"),
         Derivation("local_minimum_wage", _derive_minimum_wage, "Local minimum wage",
-                   required_feature="employees"),
+                   required_feature="employees", context_group="employees"),
         Derivation("national_minimum_wage", _derive_minimum_wage, "Federal minimum wage",
-                   required_feature="employees"),
+                   required_feature="employees", context_group="employees"),
         Derivation("exempt_salary_threshold", _derive_exempt_salary, "Exempt salary threshold",
-                   required_feature="employees"),
+                   required_feature="employees", context_group="employees"),
         Derivation("harassment_prevention_training", _derive_harassment_training,
-                   "Harassment prevention training", required_feature="training"),
+                   "Harassment prevention training", required_feature="training",
+                   context_group="training"),
         Derivation("injury_illness_recordkeeping", _derive_injury_recordkeeping,
-                   "Injury & illness recordkeeping", required_feature="incidents"),
+                   "Injury & illness recordkeeping", required_feature="incidents",
+                   context_group="incidents"),
         # Workforce-compliance trackers as the backstop for their matching
         # jurisdiction requirements. Same data epl_readiness derives its EPL
         # factors from — the workforce page is where the business maintains it.
         # (AI hiring-tool / LL144 has no catalog regulation_key yet, so there is
         # nothing to derive against — it stays self-tracked on the page.)
         Derivation("pay_transparency", _derive_pay_transparency, "Pay transparency",
-                   required_feature="workforce_compliance"),
+                   required_feature="workforce_compliance", context_group="workforce"),
         Derivation("federal_equal_pay", _derive_pay_equity, "Pay equity",
-                   required_feature="workforce_compliance"),
+                   required_feature="workforce_compliance", context_group="workforce"),
         Derivation("pay_equity", _derive_pay_equity, "Pay equity",
-                   required_feature="workforce_compliance"),
+                   required_feature="workforce_compliance", context_group="workforce"),
         Derivation("state_biometric_privacy_laws", _derive_biometrics, "Biometric privacy",
-                   required_feature="workforce_compliance"),
+                   required_feature="workforce_compliance", context_group="workforce"),
     )
 }
 
@@ -437,12 +456,53 @@ def derivable_keys() -> List[str]:
     return sorted(DERIVATIONS)
 
 
+# ── context group narrowing ─────────────────────────────────────────────────
+# Every group `_build_context` knows how to build. A candidate-row set for one
+# requirement (or one component) only ever needs the groups its OWN
+# derivations read — building all of them on every reconcile is how a
+# checklist GET ends up scanning the whole company's roster for a derivation
+# it never calls.
+CTX_GROUPS = ("employees", "training", "incidents", "wvp_training", "workforce")
+
+
+def _context_groups_for(
+    registry: Dict[str, Derivation], keys: Iterable[Optional[str]]
+) -> set:
+    """The context_group values the given registry keys' derivations read.
+
+    Unknown/None keys are ignored (a row with no matching derivation reads no
+    context) rather than erroring — the caller has already filtered candidate
+    rows to what it will actually evaluate, but staying permissive here means
+    a caller that hasn't is just a no-op for the row it can't derive anyway.
+    """
+    groups = set()
+    for key in keys:
+        d = registry.get(key) if key is not None else None
+        if d is not None and d.context_group is not None:
+            groups.add(d.context_group)
+    return groups
+
+
 # ── context (batched once per company — never N+1 per requirement) ──────────
 
-async def _build_context(conn, company_id: UUID, features: Dict[str, Any]) -> Dict[str, Any]:
-    ctx: Dict[str, Any] = {"employees": {}, "training": None, "incidents": {}}
+async def _build_context(
+    conn, company_id: UUID, features: Dict[str, Any], *,
+    groups: Optional[Sequence[str]] = None,
+) -> Dict[str, Any]:
+    """Batch-load the evidence every derivation reads, narrowed to `groups`.
 
-    if features.get("employees"):
+    `groups=None` (the default) builds everything — used by any caller that
+    hasn't narrowed its candidate rows yet. Every group key is always present
+    in the returned dict (empty/None, per group) even when not built, so a
+    derivation reading an un-built group sees exactly what it sees for an
+    unsold feature: nothing there, blind, never a violation.
+    """
+    build = CTX_GROUPS if groups is None else set(groups)
+    ctx: Dict[str, Any] = {
+        "employees": {}, "training": None, "incidents": {}, "wvp_training": None,
+    }
+
+    if "employees" in build and features.get("employees"):
         for e in await conn.fetch(
             """
             SELECT id, first_name, last_name, pay_classification, pay_rate, work_location_id
@@ -453,7 +513,7 @@ async def _build_context(conn, company_id: UUID, features: Dict[str, Any]) -> Di
         ):
             ctx["employees"].setdefault(e["work_location_id"], []).append(dict(e))
 
-    if features.get("training"):
+    if "training" in build and features.get("training"):
         ctx["training"] = await conn.fetchrow(
             """
             SELECT COUNT(*) AS assigned,
@@ -466,7 +526,7 @@ async def _build_context(conn, company_id: UUID, features: Dict[str, Any]) -> Di
             company_id,
         )
 
-    if features.get("incidents"):
+    if "incidents" in build and features.get("incidents"):
         for r in await conn.fetch(
             """
             SELECT location_id,
@@ -482,13 +542,17 @@ async def _build_context(conn, company_id: UUID, features: Dict[str, Any]) -> Di
 
     # SB 553-shaped context. Deliberately separate from ctx["training"] (which
     # is filtered to harassment/EEO training and says nothing about workplace
-    # violence) and ctx["incidents"] (which counts OSHA-recordability, not
-    # violence logging) — reusing either would silently grade the wrong thing.
-    if features.get("training"):
+    # violence) — reusing it would silently grade the wrong thing.
+    if "wvp_training" in build and features.get("training"):
         ctx["wvp_training"] = await conn.fetchrow(
             """
             SELECT COUNT(*) AS assigned,
                    COUNT(*) FILTER (WHERE status = 'completed') AS completed,
+                   COUNT(*) FILTER (WHERE status = 'completed' AND completed_date >= $2)
+                     AS current_completed,
+                   COUNT(*) FILTER (WHERE status = 'completed' AND completed_date IS NULL)
+                     AS completed_undated,
+                   MIN(completed_date) FILTER (WHERE status = 'completed') AS oldest_completed,
                    MAX(completed_date) AS last_completed
             FROM training_records
             WHERE company_id = $1
@@ -496,27 +560,12 @@ async def _build_context(conn, company_id: UUID, features: Dict[str, Any]) -> Di
                    OR LOWER(title) ~ '(workplace violence|wvp|sb ?553)')
             """,
             company_id,
+            date.today() - timedelta(days=_ANNUAL_TRAINING_WINDOW_DAYS),
         )
-
-    if features.get("incidents"):
-        ctx["violence_incidents"] = {}
-        for r in await conn.fetch(
-            """
-            SELECT location_id, COUNT(*) AS total
-            FROM ir_incidents
-            WHERE company_id = $1 AND location_id IS NOT NULL
-              AND incident_type = 'behavioral'
-              AND (title ILIKE '%violen%' OR title ILIKE '%threat%'
-                   OR description ILIKE '%violen%' OR description ILIKE '%threat%')
-            GROUP BY location_id
-            """,
-            company_id,
-        ):
-            ctx["violence_incidents"][r["location_id"]] = dict(r)
 
     # Workforce-compliance backstops (pay transparency / pay equity / biometrics).
     # Loaded once here so the per-requirement derivations never re-query.
-    if features.get("workforce_compliance"):
+    if "workforce" in build and features.get("workforce_compliance"):
         ctx["locations"] = {
             r["id"]: r["state"]
             for r in await conn.fetch(
@@ -581,7 +630,7 @@ async def reconcile_requirement_status(
 
     rows = await conn.fetch(
         f"""
-        SELECT cr.location_id, cat.id AS catalog_id, cat.regulation_key,
+        SELECT DISTINCT cr.location_id, cat.id AS catalog_id, cat.regulation_key,
                cat.numeric_value, cat.category, cat.rate_type
         FROM compliance_requirements cr
         JOIN business_locations bl ON bl.id = cr.location_id
@@ -595,7 +644,10 @@ async def reconcile_requirement_status(
     if not rows:
         return {"evaluated": 0, "changed": 0}
 
-    ctx = await _build_context(conn, company_id, features)
+    ctx = await _build_context(
+        conn, company_id, features,
+        groups=_context_groups_for(DERIVATIONS, (r["regulation_key"] for r in rows)),
+    )
 
     existing = {
         (r["location_id"], r["jurisdiction_requirement_id"]): dict(r)
@@ -603,7 +655,8 @@ async def reconcile_requirement_status(
             """
             SELECT location_id, jurisdiction_requirement_id, status, basis,
                    attested_note, attested_at
-            FROM requirement_compliance_status WHERE company_id = $1
+            FROM requirement_compliance_status
+            WHERE company_id = $1 AND component_key IS NULL
             """,
             company_id,
         )
@@ -796,7 +849,7 @@ async def reconcile_component_status(
 
     rows = await conn.fetch(
         f"""
-        SELECT cr.location_id, cat.id AS catalog_id, rc.component_key,
+        SELECT DISTINCT cr.location_id, cat.id AS catalog_id, rc.component_key,
                rc.derivation_key
         FROM compliance_requirements cr
         JOIN business_locations bl ON bl.id = cr.location_id
@@ -810,7 +863,10 @@ async def reconcile_component_status(
     if not rows:
         return {"evaluated": 0, "changed": 0}
 
-    ctx = await _build_context(conn, company_id, features)
+    ctx = await _build_context(
+        conn, company_id, features,
+        groups=_context_groups_for(COMPONENT_DERIVATIONS, (r["derivation_key"] for r in rows)),
+    )
 
     existing = {
         (r["location_id"], r["jurisdiction_requirement_id"], r["component_key"]): dict(r)
@@ -915,9 +971,17 @@ async def get_component_checklist(
     status_rows: List[Dict[str, Any]] = []
     for c in components:
         st = statuses.get(c["component_key"], {})
+        # Registry-resolved, not a bare `derivation_key is not None` — a
+        # catalog row can carry a stale/dropped derivation_key (exactly what
+        # happened when wvp_incident_log was retired) and this must agree
+        # with attest_component_status's own refusal check below, or the FE
+        # hides the attest button for a clause the server will happily
+        # accept an attestation on.
+        d = component_derivation(c["derivation_key"])
         merged = {
             **c,
-            "derivable": c["derivation_key"] is not None,
+            "derivable": d is not None,
+            "derivation_source": d.source_label if d is not None else None,
             "status": st.get("status", "unknown"),
             "basis": st.get("basis"),
             "evidence": (json.loads(st["evidence"]) if isinstance(st.get("evidence"), str)

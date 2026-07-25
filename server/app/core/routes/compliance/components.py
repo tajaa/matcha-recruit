@@ -15,11 +15,14 @@ from app.core.models.compliance import (
     AttestComponentRequest,
     RequirementComponent,
     RequirementComponentChecklist,
+    RequirementExposure,
     RequirementStatusSummary,
 )
-from app.core.services.compliance_service import get_location_requirements, verify_location_ownership
+from app.core.services.compliance_risk import PENALTY_JOIN_SQL, PENALTY_SELECT_SQL, _risk_penalty
+from app.core.services.compliance_service import get_location_requirements
 from app.core.services.compliance_status import (
     attest_component_status,
+    component_derivation,
     get_component_checklist,
 )
 from app.matcha.dependencies import require_admin_or_client
@@ -37,29 +40,63 @@ async def _load_requirement_header(conn, catalog_id: UUID):
     return row
 
 
-async def _exposure_for(conn, catalog_id: UUID, company_id: UUID) -> dict | None:
-    """Directional exposure figure — reuses the exact penalty join already at
-    compliance_risk.py:495 (catalog metadata + bound authority row) x active
-    locations. Not a dollar model of its own; labelled directional."""
+async def _assert_component_requirement_visible(
+    conn, *, location_id: UUID, catalog_id: UUID, company_id: UUID
+) -> None:
+    """404 unless this requirement is on the tenant's own Requirements tab AND
+    decomposed into components.
+
+    Runs the real `get_location_requirements` pipeline rather than a bare
+    fetch-by-id: industry applicability, preemption and city-level promotion
+    (`_filter_with_preemption` / `_filter_city_level_requirements`) are
+    SET-RELATIVE — they decide by comparing sibling requirement rows in the
+    same category group, so a query narrowed to just this one row cannot
+    reproduce the same visibility answer. Skipping this check would leak
+    jurisdictional content this tenant isn't deemed subject to, and would let
+    attest write a status for a requirement never shown to them anywhere in
+    the product.
+
+    Also stands in for the location-ownership check: `get_location_requirements`
+    already filters on `l.company_id = $2` and returns `[]` for a foreign or
+    nonexistent location, so a mismatched location 404s here rather than
+    getting a separate 403 (no existence disclosure either way).
+    """
+    visible = await get_location_requirements(location_id, company_id, conn=conn)
+    if not any(r.jurisdiction_requirement_id == str(catalog_id) and r.has_components
+               for r in visible):
+        raise HTTPException(status_code=404, detail="Requirement not found")
+
+
+async def _exposure_for(conn, catalog_id: UUID) -> RequirementExposure | None:
+    """Directional exposure figure for one decomposed requirement.
+
+    Composes the same PENALTY_SELECT_SQL/PENALTY_JOIN_SQL fragments and the
+    same pure `_risk_penalty` builder compliance_risk.py's own issue penalties
+    use, so provenance rules (source_url/citation only from the bound
+    authority row, `grounded` = the FK's existence) apply identically here —
+    no hand-copied join to drift out of sync with that file.
+    """
     row = await conn.fetchrow(
-        """
-        SELECT cat.metadata -> 'penalties' AS penalties, pai.citation AS penalty_citation,
-               (SELECT count(*) FROM business_locations
-                WHERE company_id = $2 AND COALESCE(is_active, true) = true) AS location_count
+        f"""
+        SELECT {PENALTY_SELECT_SQL}
         FROM jurisdiction_requirements cat
-        LEFT JOIN authority_index_items pai ON pai.id = cat.penalty_item_id
+        {PENALTY_JOIN_SQL}
         WHERE cat.id = $1
         """,
-        catalog_id, company_id,
+        catalog_id,
     )
     if row is None or row["penalties"] is None:
         return None
-    return {
-        "penalties": row["penalties"],
-        "penalty_citation": row["penalty_citation"],
-        "location_count": row["location_count"],
-        "directional": True,
-    }
+    penalties = row["penalties"]
+    if isinstance(penalties, str):
+        penalties = json.loads(penalties)
+    penalty = _risk_penalty(
+        penalties,
+        authority_url=row["penalty_source_url"],
+        authority_citation=row["penalty_citation"],
+        effective_date=row["penalty_effective_date"],
+    )
+    return RequirementExposure(penalty=penalty, directional=True)
 
 
 @shared_router.get(
@@ -82,26 +119,14 @@ async def get_requirement_components_endpoint(
         raise HTTPException(status_code=400, detail="Invalid id")
 
     async with get_connection() as conn:
-        if not await verify_location_ownership(conn, loc_uuid, company_id):
-            raise HTTPException(status_code=403, detail="Access denied")
-
-    # The component checklist must never be reachable for a requirement the
-    # tenant's own Requirements tab hides — get_location_requirements already
-    # runs the full visibility pipeline (industry applicability, preemption,
-    # codified gate, local-ordinance filtering); a bare fetch by catalog id
-    # would leak jurisdictional content this tenant isn't deemed subject to,
-    # and would let attest write a status for a requirement never shown to
-    # them anywhere in the product.
-    visible = await get_location_requirements(loc_uuid, company_id)
-    if not any(r.jurisdiction_requirement_id == str(cat_uuid) and r.has_components for r in visible):
-        raise HTTPException(status_code=404, detail="Requirement not found")
-
-    async with get_connection() as conn:
+        await _assert_component_requirement_visible(
+            conn, location_id=loc_uuid, catalog_id=cat_uuid, company_id=company_id,
+        )
         header = await _load_requirement_header(conn, cat_uuid)
         checklist = await get_component_checklist(
             conn, company_id=company_id, location_id=loc_uuid, catalog_id=cat_uuid,
         )
-        exposure = await _exposure_for(conn, cat_uuid, company_id)
+        exposure = await _exposure_for(conn, cat_uuid)
 
     return RequirementComponentChecklist(
         jurisdiction_requirement_id=str(cat_uuid),
@@ -136,18 +161,13 @@ async def attest_requirement_component_endpoint(
         raise HTTPException(status_code=400, detail="Invalid id")
 
     async with get_connection() as conn:
-        if not await verify_location_ownership(conn, loc_uuid, company_id):
-            raise HTTPException(status_code=403, detail="Access denied")
-
-    # Same visibility guard as the read endpoint — see its comment. Without
-    # this a client could attest a status for a requirement never shown to
-    # them on the Requirements tab (a different industry's obligation, a
-    # preempted duplicate, an uncodified row).
-    visible = await get_location_requirements(loc_uuid, company_id)
-    if not any(r.jurisdiction_requirement_id == str(cat_uuid) and r.has_components for r in visible):
-        raise HTTPException(status_code=404, detail="Requirement not found")
-
-    async with get_connection() as conn:
+        # Same visibility guard as the read endpoint — see its docstring.
+        # Without this a client could attest a status for a requirement never
+        # shown to them on the Requirements tab (a different industry's
+        # obligation, a preempted duplicate, an uncodified row).
+        await _assert_component_requirement_visible(
+            conn, location_id=loc_uuid, catalog_id=cat_uuid, company_id=company_id,
+        )
         try:
             await attest_component_status(
                 conn,
@@ -179,6 +199,13 @@ async def attest_requirement_component_endpoint(
     if isinstance(evidence, str):
         evidence = json.loads(evidence)
 
+    # Registry-resolved, not a bare `derivation_key is not None` — must agree
+    # with attest_component_status's own refusal check (compliance_status.py)
+    # and with get_component_checklist's read-path builder, or the attest
+    # button and the server's 409 disagree the moment the catalog carries a
+    # stale/dropped derivation_key.
+    d = component_derivation(component["derivation_key"])
+
     return RequirementComponent(
         component_key=component["component_key"],
         label=component["label"],
@@ -187,7 +214,8 @@ async def attest_requirement_component_endpoint(
         suggested_fix=component["suggested_fix"],
         severity=component["severity"],
         sort_order=component["sort_order"],
-        derivable=component["derivation_key"] is not None,
+        derivable=d is not None,
+        derivation_source=d.source_label if d is not None else None,
         status=component["status"] or "unknown",
         basis=component["basis"],
         evidence=evidence or {},

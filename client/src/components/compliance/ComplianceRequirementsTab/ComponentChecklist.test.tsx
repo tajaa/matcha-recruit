@@ -26,6 +26,7 @@ function checklist(overrides: Partial<RequirementComponentChecklist> = {}): Requ
         severity: 'critical',
         sort_order: 2,
         derivable: true,
+        derivation_source: 'training_records',
         status: 'unknown',
         basis: null,
         evidence: {},
@@ -42,6 +43,7 @@ function checklist(overrides: Partial<RequirementComponentChecklist> = {}): Requ
         severity: 'important',
         sort_order: 4,
         derivable: false,
+        derivation_source: null,
         status: 'unknown',
         basis: null,
         evidence: {},
@@ -62,6 +64,10 @@ function checklist(overrides: Partial<RequirementComponentChecklist> = {}): Requ
 beforeEach(() => {
   vi.mocked(complianceApi.fetchRequirementComponents).mockReset()
   vi.mocked(complianceApi.attestRequirementComponent).mockReset()
+  // These tests exercise the static list, not the audit-reveal animation
+  // (covered separately in AuditRevealModal.test.tsx) — pre-seed the
+  // "already seen" key so the modal doesn't auto-open and steal focus.
+  localStorage.setItem('matcha_audit_reveal_seen:loc-1:cat-1', '1')
 })
 
 describe('ComponentChecklist', () => {
@@ -109,6 +115,7 @@ describe('ComponentChecklist', () => {
       severity: 'important',
       sort_order: 4,
       derivable: false,
+      derivation_source: null,
       status: 'compliant',
       basis: 'attested',
       evidence: {},
@@ -126,5 +133,52 @@ describe('ComponentChecklist', () => {
       'loc-1', 'cat-1', 'hazard_assessment', { status: 'compliant' },
     ))
     await waitFor(() => expect(screen.getAllByText('Compliant').length).toBe(1))
+  })
+
+  it('a failed attestation shows an inline error without erasing the checklist', async () => {
+    vi.mocked(complianceApi.fetchRequirementComponents).mockResolvedValue(checklist())
+    vi.mocked(complianceApi.attestRequirementComponent).mockRejectedValue(new Error('409'))
+    const user = userEvent.setup()
+    render(<ComponentChecklist locationId="loc-1" catalogId="cat-1" />)
+
+    await waitFor(() => expect(screen.getByText('We have this')).toBeInTheDocument())
+    await user.click(screen.getByText('We have this'))
+
+    await waitFor(() => expect(screen.getByText('Could not save that attestation.')).toBeInTheDocument())
+    // The clauses, rollup, and Replay control must all still be on screen —
+    // an attest failure must not fall through to the load-error render path.
+    expect(screen.getAllByText('No evidence on file').length).toBe(2)
+    expect(screen.getByText('↻ Replay audit')).toBeInTheDocument()
+
+    await user.click(screen.getByText('Dismiss'))
+    expect(screen.queryByText('Could not save that attestation.')).not.toBeInTheDocument()
+  })
+
+  it('renders an attest control for the attest-only violent_incident_log clause', async () => {
+    // Regression for dropping the wvp_incident_log derivation: this clause
+    // used to be `derivable: true` with no escape hatch when its ILIKE match
+    // false-positived. It is attest-only now, like hazard_assessment.
+    vi.mocked(complianceApi.fetchRequirementComponents).mockResolvedValue(checklist({
+      components: [{
+        component_key: 'violent_incident_log',
+        label: 'Violent Incident Log',
+        question: 'Are incidents logged and retained for 5 years?',
+        statute_citation: 'Cal. Lab. Code § 6401.9(c) (violent incident log)',
+        suggested_fix: 'Deploy a violent-incident log with 5-year retention.',
+        severity: 'critical',
+        sort_order: 3,
+        derivable: false,
+        derivation_source: null,
+        status: 'unknown',
+        basis: null,
+        evidence: {},
+        attested_note: null,
+        attested_at: null,
+        derived_at: null,
+      }],
+    }))
+    render(<ComponentChecklist locationId="loc-1" catalogId="cat-1" />)
+
+    await waitFor(() => expect(screen.getByText('We have this')).toBeInTheDocument())
   })
 })

@@ -64,6 +64,19 @@ def _loc_label(row) -> str:
     return city or state or "Company-wide"
 
 
+# The penalty context every reader of a jurisdiction_requirements catalog row
+# needs: the model-writable metadata blob (the FIGURE) plus the bound
+# authority row (the PROVENANCE) — see `_risk_penalty`'s docstring for why
+# those two must never be conflated. Named fragments so a second reader
+# (routes/compliance/components.py's per-clause exposure) composes them
+# instead of hand-copying the join and silently drifting from it.
+PENALTY_SELECT_SQL = """cat.metadata -> 'penalties' AS penalties,
+       cat.penalty_effective_date,
+       pai.source_url AS penalty_source_url,
+       pai.citation   AS penalty_citation"""
+PENALTY_JOIN_SQL = "LEFT JOIN authority_index_items pai ON pai.id = cat.penalty_item_id"
+
+
 def _risk_penalty(
     pen: dict | None,
     *,
@@ -566,6 +579,10 @@ async def get_compliance_risk_summary(company_id: UUID) -> ComplianceRiskSummary
                 LEFT JOIN requirement_compliance_status rcs
                   ON rcs.location_id = cr.location_id
                  AND rcs.jurisdiction_requirement_id = cat.id
+                 -- Component rows (reqcomp01) share this table; without this
+                 -- filter a 5-component statute fans the join out 5x and
+                 -- multiplies the ceiling by the component count.
+                 AND rcs.component_key IS NULL
                 WHERE bl.company_id = $1 AND COALESCE(bl.is_active, true) = true
                   AND cat.metadata ? 'penalties'
                   {await codified_gate_sql("cat", conn=conn)}

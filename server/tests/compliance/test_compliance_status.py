@@ -295,12 +295,18 @@ def test_verdict_unknown_maps_to_none_in_derivations():
 # INACTIVE_EMPLOYMENT_STATUSES drift in the schedule tests.
 
 def test_compliance_risk_excludes_component_rows():
+    """Two live joins onto requirement_compliance_status in this function:
+    §4b (confirmed non_compliant issues) and §4c (the conditional ceiling).
+    Both must filter component_key IS NULL — §4c originally didn't, so a
+    5-component statute fanned its LEFT JOIN out 5x and multiplied the
+    dollar ceiling."""
     import inspect
     from app.core.services import compliance_risk
     src = inspect.getsource(compliance_risk.get_compliance_risk_summary)
-    assert "rcs.component_key IS NULL" in src, (
-        "compliance_risk.py's requirement_compliance_status read must filter "
-        "component_key IS NULL, or component rows collide on the RiskIssue id"
+    assert src.count("component_key IS NULL") == 2, (
+        "compliance_risk.py's two requirement_compliance_status reads (§4b "
+        "WHERE, §4c JOIN) must both filter component_key IS NULL, or "
+        "component rows collide/fan out and corrupt the risk numbers"
     )
 
 
@@ -327,3 +333,30 @@ def test_all_status_upserts_target_the_reqcomp01_unique_index():
     for fn in (cs.reconcile_requirement_status, cs.attest_requirement_status,
                cs.reconcile_component_status, cs.attest_component_status):
         assert target in inspect.getsource(fn), f"{fn.__name__} has a stale ON CONFLICT target"
+
+
+def test_reconcile_reads_are_scoped_to_their_own_row_kind():
+    """reconcile_requirement_status's `existing` snapshot must only ever see
+    whole-requirement rows (component_key IS NULL) — otherwise a component
+    row can win the dict slot for its parent's key, and (since `derived`
+    beats `attested`) a single clause's attestation can get written onto the
+    WHOLE statute the next time it fails to derive. reconcile_component_status
+    is the mirror: only component rows (component_key IS NOT NULL)."""
+    import inspect
+    from app.core.services import compliance_status as cs
+    assert "component_key IS NULL" in inspect.getsource(cs.reconcile_requirement_status)
+    assert "component_key IS NOT NULL" in inspect.getsource(cs.reconcile_component_status)
+
+
+def test_both_reconcile_candidate_queries_are_distinct():
+    """compliance_requirements is re-projected on every check and churns
+    (reqstatus01: a live run watched a location go 22 -> 17 codified rows
+    between two checks). Without DISTINCT, a duplicate projection row for the
+    same catalog id evaluates every derivation twice and — because the
+    `existing` snapshot is taken once before the loop and never refreshed
+    mid-pass — writes a second requirement_status_audit_log row claiming the
+    same transition."""
+    import inspect
+    from app.core.services import compliance_status as cs
+    assert "SELECT DISTINCT" in inspect.getsource(cs.reconcile_requirement_status)
+    assert "SELECT DISTINCT" in inspect.getsource(cs.reconcile_component_status)

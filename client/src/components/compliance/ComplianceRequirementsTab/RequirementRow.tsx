@@ -140,6 +140,7 @@ export function RequirementRow({ req, knownAuthorities, highlightId, readOnly, o
           locationId={locationId}
           catalogId={req.jurisdiction_requirement_id}
           readOnly={readOnly}
+          employeeCount={req.affected_employee_count}
         />
       )}
     </div>

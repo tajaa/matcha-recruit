@@ -1,4 +1,5 @@
 """compliance_service.checks — J6 split of compliance_service.py."""
+from contextlib import asynccontextmanager
 from typing import Optional, List, AsyncGenerator, Dict, Any, Callable, Tuple
 from uuid import UUID
 from datetime import date, datetime, timedelta
@@ -1362,8 +1363,25 @@ async def run_compliance_check_stream(
 
 
 
+@asynccontextmanager
+async def _conn_or_new(conn):
+    """Yield the caller's connection, or open a fresh one if none was passed.
+
+    Lets a hot path (e.g. the component-checklist endpoint) thread one
+    connection through several service calls instead of each one opening
+    its own — the nested-acquire footgun already documented at
+    matcha_work_document/__init__.py:189.
+    """
+    if conn is not None:
+        yield conn
+        return
+    from app.database import get_connection
+    async with get_connection() as c:
+        yield c
+
+
 async def get_employee_impact_for_location(
-    location_id: UUID, company_id: UUID
+    location_id: UUID, company_id: UUID, *, conn=None
 ) -> Dict[str, Any]:
     """Calculate employee impact for a compliance location.
 
@@ -1372,10 +1390,11 @@ async def get_employee_impact_for_location(
     Primary path: query by work_location_id FK (fast, exact).
     Fallback: heuristic matching for employees with work_location_id IS NULL
     (legacy rows that predate the FK linkage).
-    """
-    from app.database import get_connection
 
-    async with get_connection() as conn:
+    Pass `conn=` to reuse an already-open connection instead of acquiring a
+    new one from the pool.
+    """
+    async with _conn_or_new(conn) as conn:
         # Get location state/city
         loc = await conn.fetchrow(
             "SELECT state, city FROM business_locations WHERE id = $1 AND company_id = $2",
@@ -1578,11 +1597,11 @@ async def get_employee_impact_for_location(
 
 
 async def get_location_requirements(
-    location_id: UUID, company_id: UUID, category: Optional[str] = None
+    location_id: UUID, company_id: UUID, category: Optional[str] = None, *, conn=None
 ) -> List[RequirementResponse]:
-    from app.database import get_connection
-
-    async with get_connection() as conn:
+    """Pass `conn=` to reuse an already-open connection instead of acquiring a
+    new one from the pool (see `_conn_or_new`)."""
+    async with _conn_or_new(conn) as conn:
         loc = await conn.fetchrow(
             """SELECT bl.state, jr.has_local_ordinance
                FROM business_locations bl
@@ -1639,7 +1658,7 @@ async def get_location_requirements(
 
         # Enrich with employee impact data
         try:
-            impact = await get_employee_impact_for_location(location_id, company_id)
+            impact = await get_employee_impact_for_location(location_id, company_id, conn=conn)
             total_affected = impact["total_affected"]
             employee_names = impact["employee_names"]
             violations_by_rt = impact["violations_by_rate_type"]

@@ -1,26 +1,23 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { fetchRequirementComponents, attestRequirementComponent } from '../../../api/compliance/compliance'
-import type { RequirementComponent, RequirementComponentChecklist as Checklist } from '../../../types/compliance'
+import type { RequirementComponentChecklist as Checklist } from '../../../types/compliance'
+import { STATUS_LABEL, STATUS_CLASS } from './componentStatus'
+import { AuditRevealModal } from './AuditRevealModal'
 
 type Props = {
   locationId: string
   catalogId: string
   readOnly?: boolean
+  /** For the animation's header card — already fetched onto the row. */
+  employeeCount?: number | null
 }
 
-const STATUS_LABEL: Record<RequirementComponent['status'], string> = {
-  compliant: 'Compliant',
-  non_compliant: 'Gap',
-  in_progress: 'In progress',
-  unknown: 'No evidence on file',
+function safeGet(key: string): string | null {
+  try { return localStorage.getItem(key) } catch { return null }
 }
-
-const STATUS_CLASS: Record<RequirementComponent['status'], string> = {
-  compliant: 'bg-emerald-900/20 text-emerald-400 border-emerald-800/40',
-  non_compliant: 'bg-red-900/20 text-red-400 border-red-800/40',
-  in_progress: 'bg-amber-900/20 text-amber-400 border-amber-800/40',
-  unknown: 'bg-white/[0.04] text-zinc-400 border-white/[0.08]',
+function safeSet(key: string, value: string): void {
+  try { localStorage.setItem(key, value) } catch { /* Safari private mode etc — non-fatal */ }
 }
 
 // A statute decomposed into its checkable clauses (reqcomp01). `unknown`
@@ -28,25 +25,45 @@ const STATUS_CLASS: Record<RequirementComponent['status'], string> = {
 // control — never as a gap. The engine underneath is blind-never-violating
 // (compliance_status.py) and this card must not contradict that by reusing
 // "GAP" copy for the absence of a record.
-export function ComponentChecklist({ locationId, catalogId, readOnly }: Props) {
+export function ComponentChecklist({ locationId, catalogId, readOnly, employeeCount }: Props) {
   const [checklist, setChecklist] = useState<Checklist | null>(null)
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  // Load failures are fatal (nothing rendered underneath to fall back to) and
+  // block the whole card below. Attest failures are NOT — the checklist is
+  // already loaded and showing real data; a failed attestation must not wipe
+  // five clauses, the coverage rollup, and Replay down to one line of text
+  // with no retry path. Two separate states, two separate render paths.
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [attestError, setAttestError] = useState<string | null>(null)
   const [attesting, setAttesting] = useState<string | null>(null)
+  const [revealOpen, setRevealOpen] = useState(false)
+  const [runId, setRunId] = useState(0)
+  const didAutoOpen = useRef(false)
+  const seenKey = `matcha_audit_reveal_seen:${locationId}:${catalogId}`
 
   useEffect(() => {
     let cancelled = false
     setLoading(true)
-    setError(null)
+    setLoadError(null)
     fetchRequirementComponents(locationId, catalogId)
-      .then((data) => { if (!cancelled) setChecklist(data) })
-      .catch(() => { if (!cancelled) setError('Could not load the component checklist.') })
+      .then((data) => {
+        if (cancelled) return
+        setChecklist(data)
+        if (!didAutoOpen.current && !safeGet(seenKey)) {
+          didAutoOpen.current = true
+          safeSet(seenKey, '1')
+          setRevealOpen(true)
+        }
+      })
+      .catch(() => { if (!cancelled) setLoadError('Could not load the component checklist.') })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [locationId, catalogId])
 
   async function attest(componentKey: string) {
     setAttesting(componentKey)
+    setAttestError(null)
     try {
       const updated = await attestRequirementComponent(locationId, catalogId, componentKey, {
         status: 'compliant',
@@ -56,7 +73,7 @@ export function ComponentChecklist({ locationId, catalogId, readOnly }: Props) {
         components: prev.components.map((c) => (c.component_key === componentKey ? updated : c)),
       })
     } catch {
-      setError('Could not save that attestation.')
+      setAttestError('Could not save that attestation.')
     } finally {
       setAttesting(null)
     }
@@ -69,21 +86,49 @@ export function ComponentChecklist({ locationId, catalogId, readOnly }: Props) {
       </div>
     )
   }
-  if (error) {
-    return <p className="px-4 py-4 text-xs text-red-400">{error}</p>
+  if (loadError) {
+    return <p className="px-4 py-4 text-xs text-red-400">{loadError}</p>
   }
   if (!checklist) return null
 
   const { summary } = checklist
   return (
     <div className="px-4 py-3 bg-white/[0.015] border-t border-white/[0.06]">
+      <AuditRevealModal
+        open={revealOpen}
+        onClose={() => setRevealOpen(false)}
+        checklist={checklist}
+        employeeCount={employeeCount}
+        runId={runId}
+      />
+      {attestError && (
+        <div className="flex items-center justify-between mb-2 rounded border border-red-800/40 bg-red-950/20 px-2.5 py-1.5">
+          <span className="text-[11px] text-red-400">{attestError}</span>
+          <button
+            type="button"
+            onClick={() => setAttestError(null)}
+            className="text-[11px] text-zinc-500 hover:text-zinc-300 transition-colors"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
       <div className="flex items-center justify-between mb-2">
         <span className="text-[11px] text-zinc-500">
           {summary.known}/{summary.total} components with a known status
         </span>
-        <span className="text-[11px] text-zinc-500">
-          {summary.coverage_pct == null ? '—' : `${summary.coverage_pct}%`}
-        </span>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => { setRunId((n) => n + 1); setRevealOpen(true) }}
+            className="text-[11px] text-zinc-500 hover:text-amber-400 transition-colors"
+          >
+            ↻ Replay audit
+          </button>
+          <span className="text-[11px] text-zinc-500">
+            {summary.coverage_pct == null ? '—' : `${summary.coverage_pct}%`}
+          </span>
+        </div>
       </div>
       <div className="space-y-2">
         {checklist.components.map((c) => (

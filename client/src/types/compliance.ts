@@ -254,6 +254,11 @@ export interface RequirementComponent {
   /** True when this component is auto-checked from the tenant's own records
    *  — the attest control must not render for it (server refuses with 409). */
   derivable: boolean
+  /** The Derivation.source_label for a derivable component (e.g.
+   *  "training_records") — server-side single source of truth for the
+   *  audit-reveal UI's "Screening <source>" strip. Null for attest-only
+   *  components. */
+  derivation_source: string | null
   status: 'compliant' | 'non_compliant' | 'in_progress' | 'unknown'
   basis: 'derived' | 'attested' | null
   evidence: Record<string, unknown>
@@ -274,6 +279,13 @@ export interface RequirementComponentSummary {
   count_unknown: number
 }
 
+/** Directional statutory-penalty context for a decomposed requirement —
+ *  same shape + provenance rules as a risk-cockpit issue's RiskPenalty. */
+export interface RequirementExposure {
+  penalty: RiskPenalty | null
+  directional: boolean
+}
+
 export interface RequirementComponentChecklist {
   jurisdiction_requirement_id: string
   location_id: string
@@ -281,7 +293,7 @@ export interface RequirementComponentChecklist {
   statute_citation: string | null
   components: RequirementComponent[]
   summary: RequirementComponentSummary
-  exposure: Record<string, unknown> | null
+  exposure: RequirementExposure | null
 }
 
 export interface VerificationSource {

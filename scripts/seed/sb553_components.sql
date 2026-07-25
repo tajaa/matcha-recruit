@@ -13,10 +13,21 @@
 -- INSERT...SELECT simply inserts 0 rows (additive, no error, safe to re-run
 -- after that catalog row lands).
 --
--- Pinned UUID scheme (prefix 5b553c00 = "SB 553 components"):
---   5b553c00-0001-... written_plan        5b553c00-0004-... hazard_assessment
---   5b553c00-0002-... annual_training     5b553c00-0005-... annual_review
---   5b553c00-0003-... violent_incident_log
+-- Component ids are left to the column default (gen_random_uuid()) — NOT
+-- pinned constants. Idempotency comes from the real uniqueness constraint
+-- (reqcomp01: UNIQUE (jurisdiction_requirement_id, component_key)), and the
+-- ON CONFLICT target below names that pair explicitly. A pinned-UUID scheme
+-- assumes exactly one CA catalog row matches the WHERE clause; if an
+-- environment ever has two (regulation_key already spans unrelated statutes
+-- across states, and dedup migration 92583427c259 exists precisely because
+-- catalog rows collide), a pinned id would silently seed components for only
+-- the first match and insert nothing for the second — no error, just a
+-- permanently un-decomposable duplicate.
+--
+-- `j.country_code` uses the same `COALESCE(country_code,'US')` idiom as
+-- authority_ingest.py / penalty_schedules.py / admin_onboarding.py — legacy
+-- jurisdiction rows can have a NULL country_code that means US, not "unknown
+-- country".
 --
 -- CITATION NOTE: subsection-letter citations below are the best available
 -- read of Cal. Lab. Code § 6401.9's structure (written plan / training /
@@ -27,41 +38,48 @@
 -- matching the compliance_evals golden-fixture rule: an unverified citation
 -- must not claim verification it hasn't had.
 --
+-- The violent-incident-log obligation's `derivation_key` is NULL (attest-only):
+-- it used to derive `compliant` from a free-text ILIKE match against
+-- ir_incidents, but a matching incident title proves an incident was
+-- mentioned, not that the statute's log (with its required fields and 5-year
+-- retention) exists — see compliance_status.py's blind-never-violating
+-- invariant. Only `annual_training` is derivable today.
+--
 -- No BEGIN/COMMIT/SAVEPOINT here — scripts/seed-prod.sh owns the transaction
 -- envelope. Every INSERT is ON CONFLICT DO NOTHING (idempotent re-run).
 --
 -- Undo: sb553_components.undo.sql
 
 INSERT INTO requirement_components
-    (id, jurisdiction_requirement_id, component_key, label, question,
+    (jurisdiction_requirement_id, component_key, label, question,
      statute_citation, suggested_fix, severity, derivation_key, sort_order)
-SELECT v.id, jr.id, v.component_key, v.label, v.question,
+SELECT jr.id, v.component_key, v.label, v.question,
        v.statute_citation, v.suggested_fix, v.severity, v.derivation_key, v.sort_order
 FROM jurisdiction_requirements jr
 JOIN jurisdictions j ON j.id = jr.jurisdiction_id
 JOIN (VALUES
-    ('5b553c00-0001-4001-8001-000000000001'::uuid, 'written_plan', 'Written WVP Plan',
+    ('written_plan', 'Written WVP Plan',
      'Is there a written, site-specific workplace violence prevention plan, accessible to employees?',
      'Cal. Lab. Code § 6401.9(b)', 'Draft a written plan covering the statute''s required elements.',
      'critical', NULL, 1),
-    ('5b553c00-0002-4002-8002-000000000002'::uuid, 'annual_training', 'Annual Training',
+    ('annual_training', 'Annual Training',
      'Have all employees completed interactive workplace-violence-prevention training within the last 12 months?',
      'Cal. Lab. Code § 6401.9(b) (training)', 'Scope and assign an annual training program.',
      'critical', 'wvp_training', 2),
-    ('5b553c00-0003-4003-8003-000000000003'::uuid, 'violent_incident_log', 'Violent Incident Log',
+    ('violent_incident_log', 'Violent Incident Log',
      'Are workplace violence incidents, threats, and near-misses logged and retained for 5 years?',
      'Cal. Lab. Code § 6401.9(c) (violent incident log)', 'Deploy a violent-incident log with 5-year retention.',
-     'critical', 'wvp_incident_log', 3),
-    ('5b553c00-0004-4004-8004-000000000004'::uuid, 'hazard_assessment', 'Hazard Assessment',
+     'critical', NULL, 3),
+    ('hazard_assessment', 'Hazard Assessment',
      'Has each site had a workplace-specific violence hazard assessment?',
      'Cal. Lab. Code § 6401.9(b) (hazard identification)', 'Schedule per-site hazard assessments.',
      'important', NULL, 4),
-    ('5b553c00-0005-4005-8005-000000000005'::uuid, 'annual_review', 'Annual Review',
+    ('annual_review', 'Annual Review',
      'Is there an annual plan review and a post-incident review cadence in place?',
      'Cal. Lab. Code § 6401.9(f) (annual review)', 'Set an annual review cadence.',
      'important', NULL, 5)
-) AS v(id, component_key, label, question, statute_citation, suggested_fix, severity, derivation_key, sort_order)
+) AS v(component_key, label, question, statute_citation, suggested_fix, severity, derivation_key, sort_order)
   ON true
-WHERE j.state = 'CA' AND j.level = 'state'
+WHERE j.state = 'CA' AND j.level = 'state' AND COALESCE(j.country_code, 'US') = 'US'
   AND jr.regulation_key = 'workplace_violence_prevention'
-ON CONFLICT DO NOTHING;
+ON CONFLICT (jurisdiction_requirement_id, component_key) DO NOTHING;
