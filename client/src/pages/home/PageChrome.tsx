@@ -2,6 +2,19 @@ import { useEffect, useRef, useState } from "react";
 import { LEAF } from "./theme";
 import { useReducedMotion } from "./instruments/shared";
 
+/**
+ * Noir page chrome while mounted (see `[data-marketing-noir]` in index.css) —
+ * overscroll bounce stays noir instead of flashing white, and anchor scrolls
+ * glide. Any page on the noir surface (home, and now Compliance) must call this;
+ * `pages/landing/StartQualify.tsx` is the cautionary example that forgot it.
+ */
+export function useMarketingNoir() {
+  useEffect(() => {
+    document.documentElement.setAttribute("data-marketing-noir", "");
+    return () => document.documentElement.removeAttribute("data-marketing-noir");
+  }, []);
+}
+
 export function GrainOverlay() {
   return (
     <div

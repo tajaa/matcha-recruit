@@ -1,33 +1,50 @@
-import { BG, DISPLAY, INK, LINE, MUTED } from './theme'
+import { Link } from "react-router-dom";
+import { ArrowRight } from "lucide-react";
+import { ASH, BONE, DISPLAY, LEAF, NOIR } from "../../home/theme";
+import { CONTAINER, SECTION_Y_LG } from "../../home/layout";
+import { Reveal } from "../../home/PageChrome";
+import { CLOSING_HEADING, CLOSING_SUB } from "./data";
 
-// ---------------------------------------------------------------------------
-// Closing CTA band
-// ---------------------------------------------------------------------------
-
+// Primary flips to self-serve here too — the old page's only CTA was "Contact
+// us", which contradicted a product visitors can start without a sales call.
 export function CtaBand({ onContactClick }: { onContactClick: () => void }) {
   return (
-    <section className="py-20 sm:py-28 border-t" style={{ borderColor: LINE }}>
-      <div className="max-w-2xl mx-auto px-5 sm:px-10 text-center">
+    <section className={SECTION_Y_LG}>
+      <Reveal className={`${CONTAINER} text-center`}>
         <h2
-          className="tracking-tight"
-          style={{ fontFamily: DISPLAY, fontWeight: 400, color: INK, fontSize: 'clamp(2rem, 5vw, 3.25rem)', lineHeight: 1.05 }}
+          className="tracking-[-0.02em]"
+          style={{
+            fontFamily: DISPLAY,
+            fontWeight: 300,
+            lineHeight: 1,
+            color: BONE,
+            fontSize: "clamp(2.5rem, 7vw, 5.5rem)",
+          }}
         >
-          See the whole compliance stack.
+          {CLOSING_HEADING}
         </h2>
-        <p className="mt-4 text-lg sm:text-xl" style={{ color: MUTED, lineHeight: 1.6 }}>
-          Tell us where you operate and how many people you employ. We’ll
-          walk you through the rest.
+        <p className="mt-6 mx-auto max-w-lg text-lg" style={{ color: ASH, lineHeight: 1.5 }}>
+          {CLOSING_SUB}
         </p>
-        <div className="mt-8 flex justify-center">
-          <button
-            onClick={onContactClick}
-            className="inline-flex items-center justify-center px-7 h-12 rounded-full text-[15px] font-medium transition-opacity hover:opacity-90 cursor-pointer"
-            style={{ backgroundColor: INK, color: BG }}
+        <div className="mt-10 flex flex-wrap items-center justify-center gap-5">
+          <Link
+            to="/compliance/signup"
+            className="inline-flex items-center gap-2 px-8 rounded-full text-base font-medium transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_18px_44px_-16px_rgba(163,197,125,0.45)] active:translate-y-0 active:shadow-none"
+            style={{ backgroundColor: LEAF, color: NOIR, height: 56 }}
           >
-            Contact us
+            Start now
+            <ArrowRight className="w-4 h-4" />
+          </Link>
+          <button
+            type="button"
+            onClick={onContactClick}
+            className="inline-flex items-center text-base transition-opacity hover:opacity-60 cursor-pointer"
+            style={{ color: BONE }}
+          >
+            Talk to sales
           </button>
         </div>
-      </div>
+      </Reveal>
     </section>
-  )
+  );
 }

@@ -1,10 +1,10 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import MarketingNav from "../landing/MarketingNav";
 import MarketingFooter from "../landing/MarketingFooter";
 import { useSEO } from "../../hooks/useSEO";
 import { HOME_JSON_LD } from "./data";
 import { BONE, NOIR } from "./theme";
-import { GrainOverlay, PageStyle } from "./PageChrome";
+import { GrainOverlay, PageStyle, useMarketingNoir } from "./PageChrome";
 import { Hero } from "./Hero";
 import { ShowcaseSection } from "./ShowcaseSection";
 import { ProductIndex } from "./ProductIndex";
@@ -28,12 +28,7 @@ export default function Home() {
     setIsPricingOpen(true);
   };
 
-  // Noir page chrome while mounted (see index.css) — overscroll bounce stays
-  // noir instead of flashing white, and anchor scrolls glide.
-  useEffect(() => {
-    document.documentElement.setAttribute("data-marketing-noir", "");
-    return () => document.documentElement.removeAttribute("data-marketing-noir");
-  }, []);
+  useMarketingNoir();
 
   useSEO({
     title: "Matcha — Full-Service HR: Platform, Lite, Compliance & Consulting",

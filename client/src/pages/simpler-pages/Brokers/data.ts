@@ -37,6 +37,7 @@ export const PILLARS: Pillar[] = [
     description:
       'Walk into renewal prep already knowing which accounts are deteriorating — months before the carrier re-rates them.',
     highlight: 'A loss curve you can act on beats a loss run you can only read.',
+    accent: BAND_COLOR.critical,
   },
   {
     id: 'wc',
@@ -46,6 +47,7 @@ export const PILLARS: Pillar[] = [
     description:
       'Triage your book in seconds, so the loss-control call goes to the account that needs it — not the one that shouts loudest.',
     highlight: 'One screen ranks every client by safety deterioration.',
+    accent: BAND_COLOR.elevated,
   },
   {
     id: 'command',
@@ -55,5 +57,6 @@ export const PILLARS: Pillar[] = [
     description:
       'A flagged trend becomes a client conversation with the talking points already written — so outreach starts before the renewal does.',
     highlight: 'Every alert is a client conversation waiting to happen.',
+    accent: BAND_COLOR.stable,
   },
 ]

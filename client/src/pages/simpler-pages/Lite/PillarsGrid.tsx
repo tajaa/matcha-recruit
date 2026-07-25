@@ -1,10 +1,24 @@
+import { lazy, Suspense } from 'react'
 import { motion } from 'framer-motion'
 
-import { DISPLAY, GREEN_600, INK, LINE, MUTED } from './constants'
-import { PILLARS } from './data'
+import { LazyMount } from '../../landing/LazyMount'
+import { PILLARS, CAPABILITY_EXTRA } from './data'
 import { INSTRUMENTS } from './instruments'
-import { ThePoint } from './ThePoint'
 import type { Pillar } from './types'
+import { ASH, BONE, DISPLAY, LINE_D } from '../../home/theme'
+import { CONTAINER, EYEBROW, SECTION_Y } from '../../home/layout'
+import { Reveal } from '../../home/PageChrome'
+
+const OshaLogInstrument = lazy(() =>
+  import('../../home/instruments/OshaLogInstrument').then((m) => ({ default: m.OshaLogInstrument })),
+)
+
+const OSHA_FALLBACK = (
+  <div
+    className="w-full rounded-2xl"
+    style={{ minHeight: 340, backgroundColor: 'rgba(245,242,237,0.025)', border: '1px solid rgba(245,242,237,0.06)' }}
+  />
+)
 
 function PillarRow({ pillar, index }: { pillar: Pillar; index: number }) {
   const reverse = index % 2 === 1
@@ -12,8 +26,8 @@ function PillarRow({ pillar, index }: { pillar: Pillar; index: number }) {
   return (
     <section
       id={pillar.id}
-      className="relative overflow-hidden border-t py-20 sm:py-28"
-      style={{ borderColor: LINE }}
+      className={`relative overflow-hidden border-t ${SECTION_Y}`}
+      style={{ borderColor: LINE_D }}
     >
       <span
         className="absolute top-6 select-none pointer-events-none leading-none"
@@ -22,15 +36,15 @@ function PillarRow({ pillar, index }: { pillar: Pillar; index: number }) {
           fontFamily: DISPLAY,
           fontWeight: 300,
           fontSize: 'clamp(9rem, 20vw, 20rem)',
-          color: INK,
-          opacity: 0.035,
+          color: BONE,
+          opacity: 0.04,
         } as React.CSSProperties}
         aria-hidden
       >
         {pillar.number}
       </span>
 
-      <div className="relative max-w-[1440px] mx-auto px-6 sm:px-10">
+      <div className={`relative ${CONTAINER}`}>
         <div className={`grid md:grid-cols-2 gap-12 lg:gap-24 items-center ${reverse ? 'md:[&>*:first-child]:order-2' : ''}`}>
           <motion.div
             className="max-w-xl"
@@ -39,24 +53,24 @@ function PillarRow({ pillar, index }: { pillar: Pillar; index: number }) {
             viewport={{ once: true, margin: '-80px' }}
             transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
           >
-            <div className="text-[12px] uppercase tracking-[0.2em] font-mono mb-6" style={{ color: GREEN_600 }}>
+            <div className="text-[12px] font-mk-mono uppercase tracking-[0.2em] mb-6" style={{ color: pillar.accent }}>
               {pillar.number} · {pillar.title}
             </div>
             <h3
               className="tracking-tight"
-              style={{ fontFamily: DISPLAY, fontWeight: 400, color: INK, fontSize: 'clamp(2rem, 3.4vw, 3.25rem)', lineHeight: 1.04 }}
+              style={{ fontFamily: DISPLAY, fontWeight: 300, color: BONE, fontSize: 'clamp(2rem, 3.4vw, 3.25rem)', lineHeight: 1.06 }}
             >
               {pillar.tagline}
             </h3>
             <p
               className="mt-6"
-              style={{ fontFamily: DISPLAY, fontStyle: 'italic', fontWeight: 400, color: INK, fontSize: 'clamp(1.1rem, 1.5vw, 1.4rem)', lineHeight: 1.35 }}
+              style={{ fontFamily: DISPLAY, fontStyle: 'italic', fontWeight: 300, color: BONE, fontSize: 'clamp(1.1rem, 1.5vw, 1.4rem)', lineHeight: 1.35 }}
             >
-              <span style={{ color: MUTED, opacity: 0.55 }}>“</span>
+              <span style={{ color: ASH, opacity: 0.7 }}>"</span>
               {pillar.highlight}
-              <span style={{ color: MUTED, opacity: 0.55 }}>”</span>
+              <span style={{ color: ASH, opacity: 0.7 }}>"</span>
             </p>
-            <p className="mt-5 text-[16px] sm:text-lg max-w-md" style={{ color: MUTED, lineHeight: 1.65 }}>
+            <p className="mt-5 text-[16px] sm:text-lg max-w-md" style={{ color: ASH, lineHeight: 1.65 }}>
               {pillar.description}
             </p>
           </motion.div>
@@ -67,7 +81,15 @@ function PillarRow({ pillar, index }: { pillar: Pillar; index: number }) {
             viewport={{ once: true, margin: '-80px' }}
             transition={{ duration: 0.6, delay: 0.1, ease: [0.16, 1, 0.3, 1] }}
           >
-            <Instrument />
+            {pillar.id === 'osha' ? (
+              <LazyMount minHeight={340} fallback={OSHA_FALLBACK}>
+                <Suspense fallback={OSHA_FALLBACK}>
+                  <OshaLogInstrument />
+                </Suspense>
+              </LazyMount>
+            ) : (
+              <Instrument />
+            )}
           </motion.div>
         </div>
       </div>
@@ -78,29 +100,47 @@ function PillarRow({ pillar, index }: { pillar: Pillar; index: number }) {
 export function PillarsGrid() {
   return (
     <>
-      <section className="pt-20 sm:pt-28 pb-2 border-t" style={{ borderColor: LINE }}>
-        <div className="max-w-[1440px] mx-auto px-6 sm:px-10">
-          <div className="max-w-xl">
-            <div className="text-[11px] uppercase tracking-wider font-mono mb-4" style={{ color: MUTED }}>
-              What’s in the bundle
+      <section className="pt-20 sm:pt-28 pb-2 border-t" style={{ borderColor: LINE_D }}>
+        <div className={CONTAINER}>
+          <Reveal>
+            <div className="max-w-xl">
+              <div className={EYEBROW} style={{ color: ASH, marginBottom: '1rem' }}>
+                What's in the bundle
+              </div>
+              <h2
+                className="tracking-tight"
+                style={{ fontFamily: DISPLAY, fontWeight: 300, color: BONE, fontSize: 'clamp(2rem, 4vw, 3.25rem)', lineHeight: 1.08 }}
+              >
+                Intake, analysis, and OSHA — the daily layer.
+              </h2>
             </div>
-            <h2
-              className="tracking-tight"
-              style={{ fontFamily: DISPLAY, fontWeight: 400, color: INK, fontSize: 'clamp(2rem, 4vw, 3.25rem)', lineHeight: 1.05 }}
-            >
-              Intake, analysis, and OSHA — the daily layer.
-            </h2>
-          </div>
+          </Reveal>
         </div>
       </section>
 
-      {PILLARS.slice(0, 2).map((pillar, i) => (
+      {PILLARS.map((pillar, i) => (
         <PillarRow key={pillar.id} pillar={pillar} index={i} />
       ))}
-      <ThePoint />
-      {PILLARS.slice(2).map((pillar, i) => (
-        <PillarRow key={pillar.id} pillar={pillar} index={i + 2} />
-      ))}
+
+      {/* The one CoverageGrid card that wasn't a restatement of a pillar. */}
+      <section className={`${SECTION_Y} border-t`} style={{ borderColor: LINE_D }}>
+        <Reveal className={CONTAINER}>
+          <div
+            className="rounded-xl border p-6 sm:p-8 flex items-start gap-5 max-w-2xl"
+            style={{ borderColor: LINE_D }}
+          >
+            <span className="w-2 h-2 rounded-full shrink-0 mt-1.5" style={{ backgroundColor: BONE, opacity: 0.4 }} />
+            <div>
+              <h3 className="text-[1.05rem]" style={{ color: BONE, fontWeight: 500 }}>
+                {CAPABILITY_EXTRA.title}
+              </h3>
+              <p className="mt-1.5 text-[14px]" style={{ color: ASH, lineHeight: 1.6 }}>
+                {CAPABILITY_EXTRA.caption}
+              </p>
+            </div>
+          </div>
+        </Reveal>
+      </section>
     </>
   )
 }

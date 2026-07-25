@@ -5,4 +5,5 @@ export type Pillar = {
   tagline: string
   description: string
   highlight: string
+  accent: string
 }

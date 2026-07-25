@@ -1,50 +1,100 @@
-import { useState } from 'react'
+import { lazy, Suspense, useState } from 'react'
 
 import MarketingNav from '../landing/MarketingNav'
 import MarketingFooter from '../landing/MarketingFooter'
-import { ComplianceTicker } from '../../components/landing/ComplianceTicker'
-import { PricingContactModal } from '../../components/marketing/PricingContactModal'
+import { useSEO } from '../../hooks/useSEO'
+import { BONE, NOIR } from '../home/theme'
+import { GrainOverlay, PageStyle, useMarketingNoir } from '../home/PageChrome'
 
 import { Hero } from './Compliance/Hero'
-import { PillarsGrid } from './Compliance/PillarsGrid'
-import { CoverageGrid } from './Compliance/CoverageGrid'
+import { Stakes } from './Compliance/Stakes'
+import { OneSystem } from './Compliance/OneSystem'
+import { Coverage } from './Compliance/Coverage'
+import { PricingCalculator } from './Compliance/PricingCalculator'
 import { ThePoint } from './Compliance/ThePoint'
 import { CtaBand } from './Compliance/CtaBand'
-import { BG, INK } from './Compliance/theme'
+import { COMPLIANCE_JSON_LD } from './Compliance/data'
+
+// Second framer-motion importer on this route chunk alongside ComplianceInstrument
+// — already lazy at App.tsx, so neither reaches the apex `/` chunk.
+const PricingContactModal = lazy(() =>
+  import('../../components/marketing/PricingContactModal').then((m) => ({
+    default: m.PricingContactModal,
+  })),
+)
 
 // ---------------------------------------------------------------------------
-// Simplified /compliance — same four-pillar product (jurisdictional
-// compliance, handbook audit, policy management, credentialing) as the full
-// page, told in outcome-level marketing copy only. No mechanism detail (no
-// "preemption engine", no AI/OCR specifics, no data provenance) and no
-// in-app mockups.
-//
-// Grayscale card system, one green accent used the same way on every card:
-// it marks the single node each pillar resolves to — the governing rule,
-// the critical gap, the active policy, the day a credential expires. That's
-// the "shape strip", a chip row that traces each pillar's real structure
-// instead of a generic bullet icon.
+// Rebuilt onto the noir editorial surface (pages/home/*) — same product
+// (jurisdictional compliance, handbook audit, policy management, credentialing)
+// but with a claim in the hero instead of the product name, the enforcement
+// data promoted from a scrolling ticker into a real section, one system
+// section instead of two that repeated each other, and a self-serve funnel:
+// live pricing → /compliance/signup. The fixed ComplianceTicker is dropped
+// from this page only — it fights a transparent nav and restates the Stakes
+// section below it; it stays mounted on the 6 other marketing pages that use it.
 // ---------------------------------------------------------------------------
 
 export default function SimpleCompliancePage() {
   const [isPricingOpen, setIsPricingOpen] = useState(false)
+  const [hasOpenedPricing, setHasOpenedPricing] = useState(false)
+  const openPricing = () => {
+    setHasOpenedPricing(true)
+    setIsPricingOpen(true)
+  }
+
+  useMarketingNoir()
+
+  useSEO({
+    title: 'Matcha Compliance — Multi-State Employment Compliance Monitoring',
+    description:
+      'Standalone multi-state employment compliance platform — jurisdiction tracking from federal to city, change alerts, handbook audits, policy management, and credentialing.',
+    canonical: 'https://hey-matcha.com/matcha-compliance',
+    jsonLd: COMPLIANCE_JSON_LD,
+  })
 
   return (
-    <div style={{ backgroundColor: BG, color: INK }} className="min-h-screen overflow-x-hidden">
-      <PricingContactModal isOpen={isPricingOpen} onClose={() => setIsPricingOpen(false)} mode="consultation" />
-      <ComplianceTicker />
-      <MarketingNav onDemoClick={() => setIsPricingOpen(true)} />
+    <div
+      style={{ backgroundColor: NOIR, color: BONE }}
+      className="home-root min-h-screen overflow-x-hidden"
+    >
+      <PageStyle />
+      <GrainOverlay />
 
-      <Hero onContactClick={() => setIsPricingOpen(true)} />
+      {hasOpenedPricing && (
+        <Suspense
+          fallback={
+            isPricingOpen ? (
+              <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60">
+                <div
+                  className="h-8 w-8 animate-spin rounded-full border-2 border-white/25 border-t-white/90"
+                  role="status"
+                  aria-label="Loading"
+                />
+              </div>
+            ) : null
+          }
+        >
+          <PricingContactModal
+            isOpen={isPricingOpen}
+            onClose={() => setIsPricingOpen(false)}
+            mode="consultation"
+          />
+        </Suspense>
+      )}
 
-      <main>
-        <PillarsGrid />
-        <CoverageGrid />
-        <ThePoint />
-      </main>
+      <MarketingNav onDemoClick={openPricing} transparentAtTop />
 
-      <CtaBand onContactClick={() => setIsPricingOpen(true)} />
-      <MarketingFooter newsletterVariant="matcha" />
+      <Hero onContactClick={openPricing} />
+      <Stakes />
+      <OneSystem />
+      <Coverage />
+      <PricingCalculator onContactClick={openPricing} />
+      <ThePoint />
+      <CtaBand onContactClick={openPricing} />
+
+      <div style={{ backgroundColor: BONE, color: 'var(--color-ivory-ink)' }}>
+        <MarketingFooter newsletterVariant="matcha" />
+      </div>
     </div>
   )
 }

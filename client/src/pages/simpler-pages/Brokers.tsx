@@ -1,27 +1,47 @@
-import { useState } from 'react'
-import { useSEO } from '../../hooks/useSEO'
+import { lazy, Suspense, useState } from 'react'
+
 import MarketingNav from '../landing/MarketingNav'
 import MarketingFooter from '../landing/MarketingFooter'
-import { ComplianceTicker } from '../../components/landing/ComplianceTicker'
-import { PricingContactModal } from '../../components/marketing/PricingContactModal'
+import { useSEO } from '../../hooks/useSEO'
+import { BONE, NOIR } from '../home/theme'
+import { GrainOverlay, PageStyle, useMarketingNoir } from '../home/PageChrome'
+
 import { BROKERS_JSON_LD } from './Brokers/data'
-import { BG, INK } from './Brokers/theme'
 import { Hero } from './Brokers/Hero'
 import { Positioning } from './Brokers/Positioning'
 import { PillarsGrid } from './Brokers/PillarsGrid'
 import { ThePoint } from './Brokers/ThePoint'
 import { CtaBand } from './Brokers/CtaBand'
 
+const PricingContactModal = lazy(() =>
+  import('../../components/marketing/PricingContactModal').then((m) => ({
+    default: m.PricingContactModal,
+  })),
+)
+
 // ---------------------------------------------------------------------------
-// Simplified /brokers. Keeps the original colorful Book-Risk-Curve hero card
-// (the signature the user wanted to preserve), then simplifies the rest into
-// the simpler-pages design language: full-width alternating pillar rows with
-// bespoke grayscale+green instruments, a coverage recap grid, an editorial
-// cut, and the monochrome newsletter band.
+// Rebuilt onto the noir editorial surface (pages/home/*), the same pass that
+// already moved /matcha-compliance, /matcha-platform, and /matcha-lite. The
+// hero's skeuomorphic "Book Risk Console" (charcoal chassis, physical knobs,
+// recessed glass — see Brokers/console/) is UNCHANGED: it already sits in its
+// own dark room, so it's visually compatible with the noir surface below it —
+// the tonal step is now within one dark page rather than a cut against ivory.
+// Positioning/PillarsGrid/ThePoint/CtaBand are re-tokened, with the three
+// pillar instruments rebuilt on the shared noir InstrumentFrame. No pricing
+// section here: unlike Compliance/Lite, broker relationships are sales-led,
+// not self-serve Stripe, so there is no live price to calculate. ComplianceTicker
+// is dropped from this page only, same as the other rebuilds.
 // ---------------------------------------------------------------------------
 
 export default function SimpleBrokersPage() {
   const [isPricingOpen, setIsPricingOpen] = useState(false)
+  const [hasOpenedPricing, setHasOpenedPricing] = useState(false)
+  const openPricing = () => {
+    setHasOpenedPricing(true)
+    setIsPricingOpen(true)
+  }
+
+  useMarketingNoir()
 
   useSEO({
     title: 'Matcha for Brokers | Book-of-Business Intelligence',
@@ -32,12 +52,34 @@ export default function SimpleBrokersPage() {
   })
 
   return (
-    <div style={{ backgroundColor: BG, color: INK }} className="min-h-screen overflow-x-hidden">
-      <PricingContactModal isOpen={isPricingOpen} onClose={() => setIsPricingOpen(false)} mode="consultation" />
-      <ComplianceTicker />
-      <MarketingNav onDemoClick={() => setIsPricingOpen(true)} />
+    <div
+      style={{ backgroundColor: NOIR, color: BONE }}
+      className="home-root min-h-screen overflow-x-hidden"
+    >
+      <PageStyle />
+      <GrainOverlay />
 
-      <Hero onBookClick={() => setIsPricingOpen(true)} />
+      {hasOpenedPricing && (
+        <Suspense
+          fallback={
+            isPricingOpen ? (
+              <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60">
+                <div
+                  className="h-8 w-8 animate-spin rounded-full border-2 border-white/25 border-t-white/90"
+                  role="status"
+                  aria-label="Loading"
+                />
+              </div>
+            ) : null
+          }
+        >
+          <PricingContactModal isOpen={isPricingOpen} onClose={() => setIsPricingOpen(false)} mode="consultation" />
+        </Suspense>
+      )}
+
+      <MarketingNav onDemoClick={openPricing} transparentAtTop />
+
+      <Hero onBookClick={openPricing} />
 
       <main>
         <Positioning />
@@ -45,8 +87,11 @@ export default function SimpleBrokersPage() {
         <ThePoint />
       </main>
 
-      <CtaBand onBookClick={() => setIsPricingOpen(true)} />
-      <MarketingFooter newsletterVariant="matcha" />
+      <CtaBand onBookClick={openPricing} />
+
+      <div style={{ backgroundColor: BONE, color: 'var(--color-ivory-ink)' }}>
+        <MarketingFooter newsletterVariant="matcha" />
+      </div>
     </div>
   )
 }
