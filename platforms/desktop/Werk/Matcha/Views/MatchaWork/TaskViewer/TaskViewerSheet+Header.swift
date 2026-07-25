@@ -1,0 +1,314 @@
+import SwiftUI
+
+// MARK: - Header: phase, meta line, and the one directive hero
+//
+// Split out of TaskViewerSheet+Sections.swift. Everything here answers
+// "where is this ticket and what should I do about it right now?".
+
+extension TaskViewerSheet {
+
+    // MARK: - "You are here" phase
+
+    struct StatePhase {
+        let label: String
+        let owner: String
+        let color: Color
+        let icon: String
+    }
+
+    var currentPhase: StatePhase {
+        // A ticket sent back from review now lands in `todo` (the active flow)
+        // carrying a reviewNote — frame it as rework ("address the feedback"),
+        // not a cold never-started task.
+        let hasFeedback = (task.reviewNote?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
+        if task.boardColumn == "todo" && hasFeedback {
+            return StatePhase(label: "Changes Requested", owner: "Assignee to address feedback", color: .mwAttention, icon: "arrow.uturn.backward.circle.fill")
+        }
+        switch task.boardColumn {
+        case "todo":
+            return StatePhase(label: "Not Started", owner: "Assignee to begin", color: .secondary, icon: "circle.dashed")
+        case "in_progress":
+            return StatePhase(label: "In Progress", owner: "Assignee working", color: .mwInkStrong, icon: "hammer.fill")
+        case "review":
+            return StatePhase(label: "In Review", owner: "Reviewer to assess", color: .mwInkStrong, icon: "magnifyingglass.circle.fill")
+        case "changes_requested":
+            return StatePhase(label: "Changes Requested", owner: "Assignee to address feedback", color: .mwAttention, icon: "arrow.uturn.backward.circle.fill")
+        case "done":
+            return StatePhase(label: "Done", owner: "Closed", color: .mwInkStrong, icon: "checkmark.seal.fill")
+        default:
+            return StatePhase(label: columnLabel, owner: "", color: .secondary, icon: "circle")
+        }
+    }
+
+    // (Former `stateBanner` removed — folded into `metaLine` during the
+    // action-first reorg; `currentPhase`/`StatePhase` above are still used.)
+
+    // MARK: - Time in review (#9b)
+
+    /// Whole days the ticket has sat in review (from its last move). Nil when not
+    /// in review or the timestamp doesn't parse.
+    var daysInReview: Int? {
+        guard task.boardColumn == "review", let moved = task.lastMovedAt else { return nil }
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        guard let d = iso.date(from: moved) ?? ISO8601DateFormatter().date(from: moved) else { return nil }
+        return Calendar.current.dateComponents([.day], from: d, to: Date()).day
+    }
+
+    // MARK: - Reorganized header: one meta line, one directive hero
+
+    /// Single status line — folds the old status/priority pills AND the
+    /// "YOU ARE HERE" banner into one row so the top of the sheet isn't three
+    /// stacked status blocks. Phase (colored) · priority · assignee · round ·
+    /// time-in-review.
+    var metaLine: some View {
+        let p = currentPhase
+        return HStack(spacing: 8) {
+            HStack(spacing: 4) {
+                Image(systemName: p.icon).font(.system(size: 9, weight: .semibold))
+                Text(p.label).font(.system(size: 10, weight: .semibold))
+            }
+            .foregroundColor(p.color)
+            .padding(.horizontal, 7).padding(.vertical, 2)
+            .background(p.color.opacity(0.14)).cornerRadius(4)
+
+            metaPill(label: task.priority.capitalized, color: .secondary)
+            if let due = task.dueDate, !due.isEmpty {
+                metaPill(label: "Due \(String(due.prefix(10)))", color: .secondary)
+            }
+            assigneeMenu
+            if currentRound > 0 {
+                Text("Round \(currentRound)")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundColor(.secondary)
+            }
+            if let days = daysInReview {
+                HStack(spacing: 2) {
+                    Image(systemName: "clock").font(.system(size: 8))
+                    Text(days <= 0 ? "review today" : "review \(days)d")
+                        .font(.system(size: 9, weight: .medium))
+                }
+                .foregroundColor(days >= 3 ? .mwAttention : .secondary)
+            }
+            if let elName = task.elementName
+                ?? viewModel.elements.first(where: { $0.id == task.elementId })?.name {
+                HStack(spacing: 3) {
+                    Image(systemName: "square.stack.3d.up.fill").font(.system(size: 8))
+                    Text(elName).font(.system(size: 9, weight: .semibold))
+                }
+                .foregroundColor(.mwInkStrong)
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(Color.mwInkStrong.opacity(0.15)).cornerRadius(3)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    // MARK: - The directive
+
+    /// What the hero says, decided once. `directiveHero` renders it, `descriptionIsHero`
+    /// asks whether the brief was consumed by it, and `reviewContext` reuses the
+    /// `.feedback` gate — three call sites that used to hand-mirror the same `if`
+    /// ladder and were kept in sync only by comment.
+    enum Directive {
+        /// Reviewer sent it back; payload is the trimmed review note.
+        case feedback(String)
+        case review
+        /// In progress with a progress note; payload is the trimmed note.
+        case progress(String)
+        case done
+        /// Nothing more specific applies — the description IS the directive.
+        case brief(String)
+        /// Nothing to say at all; fall back to phase + owner.
+        case phase
+    }
+
+    var directive: Directive {
+        let fb = task.reviewNote?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !fb.isEmpty, ["changes_requested", "in_progress", "todo"].contains(task.boardColumn) {
+            return .feedback(fb)
+        }
+        if task.boardColumn == "review" { return .review }
+        if task.boardColumn == "in_progress",
+           let pn = task.progressNote?.trimmingCharacters(in: .whitespacesAndNewlines), !pn.isEmpty {
+            return .progress(pn)
+        }
+        if task.boardColumn == "done" { return .done }
+        if let desc = task.description?.trimmingCharacters(in: .whitespacesAndNewlines), !desc.isEmpty {
+            return .brief(desc)
+        }
+        return .phase
+    }
+
+    /// True when the description is used AS the directive hero — so the
+    /// Description collapsible is skipped to avoid showing it twice.
+    var descriptionIsHero: Bool {
+        if case .brief = directive { return true }
+        return false
+    }
+
+    /// THE one salient block: what to do right now, chosen by phase. A send-back
+    /// is the directive when present; otherwise the review prompt, the progress
+    /// note, or (fresh ticket) the brief. Everything else on the sheet is
+    /// supporting detail below this.
+    @ViewBuilder
+    var directiveHero: some View {
+        switch directive {
+        case .feedback(let fb):
+            feedbackHero(fb)
+        case .review:
+            VStack(alignment: .leading, spacing: 8) {
+                heroRule(color: .mwInkStrong, icon: "magnifyingglass.circle.fill",
+                         label: "DO NOW · REVIEW",
+                         text: "Assess this submission, then Approve or Send back below.")
+                reviewDeltaSection
+            }
+        case .progress(let pn):
+            heroRule(color: .mwInkStrong, icon: "hammer.fill", label: "WHERE WE'RE AT", text: pn)
+        case .done:
+            heroRule(color: .mwInkStrong, icon: "checkmark.seal.fill", label: "DONE", text: "This ticket is closed.")
+        case .brief(let desc):
+            // No more-specific directive (fresh/no-note ticket) → the brief is
+            // the directive. Phase-colored so it still reads as the current state.
+            heroRule(color: currentPhase.color, icon: "doc.text", label: "THE BRIEF", text: desc)
+        case .phase:
+            // No feedback, no progress note, no description → don't leave a blank
+            // hole; show the phase + owner so the sheet still answers "where is
+            // this and whose move is it?" (the old stateBanner's job).
+            heroRule(color: currentPhase.color, icon: currentPhase.icon,
+                     label: currentPhase.label.uppercased(),
+                     text: currentPhase.owner.isEmpty ? "No details yet." : currentPhase.owner)
+        }
+    }
+
+    // MARK: - Hero chrome
+
+    /// `── LABEL ─────────` monospace rule — the graphite ASCII section header,
+    /// stretching to fill the row. Used by the hero + collapsibles in graphite.
+    func asciiRule(_ label: String) -> some View {
+        HStack(spacing: 8) {
+            Text("──")
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(appState.themeTextSecondary)
+            Text(label.uppercased())
+                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .foregroundColor(appState.themeTextSecondary)
+                .tracking(1).fixedSize()
+            Rectangle().fill(appState.themeBorder).frame(height: 1)
+        }
+    }
+
+    /// Prominent hero. Graphite: a flat ASCII rule + text (no tinted box) for the
+    /// stripped-down terminal feel. Other themes: the left-rule card.
+    @ViewBuilder
+    func heroRule(color: Color, icon: String, label: String, text: String) -> some View {
+        if appState.isGraphite {
+            VStack(alignment: .leading, spacing: 6) {
+                asciiRule(label)
+                Text(text)
+                    .font(.system(size: 13))
+                    .foregroundColor(appState.themeText)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            HStack(alignment: .top, spacing: 10) {
+                RoundedRectangle(cornerRadius: 1.5).fill(color.opacity(0.85)).frame(width: 3)
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 5) {
+                        Image(systemName: icon).font(.system(size: 11, weight: .semibold))
+                        Text(label).font(.system(size: 10, weight: .bold)).tracking(0.6)
+                    }
+                    .foregroundColor(color)
+                    Text(text)
+                        .font(.system(size: 13))
+                        .foregroundColor(appState.themeText)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(.vertical, 10).padding(.horizontal, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(color.opacity(0.06)).cornerRadius(8)
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(color.opacity(0.18), lineWidth: 1))
+        }
+    }
+
+    /// Changes-requested hero — the send-back note promoted to the focal point,
+    /// with the per-item denials (severity + reason) the reviewer flagged.
+    /// Absorbs the old NEEDS WORK block.
+    ///
+    /// `reviewDenials` walks the whole history, so it is bound ONCE here and
+    /// threaded into the severity summary — the previous shape recomputed it
+    /// four times per body render (twice inside `denialSeverityCounts` alone).
+    @ViewBuilder
+    func feedbackHero(_ fb: String) -> some View {
+        let denials = reviewDenials
+        let counts = denialSeveritySummary(denials)
+        if appState.isGraphite {
+            // Flat ASCII — no tinted box, monochrome denials with `!` markers.
+            VStack(alignment: .leading, spacing: 6) {
+                asciiRule("DO NOW · CHANGES REQUESTED")
+                Text(fb)
+                    .font(.system(size: 13)).foregroundColor(appState.themeText)
+                    .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                if let counts {
+                    Text(counts).font(.system(size: 9, weight: .semibold, design: .monospaced))
+                        .foregroundColor(appState.themeText.opacity(0.6))
+                }
+                ForEach(Array(denials.enumerated()), id: \.offset) { _, d in
+                    HStack(alignment: .top, spacing: 6) {
+                        Text(d.severity == "blocker" ? "[!]" : "[ ]")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(appState.themeTextSecondary)
+                        Text("\(d.title)\(d.reason.isEmpty ? "" : " — \(d.reason)")")
+                            .font(.system(size: 11)).foregroundColor(appState.themeText.opacity(0.75))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            let color = Color.mwAttention
+            HStack(alignment: .top, spacing: 10) {
+                RoundedRectangle(cornerRadius: 1.5).fill(color.opacity(0.85)).frame(width: 3)
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 5) {
+                        Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 11, weight: .semibold))
+                        Text("DO NOW · CHANGES REQUESTED").font(.system(size: 10, weight: .bold)).tracking(0.5)
+                    }
+                    .foregroundColor(color)
+                    Text(fb)
+                        .font(.system(size: 13))
+                        .foregroundColor(appState.themeText)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let counts {
+                        Text(counts).font(.system(size: 9, weight: .semibold)).foregroundColor(appState.themeText.opacity(0.6))
+                    }
+                    ForEach(Array(denials.enumerated()), id: \.offset) { _, d in
+                        HStack(alignment: .top, spacing: 5) {
+                            Image(systemName: "xmark.square.fill").font(.system(size: 9)).foregroundColor(color.opacity(0.9))
+                            if !d.severity.isEmpty {
+                                Text(d.severity.uppercased())
+                                    .font(.system(size: 7, weight: .bold)).tracking(0.3)
+                                    .foregroundColor(d.severity == "blocker" ? .mwAttention : .secondary)
+                                    .padding(.horizontal, 3).padding(.vertical, 1)
+                                    .background((d.severity == "blocker" ? Color.mwAttention : Color.secondary).opacity(0.15))
+                                    .cornerRadius(2)
+                            }
+                            Text("\(d.title)\(d.reason.isEmpty ? "" : " — \(d.reason)")")
+                                .font(.system(size: 11)).foregroundColor(appState.themeText.opacity(0.75))
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+            }
+            .padding(.vertical, 10).padding(.horizontal, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(color.opacity(0.06)).cornerRadius(8)
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(color.opacity(0.18), lineWidth: 1))
+        }
+    }
+}

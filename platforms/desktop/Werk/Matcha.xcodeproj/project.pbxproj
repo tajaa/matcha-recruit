@@ -79,6 +79,10 @@
 		7A5C0000000000000000B010 /* NewRoundSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5C0000000000000000F010 /* NewRoundSheet.swift */; };
 		7A5C0000000000000000B011 /* TaskViewerSheet+Graph.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5C0000000000000000F011 /* TaskViewerSheet+Graph.swift */; };
 		7A5C0000000000000000B012 /* TaskViewerSheet+Sections.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5C0000000000000000F012 /* TaskViewerSheet+Sections.swift */; };
+		7A5C0000000000000000B017 /* TaskViewerSheet+Discussion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5C0000000000000000F017 /* TaskViewerSheet+Discussion.swift */; };
+		7A5C0000000000000000B016 /* TaskViewerSheet+History.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5C0000000000000000F016 /* TaskViewerSheet+History.swift */; };
+		7A5C0000000000000000B015 /* TaskViewerSheet+Review.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5C0000000000000000F015 /* TaskViewerSheet+Review.swift */; };
+		7A5C0000000000000000B014 /* TaskViewerSheet+Header.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5C0000000000000000F014 /* TaskViewerSheet+Header.swift */; };
 		7A5C0000000000000000B013 /* TaskViewerSheet+Actions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5C0000000000000000F013 /* TaskViewerSheet+Actions.swift */; };
 		7A5C0000000000000000B0C1 /* CommitSuggestionChip.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5C0000000000000000F0C1 /* CommitSuggestionChip.swift */; };
 		7A5C0000000000000000B0D1 /* PropsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5C0000000000000000F0D1 /* PropsView.swift */; };
@@ -187,6 +191,9 @@
 		DD00EE11FF22334455660002 /* ChannelsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00EE11FF22334455770002 /* ChannelsService.swift */; };
 		DD00EE11FF22334455660003 /* ChannelsWebSocket.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00EE11FF22334455770003 /* ChannelsWebSocket.swift */; };
 		DD00EE11FF22334455660004 /* ChannelsSidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00EE11FF22334455770004 /* ChannelsSidebarView.swift */; };
+		DD00EE11FF22334455660E03 /* ChannelSummarySorting.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00EE11FF22334455770E03 /* ChannelSummarySorting.swift */; };
+		DD00EE11FF22334455660E02 /* ChannelsLibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00EE11FF22334455770E02 /* ChannelsLibraryView.swift */; };
+		DD00EE11FF22334455660E01 /* CreateChannelSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00EE11FF22334455770E01 /* CreateChannelSheet.swift */; };
 		DD00EE11FF22334455660005 /* ChannelDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00EE11FF22334455770005 /* ChannelDetailView.swift */; };
 		DD00EE11FF22334455660099 /* ChannelNotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00EE11FF22334455770099 /* ChannelNotificationManager.swift */; };
 		DD00EE11FF22334455660D11 /* InviteToChannelSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00EE11FF22334455770D11 /* InviteToChannelSheet.swift */; };
@@ -236,6 +243,10 @@
 		FFFF1S1S1S1S1S1S01010001 /* ChannelStarStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = FFFF1S1S1S1S1S1S01010002 /* ChannelStarStore.swift */; };
 		FFFF1U1U1U1U1U1U01010001 /* TicketUpdatesStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = FFFF1U1U1U1U1U1U01010002 /* TicketUpdatesStore.swift */; };
 		G1G2G3000000000000000001 /* RichJournalEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = G1G2G3000000000000000002 /* RichJournalEditor.swift */; };
+		G1G2G3000000000000000J17 /* SlashMenuPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = G1G2G3000000000000000J18 /* SlashMenuPanel.swift */; };
+		G1G2G3000000000000000J15 /* MarkdownStyler.swift in Sources */ = {isa = PBXBuildFile; fileRef = G1G2G3000000000000000J16 /* MarkdownStyler.swift */; };
+		G1G2G3000000000000000J13 /* MarkdownListEditing.swift in Sources */ = {isa = PBXBuildFile; fileRef = G1G2G3000000000000000J14 /* MarkdownListEditing.swift */; };
+		G1G2G3000000000000000J11 /* JournalEditorController.swift in Sources */ = {isa = PBXBuildFile; fileRef = G1G2G3000000000000000J12 /* JournalEditorController.swift */; };
 		G1G2G3000000000000000003 /* JournalEditorToolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = G1G2G3000000000000000004 /* JournalEditorToolbar.swift */; };
 		G1G2G3000000000000000005 /* JournalContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = G1G2G3000000000000000006 /* JournalContentView.swift */; };
 		G1G2G3000000000000000007 /* JournalStylePopover.swift in Sources */ = {isa = PBXBuildFile; fileRef = G1G2G3000000000000000008 /* JournalStylePopover.swift */; };
@@ -321,6 +332,10 @@
 		7A5C0000000000000000F010 /* NewRoundSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewRoundSheet.swift; sourceTree = "<group>"; };
 		7A5C0000000000000000F011 /* TaskViewerSheet+Graph.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TaskViewerSheet+Graph.swift"; sourceTree = "<group>"; };
 		7A5C0000000000000000F012 /* TaskViewerSheet+Sections.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TaskViewerSheet+Sections.swift"; sourceTree = "<group>"; };
+		7A5C0000000000000000F017 /* TaskViewerSheet+Discussion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TaskViewerSheet+Discussion.swift"; sourceTree = "<group>"; };
+		7A5C0000000000000000F016 /* TaskViewerSheet+History.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TaskViewerSheet+History.swift"; sourceTree = "<group>"; };
+		7A5C0000000000000000F015 /* TaskViewerSheet+Review.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TaskViewerSheet+Review.swift"; sourceTree = "<group>"; };
+		7A5C0000000000000000F014 /* TaskViewerSheet+Header.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TaskViewerSheet+Header.swift"; sourceTree = "<group>"; };
 		7A5C0000000000000000F013 /* TaskViewerSheet+Actions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TaskViewerSheet+Actions.swift"; sourceTree = "<group>"; };
 		7A5C0000000000000000F0C1 /* CommitSuggestionChip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommitSuggestionChip.swift; sourceTree = "<group>"; };
 		7A5C0000000000000000F0D1 /* PropsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Props/PropsView.swift; sourceTree = "<group>"; };
@@ -421,6 +436,9 @@
 		DD00EE11FF22334455770002 /* ChannelsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelsService.swift; sourceTree = "<group>"; };
 		DD00EE11FF22334455770003 /* ChannelsWebSocket.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelsWebSocket.swift; sourceTree = "<group>"; };
 		DD00EE11FF22334455770004 /* ChannelsSidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelsSidebarView.swift; sourceTree = "<group>"; };
+		DD00EE11FF22334455770E03 /* ChannelSummarySorting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelSummarySorting.swift; sourceTree = "<group>"; };
+		DD00EE11FF22334455770E02 /* ChannelsLibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelsLibraryView.swift; sourceTree = "<group>"; };
+		DD00EE11FF22334455770E01 /* CreateChannelSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CreateChannelSheet.swift; sourceTree = "<group>"; };
 		DD00EE11FF22334455770005 /* ChannelDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelDetailView.swift; sourceTree = "<group>"; };
 		DD00EE11FF22334455770099 /* ChannelNotificationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelNotificationManager.swift; sourceTree = "<group>"; };
 		DD00EE11FF22334455770D11 /* InviteToChannelSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InviteToChannelSheet.swift; sourceTree = "<group>"; };
@@ -478,6 +496,10 @@
 		FFFF1S1S1S1S1S1S01010002 /* ChannelStarStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelStarStore.swift; sourceTree = "<group>"; };
 		FFFF1U1U1U1U1U1U01010002 /* TicketUpdatesStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TicketUpdatesStore.swift; sourceTree = "<group>"; };
 		G1G2G3000000000000000002 /* RichJournalEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RichJournalEditor.swift; sourceTree = "<group>"; };
+		G1G2G3000000000000000J18 /* SlashMenuPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SlashMenuPanel.swift; sourceTree = "<group>"; };
+		G1G2G3000000000000000J16 /* MarkdownStyler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownStyler.swift; sourceTree = "<group>"; };
+		G1G2G3000000000000000J14 /* MarkdownListEditing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownListEditing.swift; sourceTree = "<group>"; };
+		G1G2G3000000000000000J12 /* JournalEditorController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JournalEditorController.swift; sourceTree = "<group>"; };
 		G1G2G3000000000000000004 /* JournalEditorToolbar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JournalEditorToolbar.swift; sourceTree = "<group>"; };
 		G1G2G3000000000000000006 /* JournalContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JournalContentView.swift; sourceTree = "<group>"; };
 		G1G2G3000000000000000008 /* JournalStylePopover.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JournalStylePopover.swift; sourceTree = "<group>"; };
@@ -784,6 +806,10 @@
 				7A5C0000000000000000F010 /* NewRoundSheet.swift */,
 				7A5C0000000000000000F011 /* TaskViewerSheet+Graph.swift */,
 				7A5C0000000000000000F012 /* TaskViewerSheet+Sections.swift */,
+				7A5C0000000000000000F017 /* TaskViewerSheet+Discussion.swift */,
+				7A5C0000000000000000F016 /* TaskViewerSheet+History.swift */,
+				7A5C0000000000000000F015 /* TaskViewerSheet+Review.swift */,
+				7A5C0000000000000000F014 /* TaskViewerSheet+Header.swift */,
 				7A5C0000000000000000F013 /* TaskViewerSheet+Actions.swift */,
 			);
 			name = TaskViewer;
@@ -979,6 +1005,9 @@
 			isa = PBXGroup;
 			children = (
 				DD00EE11FF22334455770004 /* ChannelsSidebarView.swift */,
+				DD00EE11FF22334455770E03 /* ChannelSummarySorting.swift */,
+				DD00EE11FF22334455770E02 /* ChannelsLibraryView.swift */,
+				DD00EE11FF22334455770E01 /* CreateChannelSheet.swift */,
 				DD00EE11FF22334455770005 /* ChannelDetailView.swift */,
 				CC11DD22EE33FF445566DD02 /* ChannelBrowseView.swift */,
 				DD00EE11FF22334455770D11 /* InviteToChannelSheet.swift */,
@@ -1024,6 +1053,10 @@
 				EEEE0J0J0J0J0J0J01010008 /* NewJournalSheet.swift */,
 				EEEE0J0J0J0J0J0J0101000A /* InviteToJournalSheet.swift */,
 				G1G2G3000000000000000002 /* RichJournalEditor.swift */,
+				G1G2G3000000000000000J18 /* SlashMenuPanel.swift */,
+				G1G2G3000000000000000J16 /* MarkdownStyler.swift */,
+				G1G2G3000000000000000J14 /* MarkdownListEditing.swift */,
+				G1G2G3000000000000000J12 /* JournalEditorController.swift */,
 				G1G2G3000000000000000004 /* JournalEditorToolbar.swift */,
 				G1G2G3000000000000000006 /* JournalContentView.swift */,
 				G1G2G3000000000000000008 /* JournalStylePopover.swift */,
@@ -1228,6 +1261,10 @@
 				7A5C0000000000000000B010 /* NewRoundSheet.swift in Sources */,
 				7A5C0000000000000000B011 /* TaskViewerSheet+Graph.swift in Sources */,
 				7A5C0000000000000000B012 /* TaskViewerSheet+Sections.swift in Sources */,
+				7A5C0000000000000000B017 /* TaskViewerSheet+Discussion.swift in Sources */,
+				7A5C0000000000000000B016 /* TaskViewerSheet+History.swift in Sources */,
+				7A5C0000000000000000B015 /* TaskViewerSheet+Review.swift in Sources */,
+				7A5C0000000000000000B014 /* TaskViewerSheet+Header.swift in Sources */,
 				7A5C0000000000000000B013 /* TaskViewerSheet+Actions.swift in Sources */,
 				B2C7DB8AE33E886529C5BF99 /* MatchaApp.swift in Sources */,
 				A8B0E4F8719EE4B839FFBCBC /* AppState.swift in Sources */,
@@ -1302,6 +1339,9 @@
 				DD00EE11FF22334455660003 /* ChannelsWebSocket.swift in Sources */,
 				DD00EE11FF22334455660099 /* ChannelNotificationManager.swift in Sources */,
 				DD00EE11FF22334455660004 /* ChannelsSidebarView.swift in Sources */,
+				DD00EE11FF22334455660E03 /* ChannelSummarySorting.swift in Sources */,
+				DD00EE11FF22334455660E02 /* ChannelsLibraryView.swift in Sources */,
+				DD00EE11FF22334455660E01 /* CreateChannelSheet.swift in Sources */,
 				DD00EE11FF22334455660005 /* ChannelDetailView.swift in Sources */,
 				CC11DD22EE33FF445566CC02 /* ChannelBrowseView.swift in Sources */,
 				DD00EE11FF22334455660D11 /* InviteToChannelSheet.swift in Sources */,
@@ -1340,6 +1380,10 @@
 				FFFF1U1U1U1U1U1U01010001 /* TicketUpdatesStore.swift in Sources */,
 				AA11BB22CC33DD44EE5500F6 /* SidebarSectionOrderStore.swift in Sources */,
 				G1G2G3000000000000000001 /* RichJournalEditor.swift in Sources */,
+				G1G2G3000000000000000J17 /* SlashMenuPanel.swift in Sources */,
+				G1G2G3000000000000000J15 /* MarkdownStyler.swift in Sources */,
+				G1G2G3000000000000000J13 /* MarkdownListEditing.swift in Sources */,
+				G1G2G3000000000000000J11 /* JournalEditorController.swift in Sources */,
 				G1G2G3000000000000000003 /* JournalEditorToolbar.swift in Sources */,
 				G1G2G3000000000000000005 /* JournalContentView.swift in Sources */,
 				G1G2G3000000000000000007 /* JournalStylePopover.swift in Sources */,
