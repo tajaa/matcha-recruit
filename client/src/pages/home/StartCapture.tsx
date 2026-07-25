@@ -60,6 +60,13 @@ export function StartCapture() {
           autoComplete="email"
           inputMode="email"
           enterKeyHint="go"
+          // iOS Safari capitalises the first letter and runs autocorrect on a
+          // bare text-ish input, so a tapped address arrives as "You@company"
+          // and fails validateWorkEmail. `type="email"` alone does not suppress
+          // either on iOS — these three attributes are what do it.
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
           value={email}
           onChange={(e) => {
             setEmail(e.target.value);

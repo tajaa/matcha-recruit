@@ -57,7 +57,7 @@ export function Hero() {
     // of dead space under the proof strip that read as unfinished rather than
     // airy. Letting the showcase peek above the fold also signals scrollability
     // better than the chevron does.
-    <section className="relative w-full min-h-[88svh] flex flex-col">
+    <section className="home-hero relative w-full min-h-[88svh] flex flex-col">
       {/* Atmosphere — two whisper-quiet radial glows (leaf upper-left, amber
           lower-right, echoing the headline accents) lift the canvas off flat
           noir. Kept behind the content by DOM order; blur is baked into the
@@ -99,7 +99,7 @@ export function Hero() {
           The magazine folio motif survives where it still earns its place, in
           Manifesto.tsx. */}
       <div
-        className={`relative ${CONTAINER} flex-1 flex flex-col justify-center pt-[104px] sm:pt-[112px] pb-10`}
+        className={`home-hero-body relative ${CONTAINER} flex-1 flex flex-col justify-center pt-[104px] sm:pt-[112px] pb-10`}
       >
         {/* ONE <h1>, in normal flow, full text, opaque. The old implementation
             rendered two — a hidden full-text copy to reserve height plus a
@@ -121,7 +121,7 @@ export function Hero() {
             homepage skipped entirely: this used to be `flex-col lg:flex-row`,
             so from 768-1023px the capture stacked full-width under a narrow
             paragraph on a viewport with room for both. */}
-        <div className="mt-9 flex flex-col md:flex-row md:items-end md:justify-between gap-8 md:gap-12 lg:gap-16">
+        <div className="home-hero-deck mt-9 flex flex-col md:flex-row md:items-end md:justify-between gap-8 md:gap-12 lg:gap-16">
           <p
             className="home-fade-fast max-w-2xl text-[1.25rem] sm:text-[1.6rem] tracking-[-0.011em]"
             style={{
@@ -140,7 +140,7 @@ export function Hero() {
           </p>
 
           <div
-            className="home-fade-fast w-full md:w-[360px] lg:w-[420px] shrink-0"
+            className="home-hero-capture home-fade-fast w-full md:w-[360px] lg:w-[420px] shrink-0"
             style={{ animationDelay: `${BEAT.capture}ms` }}
           >
             <StartCapture />
@@ -148,7 +148,7 @@ export function Hero() {
         </div>
 
         <HeroProof
-          className="home-fade-fast mt-12"
+          className="home-hero-proof home-fade-fast mt-12"
           style={{ animationDelay: `${BEAT.proof}ms` }}
         />
       </div>
@@ -161,7 +161,8 @@ export function Hero() {
       <a
         href="#showcase"
         aria-label="Scroll to product showcase"
-        className="home-scroll-cue mx-auto shrink-0 pb-10 hover:opacity-100"
+        // px-4 widens the hit area to 64px; the icon alone was 32px wide.
+        className="home-scroll-cue mx-auto shrink-0 px-4 pb-10 hover:opacity-100"
         style={{ color: ASH }}
       >
         <ChevronDown className="w-8 h-8" strokeWidth={1.5} />

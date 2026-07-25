@@ -116,6 +116,34 @@ export function PageStyle() {
       /* Brand text selection — background only, so ink stays ink on the bone
          sections and bone stays bone on noir. */
       .home-root ::selection { background: rgba(163,197,125,0.32); }
+      /* iOS Safari paints a translucent grey box over any tapped link/button.
+         On a noir editorial surface it reads as a rendering fault, and every
+         control here already has its own :active/hover treatment. */
+      .home-root a, .home-root button, .home-root input, .home-root summary {
+        -webkit-tap-highlight-color: transparent;
+      }
+      /* Short landscape — a phone rotated. The hero's stacked deck row is
+         taller than the viewport there, which pushed the email capture (the
+         page's one conversion point) fully below the fold: 364px of content in
+         a 340px viewport on an iPhone 12. Compress the fold rather than let the
+         conversion element fall off it. Height-keyed, not width-keyed, so a
+         landscape tablet with real height keeps the normal layout. */
+      @media (orientation: landscape) and (max-height: 520px) {
+        .home-hero { min-height: 0; }
+        .home-hero-body { padding-top: 82px; padding-bottom: 20px; }
+        .home-hero h1 { font-size: clamp(1.5rem, 3.6vw, 2.5rem); }
+        .home-hero-deck {
+          margin-top: 1.25rem;
+          flex-direction: row;
+          align-items: flex-end;
+          justify-content: space-between;
+          gap: 2rem;
+        }
+        .home-hero-deck > p { font-size: 1.05rem; }
+        .home-hero-capture { width: 330px; flex-shrink: 0; }
+        /* Supplementary, and the fold has no room for it rotated. */
+        .home-hero-proof, .home-root .home-scroll-cue { display: none; }
+      }
       /* Keyboard focus in the page aesthetic instead of the UA default ring. */
       .home-root :is(a, button, input):focus-visible {
         outline: 1px solid ${LEAF};

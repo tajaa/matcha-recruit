@@ -211,28 +211,37 @@ export function ProductCarousel() {
               setManual(true);
               goTo(i, i > index ? 1 : -1);
             }}
-            className="relative h-1.5 rounded-full overflow-hidden transition-all duration-300 cursor-pointer"
+            // The visible bar is 6px tall — far under Apple's 44pt minimum, and
+            // these are the carousel's only touch control. The ::after pseudo
+            // element expands the hit area to ~46px tall and out to the gap on
+            // each side, so the whole dot row is one contiguous tappable strip
+            // with no dead zones, WITHOUT changing the layout the bars sit in.
+            // `overflow-hidden` moved to the inner span: on the button it would
+            // clip the pseudo element and undo the whole thing.
+            className="relative h-1.5 rounded-full transition-all duration-300 cursor-pointer after:absolute after:content-[''] after:-inset-x-1 after:-inset-y-5"
             style={{
               width: i === index ? 28 : 8,
               backgroundColor: i === index ? "rgba(245,242,237,0.18)" : LINE_D,
             }}
           >
-            {i === index && autoplay && (
-              <span
-                key={index}
-                className="absolute inset-0 origin-left"
-                style={{
-                  backgroundColor: s.accent,
-                  animation: `showcaseProgress ${SHOWCASE_INTERVAL}ms linear`,
-                }}
-              />
-            )}
-            {i === index && !autoplay && (
-              <span
-                className="absolute inset-0"
-                style={{ backgroundColor: s.accent }}
-              />
-            )}
+            <span className="absolute inset-0 rounded-full overflow-hidden">
+              {i === index && autoplay && (
+                <span
+                  key={index}
+                  className="absolute inset-0 origin-left"
+                  style={{
+                    backgroundColor: s.accent,
+                    animation: `showcaseProgress ${SHOWCASE_INTERVAL}ms linear`,
+                  }}
+                />
+              )}
+              {i === index && !autoplay && (
+                <span
+                  className="absolute inset-0"
+                  style={{ backgroundColor: s.accent }}
+                />
+              )}
+            </span>
           </button>
         ))}
       </div>
