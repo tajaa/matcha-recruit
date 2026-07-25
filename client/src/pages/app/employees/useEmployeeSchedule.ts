@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { fetchWeek, publishRange } from '../../../api/employees/employeeSchedule'
 import type {
-  Shift, RosterEmployee, ScheduleSummary,
+  Shift, RosterEmployee, ScheduleSummary, RosterFlags,
 } from '../../../types/employeeSchedule'
 import {
   toISODate, addDays, startOfWeekSunday,
@@ -14,6 +14,7 @@ export function useEmployeeSchedule() {
   const [weekStart, setWeekStart] = useState(() => toISODate(startOfWeekSunday(new Date())))
   const [shifts, setShifts] = useState<Shift[]>([])
   const [roster, setRoster] = useState<RosterEmployee[]>([])
+  const [rosterFlags, setRosterFlags] = useState<RosterFlags | null>(null)
   const [summary, setSummary] = useState<ScheduleSummary | null>(null)
   const [loading, setLoading] = useState(true)
   const [publishing, setPublishing] = useState(false)
@@ -22,6 +23,7 @@ export function useEmployeeSchedule() {
     const w = await fetchWeek(weekStart)
     setShifts(w.shifts)
     setRoster(w.roster)
+    setRosterFlags(w.roster_flags)
     setSummary(w.summary)
   }, [weekStart])
 
@@ -51,6 +53,7 @@ export function useEmployeeSchedule() {
     weekStart, setWeekStart,
     shifts,
     roster,
+    rosterFlags,
     summary,
     loading,
     publishing,

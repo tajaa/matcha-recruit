@@ -37,6 +37,7 @@ VALID_SOURCE_TYPES = {
     "discipline",
     "credential",
     "cadence",
+    "schedule",
 }
 
 
@@ -367,3 +368,113 @@ async def on_incident_closed(conn, company_id: UUID, incident: dict) -> AssignRe
         severity=incident.get("severity"),
         involved_employee_ids=incident.get("involved_employee_ids") or [],
     )
+
+
+def rule_matches_scheduled_role(
+    rule: dict, employee: dict, shift_role: Optional[str],
+) -> bool:
+    """Pure predicate for a `trigger='scheduled_role'` rule.
+
+    `rule` carries `roles` (list[str] | None — empty/None matches any role,
+    including an open shift with no role set), `departments`, `work_states`,
+    `applies_to`, `req_is_active`. `employee` carries `work_state`,
+    `department`, `is_supervisor`. Role matching is case-insensitive /
+    whitespace-trimmed — admins type roles by hand on both the shift and the
+    rule, and a stray casing mismatch shouldn't silently skip the rule.
+    """
+    if not rule.get("req_is_active", True):
+        return False
+
+    roles = rule.get("roles")
+    if roles:
+        normalized = {r.strip().lower() for r in roles if r}
+        if not shift_role or shift_role.strip().lower() not in normalized:
+            return False
+
+    if rule.get("departments") and employee.get("department") not in rule["departments"]:
+        return False
+    if rule.get("work_states") and employee.get("work_state") not in rule["work_states"]:
+        return False
+
+    applies_to = (rule.get("applies_to") or "all").lower()
+    if applies_to == "supervisor" and not employee.get("is_supervisor"):
+        return False
+    if applies_to == "nonsupervisor" and employee.get("is_supervisor"):
+        return False
+
+    return True
+
+
+async def evaluate_scheduled_role_rules(
+    conn,
+    company_id: UUID,
+    employee_id: UUID,
+    *,
+    shift_id: UUID,
+    shift_role: Optional[str],
+    shift_start: date,
+) -> AssignResult:
+    """Match `employee_id` being scheduled into `shift_role` against active
+    `trigger='scheduled_role'` rules and assign each matching requirement.
+
+    Called after the assignment write commits (assign / swap-approve / shift
+    create with up-front assignees) for `kind='work'` shifts — training-kind
+    shifts (see migration `trainsched01`) assign their own
+    `training_requirement_id` directly instead of going through rule
+    matching. Due date is the shift's start date, clamped earlier by the
+    rule's `due_days` when that would land sooner — the point is the
+    training lands before the shift, not on the rule's usual cadence.
+    """
+    employee = await conn.fetchrow(
+        "SELECT id, work_state, department, is_supervisor "
+        "FROM employees WHERE id = $1 AND org_id = $2",
+        employee_id,
+        company_id,
+    )
+    if not employee:
+        return AssignResult()
+
+    rules = await conn.fetch(
+        """
+        SELECT r.*, req.id AS req_id, req.title AS req_title,
+               req.training_type AS req_training_type,
+               req.frequency_months AS req_frequency_months,
+               req.is_active AS req_is_active
+        FROM training_assignment_rules r
+        JOIN training_requirements req ON req.id = r.requirement_id
+        WHERE r.company_id = $1 AND r.trigger = 'scheduled_role' AND r.is_active = TRUE
+        """,
+        company_id,
+    )
+
+    total = AssignResult()
+    for rule in rules:
+        if not rule_matches_scheduled_role(dict(rule), dict(employee), shift_role):
+            continue
+
+        due_date = shift_start
+        if rule["due_days"] is not None:
+            candidate = date.today() + timedelta(days=rule["due_days"])
+            due_date = min(shift_start, candidate)
+
+        requirement = {
+            "id": rule["req_id"],
+            "title": rule["req_title"],
+            "training_type": rule["req_training_type"],
+            "frequency_months": rule["req_frequency_months"],
+        }
+        outcome = await assign_training(
+            conn,
+            company_id,
+            requirement,
+            [employee_id],
+            source_type="schedule",
+            source_ref=shift_id,
+            source_note=f"Scheduled into role '{shift_role}'" if shift_role else "Scheduled shift assignment",
+            due_date=due_date,
+        )
+        total.assigned += outcome.assigned
+        total.accelerated += outcome.accelerated
+        total.already_open += outcome.already_open
+
+    return total

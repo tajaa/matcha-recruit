@@ -268,6 +268,83 @@ async def _fair_workweek_advisories(
     )
 
 
+async def _training_lapse_advisories(
+    conn,
+    company_id: UUID,
+    employee_id: UUID,
+    *,
+    shift_date: date,
+    exclude_requirement_id: Optional[UUID] = None,
+) -> list[dict]:
+    """Advisory-only (never BLOCK — no statute behind this, unlike minor-hour
+    caps): overdue training / lapsed credentials as of `shift_date` for the
+    employee being assigned. `exclude_requirement_id` drops training items for
+    the requirement a training-kind shift itself teaches — attending the
+    session is the fix, not a violation to warn about.
+
+    Silent no-op when both `training` and `credential_templates` are off
+    (module-off, not "checked and clean" — same three-state idiom as
+    `schedule_intelligence.build_qualified_coverage`)."""
+    from app.core.feature_flags import get_company_features
+    from app.matcha.services import schedule_intelligence
+
+    try:
+        features = await get_company_features(company_id, conn=conn)
+    except Exception:
+        logger.exception("Could not resolve company features for training-lapse check")
+        return [{
+            "check": "training_lapse_unavailable", "severity": "advisory",
+            "message": "Could not verify training/credential status just now — "
+                       "this is a temporary issue, not an all-clear. Verify manually.",
+            "statute": None, "state": "",
+        }]
+
+    training_enabled = bool(features.get("training"))
+    credential_templates_enabled = bool(features.get("credential_templates"))
+    if not training_enabled and not credential_templates_enabled:
+        return []
+
+    lapse_items = await schedule_intelligence.fetch_lapse_items(
+        conn, company_id, [employee_id],
+        credential_templates_enabled=credential_templates_enabled,
+        training_enabled=training_enabled,
+    )
+    items = lapse_items.get(str(employee_id), [])
+    return shape_lapse_advisories(
+        items, shift_date=shift_date, exclude_requirement_id=exclude_requirement_id,
+    )
+
+
+def shape_lapse_advisories(
+    items: list[dict],
+    *,
+    shift_date: date,
+    exclude_requirement_id: Optional[UUID] = None,
+) -> list[dict]:
+    """Pure: `fetch_lapse_items` rows -> advisory dicts, DB-free (unit-testable
+    without a connection). An item lapses only if its date is strictly before
+    `shift_date` — on/after isn't overdue yet. `exclude_requirement_id` drops
+    only the TRAINING items for that requirement (a training-kind shift's own
+    lapsed credentials still warn — attending class doesn't fix a license)."""
+    violations: list[dict] = []
+    for it in items:
+        if it["date"] is None or it["date"] >= shift_date:
+            continue
+        if (
+            exclude_requirement_id is not None
+            and it["source"] == "training"
+            and it["requirement_id"] == exclude_requirement_id
+        ):
+            continue
+        check = "training_lapse" if it["source"] == "training" else "credential_lapse"
+        violations.append({
+            "check": check, "severity": "advisory",
+            "message": f"{it['item']} was due {it['date'].isoformat()} — overdue as of this shift",
+            "statute": None, "state": "",
+        })
+    return violations
+
+
 async def check_shift_compliance(
     conn,
     company_id: UUID,
@@ -280,6 +357,8 @@ async def check_shift_compliance(
     exclude_shift_id: Optional[UUID] = None,
     fw_event: Optional[str] = None,
     fw_shift_published: bool = False,
+    shift_kind: str = "work",
+    training_requirement_id: Optional[UUID] = None,
 ) -> list[dict]:
     """Assemble context + evaluate. Returns violations (never raises). When
     `employee_id` is None (shift not yet assigned), only shift-intrinsic checks
@@ -288,7 +367,10 @@ async def check_shift_compliance(
     `fw_event` (one of `retime`/`cancel`/`assign`/`unassign`) additionally runs
     the preventive Fair Workweek advisories for this change — see
     `_fair_workweek_advisories`; omit it for calls that aren't a
-    notice-window-relevant change (e.g. the compliance-panel preview)."""
+    notice-window-relevant change (e.g. the compliance-panel preview).
+
+    `shift_kind`/`training_requirement_id`: for a `kind='training'` shift, the
+    training-lapse check excludes the requirement the shift itself teaches."""
     state, city = await _location_state(conn, company_id, location_id)
     worked = _hours(starts_at, ends_at, break_minutes)
 
@@ -341,6 +423,14 @@ async def check_shift_compliance(
         starts_at=starts_at, ends_at=ends_at, event=fw_event,
         shift_published=fw_shift_published, min_rest_gap_hours=min_rest,
     )
+    if employee_id is not None:
+        violations += await _training_lapse_advisories(
+            conn, company_id, employee_id,
+            shift_date=starts_at.astimezone(timezone.utc).date(),
+            exclude_requirement_id=(
+                training_requirement_id if shift_kind == "training" else None
+            ),
+        )
     return violations
 
 

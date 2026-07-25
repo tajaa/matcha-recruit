@@ -256,7 +256,7 @@ async def delete_requirement(
 # auto-assignment (new hire / incident close / scheduled cadence).
 # ---------------------------------------------------------------------------
 
-VALID_RULE_TRIGGERS = {"new_hire", "incident", "schedule"}
+VALID_RULE_TRIGGERS = {"new_hire", "incident", "schedule", "scheduled_role"}
 
 
 class TrainingRuleCreate(BaseModel):
@@ -268,6 +268,7 @@ class TrainingRuleCreate(BaseModel):
     due_days: Optional[int] = None
     incident_types: Optional[list[str]] = None
     min_severity: Optional[str] = None
+    roles: Optional[list[str]] = None
 
 
 class TrainingRuleUpdate(BaseModel):
@@ -278,6 +279,7 @@ class TrainingRuleUpdate(BaseModel):
     incident_types: Optional[list[str]] = None
     min_severity: Optional[str] = None
     is_active: Optional[bool] = None
+    roles: Optional[list[str]] = None
 
 
 def _rule_to_dict(row) -> dict:
@@ -292,6 +294,7 @@ def _rule_to_dict(row) -> dict:
         "due_days": row["due_days"],
         "incident_types": list(row["incident_types"]) if row["incident_types"] else None,
         "min_severity": row["min_severity"],
+        "roles": list(row["roles"]) if row["roles"] else None,
         "is_active": row["is_active"],
         "created_at": row["created_at"].isoformat() if row["created_at"] else None,
         "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
@@ -329,8 +332,8 @@ async def create_rule(
             """
             INSERT INTO training_assignment_rules
                 (company_id, requirement_id, trigger, work_states, applies_to,
-                 departments, due_days, incident_types, min_severity, created_by)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                 departments, due_days, incident_types, min_severity, roles, created_by)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
             RETURNING *
             """,
             company_id,
@@ -342,6 +345,7 @@ async def create_rule(
             body.due_days,
             body.incident_types,
             body.min_severity,
+            body.roles,
             user.id,
         )
         return _rule_to_dict(row)
@@ -383,7 +387,7 @@ async def update_rule(
     idx = 1
     for field_name in (
         "work_states", "applies_to", "departments", "due_days",
-        "incident_types", "min_severity", "is_active",
+        "incident_types", "min_severity", "is_active", "roles",
     ):
         value = getattr(body, field_name)
         if value is not None:

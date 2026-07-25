@@ -29,6 +29,7 @@ def _as_utc(value: Optional[datetime]) -> Optional[datetime]:
 
 
 ShiftStatus = Literal["draft", "published", "cancelled"]
+ShiftKind = Literal["work", "training"]
 AssignmentStatus = Literal["assigned", "confirmed", "declined"]
 RequestType = Literal["swap", "drop", "unavailable"]
 RequestDecision = Literal["approved", "denied"]
@@ -49,6 +50,13 @@ class ShiftCreate(BaseModel):
     notes: Optional[str] = Field(None, max_length=2000)
     # Employees to assign up front (optional).
     employee_ids: list[UUID] = Field(default_factory=list)
+    # 'training' ties the shift to a training_requirement — assigning an
+    # employee creates/accelerates their training record instead of (not in
+    # addition to) matching scheduled_role rules. Immutable after create
+    # (no equivalent field on ShiftUpdate) — flipping kind mid-flight would
+    # leave existing training records' provenance ambiguous.
+    kind: ShiftKind = "work"
+    training_requirement_id: Optional[UUID] = None
 
     _utc = field_validator("starts_at", "ends_at")(_as_utc)
 
@@ -56,6 +64,14 @@ class ShiftCreate(BaseModel):
     def _check_window(self) -> "ShiftCreate":
         if self.ends_at <= self.starts_at:
             raise ValueError("ends_at must be after starts_at")
+        return self
+
+    @model_validator(mode="after")
+    def _check_kind(self) -> "ShiftCreate":
+        if self.kind == "training" and self.training_requirement_id is None:
+            raise ValueError("training shifts require training_requirement_id")
+        if self.kind == "work" and self.training_requirement_id is not None:
+            raise ValueError("training_requirement_id is only valid on training shifts")
         return self
 
 

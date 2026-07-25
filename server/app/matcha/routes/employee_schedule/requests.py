@@ -7,6 +7,8 @@ requester and assigns the named target (if any); `unavailable` is informational
 (no shift mutation).
 """
 
+import logging
+from datetime import timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -14,11 +16,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from app.database import get_connection
 from ...dependencies import require_admin_or_client
 from ...models.employee_schedule import RequestReview
+from ...services.training_assignment import evaluate_scheduled_role_rules
 from ._shared import (
     require_company_id, log_audit, serialize_request, REQUEST_SELECT,
     INACTIVE_EMPLOYMENT_STATUSES, find_conflicts, raise_conflict,
 )
 from ._compliance import check_shift_compliance, raise_for_violations
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -107,7 +112,8 @@ async def review_request(request_id: UUID, body: RequestReview,
                         detail=f"Swap target is {target['employment_status']} and cannot be scheduled",
                     )
                 window = await conn.fetchrow(
-                    "SELECT starts_at, ends_at, location_id, break_minutes, status "
+                    "SELECT starts_at, ends_at, location_id, break_minutes, status, "
+                    "kind, training_requirement_id, role "
                     "FROM schedule_shifts WHERE id = $1 AND company_id = $2",
                     req["shift_id"], company_id,
                 )
@@ -134,6 +140,7 @@ async def review_request(request_id: UUID, body: RequestReview,
                         # Fair Workweek notice/clopening check an ordinary
                         # assign does.
                         fw_event="assign", fw_shift_published=(window["status"] == "published"),
+                        shift_kind=window["kind"], training_requirement_id=window["training_requirement_id"],
                     )
                     raise_for_violations(swap_violations, force=body.force)
 
@@ -165,6 +172,18 @@ async def review_request(request_id: UUID, body: RequestReview,
                         company_id, req["shift_id"], req["target_employee_id"],
                         current_user.id,
                     )
+                    if window is not None and window["kind"] == "work":
+                        try:
+                            await evaluate_scheduled_role_rules(
+                                conn, company_id, req["target_employee_id"],
+                                shift_id=req["shift_id"], shift_role=window["role"],
+                                shift_start=window["starts_at"].astimezone(timezone.utc).date(),
+                            )
+                        except Exception:
+                            logger.exception(
+                                "scheduled_role training rules failed for shift %s",
+                                req["shift_id"],
+                            )
 
             shift_starts_at = None
             if req["shift_id"] is not None:

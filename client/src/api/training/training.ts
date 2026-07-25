@@ -54,13 +54,14 @@ export type TrainingRule = {
   id: string
   company_id: string
   requirement_id: string
-  trigger: 'new_hire' | 'incident' | 'schedule'
+  trigger: 'new_hire' | 'incident' | 'schedule' | 'scheduled_role'
   work_states: string[] | null
   applies_to: 'all' | 'supervisor' | 'nonsupervisor'
   departments: string[] | null
   due_days: number | null
   incident_types: string[] | null
   min_severity: string | null
+  roles: string[] | null
   is_active: boolean
   created_at: string | null
   updated_at: string | null
@@ -180,13 +181,14 @@ export const trainingApi = {
     api.get<TrainingRule[]>(`/training/rules?is_active=${is_active}`),
   createRule: (body: {
     requirement_id: string
-    trigger: 'new_hire' | 'incident' | 'schedule'
+    trigger: 'new_hire' | 'incident' | 'schedule' | 'scheduled_role'
     work_states?: string[]
     applies_to?: 'all' | 'supervisor' | 'nonsupervisor'
     departments?: string[]
     due_days?: number
     incident_types?: string[]
     min_severity?: string
+    roles?: string[]
   }) => api.post<TrainingRule>('/training/rules', body),
   updateRule: (rule_id: string, body: Partial<Omit<TrainingRule, 'id' | 'company_id' | 'requirement_id' | 'trigger' | 'created_at' | 'updated_at'>>) =>
     api.put<TrainingRule>(`/training/rules/${rule_id}`, body),

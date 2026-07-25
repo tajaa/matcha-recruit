@@ -403,6 +403,91 @@ async def build_pretext_shield(conn, company_id: UUID, *, months: int = _PRETEXT
     }
 
 
+# ── Shared: credential/training lapse lookup ──────────────────────────────
+# Used by qualified coverage (module 4, below), the assignment-time training
+# gate (`routes/employee_schedule/_compliance.py:_training_lapse_advisories`),
+# and the roster-picker badges (`routes/employee_schedule/shifts.py:get_week`)
+# — one query set so the three surfaces can't drift apart.
+
+async def fetch_lapse_items(
+    conn, company_id: UUID, employee_ids: list[UUID], *,
+    credential_templates_enabled: bool, training_enabled: bool,
+) -> dict[str, list[dict[str, Any]]]:
+    """employee_id(str) -> [{source, item, date, requirement_id}].
+
+    `date` is the date the item lapses (a requirement's due_date, or a
+    credential/training expiration) — callers compare it against their own
+    as-of date (a shift's date, or "today"). Employees with nothing due/
+    expired are absent from the result. `requirement_id` is only populated
+    for `source == "training"` items (used to exclude the requirement a
+    training-kind shift itself teaches); `None` for credential sources.
+    """
+    lapse_items: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    if not employee_ids:
+        return lapse_items
+
+    emp_uuids = list(employee_ids)
+
+    if credential_templates_enabled:
+        req_rows = await conn.fetch(
+            """
+            SELECT ecr.employee_id, ct.label AS credential_name, ecr.due_date
+            FROM employee_credential_requirements ecr
+            JOIN employees e ON e.id = ecr.employee_id
+            LEFT JOIN credential_types ct ON ct.id = ecr.credential_type_id
+            WHERE e.org_id = $1 AND ecr.employee_id = ANY($2::uuid[])
+              AND ecr.status NOT IN ('verified', 'waived') AND ecr.due_date IS NOT NULL
+            """,
+            company_id, emp_uuids,
+        )
+        for r in req_rows:
+            lapse_items[str(r["employee_id"])].append({
+                "source": "credential_requirement", "item": r["credential_name"] or "Credential",
+                "date": r["due_date"], "requirement_id": None,
+            })
+        cred_rows = await conn.fetch(
+            """
+            SELECT employee_id, license_expiration, dea_expiration,
+                   board_certification_expiration, malpractice_expiration
+            FROM employee_credentials WHERE org_id = $1 AND employee_id = ANY($2::uuid[])
+            """,
+            company_id, emp_uuids,
+        )
+        for r in cred_rows:
+            for col, label in (
+                ("license_expiration", "License"), ("dea_expiration", "DEA registration"),
+                ("board_certification_expiration", "Board certification"),
+                ("malpractice_expiration", "Malpractice coverage"),
+            ):
+                if r[col]:
+                    lapse_items[str(r["employee_id"])].append(
+                        {"source": "credential", "item": label, "date": r[col], "requirement_id": None}
+                    )
+
+    if training_enabled:
+        train_rows = await conn.fetch(
+            """
+            SELECT employee_id, requirement_id, title, status, due_date, expiration_date
+            FROM training_records
+            WHERE company_id = $1 AND employee_id = ANY($2::uuid[]) AND requirement_id IS NOT NULL
+            """,
+            company_id, emp_uuids,
+        )
+        for r in train_rows:
+            if r["status"] != "completed" and r["due_date"]:
+                lapse_items[str(r["employee_id"])].append({
+                    "source": "training", "item": r["title"], "date": r["due_date"],
+                    "requirement_id": r["requirement_id"],
+                })
+            if r["expiration_date"]:
+                lapse_items[str(r["employee_id"])].append({
+                    "source": "training", "item": r["title"], "date": r["expiration_date"],
+                    "requirement_id": r["requirement_id"],
+                })
+
+    return lapse_items
+
+
 # ── Module 4: qualified coverage ─────────────────────────────────────────
 
 async def build_qualified_coverage(
@@ -440,63 +525,14 @@ async def build_qualified_coverage(
         assignees_by_shift[str(r["shift_id"])].append(emp)
         all_employee_ids.add(emp)
 
-    lapse_items: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    if all_employee_ids and credential_templates_enabled:
+    lapse_items: dict[str, list[dict[str, Any]]] = {}
+    if all_employee_ids:
         emp_uuids = [UUID(e) for e in all_employee_ids]
-        req_rows = await conn.fetch(
-            """
-            SELECT ecr.employee_id, ct.label AS credential_name, ecr.due_date
-            FROM employee_credential_requirements ecr
-            JOIN employees e ON e.id = ecr.employee_id
-            LEFT JOIN credential_types ct ON ct.id = ecr.credential_type_id
-            WHERE e.org_id = $1 AND ecr.employee_id = ANY($2::uuid[])
-              AND ecr.status NOT IN ('verified', 'waived') AND ecr.due_date IS NOT NULL
-            """,
-            company_id, emp_uuids,
+        lapse_items = await fetch_lapse_items(
+            conn, company_id, emp_uuids,
+            credential_templates_enabled=credential_templates_enabled,
+            training_enabled=training_enabled,
         )
-        for r in req_rows:
-            lapse_items[str(r["employee_id"])].append({
-                "source": "credential_requirement", "item": r["credential_name"] or "Credential",
-                "date": r["due_date"],
-            })
-        cred_rows = await conn.fetch(
-            """
-            SELECT employee_id, license_expiration, dea_expiration,
-                   board_certification_expiration, malpractice_expiration
-            FROM employee_credentials WHERE org_id = $1 AND employee_id = ANY($2::uuid[])
-            """,
-            company_id, emp_uuids,
-        )
-        for r in cred_rows:
-            for col, label in (
-                ("license_expiration", "License"), ("dea_expiration", "DEA registration"),
-                ("board_certification_expiration", "Board certification"),
-                ("malpractice_expiration", "Malpractice coverage"),
-            ):
-                if r[col]:
-                    lapse_items[str(r["employee_id"])].append(
-                        {"source": "credential", "item": label, "date": r[col]}
-                    )
-
-    if all_employee_ids and training_enabled:
-        emp_uuids = [UUID(e) for e in all_employee_ids]
-        train_rows = await conn.fetch(
-            """
-            SELECT employee_id, title, status, due_date, expiration_date
-            FROM training_records
-            WHERE company_id = $1 AND employee_id = ANY($2::uuid[]) AND requirement_id IS NOT NULL
-            """,
-            company_id, emp_uuids,
-        )
-        for r in train_rows:
-            if r["status"] != "completed" and r["due_date"]:
-                lapse_items[str(r["employee_id"])].append(
-                    {"source": "training", "item": r["title"], "date": r["due_date"]}
-                )
-            if r["expiration_date"]:
-                lapse_items[str(r["employee_id"])].append(
-                    {"source": "training", "item": r["title"], "date": r["expiration_date"]}
-                )
 
     shifts_out = []
     for s in shifts:

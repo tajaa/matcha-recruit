@@ -22,7 +22,7 @@ from ...services.schedule_rules import (  # re-exported for the route modules
 _SHIFT_COLS = (
     "id, company_id, location_id, template_id, series_id, role, department, "
     "starts_at, ends_at, break_minutes, required_staff, color, notes, status, "
-    "published_at, created_at, updated_at"
+    "kind, training_requirement_id, published_at, created_at, updated_at"
 )
 
 # The one request-with-context projection, shared by the admin review router and
@@ -260,13 +260,14 @@ async def fetch_shift_for_write(conn, company_id: UUID, shift_id: UUID):
     """The single read every assignment path takes before mutating a shift.
 
     Carries the window (conflict check), the status (a cancelled shift takes no
-    assignments) and the staffing counts (headcount cap). 404s if the shift
-    isn't this company's.
+    assignments), the staffing counts (headcount cap), and the role/kind/
+    training_requirement_id (training-lapse gate + scheduled-role rules +
+    training-as-shift assignment). 404s if the shift isn't this company's.
     """
     row = await conn.fetchrow(
         """
         SELECT s.starts_at, s.ends_at, s.status, s.required_staff,
-               s.location_id, s.break_minutes,
+               s.location_id, s.break_minutes, s.role, s.kind, s.training_requirement_id,
                (SELECT COUNT(*) FROM schedule_shift_assignments a
                 WHERE a.shift_id = s.id) AS assigned_count
         FROM schedule_shifts s
@@ -335,6 +336,8 @@ def _shift_row_to_dict(r) -> dict:
         "color": r["color"],
         "notes": r["notes"],
         "status": r["status"],
+        "kind": r["kind"],
+        "training_requirement_id": str(r["training_requirement_id"]) if r["training_requirement_id"] else None,
         "published_at": _iso(r["published_at"]),
         "assignments": [],
     }

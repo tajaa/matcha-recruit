@@ -1,6 +1,7 @@
 // Employee scheduling (feature: employee_schedule).
 
 export type ShiftStatus = 'draft' | 'published' | 'cancelled'
+export type ShiftKind = 'work' | 'training'
 export type AssignmentStatus = 'assigned' | 'confirmed' | 'declined'
 export type RequestType = 'swap' | 'drop' | 'unavailable'
 export type RequestStatus = 'pending' | 'approved' | 'denied' | 'cancelled'
@@ -26,6 +27,8 @@ export interface Shift {
   color: string | null
   notes: string | null
   status: ShiftStatus
+  kind: ShiftKind
+  training_requirement_id: string | null
   published_at: string | null
   assignments: ShiftAssignment[]
 }
@@ -45,10 +48,16 @@ export interface RosterEmployee {
   department: string | null
 }
 
+// Per-employee lapse counts for the roster picker. `null` = both `training`
+// and `credential_templates` are off for this company (module-off, not
+// "checked and clean" — an employee absent from the map has nothing lapsed).
+export type RosterFlags = Record<string, { overdue_training: number; lapsed_credentials: number }>
+
 export interface WeekResponse {
   week_start: string
   shifts: Shift[]
   roster: RosterEmployee[]
+  roster_flags: RosterFlags | null
   summary: ScheduleSummary
 }
 
@@ -64,6 +73,8 @@ export interface ShiftPayload {
   notes?: string | null
   employee_ids?: string[]
   status?: ShiftStatus
+  kind?: ShiftKind
+  training_requirement_id?: string | null
 }
 
 export interface ShiftTemplate {
