@@ -42,7 +42,7 @@ import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence, Tuple
 from uuid import UUID
 
 logger = logging.getLogger(__name__)
@@ -244,6 +244,87 @@ async def _derive_injury_recordkeeping(
     }
 
 
+# ── SB 553 component derivations ────────────────────────────────────────────
+# Two of the five WVP obligations are provable from data already held; the
+# other three (written plan, hazard assessment, annual review) have no system
+# record and stay attest-only — see COMPONENT_DERIVATIONS below.
+
+async def _derive_wvp_training(
+    conn, *, company_id: UUID, location_id: UUID, row: Dict[str, Any], ctx: Dict[str, Any]
+) -> DerivationResult:
+    """Annual workplace-violence-prevention training, from training_records.
+
+    Same blind/in-progress/compliant shape as `_derive_harassment_training`,
+    plus a lapse check: SB 553 training is annual, so "completed once, years
+    ago" is not "compliant" the way a one-time policy acknowledgment would be.
+    """
+    tr = ctx.get("wvp_training")
+    if tr is None or int(tr["assigned"] or 0) == 0:
+        return None  # Nothing assigned: cannot tell trained-and-unrecorded from
+        # untrained. Blind, not violating.
+    assigned, completed = int(tr["assigned"]), int(tr["completed"] or 0)
+    if completed < assigned:
+        return "in_progress", {
+            "rule": "annual WVP training assigned but incomplete",
+            "completed": completed, "assigned": assigned,
+        }
+    last = tr["last_completed"]
+    if last is not None:
+        from datetime import date, timedelta
+        if date.today() - last > timedelta(days=396):  # 12mo + slack
+            return "non_compliant", {
+                "rule": "annual WVP training lapsed (over 12 months since last completion)",
+                "last_completed": last.isoformat(),
+            }
+    return "compliant", {
+        "rule": "annual WVP training complete",
+        "completed": completed, "assigned": assigned,
+        "last_completed": last.isoformat() if last else None,
+    }
+
+
+async def _derive_wvp_incident_log(
+    conn, *, company_id: UUID, location_id: UUID, row: Dict[str, Any], ctx: Dict[str, Any]
+) -> DerivationResult:
+    """Violent-incident log, inferred from IR incidents tagged 'behavioral'
+    whose title/description mention violence or threats.
+
+    ir_incidents has no dedicated 'violence' incident_type (the CHECK
+    constraint allows only safety/behavioral/property/near_miss/other), so this
+    is a text-match proxy, not a structured field — deliberately conservative:
+    it can prove a log exists (evidence found), it can never prove one doesn't
+    (no matches could mean no incidents, or incidents logged under different
+    wording — either way, blind, not violating).
+    """
+    inc = ctx.get("violence_incidents", {}).get(location_id)
+    if not inc or int(inc["total"] or 0) == 0:
+        return None
+    return "compliant", {
+        "rule": "violent-incident log has entries",
+        "matched_incidents": int(inc["total"]),
+    }
+
+
+COMPONENT_DERIVATIONS: Dict[str, Derivation] = {
+    "wvp_training": Derivation(
+        "wvp_training", _derive_wvp_training, "SB 553 annual training",
+        required_feature="training"),
+    "wvp_incident_log": Derivation(
+        "wvp_incident_log", _derive_wvp_incident_log, "SB 553 violent incident log",
+        required_feature="incidents"),
+}
+
+
+def component_derivation(derivation_key: Optional[str]) -> Optional[Derivation]:
+    if derivation_key is None:
+        return None
+    return COMPONENT_DERIVATIONS.get(derivation_key)
+
+
+def derivable_component_keys() -> List[str]:
+    return sorted(COMPONENT_DERIVATIONS)
+
+
 # ── workforce-compliance verdicts (pure, one source of truth) ───────────────
 # Used BOTH by the DERIVATIONS below (per catalog requirement, where 'unknown'
 # means "blind → return None") and by the workforce-page requirement gate
@@ -399,6 +480,40 @@ async def _build_context(conn, company_id: UUID, features: Dict[str, Any]) -> Di
         ):
             ctx["incidents"][r["location_id"]] = dict(r)
 
+    # SB 553-shaped context. Deliberately separate from ctx["training"] (which
+    # is filtered to harassment/EEO training and says nothing about workplace
+    # violence) and ctx["incidents"] (which counts OSHA-recordability, not
+    # violence logging) — reusing either would silently grade the wrong thing.
+    if features.get("training"):
+        ctx["wvp_training"] = await conn.fetchrow(
+            """
+            SELECT COUNT(*) AS assigned,
+                   COUNT(*) FILTER (WHERE status = 'completed') AS completed,
+                   MAX(completed_date) AS last_completed
+            FROM training_records
+            WHERE company_id = $1
+              AND (training_type = 'workplace_violence'
+                   OR LOWER(title) ~ '(workplace violence|wvp|sb ?553)')
+            """,
+            company_id,
+        )
+
+    if features.get("incidents"):
+        ctx["violence_incidents"] = {}
+        for r in await conn.fetch(
+            """
+            SELECT location_id, COUNT(*) AS total
+            FROM ir_incidents
+            WHERE company_id = $1 AND location_id IS NOT NULL
+              AND incident_type = 'behavioral'
+              AND (title ILIKE '%violen%' OR title ILIKE '%threat%'
+                   OR description ILIKE '%violen%' OR description ILIKE '%threat%')
+            GROUP BY location_id
+            """,
+            company_id,
+        ):
+            ctx["violence_incidents"][r["location_id"]] = dict(r)
+
     # Workforce-compliance backstops (pay transparency / pay equity / biometrics).
     # Loaded once here so the per-requirement derivations never re-query.
     if features.get("workforce_compliance"):
@@ -530,7 +645,8 @@ async def reconcile_requirement_status(
                 (company_id, location_id, jurisdiction_requirement_id, regulation_key,
                  status, basis, evidence, derived_at, updated_at)
             VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,NOW())
-            ON CONFLICT (location_id, jurisdiction_requirement_id) DO UPDATE SET
+            ON CONFLICT (location_id, jurisdiction_requirement_id, COALESCE(component_key, ''))
+                DO UPDATE SET
                 status = EXCLUDED.status,
                 basis = EXCLUDED.basis,
                 evidence = EXCLUDED.evidence,
@@ -589,6 +705,7 @@ async def attest_requirement_status(
         """
         SELECT status FROM requirement_compliance_status
         WHERE location_id = $1 AND jurisdiction_requirement_id = $2
+          AND component_key IS NULL
         """,
         location_id, catalog_id,
     )
@@ -598,7 +715,8 @@ async def attest_requirement_status(
             (company_id, location_id, jurisdiction_requirement_id, regulation_key,
              status, basis, evidence, attested_by, attested_at, attested_note, updated_at)
         VALUES ($1,$2,$3,$4,$5,'attested',$6::jsonb,$7,NOW(),$8,NOW())
-        ON CONFLICT (location_id, jurisdiction_requirement_id) DO UPDATE SET
+        ON CONFLICT (location_id, jurisdiction_requirement_id, COALESCE(component_key, ''))
+            DO UPDATE SET
             status = EXCLUDED.status, basis = 'attested',
             evidence = EXCLUDED.evidence, attested_by = EXCLUDED.attested_by,
             attested_at = NOW(), attested_note = EXCLUDED.attested_note, updated_at = NOW()
@@ -614,6 +732,266 @@ async def attest_requirement_status(
         VALUES ($1,$2,$3,'attested',$4,$5,'attested',$6,$7::jsonb)
         """,
         company_id, location_id, catalog_id, prev, status, actor_user_id,
+        json.dumps({"note": note}),
+    )
+    return {"status": status, "basis": "attested"}
+
+
+# ── component checklist ──────────────────────────────────────────────────────
+
+async def fetch_requirement_components(
+    conn, catalog_ids: Sequence[UUID]
+) -> Dict[UUID, List[Dict[str, Any]]]:
+    """Catalog-side decomposition for a batch of requirements. Never N+1 per
+    requirement — callers pass every catalog id they need up front."""
+    if not catalog_ids:
+        return {}
+    rows = await conn.fetch(
+        """
+        SELECT id, jurisdiction_requirement_id, component_key, label, question,
+               statute_citation, suggested_fix, severity, derivation_key, sort_order
+        FROM requirement_components
+        WHERE jurisdiction_requirement_id = ANY($1::uuid[])
+        ORDER BY jurisdiction_requirement_id, sort_order
+        """,
+        list(catalog_ids),
+    )
+    out: Dict[UUID, List[Dict[str, Any]]] = {}
+    for r in rows:
+        out.setdefault(r["jurisdiction_requirement_id"], []).append(dict(r))
+    return out
+
+
+async def reconcile_component_status(
+    conn, company_id: UUID, *, features: Optional[Dict[str, Any]] = None,
+    location_id: Optional[UUID] = None, catalog_id: Optional[UUID] = None,
+) -> Dict[str, Any]:
+    """Re-derive status for every component of every codified requirement that
+    HAS components, projected to this company.
+
+    Mirrors `reconcile_requirement_status` (idempotent, read-path safe,
+    audit-logs only real transitions) with three differences: the identity key
+    is the 3-tuple (location, catalog, component) instead of 2; the candidate
+    row set comes from a join against `requirement_components` rather than a
+    filter on `derivable_keys()` — an attest-only component has no
+    `DERIVATIONS` entry and would otherwise never get evaluated; and both
+    `location_id`/`catalog_id` are optional narrowing filters so a single
+    checklist read (`get_component_checklist`) can reconcile just its own row
+    instead of the whole company.
+    """
+    if features is None:
+        from ..feature_flags import get_company_features  # local: avoids a cycle
+        features = await get_company_features(company_id)
+
+    from .compliance_service import codified_gate_sql
+
+    params: List[Any] = [company_id]
+    filters = ["bl.company_id = $1", "COALESCE(bl.is_active, true) = true"]
+    if location_id is not None:
+        params.append(location_id)
+        filters.append(f"cr.location_id = ${len(params)}")
+    if catalog_id is not None:
+        params.append(catalog_id)
+        filters.append(f"cat.id = ${len(params)}")
+
+    rows = await conn.fetch(
+        f"""
+        SELECT cr.location_id, cat.id AS catalog_id, rc.component_key,
+               rc.derivation_key
+        FROM compliance_requirements cr
+        JOIN business_locations bl ON bl.id = cr.location_id
+        JOIN jurisdiction_requirements cat ON cat.id = cr.jurisdiction_requirement_id
+        JOIN requirement_components rc ON rc.jurisdiction_requirement_id = cat.id
+        WHERE {' AND '.join(filters)}
+          {await codified_gate_sql("cat", conn=conn)}
+        """,
+        *params,
+    )
+    if not rows:
+        return {"evaluated": 0, "changed": 0}
+
+    ctx = await _build_context(conn, company_id, features)
+
+    existing = {
+        (r["location_id"], r["jurisdiction_requirement_id"], r["component_key"]): dict(r)
+        for r in await conn.fetch(
+            """
+            SELECT location_id, jurisdiction_requirement_id, component_key,
+                   status, basis, attested_note, attested_at
+            FROM requirement_compliance_status
+            WHERE company_id = $1 AND component_key IS NOT NULL
+            """,
+            company_id,
+        )
+    }
+
+    evaluated = changed = 0
+    for row in rows:
+        d = component_derivation(row["derivation_key"])
+        derived: DerivationResult = None
+        if d is not None and (d.required_feature is None or features.get(d.required_feature)):
+            try:
+                derived = await d.fn(
+                    conn, company_id=company_id, location_id=row["location_id"],
+                    row=dict(row), ctx=ctx,
+                )
+            except Exception:  # noqa: BLE001 — one bad rule must not sink the read
+                logger.exception("component derivation %s failed", d.key)
+                derived = None
+
+        key3 = (row["location_id"], row["catalog_id"], row["component_key"])
+        prev = existing.get(key3)
+        attested = None
+        if prev and prev.get("basis") == "attested":
+            attested = {
+                "status": prev["status"], "note": prev.get("attested_note"),
+                "at": prev["attested_at"].isoformat() if prev.get("attested_at") else None,
+            }
+
+        status, basis, evidence = resolve_status(derived, attested)
+        evaluated += 1
+        if prev and prev["status"] == status and prev.get("basis") == basis:
+            continue
+
+        await conn.execute(
+            """
+            INSERT INTO requirement_compliance_status
+                (company_id, location_id, jurisdiction_requirement_id, component_key,
+                 regulation_key, status, basis, evidence, derived_at, updated_at)
+            VALUES ($1,$2,$3,$4,NULL,$5,$6,$7::jsonb,$8,NOW())
+            ON CONFLICT (location_id, jurisdiction_requirement_id, COALESCE(component_key, ''))
+                DO UPDATE SET
+                status = EXCLUDED.status,
+                basis = EXCLUDED.basis,
+                evidence = EXCLUDED.evidence,
+                derived_at = COALESCE(EXCLUDED.derived_at,
+                                      requirement_compliance_status.derived_at),
+                updated_at = NOW()
+            """,
+            company_id, row["location_id"], row["catalog_id"], row["component_key"],
+            status, basis, json.dumps(evidence),
+            datetime.now(timezone.utc) if basis == "derived" else None,
+        )
+        await conn.execute(
+            """
+            INSERT INTO requirement_status_audit_log
+                (company_id, location_id, jurisdiction_requirement_id, component_key,
+                 action, from_status, to_status, basis, details)
+            VALUES ($1,$2,$3,$4,'derived',$5,$6,$7,$8::jsonb)
+            """,
+            company_id, row["location_id"], row["catalog_id"], row["component_key"],
+            (prev or {}).get("status"), status, basis, json.dumps(evidence),
+        )
+        changed += 1
+
+    return {"evaluated": evaluated, "changed": changed}
+
+
+async def get_component_checklist(
+    conn, *, company_id: UUID, location_id: UUID, catalog_id: UUID,
+) -> Dict[str, Any]:
+    """One requirement's components + per-component status + rollup, scoped to
+    a single (company, location, catalog) triple. Reconciles just that scope
+    first (cheap — a handful of rows, not the whole company) then reads back."""
+    await reconcile_component_status(
+        conn, company_id, location_id=location_id, catalog_id=catalog_id,
+    )
+
+    components = (await fetch_requirement_components(conn, [catalog_id])).get(catalog_id, [])
+    statuses = {
+        r["component_key"]: dict(r)
+        for r in await conn.fetch(
+            """
+            SELECT component_key, status, basis, evidence, attested_note, attested_at, derived_at
+            FROM requirement_compliance_status
+            WHERE company_id = $1 AND location_id = $2 AND jurisdiction_requirement_id = $3
+              AND component_key IS NOT NULL
+            """,
+            company_id, location_id, catalog_id,
+        )
+    }
+
+    out_components: List[Dict[str, Any]] = []
+    status_rows: List[Dict[str, Any]] = []
+    for c in components:
+        st = statuses.get(c["component_key"], {})
+        merged = {
+            **c,
+            "derivable": c["derivation_key"] is not None,
+            "status": st.get("status", "unknown"),
+            "basis": st.get("basis"),
+            "evidence": (json.loads(st["evidence"]) if isinstance(st.get("evidence"), str)
+                         else (st.get("evidence") or {})),
+            "attested_note": st.get("attested_note"),
+            "attested_at": st["attested_at"].isoformat() if st.get("attested_at") else None,
+            "derived_at": st["derived_at"].isoformat() if st.get("derived_at") else None,
+        }
+        out_components.append(merged)
+        status_rows.append({"status": merged["status"], "basis": merged["basis"]})
+
+    return {"components": out_components, "summary": rollup(status_rows)}
+
+
+async def attest_component_status(
+    conn, *, company_id: UUID, location_id: UUID, catalog_id: UUID,
+    component_key: str, status: str, note: Optional[str], actor_user_id: UUID,
+) -> Dict[str, Any]:
+    """Human declaration for ONE component of a decomposed requirement.
+
+    Refused only when THIS component carries a `derivation_key` — unlike
+    `attest_requirement_status`'s whole-key refusal, a sibling component with
+    no derivation must stay attestable even after another component on the
+    same requirement becomes derivable. Getting this wrong (checking the
+    parent regulation_key instead of the component) would block attestation on
+    every non-derivable clause of a statute the moment ONE clause of it gains a
+    derivation.
+    """
+    if status not in STATUSES:
+        raise ValueError(f"unknown status {status!r}")
+
+    comp = await conn.fetchrow(
+        "SELECT derivation_key FROM requirement_components "
+        "WHERE jurisdiction_requirement_id = $1 AND component_key = $2",
+        catalog_id, component_key,
+    )
+    if comp is None:
+        raise ValueError(f"no such component {component_key!r} on this requirement")
+    if comp["derivation_key"] and component_derivation(comp["derivation_key"]) is not None:
+        raise PermissionError(
+            f"{component_key!r} is derived from your own records and cannot be attested"
+        )
+
+    prev = await conn.fetchval(
+        """
+        SELECT status FROM requirement_compliance_status
+        WHERE location_id = $1 AND jurisdiction_requirement_id = $2 AND component_key = $3
+        """,
+        location_id, catalog_id, component_key,
+    )
+    await conn.execute(
+        """
+        INSERT INTO requirement_compliance_status
+            (company_id, location_id, jurisdiction_requirement_id, component_key,
+             regulation_key, status, basis, evidence, attested_by, attested_at,
+             attested_note, updated_at)
+        VALUES ($1,$2,$3,$4,NULL,$5,'attested',$6::jsonb,$7,NOW(),$8,NOW())
+        ON CONFLICT (location_id, jurisdiction_requirement_id, COALESCE(component_key, ''))
+            DO UPDATE SET
+            status = EXCLUDED.status, basis = 'attested',
+            evidence = EXCLUDED.evidence, attested_by = EXCLUDED.attested_by,
+            attested_at = NOW(), attested_note = EXCLUDED.attested_note, updated_at = NOW()
+        """,
+        company_id, location_id, catalog_id, component_key, status,
+        json.dumps({"note": note}), actor_user_id, note,
+    )
+    await conn.execute(
+        """
+        INSERT INTO requirement_status_audit_log
+            (company_id, location_id, jurisdiction_requirement_id, component_key,
+             action, from_status, to_status, basis, actor_user_id, details)
+        VALUES ($1,$2,$3,$4,'attested',$5,$6,'attested',$7,$8::jsonb)
+        """,
+        company_id, location_id, catalog_id, component_key, prev, status, actor_user_id,
         json.dumps({"note": note}),
     )
     return {"status": status, "basis": "attested"}

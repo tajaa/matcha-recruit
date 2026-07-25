@@ -19,7 +19,7 @@ import type { CategoryRowShared, GroupBy, Props } from './ComplianceRequirements
 // business. Picking one showed an empty page, or (worse) another industry's
 // obligations, on a page whose entire job is "what am I responsible for".
 
-export function ComplianceRequirementsTab({ requirements, loading, onPin, checkMessages, readOnly, previewCategoryLimit, targetReq, onTargetConsumed }: Props) {
+export function ComplianceRequirementsTab({ requirements, loading, onPin, checkMessages, locationId, readOnly, previewCategoryLimit, targetReq, onTargetConsumed }: Props) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [groupFilter, setGroupFilter] = useState<'all' | CategoryGroup>('all')
   const [searchQuery, setSearchQuery] = useState('')
@@ -163,6 +163,7 @@ export function ComplianceRequirementsTab({ requirements, loading, onPin, checkM
     highlightId,
     readOnly,
     onPin,
+    locationId,
   }
 
   if (loading) return <p className="text-sm text-zinc-500">Loading requirements...</p>

@@ -1,6 +1,6 @@
 from enum import Enum
-from typing import Optional, List, Any, Dict
-from pydantic import BaseModel, field_validator
+from typing import Optional, List, Any, Dict, Literal
+from pydantic import BaseModel, field_validator, Field
 from uuid import UUID
 from datetime import datetime, date
 
@@ -278,6 +278,10 @@ class RequirementResponse(BaseModel):
     # catalog link.
     authority_level: Optional[str] = None
     authority_name: Optional[str] = None
+    # True when requirement_components rows exist for this catalog row (reqcomp01)
+    # — tells the FE whether the row is expandable into a per-clause checklist
+    # without a probe request per row.
+    has_components: bool = False
 
 
 class PinRequirementRequest(BaseModel):
@@ -517,6 +521,42 @@ class RequirementStatusSummary(BaseModel):
     count_non_compliant: int = 0
     count_in_progress: int = 0
     count_unknown: int = 0
+
+
+class RequirementComponent(BaseModel):
+    """One checkable clause of a decomposed statute (e.g. SB 553's annual
+    training obligation), plus this tenant's status against it. `status`
+    'unknown' renders as "no evidence on file", never as a gap — see
+    compliance_status.py's blind-never-violating invariant."""
+    component_key: str
+    label: str
+    question: str
+    statute_citation: Optional[str] = None
+    suggested_fix: Optional[str] = None
+    severity: str = "important"
+    sort_order: int = 0
+    derivable: bool = False
+    status: str = "unknown"
+    basis: Optional[str] = None
+    evidence: Dict[str, Any] = Field(default_factory=dict)
+    attested_note: Optional[str] = None
+    attested_at: Optional[str] = None
+    derived_at: Optional[str] = None
+
+
+class RequirementComponentChecklist(BaseModel):
+    jurisdiction_requirement_id: str
+    location_id: str
+    title: str
+    statute_citation: Optional[str] = None
+    components: List[RequirementComponent]
+    summary: RequirementStatusSummary
+    exposure: Optional[Dict[str, Any]] = None
+
+
+class AttestComponentRequest(BaseModel):
+    status: Literal["compliant", "non_compliant", "in_progress", "unknown"]
+    note: Optional[str] = None
 
 
 class RiskGetAhead(BaseModel):

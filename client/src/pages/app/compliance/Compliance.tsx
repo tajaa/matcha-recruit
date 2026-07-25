@@ -321,6 +321,7 @@ function ComplianceFull() {
                     loading={detail.loading}
                     onPin={handlePinRequirement}
                     checkMessages={check.messages}
+                    locationId={selectedId}
                     facilityAttributes={selectedLoc?.facility_attributes}
                     targetReq={targetReq}
                     onTargetConsumed={() => setTargetReq(null)}

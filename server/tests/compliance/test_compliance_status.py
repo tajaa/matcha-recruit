@@ -284,3 +284,46 @@ def test_verdict_unknown_maps_to_none_in_derivations():
     from app.core.services.compliance_status import _verdict_to_derivation
     assert _verdict_to_derivation("unknown", "no data") is None
     assert _verdict_to_derivation("compliant", "ok") == ("compliant", {"rule": "ok"})
+
+
+# ── reqcomp01 regression: component rows must not leak into risk math ──────
+# requirement_compliance_status now holds both whole-requirement rows
+# (component_key IS NULL) and per-component rows (reqcomp01). The two live
+# readers that were NOT written with components in mind must filter them out,
+# or a 5-component statute inflates every tenant's exposure/coverage numbers.
+# A source-text assertion, not a DB test — matches how this repo already pins
+# INACTIVE_EMPLOYMENT_STATUSES drift in the schedule tests.
+
+def test_compliance_risk_excludes_component_rows():
+    import inspect
+    from app.core.services import compliance_risk
+    src = inspect.getsource(compliance_risk.get_compliance_risk_summary)
+    assert "rcs.component_key IS NULL" in src, (
+        "compliance_risk.py's requirement_compliance_status read must filter "
+        "component_key IS NULL, or component rows collide on the RiskIssue id"
+    )
+
+
+def test_risk_index_compliance_component_excludes_component_rows():
+    import inspect
+    from app.matcha.services import risk_index
+    src = inspect.getsource(risk_index._compliance_component)
+    assert src.count("rcs.component_key IS NULL") == 2, (
+        "risk_index._compliance_component's two requirement_compliance_status "
+        "joins (known / non_compliant) must both filter component_key IS NULL, "
+        "or a decomposed statute inflates both denominators"
+    )
+
+
+def test_all_status_upserts_target_the_reqcomp01_unique_index():
+    """reqcomp01 swapped the 2-col UNIQUE for a unique index on
+    (location_id, jurisdiction_requirement_id, COALESCE(component_key, '')).
+    Every upsert must name that exact expression or Postgres raises "no unique
+    or exclusion constraint matching the ON CONFLICT specification" — at write
+    time, not import time, so nothing else in this suite would catch it."""
+    import inspect
+    from app.core.services import compliance_status as cs
+    target = "ON CONFLICT (location_id, jurisdiction_requirement_id, COALESCE(component_key, ''))"
+    for fn in (cs.reconcile_requirement_status, cs.attest_requirement_status,
+               cs.reconcile_component_status, cs.attest_component_status):
+        assert target in inspect.getsource(fn), f"{fn.__name__} has a stale ON CONFLICT target"

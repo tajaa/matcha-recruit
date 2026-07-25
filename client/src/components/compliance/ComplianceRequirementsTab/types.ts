@@ -8,6 +8,9 @@ export type Props = {
   onPin: (requirementId: string, isPinned: boolean) => void
   checkMessages: ComplianceCheckMessage[]
   facilityAttributes?: FacilityAttributes | null
+  /** The location these requirements belong to — needed to fetch a
+   *  requirement's component checklist (locationId + catalog id). */
+  locationId: string | null
   /** Read-only mode (compliance_lite taste) — hide Pin (the pin endpoint is
    *  Pro-gated and would 403). */
   readOnly?: boolean
@@ -36,4 +39,5 @@ export type CategoryRowShared = {
   /** Read-only mode — hide Pin. */
   readOnly?: boolean
   onPin: (requirementId: string, isPinned: boolean) => void
+  locationId: string | null
 }

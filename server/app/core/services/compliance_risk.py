@@ -508,6 +508,10 @@ async def get_compliance_risk_summary(company_id: UUID) -> ComplianceRiskSummary
                   ON cat.id = rcs.jurisdiction_requirement_id
                 LEFT JOIN authority_index_items pai ON pai.id = cat.penalty_item_id
                 WHERE rcs.company_id = $1 AND rcs.status = 'non_compliant'
+                  -- Whole-requirement rows only. Component rows (reqcomp01)
+                  -- share this table; without this filter a 5-component
+                  -- statute yields 5 RiskIssues colliding on this row's id.
+                  AND rcs.component_key IS NULL
                   AND NOT (rcs.regulation_key = ANY($2::text[]))
                 """,
                 company_id, sorted(WAGE_LANE_OWNED_KEYS),

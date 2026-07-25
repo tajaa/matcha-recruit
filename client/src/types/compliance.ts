@@ -235,6 +235,53 @@ export interface ComplianceRequirement {
   affected_employee_names: string[]
   min_wage_violation_count: number | null
   is_pinned: boolean
+  /** True when this requirement decomposes into a per-clause checklist
+   *  (requirement_components) — render a disclosure and lazy-fetch it. */
+  has_components?: boolean
+}
+
+/** One checkable clause of a decomposed requirement (e.g. SB 553's annual
+ *  training obligation), plus this tenant's status against it. `status`
+ *  'unknown' renders as "no evidence on file" — never as a gap. */
+export interface RequirementComponent {
+  component_key: string
+  label: string
+  question: string
+  statute_citation: string | null
+  suggested_fix: string | null
+  severity: 'critical' | 'important' | 'recommended'
+  sort_order: number
+  /** True when this component is auto-checked from the tenant's own records
+   *  — the attest control must not render for it (server refuses with 409). */
+  derivable: boolean
+  status: 'compliant' | 'non_compliant' | 'in_progress' | 'unknown'
+  basis: 'derived' | 'attested' | null
+  evidence: Record<string, unknown>
+  attested_note: string | null
+  attested_at: string | null
+  derived_at: string | null
+}
+
+export interface RequirementComponentSummary {
+  total: number
+  known: number
+  coverage_pct: number | null
+  derived: number
+  attested: number
+  count_compliant: number
+  count_non_compliant: number
+  count_in_progress: number
+  count_unknown: number
+}
+
+export interface RequirementComponentChecklist {
+  jurisdiction_requirement_id: string
+  location_id: string
+  title: string
+  statute_citation: string | null
+  components: RequirementComponent[]
+  summary: RequirementComponentSummary
+  exposure: Record<string, unknown> | null
 }
 
 export interface VerificationSource {

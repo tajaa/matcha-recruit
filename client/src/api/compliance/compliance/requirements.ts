@@ -2,6 +2,8 @@ import { api } from '../../client'
 import type {
   ComplianceRequirement,
   PinnedRequirement,
+  RequirementComponent,
+  RequirementComponentChecklist,
 } from '../../../types/compliance'
 
 // ── Requirements ──
@@ -21,4 +23,24 @@ export function pinRequirement(requirementId: string, isPinned: boolean) {
 
 export function fetchPinnedRequirements() {
   return api.get<PinnedRequirement[]>('/compliance/pinned-requirements')
+}
+
+// ── Component checklist (reqcomp01) ──
+
+export function fetchRequirementComponents(locationId: string, catalogId: string) {
+  return api.get<RequirementComponentChecklist>(
+    `/compliance/locations/${locationId}/requirements/${catalogId}/components`
+  )
+}
+
+export function attestRequirementComponent(
+  locationId: string,
+  catalogId: string,
+  componentKey: string,
+  body: { status: RequirementComponent['status']; note?: string | null }
+) {
+  return api.post<RequirementComponent>(
+    `/compliance/locations/${locationId}/requirements/${catalogId}/components/${componentKey}/attest`,
+    body
+  )
 }

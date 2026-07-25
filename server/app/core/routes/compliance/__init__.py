@@ -10,5 +10,6 @@ from app.core.routes.compliance import summary  # noqa: F401,E402
 from app.core.routes.compliance import requirements  # noqa: F401,E402
 from app.core.routes.compliance import payer_policies  # noqa: F401,E402
 from app.core.routes.compliance import credentials  # noqa: F401,E402
+from app.core.routes.compliance import components  # noqa: F401,E402
 
 __all__ = ["router", "lite_router", "shared_router"]

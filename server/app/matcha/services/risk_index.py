@@ -254,15 +254,21 @@ async def _compliance_component(conn, company_id: UUID):
             (SELECT count(*) FROM covered)  AS covered,
             (SELECT count(*) FROM surface)  AS surface,
             -- A projected requirement with NO status row is unknown, not clean.
+            -- component_key IS NULL: a decomposed statute (reqcomp01) adds
+            -- component-level rows to this same table; without the filter,
+            -- joining surface (one row per requirement) to those would count
+            -- one requirement multiple times and inflate both denominators.
             (SELECT count(*) FROM surface s
                JOIN requirement_compliance_status rcs
                  ON rcs.location_id = s.location_id
                 AND rcs.jurisdiction_requirement_id = s.catalog_id
+                AND rcs.component_key IS NULL
               WHERE rcs.status <> 'unknown')  AS known,
             (SELECT count(*) FROM surface s
                JOIN requirement_compliance_status rcs
                  ON rcs.location_id = s.location_id
                 AND rcs.jurisdiction_requirement_id = s.catalog_id
+                AND rcs.component_key IS NULL
               WHERE rcs.status = 'non_compliant') AS non_compliant
         """,
         company_id,

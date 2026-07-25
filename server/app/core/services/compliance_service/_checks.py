@@ -1654,6 +1654,24 @@ async def get_location_requirements(
             rt = row.get("rate_type") or "general"
             return len(violations_by_rt.get(rt, []))
 
+        # Batched, not per-row: which of these catalog rows decompose into a
+        # component checklist (reqcomp01)? One query for the whole page.
+        catalog_ids = {
+            row["jurisdiction_requirement_id"]
+            for row in filtered
+            if row.get("jurisdiction_requirement_id")
+        }
+        components_present: set = set()
+        if catalog_ids:
+            components_present = {
+                r["jurisdiction_requirement_id"]
+                for r in await conn.fetch(
+                    "SELECT DISTINCT jurisdiction_requirement_id FROM requirement_components "
+                    "WHERE jurisdiction_requirement_id = ANY($1::uuid[])",
+                    list(catalog_ids),
+                )
+            }
+
         return [
             RequirementResponse(
                 id=str(row["id"]),
@@ -1695,6 +1713,7 @@ async def get_location_requirements(
                 authority_name=_authority_label(
                     row.get("authority_level"), row.get("authority_display_name")
                 ),
+                has_components=row.get("jurisdiction_requirement_id") in components_present,
             )
             for row in filtered
         ]
