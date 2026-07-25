@@ -90,4 +90,26 @@ describe('paste', () => {
     })
     expect(addAttachments).not.toHaveBeenCalled()
   })
+
+  it('leaves a paste aimed at a bare-contenteditable element alone', () => {
+    const editable = document.createElement('div')
+    editable.setAttribute('contenteditable', '')  // bare form — the selector used to miss this
+    document.body.appendChild(editable)
+    fireEvent.paste(editable, {
+      clipboardData: { files: [shot()], items: [], types: ['Files'] },
+    })
+    expect(addAttachments).not.toHaveBeenCalled()
+    editable.remove()
+  })
+
+  it('still captures a paste when focus is on a contenteditable="false" element', () => {
+    const inert = document.createElement('div')
+    inert.setAttribute('contenteditable', 'false')  // explicitly non-editable — must not shadow the shortcut
+    document.body.appendChild(inert)
+    fireEvent.paste(inert, {
+      clipboardData: { files: [shot()], items: [], types: ['Files'] },
+    })
+    expect(addAttachments).toHaveBeenCalledTimes(1)
+    inert.remove()
+  })
 })

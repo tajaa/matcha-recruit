@@ -388,10 +388,16 @@ def test_turn_op_budget_is_enforced_across_calls(patched):
 def test_turn_op_budget_truncates_a_call_that_straddles_the_limit(patched):
     """A call that starts under budget but asks for more than remains gets the
     overflow rejected with a reason, not silently dropped — same "truncate and
-    report" behavior validate_ops itself uses for MAX_OPS_PER_TURN."""
+    report" behavior validate_ops itself uses for MAX_OPS_PER_TURN. Every call
+    stays at or under the per-call cap (MAX_OPS_PER_TURN=20 in merlin_ops.py)
+    so this actually isolates the per-TURN budget logic — a call over 20 would
+    get truncated by validate_ops's own cap before the turn budget ever sees
+    it exceed what remains."""
     frames, _ = patched([
-        [("apply_ops", {"ops": _set_field_ops(50, offset=0)})],  # 10 left in budget
-        [("apply_ops", {"ops": _set_field_ops(15, offset=50)})],  # asks for 15
+        [("apply_ops", {"ops": _set_field_ops(20, offset=0)})],
+        [("apply_ops", {"ops": _set_field_ops(20, offset=20)})],
+        [("apply_ops", {"ops": _set_field_ops(10, offset=40)})],  # 50 applied, 10 left in budget
+        [("apply_ops", {"ops": _set_field_ops(15, offset=50)})],  # asks for 15, only 10 remain
         [("finish", {"message": "Done."})],
     ], model_tier="max")
     data = _result(frames)

@@ -205,8 +205,21 @@ async def screenshot_html(
             )
             if focus_block is not None:
                 try:
-                    await page.locator(f'[data-cz-block="{int(focus_block)}"]').first.scroll_into_view_if_needed(
-                        timeout=2000
+                    # scrollIntoView({block:"center"}), not Playwright's own
+                    # scroll_into_view_if_needed — that does the MINIMAL scroll,
+                    # which can leave a short section hugging the bottom edge of
+                    # the viewport, partially clipped. Centering is what the
+                    # tool description promises the model ("scroll to and
+                    # center this block's section").
+                    await asyncio.wait_for(
+                        page.evaluate(
+                            """(idx) => {
+                                const el = document.querySelector(`[data-cz-block="${idx}"]`)
+                                if (el) el.scrollIntoView({ block: 'center', behavior: 'instant' })
+                            }""",
+                            int(focus_block),
+                        ),
+                        timeout=2,
                     )
                 except Exception as exc:  # noqa: BLE001 — degrade to the fold, never fail the shot
                     logger.info("Merlin screenshot focus_block=%s scroll skipped: %s", focus_block, exc)

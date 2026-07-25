@@ -105,7 +105,10 @@ type StoredMessage = {
   ops?: MerlinOp[] | null
 }
 
-const HISTORY_TURNS = 10
+// MESSAGES, not turns — mirrors merlin_store.HISTORY_MESSAGES server-side
+// (this slice is what the server falls back to when no conversation row
+// exists yet, and what _recent_history_tail reads for tier routing).
+const HISTORY_MESSAGES = 20
 const TIER_KEY = 'cappe:merlin-tier'
 const WIDTH_KEY = 'cappe:merlin-width'
 const EXPANDED_KEY = 'cappe:merlin-expanded'
@@ -660,7 +663,7 @@ export function useMerlin(
         const { _k, ...rest } = b
         return { ...rest, id: _k }
       })
-      const history = messages.slice(-HISTORY_TURNS).map((m) => ({
+      const history = messages.slice(-HISTORY_MESSAGES).map((m) => ({
         role: m.role,
         content: m.content,
         ops_summary: m.results?.map((r) => r.summary).join('; '),

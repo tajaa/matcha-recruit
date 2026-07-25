@@ -483,7 +483,7 @@ export function MerlinDrawer({ merlin, selectedLabel }: { merlin: ReturnType<typ
     const onPaste = (e: ClipboardEvent) => {
       const target = e.target as HTMLElement | null
       if (panelRef.current && target && panelRef.current.contains(target)) return
-      if (target?.closest('input, textarea, select, [contenteditable="true"]')) return
+      if (target?.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])')) return
       const images = imageFilesFromClipboard(e.clipboardData)
       if (images.length === 0) return
       e.preventDefault()
