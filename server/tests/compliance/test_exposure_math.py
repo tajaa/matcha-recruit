@@ -348,3 +348,64 @@ def test_no_penalty_block_yields_no_penalty():
     from app.core.services.compliance_risk import _risk_penalty
     assert _risk_penalty(None) is None
     assert _risk_penalty({}) is None
+
+
+# ── components.py::_exposures_for — a malformed/non-dict penalty blob must
+# degrade that one row, never 500 the whole Audit tab or checklist read ──────
+
+def test_exposures_for_survives_malformed_and_non_dict_penalty_blobs():
+    """metadata->'penalties' is model-authored by the research path, so a
+    malformed JSON string or a non-dict JSON value (array/scalar/null) is
+    reachable. _exposures_for must parse it through the same _parse_penalties
+    guard compliance_risk.py's own issue penalties use — not a bare
+    json.loads feeding _risk_penalty's unchecked .get() calls, which raised
+    JSONDecodeError / AttributeError and took out the whole batch."""
+    import asyncio
+    from uuid import uuid4
+
+    from app.core.routes.compliance.components import _exposures_for
+
+    good_id, malformed_id, array_id, scalar_id, none_id, dict_val_id = (
+        uuid4(), uuid4(), uuid4(), uuid4(), uuid4(), uuid4()
+    )
+    rows = [
+        {"id": good_id, "penalties": '{"civil_penalty_max": 25000, "enforcing_agency": "Cal/OSHA"}',
+         "penalty_effective_date": None, "penalty_source_url": None, "penalty_citation": None},
+        {"id": malformed_id, "penalties": "{bad json",
+         "penalty_effective_date": None, "penalty_source_url": None, "penalty_citation": None},
+        {"id": array_id, "penalties": "[]",
+         "penalty_effective_date": None, "penalty_source_url": None, "penalty_citation": None},
+        {"id": scalar_id, "penalties": "42",
+         "penalty_effective_date": None, "penalty_source_url": None, "penalty_citation": None},
+        {"id": none_id, "penalties": None,
+         "penalty_effective_date": None, "penalty_source_url": None, "penalty_citation": None},
+        {"id": dict_val_id, "penalties": {"civil_penalty_max": 500},
+         "penalty_effective_date": None, "penalty_source_url": None, "penalty_citation": None},
+    ]
+
+    class _FakeConn:
+        async def fetch(self, query, *args):
+            return rows
+
+    out = asyncio.run(_exposures_for(
+        _FakeConn(), [good_id, malformed_id, array_id, scalar_id, none_id, dict_val_id]
+    ))
+
+    # Only the two dict-shaped rows (jsonb-native dict, and a JSON string that
+    # decodes to a dict) produce an exposure; everything else degrades to
+    # absent, and nothing raised.
+    assert set(out.keys()) == {good_id, dict_val_id}
+    assert out[good_id].penalty.civil_max == 25000
+    assert out[dict_val_id].penalty.civil_max == 500
+
+
+def test_exposures_for_empty_catalog_ids_short_circuits():
+    import asyncio
+
+    from app.core.routes.compliance.components import _exposures_for
+
+    class _NoCallConn:
+        async def fetch(self, query, *args):
+            raise AssertionError("must not query when catalog_ids is empty")
+
+    assert asyncio.run(_exposures_for(_NoCallConn(), [])) == {}

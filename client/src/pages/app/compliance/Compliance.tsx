@@ -273,6 +273,7 @@ function ComplianceFull() {
         <ComplianceAuditTab
           targetCatalogId={auditTarget}
           onTargetConsumed={() => setAuditTarget(null)}
+          companyId={searchParams.get('company_id') || undefined}
         />
       )}
 

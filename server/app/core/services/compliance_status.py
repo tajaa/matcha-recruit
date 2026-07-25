@@ -45,6 +45,8 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 from uuid import UUID
 
+from app.matcha.services.schedule_rules import INACTIVE_EMPLOYMENT_STATUSES
+
 logger = logging.getLogger(__name__)
 
 STATUSES = ("compliant", "non_compliant", "in_progress", "unknown")
@@ -281,7 +283,9 @@ async def _derive_wvp_training(
     ago. Every count here is PER ACTIVE EMPLOYEE (see the ctx query) — one
     person's three yearly completions are one current employee, not two lapses
     — keyed on each employee's most recent completion: inside the 12-month
-    window (`current_completed`), undated, or stale (`lapsed`).
+    window (`current_completed`), undated with nothing dated proving otherwise
+    (`completed_undated` — a dated completion inside the window still wins
+    over a stray undated record), or stale (`lapsed`).
     """
     tr = ctx.get("wvp_training")
     if tr is None or int(tr["assigned"] or 0) == 0:
@@ -298,7 +302,9 @@ async def _derive_wvp_training(
     current = int(tr["current_completed"] or 0)
     undated = int(tr["completed_undated"] or 0)
     # Every employee who has completed is exactly one of: last completion
-    # inside the 12mo window (current), undated, or outside it (lapsed).
+    # inside the 12mo window (current), blind-undated (no dated completion
+    # proves either currency or lapse), or outside the window (lapsed) — the
+    # ctx query's completed_undated already excludes anyone current counted.
     lapsed = completed - current - undated
     last = tr["last_completed"]
     oldest = tr["oldest_completed"]
@@ -514,8 +520,10 @@ async def _build_context(
             SELECT id, first_name, last_name, pay_classification, pay_rate, work_location_id
             FROM employees
             WHERE org_id = $1 AND termination_date IS NULL AND work_location_id IS NOT NULL
+              AND COALESCE(employment_status, 'active') <> ALL($2::text[])
             """,
             company_id,
+            list(INACTIVE_EMPLOYMENT_STATUSES),
         ):
             ctx["employees"].setdefault(e["work_location_id"], []).append(dict(e))
 
@@ -557,13 +565,20 @@ async def _build_context(
         # scores last year's on-time completion as this year's lapse — a company
         # that trains exactly on schedule would be reported non_compliant, which
         # is precisely the manufactured violation this module must never emit.
-        # Waived rows are dropped (no obligation) and terminated employees with
-        # them, so a departed worker can't pin the verdict at in_progress.
+        # Waived rows are dropped (no obligation) and terminated/offboarded
+        # employees with them, so a departed worker can't pin the verdict at
+        # in_progress or non_compliant. termination_date IS NULL alone is not
+        # enough — the status-change endpoint (employees/crud.py PUT .../status)
+        # writes employment_status without ever touching termination_date, so
+        # the two columns drift; a NULL employment_status still means active
+        # (nullable column, DEFAULT 'active').
         ctx["wvp_training"] = await conn.fetchrow(
             """
             WITH per_employee AS (
                 SELECT tr.employee_id,
                        BOOL_OR(tr.status = 'completed') AS ever_completed,
+                       BOOL_OR(tr.status = 'completed' AND tr.completed_date IS NULL)
+                         AS has_undated,
                        MAX(tr.completed_date) FILTER (WHERE tr.status = 'completed')
                          AS last_completed
                 FROM training_records tr
@@ -571,6 +586,7 @@ async def _build_context(
                 WHERE tr.company_id = $1
                   AND tr.status <> 'waived'
                   AND e.termination_date IS NULL
+                  AND COALESCE(e.employment_status, 'active') <> ALL($3::text[])
                   AND (tr.training_type = 'workplace_violence'
                        OR LOWER(tr.title) ~ '(workplace violence|wvp|sb ?553)')
                 GROUP BY tr.employee_id
@@ -578,14 +594,25 @@ async def _build_context(
             SELECT COUNT(*) AS assigned,
                    COUNT(*) FILTER (WHERE ever_completed) AS completed,
                    COUNT(*) FILTER (WHERE last_completed >= $2) AS current_completed,
-                   COUNT(*) FILTER (WHERE ever_completed AND last_completed IS NULL)
-                     AS completed_undated,
+                   -- Undated (blind), not lapsed: an employee with an undated
+                   -- completion and no dated completion inside the window —
+                   -- either because they have no dated completion at all, or
+                   -- their only dated one is stale — cannot be proven current
+                   -- OR proven lapsed. A dated completion already inside the
+                   -- window (caught by current_completed above) still wins:
+                   -- an extra undated record can't demote a provably-current
+                   -- employee.
+                   COUNT(*) FILTER (
+                       WHERE ever_completed AND has_undated
+                         AND (last_completed IS NULL OR last_completed < $2)
+                   ) AS completed_undated,
                    MIN(last_completed) AS oldest_completed,
                    MAX(last_completed) AS last_completed
             FROM per_employee
             """,
             company_id,
             date.today() - timedelta(days=_ANNUAL_TRAINING_WINDOW_DAYS),
+            list(INACTIVE_EMPLOYMENT_STATUSES),
         )
 
     # Workforce-compliance backstops (pay transparency / pay equity / biometrics).

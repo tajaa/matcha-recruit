@@ -7,7 +7,7 @@ and compliance_status.py for the underlying model.
 import json
 from uuid import UUID
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Query
 
 from app.database import get_connection
 from app.core.models.auth import CurrentUser
@@ -21,7 +21,12 @@ from app.core.models.compliance import (
     RequirementExposure,
     RequirementStatusSummary,
 )
-from app.core.services.compliance_risk import PENALTY_JOIN_SQL, PENALTY_SELECT_SQL, _risk_penalty
+from app.core.services.compliance_risk import (
+    PENALTY_JOIN_SQL,
+    PENALTY_SELECT_SQL,
+    _parse_penalties,
+    _risk_penalty,
+)
 from app.core.services.compliance_service import get_location_requirements
 from app.core.services.compliance_status import (
     attest_component_status,
@@ -83,7 +88,11 @@ async def _exposures_for(conn, catalog_ids: list[UUID]) -> dict[UUID, Requiremen
     same pure `_risk_penalty` builder compliance_risk.py's own issue penalties
     use, so provenance rules (source_url/citation only from the bound
     authority row, `grounded` = the FK's existence) apply identically here —
-    no hand-copied join to drift out of sync with that file.
+    no hand-copied join to drift out of sync with that file. Penalties parse
+    through `_parse_penalties` (not a bare `json.loads`) because the blob is
+    model-authored by the research path: a malformed string or a non-dict
+    JSON value (array/scalar/null) must degrade to "no exposure figure" for
+    that one row, not 500 the whole Audit tab.
     """
     if not catalog_ids:
         return {}
@@ -98,11 +107,9 @@ async def _exposures_for(conn, catalog_ids: list[UUID]) -> dict[UUID, Requiremen
     )
     out: dict[UUID, RequirementExposure] = {}
     for row in rows:
-        if row["penalties"] is None:
+        penalties = _parse_penalties(row["penalties"])
+        if penalties is None:
             continue
-        penalties = row["penalties"]
-        if isinstance(penalties, str):
-            penalties = json.loads(penalties)
         out[row["id"]] = RequirementExposure(
             penalty=_risk_penalty(
                 penalties,
@@ -122,7 +129,7 @@ async def _exposure_for(conn, catalog_id: UUID) -> RequirementExposure | None:
 
 @shared_router.get("/audit", response_model=ComplianceAuditOverview)
 async def get_compliance_audit_endpoint(
-    company_id_override: str | None = None,
+    company_id_override: str | None = Query(None, alias="company_id"),
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Company-wide Audit tab: every statute with a clause decomposition,
@@ -166,7 +173,7 @@ async def get_compliance_audit_endpoint(
 async def get_requirement_components_endpoint(
     location_id: str,
     catalog_id: str,
-    company_id_override: str | None = None,
+    company_id_override: str | None = Query(None, alias="company_id"),
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     company_id = await resolve_company_id(current_user, company_id_override)
@@ -207,7 +214,7 @@ async def attest_requirement_component_endpoint(
     catalog_id: str,
     component_key: str,
     payload: AttestComponentRequest,
-    company_id_override: str | None = None,
+    company_id_override: str | None = Query(None, alias="company_id"),
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     company_id = await resolve_company_id(current_user, company_id_override)
@@ -256,7 +263,10 @@ async def attest_requirement_component_endpoint(
 
     evidence = component["evidence"]
     if isinstance(evidence, str):
-        evidence = json.loads(evidence)
+        try:
+            evidence = json.loads(evidence)
+        except ValueError:
+            evidence = None
 
     # Registry-resolved, not a bare `derivation_key is not None` — must agree
     # with attest_component_status's own refusal check (compliance_status.py)

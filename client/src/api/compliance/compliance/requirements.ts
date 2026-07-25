@@ -27,9 +27,14 @@ export function fetchPinnedRequirements() {
 
 // ── Component checklist (reqcomp01) ──
 
-export function fetchRequirementComponents(locationId: string, catalogId: string) {
+export function fetchRequirementComponents(
+  locationId: string,
+  catalogId: string,
+  companyId?: string
+) {
+  const qs = companyId ? `?company_id=${encodeURIComponent(companyId)}` : ''
   return api.get<RequirementComponentChecklist>(
-    `/compliance/locations/${locationId}/requirements/${catalogId}/components`
+    `/compliance/locations/${locationId}/requirements/${catalogId}/components${qs}`
   )
 }
 
@@ -37,10 +42,12 @@ export function attestRequirementComponent(
   locationId: string,
   catalogId: string,
   componentKey: string,
-  body: { status: RequirementComponent['status']; note?: string | null }
+  body: { status: RequirementComponent['status']; note?: string | null },
+  companyId?: string
 ) {
+  const qs = companyId ? `?company_id=${encodeURIComponent(companyId)}` : ''
   return api.post<RequirementComponent>(
-    `/compliance/locations/${locationId}/requirements/${catalogId}/components/${componentKey}/attest`,
+    `/compliance/locations/${locationId}/requirements/${catalogId}/components/${componentKey}/attest${qs}`,
     body
   )
 }

@@ -11,6 +11,9 @@ type Props = {
   targetCatalogId?: string | null
   onTargetConsumed?: () => void
   readOnly?: boolean
+  /** Admin impersonation override — the target company's id, from the
+   *  `?company_id=` query param. Undefined for a normal client session. */
+  companyId?: string
 }
 
 function locationRowKey(statuteId: string, locationId: string): string {
@@ -35,6 +38,7 @@ function StatuteCard({
   isHighlighted,
   readOnly,
   onAttested,
+  companyId,
 }: {
   statute: ComplianceAuditStatute
   expandedRows: Set<string>
@@ -42,6 +46,7 @@ function StatuteCard({
   isHighlighted: boolean
   readOnly?: boolean
   onAttested: () => void
+  companyId?: string
 }) {
   const exposureText = exposureLabel(statute.summary, statute.exposure?.penalty ?? null)
   return (
@@ -102,6 +107,7 @@ function StatuteCard({
                   readOnly={readOnly}
                   employeeCount={loc.employee_count}
                   onAttested={onAttested}
+                  companyId={companyId}
                 />
               )}
             </div>
@@ -112,8 +118,8 @@ function StatuteCard({
   )
 }
 
-export function ComplianceAuditTab({ targetCatalogId, onTargetConsumed, readOnly }: Props) {
-  const { data, loading, error, refetch, refresh } = useComplianceAudit()
+export function ComplianceAuditTab({ targetCatalogId, onTargetConsumed, readOnly, companyId }: Props) {
+  const { data, loading, error, refreshError, refetch, refresh } = useComplianceAudit(companyId)
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
   const [highlightId, setHighlightId] = useState<string | null>(null)
   const didFocus = useRef<string | null>(null)
@@ -177,6 +183,9 @@ export function ComplianceAuditTab({ targetCatalogId, onTargetConsumed, readOnly
       <p className="text-[11px] text-zinc-500">
         {data.statutes.length} statute{data.statutes.length !== 1 ? 's' : ''} · {data.location_count} location{data.location_count !== 1 ? 's' : ''}
       </p>
+      {refreshError && (
+        <p className="text-[11px] text-red-400">{refreshError}</p>
+      )}
       {data.statutes.map((statute) => (
         <StatuteCard
           key={statute.jurisdiction_requirement_id}
@@ -186,8 +195,11 @@ export function ComplianceAuditTab({ targetCatalogId, onTargetConsumed, readOnly
           isHighlighted={highlightId === statute.jurisdiction_requirement_id}
           readOnly={readOnly}
           // An attestation moves the statute + location coverage numbers, which
-          // come from this one-shot fetch and not from the checklist below.
+          // come from this one-shot fetch and not from the checklist below. A
+          // failed refresh here surfaces as `refreshError` above, not a
+          // full-tab replacement — the data on screen is still valid.
           onAttested={refresh}
+          companyId={companyId}
         />
       ))}
     </div>

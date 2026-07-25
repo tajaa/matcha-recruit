@@ -15,6 +15,12 @@ vi.mock('../../api/compliance/compliance', () => ({
   attestRequirementComponent: vi.fn(),
 }))
 
+// jsdom doesn't implement scrollIntoView. The target-focus effect's two
+// setTimeouts are deliberately left un-cleaned-up (see ComplianceAuditTab's
+// own comment), so the 60ms one can still fire during a later test's async
+// waits — stub it so that doesn't throw.
+Element.prototype.scrollIntoView = vi.fn()
+
 function statute(overrides: Partial<ComplianceAuditStatute> = {}): ComplianceAuditStatute {
   return {
     jurisdiction_requirement_id: 'cat-1',
@@ -167,7 +173,7 @@ describe('ComplianceAuditTab', () => {
 
     await user.click(screen.getByText('Fresno'))
 
-    await waitFor(() => expect(complianceApi.fetchRequirementComponents).toHaveBeenCalledWith('loc-fresno', 'cat-1'))
+    await waitFor(() => expect(complianceApi.fetchRequirementComponents).toHaveBeenCalledWith('loc-fresno', 'cat-1', undefined))
   })
 
   it('collapsing unmounts the checklist and re-expanding refetches', async () => {
@@ -229,5 +235,43 @@ describe('ComplianceAuditTab', () => {
 
     await waitFor(() => expect(screen.getAllByText('No evidence on file').length).toBe(2))
     expect(screen.queryByText('We have this')).not.toBeInTheDocument()
+  })
+
+  it('threads companyId through the overview fetch and down into an expanded checklist', async () => {
+    vi.mocked(complianceApi.fetchComplianceAudit).mockResolvedValue(overview([statute()]))
+    vi.mocked(complianceApi.fetchRequirementComponents).mockResolvedValue(checklist())
+    const user = userEvent.setup()
+    render(<ComplianceAuditTab companyId="co-9" />)
+
+    await waitFor(() => expect(complianceApi.fetchComplianceAudit).toHaveBeenCalledWith('co-9'))
+
+    await waitFor(() => expect(screen.getByText('Fresno')).toBeInTheDocument())
+    await user.click(screen.getByText('Fresno'))
+
+    await waitFor(() => expect(complianceApi.fetchRequirementComponents).toHaveBeenCalledWith('loc-fresno', 'cat-1', 'co-9'))
+  })
+
+  it('a failed background refresh after attestation banners inline instead of clobbering the tab', async () => {
+    vi.mocked(complianceApi.fetchComplianceAudit)
+      .mockResolvedValueOnce(overview([statute()]))
+      .mockRejectedValueOnce(new Error('boom'))
+    vi.mocked(complianceApi.fetchRequirementComponents).mockResolvedValue(checklist())
+    vi.mocked(complianceApi.attestRequirementComponent).mockResolvedValue({
+      ...checklist().components[1], status: 'compliant', basis: 'attested',
+    })
+    const user = userEvent.setup()
+    render(<ComplianceAuditTab />)
+
+    await waitFor(() => expect(screen.getByText('Fresno')).toBeInTheDocument())
+    await user.click(screen.getByText('Fresno'))
+    await waitFor(() => expect(screen.getByText('We have this')).toBeInTheDocument())
+    await user.click(screen.getByText('We have this'))
+
+    await waitFor(() => expect(complianceApi.fetchComplianceAudit).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(
+      screen.getByText('Could not refresh — showing the last loaded data.'),
+    ).toBeInTheDocument())
+    expect(screen.getByText('Workplace Violence Prevention Plan')).toBeInTheDocument()
+    expect(screen.queryByText('Could not load the audit overview.')).not.toBeInTheDocument()
   })
 })

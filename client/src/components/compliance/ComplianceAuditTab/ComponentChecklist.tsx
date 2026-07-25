@@ -16,6 +16,8 @@ type Props = {
    *  from a separate one-shot fetch and would otherwise stay pre-attest until
    *  a full page reload). */
   onAttested?: () => void
+  /** Admin impersonation override, threaded down from ComplianceAuditTab. */
+  companyId?: string
 }
 
 // The reveal is a full-screen one-time flourish, and the Audit tab mounts one
@@ -38,7 +40,7 @@ function safeSet(key: string, value: string): void {
 // (compliance_status.py) and this card must not contradict that by reusing
 // "GAP" copy for the absence of a record.
 export function ComponentChecklist({
-  locationId, catalogId, readOnly, employeeCount, onAttested,
+  locationId, catalogId, readOnly, employeeCount, onAttested, companyId,
 }: Props) {
   const [checklist, setChecklist] = useState<Checklist | null>(null)
   const [loading, setLoading] = useState(true)
@@ -69,7 +71,7 @@ export function ComponentChecklist({
     let cancelled = false
     setLoading(true)
     setLoadError(null)
-    fetchRequirementComponents(locationId, catalogId)
+    fetchRequirementComponents(locationId, catalogId, companyId)
       .then((data) => {
         if (cancelled) return
         setChecklist(data)
@@ -88,7 +90,7 @@ export function ComponentChecklist({
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true; releaseAutoReveal() }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [locationId, catalogId])
+  }, [locationId, catalogId, companyId])
 
   async function attest(componentKey: string) {
     setAttesting(componentKey)
@@ -96,7 +98,7 @@ export function ComponentChecklist({
     try {
       const updated = await attestRequirementComponent(locationId, catalogId, componentKey, {
         status: 'compliant',
-      })
+      }, companyId)
       setChecklist((prev) => {
         if (!prev) return prev
         const components = prev.components.map(

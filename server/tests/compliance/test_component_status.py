@@ -172,10 +172,45 @@ def test_wvp_context_query_is_per_employee():
     # a waived row must not pin `assigned` above `completed` forever.
     assert "e.termination_date IS NULL" in wvp
     assert "tr.status <> 'waived'" in wvp
+    # termination_date IS NULL alone is not enough — the status-change
+    # endpoint (employees/crud.py PUT .../status) writes employment_status
+    # without ever touching termination_date, so a normally-terminated
+    # employee stays termination_date IS NULL forever. Guard the fallback too:
+    # the column is nullable (DEFAULT 'active', no NOT NULL) and a bare
+    # `NOT IN` would silently drop NULL rows as if they matched.
+    assert "COALESCE(e.employment_status, 'active') <> ALL($3::text[])" in wvp
     # `last_completed` is evidence shown to the user — an unfiltered
     # MAX(completed_date) can source it from a record that was never completed
     # (nothing in the schema ties completed_date to status).
     assert "MAX(tr.completed_date) FILTER (WHERE tr.status = 'completed')" in wvp
+
+
+def test_wvp_context_query_undated_precedence():
+    """A dated completion already inside the window must still win over a
+    stray undated record on the same employee (current_completed doesn't need
+    has_undated to be false), and completed_undated must only catch an
+    employee with no dated completion proving currency — not demote someone
+    already counted as current. Guards the mixed dated/undated regression:
+    MAX(completed_date) alone silently drops undated rows, so an employee with
+    a dated-but-stale completion AND an undated one used to fall straight into
+    `lapsed` instead of the blind `completed_undated` bucket."""
+    src = inspect.getsource(cs._build_context)
+    wvp = src[src.index('if "wvp_training" in build'):src.index('if "workforce" in build')]
+    assert "BOOL_OR(tr.status = 'completed' AND tr.completed_date IS NULL)" in wvp
+    assert "AS has_undated" in wvp
+    assert "WHERE ever_completed AND has_undated" in wvp
+    assert "last_completed IS NULL OR last_completed < $2" in wvp
+
+
+def test_employees_context_query_excludes_both_departure_signals():
+    """Same drift as the wvp_training guard above, on the employees ctx group
+    that pay-transparency/pay-classification derivations read: termination_date
+    and employment_status are written by different endpoints and can disagree,
+    so both must gate who counts as active."""
+    src = inspect.getsource(cs._build_context)
+    emp = src[src.index('if "employees" in build'):src.index('if "training" in build')]
+    assert "termination_date IS NULL" in emp
+    assert "COALESCE(employment_status, 'active') <> ALL($2::text[])" in emp
 
 
 # ── violent_incident_log is attest-only (the ILIKE-derivation removal) ─────

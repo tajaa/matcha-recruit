@@ -130,7 +130,7 @@ describe('ComponentChecklist', () => {
     await user.click(screen.getByText('We have this'))
 
     await waitFor(() => expect(complianceApi.attestRequirementComponent).toHaveBeenCalledWith(
-      'loc-1', 'cat-1', 'hazard_assessment', { status: 'compliant' },
+      'loc-1', 'cat-1', 'hazard_assessment', { status: 'compliant' }, undefined,
     ))
     await waitFor(() => expect(screen.getAllByText('Compliant').length).toBe(1))
   })
