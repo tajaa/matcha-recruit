@@ -38,10 +38,14 @@ export function Positioning() {
                   You see
                 </div>
                 <ul className="space-y-2.5 text-[15px]" style={{ color: BONE }}>
-                  <li>Book-wide risk curve</li>
+                  <li>Book-wide loss curve — expected + PML</li>
+                  <li>Premium impact, per account</li>
                   <li>Loss-control ranking</li>
                   <li>Risk alerts, ranked</li>
                   <li>Outreach, AI-drafted</li>
+                  <li>Carrier submission packets</li>
+                  <li>Loss triangles &amp; adverse development</li>
+                  <li>Limits vs. contract requirements</li>
                 </ul>
               </div>
             </div>

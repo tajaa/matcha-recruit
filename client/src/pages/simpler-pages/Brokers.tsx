@@ -9,6 +9,7 @@ import { GrainOverlay, PageStyle, useMarketingNoir } from '../home/PageChrome'
 import { BROKERS_JSON_LD } from './Brokers/data'
 import { Hero } from './Brokers/Hero'
 import { Positioning } from './Brokers/Positioning'
+import { MoneyBand } from './Brokers/MoneyBand'
 import { PillarsGrid } from './Brokers/PillarsGrid'
 import { ThePoint } from './Brokers/ThePoint'
 import { CtaBand } from './Brokers/CtaBand'
@@ -22,15 +23,26 @@ const PricingContactModal = lazy(() =>
 // ---------------------------------------------------------------------------
 // Rebuilt onto the noir editorial surface (pages/home/*), the same pass that
 // already moved /matcha-compliance, /matcha-platform, and /matcha-lite. The
-// hero's skeuomorphic "Book Risk Console" (charcoal chassis, physical knobs,
-// recessed glass — see Brokers/console/) is UNCHANGED: it already sits in its
-// own dark room, so it's visually compatible with the noir surface below it —
-// the tonal step is now within one dark page rather than a cut against ivory.
-// Positioning/PillarsGrid/ThePoint/CtaBand are re-tokened, with the three
-// pillar instruments rebuilt on the shared noir InstrumentFrame. No pricing
+// hero now shares that exact skeleton too — left-aligned copy + right-column
+// InstrumentFrame instrument (Brokers/BookInstrument.tsx) — replacing the old
+// skeuomorphic "Book Risk Console" (charcoal chassis, physical knobs, its own
+// materials system under Brokers/console/, now deleted): it needed a
+// non-wrapping ~700px module rack and never fit this column, so it read as a
+// different product from the rest of the page. Its curve is now a legible
+// miniature of the real /broker/risk-curve chart (dollar axis, Expected +
+// PML 99% reference lines) and its account rows use the real Accounts-table
+// status vocabulary (Healthy/Watch/At Risk) driven off `row.band`, not the
+// cycling index — the original coupled them wrong and could show a red dot
+// reading "Stable". Positioning/PillarsGrid/ThePoint/CtaBand are re-tokened;
+// PillarsGrid grew from 3 to 5 rows (added Submission Packet + Broker Pilot,
+// two real features the page previously never mentioned), and MoneyBand adds
+// the page's first dollar figures (Premium Δ, Est. commission, adverse
+// development) pulled from the product's own strongest money statements,
+// each carrying its own "directional, not a quote" caveat. No pricing
 // section here: unlike Compliance/Lite, broker relationships are sales-led,
-// not self-serve Stripe, so there is no live price to calculate. ComplianceTicker
-// is dropped from this page only, same as the other rebuilds.
+// not self-serve Stripe, so there is no live price to calculate.
+// ComplianceTicker is dropped from this page only, same as the other
+// rebuilds.
 // ---------------------------------------------------------------------------
 
 export default function SimpleBrokersPage() {
@@ -83,6 +95,7 @@ export default function SimpleBrokersPage() {
 
       <main>
         <Positioning />
+        <MoneyBand />
         <PillarsGrid />
         <ThePoint />
       </main>

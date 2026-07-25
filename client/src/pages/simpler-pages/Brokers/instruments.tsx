@@ -1,4 +1,4 @@
-import { ASH, BONE, LINE_D } from '../../home/theme'
+import { ASH, BONE, LEAF, LINE_D } from '../../home/theme'
 import { InstrumentFrame, useCyclingIndex, useReducedMotion } from '../../home/instruments/shared'
 import { BAND_COLOR } from './data'
 
@@ -149,8 +149,117 @@ function CommandInstrument() {
   )
 }
 
+// 04 — submission packet preview; always rendered, cycling moves which stat
+// chip is emphasized (mirrors the real /broker/clients/:id Submission tab's
+// preview chips, without showing how readiness is scored).
+const PACKET_CHIPS = [
+  { label: 'TRIR', value: '2.8' },
+  { label: 'DART', value: '1.4' },
+  { label: 'Exp. mod', value: '1.12' },
+  { label: 'EPL', value: '62/100' },
+  { label: 'Readiness', value: '78%' },
+]
+const PACKET_SECTIONS = ['Loss summary', 'EPL readiness', 'Controls evidence', 'Broker commentary']
+
+function SubmissionInstrument() {
+  const reduce = useReducedMotion()
+  const litIndex = useCyclingIndex(PACKET_CHIPS.length, 2200, reduce)
+  const accent = BAND_COLOR.critical
+  return (
+    <InstrumentFrame label="Submission · packet preview" accent={accent}>
+      <div className="px-5 pt-5 grid grid-cols-3 gap-3">
+        {PACKET_CHIPS.map((c, i) => {
+          const lit = i === litIndex
+          return (
+            <div
+              key={c.label}
+              className="rounded-lg px-3 py-2.5 text-center transition-colors duration-500"
+              style={{ backgroundColor: lit ? 'rgba(245,242,237,0.05)' : 'rgba(245,242,237,0.02)', border: `1px solid ${lit ? accent : LINE_D}` }}
+            >
+              <div className="text-[13px] tabular-nums" style={{ color: lit ? BONE : ASH, fontWeight: lit ? 600 : 400 }}>{c.value}</div>
+              <div className="text-[8.5px] font-mono uppercase tracking-wider mt-0.5" style={{ color: ASH }}>{c.label}</div>
+            </div>
+          )
+        })}
+      </div>
+      <div className="px-5 pt-4 pb-5 flex flex-col gap-2">
+        <div className="text-[9px] font-mono uppercase tracking-[0.14em]" style={{ color: ASH }}>Sections included</div>
+        <div className="flex flex-wrap gap-1.5">
+          {PACKET_SECTIONS.map((s) => (
+            <span key={s} className="text-[10px] px-2.5 py-1 rounded-full" style={{ color: ASH, border: `1px solid ${LINE_D}` }}>
+              {s}
+            </span>
+          ))}
+        </div>
+      </div>
+      <div className="px-5 pb-4 pt-3 border-t" style={{ borderColor: LINE_D }}>
+        <span className="text-[10px] font-mono uppercase tracking-[0.12em]" style={{ color: ASH }}>
+          The terms-winning artifact, one export away
+        </span>
+      </div>
+    </InstrumentFrame>
+  )
+}
+
+// 05 — Broker Pilot console preview; always rendered, cycling moves which
+// grounded observation is highlighted. Citation chips are illustrative
+// record ids, not the platform's real cid namespace.
+const PILOT_OBSERVATIONS = [
+  { text: 'Quoted premium sits 14% below the loss-supported range.', cite: 'loss-run:2026' },
+  { text: 'Indemnity clause requires $2M; client carries $1M.', cite: 'contract:p.4' },
+  { text: 'EPL readiness data is thin for two of five factors.', cite: 'epl:readiness' },
+]
+
+function PilotInstrument() {
+  const reduce = useReducedMotion()
+  const litIndex = useCyclingIndex(PILOT_OBSERVATIONS.length, 2600, reduce)
+  const accent = BAND_COLOR.elevated
+  return (
+    <InstrumentFrame label="Broker Pilot · console" accent={accent}>
+      <div className="px-5 pt-5">
+        <div className="text-[11.5px] leading-relaxed" style={{ color: ASH }}>
+          The record is assembled —{' '}
+          <span style={{ color: BONE, fontWeight: 600 }}>1,284 records</span> across{' '}
+          <span style={{ color: BONE, fontWeight: 600 }}>23 systems</span> are in scope.
+        </div>
+      </div>
+      <div className="px-5 pt-4 pb-5 flex flex-col gap-3">
+        {PILOT_OBSERVATIONS.map((o, i) => {
+          const lit = i === litIndex
+          return (
+            <div key={o.cite} className="flex items-start gap-2.5">
+              <span
+                className="mt-1.5 shrink-0 block rounded-full transition-all duration-500"
+                style={{
+                  width: lit ? 6 : 5,
+                  height: lit ? 6 : 5,
+                  backgroundColor: lit ? LEAF : 'transparent',
+                  border: lit ? 'none' : `1px solid ${LINE_D}`,
+                }}
+              />
+              <div className="min-w-0 flex-1">
+                <div className="text-[12px] transition-colors duration-500" style={{ color: lit ? BONE : ASH, fontWeight: lit ? 600 : 400 }}>
+                  {o.text}
+                </div>
+                <div className="text-[9.5px] font-mono mt-0.5" style={{ color: lit ? LEAF : ASH }}>[{o.cite}]</div>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+      <div className="px-5 pb-4 pt-3 border-t" style={{ borderColor: LINE_D }}>
+        <span className="text-[10px] font-mono uppercase tracking-[0.12em]" style={{ color: ASH }}>
+          Every answer cites the record it came from
+        </span>
+      </div>
+    </InstrumentFrame>
+  )
+}
+
 export const INSTRUMENTS: Record<string, () => React.ReactElement> = {
   'risk-curve': RiskCurveInstrument,
   wc: WcInstrument,
   command: CommandInstrument,
+  submission: SubmissionInstrument,
+  pilot: PilotInstrument,
 }

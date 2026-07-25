@@ -89,7 +89,7 @@ export function PillarsGrid() {
                 className="tracking-tight"
                 style={{ fontFamily: DISPLAY, fontWeight: 300, color: BONE, fontSize: 'clamp(2rem, 4vw, 3.25rem)', lineHeight: 1.08 }}
               >
-                Three reads on your whole book.
+                Five reads on your whole book.
               </h2>
             </div>
           </Reveal>
