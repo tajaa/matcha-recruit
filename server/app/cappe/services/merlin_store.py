@@ -21,10 +21,15 @@ from ..routes._shared import loads_list
 
 logger = logging.getLogger(__name__)
 
-# Turns replayed into the prompt. Mirrors _MAX_HISTORY_TURNS in merlin.py — the
-# transcript can be long now that it persists, but the prompt window can't grow
-# with it.
-HISTORY_TURNS = 10
+# MESSAGES (not turns — a turn is a user+assistant pair) replayed into the
+# prompt. Mirrors _MAX_HISTORY_MESSAGES in merlin.py/merlin_agent.py — the
+# transcript can be long now that it persists, but the prompt window can't
+# grow with it. Was named HISTORY_TURNS at 10 (5 actual exchanges) while the
+# two prompt-builders' own "_MAX_HISTORY_TURNS" slice was also 10 messages —
+# same number, same wrong unit, so the slice looked like a second guard but
+# was a no-op against this query's own LIMIT. 20 messages ≈ the 10 exchanges
+# the naming always intended.
+HISTORY_MESSAGES = 20
 # Hard ceiling on what `get_conversation` returns to the panel. A conversation
 # that outgrows this is still usable; the panel just shows the recent tail.
 MAX_MESSAGES_RETURNED = 200
@@ -120,7 +125,7 @@ async def get_messages(conn, conversation_id: UUID) -> list[dict[str, Any]]:
     rows = await conn.fetch(
         """
         SELECT * FROM (
-            SELECT id, role, content, results, steps, attachments, tier, created_at
+            SELECT id, role, content, results, steps, attachments, ops, tier, created_at
             FROM cappe_merlin_messages
             WHERE conversation_id = $1
             ORDER BY created_at DESC, id DESC
@@ -136,7 +141,7 @@ async def get_messages(conn, conversation_id: UUID) -> list[dict[str, Any]]:
         m = dict(r)
         # JSONB columns come back as text (no global codec) and are nullable
         # here — an absent trace must stay None, not become [].
-        for key in ("results", "steps", "attachments"):
+        for key in ("results", "steps", "attachments", "ops"):
             m[key] = loads_list(m[key]) if m[key] is not None else None
         out.append(m)
     return out
@@ -158,7 +163,7 @@ async def load_history(conn, conversation_id: UUID) -> list[dict[str, Any]]:
         ORDER BY created_at ASC, id ASC
         """,
         conversation_id,
-        HISTORY_TURNS,
+        HISTORY_MESSAGES,
     )
     history: list[dict[str, Any]] = []
     for r in rows:
@@ -184,14 +189,21 @@ async def add_message(
     results: Optional[list[dict[str, Any]]] = None,
     steps: Optional[list[dict[str, Any]]] = None,
     attachments: Optional[list[dict[str, Any]]] = None,
+    ops: Optional[list[dict[str, Any]]] = None,
     tier: Optional[str] = None,
 ) -> dict[str, Any]:
+    """`ops` (migration zzzzcappe24) is the validated op log for an ASSISTANT
+    message — what the client would apply if it never got the chance to. It
+    is what makes an agent turn recoverable after a disconnect: the route
+    persists it on the message even when the SSE stream never delivered a
+    `result` frame, and a reopened conversation with `ops` set but no
+    `results` yet is a turn the panel can offer to apply retroactively."""
     row = await conn.fetchrow(
         """
         INSERT INTO cappe_merlin_messages
-            (conversation_id, role, content, results, steps, attachments, tier)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
-        RETURNING id, role, content, results, steps, attachments, tier, created_at
+            (conversation_id, role, content, results, steps, attachments, ops, tier)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        RETURNING id, role, content, results, steps, attachments, ops, tier, created_at
         """,
         conversation_id,
         role,
@@ -199,6 +211,7 @@ async def add_message(
         json.dumps(results) if results is not None else None,
         json.dumps(steps) if steps is not None else None,
         json.dumps(attachments) if attachments is not None else None,
+        json.dumps(ops) if ops is not None else None,
         tier,
     )
     await conn.execute(
@@ -206,6 +219,6 @@ async def add_message(
         conversation_id,
     )
     m = dict(row)
-    for key in ("results", "steps", "attachments"):
+    for key in ("results", "steps", "attachments", "ops"):
         m[key] = loads_list(m[key]) if m[key] is not None else None
     return m

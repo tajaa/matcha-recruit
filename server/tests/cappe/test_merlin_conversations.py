@@ -106,20 +106,23 @@ async def test_load_history_is_capped_to_the_prompt_window():
     window can't grow with it."""
     conn = FakeConn()
     await merlin_store.load_history(conn, uuid4())
-    assert merlin_store.HISTORY_TURNS == 10
+    # MESSAGES, not turns — 20 messages is ~10 actual exchanges (see
+    # HISTORY_MESSAGES' docstring for the renaming-fixed-a-no-op history).
+    assert merlin_store.HISTORY_MESSAGES == 20
     # The LIMIT is a bound parameter, so assert the query shape carries one.
     assert "LIMIT $2" in conn.statements[0]
 
 
 @pytest.mark.asyncio
 async def test_get_messages_distinguishes_absent_from_empty_json():
-    """`results`/`steps`/`attachments` are nullable. An absent agent trace must
-    stay None — collapsing it to [] would render as "this turn did nothing"."""
+    """`results`/`steps`/`attachments`/`ops` are nullable. An absent agent
+    trace must stay None — collapsing it to [] would render as "this turn
+    did nothing"."""
     conn = FakeConn(fetch={
         "FROM cappe_merlin_messages": [
             {"id": uuid4(), "role": "assistant", "content": "Done.",
              "results": json.dumps([{"ok": True, "summary": "Edited Hero"}]),
-             "steps": None, "attachments": None, "tier": "max", "created_at": _NOW},
+             "steps": None, "attachments": None, "ops": None, "tier": "max", "created_at": _NOW},
         ],
     })
     [m] = await merlin_store.get_messages(conn, uuid4())
@@ -127,6 +130,25 @@ async def test_get_messages_distinguishes_absent_from_empty_json():
     assert m["results"] == [{"ok": True, "summary": "Edited Hero"}]
     assert m["steps"] is None
     assert m["attachments"] is None
+    assert m["ops"] is None
+
+
+@pytest.mark.asyncio
+async def test_get_messages_returns_ops_when_stored():
+    """A turn whose `ops` were persisted (migration zzzzcappe24) — what the
+    panel's "apply these changes" recovery path reads back."""
+    conn = FakeConn(fetch={
+        "FROM cappe_merlin_messages": [
+            {"id": uuid4(), "role": "assistant", "content": "Darkened the hero.",
+             "results": None, "steps": None, "attachments": None,
+             "ops": json.dumps([{"op": "set_field", "block": "b1", "path": "heading", "value": "New"}]),
+             "tier": "max", "created_at": _NOW},
+        ],
+    })
+    [m] = await merlin_store.get_messages(conn, uuid4())
+
+    assert m["ops"] == [{"op": "set_field", "block": "b1", "path": "heading", "value": "New"}]
+    assert m["results"] is None  # never applied — this IS the "unrecovered turn" shape
 
 
 # --- ownership ---------------------------------------------------------------
@@ -150,7 +172,7 @@ async def test_add_message_serializes_jsonb_and_bumps_the_conversation():
         "INSERT INTO cappe_merlin_messages": {
             "id": uuid4(), "role": "assistant", "content": "Done.",
             "results": json.dumps([{"ok": True, "summary": "Edited Hero"}]),
-            "steps": None, "attachments": None, "tier": "lite", "created_at": _NOW,
+            "steps": None, "attachments": None, "ops": None, "tier": "lite", "created_at": _NOW,
         },
     })
     stored = await merlin_store.add_message(
@@ -160,6 +182,29 @@ async def test_add_message_serializes_jsonb_and_bumps_the_conversation():
 
     assert stored["results"] == [{"ok": True, "summary": "Edited Hero"}]
     assert any("UPDATE cappe_merlin_conversations SET updated_at" in s for s in conn.statements)
+
+
+@pytest.mark.asyncio
+async def test_add_message_persists_ops_for_recovery():
+    """`ops` (migration zzzzcappe24) is what a disconnected agent turn needs
+    to be recoverable — persisted on the assistant message alongside the
+    existing steps/results traces."""
+    conn = FakeConn(fetchrow={
+        "INSERT INTO cappe_merlin_messages": {
+            "id": uuid4(), "role": "assistant", "content": "Darkened the hero.",
+            "results": None, "steps": None, "attachments": None,
+            "ops": json.dumps([{"op": "set_field", "block": "b1", "path": "heading", "value": "New"}]),
+            "tier": "max", "created_at": _NOW,
+        },
+    })
+    stored = await merlin_store.add_message(
+        conn, uuid4(), role="assistant", content="Darkened the hero.",
+        ops=[{"op": "set_field", "block": "b1", "path": "heading", "value": "New"}], tier="max",
+    )
+
+    assert stored["ops"] == [{"op": "set_field", "block": "b1", "path": "heading", "value": "New"}]
+    insert_sql = next(s for s in conn.statements if "INSERT INTO cappe_merlin_messages" in s)
+    assert "ops" in insert_sql
 
 
 # --- route wiring ------------------------------------------------------------
@@ -224,3 +269,30 @@ def test_parse_page_id_degrades_rather_than_raising():
     assert _parse_page_id(str(good)) == good
     assert _parse_page_id("not-a-uuid") is None
     assert _parse_page_id(None) is None
+
+
+def test_recent_history_tail_builds_a_recap_for_the_router():
+    """route_tier's classifier previously ran on the bare message with no
+    context at all — this is what now feeds its `history_tail`, built from
+    the client-resent `body.history` (available before any DB call)."""
+    from app.cappe.routes.merlin import _recent_history_tail
+
+    class _Turn:
+        def __init__(self, role, content):
+            self.role, self.content = role, content
+
+    history = [
+        _Turn("user", "make the hero darker"),
+        _Turn("assistant", "Darkened the hero background."),
+        _Turn("user", "now match the others"),
+    ]
+    tail = _recent_history_tail(history, n=2)
+    assert "Darkened the hero background." in tail
+    assert "match the others" in tail
+    assert "make the hero darker" not in tail  # trimmed to the last 2 turns
+
+
+def test_recent_history_tail_empty_history_is_none():
+    from app.cappe.routes.merlin import _recent_history_tail
+
+    assert _recent_history_tail([]) is None

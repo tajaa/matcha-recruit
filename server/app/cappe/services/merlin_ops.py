@@ -548,8 +548,16 @@ def _v_duplicate_block(raw: dict[str, Any], ctx: ValidationCtx) -> Optional[str]
 
 
 def _v_remove_block(raw: dict[str, Any], ctx: ValidationCtx) -> Optional[str]:
-    if _sid(raw.get("block")) not in ctx.by_id:
+    bid = _sid(raw.get("block"))
+    if bid not in ctx.by_id:
         return "block id not found"
+    # Unregister it — a LATER op in this same turn that targets this now-removed
+    # block should get a real rejection (with a reason the model can act on)
+    # instead of validating clean here and only surfacing as a "Skipped" chip
+    # once apply_ops actually runs, which is feedback the model never sees at
+    # validation time.
+    ctx.by_id.pop(bid, None)
+    ctx.pending_canvas_count.pop(bid, None)
     return None
 
 
@@ -972,14 +980,25 @@ def validate_ops(
         if not isinstance(raw, dict):
             rejected.append({"op": {"op": str(raw)}, "reason": "op was not a JSON object"})
             continue
-        op = OPS_BY_NAME.get(raw.get("op"))
+        original_op_name = raw.get("op")
+        op = OPS_BY_NAME.get(original_op_name)
         if op is None:
             rejected.append({"op": raw, "reason": f"unknown op '{raw.get('op')}'"})
             continue
 
+        # A delegating validator (apply_style_recipe → set_design_bulk,
+        # apply_section_preset → add_block) rewrites raw["op"] plus several
+        # other keys (type/content/design) IN PLACE before handing off to the
+        # real op's validator (see _v_apply_style_recipe / _v_apply_section_
+        # preset). Snapshot BEFORE validating, not just the op name after: if
+        # the delegate rejects, the rejection (and the retry feedback
+        # _rejection_feedback in merlin.py builds from it) must describe the
+        # op the model actually sent, not the expanded shape a rewritten "op"
+        # alone would still leave behind.
+        original_raw = dict(raw)
         reason = op.validate(raw, ctx)
         if reason:
-            rejected.append({"op": raw, "reason": reason})
+            rejected.append({"op": original_raw, "reason": reason})
         else:
             valid.append(raw)
 

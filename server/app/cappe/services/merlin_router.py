@@ -54,6 +54,15 @@ _COMPLEX_HINTS = re.compile(
     r"modern|beautiful|stunning|cohesive|rework|whole page|entire (page|site))\b",
     re.I,
 )
+# A quoted phrase is CONTENT the user wants edited, not their own description
+# of the request — "remove the word 'professional' from the heading" is a
+# one-field copy tweak, not a design judgment, even though the quoted text
+# contains a complex-sounding word. Stripped before _COMPLEX_HINTS runs.
+# Single-quote matching is guarded on both sides with a non-word lookaround so
+# a contraction's apostrophe ("don't", "it's") is never mistaken for a quote
+# delimiter — two contractions in one message would otherwise strip everything
+# between them, including whatever hint word sat in the middle.
+_QUOTED_RE = re.compile(r"\"[^\"]*\"|(?<!\w)'[^']*'(?!\w)")
 
 _CLASSIFIER_PROMPT = """Classify how much work a website-editing request needs. Answer ONLY with JSON:
 {"complexity": "trivial" | "standard" | "complex"}
@@ -68,14 +77,35 @@ When unsure, answer "complex" — an overworked answer is recoverable, an underw
 
 
 def _heuristic(message: str, has_selected_block: bool) -> Optional[str]:
-    """A free verdict where one is obvious, else None (ask the classifier)."""
+    """A free verdict where one is obvious, else None (ask the classifier).
+
+    Three checks, in an order that matters:
+
+    1. An explicit trivial-hint word (typo/rename/delete/…) names the
+       OPERATION as a copy/field tweak, so it wins even if the message
+       happens to contain a complex-sounding word — "delete the word premium"
+       is trivial despite "premium", because deleting a word is what's being
+       asked, not a judgment about how the page looks.
+    2. Failing that, a complex hint (matched with any QUOTED substrings
+       removed, so "remove the word 'professional' from the heading" routes
+       on the request itself) forces `max`. This must come before the
+       selected-block fallback below: a short message against an already-
+       selected section ("make this look professional") is exactly the
+       visual-judgment ask `_COMPLEX_HINTS` exists to catch, and word count
+       alone can't tell that apart from a real copy tweak ("make it say
+       8am").
+    3. Only once neither fires does a short message against a selected
+       section fall through to `lite` on length alone.
+    """
     text = (message or "").strip()
     if not text:
         return DEFAULT_MODEL_TIER
-    if _COMPLEX_HINTS.search(text):
-        return "max"
     words = text.split()
-    if len(words) <= _TRIVIAL_WORD_MAX and (has_selected_block or _TRIVIAL_HINTS.search(text)):
+    if len(words) <= _TRIVIAL_WORD_MAX and _TRIVIAL_HINTS.search(text):
+        return "lite"
+    if _COMPLEX_HINTS.search(_QUOTED_RE.sub(" ", text)):
+        return "max"
+    if len(words) <= _TRIVIAL_WORD_MAX and has_selected_block:
         return "lite"
     return None
 

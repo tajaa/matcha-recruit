@@ -15,9 +15,17 @@ TRANSCRIPT (`cappe_merlin_conversations` / `_messages`, migration zzzzcappe22,
 owned by `services/merlin_store.py`), so a conversation survives a reload and a
 page can hold several of them. See `services/merlin.py` for the op validation
 and prompt logic.
+
+`/merlin/chat` (single-shot) and `/merlin/agent` (the loop, falling back to
+single-shot on a non-agentic tier/plan) share one preamble — size gate, tier
+routing, rate limit, attachment load, conversation resolution — via
+`_prepare_turn`, so the two can't drift out of sync with each other the way
+they once did as independently hand-maintained copies.
 """
+import asyncio
 import json
 import logging
+from dataclasses import dataclass
 from typing import Any, Optional
 from uuid import UUID
 
@@ -180,6 +188,25 @@ async def delete_merlin_conversation(
         await merlin_store.delete_conversation(conn, conversation_id)
 
 
+def _recent_history_tail(history: list, n: int = 2) -> Optional[str]:
+    """A short recap of the last few turns for the auto-router's classifier
+    (`merlin_router.route_tier`'s `history_tail` — previously never passed by
+    either caller, so an ambiguous follow-up like "make it match the others"
+    was classified with no idea what "it" or "the others" refers to).
+
+    Built from `body.history` — the CLIENT-resent transcript — rather than the
+    server-loaded conversation, because tier routing happens BEFORE the DB
+    call that would resolve which conversation this is; the client always
+    sends its own recent messages here regardless of whether `conversation_id`
+    is set (see `useMerlin.ts`'s `send`), so this is available up front.
+    Content is hard-truncated — this is a routing hint, not a replay."""
+    recent = history[-n:]
+    if not recent:
+        return None
+    lines = [f"{t.role}: {t.content[:200]}" for t in recent if t.content]
+    return "\n".join(lines) or None
+
+
 def _parse_page_id(raw: str) -> Optional[UUID]:
     """`page_id` rides in as a string on the chat request (it predates
     persistence). A non-UUID means we can't record the turn — that degrades to
@@ -230,19 +257,39 @@ async def _resolve_conversation(
     )
 
 
-@router.post("/sites/{site_id}/merlin/chat", response_model=CappeMerlinChatResponse)
-async def merlin_chat(
-    site_id: UUID,
-    body: CappeMerlinChatRequest,
-    account: CappeAccount = Depends(require_cappe_account),
-):
-    """One Merlin turn: chat message + current editor snapshot in, a small
-    validated op plan out. Client-state-is-truth — this never reads or writes
-    `cappe_pages`/`cappe_sites`; it only confirms the caller owns the site.
+@dataclass
+class _PreparedTurn:
+    """Everything both turn routes need before calling into `services/merlin*`
+    — the shared preamble `_prepare_turn` builds. `site` is a DB row (still a
+    Record/Mapping, not a model) so callers keep indexing it the same way they
+    already did."""
+    site: Any
+    conversation: Optional[dict]
+    history: list[dict[str, Any]]
+    attachments: list[dict[str, Any]]
+    tier: str
+    routed: bool
+    agentic: bool
 
-    The transcript IS written (`cappe_merlin_*`, migration zzzzcappe22): the
-    user message is stored before the Gemini call, the assistant message after,
-    so a turn that fails mid-flight still leaves the question in the history.
+
+async def _prepare_turn(
+    site_id: UUID, body: CappeMerlinChatRequest, account: CappeAccount, *, allow_agentic: bool,
+) -> _PreparedTurn:
+    """Shared preamble for `/merlin/chat` and `/merlin/agent`: size gate → tier
+    routing → rate limit → attachment load → conversation resolution. The two
+    routes used to hand-repeat this (drift risk — see the module docstring);
+    this is the single copy.
+
+    `allow_agentic` is what lets ONE function serve both callers' different
+    rate-limit policy: `/merlin/agent` may run the agent loop (several Gemini
+    calls + screenshots, its own tighter hourly counter) once `tier` resolves
+    into an agent tier on a premium plan; `/merlin/chat` never runs the loop at
+    all, so it passes `allow_agentic=False` and always draws from the single-
+    shot counter, exactly as it did before this was shared.
+
+    Order is preserved exactly: the size gate runs before any Gemini call OR
+    any write; both rate-limit gates run before the transcript write, so a
+    rejected turn never leaves an unanswered question in the history.
     """
     # Size gate BEFORE any Gemini call OR any write. Pydantic bounds the item
     # counts, but a 200-block page can still be megabytes of text, and the whole
@@ -260,13 +307,18 @@ async def merlin_chat(
     tier, routed = await route_tier(
         body.model_tier, account.plan,
         message=body.message, has_selected_block=bool(body.selected_block),
+        history_tail=_recent_history_tail(body.history),
     )
+    agentic = allow_agentic and premium and tier in AGENT_TIERS
     # Cost guard until the token wallet exists: free plans get a smaller
-    # hourly allowance than paid ones, keyed per account (not per IP). Both
-    # gates run before the transcript write — a rejected turn shouldn't leave a
+    # hourly allowance than paid ones, keyed per account (not per IP). Runs
+    # before the transcript write — a rejected turn shouldn't leave a
     # question in the history that never got an answer.
-    hourly = _PAID_HOURLY_LIMIT if premium else _FREE_HOURLY_LIMIT
-    await check_rate_limit(str(account.id), "cappe_merlin_chat", hourly, 3600)
+    if agentic:
+        await check_rate_limit(str(account.id), "cappe_merlin_agent", _AGENT_HOURLY_LIMIT, 3600)
+    else:
+        hourly = _PAID_HOURLY_LIMIT if premium else _FREE_HOURLY_LIMIT
+        await check_rate_limit(str(account.id), "cappe_merlin_chat", hourly, 3600)
 
     page_uuid = _parse_page_id(body.page_id)
     # Fetched before the DB block: it's an S3 round trip, not a DB one, and
@@ -295,17 +347,44 @@ async def merlin_chat(
             # transcript.
             history = [t.model_dump() for t in body.history]
 
+    return _PreparedTurn(
+        site=site, conversation=conversation, history=history, attachments=attachments,
+        tier=tier, routed=routed, agentic=agentic,
+    )
+
+
+@router.post("/sites/{site_id}/merlin/chat", response_model=CappeMerlinChatResponse)
+async def merlin_chat(
+    site_id: UUID,
+    body: CappeMerlinChatRequest,
+    account: CappeAccount = Depends(require_cappe_account),
+):
+    """One Merlin turn: chat message + current editor snapshot in, a small
+    validated op plan out. Client-state-is-truth — this never reads or writes
+    `cappe_pages`/`cappe_sites`; it only confirms the caller owns the site.
+
+    The transcript IS written (`cappe_merlin_*`, migration zzzzcappe22): the
+    user message is stored before the Gemini call, the assistant message after,
+    so a turn that fails mid-flight still leaves the question in the history.
+
+    Shares its preamble (size gate, tier routing, rate limit, attachment load,
+    conversation resolution) with `/merlin/agent` via `_prepare_turn` —
+    `allow_agentic=False` because this route never runs the agent loop, so it
+    always draws from the single-shot hourly counter regardless of tier.
+    """
+    turn = await _prepare_turn(site_id, body, account, allow_agentic=False)
+
     try:
         result = await run_merlin_turn(
             message=body.message,
-            history=history,
+            history=turn.history,
             blocks=body.blocks,
             theme=body.theme,
-            business_name=site["name"],
-            model_tier=tier,
+            business_name=turn.site["name"],
+            model_tier=turn.tier,
             plan=account.plan,
             selected_block=body.selected_block,
-            attachments=attachments,
+            attachments=turn.attachments,
         )
     except RateLimitExceeded as exc:
         raise HTTPException(
@@ -313,17 +392,17 @@ async def merlin_chat(
             detail=f"Merlin is at capacity right now ({exc.limit_type} limit reached). Try again shortly.",
         )
 
-    result["routed"] = routed
-    if conversation is not None:
+    result["routed"] = turn.routed
+    if turn.conversation is not None:
         async with get_connection() as conn:
             stored = await merlin_store.add_message(
                 conn,
-                conversation["id"],
+                turn.conversation["id"],
                 role="assistant",
                 content=result.get("message") or "",
                 tier=result.get("tier"),
             )
-        result["conversation_id"] = conversation["id"]
+        result["conversation_id"] = turn.conversation["id"]
         # The client reports back which ops actually landed (it applies to live
         # state, so only it knows) via PATCH /merlin/messages/{id}/results.
         result["message_id"] = stored["id"]
@@ -347,67 +426,36 @@ async def merlin_agent(
     Non-premium (or Lite) callers fall through to the single-shot path and get
     its result as one `result` frame, so the client has exactly one code path.
     The page itself is still never written here.
+
+    Shares its preamble with `/merlin/chat` via `_prepare_turn`
+    (`allow_agentic=True` — `auto` resolving into an agent tier on a premium
+    plan is exactly what makes the loop reachable without the user knowing
+    the tiers exist, so this route is the one that can actually trip it).
     """
-    snapshot_bytes = len(json.dumps(body.blocks)) + len(json.dumps(body.theme))
-    if snapshot_bytes > _MAX_SNAPSHOT_BYTES:
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail="This page is too large for Merlin — edit it in Form or Canvas mode.",
-        )
+    prep = await _prepare_turn(site_id, body, account, allow_agentic=True)
 
-    premium = is_premium_plan(account.plan)
-    # `auto` (the client default) resolves here, BEFORE the agentic decision —
-    # routing to `max` is exactly what turns a vague design ask into an agent
-    # turn, so the router is what makes the loop reachable without the user
-    # knowing the tiers exist.
-    tier, routed = await route_tier(
-        body.model_tier, account.plan,
-        message=body.message, has_selected_block=bool(body.selected_block),
-    )
-    agentic = premium and tier in AGENT_TIERS
-    # One agent turn is several Gemini calls plus screenshots, so it gets its
-    # own (tighter) hourly counter rather than sharing the chat one.
-    if agentic:
-        await check_rate_limit(str(account.id), "cappe_merlin_agent", _AGENT_HOURLY_LIMIT, 3600)
-    else:
-        hourly = _PAID_HOURLY_LIMIT if premium else _FREE_HOURLY_LIMIT
-        await check_rate_limit(str(account.id), "cappe_merlin_chat", hourly, 3600)
-
-    page_uuid = _parse_page_id(body.page_id)
-    attachments = await load_attachments([a.model_dump() for a in body.attachments])
-    attachment_meta = [{"url": a["url"], "mime": a["mime"]} for a in attachments]
-
+    # nav_rows isn't part of the shared preamble — only the agent path's
+    # render_html needs it (to render other-page links in the preview nav),
+    # so it's its own connection rather than something every turn pays for.
     async with get_connection() as conn:
-        site = await get_owned_site(conn, site_id, account.id)
         nav_rows = await conn.fetch(
             "SELECT title, slug FROM cappe_pages WHERE site_id = $1 ORDER BY sort_order, created_at",
             site_id,
         )
-        conversation = await _resolve_conversation(
-            conn, body=body, site=site, page_uuid=page_uuid, account=account
-        )
-        if conversation is not None:
-            history = await merlin_store.load_history(conn, conversation["id"])
-            await merlin_store.add_message(
-                conn, conversation["id"], role="user", content=body.message,
-                attachments=attachment_meta or None,
-            )
-        else:
-            history = [t.model_dump() for t in body.history]
 
     nav = [{"slug": r["slug"], "title": r["title"]} for r in nav_rows] or [
         {"slug": "home", "title": "Home"}
     ]
-    site_theme = loads(site["theme_config"])
-    site_meta = loads(site["meta_config"])
+    site_theme = loads(prep.site["theme_config"])
+    site_meta = loads(prep.site["meta_config"])
 
     def render_html(work_blocks: list, work_theme: dict) -> str:
         """Render the agent's working copy exactly as the editor's own preview
         would — same call, same premium gating — so what the model looks at is
         what the user will see, not a more-permissive render."""
         site_dict = {
-            "name": site["name"],
-            "slug": site["slug"],
+            "name": prep.site["name"],
+            "slug": prep.site["slug"],
             "theme_config": gate_theme(work_theme or site_theme, account.plan),
             "meta_config": site_meta,
         }
@@ -416,89 +464,153 @@ async def merlin_agent(
             "slug": "home",
             "content": gate_content({"blocks": work_blocks}, account.plan),
         }
-        return render_site_html(site_dict, page, nav, preview=True)
+        # block_anchors — NOT editable — tags each section with data-cz-block
+        # so the agent's render_screenshot tool can scroll to the one it's
+        # judging, without also emitting the canvas editor runtime editable
+        # would (see render_site_html / _apply_design).
+        return render_site_html(site_dict, page, nav, preview=True, block_anchors=True)
 
     async def event_stream():
         result: dict | None = None
-        try:
-            if agentic:
-                stream = run_merlin_agent(
-                    message=body.message,
-                    history=history,
-                    blocks=body.blocks,
-                    theme=body.theme,
-                    render_html=render_html,
-                    business_name=site["name"],
-                    model_tier=tier,
-                    plan=account.plan,
-                    account_id=str(account.id),
-                    selected_block=body.selected_block,
-                    attachments=attachments,
-                )
-                async for frame in stream:
-                    if frame.get("type") == "result":
-                        result = frame["data"]
-                    else:
-                        yield _sse(frame)
-            else:
-                turn = await run_merlin_turn(
-                    message=body.message,
-                    history=history,
-                    blocks=body.blocks,
-                    theme=body.theme,
-                    business_name=site["name"],
-                    model_tier=tier,
-                    plan=account.plan,
-                    selected_block=body.selected_block,
-                    attachments=attachments,
-                )
-                result = {**turn, "steps": []}
-        except RateLimitExceeded as exc:
-            # A stream can't 429 — the response has already begun — so the cap
-            # is reported in-band and the client surfaces it as the error.
-            yield _sse({
-                "type": "error",
-                "message": f"Merlin is at capacity right now ({exc.limit_type} limit reached). Try again shortly.",
-            })
-        except Exception as exc:  # noqa: BLE001 — a stream must always terminate cleanly
-            logger.warning("Merlin agent stream failed: %s", exc, exc_info=True)
-            yield _sse({"type": "error", "message": "Merlin failed to respond."})
+        # Set once the assistant message has actually been written, so the
+        # normal path and the disconnect-recovery path below can't both try
+        # (and neither double-writes if, say, the normal path partially ran
+        # before the disconnect landed between its own steps). `persist_lock`
+        # makes the check-and-set atomic: both callers await `asyncio.shield`,
+        # and a cancellation landing mid-shield lets the INNER shielded task
+        # keep running detached — without the lock, the finally's own call
+        # could start before that detached task sets `persisted`, and both
+        # would write. The lock, not the flag alone, is what rules that out.
+        persisted = False
+        persist_lock = asyncio.Lock()
 
-        if result is not None:
-            result["routed"] = routed
-            if conversation is not None:
+        async def persist(final_result: dict) -> None:
+            """Write the assistant message — `ops` included, so a turn whose
+            reply never reached the client is still something the panel can
+            offer to apply on reopen (see CappeMerlinStoredMessage.ops).
+            Wrapped in `asyncio.shield` by both callers below: a client
+            disconnect is exactly what this exists to survive, and without
+            shielding, the SAME disconnect that cancels the rest of this
+            request would cancel this write too, the instant it hit its own
+            first `await`."""
+            nonlocal persisted
+            async with persist_lock:
+                if persisted:
+                    return
+                persisted = True
+                if prep.conversation is None:
+                    return
                 async with get_connection() as conn:
                     stored = await merlin_store.add_message(
                         conn,
-                        conversation["id"],
+                        prep.conversation["id"],
                         role="assistant",
-                        content=result.get("message") or "",
-                        steps=result.get("steps") or None,
-                        tier=result.get("tier"),
+                        content=final_result.get("message") or "",
+                        steps=final_result.get("steps") or None,
+                        ops=final_result.get("ops") or None,
+                        tier=final_result.get("tier"),
                     )
-                result["conversation_id"] = str(conversation["id"])
-                result["message_id"] = str(stored["id"])
-            # Catalog anything the agent generated this turn (do_generate_image
-            # rides prompt/aspect/image_size on the step for exactly this).
-            # Best-effort, same reasoning as the upload routes: a broken
-            # catalog insert must never surface as a failed Merlin turn.
-            image_steps = [
-                s for s in (result.get("steps") or [])
-                if s.get("kind") == "image" and s.get("image_url")
-            ]
-            if image_steps:
+                final_result["conversation_id"] = str(prep.conversation["id"])
+                final_result["message_id"] = str(stored["id"])
+
+        try:
+            try:
+                if prep.agentic:
+                    stream = run_merlin_agent(
+                        message=body.message,
+                        history=prep.history,
+                        blocks=body.blocks,
+                        theme=body.theme,
+                        render_html=render_html,
+                        business_name=prep.site["name"],
+                        model_tier=prep.tier,
+                        plan=account.plan,
+                        account_id=str(account.id),
+                        selected_block=body.selected_block,
+                        attachments=prep.attachments,
+                    )
+                    async for frame in stream:
+                        if frame.get("type") == "result":
+                            result = frame["data"]
+                        else:
+                            yield _sse(frame)
+                else:
+                    single_shot = await run_merlin_turn(
+                        message=body.message,
+                        history=prep.history,
+                        blocks=body.blocks,
+                        theme=body.theme,
+                        business_name=prep.site["name"],
+                        model_tier=prep.tier,
+                        plan=account.plan,
+                        selected_block=body.selected_block,
+                        attachments=prep.attachments,
+                    )
+                    result = {**single_shot, "steps": []}
+            except RateLimitExceeded as exc:
+                # A stream can't 429 — the response has already begun — so the
+                # cap is reported in-band and the client surfaces it as the error.
+                yield _sse({
+                    "type": "error",
+                    "message": f"Merlin is at capacity right now ({exc.limit_type} limit reached). Try again shortly.",
+                })
+            except Exception as exc:  # noqa: BLE001 — a stream must always terminate cleanly
+                logger.warning("Merlin agent stream failed: %s", exc, exc_info=True)
+                yield _sse({"type": "error", "message": "Merlin failed to respond."})
+
+            if result is not None:
+                result["routed"] = prep.routed
+                await asyncio.shield(persist(result))
+                # Catalog anything the agent generated this turn (do_generate_image
+                # rides prompt/aspect/image_size on the step for exactly this).
+                # Best-effort, same reasoning as the upload routes: a broken
+                # catalog insert must never surface as a failed Merlin turn.
+                image_steps = [
+                    s for s in (result.get("steps") or [])
+                    if s.get("kind") == "image" and s.get("image_url")
+                ]
+                if image_steps:
+                    try:
+                        async with get_connection() as conn:
+                            for s in image_steps:
+                                await cappe_assets.record(
+                                    conn, account_id=account.id, site_id=site_id, kind="generated",
+                                    url=s["image_url"], prompt=s.get("prompt"),
+                                    aspect=s.get("aspect"), image_size=s.get("image_size"),
+                                )
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning("cappe asset catalog insert failed (agent): %s", exc)
+                yield _sse({"type": "result", "data": result})
+            yield "data: [DONE]\n\n"
+        finally:
+            # Reached on a normal finish (where `persisted` is already True
+            # and this is a no-op) AND on a client disconnect — the ASGI
+            # server closes this generator (or cancels the task running it)
+            # the moment it sees the socket go, which is exactly what used to
+            # skip the `if result is not None:` block above whenever the
+            # disconnect landed between the turn finishing and that block's
+            # own `await`. `result` is only ever non-None once a turn (agent
+            # or single-shot) actually completed — a disconnect mid-turn
+            # still loses whatever the turn hadn't produced yet, same as
+            # before; this recovers exactly the case the module docstring
+            # describes, where the answer existed and the write to record it
+            # never ran.
+            if result is not None and not persisted:
                 try:
-                    async with get_connection() as conn:
-                        for s in image_steps:
-                            await cappe_assets.record(
-                                conn, account_id=account.id, site_id=site_id, kind="generated",
-                                url=s["image_url"], prompt=s.get("prompt"),
-                                aspect=s.get("aspect"), image_size=s.get("image_size"),
-                            )
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("cappe asset catalog insert failed (agent): %s", exc)
-            yield _sse({"type": "result", "data": result})
-        yield "data: [DONE]\n\n"
+                    await asyncio.shield(persist(result))
+                except asyncio.CancelledError:
+                    # The disconnect path: this await itself gets cancelled
+                    # (the shielded persist() task keeps running detached
+                    # regardless — the write still lands), but CancelledError
+                    # is a BaseException, not Exception, so it never reached
+                    # the branch below and this log line never fired on
+                    # exactly the path it exists to observe. Re-raise after
+                    # logging — this generator is being torn down and must
+                    # not swallow its own cancellation.
+                    logger.warning("Merlin post-disconnect persist failed: cancelled")
+                    raise
+                except Exception as exc:  # noqa: BLE001 — best-effort recovery write
+                    logger.warning("Merlin post-disconnect persist failed: %s", exc)
 
     return StreamingResponse(
         event_stream(),

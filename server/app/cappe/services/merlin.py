@@ -61,7 +61,11 @@ logger = logging.getLogger(__name__)
 _THEME_INTENT_RE = re.compile(
     r"\b(theme|preset|palette|colou?r scheme|restyle|redesign)\b", re.I
 )
-_MAX_HISTORY_TURNS = 10
+# MESSAGES, not turns — matches merlin_store.HISTORY_MESSAGES, the actual size
+# of what `load_history` already returns. Named _MAX_HISTORY_TURNS at the same
+# value (10) as that constant used to be, this slice was a silent no-op —
+# never trimming anything since the query itself already capped the same way.
+_MAX_HISTORY_MESSAGES = 20
 
 _rate_limiter: Optional[GeminiRateLimiter] = None
 
@@ -149,7 +153,7 @@ _GENERAL_RULES: tuple[str, ...] = (
     "Change only what was asked. Do not rewrite the user's copy, switch their theme, or restyle sections as a side effect of an unrelated request.",
     'When the user says "this section", "here", or "it", they mean the SELECTED SECTION named below. If nothing is selected and the target is ambiguous, ask which section rather than guessing.',
     'Address blocks and canvas elements ONLY by the "id" values given to you below — never by position/index guessing.',
-    "At most 20 ops per turn. Prefer editing an existing block over removing and recreating it.",
+    "At most 20 ops at a time. Prefer editing an existing block over removing and recreating it.",
     "Never invent a block type or field name outside the catalog below.",
     'If the request is unclear or nothing needs to change, return an empty "ops" array with a clarifying "message".',
     "Output ONLY the JSON object. No markdown fences, no commentary.",
@@ -308,7 +312,7 @@ def _build_prompt(
             "ambiguous which they mean, ask instead of guessing."
         )
 
-    trimmed = history[-_MAX_HISTORY_TURNS:]
+    trimmed = history[-_MAX_HISTORY_MESSAGES:]
     if trimmed:
         convo = []
         for turn in trimmed:

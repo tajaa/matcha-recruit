@@ -107,6 +107,39 @@ async def test_a_short_edit_on_a_selected_section_routes_to_lite(no_classifier):
     assert (tier, routed) == ("lite", True)
 
 
+def test_trivial_short_selected_edit_wins_over_a_complex_word_it_contains():
+    """Trivial is checked FIRST, ahead of the complex-hint check — a short
+    edit against an already-selected section must not lose to a complex-
+    sounding word the message happens to use (e.g. naming what's being cut)."""
+    assert merlin_router._heuristic("delete the word premium", has_selected_block=True) == "lite"
+
+
+def test_quoted_complex_word_does_not_trigger_the_complex_hint():
+    """A quoted word is CONTENT the user wants edited, not the requester's own
+    description of the request — it must not force `max` (a whole screenshot
+    loop) for what's really a one-field copy tweak."""
+    verdict = merlin_router._heuristic(
+        "remove the word 'professional' from the heading", has_selected_block=False,
+    )
+    assert verdict != "max"
+
+
+def test_a_complex_hint_beats_the_selected_block_shortcut():
+    """The selected-block fallback is length-only, so it must run LAST: a short
+    ask against an already-selected section ("make this look professional") is
+    exactly the visual-judgment request the screenshot loop exists for."""
+    assert merlin_router._heuristic("make this look professional", has_selected_block=True) == "max"
+
+
+def test_contraction_apostrophes_are_not_read_as_quote_delimiters():
+    """Two contractions in one message would otherwise bracket everything
+    between them — stripping the hint word and silently downgrading the turn."""
+    verdict = merlin_router._heuristic(
+        "don't make this look professional, it's urgent", has_selected_block=False,
+    )
+    assert verdict == "max"
+
+
 @pytest.mark.asyncio
 async def test_a_short_message_without_a_selection_is_not_assumed_trivial(classifier):
     """Without a selected section even a short message may mean a page-wide

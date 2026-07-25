@@ -79,6 +79,26 @@ def test_missing_at_rejected():
     assert not valid and "'at'" in rejected[0]["reason"]
 
 
+def test_apply_section_preset_rejection_keeps_its_own_op_name():
+    """_v_apply_section_preset rewrites raw["op"] to "add_block" IN PLACE
+    before delegating to _v_add_block (an earlier op in the SAME batch claims
+    the same id here, so the delegate's id-collision check is what actually
+    rejects it). The rejection must still name apply_section_preset — the op
+    the model called — not add_block, or the retry feedback built from it
+    (merlin._rejection_feedback) coaches a fix for the wrong op."""
+    valid, rejected = validate_ops(
+        [
+            {"op": "add_block", "type": "hero", "at": 0, "id": "dup-1"},
+            {"op": "apply_section_preset", "preset": "faq-clean", "at": 1, "id": "dup-1"},
+        ],
+        _BLOCKS,
+    )
+    assert len(valid) == 1
+    assert len(rejected) == 1
+    assert "collides" in rejected[0]["reason"]
+    assert rejected[0]["op"]["op"] == "apply_section_preset"
+
+
 def test_non_premium_gets_content_without_design():
     valid, rejected = _apply("stats-band-dark", premium=False)
     assert len(valid) == 1 and not rejected
