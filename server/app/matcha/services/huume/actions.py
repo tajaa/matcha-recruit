@@ -143,6 +143,66 @@ def evaluate_plan_execution(*, role: Optional[str], features: dict[str, Any]) ->
     return None
 
 
+# Pilot-backed chat tools (Legal Pilot / Handbook Pilot skills) and the company
+# feature flag each one requires beyond `huume` + `matcha_work`. Mirrors
+# STEP_REQUIRED_FEATURE: the registry the pure envelope below reads from.
+PILOT_TOOL_REQUIRED_FEATURE: dict[str, str] = {
+    "list_legal_matters": "legal_defense",
+    "open_legal_matter": "legal_defense",
+    "ask_legal_pilot": "legal_defense",
+    "generate_legal_packet": "legal_defense",
+    "draft_handbook_content": "handbook_pilot",
+    "promote_handbook_drafts": "handbook_pilot",
+}
+
+_PILOT_FEATURE_LABEL = {"legal_defense": "Legal Pilot", "handbook_pilot": "Handbook Pilot"}
+
+
+def evaluate_pilot_tool(*, tool: str, role: Optional[str], features: dict[str, Any]) -> Optional[str]:
+    """Pure. None if this pilot-backed tool may run, else a refusal reason.
+
+    Same envelope order as evaluate_plan_execution — the skill engine gates
+    nothing itself, and the pilot routes' `require_admin_or_client` +
+    `require_feature(...)` mount gates must be re-asserted on the chat path.
+    The flag check makes the tools three-state like `lookup_context` topics:
+    a company without the pilot gets a plain refusal, not an error."""
+    features = features or {}
+    required = PILOT_TOOL_REQUIRED_FEATURE.get(tool)
+    if required is None:
+        return f"Unknown pilot tool '{tool}'."
+    if (role or "").strip().lower() not in _ALLOWED_ROLES:
+        return "Only a business admin can use the pilot tools."
+    if not features.get("huume"):
+        return "Huume isn't enabled for this company."
+    if not features.get("matcha_work"):
+        return "Matcha Work isn't enabled for this company."
+    if not features.get(required):
+        label = _PILOT_FEATURE_LABEL.get(required, required)
+        return f"{label} ('{required}') isn't enabled for this company."
+    return None
+
+
+def filter_promotable_drafts(
+    requested: Optional[list[str]], created_this_turn: set[str],
+) -> tuple[Optional[list[str]], Optional[str]]:
+    """Pure two-turn guard for promote_handbook_drafts, mirroring
+    resolve_plan_offer_id: a draft proposed THIS turn cannot be promoted THIS
+    turn, even if the admin's message asked for both. Returns
+    (requested_ids_or_None, error) — None ids means "all pending", which the
+    skill then narrows by excluding `created_this_turn` itself (the DB knows
+    what's pending; this function only owns the explicit-id refusal)."""
+    created = created_this_turn or set()
+    if requested:
+        blocked = [d for d in requested if str(d) in created]
+        if blocked:
+            return None, (
+                "Those drafts were just proposed this turn — review them and "
+                "promote on your next message."
+            )
+        return [str(d) for d in requested], None
+    return None, None
+
+
 _ACTIVE_PLAN_STATUSES = {"proposed", "approved", "executing"}
 
 

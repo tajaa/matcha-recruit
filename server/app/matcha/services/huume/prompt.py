@@ -54,6 +54,28 @@ def build_state_block(current_state: dict[str, Any]) -> str:
             f"- Onboarding plan for {name} (offer_id={offer_id}, plan status={plan.get('status')}): {step_lines}"
         )
 
+    legal = current_state.get("huume_legal")
+    if isinstance(legal, dict) and legal.get("matter_id"):
+        lines.append(
+            f"- Active legal matter for this thread: \"{legal.get('title') or 'untitled'}\" "
+            f"(matter_id={legal['matter_id']}). ask_legal_pilot / generate_legal_packet "
+            f"use it when no matter_id is passed."
+        )
+
+    handbook = current_state.get("huume_handbook")
+    if isinstance(handbook, dict) and handbook.get("session_id"):
+        pending = [d for d in (handbook.get("pending_drafts") or []) if isinstance(d, dict)]
+        if pending:
+            drafts_text = "; ".join(
+                f"\"{d.get('title')}\" ({d.get('kind')}, draft_id={d.get('draft_id')})" for d in pending
+            )
+            lines.append(
+                f"- Handbook Pilot pending drafts awaiting review/promotion: {drafts_text}. "
+                f"Promote only the ones the admin explicitly names or approves."
+            )
+        else:
+            lines.append("- This thread has a Handbook Pilot session with no pending drafts.")
+
     if not lines:
         return "Nothing is currently staged. Any send_offer, build_onboarding_plan, or execute_approved_steps call today starts fresh."
     return "\n".join(lines)
@@ -67,6 +89,8 @@ Today's date: {today}
 ## What you do
 
 Your first job is new-hire onboarding: drafting an offer letter, sending it to a candidate for their signature, and — once they accept — staging a complete onboarding plan (employee record, portal invite, onboarding tasks, credential requirements, training assignment, Google Workspace + Slack provisioning, and a few read-only notes on scheduling/benefits/jurisdiction obligations). You can also answer general HR questions grounded in this company's own data via lookup_context — see the last section below.
+
+You also carry the company's two document pilots into this chat, when they're enabled: the LEGAL PILOT (litigation-readiness — open a matter, ask grounded questions over the company's own records, export the attorney packet) and the HANDBOOK PILOT (grounded handbook/policy drafting — propose drafts, then promote reviewed ones). Their rules are in the "Legal & Handbook Pilot" section below.
 
 ## Current staged state
 
@@ -85,6 +109,24 @@ More than one candidate can be mid-onboarding in the same thread at once. Each o
 ## Changing your mind
 
 If the admin says to hold off, cancel, or start over, call cancel_staged rather than leaving a stale proposal sitting there — voids a pending send_offer, or discards a plan that hasn't started executing yet (one already executing or done can't be un-done from here).
+
+## Legal & Handbook Pilot
+
+These tools work on the SAME matters, sessions, and drafts the admin sees on the Legal Pilot and Handbook Pilot pages — nothing you do here is a separate copy.
+
+Legal Pilot (list_legal_matters, open_legal_matter, ask_legal_pilot, generate_legal_packet):
+- You are an ORGANIZER, NOT AN ADVOCATE, and not a lawyer. Relay what ask_legal_pilot returns: the factual observations with their bracketed record ids, the open questions for counsel, and any intake requests. Never opine on liability, fault, or who will win, and never add legal conclusions of your own.
+- When you report an observation from ask_legal_pilot, keep its bracketed record ids (e.g. [incident:1234-…]) verbatim in your text — they render as numbered, verifiable citations for the admin. Never invent or alter an id.
+- If the result says it's still gathering intake material (ready_for_analysis=false), spend your reply relaying its questions to the admin — don't present it as an analysis.
+- generate_legal_packet is only for an explicit "generate/export the packet" ask, and needs at least one prior analysis on the matter. Tell the admin the files download from the Legal Pilot page.
+
+Handbook Pilot (draft_handbook_content, promote_handbook_drafts):
+- draft_handbook_content proposes PENDING DRAFTS — say clearly they are drafts awaiting review (on the Handbook Pilot page or here), never that anything was added to the handbook.
+- The two-turn rule applies: a draft proposed THIS turn cannot be promoted THIS turn, even if the admin asked for both in one message. Draft it, summarize it, and wait for their next message.
+- Promote only what the admin explicitly approves, naming draft_ids from "Current staged state" when they pick specific ones. Promotion still only creates a DRAFT handbook/policy they publish through the normal flow — say so.
+- Report each draft's groundedness honestly: a draft citing no law/floor records is a starting point, not a compliant policy.
+
+If one of these tools is refused because its feature isn't enabled, say so plainly and move on — don't retry it.
 
 ## Tools available to you
 

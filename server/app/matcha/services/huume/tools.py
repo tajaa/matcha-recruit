@@ -150,6 +150,96 @@ TOOLS: tuple[HuumeTool, ...] = (
         },
         required=["target"],
     ),
+    # ---- Legal Pilot skill (feature `legal_defense`) -------------------------
+    _tool(
+        "list_legal_matters", "read",
+        "List the company's legal matters (litigation-readiness case files "
+        "from the Legal Pilot) — id, title, type, status, jurisdiction, "
+        "deadline. Call this before asking about or acting on a matter when "
+        "you don't already have its matter_id.",
+    ),
+    _tool(
+        "open_legal_matter", "write",
+        "Open a new legal matter (subpoena, class_action, eeoc_charge, "
+        "single_plaintiff, audit, or other) — the case file the Legal Pilot "
+        "organizes evidence into. Creates a real record the admin also sees "
+        "on the Legal Pilot page. Confirm the title and what's being alleged "
+        "with the admin before opening one; don't invent details.",
+        properties={
+            "title": types.Schema(type=types.Type.STRING),
+            "matter_type": types.Schema(type=types.Type.STRING, enum=["subpoena", "class_action", "eeoc_charge", "single_plaintiff", "audit", "other"]),
+            "allegation": types.Schema(type=types.Type.STRING, description="What is being alleged or claimed, in the admin's words."),
+            "jurisdiction_state": types.Schema(type=types.Type.STRING, description="Two-letter US state code, e.g. 'CA'."),
+            "evidence_start": types.Schema(type=types.Type.STRING, description="ISO date YYYY-MM-DD — start of the relevant evidence window."),
+            "evidence_end": types.Schema(type=types.Type.STRING, description="ISO date YYYY-MM-DD — end of the relevant evidence window."),
+        },
+        required=["title"],
+    ),
+    _tool(
+        "ask_legal_pilot", "write",
+        "Ask the Legal Pilot a question about a matter. It gathers the "
+        "company's own records (incidents, ER cases, discipline, training, "
+        "policies, compliance, and more) into an evidence corpus and returns "
+        "a citation-validated factual analysis — observations tied to real "
+        "record ids, plus open questions for counsel. It may instead ask for "
+        "missing intake material; relay those requests. The exchange is "
+        "saved to the matter's transcript on the Legal Pilot page. Pass "
+        "matter_id when more than one matter is open (see Current staged "
+        "state / list_legal_matters).",
+        properties={
+            "question": types.Schema(type=types.Type.STRING),
+            "matter_id": types.Schema(type=types.Type.STRING, description="Which matter. Omit to use the thread's active matter, or when exactly one matter is open."),
+        },
+        required=["question"],
+    ),
+    _tool(
+        "generate_legal_packet", "write",
+        "Generate the attorney-facing evidence packet for a matter — a "
+        "defense-memo PDF citing only real records and/or a ZIP of the "
+        "underlying source documents. Requires at least one prior "
+        "ask_legal_pilot analysis on the matter (the memo is built from it). "
+        "The files are stored on the matter; the admin downloads them from "
+        "the Legal Pilot page. Only call this when the admin explicitly asks "
+        "for the packet/export.",
+        properties={
+            "matter_id": types.Schema(type=types.Type.STRING, description="Which matter. Omit to use the thread's active matter."),
+            "kind": types.Schema(type=types.Type.STRING, enum=["pdf", "zip", "both"]),
+        },
+    ),
+    # ---- Handbook Pilot skill (feature `handbook_pilot`) ---------------------
+    _tool(
+        "draft_handbook_content", "write",
+        "Draft handbook sections and/or standalone policies grounded in the "
+        "company's own profile, applicable jurisdiction requirements, "
+        "existing handbook and policies, and open audit/freshness findings. "
+        "Pass the admin's request verbatim (e.g. 'a lactation accommodation "
+        "policy for our CA and NY offices'). Proposals are saved as PENDING "
+        "DRAFTS — reviewable and editable on the Handbook Pilot page — and "
+        "are NOT part of the real handbook until promoted. Never call "
+        "promote_handbook_drafts in the same turn you drafted.",
+        properties={
+            "request": types.Schema(type=types.Type.STRING, description="What to draft, in the admin's words — topic, jurisdictions, any constraints."),
+        },
+        required=["request"],
+    ),
+    _tool(
+        "promote_handbook_drafts", "write",
+        "Promote reviewed pending drafts into the real tables: handbook-"
+        "section drafts become ONE new draft handbook, policy drafts become "
+        "draft policies. Only call this when the admin explicitly asks to "
+        "promote, on a LATER message than the one that drafted them. Pass "
+        "draft_ids naming exactly which drafts (see Current staged state), "
+        "or omit it to promote all pending drafts from earlier turns. "
+        "Everything promoted still lands as a DRAFT handbook/policy the "
+        "admin publishes through the normal flow.",
+        properties={
+            "draft_ids": types.Schema(
+                type=types.Type.ARRAY, items=types.Schema(type=types.Type.STRING),
+                description="Pending draft ids to promote. Omit for all pending drafts from earlier turns.",
+            ),
+            "handbook_title": types.Schema(type=types.Type.STRING, description="Title for the new draft handbook when promoting section drafts."),
+        },
+    ),
     _tool(
         "finish", "finish",
         "End the turn. Call this once you've done what was asked, or to "

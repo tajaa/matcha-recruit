@@ -4,6 +4,7 @@ documents. The appendix is rendered deterministically from DB rows."""
 import asyncio
 import io
 import logging
+import unicodedata
 import zipfile
 from datetime import datetime, timezone
 from uuid import UUID
@@ -33,6 +34,15 @@ from .details import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def safe_name(s: str) -> str:
+    """ASCII-only filename slug (shared by the route and the Huume skill).
+    Non-ASCII survives into Content-Disposition otherwise, and Starlette
+    encodes header values as latin-1 — a title with an em dash or accent
+    crashes every download of that packet with a 500."""
+    ascii_s = unicodedata.normalize("NFKD", s or "matter").encode("ascii", "ignore").decode("ascii")
+    return (ascii_s or "matter").replace("/", "-").replace('"', "").replace(" ", "-")[:60] or "matter"
 
 
 # --------------------------------------------------------------------------- #

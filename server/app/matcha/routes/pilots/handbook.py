@@ -138,25 +138,11 @@ async def _load_draft(conn, draft_id, company_id) -> dict:
 
 async def _assert_paid(conn, company_id) -> None:
     """Block the token-burning / write endpoints for a self-serve Matcha-X
-    company that hasn't paid yet. handbook_pilot is granted to Matcha-X via the
-    tier overlay *before* checkout, and the Stripe webhook flips `incidents` on
-    payment (the X paid gate) — so an abandoned-checkout X company can reach the
-    page (FeatureGate passes) but must not run Gemini generation or promote until
-    paid. Pro/bespoke (contract-billed) has no such gate."""
-    from app.core.feature_flags import merge_company_features
-
-    row = await conn.fetchrow(
-        "SELECT signup_source, enabled_features FROM companies WHERE id = $1", company_id
-    )
-    if not row:
-        return
-    if row["signup_source"] == "matcha_x":
-        features = merge_company_features(row["enabled_features"], row["signup_source"])
-        if not features.get("incidents"):
-            raise HTTPException(
-                status_code=402,
-                detail="Subscribe to Matcha-X to use Handbook Pilot drafting.",
-            )
+    company that hasn't paid yet — see `hp.unpaid_x_reason` (shared with the
+    Huume chat skill, which refuses instead of 402ing)."""
+    reason = await hp.unpaid_x_reason(conn, company_id)
+    if reason:
+        raise HTTPException(status_code=402, detail=reason)
 
 
 # --------------------------------------------------------------------------- #
@@ -307,38 +293,11 @@ async def chat(session_id: UUID, body: ChatIn, request: Request,
     user_id = getattr(current_user, "id", None)
 
     async def _persist(result_payload: dict):
-        """Persist the assistant turn + proposed drafts. Wrapped in
-        asyncio.shield by the caller so a client disconnect right after the
-        result is produced doesn't drop the (already-generated) turn."""
-        drafts = result_payload.get("proposed_drafts") or []
-        async with get_connection() as c2:
-            async with c2.transaction():
-                draft_ids = []
-                for d in drafts:
-                    new_id = await c2.fetchval(
-                        """INSERT INTO handbook_pilot_drafts
-                               (session_id, company_id, kind, title, section_key,
-                                content, citations, created_by)
-                           VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id""",
-                        session_id, company_id, d["kind"], d["title"],
-                        d.get("section_key"), d["content"],
-                        json.dumps(d.get("cited_ids") or []), user_id,
-                    )
-                    draft_ids.append(str(new_id))
-                await c2.execute(
-                    "INSERT INTO handbook_pilot_messages (session_id, role, content, metadata) "
-                    "VALUES ($1, 'assistant', $2, $3)",
-                    session_id, result_payload.get("assistant_text", ""),
-                    json.dumps({
-                        "open_questions": result_payload.get("open_questions"),
-                        "dropped_citations": result_payload.get("dropped_citations"),
-                        "draft_ids": draft_ids,
-                    }),
-                )
-                await c2.execute(
-                    "UPDATE handbook_pilot_sessions SET updated_at = NOW() WHERE id = $1",
-                    session_id,
-                )
+        """Persist the assistant turn + proposed drafts (shared service —
+        `hp.persist_turn`). Wrapped in asyncio.shield by the caller so a client
+        disconnect right after the result is produced doesn't drop the
+        (already-generated) turn."""
+        await hp.persist_turn(session_id, company_id, result_payload, user_id)
 
     async def event_stream():
         result_payload = None
@@ -491,77 +450,19 @@ async def promote(session_id: UUID, body: PromoteIn, request: Request,
     if not drafts:
         raise HTTPException(status_code=400, detail="No promotable drafts found")
 
-    section_drafts = [d for d in drafts if d["kind"] == "handbook_section"]
-    policy_drafts = [d for d in drafts if d["kind"] == "policy"]
-
-    promoted: dict[str, dict] = {}      # draft_id -> promoted_ref
-    handbook_result: dict | None = None
-    policy_results: list[dict] = []
-    failed: list[dict] = []             # {draft_id, title, error}
-
-    # Handbook sections → one new draft handbook (the section group is atomic:
-    # create_handbook_from_sections runs in a single transaction).
-    if section_drafts:
-        from app.core.services.handbook_service import HandbookService
-        sections = [{
-            "section_key": d.get("section_key"),
-            "title": d["title"],
-            # Belt-and-suspenders: strip any inline corpus-id tags before the
-            # text lands in the real handbook (covers legacy/edited drafts that
-            # predate the generation-time strip).
-            "content": hp.strip_corpus_citations(d["content"])[0],
-            "section_type": "custom",
-        } for d in section_drafts]
-        title = (body.handbook_title or session.get("title") or "Handbook Pilot draft")[:300]
-        try:
-            handbook = await HandbookService.create_handbook_from_sections(
-                str(company_id), title, scopes, sections, str(user_id) if user_id else None,
-            )
-            hb_id = str(handbook.id)
-            handbook_result = {"id": hb_id, "title": title}
-            for d in section_drafts:
-                promoted[str(d["id"])] = {"kind": "handbook", "handbook_id": hb_id}
-        except Exception as exc:  # noqa: BLE001 - surface as a per-draft failure, not a 500
-            logger.exception("handbook_pilot: handbook promotion failed")
-            for d in section_drafts:
-                failed.append({"draft_id": str(d["id"]), "title": d["title"], "error": str(exc)})
-
-    # Policies → one draft policy each (independent; a failure doesn't block the rest).
-    if policy_drafts:
-        from app.core.services.policy_service import PolicyService
-        from app.core.models.policy import PolicyCreate
-        for d in policy_drafts:
-            try:
-                policy = await PolicyService.create_policy(
-                    str(company_id),
-                    PolicyCreate(title=d["title"],
-                                 content=hp.strip_corpus_citations(d["content"])[0],
-                                 status="draft", source_type="manual"),
-                    str(user_id) if user_id else None,
-                )
-                pid = str(policy.id)
-                policy_results.append({"id": pid, "title": d["title"]})
-                promoted[str(d["id"])] = {"kind": "policy", "policy_id": pid}
-            except Exception as exc:  # noqa: BLE001
-                logger.exception("handbook_pilot: policy promotion failed for draft %s", d["id"])
-                failed.append({"draft_id": str(d["id"]), "title": d["title"], "error": str(exc)})
-
-    # Mark whatever succeeded as promoted (each ref points at the real record so
-    # a re-promote of the rest never re-creates the succeeded ones) + audit.
+    # Promotion core moved to the shared service (`hp.promote_drafts`) — also
+    # used by the Huume chat skill. Partial success stays first-class.
+    result = await hp.promote_drafts(
+        company_id, session, drafts, scopes=scopes,
+        handbook_title=body.handbook_title, user_id=user_id,
+    )
     async with get_connection() as conn:
-        for draft_id, ref in promoted.items():
-            await conn.execute(
-                "UPDATE handbook_pilot_drafts SET status = 'promoted', promoted_ref = $2::jsonb, "
-                "updated_at = NOW() WHERE id = $1",
-                UUID(draft_id), json.dumps(ref),
-            )
-        await conn.execute("UPDATE handbook_pilot_sessions SET updated_at = NOW() WHERE id = $1", session_id)
         await _audit(conn, session_id, current_user, request, "promote",
-                     {"promoted": list(promoted.keys()),
-                      "failed": [f["draft_id"] for f in failed]})
+                     {"promoted": list(result["promoted_refs"].keys()),
+                      "failed": [f["draft_id"] for f in result["failed"]]})
     return {
-        "promoted": len(promoted),
-        "handbook": handbook_result,
-        "policies": policy_results,
-        "failed": failed,
+        "promoted": len(result["promoted_refs"]),
+        "handbook": result["handbook"],
+        "policies": result["policies"],
+        "failed": result["failed"],
     }

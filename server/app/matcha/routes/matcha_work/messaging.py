@@ -920,9 +920,17 @@ async def _run_huume_dispatch(tc: TurnContext):
     except Exception:
         logger.warning("Huume post-turn state re-read failed for thread %s", thread_id, exc_info=True)
 
+    assistant_metadata = {"huume_steps": final_result.get("steps") or [], "huume_run_id": str(run_id)}
+    # Pilot-tool citation records (Legal/Handbook Pilot skills) — stored under
+    # the same metadata keys HR Pilot uses, so MessageBubble's CitationSources
+    # renders them with no client changes.
+    if final_result.get("citations"):
+        assistant_metadata["citations"] = final_result["citations"]
+    if final_result.get("dropped_citations"):
+        assistant_metadata["dropped_citations"] = final_result["dropped_citations"]
     assistant_msg = await doc_svc.add_message(
         thread_id, "assistant", final_result["message"],
-        metadata={"huume_steps": final_result.get("steps") or [], "huume_run_id": str(run_id)},
+        metadata=assistant_metadata,
     )
     tc.assistant_msg = assistant_msg
 

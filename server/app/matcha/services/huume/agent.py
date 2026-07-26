@@ -44,7 +44,7 @@ from app.core.services.ai_usage import feature_scope
 from app.core.services.genai_client import get_genai_client
 from app.core.services.rate_limiter import GeminiRateLimiter, RateLimitExceeded
 
-from . import actions, onboarding_skill, store
+from . import actions, handbook_skill, legal_skill, onboarding_skill, store
 from .prompt import build_state_block, build_system_prompt
 from .tools import TOOLS_BY_NAME, tool_declarations
 
@@ -52,7 +52,12 @@ logger = logging.getLogger(__name__)
 
 _MODEL = "gemini-3.6-flash"
 _MAX_MODEL_CALLS = 8
-_WALL_CLOCK_SECONDS = 150.0
+# 240s, not the 150s the loop launched with: the pilot tools (ask_legal_pilot /
+# draft_handbook_content / generate_legal_packet) each embed their own
+# 90s-capped Gemini call, and a 150s budget could force-finish the turn before
+# the model gets one call to report a result it already paid for. The bound
+# still exists to stop runaway loops, not to race a single grounded analysis.
+_WALL_CLOCK_SECONDS = 240.0
 _CALL_TIMEOUT = 60.0
 _MAX_HISTORY_MESSAGES = 20
 
@@ -157,6 +162,28 @@ async def run_huume_turn(
     pre_turn_action = current_state.get("huume_action")
     pre_turn_plans: dict[str, dict[str, Any]] = dict(current_state.get("huume_plans") or {})
     built_this_turn: set[str] = set()
+
+    # Pilot-skill turn state: handbook drafts proposed THIS turn (the two-turn
+    # promote guard, mirroring built_this_turn), plus the citation records the
+    # pilot tools resolved — accumulated across the turn and attached to the
+    # final message metadata so the client renders verifiable sources.
+    handbook_drafts_this_turn: set[str] = set()
+    turn_citations: dict[str, dict[str, Any]] = {}
+    turn_dropped: list[str] = []
+
+    def _state_legal() -> dict[str, Any]:
+        val = state_updates.get("huume_legal") or current_state.get("huume_legal")
+        return val if isinstance(val, dict) else {}
+
+    def _state_handbook() -> dict[str, Any]:
+        val = state_updates.get("huume_handbook") or current_state.get("huume_handbook")
+        return val if isinstance(val, dict) else {}
+
+    def _collect_citations(result: dict[str, Any]) -> None:
+        for rec in result.pop("citation_records", []) or []:
+            if isinstance(rec, dict) and rec.get("cid"):
+                turn_citations[rec["cid"]] = rec
+        turn_dropped.extend(result.get("dropped_citations") or [])
 
     async def call_tool(name: str, args: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
         """Returns (function_response payload, step dict)."""
@@ -291,6 +318,131 @@ async def run_huume_turn(
                 step = recorder.record(tool=name, kind="write", label=f"Unknown cancel target '{target}'", status="error")
                 return {"error": f"unknown target '{target}'"}, step
 
+            if name in actions.PILOT_TOOL_REQUIRED_FEATURE:
+                # Legal Pilot / Handbook Pilot skills — the routes' mount gates
+                # (require_admin_or_client + require_feature) re-asserted here,
+                # since the loop itself never decides authorization.
+                refusal = actions.evaluate_pilot_tool(tool=name, role=user_role, features=features)
+                if refusal:
+                    kind = TOOLS_BY_NAME[name].kind
+                    step = recorder.record(tool=name, kind=kind, label=f"{name.replace('_', ' ')} unavailable", status="rejected", detail=refusal)
+                    return {"status": "refused", "message": refusal}, step
+
+            if name == "list_legal_matters":
+                result = await legal_skill.list_matters(company_id=company_id)
+                step = recorder.record(tool=name, kind="read", label="Listed legal matters", status="ok")
+                return _json_safe(result), step
+
+            if name == "open_legal_matter":
+                result = await legal_skill.open_matter(
+                    company_id=company_id, actor_user_id=user_id, thread_id=thread_id,
+                    title=str(args.get("title") or ""), matter_type=args.get("matter_type"),
+                    allegation=args.get("allegation"), jurisdiction_state=args.get("jurisdiction_state"),
+                    evidence_start=args.get("evidence_start"), evidence_end=args.get("evidence_end"),
+                )
+                ok = result.get("status") == "ok"
+                if ok:
+                    state_updates["huume_legal"] = {"matter_id": result["matter_id"], "title": result.get("title")}
+                step = recorder.record(
+                    tool=name, kind="write",
+                    label="Opened legal matter" if ok else "Could not open legal matter",
+                    status="ok" if ok else "error", detail=result.get("title") if ok else result.get("message"),
+                )
+                return _json_safe(result), step
+
+            if name == "ask_legal_pilot":
+                result = await legal_skill.ask_matter(
+                    company_id=company_id, actor_user_id=user_id, thread_id=thread_id,
+                    matter_id=args.get("matter_id"), state_matter_id=_state_legal().get("matter_id"),
+                    question=str(args.get("question") or ""), features=features,
+                )
+                ok = result.get("status") == "ok"
+                if ok:
+                    state_updates["huume_legal"] = {"matter_id": result["matter_id"], "title": result.get("title")}
+                    _collect_citations(result)
+                step = recorder.record(
+                    tool=name, kind="write",
+                    label="Ran Legal Pilot analysis" if ok else "Legal Pilot analysis failed",
+                    status="ok" if ok else "error", detail=result.get("title") if ok else result.get("message"),
+                )
+                return _json_safe(result), step
+
+            if name == "generate_legal_packet":
+                result = await legal_skill.generate_packet(
+                    company_id=company_id, actor_user_id=user_id, thread_id=thread_id,
+                    matter_id=args.get("matter_id"), state_matter_id=_state_legal().get("matter_id"),
+                    kind=str(args.get("kind") or "both"), features=features,
+                )
+                ok = result.get("status") == "ok"
+                if ok:
+                    state_updates["huume_legal"] = {"matter_id": result["matter_id"], "title": result.get("title")}
+                step = recorder.record(
+                    tool=name, kind="write",
+                    label="Generated legal packet" if ok else "Could not generate legal packet",
+                    status="ok" if ok else ("rejected" if result.get("status") == "refused" else "error"),
+                    detail=result.get("message"),
+                )
+                return _json_safe(result), step
+
+            if name == "draft_handbook_content":
+                session = await handbook_skill.ensure_session(
+                    company_id=company_id, actor_user_id=user_id, thread_id=thread_id,
+                    session_id=_state_handbook().get("session_id"),
+                )
+                result = await handbook_skill.draft_content(
+                    company_id=company_id, actor_user_id=user_id, thread_id=thread_id,
+                    session=session, request_text=str(args.get("request") or ""),
+                )
+                ok = result.get("status") == "ok"
+                if ok:
+                    state_updates["huume_handbook"] = {
+                        "session_id": result["session_id"],
+                        "pending_drafts": result.get("pending_drafts") or [],
+                    }
+                    for d in result.get("drafts") or []:
+                        handbook_drafts_this_turn.add(d["draft_id"])
+                    _collect_citations(result)
+                n = len(result.get("drafts") or [])
+                step = recorder.record(
+                    tool=name, kind="write",
+                    label=(f"Proposed {n} handbook draft{'s' if n != 1 else ''}" if ok else "Handbook drafting failed"),
+                    status="ok" if ok else ("rejected" if result.get("status") == "refused" else "error"),
+                    detail=None if ok else result.get("message"),
+                )
+                return _json_safe(result), step
+
+            if name == "promote_handbook_drafts":
+                session_id = _state_handbook().get("session_id")
+                if not session_id:
+                    step = recorder.record(tool=name, kind="write", label="Promote refused", status="rejected",
+                                           detail="No handbook drafts have been proposed in this thread yet.")
+                    return {"status": "refused", "message": "No handbook drafts have been proposed in this thread yet."}, step
+                requested, err = actions.filter_promotable_drafts(
+                    list(args.get("draft_ids") or []) or None, handbook_drafts_this_turn,
+                )
+                if err:
+                    step = recorder.record(tool=name, kind="write", label="Promote refused", status="rejected", detail=err)
+                    return {"status": "refused", "message": err}, step
+                result = await handbook_skill.promote(
+                    company_id=company_id, actor_user_id=user_id, thread_id=thread_id,
+                    session_id=session_id, draft_ids=requested,
+                    exclude_ids=handbook_drafts_this_turn, handbook_title=args.get("handbook_title"),
+                )
+                ok = result.get("status") == "ok"
+                if ok:
+                    state_updates["huume_handbook"] = {
+                        "session_id": result["session_id"],
+                        "pending_drafts": result.get("pending_drafts") or [],
+                    }
+                n = result.get("promoted") or 0
+                step = recorder.record(
+                    tool=name, kind="write",
+                    label=(f"Promoted {n} draft{'s' if n != 1 else ''}" if ok else "Promote refused"),
+                    status="ok" if ok else ("rejected" if result.get("status") == "refused" else "error"),
+                    detail=result.get("message"),
+                )
+                return _json_safe(result), step
+
             step = recorder.record(tool=name, kind="write", label=f"Unknown tool '{name}'", status="error")
             return {"error": f"unknown tool '{name}'"}, step
         except Exception:
@@ -389,13 +541,23 @@ async def run_huume_turn(
     total_usage["model"] = _MODEL
     total_usage["estimated"] = False
 
+    result_data: dict[str, Any] = {
+        "message": final_message,
+        "steps": recorder.steps,
+        "token_usage": total_usage,
+        "state_updates": state_updates,
+        "model_calls": model_calls,
+    }
+    # Citation records the pilot tools resolved this turn — the dispatcher
+    # stores them on the assistant message metadata, where MessageBubble's
+    # CitationSources renders them (same shape HR Pilot uses). Only ids that
+    # survived the pilots' own validate_citations gate ever reach here.
+    if turn_citations:
+        result_data["citations"] = list(turn_citations.values())
+    if turn_dropped:
+        result_data["dropped_citations"] = sorted(set(turn_dropped))
+
     yield {
         "type": "huume_result",
-        "data": {
-            "message": final_message,
-            "steps": recorder.steps,
-            "token_usage": total_usage,
-            "state_updates": state_updates,
-            "model_calls": model_calls,
-        },
+        "data": result_data,
     }

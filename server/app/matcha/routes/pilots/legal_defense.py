@@ -14,7 +14,6 @@ chat turn, packet generation, download, and share is written to
 import json
 import logging
 import secrets
-import unicodedata
 from datetime import date, datetime, timedelta, timezone
 from typing import Literal, Optional
 from uuid import UUID
@@ -119,22 +118,16 @@ class ShareIn(BaseModel):
 # --------------------------------------------------------------------------- #
 
 async def _audit(conn, matter_id, current_user, request: Request, action: str, details: dict | None = None):
-    await conn.execute(
-        """INSERT INTO legal_matter_audit_log (matter_id, user_id, action, details, ip_address)
-           VALUES ($1, $2, $3, $4, $5)""",
-        matter_id, getattr(current_user, "id", None), action,
-        json.dumps(details or {}), client_ip(request),
+    await ld.audit_matter(
+        conn, matter_id, getattr(current_user, "id", None), action, details, client_ip(request)
     )
 
 
 async def _load_matter(conn, matter_id: str, company_id) -> dict:
-    row = await conn.fetchrow(
-        "SELECT * FROM legal_matters WHERE id = $1 AND company_id = $2",
-        matter_id, company_id,
-    )
-    if not row:
+    matter = await ld.load_matter(conn, matter_id, company_id)
+    if not matter:
         raise HTTPException(status_code=404, detail="Matter not found")
-    return dict(row)
+    return matter
 
 
 async def _check_location(conn, location_id, company_id) -> None:
@@ -155,55 +148,10 @@ async def _features(conn, company_id) -> dict:
     return merge_company_features(row["enabled_features"], row["signup_source"])
 
 
-async def _load_messages(conn, matter_id: str) -> list[dict]:
-    rows = await conn.fetch(
-        "SELECT role, content, metadata, created_at FROM legal_matter_messages "
-        "WHERE matter_id = $1 ORDER BY created_at",
-        matter_id,
-    )
-    return [dict(r) for r in rows]
-
-
-async def _latest_memo(conn, matter_id: str) -> Optional[dict]:
-    """The newest assistant turn that actually carries an analysis.
-
-    Not simply the newest row: intake turns (the assistant asking the admin for
-    missing material) persist with an empty ``evidence_map`` by design, and
-    building the packet off one of those renders a memo whose observations
-    section reads "No grounded observations were recorded." even though an
-    earlier turn produced a full analysis. Prefer the newest turn with a
-    non-empty map; fall back to the newest row so matters predating this — and
-    matters whose only analysis genuinely found nothing — behave as before, and
-    so the caller's "discuss the matter in chat first" 400 still triggers only
-    on a matter with no assistant turn at all.
-    """
-    row = await conn.fetchrow(
-        "SELECT content, metadata FROM legal_matter_messages "
-        "WHERE matter_id = $1 AND role = 'assistant' "
-        "  AND COALESCE(jsonb_array_length(metadata -> 'evidence_map'), 0) > 0 "
-        "ORDER BY created_at DESC LIMIT 1",
-        matter_id,
-    )
-    if not row:
-        row = await conn.fetchrow(
-            "SELECT content, metadata FROM legal_matter_messages "
-            "WHERE matter_id = $1 AND role = 'assistant' ORDER BY created_at DESC LIMIT 1",
-            matter_id,
-        )
-    if not row:
-        return None
-    meta = row["metadata"]
-    if isinstance(meta, str):
-        try:
-            meta = json.loads(meta)
-        except Exception:
-            meta = {}
-    meta = meta or {}
-    return {
-        "assistant_text": row["content"] or "",
-        "evidence_map": meta.get("evidence_map") or [],
-        "open_questions": meta.get("open_questions") or [],
-    }
+# Persistence helpers moved to services/pilots/legal_defense/matters.py (shared
+# with the Huume chat skill) — these are thin aliases so call sites read the same.
+_load_messages = ld.load_messages
+_latest_memo = ld.latest_memo
 
 
 # --------------------------------------------------------------------------- #
@@ -455,12 +403,9 @@ async def list_matter_research(matter_id: str, current_user=Depends(require_admi
 # Packet generation + download + counsel share
 # --------------------------------------------------------------------------- #
 
-def _safe_name(s: str) -> str:
-    """ASCII-only filename slug. Non-ASCII survives into Content-Disposition
-    otherwise, and Starlette encodes header values as latin-1 — a title with
-    an em dash or accent crashes every download of that packet with a 500."""
-    ascii_s = unicodedata.normalize("NFKD", s or "matter").encode("ascii", "ignore").decode("ascii")
-    return (ascii_s or "matter").replace("/", "-").replace('"', "").replace(" ", "-")[:60] or "matter"
+# ASCII-only filename slug — moved to the service (`ld.safe_name`, shared with
+# the Huume chat skill's packet tool).
+_safe_name = ld.safe_name
 
 
 def _safe_filename(name: Optional[str]) -> str:

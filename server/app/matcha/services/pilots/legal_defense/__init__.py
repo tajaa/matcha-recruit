@@ -111,6 +111,12 @@ from .gather import (  # noqa: F401
     gather_evidence,
     resolve_matter_jurisdiction,
 )
+from .matters import (  # noqa: F401
+    audit_matter,
+    latest_memo,
+    load_matter,
+    load_messages,
+)
 from .chat import (  # noqa: F401
     _MATTER_TYPE_EXPECTED,
     _SYSTEM,
@@ -166,4 +172,5 @@ from .packet import (  # noqa: F401
     _research_html,
     _safe_detail,
     build_defense_packet,
+    safe_name,
 )
