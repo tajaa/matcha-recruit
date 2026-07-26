@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { getHuumeState, hasHuumeContent } from './huumeState'
+import { getHuumeState, hasHuumeContent, shouldShowHuumePanel } from './huumeState'
 
 describe('getHuumeState', () => {
   it('returns empty plans for null/undefined state', () => {
@@ -45,11 +45,45 @@ describe('hasHuumeContent', () => {
     expect(hasHuumeContent({ plans: {}, legal: { matter_id: 'm1' } })).toBe(true)
   })
 
+  it('is true when only an offer is present', () => {
+    expect(hasHuumeContent({ plans: {}, offer: { offer_id: 'o1', status: 'sent' } })).toBe(true)
+  })
+
   it('is false when handbook has no pending drafts', () => {
     expect(hasHuumeContent({ plans: {}, handbook: { session_id: 's1', pending_drafts: [] } })).toBe(false)
   })
 
   it('is true when handbook has a pending draft', () => {
     expect(hasHuumeContent({ plans: {}, handbook: { session_id: 's1', pending_drafts: [{ draft_id: 'd1' }] } })).toBe(true)
+  })
+})
+
+describe('shouldShowHuumePanel', () => {
+  const staged = { huume_offer: { offer_id: 'o1', status: 'sent' } }
+
+  it('is false when huume mode is off, regardless of content', () => {
+    expect(shouldShowHuumePanel({ huumeMode: false, state: staged })).toBe(false)
+  })
+
+  it('is false without current_state', () => {
+    expect(shouldShowHuumePanel({ huumeMode: true, state: null })).toBe(false)
+    expect(shouldShowHuumePanel({ huumeMode: true, state: undefined })).toBe(false)
+  })
+
+  it('shows when content exists, even over a PDF or agent panel', () => {
+    expect(shouldShowHuumePanel({ huumeMode: true, state: staged, pdfUrl: 'blob:x' })).toBe(true)
+    expect(shouldShowHuumePanel({ huumeMode: true, state: staged, agentMode: true })).toBe(true)
+  })
+
+  it('yields to the PDF preview when nothing is staged (smoke case c)', () => {
+    expect(shouldShowHuumePanel({ huumeMode: true, state: {}, pdfUrl: 'blob:x' })).toBe(false)
+  })
+
+  it('yields to the AgentPanel when nothing is staged (smoke case c)', () => {
+    expect(shouldShowHuumePanel({ huumeMode: true, state: {}, agentMode: true })).toBe(false)
+  })
+
+  it('shows the empty state on a bare huume thread', () => {
+    expect(shouldShowHuumePanel({ huumeMode: true, state: {} })).toBe(true)
   })
 })

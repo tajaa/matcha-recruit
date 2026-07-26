@@ -27,3 +27,19 @@ export function hasHuumeContent(h: HuumeState): boolean {
   return Object.keys(h.plans).length > 0 || !!h.offer || !!h.action || !!h.legal
     || !!(h.handbook && h.handbook.pending_drafts?.length > 0)
 }
+
+export interface HuumePanelGateOpts {
+  huumeMode: boolean
+  state: Record<string, unknown> | null | undefined
+  pdfUrl?: string | null
+  agentMode?: boolean
+}
+
+/** Right-panel gate for the Huume card. Shows whenever huume content exists;
+ * with huume mode on but nothing staged, only if it wouldn't displace the
+ * PDF preview / AgentPanel — RightPanels suppresses both behind this flag,
+ * so a bare huume thread must not cost an offer-letter its PDF. */
+export function shouldShowHuumePanel(opts: HuumePanelGateOpts): boolean {
+  if (!opts.huumeMode || !opts.state) return false
+  return hasHuumeContent(getHuumeState(opts.state)) || (!opts.pdfUrl && !opts.agentMode)
+}

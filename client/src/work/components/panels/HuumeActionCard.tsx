@@ -28,6 +28,18 @@ function Row({ label, value }: { label: string; value?: string | null }) {
   )
 }
 
+/** One-line summary for the banner strip — the full panel card carries the detail. */
+function bannerLabel(action: HuumeAction): string {
+  switch (action.type) {
+    case 'send_offer':
+      return 'Send offer for signature?'
+    case 'discipline_draft':
+      return `Write-up for ${action.employee_name ?? 'employee'} staged — confirm?`
+    default:
+      return 'Action staged — confirm or cancel?'
+  }
+}
+
 export default function HuumeActionCard({ action, lightMode, streaming, onSendChat, variant = 'panel' }: HuumeActionCardProps) {
   const cardBg = lightMode ? 'bg-orange-50 border-orange-200 text-orange-900' : 'bg-orange-950/30 border-orange-900/50 text-orange-100'
   const chipEmerald = lightMode ? 'bg-emerald-50 text-emerald-700 border-emerald-300' : 'bg-emerald-950/40 text-emerald-300 border-emerald-800'
@@ -54,10 +66,36 @@ export default function HuumeActionCard({ action, lightMode, streaming, onSendCh
 
   // status === 'proposed' — awaiting confirmation.
   let icon = <ShieldAlert size={14} />
+  if (action.type === 'send_offer') icon = <FileSignature size={14} />
+
+  if (variant === 'banner') {
+    return (
+      <div className={`mx-3 mt-2 flex items-center gap-2 rounded border px-2.5 py-1.5 ${cardBg}`}>
+        {icon}
+        <span className="flex-1 truncate text-[11px] font-medium">{bannerLabel(action)}</span>
+        <button
+          type="button"
+          disabled={streaming || !onSendChat}
+          onClick={() => onSendChat?.('confirm')}
+          className="text-[11px] font-medium px-2 py-1 rounded bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white"
+        >
+          Confirm
+        </button>
+        <button
+          type="button"
+          disabled={streaming || !onSendChat}
+          onClick={() => onSendChat?.('cancel')}
+          className="text-[11px] font-medium px-2 py-1 rounded border border-orange-700 text-orange-300 hover:bg-orange-950/40 disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          Cancel
+        </button>
+      </div>
+    )
+  }
+
   let body: React.ReactNode
   switch (action.type) {
     case 'send_offer':
-      icon = <FileSignature size={14} />
       body = (
         <>
           <div className="text-[12px] font-medium">Ready to send the offer for signature.</div>
@@ -86,7 +124,7 @@ export default function HuumeActionCard({ action, lightMode, streaming, onSendCh
   }
 
   return (
-    <div className={`flex flex-col gap-2 rounded border px-3 py-2.5 ${cardBg} ${variant === 'banner' ? 'mx-3 mt-2' : ''}`}>
+    <div className={`flex flex-col gap-2 rounded border px-3 py-2.5 ${cardBg}`}>
       <div className="flex items-center gap-1.5">{icon}<span className="text-[10px] uppercase tracking-wide opacity-70">Awaiting your confirmation</span></div>
       {body}
       <div className="flex gap-1.5 mt-0.5">

@@ -8,7 +8,7 @@ import ChatMessages from './MatchaWorkThread/ChatMessages'
 import ChatComposer from './MatchaWorkThread/ChatComposer'
 import RightPanels from './MatchaWorkThread/RightPanels'
 import HuumeActionCard from '../components/panels/HuumeActionCard'
-import { getHuumeState, hasHuumeContent } from '../utils/huumeState'
+import { getHuumeState, shouldShowHuumePanel } from '../utils/huumeState'
 
 export default function MatchaWorkThread() {
   const c = useThreadController()
@@ -27,13 +27,10 @@ export default function MatchaWorkThread() {
   const showProjectPanel = !!(isProject && thread?.current_state)
   const isLanguageTutor = thread?.task_type === 'language_tutor'
   const showLanguageTutorPanel = !tutorDismissed && (isLanguageTutor || showTutorSetup)
-  const huume = getHuumeState(thread?.current_state)
-  // Panel shows whenever huume content exists. With huume mode on but nothing
-  // staged, it shows only if it wouldn't displace the PDF preview / AgentPanel
-  // (RightPanels suppresses both behind showHuumePanel) — that keeps the
-  // offer-letter PDF visible in a huume thread with no staged content.
-  const showHuumePanel = !!(thread?.huume_mode && thread?.current_state
-    && (hasHuumeContent(huume) || (!pdfUrl && !agentMode)))
+  const huume = getHuumeState(thread?.current_state)   // banner below needs huume.action
+  const showHuumePanel = shouldShowHuumePanel({
+    huumeMode: !!thread?.huume_mode, state: thread?.current_state, pdfUrl, agentMode,
+  })
   const hasRightPanel = !!(pdfUrl || showPresentationPanel || showResumeBatchPanel || showInventoryPanel || showProjectPanel || showLanguageTutorPanel || showHuumePanel || agentMode)
   const isFinalized = thread?.status === 'finalized'
   const isArchived = thread?.status === 'archived'

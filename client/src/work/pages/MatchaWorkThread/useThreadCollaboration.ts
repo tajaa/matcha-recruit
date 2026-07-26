@@ -21,12 +21,16 @@ export function useThreadCollaboration(
   // capturing the callback directly would freeze its first render's closure.
   const onHuumeEventRef = useRef(onHuumeEvent)
   onHuumeEventRef.current = onHuumeEvent
+  // Message ids whose huume_event already triggered a refetch — a re-pushed
+  // duplicate frame must not trigger a second getThread.
+  const seenHuumeEventIdsRef = useRef<Set<string>>(new Set())
 
   useEffect(() => {
     if (!threadId) return
 
     const sock = new ThreadSocket()
     threadSocketRef.current = sock
+    seenHuumeEventIdsRef.current = new Set()
 
     sock.onNewMessage = (newMessages) => {
       setMessages((prev) => {
@@ -34,7 +38,13 @@ export function useThreadCollaboration(
         const deduped = newMessages.filter(m => !existingIds.has(m.id))
         return deduped.length > 0 ? [...prev, ...deduped] : prev
       })
-      if (newMessages.some(m => m.metadata?.huume_event)) onHuumeEventRef.current?.()
+      const freshEvents = newMessages.filter(
+        (m) => m.metadata?.huume_event && !seenHuumeEventIdsRef.current.has(m.id),
+      )
+      if (freshEvents.length > 0) {
+        freshEvents.forEach((m) => seenHuumeEventIdsRef.current.add(m.id))
+        onHuumeEventRef.current?.()
+      }
     }
 
     sock.onTyping = (user) => {
