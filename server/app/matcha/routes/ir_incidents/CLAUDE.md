@@ -45,7 +45,7 @@ The package's exported `router` is **`crud.router` directly** — not a wrapping
 When the AI emits a new action card type (currently `run_analysis`, `set_field`, `request_info`, `escalate`, `close_incident`):
 
 1. `client/src/components/ir/IRCopilotCard.tsx:5` — extend the `CopilotCardAction.type` union.
-2. `app/matcha/services/ir_ai_orchestrator.py` — add to `IR_ACTION_TYPES` set and the prompt-template guidance section.
+2. `app/matcha/services/ir/ir_ai_orchestrator.py` — add to `IR_ACTION_TYPES` set and the prompt-template guidance section.
 3. `app/matcha/routes/ir_incidents/copilot.py` — add the `elif action_type == "<new>"` branch in `accept_copilot_card`. Set `event_summary` and `event_extra` appropriately. The trailing `append_message` + `log_audit` block already handles the rest.
 
 ## External symbols re-exported by `__init__.py`

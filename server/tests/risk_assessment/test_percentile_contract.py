@@ -17,7 +17,7 @@ numbers here" cannot land quietly.
 """
 import math
 
-from app.matcha.services.monte_carlo_service import Z_90, _lognormal_params
+from app.matcha.services.risk_analytics.monte_carlo_service import Z_90, _lognormal_params
 
 
 def test_low_high_are_treated_as_the_10th_and_90th_percentiles():

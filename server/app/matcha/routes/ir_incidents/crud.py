@@ -1059,7 +1059,7 @@ async def update_incident(
         # `async with` block before any background task would run.
         if status_changed and row["status"] == "closed" and row.get("company_id"):
             try:
-                from app.matcha.services.training_assignment import on_incident_closed
+                from app.matcha.services.training.training_assignment import on_incident_closed
 
                 await on_incident_closed(
                     conn,

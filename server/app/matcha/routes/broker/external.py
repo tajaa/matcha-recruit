@@ -14,9 +14,9 @@ from pydantic import BaseModel, Field
 
 from ....database import get_connection
 from ...dependencies import require_broker_pro
-from ...services import external_clients as ext
-from ...services import epl_readiness
-from ...services import loss_run_parser
+from ...services.broker import external_clients as ext
+from ...services.broker import epl_readiness
+from ...services.insurance import loss_run_parser
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

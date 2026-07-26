@@ -4,7 +4,7 @@
 # permissive stub otherwise). Never override sys.modules for it here — the
 # override leaks process-wide and breaks whichever test imports next.
 
-from app.matcha.services.matcha_work_ai import HANDBOOK_FIELDS, _infer_skill_from_state
+from app.matcha.services.matcha_work.matcha_work_ai import HANDBOOK_FIELDS, _infer_skill_from_state
 
 
 def test_infer_policy_before_workbook_for_mixed_state():

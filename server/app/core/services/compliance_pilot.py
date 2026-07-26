@@ -374,7 +374,7 @@ async def run_chat_turn(mode: str, corpus: dict, snapshot: Optional[dict],
     """Async generator of SSE dicts for one turn: a status tick, then one validated
     `result`. The citation gate runs before anything reaches the admin. Proposal
     validation against the DB happens in the route (needs a connection)."""
-    from app.matcha.services.legal_defense import validate_citations, _parse_json  # lazy — see module note
+    from app.matcha.services.pilots.legal_defense import validate_citations, _parse_json  # lazy — see module note
 
     yield {"type": "status", "message": "Thinking…"}
     try:

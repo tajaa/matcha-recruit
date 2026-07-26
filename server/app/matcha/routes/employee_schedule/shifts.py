@@ -16,11 +16,11 @@ from ...dependencies import require_admin_or_client
 from ...models.employee_schedule import (
     ShiftCreate, ShiftUpdate, PublishRange,
 )
-from ...services.schedule_rules import (
+from ...services.scheduling.schedule_rules import (
     build_patch, summarize_shifts as _summarize, week_bounds as _week_bounds,
 )
-from ...services import schedule_compliance, schedule_intelligence
-from ...services.training_assignment import evaluate_scheduled_role_rules, assign_training
+from ...services.scheduling import schedule_compliance, schedule_intelligence
+from ...services.training.training_assignment import evaluate_scheduled_role_rules, assign_training
 from ._shared import (
     require_company_id, log_audit, fetch_shifts, fetch_roster, fetch_shift_by_id,
     assert_employee_in_company, assert_location_in_company,

@@ -10,7 +10,7 @@ executor and are exercised manually against dev (see PR description).
 import json
 from datetime import date, datetime, timezone
 
-from app.matcha.services.hr_pilot_actions import (
+from app.matcha.services.pilots.hr_pilot_actions import (
     _parse_iso_dates,
     _slim_compliance_snapshot,
     _validate_discipline_fields,

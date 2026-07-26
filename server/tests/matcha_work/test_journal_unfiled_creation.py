@@ -75,7 +75,7 @@ def _touched_folders_table(conn) -> bool:
 async def test_omitted_folder_id_still_auto_files_into_default_folder(monkeypatch):
     """Unchanged existing behavior: folder_id_provided=False (the default)
     means "not specified" -> auto-assign the caller's "Notes" notebook."""
-    from app.matcha.services import journal_service as svc
+    from app.matcha.services.matcha_work import journal_service as svc
     creator, company = uuid4(), uuid4()
     conn = _FakeConn()
     monkeypatch.setattr(svc, "get_connection", lambda *a, **k: _FakeCtx(conn))
@@ -92,7 +92,7 @@ async def test_explicit_null_folder_id_creates_unfiled_journal(monkeypatch):
     """The new capability: folder_id=None + folder_id_provided=True means the
     caller genuinely wants no folder -> skip the default-folder auto-assign,
     insert with folder_id NULL."""
-    from app.matcha.services import journal_service as svc
+    from app.matcha.services.matcha_work import journal_service as svc
     creator, company = uuid4(), uuid4()
     conn = _FakeConn()
     monkeypatch.setattr(svc, "get_connection", lambda *a, **k: _FakeCtx(conn))
@@ -112,7 +112,7 @@ async def test_invalid_folder_id_falls_back_to_default_not_unfiled(monkeypatch):
     """A real folder_id that fails the ownership check is NOT the same as
     "explicitly unfiled" — it still falls back to the default "Notes" folder,
     matching the pre-existing behavior for a bad/foreign folder reference."""
-    from app.matcha.services import journal_service as svc
+    from app.matcha.services.matcha_work import journal_service as svc
     creator, company, foreign_folder = uuid4(), uuid4(), uuid4()
     conn = _FakeConn(folder_owned=False)
     monkeypatch.setattr(svc, "get_connection", lambda *a, **k: _FakeCtx(conn))

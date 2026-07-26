@@ -18,7 +18,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from pydantic import BaseModel
 
 from ...database import get_connection
-from ...matcha.services.resume_parser import (
+from ...matcha.services.matcha_work.resume_parser import (
     RESUME_UPLOAD_EXTENSIONS,
     RESUME_UPLOAD_MAX_BYTES,
     ResumeParseError,

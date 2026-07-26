@@ -35,19 +35,19 @@ from app.matcha.routes.matcha_work.ai_turn import (
     _scope_slide_update,
 )
 from app.matcha.routes.matcha_work._shared import THREAD_FILE_TEXT_CAP, _row_to_message, _sse_data
-from app.matcha.services import matcha_work_document as doc_svc
-from app.matcha.services import token_budget_service
-from app.matcha.services.escalation_service import should_escalate, create_escalation
+from app.matcha.services.matcha_work import matcha_work_document as doc_svc
+from app.matcha.services.billing import token_budget_service
+from app.matcha.services.matcha_work.escalation_service import should_escalate, create_escalation
 from app.core.feature_flags import get_company_features
-from app.matcha.services.matcha_work_modes import THREAD_MODES, MODES_BY_KEY
-from app.matcha.services.matcha_work_node import build_compliance_context, build_payer_staff_context, ComplianceContextResult
-from app.matcha.services.matcha_work_ai import (
+from app.matcha.services.matcha_work.matcha_work_modes import THREAD_MODES, MODES_BY_KEY
+from app.matcha.services.matcha_work.matcha_work_node import build_compliance_context, build_payer_staff_context, ComplianceContextResult
+from app.matcha.services.matcha_work.matcha_work_ai import (
     _build_company_context,
     _infer_skill_from_state,
     compact_conversation,
     get_ai_provider,
 )
-from app.matcha.services.model_pricing import calculate_call_cost
+from app.matcha.services.billing.model_pricing import calculate_call_cost
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -416,7 +416,7 @@ async def _build_thread_file_attachment_meta(attachments) -> list[dict]:
     still attaches, it just won't feed the AI."""
     if not attachments:
         return []
-    from app.matcha.services.er_document_parser import ERDocumentParser
+    from app.matcha.services.er.er_document_parser import ERDocumentParser
     storage = get_storage()
     parser = ERDocumentParser()
     out: list[dict] = []
@@ -539,7 +539,7 @@ async def _run_quota_gate(company_id: UUID, current_user: CurrentUser) -> None:
     # free-taste exhaustion apart from a generic error and raise the paywall.
     quota = await doc_svc.check_token_quota(current_user.id, company_id)
     if not quota["allowed"]:
-        from app.matcha.services import entitlements_service
+        from app.matcha.services.billing import entitlements_service
 
         plan = await entitlements_service.resolve_plan_for_user(current_user.id)
         raise HTTPException(
@@ -674,13 +674,13 @@ async def _run_hard_stop_gates(tc: TurnContext):
             hr_pilot_features = await get_company_features(company_id)
             hr_pilot_active = hr_pilot_features.get("hr_pilot", False)
         if hr_pilot_active:
-            from app.matcha.services.hr_pilot_escalation import (
+            from app.matcha.services.pilots.hr_pilot_escalation import (
                 classify_message,
                 CORPORATE_HR_ESCALATION_NOTICE,
             )
             verdict = classify_message(body.content)
             if verdict.hard_stop:
-                from app.matcha.services.hr_pilot_actions import should_stage_handoff
+                from app.matcha.services.pilots.hr_pilot_actions import should_stage_handoff
                 _feats = hr_pilot_features if isinstance(hr_pilot_features, dict) else {}
                 existing_action = (thread.get("current_state") or {}).get("hr_action")
                 handoff_type = should_stage_handoff(existing_action, verdict.category, _feats)
@@ -740,7 +740,7 @@ async def _run_hard_stop_gates(tc: TurnContext):
 
                 escalation_row = None
                 try:
-                    from app.matcha.services.escalation_service import create_hr_pilot_escalation
+                    from app.matcha.services.matcha_work.escalation_service import create_hr_pilot_escalation
                     escalation_row = await create_hr_pilot_escalation(
                         company_id=company_id,
                         thread_id=thread_id,
@@ -780,7 +780,7 @@ async def _run_hard_stop_gates(tc: TurnContext):
 
                 if _notify_admins:
                     try:
-                        from app.matcha.services.escalation_service import send_hr_pilot_hard_stop_notifications
+                        from app.matcha.services.matcha_work.escalation_service import send_hr_pilot_hard_stop_notifications
                         _track_background_task(asyncio.create_task(
                             send_hr_pilot_hard_stop_notifications(
                                 company_id=company_id,
@@ -916,7 +916,7 @@ async def _inject_mode_contexts(tc: TurnContext):
             from app.core.services.embedding_service import get_embedding_service as _ges2
             from app.core.services.payer_policy_rag import PayerPolicyRAGService as _PRAG2
             from app.config import get_settings as _gs2
-            from app.matcha.services.matcha_work_ai import PAYER_MODE_SYSTEM_PROMPT as _PMSP
+            from app.matcha.services.matcha_work.matcha_work_ai import PAYER_MODE_SYSTEM_PROMPT as _PMSP
             from datetime import date as _d2
 
             _ak2 = _os2.getenv("GEMINI_API_KEY") or _gs2().gemini_api_key
@@ -1104,8 +1104,8 @@ async def _audit_and_persist(tc: TurnContext) -> None:
         hr_pilot_dropped: list[str] = []
         if tc.hr_pilot_mode_active and assistant_reply_text:
             try:
-                from app.matcha.services.hr_pilot_corpus import audit_citations
-                from app.matcha.services.matcha_work_mode_contexts import (
+                from app.matcha.services.pilots.hr_pilot_corpus import audit_citations
+                from app.matcha.services.matcha_work.matcha_work_mode_contexts import (
                     get_hr_pilot_corpus,
                 )
                 _corpus = await get_hr_pilot_corpus(company_id)
@@ -1191,7 +1191,7 @@ async def _audit_and_persist(tc: TurnContext) -> None:
         for _evt in (post_events or []):
             if _evt.get("kind") == "hr_pilot_compliance_block":
                 try:
-                    from app.matcha.services.escalation_service import (
+                    from app.matcha.services.matcha_work.escalation_service import (
                         create_hr_pilot_compliance_escalation,
                     )
                     await create_hr_pilot_compliance_escalation(
@@ -1332,7 +1332,7 @@ async def send_message_stream(
 
     # Pre-fetch any image attachment bytes concurrently off the event loop so
     # the prompt builder (which runs in a thread pool) doesn't block on I/O.
-    from app.matcha.services.matcha_work_ai import fetch_image_parts_for_messages
+    from app.matcha.services.matcha_work.matcha_work_ai import fetch_image_parts_for_messages
     await fetch_image_parts_for_messages(msg_dicts)
 
     tc.ai_provider = get_ai_provider()
@@ -1340,7 +1340,7 @@ async def send_message_stream(
 
     # Inject project file attachments metadata
     if thread.get("project_id"):
-        from app.matcha.services import project_file_service
+        from app.matcha.services.matcha_work import project_file_service
         pfiles = await project_file_service.list_project_files(thread["project_id"])
         if pfiles:
             listing = "\n".join(f"- {f['filename']} ({f['content_type']}, {f['file_size']:,} bytes)" for f in pfiles)

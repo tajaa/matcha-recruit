@@ -28,8 +28,8 @@ from ...dependencies import require_admin_or_client, get_client_company_id
 from app.core.feature_flags import merge_company_features
 from app.core.services.redis_cache import check_rate_limit, client_ip
 from app.core.services.storage import get_storage
-from ...services import legal_defense as ld
-from ...services import legal_research
+from ...services.pilots import legal_defense as ld
+from ...services.pilots import legal_research
 
 logger = logging.getLogger(__name__)
 
@@ -224,7 +224,7 @@ async def parse_intake(file: UploadFile = File(...), current_user=Depends(requir
         raise HTTPException(status_code=400, detail="Empty file")
     if len(data) > 15_000_000:
         raise HTTPException(status_code=413, detail="PDF too large (max 15 MB)")
-    from ...services import legal_intake_parser
+    from ...services.pilots import legal_intake_parser
     return await legal_intake_parser.parse_intake_document(data)
 
 

@@ -2,7 +2,7 @@
 
 import json
 
-from app.matcha.services.training_grading import (
+from app.matcha.services.training.training_grading import (
     grade_quiz as _grade_quiz,
     parse_jsonb as _parse_jsonb,
     sanitize_lesson_template as _sanitize_lesson_template,

@@ -20,7 +20,7 @@ from ..services.policy_service import PolicyService, SignatureService
 from ..services.email import get_email_service
 from ..services.storage import get_storage
 from ..models.auth import CurrentUser
-from ...matcha.services.er_document_parser import ERDocumentParser
+from ...matcha.services.er.er_document_parser import ERDocumentParser
 from uuid import UUID
 import logging
 

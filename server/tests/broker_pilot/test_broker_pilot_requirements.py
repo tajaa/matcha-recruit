@@ -6,8 +6,8 @@ satisfied by platform triangles; a processing or failed upload never counts),
 and the 409 body the chat gate raises.
 """
 
-from app.matcha.services import broker_pilot as bp
-from app.matcha.services import broker_pilot_requirements as bpr
+from app.matcha.services.broker import broker_pilot as bp
+from app.matcha.services.broker import broker_pilot_requirements as bpr
 
 
 # --------------------------------------------------------------------------- #

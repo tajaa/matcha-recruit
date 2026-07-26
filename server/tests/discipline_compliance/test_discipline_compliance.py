@@ -12,8 +12,8 @@ from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
-from app.matcha.services import discipline_compliance as dc
-from app.matcha.services.legal_defense import validate_citations
+from app.matcha.services.discipline import discipline_compliance as dc
+from app.matcha.services.pilots.legal_defense import validate_citations
 
 
 def _leave(start, end=None, leave_type="medical", status="approved", id="L1"):

@@ -298,7 +298,7 @@ async def start_call(
 ):
     """Owner starts a call session. Returns a publisher token + LiveKit URL."""
     from ...core.services.livekit_service import create_room, mint_token, _get_lk_config
-    from ...matcha.services import entitlements_service
+    from ...matcha.services.billing import entitlements_service
     try:
         livekit_url, _, _ = _get_lk_config()
     except RuntimeError as e:

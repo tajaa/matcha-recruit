@@ -22,8 +22,8 @@ _bleach = sys.modules["bleach"]
 _bleach.clean = lambda text, **kw: text
 _bleach.linkify = lambda text, **kw: text
 
-from app.matcha.services import entitlements_service as ent  # noqa: E402
-from app.matcha.services.entitlements_service import (  # noqa: E402
+from app.matcha.services.billing import entitlements_service as ent  # noqa: E402
+from app.matcha.services.billing.entitlements_service import (  # noqa: E402
     PLAN_BUSINESS,
     PLAN_FREE,
     PLAN_LITE,
@@ -215,14 +215,14 @@ class TestModelClamp:
         return (
             patch.object(ent, "resolve_plan_for_user", AsyncMock(return_value=plan)),
             patch(
-                "app.matcha.services.matcha_work_ai.get_matcha_work_model_mode",
+                "app.matcha.services.matcha_work.matcha_work_ai.get_matcha_work_model_mode",
                 AsyncMock(return_value=mode),
             ),
         )
 
     @pytest.mark.asyncio
     async def test_free_cannot_force_pro_override(self):
-        from app.matcha.services.matcha_work_ai import _get_model, PRO_MODEL
+        from app.matcha.services.matcha_work.matcha_work_ai import _get_model, PRO_MODEL
 
         p1, p2 = self._patches(PLAN_FREE)
         with p1, p2:
@@ -231,7 +231,7 @@ class TestModelClamp:
 
     @pytest.mark.asyncio
     async def test_pro_plan_override_honored(self):
-        from app.matcha.services.matcha_work_ai import _get_model, PRO_MODEL
+        from app.matcha.services.matcha_work.matcha_work_ai import _get_model, PRO_MODEL
 
         p1, p2 = self._patches(PLAN_PRO)
         with p1, p2:
@@ -240,7 +240,7 @@ class TestModelClamp:
 
     @pytest.mark.asyncio
     async def test_lite_override_to_flash_is_fine(self):
-        from app.matcha.services.matcha_work_ai import _get_model
+        from app.matcha.services.matcha_work.matcha_work_ai import _get_model
 
         p1, p2 = self._patches(PLAN_LITE)
         with p1, p2:
@@ -251,7 +251,7 @@ class TestModelClamp:
 
     @pytest.mark.asyncio
     async def test_business_defaults_to_pro_model(self):
-        from app.matcha.services.matcha_work_ai import _get_model, PRO_MODEL
+        from app.matcha.services.matcha_work.matcha_work_ai import _get_model, PRO_MODEL
 
         p1, p2 = self._patches(PLAN_BUSINESS)
         with p1, p2:
@@ -260,7 +260,7 @@ class TestModelClamp:
 
     @pytest.mark.asyncio
     async def test_heavy_mode_forces_pro_for_all(self):
-        from app.matcha.services.matcha_work_ai import _get_model, PRO_MODEL
+        from app.matcha.services.matcha_work.matcha_work_ai import _get_model, PRO_MODEL
 
         p1, p2 = self._patches(PLAN_FREE, mode="heavy")
         with p1, p2:
@@ -269,7 +269,7 @@ class TestModelClamp:
 
     @pytest.mark.asyncio
     async def test_free_default_is_analysis_model(self):
-        from app.matcha.services.matcha_work_ai import _get_model
+        from app.matcha.services.matcha_work.matcha_work_ai import _get_model
 
         p1, p2 = self._patches(PLAN_FREE)
         with p1, p2:

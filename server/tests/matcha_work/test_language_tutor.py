@@ -33,7 +33,7 @@ sys.modules.setdefault("google", google_module)
 sys.modules.setdefault("google.genai", genai_module)
 sys.modules.setdefault("google.genai.types", types_module)
 
-from app.matcha.services.matcha_work_ai import _infer_skill_from_state
+from app.matcha.services.matcha_work.matcha_work_ai import _infer_skill_from_state
 
 
 # ═══════════════════════════════════════════════════════════════════════

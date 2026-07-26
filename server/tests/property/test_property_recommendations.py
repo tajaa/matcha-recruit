@@ -1,9 +1,9 @@
 """Pure-logic tests for the property risk-improvement plan.
 
-No DB — only app.matcha.services.property_recommendations.build_plan.
+No DB — only app.matcha.services.property.property_recommendations.build_plan.
 """
 
-from app.matcha.services import property_recommendations as recs
+from app.matcha.services.property import property_recommendations as recs
 
 YEAR = 2026
 

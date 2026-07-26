@@ -6,9 +6,9 @@ and answers can only cite records that exist.
 
 import pytest
 
-from app.matcha.services import ask_hr as svc
-from app.matcha.services.hr_pilot_escalation import classify_message
-from app.matcha.services.legal_defense import validate_citations
+from app.matcha.services.pilots import ask_hr as svc
+from app.matcha.services.pilots.hr_pilot_escalation import classify_message
+from app.matcha.services.pilots.legal_defense import validate_citations
 
 
 # --------------------------------------------------------------------------- #

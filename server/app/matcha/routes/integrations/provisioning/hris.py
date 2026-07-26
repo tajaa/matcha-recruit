@@ -31,15 +31,15 @@ from app.matcha.dependencies import (
     require_feature,
     require_feature,
 )
-from app.matcha.services.google_workspace_service import GoogleWorkspaceService
-from app.matcha.services.onboarding_orchestrator import (
+from app.matcha.services.onboarding.google_workspace_service import GoogleWorkspaceService
+from app.matcha.services.onboarding.onboarding_orchestrator import (
     PROVIDER_GOOGLE_WORKSPACE,
     PROVIDER_SLACK,
     retry_google_workspace_onboarding,
     start_google_workspace_onboarding,
     start_slack_onboarding,
 )
-from app.matcha.services.hris_service import PROVIDER_HRIS, HRISProvisioningError
+from app.matcha.services.hris.hris_service import PROVIDER_HRIS, HRISProvisioningError
 
 # Several handlers below already call logger.error(...) on their failure paths
 # (Gusto company fetch; Finch Connect-session / sandbox / token exchange) but
@@ -145,7 +145,7 @@ async def connect_hris(
     test_status = "connected"
     test_error = None
     if request.test_connection and request.mode != "mock":
-        from app.matcha.services.hris_service import get_hris_service, GustoHRISService
+        from app.matcha.services.hris.hris_service import get_hris_service, GustoHRISService
         service = get_hris_service(request.mode)
         test_secrets = {
             "client_id": request.client_id or "",
@@ -214,7 +214,7 @@ async def trigger_hris_sync(
     """Trigger a manual HRIS sync — fetches all employees from the HRIS and imports them."""
     company_id = await get_client_company_id(current_user)
 
-    from app.matcha.services.hris_sync_orchestrator import start_hris_sync
+    from app.matcha.services.hris.hris_sync_orchestrator import start_hris_sync
     try:
         result = await start_hris_sync(
             company_id=company_id,
@@ -496,7 +496,7 @@ async def get_gusto_verification_token(
 @router.post("/hris/webhook/gusto")
 async def gusto_webhook(request: Request, background_tasks: BackgroundTasks):
     """Receive Gusto webhook events and sync changes to Matcha."""
-    from app.matcha.services.hris_sync_orchestrator import start_hris_sync
+    from app.matcha.services.hris.hris_sync_orchestrator import start_hris_sync
     body = await request.body()
 
     try:
@@ -830,7 +830,7 @@ async def _load_finch_for_benefits(company_id):
         except Exception:
             secrets[key] = value
 
-    from app.matcha.services.finch_service import FinchHRISService
+    from app.matcha.services.hris.finch_service import FinchHRISService
     return config, secrets, FinchHRISService()
 @router.get("/hris/benefits/meta",
             dependencies=[Depends(require_feature("hris_deductions"))])

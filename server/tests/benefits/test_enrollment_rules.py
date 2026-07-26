@@ -3,7 +3,7 @@ from datetime import date
 
 import pytest
 
-from app.matcha.services.benefits_enrollment import (
+from app.matcha.services.benefits.benefits_enrollment import (
     allowed_transition,
     build_closing_soon_email,
     build_unsubmitted_nudge_email,

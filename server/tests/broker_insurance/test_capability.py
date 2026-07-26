@@ -5,7 +5,7 @@ confirms the data exists. In mock mode everything is exposed (so the whole produ
 is demoable); in live mode only the confirmed set is on.
 """
 
-from app.matcha.services import coterie_service as cs
+from app.matcha.services.insurance import coterie_service as cs
 
 
 def test_parse_caps_all_and_list_and_default():

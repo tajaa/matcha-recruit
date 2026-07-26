@@ -10,8 +10,8 @@ from fastapi import APIRouter, HTTPException, Request, status
 from ..services.stripe_service import StripeService, StripeServiceError
 from ..services.product_definitions import product_for_pack_id
 from ...database import get_connection
-from ...matcha.services import billing_service
-from ...matcha.services import token_budget_service
+from ...matcha.services.billing import billing_service
+from ...matcha.services.billing import token_budget_service
 
 logger = logging.getLogger(__name__)
 
@@ -687,7 +687,7 @@ async def _route_event(event_type: str, event_object: dict) -> dict:
                     )
 
                     # New subscription changes the user's resolved plan.
-                    from ...matcha.services import entitlements_service
+                    from ...matcha.services.billing import entitlements_service
                     entitlements_service.invalidate_plan_cache()
 
                     # Activate token budget

@@ -1,6 +1,6 @@
 """Pure tests for the loss-run parser's _coerce (Gemini call is best-effort, not tested)."""
 
-from app.matcha.services import loss_run_parser as lr
+from app.matcha.services.insurance import loss_run_parser as lr
 
 
 def test_coerce_clamps_and_types():

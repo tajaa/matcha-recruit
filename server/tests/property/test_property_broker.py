@@ -3,8 +3,8 @@ external-client property compute + the separate property submission-readiness bl
 No DB.
 """
 
-from app.matcha.services import external_clients as ext
-from app.matcha.services import submission_readiness as sr
+from app.matcha.services.broker import external_clients as ext
+from app.matcha.services.broker import submission_readiness as sr
 
 
 # --- _compute_property (off-platform summary → scoring shape) ---------------

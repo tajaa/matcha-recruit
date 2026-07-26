@@ -1,7 +1,7 @@
 from dataclasses import replace
 from datetime import date, datetime
 
-from app.matcha.services.onboarding_reminder_logic import (
+from app.matcha.services.onboarding.onboarding_reminder_logic import (
     DEFAULT_BUSINESS_DAYS,
     ReminderSettings,
     _is_quiet_hour,

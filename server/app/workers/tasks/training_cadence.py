@@ -23,7 +23,7 @@ from datetime import date, timedelta
 from ..celery_app import celery_app
 from ..utils import get_db_connection, scheduler_settings_row
 from app.core.feature_flags import get_company_features
-from app.matcha.services.training_assignment import resolve_audience, assign_training
+from app.matcha.services.training.training_assignment import resolve_audience, assign_training
 
 
 async def _send_assignment_email(employee_email: str, employee_name: str, training_title: str, due_date) -> None:

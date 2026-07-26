@@ -57,7 +57,7 @@ from app.core.services.platform_settings import (
     get_tenant_codified_only, prime_tenant_codified_only_cache,
     DEFAULT_ER_SIMILARITY_WEIGHTS, EXPECTED_WEIGHT_KEYS,
 )
-from app.matcha.services import billing_service as mw_billing_service
+from app.matcha.services.billing import billing_service as mw_billing_service
 from app.config import get_settings
 from app.core.services.stripe_service import StripeService, StripeServiceError
 from app.core.feature_flags import DEFAULT_COMPANY_FEATURES
@@ -594,7 +594,7 @@ async def update_company_admin(company_id: UUID, body: CompanyProfileUpdate, cur
             "Admin set companies.is_test: company=%s is_test=%s admin=%s",
             company_id, fields["is_test"], current_user.id,
         )
-    from app.matcha.services.matcha_work_document import invalidate_company_profile_cache
+    from app.matcha.services.matcha_work.matcha_work_document import invalidate_company_profile_cache
     invalidate_company_profile_cache(company_id)
     return {"ok": True}
 
@@ -609,7 +609,7 @@ async def delete_company_admin(company_id: UUID):
         )
         if not row:
             raise HTTPException(status_code=404, detail="Company not found or already deleted")
-        from app.matcha.services.matcha_work_document import invalidate_company_profile_cache
+        from app.matcha.services.matcha_work.matcha_work_document import invalidate_company_profile_cache
         invalidate_company_profile_cache(company_id)
     return {"ok": True}
 

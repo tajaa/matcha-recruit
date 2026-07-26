@@ -14,7 +14,7 @@ from app.config import get_settings
 from app.core.models.auth import CurrentUser
 from app.database import get_connection
 from app.matcha.dependencies import require_admin_or_client, get_client_company_id
-from app.matcha.services import matcha_work_document as doc_svc
+from app.matcha.services.matcha_work import matcha_work_document as doc_svc
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -136,7 +136,7 @@ async def get_tutor_voice_status(
                 # Another request is already running analysis
                 return {"status": "analyzing", "tutor_analysis": None}
             try:
-                from app.matcha.services.conversation_analyzer import ConversationAnalyzer
+                from app.matcha.services.interviews.conversation_analyzer import ConversationAnalyzer
                 settings = get_settings()
                 analyzer = ConversationAnalyzer(
                     api_key=settings.gemini_api_key,

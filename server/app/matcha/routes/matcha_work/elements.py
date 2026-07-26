@@ -198,7 +198,7 @@ async def put_element_repo_snapshot(
         raise HTTPException(status_code=403, detail="You don't have edit access to this project")
     async with get_connection() as conn:
         await _verify_element_in_project(conn, project_id, element_id)
-    from app.matcha.services import element_repo_service as repo_svc
+    from app.matcha.services.matcha_work import element_repo_service as repo_svc
     summary = await repo_svc.replace_element_snapshot(project_id, element_id, body.get("files") or [])
     return summary
 
@@ -209,7 +209,7 @@ async def get_element_repo_snapshot_stats(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     await _verify_project_access(project_id, current_user)
-    from app.matcha.services import element_repo_service as repo_svc
+    from app.matcha.services.matcha_work import element_repo_service as repo_svc
     return await repo_svc.get_snapshot_stats(element_id)
 
 def _serialize_element(d: dict) -> dict:
@@ -228,7 +228,7 @@ async def list_element_files_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Files bucketed under one element's context repo."""
-    from app.matcha.services import project_file_service
+    from app.matcha.services.matcha_work import project_file_service
 
     await _verify_project_access(project_id, current_user)
     async with get_connection() as conn:
@@ -242,7 +242,7 @@ async def list_element_folders_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Folder tree scoped to one element."""
-    from app.matcha.services import project_file_service
+    from app.matcha.services.matcha_work import project_file_service
 
     await _verify_project_access(project_id, current_user)
     async with get_connection() as conn:
@@ -258,7 +258,7 @@ async def create_element_folder_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Create a folder inside an element's repo (optionally nested)."""
-    from app.matcha.services import project_file_service
+    from app.matcha.services.matcha_work import project_file_service
 
     _project, role = await _verify_project_access(project_id, current_user)
     if not _can_edit_project(role):
@@ -280,7 +280,7 @@ async def list_element_notes_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Notes + links pinned to an element."""
-    from app.matcha.services import element_notes_service
+    from app.matcha.services.matcha_work import element_notes_service
 
     await _verify_project_access(project_id, current_user)
     async with get_connection() as conn:
@@ -295,7 +295,7 @@ async def add_element_note_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Pin a note ('note', free text) or a link ('link', url) to an element."""
-    from app.matcha.services import element_notes_service
+    from app.matcha.services.matcha_work import element_notes_service
 
     _project, role = await _verify_project_access(project_id, current_user)
     if not _can_edit_project(role):
@@ -324,7 +324,7 @@ async def delete_element_note_endpoint(
     note_id: UUID,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    from app.matcha.services import element_notes_service
+    from app.matcha.services.matcha_work import element_notes_service
 
     _project, role = await _verify_project_access(project_id, current_user)
     if not _can_edit_project(role):

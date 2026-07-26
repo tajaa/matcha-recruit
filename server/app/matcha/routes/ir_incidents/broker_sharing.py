@@ -21,7 +21,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 
 from app.database import get_connection
 from app.matcha.dependencies import require_admin_or_client, get_client_company_id
-from app.matcha.services import broker_chat_service as chat_svc
+from app.matcha.services.broker import broker_chat_service as chat_svc
 
 from ._shared import log_audit
 

@@ -265,7 +265,7 @@ async def create_discipline_record(
         if not employee:
             raise HTTPException(status_code=404, detail="Employee not found")
 
-    from app.matcha.services import discipline_engine
+    from app.matcha.services.discipline import discipline_engine
     try:
         record = await discipline_engine.issue_discipline_with_supersede(
             actor_user_id=current_user.id,
@@ -429,7 +429,7 @@ async def update_discipline_record(
         )
 
         if request.status is not None and request.status != existing["status"]:
-            from app.matcha.services import discipline_engine
+            from app.matcha.services.discipline import discipline_engine
             await discipline_engine.write_audit(
                 conn, record_id, current_user.id,
                 "status_changed",

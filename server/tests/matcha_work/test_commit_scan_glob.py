@@ -4,7 +4,7 @@ No DB, no Gemini — safe to run anywhere:
     cd server && ./venv/bin/python -m pytest tests/matcha_work/test_commit_scan_glob.py -q
 """
 
-from app.matcha.services.commit_scan_service import (
+from app.matcha.services.matcha_work.commit_scan_service import (
     path_matches_glob,
     element_matches_commit,
     match_changed_files_to_elements,

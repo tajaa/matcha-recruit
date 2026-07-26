@@ -15,10 +15,10 @@ from ...core.dependencies import require_admin as require_platform_admin
 from ...core.services.stripe_service import StripeService, StripeServiceError
 from ...database import get_connection
 from ..dependencies import get_client_company_id, require_admin_or_client, require_feature
-from ..services import billing_service
-from ..services import entitlements_service
-from ..services import token_budget_service
-from ..services.token_budget_service import (
+from ..services.billing import billing_service
+from ..services.billing import entitlements_service
+from ..services.billing import token_budget_service
+from ..services.billing.token_budget_service import (
     SUBSCRIPTION_AMOUNT_CENTS,
     SUBSCRIPTION_PACK_ID,
     SUBSCRIPTION_TOKENS,

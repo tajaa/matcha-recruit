@@ -15,8 +15,8 @@ import pytest
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-import app.matcha.services.wage_benchmark_service as wbs
-from app.matcha.services.wage_benchmark_service import (
+import app.matcha.services.workforce.wage_benchmark_service as wbs
+from app.matcha.services.workforce.wage_benchmark_service import (
     BELOW_MARKET_THRESHOLD,
     REPLACEMENT_COST_PER_EMPLOYEE,
     ANNUAL_HOURS,

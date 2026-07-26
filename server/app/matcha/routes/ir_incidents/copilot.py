@@ -24,7 +24,7 @@ from fastapi.responses import StreamingResponse
 from app.database import get_connection
 from app.matcha.dependencies import require_admin_or_client, get_client_company_id
 # Safe at module level: ir_flow's own imports of this package are function-local.
-from app.matcha.services import ir_flow
+from app.matcha.services.ir import ir_flow
 from app.matcha.models.ir_incident import (
     IRCopilotAcceptRequest,
     IRCopilotCard,
@@ -208,7 +208,7 @@ async def stream_copilot_round(
       - {type:'done'}
     Persists user message + assistant text + one row per card.
     """
-    from app.matcha.services.ir_ai_orchestrator import (
+    from app.matcha.services.ir.ir_ai_orchestrator import (
         generate_guidance,
         load_incident_state,
         persist_assistant_round,
@@ -232,7 +232,7 @@ async def stream_copilot_round(
             # Append the user's message FIRST so the orchestrator includes it.
             user_msg = (body.message or "").strip()
             if user_msg:
-                from app.matcha.services.ir_ai_orchestrator import append_message
+                from app.matcha.services.ir.ir_ai_orchestrator import append_message
                 user_row = await append_message(
                     conn,
                     incident_id=incident_id,
@@ -353,7 +353,7 @@ async def resume_copilot_after_info_request(*, company_id: str, incident_id: UUI
     ``stream_copilot_round`` — state is loaded and released before the
     (up-to-60s) Gemini call, then a fresh connection persists the result.
     """
-    from app.matcha.services.ir_ai_orchestrator import (
+    from app.matcha.services.ir.ir_ai_orchestrator import (
         generate_guidance,
         load_incident_state,
         persist_assistant_round,
@@ -517,7 +517,7 @@ async def skip_copilot_card(
 
         # Honor the skip in the deterministic flow: record the gate so
         # resolve_next_step stops re-emitting the same card on later rounds.
-        from app.matcha.services.ir_flow import gate_key_for_card
+        from app.matcha.services.ir.ir_flow import gate_key_for_card
         gate = gate_key_for_card(stored_card.get("id") if isinstance(stored_card, dict) else None)
         if gate:
             await conn.execute(
@@ -558,7 +558,7 @@ async def _emit_chain_card(conn, *, incident_id: UUID, card: dict, created_by=No
     user accepts the previous one (or after the close-time guard redirects).
     Shape matches what ``persist_assistant_round`` writes for AI-emitted cards.
     """
-    from app.matcha.services.ir_ai_orchestrator import append_message
+    from app.matcha.services.ir.ir_ai_orchestrator import append_message
 
     return await append_message(
         conn,
@@ -653,7 +653,7 @@ async def _emit_osha_description_review(conn, incident_id, current_user):
             "SELECT title, description FROM ir_incidents WHERE id = $1", incident_id
         )
         try:
-            from app.matcha.services.ir_analysis import get_ir_analyzer
+            from app.matcha.services.ir.ir_analysis import get_ir_analyzer
             clean = await get_ir_analyzer().cleanse_description(
                 title=(row["title"] if row else "") or "",
                 description=(row["description"] if row else "") or "",
@@ -958,7 +958,7 @@ async def _close_incident_via_copilot(
     # Best-effort — a rule-matching failure must never block the close.
     if row and row["company_id"]:
         try:
-            from app.matcha.services.training_assignment import on_incident_closed
+            from app.matcha.services.training.training_assignment import on_incident_closed
 
             await on_incident_closed(
                 conn,
@@ -989,7 +989,7 @@ async def close_incident_via_copilot(
     current_user=Depends(require_admin_or_client),
 ):
     """Direct close — no card required. Used by the panel's Close button."""
-    from app.matcha.services.ir_ai_orchestrator import append_message
+    from app.matcha.services.ir.ir_ai_orchestrator import append_message
 
     company_id = await get_client_company_id(current_user)
     async with get_connection() as conn:
@@ -1737,7 +1737,7 @@ async def accept_copilot_card(
       - {type:'done'}
       - {type:'error', detail:...}
     """
-    from app.matcha.services.ir_ai_orchestrator import (
+    from app.matcha.services.ir.ir_ai_orchestrator import (
         _canonical_analysis_type,
         append_message,
         generate_guidance,
@@ -2239,7 +2239,7 @@ async def accept_copilot_card(
 
                 elif action_type == "assign_training":
                     from app.core.feature_flags import get_company_features
-                    from app.matcha.services.training_assignment import assign_training
+                    from app.matcha.services.training.training_assignment import assign_training
 
                     features = await get_company_features(company_id, conn=conn)
                     if not features.get("training"):

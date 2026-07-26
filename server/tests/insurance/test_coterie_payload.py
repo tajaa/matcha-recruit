@@ -6,7 +6,7 @@ and the mock quote scaling with exposure so the bind flow is testable without
 live carrier credentials.
 """
 
-from app.matcha.services import coterie_service as cs
+from app.matcha.services.insurance import coterie_service as cs
 
 
 _COMPANY = {

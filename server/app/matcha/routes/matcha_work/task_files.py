@@ -28,7 +28,7 @@ async def upload_task_file_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Upload an attachment scoped to a single kanban task."""
-    from app.matcha.services import project_file_service
+    from app.matcha.services.matcha_work import project_file_service
 
     project, _role = await _verify_project_access(project_id, current_user)
     await _verify_task_belongs_to_project(project_id, task_id)
@@ -49,7 +49,7 @@ async def list_task_files_endpoint(
     task_id: UUID,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    from app.matcha.services import project_file_service
+    from app.matcha.services.matcha_work import project_file_service
     await _verify_project_access(project_id, current_user)
     await _verify_task_belongs_to_project(project_id, task_id)
     files = await project_file_service.list_task_files(project_id, task_id)
@@ -62,7 +62,7 @@ async def delete_task_file_endpoint(
     file_id: UUID,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    from app.matcha.services import project_file_service
+    from app.matcha.services.matcha_work import project_file_service
 
     await _verify_project_access(project_id, current_user)
     record = await project_file_service.get_task_file(file_id, project_id, task_id)

@@ -407,7 +407,7 @@ def _assemble_wc_metrics(
     Pure (no DB) so the company-wide path and the per-location fan-out produce
     byte-identical shapes from differently-grouped queries.
     """
-    from app.matcha.services.wc_benchmarks import (
+    from app.matcha.services.insurance.wc_benchmarks import (
         lookup_benchmark, estimate_premium_impact, severity_band,
     )
 
@@ -1059,7 +1059,7 @@ async def get_analytics_risk_insights(
     current_user=Depends(require_admin_or_client),
 ):
     """Gemini-driven theme detection across recent IR corpus. 24h cache."""
-    from app.matcha.services.ir_analysis import get_ir_analyzer
+    from app.matcha.services.ir.ir_analysis import get_ir_analyzer
 
     company_id = await get_client_company_id(current_user)
     generated_at_iso = _utc_now_naive().isoformat()
@@ -1270,7 +1270,7 @@ async def get_analytics_consistency(
     current_user=Depends(require_admin_or_client),
 ):
     """Get company-wide consistency analytics across all resolved incidents."""
-    from app.matcha.services.ir_consistency import compute_consistency_analytics
+    from app.matcha.services.ir.ir_consistency import compute_consistency_analytics
 
     company_id = await get_client_company_id(current_user)
     if company_id is None:

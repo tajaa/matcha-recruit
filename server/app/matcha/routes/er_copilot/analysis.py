@@ -463,7 +463,7 @@ async def analyze_similar_cases(
                 return
 
             # Stream fresh analysis
-            from ...services.er_precedent import find_similar_cases_stream
+            from ...services.er.er_precedent import find_similar_cases_stream
 
             async for event in find_similar_cases_stream(str(case_id), conn):
                 if event["type"] == "phase":

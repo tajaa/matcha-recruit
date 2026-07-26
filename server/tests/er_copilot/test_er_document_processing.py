@@ -96,7 +96,7 @@ def _run_process_document(chunk_count, embedding_service, conn):
 
     with (
         patch("app.core.services.storage.get_storage", return_value=fake_storage),
-        patch("app.matcha.services.er_document_parser.ERDocumentParser", return_value=fake_parser),
+        patch("app.matcha.services.er.er_document_parser.ERDocumentParser", return_value=fake_parser),
         patch("app.core.services.pii_scrubber.PIIScrubber", return_value=fake_scrubber),
         patch("app.core.services.embedding_service.EmbeddingService", return_value=embedding_service),
         patch("app.config.load_settings", return_value=SimpleNamespace(gemini_api_key="k")),
@@ -229,7 +229,7 @@ def test_redis_outage_does_not_fail_the_document():
 
     with (
         patch("app.core.services.storage.get_storage", return_value=fake_storage),
-        patch("app.matcha.services.er_document_parser.ERDocumentParser", return_value=fake_parser),
+        patch("app.matcha.services.er.er_document_parser.ERDocumentParser", return_value=fake_parser),
         patch("app.core.services.pii_scrubber.PIIScrubber", return_value=fake_scrubber),
         patch("app.core.services.embedding_service.EmbeddingService", return_value=embedder),
         patch("app.config.load_settings", return_value=SimpleNamespace(gemini_api_key="k")),

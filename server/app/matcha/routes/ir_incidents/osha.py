@@ -47,7 +47,7 @@ from app.core.services.osha_privacy import (
     PRIVACY_DESCRIPTION_PLACEHOLDER,
 )
 from app.core.services.genai_client import get_genai_client
-from app.matcha.services.naics_titles import naics_industry_description
+from app.matcha.services.ir.naics_titles import naics_industry_description
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +79,7 @@ ITA_CSV_COLUMNS = [
 # the CSV export and the API submission must never disagree on the size code.
 # Same reason for the EIN/zip normalizers: the pre-flight validator must judge
 # the exact digits the API payload will carry, not the raw stored string.
-from app.matcha.services.ir_ita_submission import (  # noqa: E402
+from app.matcha.services.ir.ir_ita_submission import (  # noqa: E402
     ita_size_category as _ita_size_category,
     _normalize_ein,
     _normalize_zip,
@@ -1322,7 +1322,7 @@ async def submit_ita(
     lock held for the whole transaction, so a double-click can't slip two
     filings through the gap between the check and the insert.
     """
-    from app.matcha.services.ir_ita_submission import submit_establishments
+    from app.matcha.services.ir.ir_ita_submission import submit_establishments
 
     company_id = await get_client_company_id(current_user)
     if company_id is None:

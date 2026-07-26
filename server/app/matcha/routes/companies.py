@@ -257,7 +257,7 @@ async def update_company(
         if not row:
             raise HTTPException(status_code=404, detail="Company not found")
 
-        from ..services.matcha_work_document import invalidate_company_profile_cache
+        from ..services.matcha_work.matcha_work_document import invalidate_company_profile_cache
         invalidate_company_profile_cache(company_id)
 
         # Get interview count
@@ -330,7 +330,7 @@ async def upload_company_logo(
             url, company_id,
         )
 
-        from ..services.matcha_work_document import invalidate_company_profile_cache
+        from ..services.matcha_work.matcha_work_document import invalidate_company_profile_cache
         invalidate_company_profile_cache(company_id)
 
         return {"url": url}

@@ -44,7 +44,7 @@ from ._shared import (
     _sync_employee_location_for_compliance,
     send_single_invitation,
 )
-from app.matcha.services.onboarding_orchestrator import (
+from app.matcha.services.onboarding.onboarding_orchestrator import (
     PROVIDER_GOOGLE_WORKSPACE,
     PROVIDER_SLACK,
 )
@@ -533,7 +533,7 @@ async def bulk_upload_employees_csv(
 
                 # Auto-assign new-hire training per training_assignment_rules
                 try:
-                    from app.matcha.services.training_assignment import evaluate_new_hire_rules
+                    from app.matcha.services.training.training_assignment import evaluate_new_hire_rules
 
                     await evaluate_new_hire_rules(conn, company_id, employee["id"])
                 except Exception:

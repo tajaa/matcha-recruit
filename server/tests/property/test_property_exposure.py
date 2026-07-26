@@ -1,9 +1,9 @@
 """Pure-logic tests for directional property exposure ($ AAL / PML / coinsurance).
 
-No DB — only the pure helpers in app.matcha.services.property_exposure.
+No DB — only the pure helpers in app.matcha.services.property.property_exposure.
 """
 
-from app.matcha.services import property_exposure as ex
+from app.matcha.services.property import property_exposure as ex
 
 
 def _b(bid="b1", tiv=10_000_000, insured=None, replacement=None, perils=None):

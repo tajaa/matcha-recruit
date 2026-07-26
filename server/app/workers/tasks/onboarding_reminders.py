@@ -7,7 +7,7 @@ Runs on worker startup when the onboarding_reminders scheduler is enabled.
 import asyncio
 from datetime import datetime, timezone
 
-from app.matcha.services.onboarding_reminder_logic import (
+from app.matcha.services.onboarding.onboarding_reminder_logic import (
     DEFAULT_MAX_PER_CYCLE,
     ReminderSettings,
     _build_settings,

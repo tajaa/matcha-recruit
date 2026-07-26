@@ -30,8 +30,8 @@ def _as_list(jsonb_val) -> list:
 
 async def _extract(cba_id: str) -> dict:
     from app.core.services.storage import get_storage
-    from app.matcha.services.er_document_parser import ERDocumentParser
-    from app.matcha.services.labor_relations_ai import extract_clauses_from_cba
+    from app.matcha.services.er.er_document_parser import ERDocumentParser
+    from app.matcha.services.er.labor_relations_ai import extract_clauses_from_cba
 
     conn = await get_db_connection()
     try:

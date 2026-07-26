@@ -15,7 +15,7 @@ from pydantic import BaseModel
 
 from ...core.models.auth import CurrentUser
 from ..dependencies import require_admin_or_client, get_client_company_id
-from ..services import productivity_service
+from ..services.matcha_work import productivity_service
 
 router = APIRouter()
 

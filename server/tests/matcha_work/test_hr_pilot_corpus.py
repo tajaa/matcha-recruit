@@ -8,7 +8,7 @@ import pytest
 
 from datetime import date, datetime, timedelta
 
-from app.matcha.services.hr_pilot_corpus import (
+from app.matcha.services.pilots.hr_pilot_corpus import (
     audit_citations,
     build_hr_pilot_corpus,
     render_corpus_block,
@@ -592,7 +592,7 @@ def test_operational_records_render_into_the_prompt_block(grounding):
 # Review fixes — employee redaction, declined assignees, unknown-feature state
 # --------------------------------------------------------------------------- #
 
-from app.matcha.services.hr_pilot_corpus import (  # noqa: E402
+from app.matcha.services.pilots.hr_pilot_corpus import (  # noqa: E402
     _SUPERVISOR_ONLY_SOURCES,
     redact_for_employee,
 )
@@ -673,7 +673,7 @@ def test_module_off_still_says_not_enabled(grounding):
 
 
 def test_training_program_cap_note(grounding):
-    from app.matcha.services.hr_pilot_corpus import _MAX_TRAINING_PROGRAMS
+    from app.matcha.services.pilots.hr_pilot_corpus import _MAX_TRAINING_PROGRAMS
     t = _training_fixture()
     t["programs"] = [dict(t["programs"][0], id=f"bbbbbbbb-0000-0000-0000-{i:012d}")
                      for i in range(_MAX_TRAINING_PROGRAMS)]

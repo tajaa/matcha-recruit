@@ -39,7 +39,7 @@ async def commit_scan_endpoint(
     # Stamp branch onto each commit if the client sent it at the top level.
     for c in commits:
         c.setdefault("branch", branch)
-    from app.matcha.services import commit_scan_service as cs_svc
+    from app.matcha.services.matcha_work import commit_scan_service as cs_svc
     suggestions = await cs_svc.scan_commits(project_id, company_id, commits)
     return {"suggestions": suggestions}
 
@@ -50,7 +50,7 @@ async def list_commit_suggestions_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     await _verify_project_access(project_id, current_user)
-    from app.matcha.services import commit_scan_service as cs_svc
+    from app.matcha.services.matcha_work import commit_scan_service as cs_svc
     return await cs_svc.list_pending_suggestions(project_id, task_id)
 
 @router.get("/projects/{project_id}/tasks/{task_id}/commit-completions")
@@ -62,7 +62,7 @@ async def list_commit_completions_endpoint(
     """Accepted commit→subtask completions for a task — which commit completed
     each done item, so an in-review reviewer can audit the AI auto-checks."""
     await _verify_project_access(project_id, current_user)
-    from app.matcha.services import commit_scan_service as cs_svc
+    from app.matcha.services.matcha_work import commit_scan_service as cs_svc
     return await cs_svc.list_accepted_completions(project_id, task_id)
 
 @router.post("/projects/{project_id}/commit-suggestions/{suggestion_id}/accept")
@@ -74,8 +74,8 @@ async def accept_commit_suggestion_endpoint(
     _project, role = await _verify_project_access(project_id, current_user)
     if not _can_edit_project(role):
         raise HTTPException(status_code=403, detail="You don't have edit access to this project")
-    from app.matcha.services import commit_scan_service as cs_svc
-    from app.matcha.services import project_subtask_service as st_svc
+    from app.matcha.services.matcha_work import commit_scan_service as cs_svc
+    from app.matcha.services.matcha_work import project_subtask_service as st_svc
     # Atomic claim: resolve_suggestion only flips a *pending* row, so a
     # double-accept (or racing client) no-ops on the second call.
     resolved = await cs_svc.resolve_suggestion(
@@ -98,7 +98,7 @@ async def dismiss_commit_suggestion_endpoint(
     _project, role = await _verify_project_access(project_id, current_user)
     if not _can_edit_project(role):
         raise HTTPException(status_code=403, detail="You don't have edit access to this project")
-    from app.matcha.services import commit_scan_service as cs_svc
+    from app.matcha.services.matcha_work import commit_scan_service as cs_svc
     resolved = await cs_svc.resolve_suggestion(
         project_id, suggestion_id, status="dismissed", actor_user_id=current_user.id,
     )
@@ -109,7 +109,7 @@ async def dismiss_commit_suggestion_endpoint(
 def _resolve_github_repo(project: dict, body: dict):
     """The repo/branch a sync or scan should use: the project's connected repo,
     then a body override, then the server default. (branch may be None.)"""
-    from app.matcha.services import github_service as gh_svc
+    from app.matcha.services.matcha_work import github_service as gh_svc
     repo = (body or {}).get("repo") or project.get("github_repo") or gh_svc.default_repo()
     ref = (body or {}).get("ref") or project.get("github_branch")
     return repo, ref
@@ -120,7 +120,7 @@ async def get_github_connection(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     project, _role = await _verify_project_access(project_id, current_user)
-    from app.matcha.services import github_service as gh_svc
+    from app.matcha.services.matcha_work import github_service as gh_svc
     repo = project.get("github_repo")
     return {
         "repo": repo,
@@ -141,7 +141,7 @@ async def put_github_connection(
     _project, role = await _verify_project_access(project_id, current_user)
     if not _can_edit_project(role):
         raise HTTPException(status_code=403, detail="You don't have edit access to this project")
-    from app.matcha.services import github_service as gh_svc
+    from app.matcha.services.matcha_work import github_service as gh_svc
     repo = ((body or {}).get("repo") or "").strip().strip("/")
     branch = ((body or {}).get("branch") or "").strip() or None
     if not repo:
@@ -175,7 +175,7 @@ async def github_sync_endpoint(
     project, role = await _verify_project_access(project_id, current_user)
     if not _can_edit_project(role):
         raise HTTPException(status_code=403, detail="You don't have edit access to this project")
-    from app.matcha.services import github_service as gh_svc
+    from app.matcha.services.matcha_work import github_service as gh_svc
     repo, ref = _resolve_github_repo(project, body)
     if not repo:
         raise HTTPException(status_code=400, detail="No GitHub repo connected to this project.")
@@ -216,8 +216,8 @@ async def github_scan_commits_endpoint(
     company_id = _project_company_id(project) or await get_client_company_id(current_user)
     if not company_id:
         raise HTTPException(status_code=400, detail="No company context")
-    from app.matcha.services import github_service as gh_svc
-    from app.matcha.services import commit_scan_service as cs_svc
+    from app.matcha.services.matcha_work import github_service as gh_svc
+    from app.matcha.services.matcha_work import commit_scan_service as cs_svc
     repo, ref = _resolve_github_repo(project, body)
     if not repo:
         raise HTTPException(status_code=400, detail="No GitHub repo connected to this project.")
@@ -252,7 +252,7 @@ async def install_github_webhook_endpoint(
     project, role = await _verify_project_access(project_id, current_user)
     if not _can_edit_project(role):
         raise HTTPException(status_code=403, detail="You don't have edit access to this project")
-    from app.matcha.services import github_service as gh_svc
+    from app.matcha.services.matcha_work import github_service as gh_svc
     repo, _ref = _resolve_github_repo(project, {})
     if not repo:
         raise HTTPException(status_code=400, detail="No GitHub repo connected to this project.")
@@ -273,7 +273,7 @@ async def github_push_webhook(request: Request):
     """GitHub push webhook → scan the pushed commits for every project connected
     to that repo+branch. Public (no JWT); authenticated by HMAC signature.
     URL: /api/matcha-work/public/github/webhook"""
-    from app.matcha.services import github_service as gh_svc
+    from app.matcha.services.matcha_work import github_service as gh_svc
     raw = await request.body()
     if not gh_svc.verify_webhook_signature(raw, request.headers.get("X-Hub-Signature-256")):
         raise HTTPException(status_code=401, detail="bad signature")
@@ -306,7 +306,7 @@ async def github_push_webhook(request: Request):
     if not rows:
         return {"ok": True, "projects": 0}
 
-    from app.matcha.services import commit_scan_service as cs_svc
+    from app.matcha.services.matcha_work import commit_scan_service as cs_svc
     commits = await gh_svc.fetch_commits_by_sha(repo, shas, branch)
     for r in rows:
         if not r["company_id"]:

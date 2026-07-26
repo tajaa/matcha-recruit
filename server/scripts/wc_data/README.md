@@ -12,7 +12,7 @@ industry (e.g. nursing care `6231` TRC 6.3 vs the health-care sector `62` ~4.4).
   ([page](https://www.bls.gov/web/osh/table-1-industry-rates-national.htm)).
   Saved here as `bls_table1_industry_rates_2024.pdf` (gitignored; re-download to refresh).
 - **Build:** `cd server && ./venv/bin/python scripts/wc_data/build_bls_rates.py`
-  → regenerates `app/matcha/services/bls_injury_rates_2024.py` (GENERATED static
+  → regenerates `app/matcha/services/insurance/bls_injury_rates_2024.py` (GENERATED static
   dict; needs `pdftotext`/poppler). 2-digit ranges (31-33/44-45/48-49) expanded
   to each member code.
 - **Use:** `wc_benchmarks.lookup_benchmark(industry, naics=None)` prefers the most

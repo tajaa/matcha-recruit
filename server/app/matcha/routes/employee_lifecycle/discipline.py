@@ -21,11 +21,11 @@ from app.core.dependencies import get_current_user
 from app.core.models.auth import CurrentUser
 from app.core.services.storage import get_storage
 from app.matcha.dependencies import require_admin_or_client, get_client_company_id
-from app.matcha.services import discipline_ai
-from app.matcha.services import discipline_compliance
-from app.matcha.services import discipline_engine
-from app.matcha.services import discipline_notifications
-from app.matcha.services.discipline_pdf import render_discipline_letter
+from app.matcha.services.discipline import discipline_ai
+from app.matcha.services.discipline import discipline_compliance
+from app.matcha.services.discipline import discipline_engine
+from app.matcha.services.discipline import discipline_notifications
+from app.matcha.services.discipline.discipline_pdf import render_discipline_letter
 from app.matcha.services.signature_provider import (
     get_signature_provider,
     verify_webhook_signature,

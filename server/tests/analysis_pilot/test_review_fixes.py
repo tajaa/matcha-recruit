@@ -7,9 +7,9 @@ Pure engine only (no DB / no Gemini / no app boot), like test_analysis_packs.
 
 import math
 
-from app.matcha.services import analysis_packs as R
-from app.matcha.services.analysis_packs import base as B
-from app.matcha.services.analysis_packs import corpus as C
+from app.matcha.services.pilots import analysis_packs as R
+from app.matcha.services.pilots.analysis_packs import base as B
+from app.matcha.services.pilots.analysis_packs import corpus as C
 
 
 def _norm(csv: bytes, filename: str = "x.csv", **kw):

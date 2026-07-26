@@ -62,10 +62,10 @@ from app.matcha.models.matcha_work import (
     SendHandbookSignaturesResponse,
     GeneratePresentationResponse,
 )
-from app.matcha.services import matcha_work_document as doc_svc
-from app.matcha.services.matcha_work_modes import MODE_COLUMNS_SQL, MODES_BY_KEY, THREAD_MODES
-from app.matcha.services.er_document_parser import ERDocumentParser
-from app.matcha.services.matcha_work_handbook_upload import (
+from app.matcha.services.matcha_work import matcha_work_document as doc_svc
+from app.matcha.services.matcha_work.matcha_work_modes import MODE_COLUMNS_SQL, MODES_BY_KEY, THREAD_MODES
+from app.matcha.services.er.er_document_parser import ERDocumentParser
+from app.matcha.services.matcha_work.matcha_work_handbook_upload import (
     AuditedLocation,
     MAX_RED_FLAGS,
     MAX_SECTION_PREVIEWS,
@@ -76,7 +76,7 @@ from app.matcha.services.matcha_work_handbook_upload import (
     derive_handbook_title,
     parse_handbook_sections,
 )
-from app.matcha.services.matcha_work_ai import get_ai_provider, _infer_skill_from_state, _build_company_context
+from app.matcha.services.matcha_work.matcha_work_ai import get_ai_provider, _infer_skill_from_state, _build_company_context
 from app.core.services.handbook_service import HandbookService
 
 logger = logging.getLogger(__name__)

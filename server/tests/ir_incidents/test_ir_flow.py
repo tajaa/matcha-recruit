@@ -25,7 +25,7 @@ sys.modules.setdefault("google", google_module)
 sys.modules.setdefault("google.genai", genai_module)
 sys.modules.setdefault("google.genai.types", types_module)
 
-from app.matcha.services import ir_flow
+from app.matcha.services.ir import ir_flow
 
 
 def _incident(**overrides):

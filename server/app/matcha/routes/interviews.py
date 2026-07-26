@@ -32,8 +32,8 @@ from ...core.services.auth import (
     decode_interview_ws_token,
     decode_token,
 )
-from ..services.culture_analyzer import CultureAnalyzer
-from ..services.conversation_analyzer import ConversationAnalyzer
+from ..services.interviews.culture_analyzer import CultureAnalyzer
+from ..services.interviews.conversation_analyzer import ConversationAnalyzer
 from ...protocol import (
     MessageType,
     parse_text_message,

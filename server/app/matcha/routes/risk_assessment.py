@@ -19,19 +19,19 @@ from ...config import get_settings
 from ...core.dependencies import require_admin
 from ...database import get_connection
 from ..dependencies import require_admin_or_client, get_client_company_id
-from ..services.risk_assessment_service import (
+from ..services.risk_analytics.risk_assessment_service import (
     compute_risk_assessment,
     generate_recommendations,
     load_risk_weights,
     write_risk_history,
 )
-from ..services.monte_carlo_service import (
+from ..services.risk_analytics.monte_carlo_service import (
     run_monte_carlo,
     extract_cost_of_risk_items,
 )
-from ..services.cohort_analysis_service import compute_cohort_analysis
-from ..services.benchmark_service import compute_benchmarks
-from ..services.anomaly_detection_service import detect_anomalies
+from ..services.risk_analytics.cohort_analysis_service import compute_cohort_analysis
+from ..services.risk_analytics.benchmark_service import compute_benchmarks
+from ..services.risk_analytics.anomaly_detection_service import detect_anomalies
 
 logger = logging.getLogger(__name__)
 

@@ -33,7 +33,7 @@ from pydantic import BaseModel, EmailStr, model_validator
 from app.core.models.auth import CurrentUser
 from app.database import get_connection
 from app.matcha.dependencies import get_client_company_id, require_admin_or_client
-from app.matcha.services.onboarding_orchestrator import (
+from app.matcha.services.onboarding.onboarding_orchestrator import (
     PROVIDER_GOOGLE_WORKSPACE,
     PROVIDER_SLACK,
 )
@@ -622,7 +622,7 @@ async def create_employee(
 
         # Auto-assign new-hire training per training_assignment_rules
         try:
-            from app.matcha.services.training_assignment import evaluate_new_hire_rules
+            from app.matcha.services.training.training_assignment import evaluate_new_hire_rules
 
             outcome = await evaluate_new_hire_rules(conn, company_id, row["id"])
             if outcome.assigned:

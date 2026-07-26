@@ -3,7 +3,7 @@ from uuid import UUID
 
 import pytest
 
-from app.matcha.services.matcha_work_handbook_upload import (
+from app.matcha.services.matcha_work.matcha_work_handbook_upload import (
     MAX_RED_FLAGS,
     AuditedLocation,
     _keyword_list,

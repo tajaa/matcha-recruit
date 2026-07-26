@@ -27,7 +27,7 @@ import json
 import pytest
 
 from app.matcha.routes.ir_incidents.copilot import _extract_current_cards
-from app.matcha.services.ir_ai_orchestrator import persist_assistant_round
+from app.matcha.services.ir.ir_ai_orchestrator import persist_assistant_round
 
 
 def _card_row(card_id: str, **metadata_extra):

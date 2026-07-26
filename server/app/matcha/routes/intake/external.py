@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from ....database import get_connection
-from ...services import external_clients as ext
+from ...services.broker import external_clients as ext
 
 router = APIRouter()
 

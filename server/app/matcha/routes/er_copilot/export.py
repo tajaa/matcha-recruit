@@ -16,7 +16,7 @@ from ...dependencies import require_admin_or_client, get_client_company_id
 from ....core.models.auth import CurrentUser
 from ....core.services.storage import get_storage
 from ....core.services.auth import hash_password, verify_password_async
-from ...services.er_export import extract_analysis_export_text
+from ...services.er.er_export import extract_analysis_export_text
 
 from ._shared import (
     logger,

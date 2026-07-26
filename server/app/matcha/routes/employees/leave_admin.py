@@ -129,7 +129,7 @@ async def handle_leave_request(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Approve, deny, activate, or complete a leave request."""
-    from app.matcha.services.leave_agent import get_leave_agent
+    from app.matcha.services.leave.leave_agent import get_leave_agent
 
     company_id = await get_client_company_id(current_user)
 
@@ -323,7 +323,7 @@ async def return_checkin(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Process a return-to-work check-in: returning, extending, or starting a new leave."""
-    from app.matcha.services.leave_agent import get_leave_agent
+    from app.matcha.services.leave.leave_agent import get_leave_agent
 
     company_id = await get_client_company_id(current_user)
 
@@ -429,7 +429,7 @@ async def get_leave_eligibility(
     ``leave_requests.eligibility_data`` so repeated calls are fast.
     """
     import json
-    from app.matcha.services.leave_eligibility_service import LeaveEligibilityService
+    from app.matcha.services.leave.leave_eligibility_service import LeaveEligibilityService
 
     company_id = await get_client_company_id(current_user)
 
@@ -562,7 +562,7 @@ async def create_leave_notice(
 
     Requires the ``compliance_plus`` feature flag.
     """
-    from app.matcha.services.leave_notices_service import LeaveNoticeService, VALID_NOTICE_TYPES
+    from app.matcha.services.leave.leave_notices_service import LeaveNoticeService, VALID_NOTICE_TYPES
 
     if request.notice_type not in VALID_NOTICE_TYPES:
         raise HTTPException(
@@ -589,7 +589,7 @@ async def create_leave_notice(
                 org_id=company_id,
                 leave_request_id=leave_id,
             )
-            from app.matcha.services.leave_agent import get_leave_agent
+            from app.matcha.services.leave.leave_agent import get_leave_agent
 
             background_tasks.add_task(get_leave_agent().on_leave_notice_ready, leave_id)
             return doc

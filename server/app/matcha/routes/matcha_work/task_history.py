@@ -208,7 +208,7 @@ async def log_task_activity_endpoint(
     and own `task_id == task_id`). Stored in metadata JSONB; surfaced back
     out as a top-level field on history-row responses.
     """
-    from app.matcha.services import project_task_service as pt_svc
+    from app.matcha.services.matcha_work import project_task_service as pt_svc
 
     await _verify_project_access(project_id, current_user)
 

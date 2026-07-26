@@ -1,6 +1,6 @@
 """Pure tests for submission-readiness scoring (DB gather smoke-tested vs dev)."""
 
-from app.matcha.services import submission_readiness as sr
+from app.matcha.services.broker import submission_readiness as sr
 
 # Signals that mark every item done (perfect submission).
 ALL_DONE = dict(

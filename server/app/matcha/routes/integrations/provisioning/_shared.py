@@ -31,15 +31,15 @@ from app.matcha.dependencies import (
     require_feature,
     require_feature,
 )
-from app.matcha.services.google_workspace_service import GoogleWorkspaceService
-from app.matcha.services.onboarding_orchestrator import (
+from app.matcha.services.onboarding.google_workspace_service import GoogleWorkspaceService
+from app.matcha.services.onboarding.onboarding_orchestrator import (
     PROVIDER_GOOGLE_WORKSPACE,
     PROVIDER_SLACK,
     retry_google_workspace_onboarding,
     start_google_workspace_onboarding,
     start_slack_onboarding,
 )
-from app.matcha.services.hris_service import PROVIDER_HRIS, HRISProvisioningError
+from app.matcha.services.hris.hris_service import PROVIDER_HRIS, HRISProvisioningError
 
 # Several handlers below already call logger.error(...) on their failure paths
 # (Gusto company fetch; Finch Connect-session / sandbox / token exchange) but

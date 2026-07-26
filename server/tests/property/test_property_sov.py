@@ -1,12 +1,12 @@
 """Pure-logic tests for commercial-property SOV math + the line-key widenings.
 
-No DB — only the pure helpers in app.matcha.services.property_sov plus a regression
+No DB — only the pure helpers in app.matcha.services.property.property_sov plus a regression
 guard that the new 'property' line key is wired into the shared casualty engines.
 """
 
-from app.matcha.services import property_sov as sov
-from app.matcha.services import limit_adequacy as la
-from app.matcha.services import loss_development as ld
+from app.matcha.services.property import property_sov as sov
+from app.matcha.services.insurance import limit_adequacy as la
+from app.matcha.services.insurance import loss_development as ld
 
 YEAR = 2026
 

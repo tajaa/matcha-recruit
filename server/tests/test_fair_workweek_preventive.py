@@ -4,7 +4,7 @@
 
 from datetime import datetime, timedelta, timezone
 
-from app.matcha.services import fair_workweek as fw
+from app.matcha.services.scheduling import fair_workweek as fw
 
 NYC = fw._FAIR_WORKWEEK_ORDINANCES[("NY", "new-york-city")]
 LA = fw._FAIR_WORKWEEK_ORDINANCES[("CA", "los-angeles")]
@@ -142,5 +142,5 @@ def test_every_advisory_is_advisory_severity_never_block():
     )
     assert len(out) >= 2  # both notice and clopening should fire here
     assert all(v["severity"] == "advisory" for v in out)
-    from app.matcha.services import schedule_compliance as sc
+    from app.matcha.services.scheduling import schedule_compliance as sc
     assert sc.has_block(out) is False

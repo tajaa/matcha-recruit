@@ -7,8 +7,8 @@ import pytest
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-import app.matcha.services.leave_eligibility_service as leave_eligibility_service_module
-from app.matcha.services.leave_eligibility_service import LeaveEligibilityService
+import app.matcha.services.leave.leave_eligibility_service as leave_eligibility_service_module
+from app.matcha.services.leave.leave_eligibility_service import LeaveEligibilityService
 
 
 class _FakeConnContext:

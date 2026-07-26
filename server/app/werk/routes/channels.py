@@ -617,7 +617,7 @@ async def create_channel(
 
     # …and within individual accounts, creator monetization is a Pro entitlement.
     if body.paid_config and current_user.role == "individual":
-        from ...matcha.services import entitlements_service
+        from ...matcha.services.billing import entitlements_service
 
         await entitlements_service.require_plan(
             current_user.id, entitlements_service.PLAN_PRO, "paid_channels"
@@ -3170,7 +3170,7 @@ async def accept_invite_signup(code: str, body: AcceptInviteRequest, http_reques
     from ...core.feature_flags import DEFAULT_COMPANY_FEATURES
     from ...core.services.auth import hash_password, create_access_token, create_refresh_token
     from ...core.services.redis_cache import check_rate_limit, client_ip
-    from ...matcha.services.token_budget_service import FREE_TOKEN_GRANT
+    from ...matcha.services.billing.token_budget_service import FREE_TOKEN_GRANT
 
     ip = client_ip(http_request)
     await check_rate_limit(ip, "channel_invite_accept", 10, 3600)

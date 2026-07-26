@@ -23,9 +23,9 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from app.matcha.services.finch_service import FinchHRISService  # noqa: E402
-from app.matcha.services.hris_service import GustoHRISService, HRISService  # noqa: E402
-from app.matcha.services import hris_sync_orchestrator as orch  # noqa: E402
+from app.matcha.services.hris.finch_service import FinchHRISService  # noqa: E402
+from app.matcha.services.hris.hris_service import GustoHRISService, HRISService  # noqa: E402
+from app.matcha.services.hris import hris_sync_orchestrator as orch  # noqa: E402
 
 
 # Keys the orchestrator handles somewhere other than the employees INSERT/UPDATE.

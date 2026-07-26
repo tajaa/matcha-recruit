@@ -3,7 +3,7 @@
     cd server && ./venv/bin/python -m pytest tests/matcha_work/test_grounding_context.py -q
 """
 
-from app.matcha.services.element_repo_service import assemble_context
+from app.matcha.services.matcha_work.element_repo_service import assemble_context
 
 
 def test_includes_small_files_whole():

@@ -6,8 +6,8 @@ through the flat corpus index so the shared `validate_citations` gate keeps the
 real ones and drops invented ones.
 """
 
-from app.matcha.services import broker_pilot as bp
-from app.matcha.services.legal_defense import validate_citations
+from app.matcha.services.broker import broker_pilot as bp
+from app.matcha.services.pilots.legal_defense import validate_citations
 
 
 def _sample_index() -> dict:

@@ -5,7 +5,7 @@ an unenforceable clause the model tries to ground in a non-existent `law:` ID
 must be stripped before the draft reaches the admin.
 """
 
-from app.matcha.services import handbook_pilot as hp
+from app.matcha.services.pilots import handbook_pilot as hp
 
 
 # --- corpus assembly -------------------------------------------------------
@@ -563,7 +563,7 @@ def test_hr_pilot_corpus_mints_the_floor_exactly_once():
     which now owns compliance_floor. Minting it again there would render every
     floor record twice in the prompt (the index dedupes on cid; the prompt does
     not) and state the no-floor note twice."""
-    from app.matcha.services.hr_pilot_corpus import build_hr_pilot_corpus
+    from app.matcha.services.pilots.hr_pilot_corpus import build_hr_pilot_corpus
 
     corpus = build_hr_pilot_corpus(_grounding(), [_chain()])
     groups = [k for k in corpus["sources"] if k == "compliance_floor"]
@@ -578,7 +578,7 @@ def test_hr_pilot_corpus_mints_the_floor_exactly_once():
 def test_hr_pilot_corpus_still_accepts_chains_only_via_the_parameter():
     """Back-compat: the caller in matcha_work_mode_contexts passes chains as a
     positional argument, not inside grounding."""
-    from app.matcha.services.hr_pilot_corpus import build_hr_pilot_corpus
+    from app.matcha.services.pilots.hr_pilot_corpus import build_hr_pilot_corpus
 
     corpus = build_hr_pilot_corpus({"scopes": [], "industry": "general"}, [_chain()])
     assert corpus["sources"]["compliance_floor"]["records"]
@@ -716,7 +716,7 @@ def test_attach_compliance_floor_degrades_to_empty(monkeypatch):
             raise RuntimeError("compliance service down")
 
     monkeypatch.setitem(__import__("sys").modules,
-                        "app.matcha.services.matcha_work_node", _Boom())
+                        "app.matcha.services.matcha_work.matcha_work_node", _Boom())
     g = asyncio.run(hp.attach_compliance_floor({"scopes": []}, "cid"))
     assert g["reasoning_chains"] == []
 
@@ -724,7 +724,7 @@ def test_attach_compliance_floor_degrades_to_empty(monkeypatch):
 def test_full_text_is_opt_in_so_hr_pilots_cached_corpus_stays_small():
     """`build_hr_pilot_corpus` delegates here and its result is Redis-cached per
     company; an unconditional map would store up to 120k chars HR never reads."""
-    from app.matcha.services.hr_pilot_corpus import build_hr_pilot_corpus
+    from app.matcha.services.pilots.hr_pilot_corpus import build_hr_pilot_corpus
 
     grounding = {**_grounding(),
                  "sections": [{"id": "s1", "title": "T", "content": "x" * 5_000}]}
@@ -913,7 +913,7 @@ def test_employee_redaction_covers_the_new_finding_groups():
     today, but the redaction list must already name them: whoever wires them in
     should not have to remember that an employee asking about PTO would
     otherwise be handed the company's own compliance gaps."""
-    from app.matcha.services import hr_pilot_corpus as hpc
+    from app.matcha.services.pilots import hr_pilot_corpus as hpc
     assert "handbook_audit" in hpc._SUPERVISOR_ONLY_SOURCES
     assert "handbook_freshness" in hpc._SUPERVISOR_ONLY_SOURCES
 

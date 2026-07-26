@@ -9,7 +9,7 @@ from typing import Optional
 
 import httpx
 
-from ...matcha.services.property_cat import geocode as _census_geocode
+from ...matcha.services.property.property_cat import geocode as _census_geocode
 
 logger = logging.getLogger(__name__)
 

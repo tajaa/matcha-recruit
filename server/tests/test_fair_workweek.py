@@ -3,7 +3,7 @@
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
-from app.matcha.services import fair_workweek as fw
+from app.matcha.services.scheduling import fair_workweek as fw
 
 
 def _dt(iso: str) -> datetime:

@@ -16,7 +16,7 @@ import asyncio
 import json
 from types import SimpleNamespace
 
-from app.matcha.services import ir_ai_orchestrator
+from app.matcha.services.ir import ir_ai_orchestrator
 
 
 def _build_fake_analyzer(payload: dict):

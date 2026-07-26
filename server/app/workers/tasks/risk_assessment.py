@@ -19,7 +19,7 @@ from ..utils import get_db_connection, scheduler_settings_row
 
 async def _get_weights(conn) -> dict[str, float]:
     """Load risk assessment weights from platform_settings (shared loader)."""
-    from app.matcha.services.risk_assessment_service import load_risk_weights
+    from app.matcha.services.risk_analytics.risk_assessment_service import load_risk_weights
 
     return await load_risk_weights(conn)
 
@@ -27,7 +27,7 @@ async def _get_weights(conn) -> dict[str, float]:
 async def _run_assessment(company_id: str) -> dict:
     """Compute and store a risk assessment for a single company (no recommendations)."""
     from uuid import UUID
-    from app.matcha.services.risk_assessment_service import (
+    from app.matcha.services.risk_analytics.risk_assessment_service import (
         compute_risk_assessment,
         write_risk_history,
     )

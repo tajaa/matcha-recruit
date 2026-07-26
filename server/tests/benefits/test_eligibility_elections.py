@@ -7,7 +7,7 @@ row's employee_id has actually been resolved.
 """
 from uuid import uuid4
 
-from app.matcha.services.benefits_eligibility import is_addressed_by_election
+from app.matcha.services.benefits.benefits_eligibility import is_addressed_by_election
 
 
 def test_addressed_employee_is_suppressed():

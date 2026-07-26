@@ -427,7 +427,7 @@ async def _load_guidance_context(conn, case_id: UUID, case_row) -> dict[str, Any
 
 def _build_er_analyzer(model_override: Optional[str] = None):
     """Create ERAnalyzer using shared Gemini credential cascade."""
-    from ...services.er_analyzer import ERAnalyzer
+    from ...services.er.er_analyzer import ERAnalyzer
 
     settings = get_settings()
     model = "gemini-3.1-pro-preview" if model_override == "pro" else settings.analysis_model

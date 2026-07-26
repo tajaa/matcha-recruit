@@ -3,7 +3,7 @@
 Loss ratio = projected ultimate ÷ paid premium, per (line, policy year), with a
 per-year account rollup. Threshold: < 60% favorable, >= 60% adverse, no premium = na.
 """
-from app.matcha.services import loss_development as ld
+from app.matcha.services.insurance import loss_development as ld
 
 
 def _dev():

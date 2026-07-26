@@ -7,7 +7,7 @@ from unittest.mock import patch, MagicMock, AsyncMock
 # override leaks process-wide and breaks whichever test imports next.
 
 from app.config import load_settings
-from app.matcha.services.matcha_work_ai import GeminiProvider, AIResponse
+from app.matcha.services.matcha_work.matcha_work_ai import GeminiProvider, AIResponse
 
 @pytest.fixture(scope="module", autouse=True)
 def setup_settings():
@@ -114,7 +114,7 @@ async def test_image_generation_routing_and_upload(mock_get_storage):
 
 
 @pytest.mark.asyncio
-@patch("app.matcha.services.matcha_work_ai._get_model")
+@patch("app.matcha.services.matcha_work.matcha_work_ai._get_model")
 @patch("app.core.services.storage.get_storage")
 async def test_non_image_requests_normal_flow(mock_get_storage, mock_get_model):
     mock_get_model.return_value = "gemini-3.5-flash"

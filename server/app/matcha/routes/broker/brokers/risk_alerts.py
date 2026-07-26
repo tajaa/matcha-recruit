@@ -94,7 +94,7 @@ async def scan_broker_theme_alerts_endpoint(current_user: CurrentUser = Depends(
     IR Themes & People analysis. Runs in FastAPI (the theme detection needs the DB
     pool, which the alert worker doesn't have). The FE calls this when the Alerts
     tab opens; results land in the same broker_risk_alerts table as trend alerts."""
-    from app.matcha.services.broker_theme_alerts import scan_broker_theme_alerts
+    from app.matcha.services.broker.broker_theme_alerts import scan_broker_theme_alerts
     async with get_connection() as conn:
         membership = await _get_broker_membership(conn, user_id=current_user.id)
         broker_id = membership["broker_id"]

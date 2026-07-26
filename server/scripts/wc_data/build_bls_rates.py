@@ -6,7 +6,7 @@ Source (free, public, no login — but bot-blocked, so downloaded by hand):
   https://www.bls.gov/web/osh/table-1-industry-rates-national.htm  (XLSX or "print" PDF)
 Saved here as bls_table1_industry_rates_2024.pdf (gitignored — re-download to refresh).
 
-Output: app/matcha/services/bls_injury_rates_2024.py with
+Output: app/matcha/services/insurance/bls_injury_rates_2024.py with
   BLS_INJURY_RATES = { "<naics>": {"label": ..., "trc": <float>, "dart": <float|None>}, ... }
 2-digit NAICS ranges (31-33, 44-45, 48-49) are also stored under each member code
 so a 2-digit sector lookup always resolves. Re-run:
@@ -20,7 +20,7 @@ import subprocess
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PDF = os.path.join(HERE, "bls_table1_industry_rates_2024.pdf")
-OUT = os.path.join(HERE, "..", "..", "app", "matcha", "services", "bls_injury_rates_2024.py")
+OUT = os.path.join(HERE, "..", "..", "app", "matcha", "services", "insurance", "bls_injury_rates_2024.py")
 YEAR = 2024
 SOURCE = "BLS SOII Table 1 (2024)"
 

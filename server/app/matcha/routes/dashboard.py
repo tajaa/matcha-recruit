@@ -314,7 +314,7 @@ async def get_dashboard_stats(
     # Hourly wage gap vs. BLS market (§3.1, QSR_RETENTION_PLAN.md)
     wage_gap_summary = None
     try:
-        from ..services.wage_benchmark_service import compute_company_wage_gap
+        from ..services.workforce.wage_benchmark_service import compute_company_wage_gap
         gap = await compute_company_wage_gap(company_id)
         # Only surface when there's an hourly population to talk about — the
         # widget is noise on companies with 0 hourly employees.
@@ -338,7 +338,7 @@ async def get_dashboard_stats(
     # Composite flight-risk score (§3.3, QSR_RETENTION_PLAN.md)
     flight_risk_summary = None
     try:
-        from ..services.flight_risk_service import compute_company_summary
+        from ..services.workforce.flight_risk_service import compute_company_summary
         fr = await compute_company_summary(company_id)
         # Only surface when there are employees to evaluate — avoids a
         # widget that always reads "0 evaluated" on empty companies.
@@ -920,7 +920,7 @@ async def get_wage_gap_details(
         return WageGapDetailsResponse(employees=[], role_rollups=[])
 
     try:
-        from ..services.wage_benchmark_service import compute_employee_wage_gaps
+        from ..services.workforce.wage_benchmark_service import compute_employee_wage_gaps
         gaps, rollups = await compute_employee_wage_gaps(company_id)
     except asyncpg.UndefinedTableError:
         return WageGapDetailsResponse(employees=[], role_rollups=[])
@@ -950,7 +950,7 @@ async def export_wage_gap_csv(
         return Response(content="", media_type="text/csv")
 
     try:
-        from ..services.wage_benchmark_service import compute_employee_wage_gaps
+        from ..services.workforce.wage_benchmark_service import compute_employee_wage_gaps
         gaps, _ = await compute_employee_wage_gaps(company_id)
     except asyncpg.UndefinedTableError:
         gaps = []
@@ -1948,7 +1948,7 @@ async def resolve_escalated_query(
     note = (body.resolution_note or "").strip()
     if thread_id and note:
         try:
-            from app.matcha.services import matcha_work_document as _doc_svc
+            from app.matcha.services.matcha_work import matcha_work_document as _doc_svc
             from app.matcha.routes.matcha_work._shared import _row_to_message
             posted = await _doc_svc.add_message(
                 thread_id,

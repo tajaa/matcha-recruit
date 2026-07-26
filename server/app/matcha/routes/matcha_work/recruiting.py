@@ -26,8 +26,8 @@ from app.matcha.routes.matcha_work._shared import (
     _strip_markdown,
     _verify_project_access,
 )
-from app.matcha.services.er_document_parser import ERDocumentParser
-from app.matcha.services.matcha_work_ai import get_ai_provider
+from app.matcha.services.er.er_document_parser import ERDocumentParser
+from app.matcha.services.matcha_work.matcha_work_ai import get_ai_provider
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -47,7 +47,7 @@ async def list_recruiting_clients_endpoint(
     include_archived: bool = Query(False),
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    from app.matcha.services import recruiting_client_service as rc_svc
+    from app.matcha.services.matcha_work import recruiting_client_service as rc_svc
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         return []
@@ -58,7 +58,7 @@ async def create_recruiting_client_endpoint(
     body: dict,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    from app.matcha.services import recruiting_client_service as rc_svc
+    from app.matcha.services.matcha_work import recruiting_client_service as rc_svc
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         raise HTTPException(status_code=400, detail="No company associated")
@@ -79,7 +79,7 @@ async def get_recruiting_client_endpoint(
     client_id: UUID,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    from app.matcha.services import recruiting_client_service as rc_svc
+    from app.matcha.services.matcha_work import recruiting_client_service as rc_svc
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         raise HTTPException(status_code=404, detail="Not found")
@@ -94,7 +94,7 @@ async def update_recruiting_client_endpoint(
     body: dict,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    from app.matcha.services import recruiting_client_service as rc_svc
+    from app.matcha.services.matcha_work import recruiting_client_service as rc_svc
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         raise HTTPException(status_code=404, detail="Not found")
@@ -108,7 +108,7 @@ async def archive_recruiting_client_endpoint(
     client_id: UUID,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    from app.matcha.services import recruiting_client_service as rc_svc
+    from app.matcha.services.matcha_work import recruiting_client_service as rc_svc
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         raise HTTPException(status_code=404, detail="Not found")
@@ -122,7 +122,7 @@ async def unarchive_recruiting_client_endpoint(
     client_id: UUID,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    from app.matcha.services import recruiting_client_service as rc_svc
+    from app.matcha.services.matcha_work import recruiting_client_service as rc_svc
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         raise HTTPException(status_code=404, detail="Not found")
@@ -142,7 +142,7 @@ async def list_project_chats_endpoint(
     any project thread shared with them. Access to the project itself is
     verified first.
     """
-    from app.matcha.services import project_service as proj_svc
+    from app.matcha.services.matcha_work import project_service as proj_svc
     project, _role = await _verify_project_access(project_id, current_user)
     company_id = project.get("company_id")
     if company_id is None:
@@ -156,7 +156,7 @@ async def create_project_chat_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Create a new chat within a project."""
-    from app.matcha.services import project_service as proj_svc
+    from app.matcha.services.matcha_work import project_service as proj_svc
     project, _role = await _verify_project_access(project_id, current_user)
     company_id = project.get("company_id")
     if company_id is None:
@@ -170,7 +170,7 @@ async def populate_posting_from_chat(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Extract structured posting fields from a chat message using AI."""
-    from app.matcha.services import project_service as proj_svc
+    from app.matcha.services.matcha_work import project_service as proj_svc
 
     project, _role = await _verify_project_access(project_id, current_user)
 
@@ -218,7 +218,7 @@ async def update_project_posting(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Update the job posting data for a recruiting project."""
-    from app.matcha.services import project_service as proj_svc
+    from app.matcha.services.matcha_work import project_service as proj_svc
     await _verify_project_access(project_id, current_user)
     return await proj_svc.update_project_data(project_id, {"posting": body})
 
@@ -229,7 +229,7 @@ async def toggle_project_shortlist(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Toggle a candidate on/off the shortlist."""
-    from app.matcha.services import project_service as proj_svc
+    from app.matcha.services.matcha_work import project_service as proj_svc
     await _verify_project_access(project_id, current_user)
     return await proj_svc.toggle_shortlist(project_id, candidate_id)
 
@@ -240,7 +240,7 @@ async def toggle_project_dismiss(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Toggle a candidate on/off the dismissed list."""
-    from app.matcha.services import project_service as proj_svc
+    from app.matcha.services.matcha_work import project_service as proj_svc
     await _verify_project_access(project_id, current_user)
     return await proj_svc.toggle_dismiss(project_id, candidate_id)
 
@@ -256,7 +256,7 @@ async def reject_project_candidate(
     When `send_email=false` this is equivalent to dismissing the candidate
     with a `status='rejected'` marker — no email goes out.
     """
-    from app.matcha.services import project_service as proj_svc
+    from app.matcha.services.matcha_work import project_service as proj_svc
     from app.core.services.email import EmailService
 
     project, _role = await _verify_project_access(project_id, current_user)
@@ -335,7 +335,7 @@ async def upload_project_resumes(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Upload resumes to a recruiting project — extract candidates into project_data."""
-    from app.matcha.services import project_service as proj_svc
+    from app.matcha.services.matcha_work import project_service as proj_svc
 
     project, _role = await _verify_project_access(project_id, current_user)
 
@@ -520,7 +520,7 @@ async def analyze_project_candidates(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Rank candidates against the job posting using AI."""
-    from app.matcha.services import project_service as proj_svc
+    from app.matcha.services.matcha_work import project_service as proj_svc
 
     project, _role = await _verify_project_access(project_id, current_user)
 
@@ -636,7 +636,7 @@ async def send_project_interviews(
 ):
     """Create screening interviews for selected project candidates and send invite emails."""
     import secrets as _secrets
-    from app.matcha.services import project_service as proj_svc
+    from app.matcha.services.matcha_work import project_service as proj_svc
     from app.core.services.email import EmailService
 
     project, _role = await _verify_project_access(project_id, current_user)
@@ -741,7 +741,7 @@ async def sync_project_interviews(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Sync interview statuses back into project candidates."""
-    from app.matcha.services import project_service as proj_svc
+    from app.matcha.services.matcha_work import project_service as proj_svc
 
     project, _role = await _verify_project_access(project_id, current_user)
 

@@ -21,12 +21,12 @@ from app.matcha.dependencies import (
     get_client_company_id,
     require_employee_record,
 )
-from app.matcha.services.training_grading import (
+from app.matcha.services.training.training_grading import (
     grade_quiz as _grade_quiz_pure,
     parse_jsonb as _parse_jsonb,
     sanitize_lesson_template as _sanitize_lesson_template,
 )
-from app.matcha.services.training_assignment import (
+from app.matcha.services.training.training_assignment import (
     assign_training as _assign_training,
 )
 from app.core.models.auth import CurrentUser
@@ -1192,7 +1192,7 @@ async def attest_completion(
 ):
     """Finalize training: requires a passed quiz attempt. Generates PDF cert,
     uploads to S3, sets completion fields, returns presigned cert URL."""
-    from app.matcha.services.training_pdf import (
+    from app.matcha.services.training.training_pdf import (
         new_certificate_id,
         render_certificate_pdf,
         upload_certificate,

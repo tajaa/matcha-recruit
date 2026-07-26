@@ -209,7 +209,7 @@ class TestStartCall:
             "lk_config": patch(f"{LK}._get_lk_config", return_value=("ws://t", "k", "s")),
             "create_room": patch(f"{LK}.create_room", AsyncMock()),
             "mint_token": patch(f"{LK}.mint_token", return_value="jwt"),
-            "require_plan": patch("app.matcha.services.entitlements_service.require_plan", AsyncMock()),
+            "require_plan": patch("app.matcha.services.billing.entitlements_service.require_plan", AsyncMock()),
         }
 
     @staticmethod

@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 
 from ....database import get_connection
 from ...dependencies import require_admin_or_client, get_client_company_id
-from ...services import controls_evidence as ce
+from ...services.insurance import controls_evidence as ce
 from ...models.controls_evidence import ControlEvidenceUpdate
 
 router = APIRouter()

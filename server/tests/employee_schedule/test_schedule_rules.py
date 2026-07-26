@@ -11,7 +11,7 @@ from datetime import date, datetime, time, timezone
 from pathlib import Path
 from uuid import uuid4
 
-from app.matcha.services.schedule_rules import (
+from app.matcha.services.scheduling.schedule_rules import (
     INACTIVE_EMPLOYMENT_STATUSES,
     build_patch,
     conflict_detail,

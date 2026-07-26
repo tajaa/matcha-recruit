@@ -18,7 +18,7 @@ import logging
 
 from ..celery_app import celery_app
 from ..utils import get_db_connection
-from app.matcha.services import benefits_eligibility as be
+from app.matcha.services.benefits import benefits_eligibility as be
 
 logger = logging.getLogger(__name__)
 

@@ -193,7 +193,7 @@ async def create_corrective_action(
 
         if training_requirement_id and incident["involved_employee_ids"]:
             try:
-                from app.matcha.services.training_assignment import assign_training
+                from app.matcha.services.training.training_assignment import assign_training
 
                 await assign_training(
                     conn,
@@ -492,7 +492,7 @@ async def assign_training_from_incident(
                 str(requirement["id"]), str(payload.corrective_action_id),
             )
 
-        from app.matcha.services.training_assignment import assign_training
+        from app.matcha.services.training.training_assignment import assign_training
 
         outcome = await assign_training(
             conn,

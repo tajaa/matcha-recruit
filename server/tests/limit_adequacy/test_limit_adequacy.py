@@ -1,8 +1,8 @@
 """Pure tests for the limit-adequacy engine + contract-requirement coercion.
 DB build_review is smoke-tested against dev separately."""
 
-from app.matcha.services import limit_adequacy as la
-from app.matcha.services import contract_parser as cp
+from app.matcha.services.insurance import limit_adequacy as la
+from app.matcha.services.insurance import contract_parser as cp
 
 M = 1_000_000
 
@@ -275,7 +275,7 @@ DELETED: list = []
 
 
 def _install_fakes(monkeypatch, *, upload_raises: bool):
-    from app.matcha.services import risk_transfer as rtx
+    from app.matcha.services.insurance import risk_transfer as rtx
 
     async def fake_parse(_data):
         return {"counterparty": "Acme", "contract_type": "construction",
@@ -365,7 +365,7 @@ def test_discard_source_is_best_effort_and_ignores_a_missing_path(monkeypatch):
 def test_one_bad_contract_does_not_strip_verdicts_off_the_others(monkeypatch):
     """attach_verdicts mutates the list in place — an exception on one row must
     not leave every later row without a verdict."""
-    from app.matcha.services import risk_transfer as rtx
+    from app.matcha.services.insurance import risk_transfer as rtx
 
     real = rtx.assess_indemnity
 

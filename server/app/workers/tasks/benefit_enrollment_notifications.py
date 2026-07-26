@@ -26,7 +26,7 @@ from ..celery_app import celery_app
 from ..utils import get_db_connection, scheduler_settings_row
 from app.config import get_settings
 from app.core.services.email import get_email_service
-from app.matcha.services.benefits_enrollment import (
+from app.matcha.services.benefits.benefits_enrollment import (
     CLOSING_SOON_DAYS,
     NUDGE_AFTER_DAYS,
     build_closing_soon_email,

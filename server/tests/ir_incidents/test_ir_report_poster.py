@@ -4,7 +4,7 @@ Pure-function test — no DB, no app boot. Renders through WeasyPrint (real,
 not mocked) since that's the actual behavior being verified: valid HTML in,
 valid PDF bytes out.
 """
-from app.matcha.services.ir_report_poster import (
+from app.matcha.services.ir.ir_report_poster import (
     DEFAULT_BRANDING,
     _text_on,
     build_report_poster_pdf,

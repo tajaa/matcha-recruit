@@ -1,6 +1,6 @@
 """Pure tests for controls-evidence helpers (DB/render paths smoke-tested vs dev)."""
 
-from app.matcha.services import controls_evidence as ce
+from app.matcha.services.insurance import controls_evidence as ce
 
 
 def test_catalog_has_8_unique_keys():

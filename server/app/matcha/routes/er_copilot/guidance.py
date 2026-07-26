@@ -10,13 +10,14 @@ from fastapi import APIRouter, HTTPException, Depends, Response, Query
 from ....database import get_connection
 from ...dependencies import require_admin_or_client, get_client_company_id
 from ....core.models.auth import CurrentUser
-from ...services.er_guidance import (
+from ...services.er.er_guidance import (
     _build_fallback_guidance_payload,
     _determination_confidence_floor,
     _normalize_analysis_payload,
     _normalize_suggested_guidance_payload,
 )
-from ...services import er_compliance_grounding, legal_defense
+from ...services.er import er_compliance_grounding
+from ...services.pilots import legal_defense
 from ...models.er_case import (
     SuggestedGuidanceResponse,
     OutcomeAnalysisResponse,

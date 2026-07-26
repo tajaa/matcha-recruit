@@ -9,10 +9,10 @@ from datetime import date, timedelta
 
 import pytest
 
-from app.matcha.services import workforce_compliance as wf
-from app.matcha.services import epl_readiness as epl
-from app.matcha.services import pay_equity_analysis as pe
-from app.matcha.services import workforce_requirement_gate as gate
+from app.matcha.services.workforce import workforce_compliance as wf
+from app.matcha.services.broker import epl_readiness as epl
+from app.matcha.services.workforce import pay_equity_analysis as pe
+from app.matcha.services.workforce import workforce_requirement_gate as gate
 
 
 # --- audit_dates (AI-audit cadence / overdue math) -------------------------

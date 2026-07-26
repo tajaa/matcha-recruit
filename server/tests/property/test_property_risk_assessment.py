@@ -1,10 +1,10 @@
 """Pure-logic tests for the composite property risk ASSESSMENT (per-building + portfolio).
 
-No DB — only app.matcha.services.property_risk. (Distinct from test_property_risk.py,
-which covers risk_index._property_score, the cross-line composite feed.)
+No DB — only app.matcha.services.property.property_risk. (Distinct from test_property_risk.py,
+which covers broker.risk_index._property_score, the cross-line composite feed.)
 """
 
-from app.matcha.services import property_risk as pr
+from app.matcha.services.property import property_risk as pr
 
 
 def _b(bid="b1", cope_score=90, cope_grade="A", itv_ratio=1.0, perils=None,

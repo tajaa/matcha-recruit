@@ -63,7 +63,7 @@ async def _bg_sync_channel_attachments(channel_id_str: str, user_id, attachments
                 channel_id_str,
             )
             if proj_id:
-                from app.matcha.services.project_file_service import (
+                from app.matcha.services.matcha_work.project_file_service import (
                     sync_channel_attachments_to_project,
                 )
                 await sync_channel_attachments_to_project(
@@ -858,7 +858,7 @@ async def channel_websocket(
                             # payload carries the resolved IDs for client-side chip
                             # rendering. Email enqueue happens below; emails are
                             # rate-limited and only send to offline users.
-                            from app.matcha.services.mentions import (
+                            from app.matcha.services.matcha_work.mentions import (
                                 parse_mentions, resolve_mentions,
                             )
                             mention_handles = parse_mentions(row["content"])

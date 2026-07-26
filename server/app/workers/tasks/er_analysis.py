@@ -39,7 +39,7 @@ def _safe_publish_progress(**kwargs) -> None:
 
 def _build_er_analyzer(model_override: Optional[str] = None):
     """Create ERAnalyzer using the same credential cascade as GeminiComplianceService."""
-    from app.matcha.services.er_analyzer import ERAnalyzer
+    from app.matcha.services.er.er_analyzer import ERAnalyzer
     from app.config import load_settings
     import os
 
@@ -327,7 +327,7 @@ def _text_fingerprint(value: str) -> str:
 async def _extract_text_from_file_url(file_url: str, fallback_filename: str) -> str:
     """Download a file from storage and extract plain text for analysis."""
     from app.core.services.storage import get_storage
-    from app.matcha.services.er_document_parser import ERDocumentParser
+    from app.matcha.services.er.er_document_parser import ERDocumentParser
     from urllib.parse import urlparse, unquote
     import os
 

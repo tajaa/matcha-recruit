@@ -1,7 +1,7 @@
 """Pure-logic tests for the composite risk index. compute_risk_index itself is
 DB-coupled (exercised by a dev integration smoke); these cover the pure pieces."""
 
-from app.matcha.services import risk_index, epl_readiness
+from app.matcha.services.broker import risk_index, epl_readiness
 
 
 def test_band_reexports_epl_thresholds():

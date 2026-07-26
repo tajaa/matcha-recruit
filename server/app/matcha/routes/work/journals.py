@@ -12,8 +12,8 @@ from pydantic import BaseModel
 from app.core.models.auth import CurrentUser
 from app.core.services.storage import get_storage
 from app.matcha.dependencies import require_admin_or_client, get_client_company_id
-from app.matcha.services import entitlements_service
-from app.matcha.services import journal_service
+from app.matcha.services.billing import entitlements_service
+from app.matcha.services.matcha_work import journal_service
 
 router = APIRouter()
 

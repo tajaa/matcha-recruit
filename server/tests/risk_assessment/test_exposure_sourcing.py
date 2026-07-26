@@ -9,7 +9,7 @@ customer was asked to act on, while our own catalog said $70,304 for California.
 """
 import pytest
 
-from app.matcha.services.risk_assessment_service import (
+from app.matcha.services.risk_analytics.risk_assessment_service import (
     _UNSOURCED_REASONS,
     _exempt_threshold_sentence,
     _stamp_sourcing,
@@ -121,6 +121,6 @@ def test_each_reason_explains_rather_than_hedges(key):
 def test_the_reason_map_covers_every_key_monte_carlo_knows():
     """monte_carlo keys off line_item['key']; a key it models but we never label
     is a line that renders unexplained."""
-    from app.matcha.services.monte_carlo_service import STOCHASTIC_LAMBDA_OVERRIDES
+    from app.matcha.services.risk_analytics.monte_carlo_service import STOCHASTIC_LAMBDA_OVERRIDES
     for key in STOCHASTIC_LAMBDA_OVERRIDES:
         assert key in _UNSOURCED_REASONS, f"{key} is modelled but unlabelled"

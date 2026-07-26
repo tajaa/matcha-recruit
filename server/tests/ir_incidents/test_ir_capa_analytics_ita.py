@@ -135,7 +135,7 @@ def _fixture_establishment() -> dict:
 
 
 def test_ita_size_category_bands():
-    from app.matcha.services.ir_ita_submission import ita_size_category as _ita_size_category
+    from app.matcha.services.ir.ir_ita_submission import ita_size_category as _ita_size_category
 
     # Bands are OSHA's, not a 1..n sequence: the data dictionary says enter 1
     # (<20), 21 (20-99), 22 (100-249), 3 (250+).
@@ -150,7 +150,7 @@ def test_ita_size_category_bands():
 
 
 def test_build_ita_establishment_payload_shape():
-    from app.matcha.services.ir_ita_submission import build_ita_establishment_payload
+    from app.matcha.services.ir.ir_ita_submission import build_ita_establishment_payload
 
     payload = build_ita_establishment_payload(_fixture_establishment())
 
@@ -167,7 +167,7 @@ def test_build_ita_establishment_payload_shape():
 def test_ita_normalizers_strip_to_digits():
     """The CSV export and the API payload both send these, and the pre-flight
     validator judges the same digits — they must not drift."""
-    from app.matcha.services.ir_ita_submission import _normalize_ein, _normalize_zip
+    from app.matcha.services.ir.ir_ita_submission import _normalize_ein, _normalize_zip
 
     assert _normalize_ein("12-3456789") == "123456789"
     assert _normalize_ein(" 12 3456789 ") == "123456789"
@@ -186,14 +186,14 @@ def test_ita_normalizers_strip_to_digits():
 def test_build_ita_establishment_payload_strips_ein_punctuation():
     """OSHA rejects the canonical hyphenated IRS form with "EIN can only contain
     numbers" — a 403 wrapping an upstream 400 that fails the whole batch."""
-    from app.matcha.services.ir_ita_submission import build_ita_establishment_payload
+    from app.matcha.services.ir.ir_ita_submission import build_ita_establishment_payload
 
     payload = build_ita_establishment_payload(_fixture_establishment())
     assert payload["ein"] == {"ein": "123456789"}
 
 
 def test_build_ita_establishment_payload_omits_absent_ein():
-    from app.matcha.services.ir_ita_submission import build_ita_establishment_payload
+    from app.matcha.services.ir.ir_ita_submission import build_ita_establishment_payload
 
     est = _fixture_establishment()
     est["ein"] = None
@@ -204,7 +204,7 @@ def test_build_ita_establishment_payload_omits_absent_ein():
 
 
 def test_build_ita_form300a_payload_matches_aggregate_numbers():
-    from app.matcha.services.ir_ita_submission import build_ita_form300a_payload
+    from app.matcha.services.ir.ir_ita_submission import build_ita_form300a_payload
 
     payload = build_ita_form300a_payload(_fixture_establishment(), "1182988", 2025)
 
@@ -223,7 +223,7 @@ def test_build_ita_form300a_payload_matches_aggregate_numbers():
 
 
 def test_build_ita_form300a_payload_zero_cases_flags_no_injuries():
-    from app.matcha.services.ir_ita_submission import build_ita_form300a_payload
+    from app.matcha.services.ir.ir_ita_submission import build_ita_form300a_payload
 
     est = _fixture_establishment()
     est["agg"]["total_cases"] = 0
@@ -236,7 +236,7 @@ def test_extract_message_reads_osha_string_error_body():
     JSON *string* wrapping the upstream 400, and truncates it mid-JSON. Reading
     only dict bodies rendered every rejection as "returned HTTP 403", which reads
     as an auth failure."""
-    from app.matcha.services.ir_ita_submission import _extract_message
+    from app.matcha.services.ir.ir_ita_submission import _extract_message
 
     truncated = (
         "Client error: `POST http://ita:8080/v1/users/280156/establishments` resulted in a "

@@ -6,7 +6,7 @@ is verified manually against the sandbox (see the plan / module docstring).
 """
 import pytest
 
-from app.matcha.services.ir_ita_submission import (
+from app.matcha.services.ir.ir_ita_submission import (
     ita_size_category,
     build_ita_establishment_payload,
     build_ita_form300a_payload,

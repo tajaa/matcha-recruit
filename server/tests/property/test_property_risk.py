@@ -4,8 +4,8 @@ No DB — only risk_index pure helpers. The DB-backed _property_component /
 compute_risk_index are exercised by manual integration on dev.
 """
 
-from app.matcha.services import risk_index as ri
-from app.matcha.services import epl_readiness as epl
+from app.matcha.services.broker import risk_index as ri
+from app.matcha.services.broker import epl_readiness as epl
 
 
 def _rollup(score, ratio=None, under=0, n=2):

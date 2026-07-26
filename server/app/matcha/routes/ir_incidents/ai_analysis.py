@@ -68,7 +68,7 @@ async def analyze_categorization(
     current_user=Depends(require_admin_or_client),
 ):
     """Auto-categorize an incident using AI."""
-    from app.matcha.services.ir_analysis import get_ir_analyzer, IRAnalysisError
+    from app.matcha.services.ir.ir_analysis import get_ir_analyzer, IRAnalysisError
 
     async with get_connection() as conn:
         row = await _get_incident_with_company_check(
@@ -156,7 +156,7 @@ async def analyze_severity(
     current_user=Depends(require_admin_or_client),
 ):
     """Assess incident severity using AI."""
-    from app.matcha.services.ir_analysis import get_ir_analyzer, IRAnalysisError
+    from app.matcha.services.ir.ir_analysis import get_ir_analyzer, IRAnalysisError
 
     async with get_connection() as conn:
         row = await _get_incident_with_company_check(conn, incident_id, current_user)
@@ -253,7 +253,7 @@ async def run_root_cause_inline(
     SSE endpoint. Raises ``IRAnalysisError`` if the LLM fails AND no
     cached row exists.
     """
-    from app.matcha.services.ir_analysis import get_ir_analyzer, IRAnalysisError
+    from app.matcha.services.ir.ir_analysis import get_ir_analyzer, IRAnalysisError
 
     async with get_connection() as conn:
         row = await _get_incident_with_company_check(conn, incident_id, current_user)
@@ -345,7 +345,7 @@ async def run_followup_questions_inline(
     Returns the analysis dict (``questions`` + ``reasoning``). Raises
     ``IRAnalysisError`` if the LLM fails AND no cached row exists.
     """
-    from app.matcha.services.ir_analysis import get_ir_analyzer, IRAnalysisError
+    from app.matcha.services.ir.ir_analysis import get_ir_analyzer, IRAnalysisError
 
     async with get_connection() as conn:
         row = await _get_incident_with_company_check(conn, incident_id, current_user)
@@ -418,7 +418,7 @@ async def analyze_root_cause(
     ``run_root_cause_inline`` so the IR Copilot accept handler can invoke
     the same logic without SSE wrapping.
     """
-    from app.matcha.services.ir_analysis import IRAnalysisError
+    from app.matcha.services.ir.ir_analysis import IRAnalysisError
 
     # Pre-fetch for auth + cached probe (mirrors run_root_cause_inline's
     # cached path so the SSE can report from_cache without re-querying).
@@ -487,7 +487,7 @@ async def run_recommendations_inline(
     ``analyze_recommendations``' data-gathering + caching; raises
     ``IRAnalysisError`` if the LLM fails AND no cached row exists.
     """
-    from app.matcha.services.ir_analysis import get_ir_analyzer, IRAnalysisError
+    from app.matcha.services.ir.ir_analysis import get_ir_analyzer, IRAnalysisError
     from app.matcha.models.ir_incident import RecommendationItem
 
     async with get_connection() as conn:
@@ -596,7 +596,7 @@ async def analyze_recommendations(
     current_user=Depends(require_admin_or_client),
 ):
     """Generate corrective action recommendations using AI (SSE stream)."""
-    from app.matcha.services.ir_analysis import get_ir_analyzer, IRAnalysisError
+    from app.matcha.services.ir.ir_analysis import get_ir_analyzer, IRAnalysisError
     from app.matcha.models.ir_incident import RecommendationItem
 
     # Pre-fetch all data before starting the stream
@@ -753,7 +753,7 @@ async def analyze_similar_incidents(
     current_user=Depends(require_admin_or_client),
 ):
     """Find precedent incidents using hybrid similarity scoring (SSE stream)."""
-    from app.matcha.services.ir_precedent import find_precedents_stream
+    from app.matcha.services.ir.ir_precedent import find_precedents_stream
 
     # Pre-fetch data before starting the stream
     async with get_connection() as conn:
@@ -896,7 +896,7 @@ async def _incident_statute_fields(row, company_id: str) -> dict:
     them to those the incident type implicates. Never raises — statute grounding
     is additive and must not break the existing policy mapping."""
     try:
-        from app.matcha.services import ir_statute_grounding
+        from app.matcha.services.ir import ir_statute_grounding
 
         incident = {
             "location_id": row.get("location_id"),
@@ -922,7 +922,7 @@ async def _incident_statute_fields(row, company_id: str) -> dict:
 async def _auto_map_policy_violations(incident_id: str, company_id: str):
     """Background task: auto-map incident to company policies."""
     try:
-        from app.matcha.services.ir_analysis import get_ir_analyzer
+        from app.matcha.services.ir.ir_analysis import get_ir_analyzer
 
         async with get_connection() as conn:
             # Fetch incident
@@ -1103,7 +1103,7 @@ async def get_policy_mapping(
     current_user=Depends(require_admin_or_client),
 ):
     """Get policy violation mapping for an incident."""
-    from app.matcha.services.ir_analysis import get_ir_analyzer
+    from app.matcha.services.ir.ir_analysis import get_ir_analyzer
 
     async with get_connection() as conn:
         inc = await _get_incident_with_company_check(conn, incident_id, current_user, columns="id, title, description, incident_type, severity, category_data, company_id, location_id")
@@ -1242,7 +1242,7 @@ async def get_consistency_guidance(
     current_user=Depends(require_admin_or_client),
 ):
     """Get consistency guidance based on precedent analysis for an incident."""
-    from app.matcha.services.ir_consistency import compute_outcome_distribution
+    from app.matcha.services.ir.ir_consistency import compute_outcome_distribution
 
     async with get_connection() as conn:
         # Verify incident exists and belongs to company

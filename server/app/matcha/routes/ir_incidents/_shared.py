@@ -674,7 +674,7 @@ async def _auto_classify_incident_task(
     Any failure is logged and swallowed — never re-raised.
     """
     try:
-        from app.matcha.services.ir_analysis import get_ir_analyzer, IRAnalysisError
+        from app.matcha.services.ir.ir_analysis import get_ir_analyzer, IRAnalysisError
     except Exception:  # pragma: no cover - import problems shouldn't crash submit
         logger.exception("[IR] Unable to import IRAnalyzer for auto-classify")
         return

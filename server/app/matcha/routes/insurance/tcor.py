@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from ....database import get_connection
 from ...dependencies import require_admin_or_client, get_client_company_id
-from ...services import tcor_service
+from ...services.insurance import tcor_service
 from ...models.tcor import TcorInput
 
 router = APIRouter()

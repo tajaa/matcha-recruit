@@ -45,7 +45,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 from uuid import UUID
 
-from app.matcha.services.schedule_rules import INACTIVE_EMPLOYMENT_STATUSES
+from app.matcha.services.scheduling.schedule_rules import INACTIVE_EMPLOYMENT_STATUSES
 
 logger = logging.getLogger(__name__)
 

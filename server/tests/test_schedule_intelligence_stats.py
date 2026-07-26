@@ -6,7 +6,7 @@ DB — see the plan's verification section.
 
 from datetime import date, datetime, timedelta, timezone
 
-from app.matcha.services import schedule_intelligence_stats as sis
+from app.matcha.services.scheduling import schedule_intelligence_stats as sis
 
 
 def _dt(iso: str) -> datetime:

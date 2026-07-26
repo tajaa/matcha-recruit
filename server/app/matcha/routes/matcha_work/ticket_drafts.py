@@ -25,7 +25,7 @@ async def list_ticket_drafts_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     await _verify_project_access(project_id, current_user)
-    from app.matcha.services import ticket_draft_service as td_svc
+    from app.matcha.services.matcha_work import ticket_draft_service as td_svc
     return await td_svc.list_drafts(project_id, status)
 
 @router.post("/projects/{project_id}/ticket-drafts", status_code=201)
@@ -38,7 +38,7 @@ async def create_ticket_draft_endpoint(
     company_id = _project_company_id(project) or await get_client_company_id(current_user)
     if not company_id:
         raise HTTPException(status_code=400, detail="No company context")
-    from app.matcha.services import ticket_draft_service as td_svc
+    from app.matcha.services.matcha_work import ticket_draft_service as td_svc
     try:
         return await td_svc.create_draft(
             project_id, company_id, current_user.id,
@@ -56,7 +56,7 @@ async def get_ticket_draft_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     await _verify_project_access(project_id, current_user)
-    from app.matcha.services import ticket_draft_service as td_svc
+    from app.matcha.services.matcha_work import ticket_draft_service as td_svc
     draft = await td_svc.get_draft(project_id, draft_id)
     if not draft:
         raise HTTPException(status_code=404, detail="Draft not found")
@@ -70,7 +70,7 @@ async def update_ticket_draft_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     await _verify_project_access(project_id, current_user)
-    from app.matcha.services import ticket_draft_service as td_svc
+    from app.matcha.services.matcha_work import ticket_draft_service as td_svc
     draft = await td_svc.update_draft(project_id, draft_id, body)
     if not draft:
         raise HTTPException(status_code=404, detail="Draft not found")
@@ -83,7 +83,7 @@ async def delete_ticket_draft_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     await _verify_project_access(project_id, current_user)
-    from app.matcha.services import ticket_draft_service as td_svc
+    from app.matcha.services.matcha_work import ticket_draft_service as td_svc
     if not await td_svc.delete_draft(project_id, draft_id):
         raise HTTPException(status_code=404, detail="Draft not found")
     return {"deleted": True}
@@ -95,7 +95,7 @@ async def list_ticket_draft_messages_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     await _verify_project_access(project_id, current_user)
-    from app.matcha.services import ticket_draft_service as td_svc
+    from app.matcha.services.matcha_work import ticket_draft_service as td_svc
     return await td_svc.list_messages(project_id, draft_id)
 
 @router.post("/projects/{project_id}/ticket-drafts/{draft_id}/messages")
@@ -110,7 +110,7 @@ async def post_ticket_draft_message_endpoint(
     content = (body.get("content") or "").strip()
     if not content:
         raise HTTPException(status_code=400, detail="content is required")
-    from app.matcha.services import ticket_draft_service as td_svc
+    from app.matcha.services.matcha_work import ticket_draft_service as td_svc
     result = await td_svc.chat(
         project_id, draft_id, company_id, user_content=content, actor_user_id=current_user.id,
     )
@@ -126,7 +126,7 @@ async def generate_ticket_draft_fields_endpoint(
 ):
     project, _role = await _verify_project_access(project_id, current_user)
     company_id = _project_company_id(project) or await get_client_company_id(current_user)
-    from app.matcha.services import ticket_draft_service as td_svc
+    from app.matcha.services.matcha_work import ticket_draft_service as td_svc
     draft = await td_svc.generate_fields(project_id, draft_id, company_id)
     if not draft:
         raise HTTPException(status_code=404, detail="Draft not found")
@@ -143,7 +143,7 @@ async def promote_ticket_draft_endpoint(
     if not _can_edit_project(role):
         raise HTTPException(status_code=403, detail="You don't have edit access to this project")
     company_id = _project_company_id(project) or await get_client_company_id(current_user)
-    from app.matcha.services import ticket_draft_service as td_svc
+    from app.matcha.services.matcha_work import ticket_draft_service as td_svc
     try:
         task = await td_svc.promote(
             project_id, draft_id, company_id,

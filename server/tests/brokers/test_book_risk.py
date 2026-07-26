@@ -1,13 +1,13 @@
 """Pure-logic tests for the exposure-weighted book risk roll-up.
 
-No DB — only the pure function app.matcha.services.risk_index.weighted_book_risk.
+No DB — only the pure function app.matcha.services.broker.risk_index.weighted_book_risk.
 This is the canonical source of truth the client-side TS port (utils/bookRisk.ts)
 mirrors; the same fixtures are ported to client/src/utils/bookRisk.test.ts.
 """
 
 import pytest
 
-from app.matcha.services.risk_index import weighted_book_risk
+from app.matcha.services.broker.risk_index import weighted_book_risk
 
 
 def _c(index, band, headcount=None, premium=None, confidence=None):

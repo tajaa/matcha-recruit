@@ -21,7 +21,7 @@ from ...models.broker_chat import (
     MessageEdit,
     MessageOut,
 )
-from ...services import broker_chat_service as svc
+from ...services.broker import broker_chat_service as svc
 from ....core.models.auth import CurrentUser
 
 router = APIRouter()

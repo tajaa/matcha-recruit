@@ -35,7 +35,7 @@ async def set_project_pipeline_mode_endpoint(
     mw_projects.project_data.pipeline_mode via a non-destructive merge so the
     board can render sales stages / deal fields. Other project_data keys are
     preserved."""
-    from app.matcha.services import project_service as proj_svc
+    from app.matcha.services.matcha_work import project_service as proj_svc
 
     await _verify_project_access(project_id, current_user)
     enabled = bool(body.get("enabled", False))
@@ -49,7 +49,7 @@ async def count_done_tasks_endpoint(
     """`{total, this_week}` for the Done column. The board needs the total to
     label its "show N finished earlier" expander, which the task list itself
     can't supply — it never returns the whole column."""
-    from app.matcha.services import project_task_service as pt_svc
+    from app.matcha.services.matcha_work import project_task_service as pt_svc
     await _verify_project_access(project_id, current_user)
     return await pt_svc.count_done_tasks(project_id)
 
@@ -71,8 +71,8 @@ async def list_project_tasks_endpoint(
     no "show earlier" expander — keeps its cumulative Done column, now merely
     bounded rather than unbounded. The desktop board opens on `week` and
     re-requests `all` when the user expands Done."""
-    from app.matcha.services import project_task_service as pt_svc
-    from app.matcha.services import project_file_service
+    from app.matcha.services.matcha_work import project_task_service as pt_svc
+    from app.matcha.services.matcha_work import project_file_service
     await _verify_project_access(project_id, current_user)
     tasks = await pt_svc.list_project_tasks(project_id, viewer_id=current_user.id,
                                             done_scope=done_scope)
@@ -92,7 +92,7 @@ async def create_project_task_endpoint(
 ):
     """Create a kanban task in a project."""
     from datetime import date as _date
-    from app.matcha.services import project_task_service as pt_svc
+    from app.matcha.services.matcha_work import project_task_service as pt_svc
 
     project, _role = await _verify_project_access(project_id, current_user)
 
@@ -154,7 +154,7 @@ async def create_project_task_endpoint(
     # order; a bad item is skipped rather than failing the whole task create.
     raw_subtasks = body.get("subtasks")
     if isinstance(raw_subtasks, list) and result.get("id"):
-        from app.matcha.services import project_subtask_service as st_svc
+        from app.matcha.services.matcha_work import project_subtask_service as st_svc
         task_uuid = UUID(result["id"]) if isinstance(result["id"], str) else result["id"]
         created = 0
         for item in raw_subtasks[:50]:
@@ -185,7 +185,7 @@ async def update_project_task_endpoint(
 ):
     """Partial update. Drag-drop updates board_column; checkbox updates status."""
     from datetime import date as _date
-    from app.matcha.services import project_task_service as pt_svc
+    from app.matcha.services.matcha_work import project_task_service as pt_svc
 
     project, _role = await _verify_project_access(project_id, current_user)
 
@@ -257,7 +257,7 @@ async def reject_project_task_endpoint(
     store the reason, and email the assignee. Requires the task to be in the
     review column and a non-empty note explaining what's incomplete.
     """
-    from app.matcha.services import project_task_service as pt_svc
+    from app.matcha.services.matcha_work import project_task_service as pt_svc
 
     project, _role = await _verify_project_access(project_id, current_user)
 
@@ -288,7 +288,7 @@ async def approve_project_task_endpoint(
 ):
     """Reviewer approves a task out of review → done, recording a `review_approved`
     sign-off (approver + timestamp + optional note). Requires the task in review."""
-    from app.matcha.services import project_task_service as pt_svc
+    from app.matcha.services.matcha_work import project_task_service as pt_svc
 
     project, role = await _verify_project_access(project_id, current_user)
     if not _can_edit_project(role):
@@ -313,8 +313,8 @@ async def ai_draft_task_endpoint(
 ):
     """Turn a natural-language request into a structured ticket draft (no DB
     write). The client reviews/edits, then creates via POST .../tasks."""
-    from app.matcha.services import project_service as proj_svc
-    from app.matcha.services import matcha_work_ai
+    from app.matcha.services.matcha_work import project_service as proj_svc
+    from app.matcha.services.matcha_work import matcha_work_ai
 
     project, _role = await _verify_project_access(project_id, current_user)
 
@@ -385,7 +385,7 @@ async def ai_draft_task_endpoint(
     # Repo conventions (CLAUDE.md etc.) from the synced element snapshot — grounds
     # the model in this codebase so subtasks reference real files/migrations/tests.
     # "" when nothing is synced (graceful).
-    from app.matcha.services import element_repo_service as repo_svc
+    from app.matcha.services.matcha_work import element_repo_service as repo_svc
     try:
         conventions = await repo_svc.fetch_convention_docs(project_id)
     except Exception:  # noqa: BLE001 — advisory context, never block a draft
@@ -453,7 +453,7 @@ async def delete_project_task_endpoint(
     task_id: UUID,
     current_user: CurrentUser = Depends(require_company_member),
 ):
-    from app.matcha.services import project_task_service as pt_svc
+    from app.matcha.services.matcha_work import project_task_service as pt_svc
     await _verify_project_access(project_id, current_user)
     if not await pt_svc.delete_project_task(
         project_id, task_id, actor_user_id=current_user.id
@@ -467,7 +467,7 @@ async def list_task_subtasks_endpoint(
     task_id: UUID,
     current_user: CurrentUser = Depends(require_company_member),
 ):
-    from app.matcha.services import project_subtask_service as st_svc
+    from app.matcha.services.matcha_work import project_subtask_service as st_svc
     await _verify_project_access(project_id, current_user)
     rows = await st_svc.list_subtasks(project_id, task_id)
     if rows is None:
@@ -481,7 +481,7 @@ async def create_task_subtask_endpoint(
     body: dict = Body(...),
     current_user: CurrentUser = Depends(require_company_member),
 ):
-    from app.matcha.services import project_subtask_service as st_svc
+    from app.matcha.services.matcha_work import project_subtask_service as st_svc
     await _verify_project_access(project_id, current_user)
     assigned_raw = body.get("assigned_to")
     try:
@@ -506,7 +506,7 @@ async def update_task_subtask_endpoint(
     body: dict = Body(...),
     current_user: CurrentUser = Depends(require_company_member),
 ):
-    from app.matcha.services import project_subtask_service as st_svc
+    from app.matcha.services.matcha_work import project_subtask_service as st_svc
     await _verify_project_access(project_id, current_user)
 
     patch: dict = {}
@@ -543,7 +543,7 @@ async def update_task_subtask_endpoint(
     # for this subtask, so the card stops crediting that commit and the same
     # commit won't silently re-auto-check it.
     if reason and patch.get("is_done") is False:
-        from app.matcha.services import commit_scan_service as cs_svc
+        from app.matcha.services.matcha_work import commit_scan_service as cs_svc
         await cs_svc.dismiss_accepted_for_subtask(
             project_id, subtask_id, actor_user_id=current_user.id,
         )
@@ -556,7 +556,7 @@ async def delete_task_subtask_endpoint(
     subtask_id: UUID,
     current_user: CurrentUser = Depends(require_company_member),
 ):
-    from app.matcha.services import project_subtask_service as st_svc
+    from app.matcha.services.matcha_work import project_subtask_service as st_svc
     await _verify_project_access(project_id, current_user)
     if not await st_svc.delete_subtask(
         project_id, task_id, subtask_id,
@@ -574,7 +574,7 @@ async def summarize_task_endpoint(
     """1-click Gemini Flash Lite catch-up summary of a ticket — where the work
     stands + what's been done recently. Ephemeral (not persisted); read-only."""
     await _verify_project_access(project_id, current_user)
-    from app.matcha.services import task_summary_service
+    from app.matcha.services.matcha_work import task_summary_service
     summary = await task_summary_service.generate_task_summary(project_id, task_id)
     if summary is None:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -607,8 +607,8 @@ async def start_task_round_endpoint(
     Returns: {round_event, subtask, note}. The note is None if no body+no
     attachments were supplied.
     """
-    from app.matcha.services import project_subtask_service as st_svc
-    from app.matcha.services import project_task_service as pt_svc
+    from app.matcha.services.matcha_work import project_subtask_service as st_svc
+    from app.matcha.services.matcha_work import project_task_service as pt_svc
 
     await _verify_project_access(project_id, current_user)
     await _verify_task_belongs_to_project(project_id, task_id)

@@ -15,7 +15,7 @@ itself teaches — not the employee's other lapses.
 from datetime import date
 
 from app.matcha.routes.employee_schedule._compliance import shape_lapse_advisories
-from app.matcha.services.training_assignment import VALID_SOURCE_TYPES
+from app.matcha.services.training.training_assignment import VALID_SOURCE_TYPES
 from app.matcha.routes.employee_lifecycle.training import VALID_RULE_TRIGGERS
 
 SHIFT_DATE = date(2026, 8, 1)

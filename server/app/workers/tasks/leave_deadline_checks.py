@@ -100,7 +100,7 @@ async def _check_deadlines() -> dict:
                 )
 
         if updated_deadline_ids:
-            from app.matcha.services.leave_agent import get_leave_agent
+            from app.matcha.services.leave.leave_agent import get_leave_agent
 
             leave_agent = get_leave_agent()
             for deadline_id in updated_deadline_ids:

@@ -202,25 +202,25 @@ class TestPayerNormalization:
 
 class TestThresholdEngine:
     def test_large_company_thresholds(self):
-        from app.matcha.services.matcha_work_node import compute_threshold_status
+        from app.matcha.services.matcha_work.matcha_work_node import compute_threshold_status
         statuses = {s["name"]: s for s in compute_threshold_status(612)}
         assert statuses["WARN Act (plant closings & mass layoffs)"]["applies"] is True
         assert statuses["FMLA (family & medical leave)"]["applies"] is True
 
     def test_boundary_at_fifty(self):
-        from app.matcha.services.matcha_work_node import compute_threshold_status
+        from app.matcha.services.matcha_work.matcha_work_node import compute_threshold_status
         statuses = {s["name"]: s for s in compute_threshold_status(50)}
         assert statuses["FMLA (family & medical leave)"]["applies"] is True
         assert statuses["WARN Act (plant closings & mass layoffs)"]["applies"] is False
         assert statuses["EEO-1 reporting"]["applies"] is False
 
     def test_small_company(self):
-        from app.matcha.services.matcha_work_node import compute_threshold_status
+        from app.matcha.services.matcha_work.matcha_work_node import compute_threshold_status
         statuses = compute_threshold_status(10)
         assert all(not s["applies"] for s in statuses)
 
     def test_fmla_marked_directional(self):
-        from app.matcha.services.matcha_work_node import compute_threshold_status
+        from app.matcha.services.matcha_work.matcha_work_node import compute_threshold_status
         statuses = {s["name"]: s for s in compute_threshold_status(200)}
         assert statuses["FMLA (family & medical leave)"]["directional"] is True
         assert statuses["Title VII / ADA / GINA (anti-discrimination)"]["directional"] is False

@@ -6,8 +6,8 @@ Covers the citation-record builder and the end-to-end anti-hallucination gate
 plan's verification section — not here.
 """
 
-from app.matcha.services import er_compliance_grounding as g
-from app.matcha.services.legal_defense import validate_citations
+from app.matcha.services.er import er_compliance_grounding as g
+from app.matcha.services.pilots.legal_defense import validate_citations
 
 
 def _index():

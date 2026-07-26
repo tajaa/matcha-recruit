@@ -1,6 +1,6 @@
 import pytest
 
-from app.matcha.services.onboarding_state_machine import (
+from app.matcha.services.onboarding.onboarding_state_machine import (
     OnboardingEventSchemaError,
     OnboardingTransitionError,
     all_states,

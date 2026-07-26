@@ -8,8 +8,8 @@ comparison, and the corpus contract are all pinned to hand-verified values.
 
 import math
 
-from app.matcha.services import analysis_packs as R
-from app.matcha.services.analysis_packs import base as B
+from app.matcha.services.pilots import analysis_packs as R
+from app.matcha.services.pilots.analysis_packs import base as B
 
 
 # --- pure math --------------------------------------------------------------

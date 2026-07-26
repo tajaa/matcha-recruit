@@ -1,4 +1,4 @@
-from app.matcha.services.er_guidance import (
+from app.matcha.services.er.er_guidance import (
     _build_fallback_guidance_payload,
     _determination_confidence_floor,
     _normalize_guidance_action,
@@ -126,7 +126,7 @@ def _make_analyzer():
     google_stub = MagicMock()
     google_stub.genai = MagicMock()
     with patch.dict(sys.modules, {"google": google_stub, "google.genai": google_stub.genai}):
-        from app.matcha.services.er_analyzer import ERAnalyzer  # noqa: PLC0415
+        from app.matcha.services.er.er_analyzer import ERAnalyzer  # noqa: PLC0415
         analyzer = ERAnalyzer.__new__(ERAnalyzer)
     analyzer.model = "gemini-2.5-flash"
     analyzer.client = MagicMock()
@@ -238,7 +238,7 @@ def test_generate_content_async_timeout_logs_error_with_marker(caplog):
         side_effect=[asyncio.TimeoutError(), _FakeResponse("ok")]
     )
 
-    with caplog.at_level("ERROR", logger="app.matcha.services.er_analyzer"):
+    with caplog.at_level("ERROR", logger="app.matcha.services.er.er_analyzer"):
         asyncio.run(analyzer._generate_content_async("prompt"))
 
     error_records = [r for r in caplog.records if r.levelname == "ERROR"]

@@ -17,7 +17,7 @@ from ...dependencies import require_admin_or_client
 from ...models.employee_schedule import (
     TemplateCreate, TemplateUpdate, GenerateFromTemplate,
 )
-from ...services.schedule_rules import build_patch, template_windows
+from ...services.scheduling.schedule_rules import build_patch, template_windows
 from ._shared import (
     require_company_id, log_audit, serialize_template, fetch_shifts,
     assert_location_in_company,

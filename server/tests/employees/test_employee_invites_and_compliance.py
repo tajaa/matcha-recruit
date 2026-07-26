@@ -35,7 +35,7 @@ async def _noop_ensure_location_for_employee(
 compliance_service_module.ensure_location_for_employee = _noop_ensure_location_for_employee
 sys.modules.setdefault("app.core.services.compliance_service", compliance_service_module)
 
-onboarding_orchestrator_module = types.ModuleType("app.matcha.services.onboarding_orchestrator")
+onboarding_orchestrator_module = types.ModuleType("app.matcha.services.onboarding.onboarding_orchestrator")
 onboarding_orchestrator_module.PROVIDER_GOOGLE_WORKSPACE = "google_workspace"
 onboarding_orchestrator_module.PROVIDER_SLACK = "slack"
 
@@ -50,7 +50,7 @@ async def _noop_slack_onboarding(*args, **kwargs):
 
 onboarding_orchestrator_module.start_google_workspace_onboarding = _noop_google_workspace_onboarding
 onboarding_orchestrator_module.start_slack_onboarding = _noop_slack_onboarding
-sys.modules.setdefault("app.matcha.services.onboarding_orchestrator", onboarding_orchestrator_module)
+sys.modules.setdefault("app.matcha.services.onboarding.onboarding_orchestrator", onboarding_orchestrator_module)
 
 routes_package = types.ModuleType("app.matcha.routes")
 routes_package.__path__ = [str(Path(__file__).resolve().parents[1] / "app" / "matcha" / "routes")]

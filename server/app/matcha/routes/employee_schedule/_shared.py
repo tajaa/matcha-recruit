@@ -15,7 +15,7 @@ from uuid import UUID
 from fastapi import HTTPException
 
 from ...dependencies import get_client_company_id
-from ...services.schedule_rules import (  # re-exported for the route modules
+from ...services.scheduling.schedule_rules import (  # re-exported for the route modules
     INACTIVE_EMPLOYMENT_STATUSES, build_patch, conflict_detail, shift_full_detail,
 )
 

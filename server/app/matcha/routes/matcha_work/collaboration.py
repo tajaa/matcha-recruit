@@ -15,7 +15,7 @@ from app.core.models.auth import CurrentUser
 from app.database import get_connection
 from app.matcha.dependencies import require_admin_or_client, get_client_company_id
 from app.matcha.routes.matcha_work._shared import _verify_project_access
-from app.matcha.services import matcha_work_document as doc_svc
+from app.matcha.services.matcha_work import matcha_work_document as doc_svc
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -36,7 +36,7 @@ async def ensure_project_discussion_channel(
     company OR are an active collaborator. This mirrors the visibility
     rule used by list_projects.
     """
-    from app.matcha.services import project_service as proj_svc
+    from app.matcha.services.matcha_work import project_service as proj_svc
 
     company_id = await get_client_company_id(current_user)
     async with get_connection() as conn:
@@ -73,7 +73,7 @@ async def list_project_collaborators(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """List collaborators on a project."""
-    from app.matcha.services import project_service as proj_svc
+    from app.matcha.services.matcha_work import project_service as proj_svc
     await _verify_project_access(project_id, current_user)
     return await proj_svc.list_collaborators(project_id)
 
@@ -84,7 +84,7 @@ async def add_project_collaborator(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Add a user as a collaborator. Only the project owner can invite."""
-    from app.matcha.services import project_service as proj_svc
+    from app.matcha.services.matcha_work import project_service as proj_svc
     _project, role = await _verify_project_access(project_id, current_user)
     if role != "owner":
         raise HTTPException(status_code=403, detail="Only the project owner can add collaborators")
@@ -103,7 +103,7 @@ async def remove_project_collaborator(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Remove a collaborator from a project. Only the owner can do this."""
-    from app.matcha.services import project_service as proj_svc
+    from app.matcha.services.matcha_work import project_service as proj_svc
     await _verify_project_access(project_id, current_user)
     try:
         return await proj_svc.remove_collaborator(project_id, user_id, current_user.id)
@@ -250,7 +250,7 @@ async def accept_project_invite(
 ):
     """Accept a pending invite — join the project + its chat, and tell the
     creator/inviter you've joined (toast + inbox + bell)."""
-    from app.matcha.services import project_service as proj_svc
+    from app.matcha.services.matcha_work import project_service as proj_svc
     from app.matcha.services import notification_service as notif_svc
 
     async with get_connection() as conn:
@@ -355,7 +355,7 @@ async def search_admin_users_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Search admin users for the collaborator invite picker."""
-    from app.matcha.services import project_service as proj_svc
+    from app.matcha.services.matcha_work import project_service as proj_svc
     if current_user.role != "admin":
         raise HTTPException(status_code=403, detail="Only admins can search admin users")
     return await proj_svc.search_admin_users(q, current_user.id)

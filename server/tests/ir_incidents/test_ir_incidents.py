@@ -29,7 +29,7 @@ import importlib
 import pytest
 from datetime import datetime, timezone, timedelta
 
-from app.matcha.services.ir_analysis import (
+from app.matcha.services.ir.ir_analysis import (
     _validate_categorization,
     _validate_severity,
     _validate_root_cause,
@@ -41,7 +41,7 @@ from app.matcha.services.ir_analysis import (
     VALID_SEVERITIES,
     VALID_RELEVANCES,
 )
-from app.matcha.services.ir_precedent import (
+from app.matcha.services.ir.ir_precedent import (
     _score_type_match,
     _score_severity,
     _score_location,
@@ -57,7 +57,7 @@ from app.matcha.services.ir_precedent import (
     compute_structural_scores,
     SEVERITY_ORDINAL,
 )
-from app.matcha.services.ir_consistency import (
+from app.matcha.services.ir.ir_consistency import (
     _compute_kish_effective_n,
     _confidence_level,
     _compute_weighted_action_distribution,

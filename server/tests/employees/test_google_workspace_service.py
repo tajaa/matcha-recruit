@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from app.matcha.services.google_workspace_service import (
+from app.matcha.services.onboarding.google_workspace_service import (
     GoogleWorkspaceProvisioningError,
     GoogleWorkspaceService,
 )
@@ -101,7 +101,7 @@ def test_google_workspace_api_token_sets_temporary_password(monkeypatch: pytest.
                 return _FakeResponse(201, {})
             raise AssertionError(f"Unexpected POST URL {url}")
 
-    monkeypatch.setattr("app.matcha.services.google_workspace_service.httpx.AsyncClient", _FakeAsyncClient)
+    monkeypatch.setattr("app.matcha.services.onboarding.google_workspace_service.httpx.AsyncClient", _FakeAsyncClient)
 
     service = GoogleWorkspaceService()
     result = asyncio.run(
@@ -149,7 +149,7 @@ def test_google_workspace_api_token_falls_back_when_org_unit_invalid(monkeypatch
                 return _FakeResponse(400, {"error": {"message": "Invalid Input: INVALID_OU_ID"}})
             return _FakeResponse(201, {"id": "google-user-2", "primaryEmail": "jane@example.com"})
 
-    monkeypatch.setattr("app.matcha.services.google_workspace_service.httpx.AsyncClient", _FakeAsyncClient)
+    monkeypatch.setattr("app.matcha.services.onboarding.google_workspace_service.httpx.AsyncClient", _FakeAsyncClient)
 
     service = GoogleWorkspaceService()
     result = asyncio.run(

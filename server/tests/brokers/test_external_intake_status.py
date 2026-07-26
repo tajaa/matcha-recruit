@@ -1,13 +1,13 @@
 """Pure-logic tests for external-client intake submission-status derivation.
 
-No DB — only the pure helpers in app.matcha.services.external_clients
+No DB — only the pure helpers in app.matcha.services.broker.external_clients
 (_intake_state, _intake_payload). The DB-backed intake_status/intake_status_map
 queries are exercised by a manual integration smoke against dev.
 """
 
 from datetime import datetime
 
-from app.matcha.services.external_clients import _intake_state, _intake_payload
+from app.matcha.services.broker.external_clients import _intake_state, _intake_payload
 
 
 # --- _intake_state (ledger → state classifier) -----------------------------

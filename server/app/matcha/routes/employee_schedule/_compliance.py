@@ -21,8 +21,8 @@ from uuid import UUID
 
 from fastapi import HTTPException
 
-from ...services import schedule_compliance
-from ...services.schedule_rules import compliance_warning_detail, compliance_block_detail
+from ...services.scheduling import schedule_compliance
+from ...services.scheduling.schedule_rules import compliance_warning_detail, compliance_block_detail
 
 logger = logging.getLogger(__name__)
 
@@ -253,7 +253,7 @@ async def _fair_workweek_advisories(
     if not state or not city:
         return []
 
-    from ...services import fair_workweek
+    from ...services.scheduling import fair_workweek
 
     company = await conn.fetchrow("SELECT industry FROM companies WHERE id = $1", company_id)
     industry = company["industry"] if company else None
@@ -286,7 +286,7 @@ async def _training_lapse_advisories(
     (module-off, not "checked and clean" — same three-state idiom as
     `schedule_intelligence.build_qualified_coverage`)."""
     from app.core.feature_flags import get_company_features
-    from app.matcha.services import schedule_intelligence
+    from app.matcha.services.scheduling import schedule_intelligence
 
     try:
         features = await get_company_features(company_id, conn=conn)

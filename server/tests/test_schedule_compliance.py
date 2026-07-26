@@ -5,7 +5,7 @@ Covers the curated-table evaluators + orchestration. The DB assembly
 manually on dev DB — see the plan's verification section.
 """
 
-from app.matcha.services import schedule_compliance as sc
+from app.matcha.services.scheduling import schedule_compliance as sc
 
 
 def test_rules_for_state_merges_federal_and_state():

@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 
 from app.database import get_connection
 from app.matcha.dependencies import require_admin_or_client, get_client_company_id
-from app.matcha.services.ir_report_poster import (
+from app.matcha.services.ir.ir_report_poster import (
     build_report_poster_pdf, resolve_branding, DEFAULT_BRANDING,
 )
 

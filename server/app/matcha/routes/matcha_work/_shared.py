@@ -14,8 +14,8 @@ from app.core.services.storage import get_storage
 from app.database import get_connection
 from app.matcha.dependencies import get_client_company_id
 from app.matcha.models.matcha_work import MWMessageOut, ThreadDetailResponse
-from app.matcha.services import matcha_work_document as doc_svc
-from app.matcha.services.matcha_work_ai import _infer_skill_from_state
+from app.matcha.services.matcha_work import matcha_work_document as doc_svc
+from app.matcha.services.matcha_work.matcha_work_ai import _infer_skill_from_state
 
 RESUME_UPLOAD_EXTENSIONS = {".pdf", ".doc", ".docx", ".txt"}
 
@@ -104,7 +104,7 @@ async def _build_thread_detail_response(thread_id: UUID, company_id: Optional[UU
             for r in collab_rows
         ]
 
-    from app.matcha.services.matcha_work_modes import THREAD_MODES
+    from app.matcha.services.matcha_work.matcha_work_modes import THREAD_MODES
 
     return ThreadDetailResponse(
         id=thread["id"],
@@ -171,7 +171,7 @@ def _guard_sensitive_project_type(project: dict, current_user: CurrentUser) -> N
 
 async def _verify_project_access(project_id: UUID, current_user: CurrentUser) -> tuple[dict, str]:
     """Check project access. For admins, uses collaborator table. Returns (project, role)."""
-    from app.matcha.services import project_service as proj_svc
+    from app.matcha.services.matcha_work import project_service as proj_svc
     if current_user.role == "admin":
         result = await proj_svc.get_project_as_collaborator(project_id, current_user.id)
         if result:

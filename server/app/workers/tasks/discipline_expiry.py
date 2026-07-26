@@ -21,7 +21,7 @@ async def _dispatch_discipline_expiry() -> dict:
     finally:
         await conn.close()
 
-    from app.matcha.services import discipline_engine
+    from app.matcha.services.discipline import discipline_engine
     flipped = await discipline_engine.expire_stale_records()
     print(f"[Discipline Expiry] Flipped {flipped} record(s) to expired.")
     return {"flipped": flipped}

@@ -3,8 +3,8 @@
 No DB / app boot — the trajectory assembly + routes are smoke-tested against dev.
 """
 
-from app.matcha.services import wc_depth
-from app.matcha.services import wc_mod_parser as mp
+from app.matcha.services.insurance import wc_depth
+from app.matcha.services.insurance import wc_mod_parser as mp
 
 
 # --- proxy_mod (directional actual ÷ expected) -----------------------------

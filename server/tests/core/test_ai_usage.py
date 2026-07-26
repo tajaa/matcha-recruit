@@ -27,7 +27,7 @@ def _call_feature_label_from(module_name: str) -> str:
     that name.
 
     The parametrized names below (app.cappe.services.merlin,
-    app.matcha.services.matcha_work_ai, ...) are REAL, already-imported
+    app.matcha.services.matcha_work.matcha_work_ai, ...) are REAL, already-imported
     production modules elsewhere in the suite — this MUST save whatever was
     already in sys.modules and put it back, never unconditionally `del`. An
     earlier version deleted the entry unconditionally, which — when some
@@ -58,7 +58,7 @@ def _call_feature_label_from(module_name: str) -> str:
 
 @pytest.mark.parametrize("module_name,expected", [
     ("app.cappe.services.merlin", "cappe.merlin"),
-    ("app.matcha.services.matcha_work_ai", "matcha.matcha_work_ai"),
+    ("app.matcha.services.matcha_work.matcha_work_ai", "matcha.matcha_work_ai"),
     # "core"/"workers"/"tasks" are deliberately KEPT (not stripped): they're
     # top-level branches that hold same-named modules for different reasons —
     # app.core.services.legislation_watch (inline research call) vs.

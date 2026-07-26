@@ -35,7 +35,7 @@ from ..models.employee_schedule import ScheduleRequestCreate
 from ..models.benefits import ElectionUpsert, LifeEventCreate
 from ...core.dependencies import get_current_user
 from ..dependencies import require_employee, require_employee_record, require_feature
-from ..services.benefits_enrollment import log_benefit_audit, resolve_active_window
+from ..services.benefits.benefits_enrollment import log_benefit_audit, resolve_active_window
 
 router = APIRouter()
 
@@ -569,7 +569,7 @@ async def get_my_leave_eligibility(
     Requires the ``compliance_plus`` feature flag.
     Returns FMLA eligibility and applicable state programs.
     """
-    from ..services.leave_eligibility_service import LeaveEligibilityService
+    from ..services.leave.leave_eligibility_service import LeaveEligibilityService
 
     service = LeaveEligibilityService()
     return await service.get_eligibility_summary(employee["id"])
@@ -619,7 +619,7 @@ async def submit_leave_request(
             request.expected_return_date, request.reason,
             request.intermittent, request.intermittent_schedule,
         )
-        from ..services.leave_agent import get_leave_agent
+        from ..services.leave.leave_agent import get_leave_agent
 
         background_tasks.add_task(get_leave_agent().on_leave_request_created, row["id"])
         return LeaveRequestResponse(**dict(row))

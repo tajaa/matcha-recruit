@@ -37,7 +37,7 @@ async def list_projects_endpoint(
     current_user: CurrentUser = Depends(require_company_member),
 ):
     """List all projects for the current user."""
-    from app.matcha.services import project_service as proj_svc
+    from app.matcha.services.matcha_work import project_service as proj_svc
     if current_user.role == "admin":
         # Include the admin's tenant-scoped company so they see projects
         # owned by that company even when they're not explicitly seeded
@@ -63,8 +63,8 @@ async def create_project_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Create a new project with an auto-created first chat."""
-    from app.matcha.services import project_service as proj_svc
-    from app.matcha.services import entitlements_service
+    from app.matcha.services.matcha_work import project_service as proj_svc
+    from app.matcha.services.billing import entitlements_service
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         raise HTTPException(status_code=400, detail="No company associated")
@@ -132,9 +132,9 @@ async def get_project_bundle_endpoint(
     identically. Verifies access ONCE, then runs the six independent reads
     concurrently — replacing the ~6 sequential round-trips the client used to
     fire on every project open."""
-    from app.matcha.services import project_task_service as pt_svc
-    from app.matcha.services import project_file_service
-    from app.matcha.services import project_service as proj_svc
+    from app.matcha.services.matcha_work import project_task_service as pt_svc
+    from app.matcha.services.matcha_work import project_file_service
+    from app.matcha.services.matcha_work import project_service as proj_svc
     project, _role = await _verify_project_access(project_id, current_user)
 
     async def _tasks_with_attachments() -> list[dict]:
@@ -186,8 +186,8 @@ async def update_project_endpoint(
     routed through the per-user pin store so existing clients keep
     working without flipping the global flag for everyone else.
     """
-    from app.matcha.services import project_service as proj_svc
-    from app.matcha.services import recruiting_client_service as rc_svc
+    from app.matcha.services.matcha_work import project_service as proj_svc
+    from app.matcha.services.matcha_work import recruiting_client_service as rc_svc
     project, _role = await _verify_project_access(project_id, current_user)
 
     # Per-user pin handoff (legacy API compat). Don't write to the global
@@ -223,7 +223,7 @@ async def set_project_pin_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Set the per-user star/pin on a project. Body: `{is_pinned: bool}`."""
-    from app.matcha.services import project_service as proj_svc
+    from app.matcha.services.matcha_work import project_service as proj_svc
     await _verify_project_access(project_id, current_user)
     pinned = bool(body.get("is_pinned", True))
     await proj_svc.set_project_pin(current_user.id, project_id, pinned)
@@ -235,7 +235,7 @@ async def archive_project_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Archive a project."""
-    from app.matcha.services import project_service as proj_svc
+    from app.matcha.services.matcha_work import project_service as proj_svc
     await _verify_project_access(project_id, current_user)
     await proj_svc.archive_project(project_id)
     return {"status": "archived"}
@@ -246,7 +246,7 @@ async def delete_project_permanent_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Hard-delete a project along with all its threads and messages."""
-    from app.matcha.services import project_service as proj_svc
+    from app.matcha.services.matcha_work import project_service as proj_svc
     await _verify_project_access(project_id, current_user)
     await proj_svc.delete_project_permanent(project_id)
 
@@ -256,7 +256,7 @@ async def unarchive_project_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Restore an archived project to active status."""
-    from app.matcha.services import project_service as proj_svc
+    from app.matcha.services.matcha_work import project_service as proj_svc
     await _verify_project_access(project_id, current_user)
     await proj_svc.unarchive_project(project_id)
     return {"status": "active"}
@@ -268,7 +268,7 @@ async def patch_discipline_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Update discipline project_data (employee, infraction, level)."""
-    from app.matcha.services import project_service as proj_svc
+    from app.matcha.services.matcha_work import project_service as proj_svc
     await _verify_project_access(project_id, current_user)
     try:
         return await proj_svc.patch_discipline(project_id, body)
@@ -281,7 +281,7 @@ async def discipline_meeting_held_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Stamp meeting_held_at. Required gate before signature can be requested."""
-    from app.matcha.services import project_service as proj_svc
+    from app.matcha.services.matcha_work import project_service as proj_svc
     await _verify_project_access(project_id, current_user)
     return await proj_svc.mark_discipline_meeting_held(project_id)
 
@@ -298,7 +298,7 @@ async def discipline_request_signature_endpoint(
     requested_at on the project's signature blob. The webhook handler
     flips draft_status to 'signed' once the recipient signs.
     """
-    from app.matcha.services import project_service as proj_svc
+    from app.matcha.services.matcha_work import project_service as proj_svc
     from app.matcha.services.signature_provider import get_signature_provider
 
     project, _ = await _verify_project_access(project_id, current_user)
@@ -340,7 +340,7 @@ async def discipline_refuse_signature_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Mark the project as Employee Refused to Sign. Closes the workflow."""
-    from app.matcha.services import project_service as proj_svc
+    from app.matcha.services.matcha_work import project_service as proj_svc
     await _verify_project_access(project_id, current_user)
     notes = (body.get("notes") or "").strip()
     if len(notes) < 20:
@@ -358,7 +358,7 @@ async def discipline_upload_physical_endpoint(
     Stores the scan via the existing storage service and records the
     storage path on the project's signature blob. Closes the workflow.
     """
-    from app.matcha.services import project_service as proj_svc
+    from app.matcha.services.matcha_work import project_service as proj_svc
     project_record, _ = await _verify_project_access(project_id, current_user)
     company_id = project_record.get("company_id") if isinstance(project_record, dict) else None
     if not company_id:
@@ -381,7 +381,7 @@ async def discipline_upload_physical_endpoint(
 
     # Surface in the project's Files panel so HR can find it the same
     # way they find any other project attachment.
-    from app.matcha.services import project_file_service as file_svc
+    from app.matcha.services.matcha_work import project_file_service as file_svc
     await file_svc.add_project_file(
         project_id=project_id,
         uploaded_by=current_user.id,
@@ -408,7 +408,7 @@ async def signature_webhook(request: Request):
     HMAC verification (X-Docuseal-Signature header) is required — see
     matcha/services/signature_provider.py:verify_webhook_signature.
     """
-    from app.matcha.services import project_service as proj_svc
+    from app.matcha.services.matcha_work import project_service as proj_svc
     from app.matcha.services.signature_provider import get_signature_provider, verify_webhook_signature
 
     raw = await request.body()
@@ -470,7 +470,7 @@ async def signature_webhook(request: Request):
             # No authenticated user on a webhook — attribute to the
             # project creator so the file row has a valid uploaded_by.
             if uploaded_by:
-                from app.matcha.services import project_file_service as file_svc
+                from app.matcha.services.matcha_work import project_file_service as file_svc
                 await file_svc.add_project_file(
                     project_id=project_id,
                     uploaded_by=uploaded_by,
@@ -492,7 +492,7 @@ async def patch_blog_endpoint(
     body: dict,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    from app.matcha.services import project_service as proj_svc
+    from app.matcha.services.matcha_work import project_service as proj_svc
     await _verify_project_access(project_id, current_user)
     try:
         return await proj_svc.patch_blog(project_id, body)
@@ -505,7 +505,7 @@ async def transition_blog_status_endpoint(
     body: dict,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    from app.matcha.services import project_service as proj_svc
+    from app.matcha.services.matcha_work import project_service as proj_svc
     await _verify_project_access(project_id, current_user)
     to = (body or {}).get("to")
     if not to:
@@ -517,7 +517,7 @@ async def transition_blog_status_endpoint(
 
 # Re-exported from the service (the single owner of the project-file upload
 # policy) — `tasks.py` and `threads.py` import these names from here.
-from app.matcha.services.project_file_service import (  # noqa: E402
+from app.matcha.services.matcha_work.project_file_service import (  # noqa: E402
     ALLOWED_PROJECT_FILE_EXTENSIONS,
     PROJECT_FILE_MAX_BYTES,
 )
@@ -540,7 +540,7 @@ async def upload_project_file(
     """Upload a file attachment to a project. Pass `element_id` to bucket it
     under an element's context repo (and optionally `folder_id` for a folder
     within that repo); omit both for the project's root Files tab."""
-    from app.matcha.services import project_file_service
+    from app.matcha.services.matcha_work import project_file_service
 
     project, _role = await _verify_project_access(project_id, current_user)
     company_id = project.get("company_id")
@@ -571,7 +571,7 @@ async def list_project_files_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """List file attachments for a project."""
-    from app.matcha.services import project_file_service
+    from app.matcha.services.matcha_work import project_file_service
 
     await _verify_project_access(project_id, current_user)
     return await project_file_service.list_project_files(project_id)
@@ -583,7 +583,7 @@ async def delete_project_file_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Delete a file attachment from a project."""
-    from app.matcha.services import project_file_service
+    from app.matcha.services.matcha_work import project_file_service
 
     await _verify_project_access(project_id, current_user)
 
@@ -606,7 +606,7 @@ async def list_project_folders_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """List folders for a project's Files tab."""
-    from app.matcha.services import project_file_service
+    from app.matcha.services.matcha_work import project_file_service
 
     await _verify_project_access(project_id, current_user)
     return await project_file_service.list_project_folders(project_id)
@@ -619,7 +619,7 @@ async def create_project_folder_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Create a folder (optionally nested under parent_id)."""
-    from app.matcha.services import project_file_service
+    from app.matcha.services.matcha_work import project_file_service
 
     await _verify_project_access(project_id, current_user)
     clean = (name or "").strip()
@@ -640,7 +640,7 @@ async def update_project_folder_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Rename and/or reparent a folder. move_to_root=true sends it to the root."""
-    from app.matcha.services import project_file_service
+    from app.matcha.services.matcha_work import project_file_service
 
     await _verify_project_access(project_id, current_user)
     rec = await project_file_service.update_project_folder(
@@ -658,7 +658,7 @@ async def delete_project_folder_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Delete a folder; its files fall back to the root."""
-    from app.matcha.services import project_file_service
+    from app.matcha.services.matcha_work import project_file_service
 
     await _verify_project_access(project_id, current_user)
     ok = await project_file_service.delete_project_folder(folder_id, project_id)
@@ -674,7 +674,7 @@ async def move_project_file_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Move a file into a folder (folder_id) or to the root (null)."""
-    from app.matcha.services import project_file_service
+    from app.matcha.services.matcha_work import project_file_service
 
     await _verify_project_access(project_id, current_user)
     rec = await project_file_service.move_file_to_folder(file_id, project_id, folder_id)
@@ -690,7 +690,7 @@ async def copy_project_file_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Copy a file into a folder, leaving the original (Media "Add to Files")."""
-    from app.matcha.services import project_file_service
+    from app.matcha.services.matcha_work import project_file_service
 
     await _verify_project_access(project_id, current_user)
     rec = await project_file_service.copy_file_to_folder(file_id, project_id, folder_id)
@@ -706,7 +706,7 @@ async def sync_chat_files_endpoint(
     """Backfill the project's Files/Media with all discussion-chat attachments.
     Idempotent — called when the Media tab opens so screenshots dropped in chat
     show up even if the per-message mirror didn't run."""
-    from app.matcha.services import project_file_service
+    from app.matcha.services.matcha_work import project_file_service
 
     await _verify_project_access(project_id, current_user)
     added = await project_file_service.backfill_project_chat_files(project_id)
@@ -718,7 +718,7 @@ async def list_project_links_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Links shared in the collab chat — http(s) URLs pulled from messages."""
-    from app.matcha.services import project_service
+    from app.matcha.services.matcha_work import project_service
 
     await _verify_project_access(project_id, current_user)
     return await project_service.list_project_links(project_id)
@@ -861,7 +861,7 @@ async def complete_project_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Mark project as completed. Owner-only."""
-    from app.matcha.services import project_task_service as pt_svc
+    from app.matcha.services.matcha_work import project_task_service as pt_svc
     _project, role = await _verify_project_access(project_id, current_user)
     if role != "owner":
         raise HTTPException(status_code=403, detail="Only the owner can mark a project complete")

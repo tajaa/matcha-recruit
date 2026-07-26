@@ -4,7 +4,7 @@ Pure-helper unit tests — no app boot, no DB. Backs the auto-fill of the
 300A PDF industry-description field and the ITA CSV industry_description
 column from the establishment's NAICS code.
 """
-from app.matcha.services.naics_titles import naics_industry_description
+from app.matcha.services.ir.naics_titles import naics_industry_description
 
 
 def test_six_digit_resolves_to_subsector():

@@ -31,7 +31,7 @@ async def create_research_task(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Create a new research task in a project."""
-    from app.matcha.services import research_task_service as rt_svc
+    from app.matcha.services.matcha_work import research_task_service as rt_svc
 
     await _verify_project_access(project_id, current_user)
     return await rt_svc.create_task(
@@ -48,7 +48,7 @@ async def update_research_task(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Update a research task definition."""
-    from app.matcha.services import research_task_service as rt_svc
+    from app.matcha.services.matcha_work import research_task_service as rt_svc
 
     await _verify_project_access(project_id, current_user)
     try:
@@ -63,7 +63,7 @@ async def delete_research_task(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Delete a research task and all its results."""
-    from app.matcha.services import research_task_service as rt_svc
+    from app.matcha.services.matcha_work import research_task_service as rt_svc
 
     await _verify_project_access(project_id, current_user)
     return await rt_svc.delete_task(project_id, task_id)
@@ -76,7 +76,7 @@ async def add_research_inputs(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Add URLs to a research task."""
-    from app.matcha.services import research_task_service as rt_svc
+    from app.matcha.services.matcha_work import research_task_service as rt_svc
 
     await _verify_project_access(project_id, current_user)
     try:
@@ -92,7 +92,7 @@ async def delete_research_input(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Remove a URL from a research task."""
-    from app.matcha.services import research_task_service as rt_svc
+    from app.matcha.services.matcha_work import research_task_service as rt_svc
 
     await _verify_project_access(project_id, current_user)
     try:
@@ -111,7 +111,7 @@ async def _stream_one_input(
     and its messages come back over a queue that this generator drains on a 1s
     tick until the task completes, then once more for anything still buffered.
     """
-    from app.matcha.services.research_browse_service import run_research_for_input
+    from app.matcha.services.matcha_work.research_browse_service import run_research_for_input
 
     if emit_start:
         yield _sse_data({"type": "status", "input_id": input_id, "url": url,
@@ -166,7 +166,7 @@ async def run_research_task(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Run all pending research inputs sequentially with SSE status streaming."""
-    from app.matcha.services import research_task_service as rt_svc
+    from app.matcha.services.matcha_work import research_task_service as rt_svc
     from starlette.responses import StreamingResponse
 
     project, _role = await _verify_project_access(project_id, current_user)
@@ -205,7 +205,7 @@ async def follow_up_research_input(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Re-research a URL with additional instructions, building on previous findings."""
-    from app.matcha.services import research_task_service as rt_svc
+    from app.matcha.services.matcha_work import research_task_service as rt_svc
     from starlette.responses import StreamingResponse
 
     project, _role = await _verify_project_access(project_id, current_user)
@@ -240,7 +240,7 @@ async def retry_research_input(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Retry a failed research input with SSE streaming."""
-    from app.matcha.services import research_task_service as rt_svc
+    from app.matcha.services.matcha_work import research_task_service as rt_svc
     from starlette.responses import StreamingResponse
 
     await _verify_project_access(project_id, current_user)
@@ -266,7 +266,7 @@ async def stop_research_task(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Reset all running inputs back to pending (cancel in-flight research)."""
-    from app.matcha.services import research_task_service as rt_svc
+    from app.matcha.services.matcha_work import research_task_service as rt_svc
 
     await _verify_project_access(project_id, current_user)
     return await rt_svc.stop_task(project_id, task_id)

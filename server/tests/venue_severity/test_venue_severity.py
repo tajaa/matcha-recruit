@@ -1,6 +1,6 @@
 """Pure tests for venue-severity resolution + rollup (DB gather smoke-tested vs dev)."""
 
-from app.matcha.services import venue_severity as vs
+from app.matcha.services.insurance import venue_severity as vs
 
 STATE_ROWS = [
     {"state": "CA", "county": "", "tier": "high", "score": 70, "source": "ATRA", "note": "state"},

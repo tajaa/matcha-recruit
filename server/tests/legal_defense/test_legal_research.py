@@ -5,7 +5,7 @@ import asyncio
 import json
 from contextlib import asynccontextmanager
 
-from app.matcha.services import legal_research as lr
+from app.matcha.services.pilots import legal_research as lr
 
 
 # --- CourtListener v4 result parsing ---------------------------------------
@@ -557,7 +557,7 @@ def test_matter_type_terms_are_all_anchored_to_employment():
 # --- subject anchoring (in-jurisdiction, off-subject results) ------------------
 
 def test_theory_anchors_cover_every_theory():
-    from app.matcha.services import legal_defense as ld
+    from app.matcha.services.pilots import legal_defense as ld
     assert set(lr._THEORY_ANCHORS) == set(ld._THEORIES)
 
 

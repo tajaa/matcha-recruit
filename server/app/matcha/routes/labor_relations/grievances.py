@@ -718,7 +718,7 @@ async def assess_merit(
 
     async def event_stream():
         try:
-            from app.matcha.services.labor_relations_ai import assess_grievance_merit
+            from app.matcha.services.er.labor_relations_ai import assess_grievance_merit
             async for chunk in assess_grievance_merit(detail):
                 yield f"data: {json.dumps({'delta': chunk})}\n\n"
         except Exception as exc:  # noqa: BLE001

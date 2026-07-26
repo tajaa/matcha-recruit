@@ -1,4 +1,4 @@
-from app.matcha.services.er_export import extract_analysis_export_text
+from app.matcha.services.er.er_export import extract_analysis_export_text
 
 
 def test_extract_analysis_export_text_prefers_report_content():

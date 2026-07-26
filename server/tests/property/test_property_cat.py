@@ -5,7 +5,7 @@ USGS/USFS fetchers and enrich_building are best-effort and exercised by a manual
 dev smoke against real addresses.
 """
 
-from app.matcha.services import property_cat as pc
+from app.matcha.services.property import property_cat as pc
 
 
 # --- flood -----------------------------------------------------------------

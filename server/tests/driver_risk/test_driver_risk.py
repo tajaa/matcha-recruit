@@ -1,6 +1,6 @@
 """Pure tests for driver-risk scoring + fleet rollup (#15)."""
 
-from app.matcha.services import driver_risk as dr
+from app.matcha.services.insurance import driver_risk as dr
 
 
 def _s(**kw):

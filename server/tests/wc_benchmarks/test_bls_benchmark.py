@@ -1,6 +1,6 @@
 """BLS-enriched WC benchmark lookup (gap-analysis #22)."""
 
-from app.matcha.services import wc_benchmarks as wb
+from app.matcha.services.insurance import wc_benchmarks as wb
 
 
 def test_bls_module_loaded():

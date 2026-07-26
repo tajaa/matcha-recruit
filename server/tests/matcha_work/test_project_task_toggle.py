@@ -155,7 +155,7 @@ def _make_returning(*, board_column: str, status: str) -> dict:
 async def test_toggle_to_done_sends_completed_status_and_done_column(monkeypatch):
     """Desktop sends {board_column:'done', status:'completed'}. Service must
     write status='completed' and board_column='done' to the DB."""
-    from app.matcha.services import project_task_service as svc
+    from app.matcha.services.matcha_work import project_task_service as svc
 
     conn = _FakeConn(
         current=_make_current(board_column="todo", status="pending"),
@@ -179,7 +179,7 @@ async def test_toggle_to_done_sends_completed_status_and_done_column(monkeypatch
 async def test_toggle_to_done_with_only_status_in_patch(monkeypatch):
     """If desktop only sends `status: completed` (older client), service
     must still derive board_column='done' from the sync rule."""
-    from app.matcha.services import project_task_service as svc
+    from app.matcha.services.matcha_work import project_task_service as svc
 
     conn = _FakeConn(
         current=_make_current(board_column="todo", status="pending"),
@@ -200,7 +200,7 @@ async def test_toggle_to_done_with_only_status_in_patch(monkeypatch):
 async def test_toggle_to_pending_sends_todo_column(monkeypatch):
     """Reverse toggle: status='pending' from a 'done' card moves column
     back to 'todo' so the unchecked card lands in the Todo lane."""
-    from app.matcha.services import project_task_service as svc
+    from app.matcha.services.matcha_work import project_task_service as svc
 
     conn = _FakeConn(
         current=_make_current(board_column="done", status="completed"),
@@ -222,7 +222,7 @@ async def test_toggle_to_pending_sends_todo_column(monkeypatch):
 @pytest.mark.asyncio
 async def test_drag_to_done_only_board_column_in_patch(monkeypatch):
     """Drag-drop sends just `board_column`. Service derives status='completed'."""
-    from app.matcha.services import project_task_service as svc
+    from app.matcha.services.matcha_work import project_task_service as svc
 
     conn = _FakeConn(
         current=_make_current(board_column="in_progress", status="pending"),
@@ -245,7 +245,7 @@ async def test_response_shape_matches_swift_decoder(monkeypatch):
     description, assigned_to, due_date, completed_at, created_at, updated_at,
     assigned_name. _row_to_task must stringify UUIDs and isoformat datetimes
     so JSON round-trips cleanly through Swift's JSONDecoder."""
-    from app.matcha.services import project_task_service as svc
+    from app.matcha.services.matcha_work import project_task_service as svc
 
     conn = _FakeConn(
         current=_make_current(board_column="todo", status="pending"),
@@ -281,7 +281,7 @@ async def test_toggle_logs_column_change_history_row(monkeypatch):
     (missing column, bad cast) shows up as a silently empty ticket timeline and
     nothing else. Assert the row is written and carries the real transition.
     """
-    from app.matcha.services import project_task_service as svc
+    from app.matcha.services.matcha_work import project_task_service as svc
 
     conn = _FakeConn(
         current=_make_current(board_column="todo", status="pending"),
@@ -310,7 +310,7 @@ async def test_history_metadata_values_are_all_strings(monkeypatch):
     someone writes an int, a UUID, a None, or a nested dict here, the desktop's
     [String: String] decode of mw_task_history fails wholesale.
     """
-    from app.matcha.services import project_task_service as svc
+    from app.matcha.services.matcha_work import project_task_service as svc
 
     conn = _FakeConn(
         current=_make_current(board_column="todo", status="pending"),
@@ -339,7 +339,7 @@ async def test_invalid_board_column_raises_valueerror(monkeypatch):
     """Bad payload should raise ValueError (route catches → 400). A silent
     failure here would not show as a 400 — the desktop catch block then
     calls loadTasks() and the user sees the snap-back."""
-    from app.matcha.services import project_task_service as svc
+    from app.matcha.services.matcha_work import project_task_service as svc
 
     conn = _FakeConn(
         current=_make_current(board_column="todo", status="pending"),

@@ -26,7 +26,7 @@ from pydantic import BaseModel, Field
 from ....database import get_connection
 from ...dependencies import require_admin_or_client, get_client_company_id
 from app.core.services.redis_cache import check_rate_limit, client_ip
-from ...services import handbook_pilot as hp
+from ...services.pilots import handbook_pilot as hp
 
 logger = logging.getLogger(__name__)
 

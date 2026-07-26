@@ -17,7 +17,7 @@ from pydantic import BaseModel
 
 from app.core.models.auth import CurrentUser
 from app.matcha.dependencies import get_client_company_id, require_admin_or_client
-from app.matcha.services.flight_risk_service import (
+from app.matcha.services.workforce.flight_risk_service import (
     compute_company_summary,
     compute_for_company,
     get_employee_history,

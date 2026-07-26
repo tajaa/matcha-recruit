@@ -4,7 +4,7 @@ from datetime import date
 
 import pytest
 
-from app.matcha.services import loss_development as ld
+from app.matcha.services.insurance import loss_development as ld
 
 
 def _snap(label, val, incurred, line="wc", start=None):

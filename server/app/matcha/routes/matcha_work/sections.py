@@ -23,7 +23,7 @@ from app.core.services.storage import get_storage
 from app.matcha.dependencies import require_admin_or_client, get_client_company_id
 from app.matcha.routes.matcha_work.pdf_export import _render_project_pdf
 from app.matcha.routes.matcha_work._shared import _strip_markdown, _verify_project_access
-from app.matcha.services import matcha_work_document as doc_svc
+from app.matcha.services.matcha_work import matcha_work_document as doc_svc
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -84,7 +84,7 @@ async def add_project_section_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Add a section to the project."""
-    from app.matcha.services import project_service as proj_svc
+    from app.matcha.services.matcha_work import project_service as proj_svc
     await _verify_project_access(project_id, current_user)
     company_id = await get_client_company_id(current_user)
     raw_content = body.get("content", "")
@@ -104,7 +104,7 @@ async def reorder_project_sections_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Reorder project sections."""
-    from app.matcha.services import project_service as proj_svc
+    from app.matcha.services.matcha_work import project_service as proj_svc
     await _verify_project_access(project_id, current_user)
     return await proj_svc.reorder_sections(project_id, body.get("section_ids", []))
 
@@ -116,7 +116,7 @@ async def update_project_section_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Update a project section."""
-    from app.matcha.services import project_service as proj_svc
+    from app.matcha.services.matcha_work import project_service as proj_svc
     await _verify_project_access(project_id, current_user)
     actor_name = await proj_svc._resolve_actor_name(current_user.id)
     return await proj_svc.update_section(
@@ -131,7 +131,7 @@ async def delete_project_section_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Delete a project section."""
-    from app.matcha.services import project_service as proj_svc
+    from app.matcha.services.matcha_work import project_service as proj_svc
     await _verify_project_access(project_id, current_user)
     return await proj_svc.delete_section(project_id, section_id)
 
@@ -142,7 +142,7 @@ async def accept_project_section_revision_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Promote a section's pending AI revision into its live content."""
-    from app.matcha.services import project_service as proj_svc
+    from app.matcha.services.matcha_work import project_service as proj_svc
     await _verify_project_access(project_id, current_user)
     actor_name = await proj_svc._resolve_actor_name(current_user.id)
     return await proj_svc.accept_section_revision(
@@ -157,7 +157,7 @@ async def reject_project_section_revision_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Discard a section's pending AI revision, leaving live content untouched."""
-    from app.matcha.services import project_service as proj_svc
+    from app.matcha.services.matcha_work import project_service as proj_svc
     await _verify_project_access(project_id, current_user)
     return await proj_svc.reject_section_revision(project_id, section_id)
 
@@ -271,7 +271,7 @@ async def email_project_section_endpoint(
 async def _resolve_actor_name_safe(user_id) -> str:
     """Best-effort display name for the current user; falls back to 'Someone'."""
     try:
-        from app.matcha.services import project_service as proj_svc
+        from app.matcha.services.matcha_work import project_service as proj_svc
         name = await proj_svc._resolve_actor_name(user_id)
         return name or "Someone"
     except Exception:
@@ -285,7 +285,7 @@ async def list_section_comments_endpoint(
 ):
     """Comments on a single note, oldest first."""
     await _verify_project_access(project_id, current_user)
-    from app.matcha.services import project_comment_service as cmt_svc
+    from app.matcha.services.matcha_work import project_comment_service as cmt_svc
     return await cmt_svc.list_section_comments(project_id, section_id)
 
 @router.post("/projects/{project_id}/sections/{section_id}/comments")
@@ -332,7 +332,7 @@ async def create_section_comment_endpoint(
 
     company_id = await get_client_company_id(current_user)
 
-    from app.matcha.services import project_comment_service as cmt_svc
+    from app.matcha.services.matcha_work import project_comment_service as cmt_svc
     comment = await cmt_svc.create_section_comment(
         project_id=project_id,
         section_id=section_id,
@@ -388,7 +388,7 @@ async def delete_section_comment_endpoint(
 ):
     """Delete one of your own comments."""
     await _verify_project_access(project_id, current_user)
-    from app.matcha.services import project_comment_service as cmt_svc
+    from app.matcha.services.matcha_work import project_comment_service as cmt_svc
     ok = await cmt_svc.delete_section_comment(comment_id, current_user.id)
     if not ok:
         raise HTTPException(status_code=404, detail="Comment not found")
@@ -406,7 +406,7 @@ async def resolve_section_comment_endpoint(
     with project access may resolve (mirrors doc-comment conventions)."""
     await _verify_project_access(project_id, current_user)
     resolved = bool(body.get("resolved", True))
-    from app.matcha.services import project_comment_service as cmt_svc
+    from app.matcha.services.matcha_work import project_comment_service as cmt_svc
     comment = await cmt_svc.set_section_comment_resolved(comment_id, project_id, resolved)
     if comment is None:
         raise HTTPException(status_code=404, detail="Comment not found")
@@ -420,7 +420,7 @@ async def edit_diagram_ai(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Use AI to modify a diagram based on a natural language instruction."""
-    from app.matcha.services import project_service as proj_svc
+    from app.matcha.services.matcha_work import project_service as proj_svc
 
     await _verify_project_access(project_id, current_user)
     company_id = await get_client_company_id(current_user)
@@ -554,7 +554,7 @@ async def edit_diagram_text(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Edit text labels in a diagram by direct string replacement."""
-    from app.matcha.services import project_service as proj_svc
+    from app.matcha.services.matcha_work import project_service as proj_svc
 
     await _verify_project_access(project_id, current_user)
     company_id = await get_client_company_id(current_user)
@@ -601,7 +601,7 @@ async def save_diagram(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Save a diagram from the visual editor (Excalidraw SVG export)."""
-    from app.matcha.services import project_service as proj_svc
+    from app.matcha.services.matcha_work import project_service as proj_svc
 
     await _verify_project_access(project_id, current_user)
     company_id = await get_client_company_id(current_user)

@@ -22,8 +22,8 @@ from app.core.models.auth import CurrentUser
 from app.database import get_connection
 from app.matcha.dependencies import require_admin_or_client, get_client_company_id
 from app.matcha.models.matcha_work import UsageSummaryResponse
-from app.matcha.services import matcha_work_document as doc_svc
-from app.matcha.services.matcha_work_ai import get_ai_provider
+from app.matcha.services.matcha_work import matcha_work_document as doc_svc
+from app.matcha.services.matcha_work.matcha_work_ai import get_ai_provider
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -227,7 +227,7 @@ async def agent_email_status(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Check if the current user has Gmail connected."""
-    from app.matcha.services.gmail_service import GmailService
+    from app.matcha.services.matcha_work.gmail_service import GmailService
     gmail = GmailService(current_user.id)
     return await gmail.get_status()
 
@@ -236,7 +236,7 @@ async def agent_email_connect(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Start Google OAuth flow. Returns an auth_url to open in a popup."""
-    from app.matcha.services.gmail_service import get_oauth_credentials, GMAIL_SCOPES
+    from app.matcha.services.matcha_work.gmail_service import get_oauth_credentials, GMAIL_SCOPES
     import urllib.parse
 
     creds = get_oauth_credentials()
@@ -268,7 +268,7 @@ async def agent_email_callback(
     state: str = Query(...),
 ):
     """OAuth callback — exchange code for tokens, store encrypted in DB, close popup."""
-    from app.matcha.services.gmail_service import GmailService, get_oauth_credentials, GMAIL_SCOPES
+    from app.matcha.services.matcha_work.gmail_service import GmailService, get_oauth_credentials, GMAIL_SCOPES
     from app.core.services.secret_crypto import decrypt_secret as _decrypt
 
     # Recover user ID from state
@@ -337,7 +337,7 @@ async def agent_email_fetch(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Fetch unread emails for the current user."""
-    from app.matcha.services.gmail_service import GmailService
+    from app.matcha.services.matcha_work.gmail_service import GmailService
     gmail = GmailService(current_user.id)
     await gmail.load_token()
     if not gmail.is_configured:
@@ -351,8 +351,8 @@ async def agent_email_draft(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Draft a reply to an email using AI."""
-    from app.matcha.services import entitlements_service
-    from app.matcha.services.gmail_service import GmailService
+    from app.matcha.services.billing import entitlements_service
+    from app.matcha.services.matcha_work.gmail_service import GmailService
 
     # Email fetch/send stay free (non-AI); AI drafting is Lite+.
     await entitlements_service.require_plan(current_user.id, entitlements_service.PLAN_LITE, "email_ai")
@@ -400,7 +400,7 @@ async def agent_email_send(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Send an email via Gmail."""
-    from app.matcha.services.gmail_service import GmailService
+    from app.matcha.services.matcha_work.gmail_service import GmailService
     gmail = GmailService(current_user.id)
     await gmail.load_token()
     if not gmail.is_configured:
@@ -428,7 +428,7 @@ async def get_entitlements(
     mw_subscriptions + beta flags (see entitlements_service). Replaces the
     client's separate isPlusActive / beta-flag reads.
     """
-    from app.matcha.services import entitlements_service
+    from app.matcha.services.billing import entitlements_service
 
     response.headers["Cache-Control"] = "private, max-age=60"
     company_id = await get_client_company_id(current_user)

@@ -1,6 +1,6 @@
 """Risk-to-Rate lever scoring — pure, DB-free."""
 
-from app.matcha.services import risk_to_rate as rr
+from app.matcha.services.broker import risk_to_rate as rr
 
 
 def test_realized_vs_available_split():

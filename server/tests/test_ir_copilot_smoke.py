@@ -17,7 +17,7 @@ from app.matcha.models.ir_incident import (
     IRCopilotCard,
     IRCopilotCardAction,
 )
-from app.matcha.services.ir_ai_orchestrator import (
+from app.matcha.services.ir.ir_ai_orchestrator import (
     IR_VALID_ANALYSIS_TYPES,
     IR_VALID_TABS,
     IR_ACTION_TYPES,
@@ -25,7 +25,7 @@ from app.matcha.services.ir_ai_orchestrator import (
     _serialize_conversation,
     _serialize_incident_core,
 )
-from app.matcha.services.er_guidance import (
+from app.matcha.services.er.er_guidance import (
     DEFAULT_VALID_TABS,
     DEFAULT_VALID_ANALYSIS_TYPES,
     _normalize_guidance_action,
@@ -146,7 +146,7 @@ def test_generate_guidance_drops_invalid_cards(monkeypatch):
     import asyncio
     from types import SimpleNamespace
 
-    from app.matcha.services import ir_ai_orchestrator
+    from app.matcha.services.ir import ir_ai_orchestrator
 
     payload_json = json.dumps({
         "summary": "Mixed bag.",
@@ -237,7 +237,7 @@ def test_generate_guidance_drops_invalid_cards(monkeypatch):
     for card in result["cards"]:
         assert card["action"]["type"] in IR_ACTION_TYPES
         if card["action"]["type"] == "set_field":
-            from app.matcha.services.ir_ai_orchestrator import _is_valid_set_field
+            from app.matcha.services.ir.ir_ai_orchestrator import _is_valid_set_field
             assert _is_valid_set_field(card["action"]["field_name"], card["action"]["field_value"])
 
 
@@ -255,7 +255,7 @@ def test_generate_guidance_preserves_quick_reply_choices(monkeypatch):
     import asyncio
     from types import SimpleNamespace
 
-    from app.matcha.services import ir_ai_orchestrator
+    from app.matcha.services.ir import ir_ai_orchestrator
 
     payload_json = json.dumps({
         "summary": "Capture the root cause if you like.",
@@ -326,7 +326,7 @@ def test_generate_guidance_drops_treatment_set_field_when_already_set(monkeypatc
     import asyncio
     from types import SimpleNamespace
 
-    from app.matcha.services import ir_ai_orchestrator
+    from app.matcha.services.ir import ir_ai_orchestrator
 
     payload_json = json.dumps({
         "summary": "Continue.",
@@ -414,7 +414,7 @@ def test_generate_guidance_keeps_treatment_set_field_when_unset(monkeypatch):
     import asyncio
     from types import SimpleNamespace
 
-    from app.matcha.services import ir_ai_orchestrator
+    from app.matcha.services.ir import ir_ai_orchestrator
 
     payload_json = json.dumps({
         "summary": "Gate.",
@@ -483,7 +483,7 @@ def test_generate_guidance_drops_log_root_cause_query_when_interview_in_progress
     import asyncio
     from types import SimpleNamespace
 
-    from app.matcha.services import ir_ai_orchestrator
+    from app.matcha.services.ir import ir_ai_orchestrator
 
     payload_json = json.dumps({
         "summary": "Continue.",
@@ -565,7 +565,7 @@ def test_generate_guidance_keeps_log_root_cause_query_when_no_interview(monkeypa
     import asyncio
     from types import SimpleNamespace
 
-    from app.matcha.services import ir_ai_orchestrator
+    from app.matcha.services.ir import ir_ai_orchestrator
 
     payload_json = json.dumps({
         "summary": "Capture root cause.",
@@ -630,7 +630,7 @@ def test_generate_guidance_keeps_log_root_cause_query_when_no_interview(monkeypa
 
 def test_canonical_analysis_type_aliases():
     """AI commonly emits abbreviated names. Aliases must resolve to canonical."""
-    from app.matcha.services.ir_ai_orchestrator import _canonical_analysis_type
+    from app.matcha.services.ir.ir_ai_orchestrator import _canonical_analysis_type
 
     assert _canonical_analysis_type("policy") == "policy_mapping"
     assert _canonical_analysis_type("Policy") == "policy_mapping"
@@ -646,7 +646,7 @@ def test_canonical_analysis_type_aliases():
 def test_is_valid_set_field_rejects_hallucinated_enums():
     """User-reported bug: AI proposed `set_field incident_type='Tardiness'`
     which the backend rejects. Orchestrator should drop the card upstream."""
-    from app.matcha.services.ir_ai_orchestrator import _is_valid_set_field
+    from app.matcha.services.ir.ir_ai_orchestrator import _is_valid_set_field
 
     # Valid enum values
     assert _is_valid_set_field("incident_type", "behavioral") is True
@@ -672,7 +672,7 @@ def test_is_valid_set_field_rejects_hallucinated_enums():
 def test_summaries_too_similar_catches_paraphrase():
     """Repetitive copilot summaries (same facts, different wording) should
     register as similar so persist_assistant_round can skip the duplicate."""
-    from app.matcha.services.ir_ai_orchestrator import _summaries_too_similar
+    from app.matcha.services.ir.ir_ai_orchestrator import _summaries_too_similar
 
     a = "The incident concerns Gina's 10-minute tardiness without prior notification, violating the attendance policy. It is currently categorized as behavioral and low severity."
     b = "The incident regarding Gina's 10-minute tardiness without prior notification is categorized as behavioral and low severity, with a clear violation of the attendance policy."

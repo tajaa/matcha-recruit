@@ -6,7 +6,7 @@ narrowing, and the copilot context serializer. The DB-backed
 `get_incident_statutes` is exercised manually on dev-remote — see the plan.
 """
 
-from app.matcha.services import ir_statute_grounding as g
+from app.matcha.services.ir import ir_statute_grounding as g
 
 
 def _statutes():

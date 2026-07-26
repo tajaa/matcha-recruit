@@ -13,7 +13,7 @@ import pytest
     reason="weasyprint not installed",
 )
 def test_render_certificate_returns_pdf_bytes():
-    from app.matcha.services.training_pdf import render_certificate_pdf
+    from app.matcha.services.training.training_pdf import render_certificate_pdf
 
     pdf_bytes = asyncio.run(
         render_certificate_pdf(
@@ -37,7 +37,7 @@ def test_render_certificate_returns_pdf_bytes():
 
 def test_html_template_includes_required_strings():
     """Quick smoke test on the HTML template layer (no PDF rendering)."""
-    from app.matcha.services.training_pdf import _build_html
+    from app.matcha.services.training.training_pdf import _build_html
 
     cert_id = uuid4()
     html = _build_html(

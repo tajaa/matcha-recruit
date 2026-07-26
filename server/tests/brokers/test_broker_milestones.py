@@ -2,7 +2,7 @@
 
 No DB / no worker — only the pure functions:
 - app.workers.tasks.broker_milestones (evaluate_milestones, decide_milestone_action)
-- app.matcha.services.broker_outreach (_anonymize_context, _normalize_prompts)
+- app.matcha.services.broker.broker_outreach (_anonymize_context, _normalize_prompts)
 """
 
 import json
@@ -12,7 +12,7 @@ from app.workers.tasks.broker_milestones import (
     decide_milestone_action,
     INCIDENT_FREE_TIERS,
 )
-from app.matcha.services.broker_outreach import (
+from app.matcha.services.broker.broker_outreach import (
     _anonymize_context,
     _normalize_prompts,
     PII_DENYLIST,

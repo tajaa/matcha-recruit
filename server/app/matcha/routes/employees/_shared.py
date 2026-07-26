@@ -17,12 +17,12 @@ from app.database import get_connection
 from app.core.us_states import US_STATE_CODES
 from app.core.services.compliance_service import ensure_location_for_employee
 from app.core.services.email import get_email_service
-from app.matcha.services.onboarding_orchestrator import (
+from app.matcha.services.onboarding.onboarding_orchestrator import (
     PROVIDER_SLACK,
     start_google_workspace_onboarding,
     start_slack_onboarding,
 )
-from app.matcha.services.risk_assessment_service import (
+from app.matcha.services.risk_analytics.risk_assessment_service import (
     compute_risk_assessment,
     generate_recommendations,
     load_risk_weights,

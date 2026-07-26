@@ -1,7 +1,7 @@
 """Tests for Monte Carlo risk simulation service."""
 
 import pytest
-from app.matcha.services.monte_carlo_service import (
+from app.matcha.services.risk_analytics.monte_carlo_service import (
     run_monte_carlo,
     extract_cost_of_risk_items,
     _lognormal_params,

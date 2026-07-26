@@ -3,7 +3,7 @@
     cd server && ./venv/bin/python -m pytest tests/matcha_work/test_hr_pilot_escalation.py -q
 """
 
-from app.matcha.services.hr_pilot_escalation import (
+from app.matcha.services.pilots.hr_pilot_escalation import (
     CORPORATE_HR_ESCALATION_NOTICE,
     classify_message,
 )

@@ -35,7 +35,7 @@ MIN_INTERVAL_HOURS = 6
 
 async def _backfill(force: bool = False) -> Dict[str, Any]:
     import httpx
-    from app.matcha.services.property_cat import geocode_fips
+    from app.matcha.services.property.property_cat import geocode_fips
 
     conn = await get_db_connection()
     try:

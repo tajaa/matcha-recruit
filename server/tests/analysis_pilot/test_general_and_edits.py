@@ -4,8 +4,8 @@ edit-proposal gate (highlight-to-chat discrepancy corrections).
 Pure engine only (no DB / no Gemini / no app boot), like test_analysis_packs.
 """
 
-from app.matcha.services import analysis_packs as P
-from app.matcha.services.analysis_packs.corpus import build_corpus, validate_edit_proposals
+from app.matcha.services.pilots import analysis_packs as P
+from app.matcha.services.pilots.analysis_packs.corpus import build_corpus, validate_edit_proposals
 
 
 def _norm(csv: bytes, filename: str = "x.csv"):

@@ -368,7 +368,7 @@ async def create_case(
             request.client.host if request.client else None,
         )
 
-        from app.matcha.services.leave_agent import get_leave_agent
+        from app.matcha.services.leave.leave_agent import get_leave_agent
 
         background_tasks.add_task(get_leave_agent().on_accommodation_request_created, row["id"])
         return _case_response(row, document_count=0)
@@ -561,7 +561,7 @@ async def update_case(
         )
 
         if case.status is not None:
-            from app.matcha.services.leave_agent import get_leave_agent
+            from app.matcha.services.leave.leave_agent import get_leave_agent
 
             background_tasks.add_task(
                 get_leave_agent().on_accommodation_status_changed,
@@ -803,7 +803,7 @@ async def delete_document(
 
 def _get_analyzer():
     """Create an AccommodationAnalyzer instance from settings."""
-    from app.matcha.services.accommodation_service import AccommodationAnalyzer
+    from app.matcha.services.leave.accommodation_service import AccommodationAnalyzer
     settings = get_settings()
     return AccommodationAnalyzer(api_key=settings.gemini_api_key)
 

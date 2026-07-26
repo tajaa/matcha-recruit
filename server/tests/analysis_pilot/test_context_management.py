@@ -4,9 +4,9 @@ determinism guarantee. Pure — no DB, no Gemini, no app boot."""
 
 import math
 
-from app.matcha.services import analysis_pilot as ap
-from app.matcha.services.analysis_packs import base as B
-from app.matcha.services.analysis_packs import general as G
+from app.matcha.services.pilots import analysis_pilot as ap
+from app.matcha.services.pilots.analysis_packs import base as B
+from app.matcha.services.pilots.analysis_packs import general as G
 
 
 # --- A: per-message clipping -------------------------------------------------

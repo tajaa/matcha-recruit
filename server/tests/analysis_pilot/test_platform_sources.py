@@ -8,8 +8,8 @@ a feature gate.
 
 from datetime import date, datetime, timezone
 
-from app.matcha.services import analysis_platform_sources as ps
-from app.matcha.services.analysis_packs import insurance, mapping, parse
+from app.matcha.services.pilots import analysis_platform_sources as ps
+from app.matcha.services.pilots.analysis_packs import insurance, mapping, parse
 
 
 # --- monthly incident series --------------------------------------------------

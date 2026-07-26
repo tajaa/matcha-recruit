@@ -12,8 +12,8 @@ google_module = types.ModuleType("google")
 google_module.genai = types.SimpleNamespace()
 sys.modules.setdefault("google", google_module)
 
-import app.matcha.services.risk_assessment_service as risk_assessment_service_module
-from app.matcha.services.risk_assessment_service import (
+import app.matcha.services.risk_analytics.risk_assessment_service as risk_assessment_service_module
+from app.matcha.services.risk_analytics.risk_assessment_service import (
     compute_compliance_dimension,
     compute_er_dimension,
 )

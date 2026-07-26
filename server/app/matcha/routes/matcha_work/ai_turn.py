@@ -30,9 +30,9 @@ from app.matcha.models.matcha_work import (
     WorkbookDocument,
 )
 from app.matcha.routes.matcha_work._shared import _json_object
-from app.matcha.services import matcha_work_document as doc_svc
-from app.matcha.services.matcha_work_ai import _infer_skill_from_state
-from app.matcha.services.onboarding_orchestrator import (
+from app.matcha.services.matcha_work import matcha_work_document as doc_svc
+from app.matcha.services.matcha_work.matcha_work_ai import _infer_skill_from_state
+from app.matcha.services.onboarding.onboarding_orchestrator import (
     PROVIDER_GOOGLE_WORKSPACE,
     PROVIDER_SLACK,
     start_google_workspace_onboarding,
@@ -103,13 +103,13 @@ def _validate_updates_for_skill(skill: str, updates: dict) -> dict:
     elif skill == "project":
         valid_fields = VALID_PROJECT_FIELDS
     elif skill == "blog":
-        from app.matcha.services.matcha_work_ai import BLOG_FIELDS as _BLOG_FIELDS
+        from app.matcha.services.matcha_work.matcha_work_ai import BLOG_FIELDS as _BLOG_FIELDS
         valid_fields = set(_BLOG_FIELDS)
     elif skill == "hr_pilot":
         # Whitelist to hr_action, then drop any model-emitted hand-off type
         # (ir_report/er_case) — those are server-staged only. A model can never
         # mint a hand-off or overwrite the server-captured narrative this way.
-        from app.matcha.services.hr_pilot_actions import filter_model_staged_hr_action
+        from app.matcha.services.pilots.hr_pilot_actions import filter_model_staged_hr_action
         return filter_model_staged_hr_action({k: v for k, v in updates.items() if k == "hr_action"})
     else:
         return {}
@@ -610,7 +610,7 @@ async def _inject_recruiting_project_context(
     if not project_id:
         return ctx
 
-    from app.matcha.services import project_service as proj_svc
+    from app.matcha.services.matcha_work import project_service as proj_svc
     row = project_meta
     if row is None:
         async with get_connection() as conn:
@@ -777,7 +777,7 @@ async def _apply_ai_updates_and_operations(
         # _validate_updates_for_skill("blog", ...) already whitelists BLOG_FIELDS
         # only, so nothing else survives for blog chats.
         if skill == "blog":
-            from app.matcha.services.matcha_work_ai import BLOG_FIELDS as _BLOG_FIELDS
+            from app.matcha.services.matcha_work.matcha_work_ai import BLOG_FIELDS as _BLOG_FIELDS
             for _bk in _BLOG_FIELDS:
                 if _bk in safe_updates:
                     blog_directives[_bk] = safe_updates.pop(_bk)
@@ -809,7 +809,7 @@ async def _apply_ai_updates_and_operations(
             _skip_project_sections_sync = _project_type == "blog"
 
             if project_id and not _skip_project_sections_sync and "project_sections" in safe_updates:
-                from app.matcha.services import project_service as proj_svc
+                from app.matcha.services.matcha_work import project_service as proj_svc
                 new_sections = safe_updates.get("project_sections") or []
                 if new_sections:
                     try:
@@ -922,7 +922,7 @@ async def _apply_ai_updates_and_operations(
     # AI describes options in reply text, no persistence.
     blog_changes_applied = False
     if blog_directives and project_id:
-        from app.matcha.services import project_service as _blog_proj_svc
+        from app.matcha.services.matcha_work import project_service as _blog_proj_svc
         try:
             _, blog_secs_changed = await _blog_proj_svc.apply_blog_directives(
                 project_id,
@@ -985,7 +985,7 @@ async def _apply_ai_updates_and_operations(
                 and _staged.get("status") == "proposed":
             try:
                 from app.core.feature_flags import get_company_features
-                from app.matcha.services.hr_pilot_actions import precheck_discipline_proposal
+                from app.matcha.services.pilots.hr_pilot_actions import precheck_discipline_proposal
                 _feats = await get_company_features(company_id)
                 if _feats.get("discipline"):
                     _pre = await precheck_discipline_proposal(company_id=company_id, staged_action=_staged)
@@ -1308,7 +1308,7 @@ async def _apply_ai_updates_and_operations(
                 # thread mode, confirm-first, hard-stop, then the deterministic
                 # discipline compliance gate inside the executor).
                 from app.core.feature_flags import get_company_features
-                from app.matcha.services.hr_pilot_actions import (
+                from app.matcha.services.pilots.hr_pilot_actions import (
                     evaluate_hr_action, execute_hr_action,
                 )
 

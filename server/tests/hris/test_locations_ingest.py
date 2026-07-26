@@ -18,8 +18,8 @@ from uuid import UUID, uuid4
 import pytest
 
 import app.core.services.compliance_service as compliance_service
-from app.matcha.services.hris_service import HRISProvisioningError
-from app.matcha.services.hris_sync_orchestrator import (
+from app.matcha.services.hris.hris_service import HRISProvisioningError
+from app.matcha.services.hris.hris_sync_orchestrator import (
     _fetch_company_locations,
     _sync_company_locations,
 )

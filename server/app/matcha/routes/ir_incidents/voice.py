@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from app.database import get_connection
 from app.core.services.redis_cache import check_rate_limit
 from app.matcha.dependencies import require_admin_or_client, get_client_company_id, require_feature
-from app.matcha.services.ir_voice_parser import parse_voice_incident
+from app.matcha.services.ir.ir_voice_parser import parse_voice_incident
 from ._shared import _read_audio_or_400
 
 router = APIRouter()

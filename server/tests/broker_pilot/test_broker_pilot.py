@@ -6,8 +6,8 @@ flat index (the citation gate and memo renderer key on it), and the imported
 invented ones.
 """
 
-from app.matcha.services import broker_pilot as bp
-from app.matcha.services.legal_defense import validate_citations
+from app.matcha.services.broker import broker_pilot as bp
+from app.matcha.services.pilots.legal_defense import validate_citations
 
 
 # --- extraction coercion ----------------------------------------------------
@@ -644,7 +644,7 @@ def test_broker_native_gather_skips_leave_and_only_leave():
     medical-adjacent and must not; the termination-lifecycle records and agency
     charges are EPL underwriting context and must."""
     import asyncio
-    from app.matcha.services import legal_defense as ldef
+    from app.matcha.services.pilots import legal_defense as ldef
 
     assert bp._BROKER_EXCLUDED_SOURCES == {"leave"}
     registry_keys = {k for k, _l, _fn, _e in ldef._SOURCES}

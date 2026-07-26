@@ -27,8 +27,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from ....database import get_connection
 from ...dependencies import require_broker, require_broker_pro
 from ...models.insurance import BrokerQuoteRequest, FnolRequest, PresentRequest
-from ...services import coterie_service, risk_to_rate
-from ...services.coterie_service import CoterieError
+from ...services.insurance import coterie_service
+from ...services.broker import risk_to_rate
+from ...services.insurance.coterie_service import CoterieError
 from .external import _broker_id
 from .portfolio import _assert_broker_owns_company
 

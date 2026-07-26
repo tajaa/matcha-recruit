@@ -1,6 +1,6 @@
 """Pure tests for broker theme-alert helpers (DB/Gemini paths smoke-tested vs dev)."""
 
-from app.matcha.services import broker_theme_alerts as bta
+from app.matcha.services.broker import broker_theme_alerts as bta
 
 
 def test_slug_within_metric_key_limit():

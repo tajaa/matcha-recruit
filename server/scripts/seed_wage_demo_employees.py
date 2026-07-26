@@ -270,7 +270,7 @@ async def seed(company_id_arg: str | None):
 
         # Quick self-check: how many will show as below-market?
         print("\nrunning live wage-gap computation against this company...")
-        from app.matcha.services.wage_benchmark_service import compute_company_wage_gap
+        from app.matcha.services.workforce.wage_benchmark_service import compute_company_wage_gap
         gap = await compute_company_wage_gap(company_id)
         print(f"  hourly employees:       {gap.hourly_employees_count}")
         print(f"  evaluated:              {gap.employees_evaluated}")

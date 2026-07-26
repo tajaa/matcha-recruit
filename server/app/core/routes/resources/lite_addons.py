@@ -49,7 +49,7 @@ async def list_lite_addons(current_user: CurrentUser = Depends(require_client)):
     Not-lite companies get an empty list rather than a 403 — the panel simply
     doesn't render for them.
     """
-    from app.matcha.services import billing_service
+    from app.matcha.services.billing import billing_service
     from app.core.services.lite_addons import LITE_ADDONS, addon_pack_id
     from app.core.services.matcha_lite_pricing import compute_matcha_lite_price_cents, get_matcha_lite_pricing
 
@@ -101,7 +101,7 @@ async def cancel_lite_addon(
     webhook passes its `if canceled:` gate and un-flips the feature flag when
     the period actually ends.
     """
-    from app.matcha.services import billing_service
+    from app.matcha.services.billing import billing_service
     from app.core.services.lite_addons import LITE_ADDONS, addon_pack_id
     from app.core.services.stripe_service import StripeService, StripeServiceError
 

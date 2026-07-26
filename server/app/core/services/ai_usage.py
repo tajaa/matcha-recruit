@@ -101,6 +101,22 @@ def feature_scope(label: str) -> Iterator[None]:
 # worker sweep is the one that runs unattended and repeatedly.
 _LABEL_STOPWORDS = {"app", "services", "routes"}
 
+# services/ split into domain subpackages 2026-07-25 (matcha_work_ai.py ->
+# services/matcha_work/matcha_work_ai.py, etc). The domain segment is purely
+# organizational nesting like "services"/"routes" above and must strip the
+# same way, so a moved module's label is byte-identical to its pre-move label
+# and old ai_usage_log rows keep rolling up under it. Deliberately NOT folded
+# into _LABEL_STOPWORDS: several domain names (broker/insurance/pilots/
+# onboarding) collide with routes/ grouping-folder names, and stripping those
+# generically would risk exactly the cross-branch collision the comment above
+# warns about. Matched positionally instead — only the segment right after
+# "app.matcha.services." is a candidate, never a same-named segment elsewhere.
+_SERVICES_DOMAINS = {
+    "ir", "er", "discipline", "leave", "scheduling", "training", "onboarding",
+    "hris", "benefits", "workforce", "risk_analytics", "matcha_work", "billing",
+    "pilots", "broker", "insurance", "property", "interviews",
+}
+
 
 def _feature_label() -> str:
     """Best-effort caller attribution via stack inspection.
@@ -128,7 +144,11 @@ def _feature_label() -> str:
         while frame is not None and depth < 30:
             name = frame.f_globals.get("__name__", "")
             if name.startswith("app.") and name != __name__:
-                parts = [p for p in name.split(".") if p not in _LABEL_STOPWORDS]
+                segs = name.split(".")
+                if (len(segs) > 3 and segs[1] == "matcha" and segs[2] == "services"
+                        and segs[3] in _SERVICES_DOMAINS):
+                    del segs[3]
+                parts = [p for p in segs if p not in _LABEL_STOPWORDS]
                 label = ".".join(parts) if parts else name
                 return label[:100]
             frame = frame.f_back

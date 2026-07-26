@@ -40,7 +40,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.config import load_settings
 from app.database import close_pool, get_connection, init_pool
-from app.matcha.services.wage_benchmark_service import classify_title, lookup_benchmark
+from app.matcha.services.workforce.wage_benchmark_service import classify_title, lookup_benchmark
 
 DEFAULT_COMPANY_ID = UUID("1a1123e5-4c24-4735-8501-9a64a1dd7691")  # 360 Behavioral Health
 

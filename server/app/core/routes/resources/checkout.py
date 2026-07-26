@@ -233,7 +233,7 @@ async def create_lite_addon_checkout(
     admin-toggled instead. The webhook flips the add-on's feature flag on
     `checkout.session.completed` (metadata.type='matcha_lite_addon').
     """
-    from app.matcha.services import billing_service
+    from app.matcha.services.billing import billing_service
     from app.core.services.lite_addons import LITE_ADDONS, addon_pack_id
     from app.core.services.matcha_lite_pricing import compute_matcha_lite_price_cents, get_matcha_lite_pricing
     from app.core.services.stripe_service import StripeService, StripeServiceError
@@ -331,7 +331,7 @@ async def create_lite_upgrade_checkout(
     Priced at the standard matcha_lite rate for the stored headcount. Nothing
     changes until checkout.session.completed lands — abandoning is a no-op.
     """
-    from app.matcha.services import billing_service
+    from app.matcha.services.billing import billing_service
     from app.core.services.matcha_lite_pricing import compute_matcha_lite_price_cents, get_matcha_lite_pricing
     from app.core.services.stripe_service import StripeService, StripeServiceError
 

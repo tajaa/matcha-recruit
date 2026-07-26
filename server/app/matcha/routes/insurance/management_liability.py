@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from ....database import get_connection
 from ...dependencies import require_admin_or_client, get_client_company_id
-from ...services import do_readiness
+from ...services.insurance import do_readiness
 from ...models.do_readiness import DoAttestation
 
 router = APIRouter()

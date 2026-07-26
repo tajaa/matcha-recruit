@@ -133,7 +133,7 @@ def _first(conn, needle):
 
 @pytest.mark.asyncio
 async def test_list_journal_folders_scopes_by_user(monkeypatch):
-    from app.matcha.services import journal_service as svc
+    from app.matcha.services.matcha_work import journal_service as svc
     user_id, company_id = uuid4(), uuid4()
     conn = _FakeConn(user_id)
     monkeypatch.setattr(svc, "get_connection", lambda *a, **k: _FakeCtx(conn))
@@ -149,7 +149,7 @@ async def test_list_journal_folders_scopes_by_user(monkeypatch):
 async def test_ensure_default_folder_scopes_by_creator():
     """Each user gets their OWN 'Notes' notebook — the existence check must be
     keyed on created_by, not just company."""
-    from app.matcha.services import journal_service as svc
+    from app.matcha.services.matcha_work import journal_service as svc
     creator, company = uuid4(), uuid4()
     conn = _FakeConn(creator)
 
@@ -162,7 +162,7 @@ async def test_ensure_default_folder_scopes_by_creator():
 
 @pytest.mark.asyncio
 async def test_create_journal_folder_parent_check_scopes_by_creator(monkeypatch):
-    from app.matcha.services import journal_service as svc
+    from app.matcha.services.matcha_work import journal_service as svc
     creator, company, parent = uuid4(), uuid4(), uuid4()
     conn = _FakeConn(creator)
     monkeypatch.setattr(svc, "get_connection", lambda *a, **k: _FakeCtx(conn))
@@ -176,7 +176,7 @@ async def test_create_journal_folder_parent_check_scopes_by_creator(monkeypatch)
 
 @pytest.mark.asyncio
 async def test_update_journal_folder_owner_check_scopes_by_user(monkeypatch):
-    from app.matcha.services import journal_service as svc
+    from app.matcha.services.matcha_work import journal_service as svc
     user_id, company, folder = uuid4(), uuid4(), uuid4()
     conn = _FakeConn(user_id)
     monkeypatch.setattr(svc, "get_connection", lambda *a, **k: _FakeCtx(conn))
@@ -190,7 +190,7 @@ async def test_update_journal_folder_owner_check_scopes_by_user(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_delete_journal_folder_owner_check_scopes_by_user(monkeypatch):
-    from app.matcha.services import journal_service as svc
+    from app.matcha.services.matcha_work import journal_service as svc
     user_id, company, folder = uuid4(), uuid4(), uuid4()
     conn = _FakeConn(user_id)
     monkeypatch.setattr(svc, "get_connection", lambda *a, **k: _FakeCtx(conn))
@@ -206,7 +206,7 @@ async def test_delete_journal_folder_owner_check_scopes_by_user(monkeypatch):
 async def test_create_journal_into_folder_validates_ownership(monkeypatch):
     """Filing a new note into a folder must verify the folder is the caller's
     own — otherwise a user could file into a coworker's notebook."""
-    from app.matcha.services import journal_service as svc
+    from app.matcha.services.matcha_work import journal_service as svc
     creator, company, folder = uuid4(), uuid4(), uuid4()
     conn = _FakeConn(creator)
     monkeypatch.setattr(svc, "get_connection", lambda *a, **k: _FakeCtx(conn))

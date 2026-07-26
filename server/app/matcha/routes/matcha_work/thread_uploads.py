@@ -27,10 +27,10 @@ from app.matcha.routes.matcha_work._shared import (
     _sse_data,
 )
 from app.matcha.models.matcha_work import SendInterviewsRequest, SendMessageResponse
-from app.matcha.services import matcha_work_document as doc_svc
-from app.matcha.services import token_budget_service
-from app.matcha.services.er_document_parser import ERDocumentParser
-from app.matcha.services.matcha_work_ai import _build_company_context, _infer_skill_from_state, get_ai_provider
+from app.matcha.services.matcha_work import matcha_work_document as doc_svc
+from app.matcha.services.billing import token_budget_service
+from app.matcha.services.er.er_document_parser import ERDocumentParser
+from app.matcha.services.matcha_work.matcha_work_ai import _build_company_context, _infer_skill_from_state, get_ai_provider
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -202,7 +202,7 @@ async def upload_thread_resume(
 
     async def event_stream():
         try:
-            from app.matcha.services.resume_parser import (
+            from app.matcha.services.matcha_work.resume_parser import (
                 extract_resume_text,
                 parse_resume_text,
                 ResumeParseError,

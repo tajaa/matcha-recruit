@@ -1,0 +1,1711 @@
+"""Project service — CRUD + section management for mw_projects."""
+
+import json
+import logging
+import os
+import re
+import secrets
+from datetime import datetime, timezone
+from typing import Optional
+from uuid import UUID
+
+from ....database import get_connection
+from .matcha_work_modes import MODE_COLUMNS
+
+logger = logging.getLogger(__name__)
+
+
+_ALLOWED_PROJECT_TYPES = {"general", "presentation", "recruiting", "blog", "collab", "discipline"}
+
+# Starter section skeletons spawned at project create time when the request
+# body includes a `template` field. Mirrors `client/src/data/projectTemplates.ts`
+# — keep both in sync until this is lifted into a DB-backed table.
+PROJECT_TEMPLATE_SECTIONS: dict[str, list[dict]] = {
+    "proposal": [
+        {"title": "Executive Summary", "content": "<p>[client name] is a [industry] company looking to [client goal]. This proposal outlines how we will deliver [solution headline] over [engagement length], for an investment of [pricing total].</p>"},
+        {"title": "Problem", "content": "<p>Today, [client name] faces [problem statement]. Without action, this leads to [business impact].</p>"},
+        {"title": "Proposed Solution", "content": "<p>We will [solution overview]. Key deliverables include:</p><ul><li>[deliverable 1]</li><li>[deliverable 2]</li><li>[deliverable 3]</li></ul>"},
+        {"title": "Timeline & Deliverables", "content": "<ul><li><strong>Week 1–2 — Discovery:</strong> [discovery scope]</li><li><strong>Week 3–[N] — Build:</strong> [build scope]</li><li><strong>Final week — Handoff:</strong> [handoff scope]</li></ul>"},
+        {"title": "Pricing", "content": "<p>Total engagement: <strong>[pricing total]</strong>.</p><p>Billing: [billing terms]. Payment terms: [payment terms].</p>"},
+        {"title": "Next Steps", "content": "<ol><li>Review this proposal with [client stakeholder]</li><li>Sign and return by [signature deadline]</li><li>Kickoff call on [kickoff date]</li></ol>"},
+    ],
+    "project_brief": [
+        {"title": "Background", "content": "<p>[project name] is being undertaken because [reason / problem]. It builds on prior work in [related context].</p>"},
+        {"title": "Goals", "content": "<ul><li>[goal 1]</li><li>[goal 2]</li><li>[goal 3]</li></ul>"},
+        {"title": "Scope", "content": "<p><strong>In scope:</strong> [in-scope items]</p><p><strong>Out of scope:</strong> [out-of-scope items]</p>"},
+        {"title": "Stakeholders", "content": "<ul><li><strong>Owner:</strong> [project owner]</li><li><strong>Sponsor:</strong> [executive sponsor]</li><li><strong>Contributors:</strong> [contributors]</li><li><strong>Reviewers:</strong> [reviewers]</li></ul>"},
+        {"title": "Success Metrics", "content": "<ul><li>[metric 1] reaches [target 1] by [target date]</li><li>[metric 2] reaches [target 2] by [target date]</li></ul>"},
+        {"title": "Timeline", "content": "<ul><li><strong>[milestone 1]</strong> — [target date]</li><li><strong>[milestone 2]</strong> — [target date]</li><li><strong>Launch</strong> — [launch date]</li></ul>"},
+    ],
+    "status_report": [
+        {"title": "Summary", "content": "<p>Week of [report week]. Overall status: <strong>[on-track / at-risk / off-track]</strong>. [1-line summary of the week].</p>"},
+        {"title": "Wins this week", "content": "<ul><li>[win 1]</li><li>[win 2]</li><li>[win 3]</li></ul>"},
+        {"title": "Risks & Blockers", "content": "<ul><li><strong>[risk 1]</strong> — [mitigation / owner]</li><li><strong>[blocker 1]</strong> — needs [unblocker / decision]</li></ul>"},
+        {"title": "Next week", "content": "<ul><li>[priority 1]</li><li>[priority 2]</li><li>[priority 3]</li></ul>"},
+        {"title": "Asks", "content": "<p>What we need from leadership / partners:</p><ul><li>[ask 1]</li><li>[ask 2]</li></ul>"},
+    ],
+    "pitch_deck": [
+        {"title": "Title", "content": "<p><strong>[company / product name]</strong></p><p>[one-line tagline — what you do, who for]</p>"},
+        {"title": "Problem", "content": "<p>[target customer] suffers from [pain point]. Today they cope by [current workaround], which is [why workaround is bad].</p>"},
+        {"title": "Solution", "content": "<p>[product name] solves this by [solution headline].</p><p>Key capabilities:</p><ul><li>[capability 1]</li><li>[capability 2]</li><li>[capability 3]</li></ul>"},
+        {"title": "Demo / Walkthrough", "content": "<p>Walk through [demo scenario]:</p><ol><li>[step 1 — what user sees]</li><li>[step 2 — what user does]</li><li>[step 3 — outcome / wow moment]</li></ol>"},
+        {"title": "Traction", "content": "<ul><li>[users / customers / revenue metric]</li><li>[growth rate]</li><li>[notable logos / testimonials]</li></ul>"},
+        {"title": "Ask", "content": "<p>We are raising <strong>[ask amount]</strong> to [use of funds].</p><p>Next step: [next step / call to action].</p>"},
+    ],
+}
+_ALLOWED_BLOG_TONES = {"expert-casual", "technical", "exec-brief", "conversational", "academic"}
+_ALLOWED_BLOG_STATUSES = {"draft", "scheduled", "published"}
+_ALLOWED_DISCIPLINE_LEVELS = {"verbal_warning", "written_warning", "final_warning", "termination_notice"}
+_ALLOWED_DISCIPLINE_CATEGORIES = {"attendance", "performance", "conduct", "policy_violation", "safety", "harassment", "other"}
+_ALLOWED_DISCIPLINE_SEVERITIES = {"minor", "moderate", "severe"}
+
+
+def _slugify(text: str) -> str:
+    s = (text or "").lower().strip()
+    s = re.sub(r"[^a-z0-9]+", "-", s)
+    return s.strip("-")[:80] or "untitled"
+
+
+def _seed_blog_data(extra_data: Optional[dict]) -> dict:
+    e = extra_data or {}
+    tone = e.get("tone") if e.get("tone") in _ALLOWED_BLOG_TONES else "expert-casual"
+    return {
+        "slug": _slugify(e.get("title") or ""),
+        "excerpt": None,
+        "cover_image_url": None,
+        "author": e.get("author") or {},
+        "audience": e.get("audience"),
+        "tone": tone,
+        "tags": [str(t) for t in (e.get("tags") or [])],
+        "status": "draft",
+        "published_at": None,
+        "stats": {"word_count": 0, "read_minutes": 0},
+    }
+
+
+def _seed_discipline_data(extra_data: Optional[dict]) -> dict:
+    """Initial project_data shape for a Discipline project.
+
+    Document-first flow: no synced employee DB, no escalation engine,
+    no look-back math. The user fills in the employee details + the
+    situation, picks a level, and the AI drafts the document into
+    mw_projects.sections like blog projects do.
+    """
+    e = extra_data or {}
+    employee_in = e.get("employee") or {}
+    infraction_in = e.get("infraction") or {}
+    level = e.get("level") if e.get("level") in _ALLOWED_DISCIPLINE_LEVELS else None
+    category = (
+        infraction_in.get("category")
+        if infraction_in.get("category") in _ALLOWED_DISCIPLINE_CATEGORIES
+        else None
+    )
+    severity = (
+        infraction_in.get("severity")
+        if infraction_in.get("severity") in _ALLOWED_DISCIPLINE_SEVERITIES
+        else None
+    )
+    return {
+        "employee": {
+            "name": employee_in.get("name"),
+            "title": employee_in.get("title"),
+            "department": employee_in.get("department"),
+            "manager_name": employee_in.get("manager_name"),
+            "manager_email": employee_in.get("manager_email"),
+            "employee_email": employee_in.get("employee_email"),
+        },
+        "infraction": {
+            "category": category,
+            "category_label": infraction_in.get("category_label"),
+            "occurred_on": infraction_in.get("occurred_on"),
+            "summary": infraction_in.get("summary"),
+            "severity": severity,
+            "evidence_urls": [],
+        },
+        "level": level,
+        "draft_status": "drafting",
+        "meeting_held_at": None,
+        "signature": {
+            "method": None,
+            "envelope_id": None,
+            "requested_at": None,
+            "signed_at": None,
+            "refused_at": None,
+            "refusal_notes": None,
+            "signed_pdf_storage_path": None,
+        },
+        "delivered_status": "draft",
+    }
+
+
+def _compute_blog_stats(sections: list) -> dict:
+    wc = 0
+    for s in sections or []:
+        if not isinstance(s, dict):
+            continue
+        content = s.get("content") or ""
+        wc += len([w for w in re.split(r"\s+", content.strip()) if w])
+    return {"word_count": wc, "read_minutes": max(1, round(wc / 225)) if wc else 0}
+
+
+async def create_project(
+    company_id: UUID,
+    user_id: UUID,
+    title: str = "Untitled Project",
+    project_type: str = "general",
+    hiring_client_id: Optional[UUID] = None,
+    icon: Optional[str] = None,
+    extra_data: Optional[dict] = None,
+) -> dict:
+    if project_type not in _ALLOWED_PROJECT_TYPES:
+        raise ValueError(f"Unknown project_type '{project_type}'")
+    async with get_connection() as conn:
+        if hiring_client_id is not None:
+            owner_check = await conn.fetchval(
+                "SELECT company_id FROM recruiting_clients WHERE id = $1",
+                hiring_client_id,
+            )
+            if owner_check != company_id:
+                raise ValueError("Hiring client does not belong to this workspace")
+
+        if project_type == "blog":
+            seed_extra = dict(extra_data or {})
+            seed_extra.setdefault("title", title)
+            initial_project_data = _seed_blog_data(seed_extra)
+        elif project_type == "discipline":
+            initial_project_data = _seed_discipline_data(extra_data)
+        else:
+            initial_project_data = {}
+
+        # Auto-name "New Project N" when caller passed a default. Counts
+        # existing projects for this company that share the "New Project"
+        # prefix and bumps the next integer. Skips numbering for blog.
+        if title in (None, "", "Untitled Project", "New Project") and project_type != "blog":
+            existing = await conn.fetchval(
+                """
+                SELECT COUNT(*) FROM mw_projects
+                WHERE company_id = $1
+                  AND project_type != 'blog'
+                  AND (title = 'New Project' OR title ~ '^New Project [0-9]+$')
+                """,
+                company_id,
+            )
+            title = "New Project" if not existing else f"New Project {existing + 1}"
+
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                """
+                INSERT INTO mw_projects (company_id, created_by, title, project_type, hiring_client_id, project_data, icon)
+                VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)
+                RETURNING *
+                """,
+                company_id, user_id, title, project_type, hiring_client_id,
+                json.dumps(initial_project_data), icon,
+            )
+
+            # Optional starter template — seed the project's `sections` JSONB
+            # with a pre-defined skeleton (proposal, project_brief, etc.). The
+            # bracketed-placeholder content lets the existing AI fill flow
+            # auto-populate values from the user's first chat message. Lives
+            # inside the same transaction as the INSERT so a partial create
+            # never produces a project with the wrong sections.
+            template_id = (extra_data or {}).get("template")
+            if template_id and template_id in PROJECT_TEMPLATE_SECTIONS:
+                now_iso = datetime.now(timezone.utc).isoformat()
+                # Match the 16-hex-char ID format used by add_section
+                # (`os.urandom(8).hex()`) so any code that incidentally
+                # assumes a fixed length works against template-seeded rows.
+                seeded_sections = [
+                    {
+                        "id": secrets.token_hex(8),
+                        "title": s["title"],
+                        "content": s["content"],
+                        "source_message_id": None,
+                        "content_source": "template",
+                        "content_updated_at": now_iso,
+                        "history": [],
+                    }
+                    for s in PROJECT_TEMPLATE_SECTIONS[template_id]
+                ]
+                await conn.execute(
+                    "UPDATE mw_projects SET sections = $1::jsonb WHERE id = $2",
+                    json.dumps(seeded_sections), row["id"],
+                )
+                # Refresh the row so the returned project includes the seed.
+                row = await conn.fetchrow(
+                    "SELECT * FROM mw_projects WHERE id = $1", row["id"]
+                )
+
+            # Seed initial thread state for recruiting projects so the AI
+            # infers skill="project" from the first message instead of "chat"
+            initial_state = '{}'
+            if project_type == 'recruiting':
+                initial_state = json.dumps({"project_title": title, "project_sections": []})
+
+            # Auto-create a first chat in the project
+            chat = await conn.fetchrow(
+                """
+                INSERT INTO mw_threads (company_id, created_by, title, project_id, current_state)
+                VALUES ($1, $2, $3, $4, $5::jsonb)
+                RETURNING id, title, status, created_at, updated_at
+                """,
+                company_id, user_id, "Chat 1", row["id"], initial_state,
+            )
+            # Seed the creator as project owner. Critical for the admin
+            # listing path which filters projects by collaborator membership
+            # only — without this insert the admin cannot see the project
+            # they just created.
+            await conn.execute(
+                """
+                INSERT INTO mw_project_collaborators (project_id, user_id, invited_by, role, status)
+                VALUES ($1, $2, $2, 'owner', 'active')
+                ON CONFLICT (project_id, user_id) DO UPDATE SET status = 'active'
+                """,
+                row["id"], user_id,
+            )
+    project = _parse_project(row)
+    project["chats"] = [dict(chat)]
+    project["chat_count"] = 1
+    return project
+
+
+def _parse_project(row) -> dict:
+    """Convert a DB row to a project dict with parsed JSONB."""
+    d = dict(row)
+    for key in ("sections", "project_data"):
+        if key in d and isinstance(d[key], str):
+            d[key] = json.loads(d[key])
+        elif key not in d:
+            d[key] = [] if key == "sections" else {}
+    d.setdefault("project_type", "general")
+    return d
+
+
+async def get_project(project_id: UUID, company_id: UUID, user_id: UUID | None = None) -> Optional[dict]:
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT p.*, rc.name AS hiring_client_name
+            FROM mw_projects p
+            LEFT JOIN recruiting_clients rc ON rc.id = p.hiring_client_id
+            WHERE p.id = $1 AND p.company_id = $2
+            """,
+            project_id, company_id,
+        )
+        if not row:
+            return None
+        project = _parse_project(row)
+        project["hiring_client_name"] = row["hiring_client_name"]
+
+        chats = await conn.fetch(
+            """
+            SELECT id, title, status, version, created_at, updated_at, is_pinned
+            FROM mw_threads
+            WHERE project_id = $1
+            ORDER BY created_at ASC
+            """,
+            project_id,
+        )
+        project["chats"] = [dict(c) for c in chats]
+        project["chat_count"] = len(chats)
+
+        # Resolve collaborator role + per-user pin for the requesting user
+        if user_id:
+            collab = await conn.fetchrow(
+                "SELECT role FROM mw_project_collaborators WHERE project_id = $1 AND user_id = $2 AND status = 'active'",
+                project_id, user_id,
+            )
+            project["collaborator_role"] = collab["role"] if collab else None
+            user_pinned = await conn.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM mw_project_pins WHERE user_id = $1 AND project_id = $2)",
+                user_id, project_id,
+            )
+            project["is_pinned"] = bool(user_pinned)
+        elif project.get("created_by") is not None:
+            # Default: project creator is the owner
+            project["collaborator_role"] = "owner"
+    return project
+
+
+async def list_projects(
+    company_id: Optional[UUID],
+    status: Optional[str] = None,
+    user_id: Optional[UUID] = None,
+    hiring_client_id: Optional[UUID] = None,
+) -> list[dict]:
+    """List projects. If company_id and user_id are both provided, lists company projects + collaborated projects."""
+    async with get_connection() as conn:
+        filters = []
+        args = []
+        
+        if company_id and user_id:
+            args.extend([company_id, user_id])
+            filters.append(f"(p.company_id = $1 OR EXISTS (SELECT 1 FROM mw_project_collaborators pc_auth WHERE pc_auth.project_id = p.id AND pc_auth.user_id = $2 AND pc_auth.status = 'active'))")
+        elif user_id:
+            args.append(user_id)
+            filters.append(f"EXISTS (SELECT 1 FROM mw_project_collaborators pc_auth WHERE pc_auth.project_id = p.id AND pc_auth.user_id = $1 AND pc_auth.status = 'active')")
+        elif company_id:
+            args.append(company_id)
+            filters.append(f"p.company_id = $1")
+            
+        if status:
+            args.append(status)
+            filters.append(f"p.status = ${len(args)}")
+            
+        if hiring_client_id is not None:
+            args.append(hiring_client_id)
+            filters.append(f"p.hiring_client_id = ${len(args)}")
+
+        where_clause = "WHERE " + " AND ".join(filters) if filters else ""
+        
+        # To get the collaborator_role for the user without breaking the query with parameterized joins,
+        # we can just select it via a subquery in the SELECT clause if user_id is provided.
+        role_subquery = ""
+        pin_subquery = ""
+        if user_id:
+            user_arg_idx = 1 if not company_id else 2
+            role_subquery = f", (SELECT role FROM mw_project_collaborators WHERE project_id = p.id AND user_id = ${user_arg_idx} AND status = 'active' LIMIT 1) AS collaborator_role"
+            # Per-user pin overrides the legacy global mw_projects.is_pinned.
+            pin_subquery = f", EXISTS(SELECT 1 FROM mw_project_pins WHERE user_id = ${user_arg_idx} AND project_id = p.id) AS user_pinned"
+
+        query = f"""
+            SELECT p.*,
+                   rc.name AS hiring_client_name,
+                   (SELECT COUNT(*) FROM mw_threads WHERE project_id = p.id) as chat_count
+                   {role_subquery}
+                   {pin_subquery}
+            FROM mw_projects p
+            LEFT JOIN recruiting_clients rc ON rc.id = p.hiring_client_id
+            {where_clause}
+            ORDER BY p.updated_at DESC
+        """
+        rows = await conn.fetch(query, *args)
+
+        # Second pass: load active collaborators for collab-typed projects
+        # in one follow-up query so the main list query stays simple. Best
+        # effort — if this lookup fails, projects still render without
+        # the collaborator pile.
+        collabs_by_project: dict[str, list[dict]] = {}
+        try:
+            collab_project_ids = [
+                r["id"] for r in rows
+                if (r["project_type"] if "project_type" in r.keys() else None) == "collab"
+            ]
+            if collab_project_ids:
+                pc_rows = await conn.fetch(
+                    """
+                    SELECT pc.project_id, pc.user_id, pc.role,
+                           COALESCE(
+                               c.name,
+                               NULLIF(BTRIM(CONCAT(e.first_name, ' ', e.last_name)), ''),
+                               a.name,
+                               u.email
+                           ) AS name,
+                           u.email, u.avatar_url
+                    FROM mw_project_collaborators pc
+                    JOIN users u ON u.id = pc.user_id
+                    LEFT JOIN clients c ON c.user_id = pc.user_id
+                    LEFT JOIN employees e ON e.user_id = pc.user_id
+                    LEFT JOIN admins a ON a.user_id = pc.user_id
+                    WHERE pc.project_id = ANY($1::uuid[]) AND pc.status = 'active'
+                    ORDER BY pc.role DESC, u.email
+                    """,
+                    collab_project_ids,
+                )
+                for cr in pc_rows:
+                    pid = str(cr["project_id"])
+                    collabs_by_project.setdefault(pid, []).append({
+                        "user_id": str(cr["user_id"]),
+                        "name": cr["name"],
+                        "email": cr["email"],
+                        "avatar_url": cr["avatar_url"],
+                        "role": cr["role"],
+                    })
+        except Exception as exc:
+            logger.warning("list_projects collaborators lookup failed: %s", exc)
+
+    results = []
+    for r in rows:
+        p = _parse_project(r)
+        if "collaborator_role" in r.keys():
+            p["collaborator_role"] = r["collaborator_role"]
+        if "hiring_client_name" in r.keys():
+            p["hiring_client_name"] = r["hiring_client_name"]
+        # Per-user pin overrides the global is_pinned column when caller is known.
+        if "user_pinned" in r.keys():
+            p["is_pinned"] = bool(r["user_pinned"])
+        pid = str(p.get("id"))
+        if pid in collabs_by_project:
+            p["collaborators"] = collabs_by_project[pid]
+        results.append(p)
+    return results
+
+
+async def update_project(project_id: UUID, updates: dict) -> dict:
+    async with get_connection() as conn:
+        async with conn.transaction():
+            prior = await conn.fetchrow(
+                "SELECT title, project_type, project_data FROM mw_projects WHERE id = $1 FOR UPDATE",
+                project_id,
+            )
+            # Note: is_pinned is intentionally NOT in this set — pin is now
+            # per-user via mw_project_pins. The route intercepts is_pinned
+            # before calling this service. The global column on mw_projects
+            # is kept for backfill/legacy reads only.
+            allowed = {"title", "status", "hiring_client_id", "icon"}
+            sets = []
+            vals = []
+            idx = 1
+            for k, v in updates.items():
+                if k in allowed:
+                    sets.append(f"{k} = ${idx}")
+                    vals.append(v)
+                    idx += 1
+            if not sets:
+                row = await conn.fetchrow("SELECT * FROM mw_projects WHERE id = $1", project_id)
+                return dict(row) if row else {}
+            vals.append(project_id)
+            row = await conn.fetchrow(
+                f"UPDATE mw_projects SET {', '.join(sets)}, updated_at = NOW() WHERE id = ${idx} RETURNING *",
+                *vals,
+            )
+            # Blog: re-derive slug when title changes AND current slug matches prior auto-slug
+            if prior and prior["project_type"] == "blog" and "title" in updates:
+                new_title = updates["title"]
+                prior_title = prior["title"] or ""
+                data = prior["project_data"]
+                if isinstance(data, str):
+                    data = json.loads(data or "{}")
+                data = data or {}
+                current_slug = data.get("slug") or ""
+                if not current_slug or current_slug == _slugify(prior_title):
+                    data["slug"] = _slugify(new_title)
+                    row = await conn.fetchrow(
+                        "UPDATE mw_projects SET project_data = $1::jsonb WHERE id = $2 RETURNING *",
+                        json.dumps(data), project_id,
+                    )
+
+            # Collab: keep the linked discussion channel's name in sync with the
+            # project title so the channels sidebar stays legible after a rename.
+            if prior and prior["project_type"] == "collab" and "title" in updates:
+                cdata = prior["project_data"]
+                if isinstance(cdata, str):
+                    try:
+                        cdata = json.loads(cdata or "{}")
+                    except (json.JSONDecodeError, ValueError):
+                        cdata = {}
+                cdata = cdata or {}
+                chan_id = cdata.get("discussion_channel_id")
+                new_title = (updates.get("title") or "").strip()
+                if chan_id and new_title:
+                    await conn.execute(
+                        "UPDATE channels SET name = $1 WHERE id = $2 AND name IS DISTINCT FROM $1",
+                        new_title,
+                        UUID(chan_id) if isinstance(chan_id, str) else chan_id,
+                    )
+    return _parse_project(row)
+
+
+# ── Blog operations ──
+
+
+async def patch_blog(project_id: UUID, patch: dict) -> dict:
+    """Partial update of blog project_data (excerpt/tone/tags/slug/author/audience)."""
+    async with get_connection() as conn:
+        async with conn.transaction():
+            data = await _load_and_lock_data(conn, project_id)
+            if "slug" in patch and patch["slug"] is not None:
+                data["slug"] = _slugify(str(patch["slug"]))
+            if "excerpt" in patch:
+                data["excerpt"] = patch["excerpt"]
+            if "audience" in patch:
+                data["audience"] = patch["audience"]
+            if "tone" in patch:
+                tone = patch["tone"]
+                if tone not in _ALLOWED_BLOG_TONES:
+                    raise ValueError(f"Unknown tone '{tone}'")
+                data["tone"] = tone
+            if "tags" in patch and isinstance(patch["tags"], list):
+                data["tags"] = [str(t) for t in patch["tags"]]
+            if "author" in patch and isinstance(patch["author"], dict):
+                author = dict(data.get("author") or {})
+                author.update(patch["author"])
+                data["author"] = author
+            return await _persist_data(conn, project_id, data)
+
+
+async def transition_blog_status(project_id: UUID, to: str) -> dict:
+    """Flip blog status. Phase 1: draft <-> published only."""
+    if to not in _ALLOWED_BLOG_STATUSES:
+        raise ValueError(f"Unknown status '{to}'")
+    async with get_connection() as conn:
+        async with conn.transaction():
+            data = await _load_and_lock_data(conn, project_id)
+            data["status"] = to
+            if to == "published":
+                data["published_at"] = datetime.now(timezone.utc).isoformat()
+            elif to == "draft":
+                data["published_at"] = None
+            return await _persist_data(conn, project_id, data)
+
+
+async def archive_project(project_id: UUID):
+    async with get_connection() as conn:
+        await conn.execute(
+            "UPDATE mw_projects SET status = 'archived', updated_at = NOW() WHERE id = $1",
+            project_id,
+        )
+
+
+async def unarchive_project(project_id: UUID):
+    async with get_connection() as conn:
+        await conn.execute(
+            "UPDATE mw_projects SET status = 'active', updated_at = NOW() WHERE id = $1 AND status = 'archived'",
+            project_id,
+        )
+
+
+async def delete_project_permanent(project_id: UUID):
+    async with get_connection() as conn:
+        async with conn.transaction():
+            await conn.execute(
+                "DELETE FROM mw_threads WHERE project_id = $1",
+                project_id,
+            )
+            await conn.execute(
+                "DELETE FROM mw_projects WHERE id = $1",
+                project_id,
+            )
+
+
+# ── Section operations ──
+#
+# All mutating section ops go through `_mutate_sections`: acquire row lock,
+# read sections, let a mutator callable produce the new list + any "extra"
+# return value for the caller, then write back in the same transaction. This
+# eliminates the read-modify-write race the separate get_sections / _update_sections
+# pattern had. The write is skipped entirely when the new sections JSON matches
+# the old — avoids version bumps and stats recompute on no-op updates.
+
+def _sections_from_row(raw) -> list:
+    if raw is None:
+        return []
+    return json.loads(raw) if isinstance(raw, str) else list(raw)
+
+
+_HISTORY_SNAPSHOT_INTERVAL_SEC = 300
+_HISTORY_MAX_ENTRIES = 50
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+async def _resolve_actor_name(user_id) -> Optional[str]:
+    """Display name for a user id (clients/employees/admins, email fallback).
+    Mirrors the COALESCE pattern used across the matcha services. None for a
+    null/unknown user."""
+    if user_id is None:
+        return None
+    try:
+        uid = user_id if isinstance(user_id, UUID) else UUID(str(user_id))
+    except (TypeError, ValueError):
+        return None
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT COALESCE(c.name, CONCAT(e.first_name, ' ', e.last_name), a.name, u.email) AS name
+            FROM users u
+            LEFT JOIN clients c ON c.user_id = u.id
+            LEFT JOIN employees e ON e.user_id = u.id
+            LEFT JOIN admins a ON a.user_id = u.id
+            WHERE u.id = $1
+            """,
+            uid,
+        )
+    name = (row["name"] or "").strip() if row else ""
+    return name or None
+
+
+def _maybe_append_history(
+    section: dict,
+    prior_content: str,
+    prior_source: str,
+    *,
+    prior_author_id: Optional[str] = None,
+    prior_author_name: Optional[str] = None,
+    force: bool = False,
+) -> list:
+    """Append a snapshot of prior_content (with the author who wrote it) to
+    section['history']. Snapshots on the >5min cadence, OR immediately when
+    `force` is set — used when a *different* author takes over so a contributor's
+    version is never swallowed by the debounce. No-op when prior_content empty.
+    Caps at _HISTORY_MAX_ENTRIES.
+    """
+    history = list(section.get("history") or [])
+    if not prior_content:
+        return history
+    last_at = history[-1].get("at") if history else None
+    now = datetime.now(timezone.utc)
+    if not force and last_at:
+        try:
+            last_dt = datetime.fromisoformat(last_at)
+            if (now - last_dt).total_seconds() < _HISTORY_SNAPSHOT_INTERVAL_SEC:
+                return history
+        except ValueError:
+            pass
+    history.append({
+        "content": prior_content,
+        "source": prior_source or "user",
+        "author_id": str(prior_author_id) if prior_author_id else None,
+        "author_name": prior_author_name,
+        "at": now.isoformat(),
+    })
+    if len(history) > _HISTORY_MAX_ENTRIES:
+        history = history[-_HISTORY_MAX_ENTRIES:]
+    return history
+
+
+async def _mutate_sections(project_id: UUID, mutator) -> tuple[dict, object]:
+    """Run `mutator(sections) -> (new_sections, extra)` under a row lock.
+
+    Returns (project_dict, extra). `extra` is whatever the mutator wants to
+    hand back to its caller (e.g. the newly-inserted section object).
+    When new_sections is byte-identical to the existing list, the write and
+    stats recompute are skipped — the existing row is returned untouched.
+    """
+    async with get_connection() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                "SELECT * FROM mw_projects WHERE id = $1 FOR UPDATE",
+                project_id,
+            )
+            if row is None:
+                raise ValueError(f"Project {project_id} not found")
+            current = _sections_from_row(row["sections"])
+            new_sections, extra = mutator(current)
+            # No-op detection: same JSON encoding → skip write.
+            new_json = json.dumps(new_sections)
+            old_json = json.dumps(current)
+            if new_json == old_json:
+                return _parse_project(row), extra
+
+            if row["project_type"] == "blog":
+                data = row["project_data"]
+                if isinstance(data, str):
+                    data = json.loads(data or "{}")
+                data = data or {}
+                data["stats"] = _compute_blog_stats(new_sections)
+                updated = await conn.fetchrow(
+                    """
+                    UPDATE mw_projects
+                    SET sections = $1::jsonb, project_data = $2::jsonb,
+                        version = version + 1, updated_at = NOW()
+                    WHERE id = $3
+                    RETURNING *
+                    """,
+                    new_json, json.dumps(data), project_id,
+                )
+            else:
+                updated = await conn.fetchrow(
+                    """
+                    UPDATE mw_projects
+                    SET sections = $1::jsonb, version = version + 1, updated_at = NOW()
+                    WHERE id = $2
+                    RETURNING *
+                    """,
+                    new_json, project_id,
+                )
+    return _parse_project(updated), extra
+
+
+async def _update_sections(project_id: UUID, sections: list) -> dict:
+    """Back-compat wrapper: replaces the full sections list atomically. Prefer
+    `_mutate_sections` for read-modify-write; use this only when the caller
+    has already decided on the final list (e.g. outline seeding from AI)."""
+    project, _ = await _mutate_sections(project_id, lambda _prev: (sections, None))
+    return project
+
+
+async def get_sections(project_id: UUID) -> list:
+    async with get_connection() as conn:
+        raw = await conn.fetchval("SELECT sections FROM mw_projects WHERE id = $1", project_id)
+    return _sections_from_row(raw)
+
+
+async def add_section(project_id: UUID, section: dict) -> dict:
+    new_section = {
+        "id": os.urandom(8).hex(),
+        "title": section.get("title"),
+        "content": section.get("content", ""),
+        "source_message_id": section.get("source_message_id"),
+        "content_source": section.get("content_source") or "user",
+        "content_updated_at": _now_iso(),
+        "history": [],
+    }
+    if section.get("diagram_data"):
+        new_section["diagram_data"] = section["diagram_data"]
+
+    def mutate(sections):
+        return ([*sections, new_section], new_section)
+
+    project, inserted = await _mutate_sections(project_id, mutate)
+    return {"section": inserted, **project}
+
+
+async def update_section(
+    project_id: UUID,
+    section_id: str,
+    updates: dict,
+    *,
+    actor_user_id=None,
+    actor_name: Optional[str] = None,
+) -> dict:
+    """User-facing section update. Stamps content_source='user', records the
+    editing author, and appends an author-attributed history snapshot when
+    content changes (forced when a different author takes over).
+    """
+    source = updates.get("_source") or "user"
+    actor_id_str = str(actor_user_id) if actor_user_id else None
+
+    def mutate(sections):
+        out = []
+        for s in sections:
+            if s.get("id") == section_id:
+                merged = {**s}
+                content_changed = (
+                    "content" in updates and updates["content"] != s.get("content")
+                )
+                if content_changed:
+                    prior_author_id = s.get("last_edited_by")
+                    # Force a snapshot when a different author takes over, so the
+                    # prior contributor's version is preserved even within 5 min.
+                    force = actor_id_str is not None and actor_id_str != prior_author_id
+                    merged["history"] = _maybe_append_history(
+                        s,
+                        s.get("content") or "",
+                        s.get("content_source") or "user",
+                        prior_author_id=prior_author_id,
+                        prior_author_name=s.get("last_edited_by_name"),
+                        force=force,
+                    )
+                    merged["content"] = updates["content"]
+                    merged["content_source"] = source
+                    merged["content_updated_at"] = _now_iso()
+                    # Who wrote the now-current content — drives "Last edited by X"
+                    # and the author stamp on the NEXT snapshot that displaces it.
+                    merged["last_edited_by"] = actor_id_str
+                    merged["last_edited_by_name"] = actor_name
+                    merged["last_edited_at"] = _now_iso()
+                    # Intentionally preserve pending_revision. Only
+                    # accept_section_revision / reject_section_revision clear
+                    # it — user edits and pending AI suggestions coexist so
+                    # the banner stays actionable until the user decides.
+                if "title" in updates:
+                    merged["title"] = updates["title"]
+                if "diagram_data" in updates:
+                    merged["diagram_data"] = updates["diagram_data"]
+                out.append(merged)
+            else:
+                out.append(s)
+        return (out, None)
+
+    project, _ = await _mutate_sections(project_id, mutate)
+    return project
+
+
+async def accept_section_revision(
+    project_id: UUID,
+    section_id: str,
+    *,
+    actor_user_id=None,
+    actor_name: Optional[str] = None,
+) -> dict:
+    """Promote pending_revision → content. Snapshots the displaced content with
+    its prior author, and records the accepting human as the new content's
+    editor (content_source stays 'ai' since the text is AI-authored)."""
+    actor_id_str = str(actor_user_id) if actor_user_id else None
+
+    def mutate(sections):
+        out = []
+        for s in sections:
+            if s.get("id") == section_id:
+                pending = s.get("pending_revision")
+                if not pending:
+                    out.append(s)
+                    continue
+                merged = {**s}
+                prior_author_id = s.get("last_edited_by")
+                merged["history"] = _maybe_append_history(
+                    s,
+                    s.get("content") or "",
+                    s.get("content_source") or "user",
+                    prior_author_id=prior_author_id,
+                    prior_author_name=s.get("last_edited_by_name"),
+                    force=actor_id_str is not None and actor_id_str != prior_author_id,
+                )
+                merged["content"] = pending
+                merged["content_source"] = "ai"
+                merged["content_updated_at"] = _now_iso()
+                merged["last_edited_by"] = actor_id_str
+                merged["last_edited_by_name"] = actor_name
+                merged["last_edited_at"] = _now_iso()
+                merged["pending_revision"] = None
+                merged["pending_change_summary"] = None
+                out.append(merged)
+            else:
+                out.append(s)
+        return (out, None)
+
+    project, _ = await _mutate_sections(project_id, mutate)
+    return project
+
+
+async def reject_section_revision(project_id: UUID, section_id: str) -> dict:
+    """Discard pending_revision, leaving content untouched."""
+    def mutate(sections):
+        out = []
+        for s in sections:
+            if s.get("id") == section_id and (s.get("pending_revision") or s.get("pending_change_summary")):
+                merged = {**s, "pending_revision": None, "pending_change_summary": None}
+                out.append(merged)
+            else:
+                out.append(s)
+        return (out, None)
+
+    project, _ = await _mutate_sections(project_id, mutate)
+    return project
+
+
+async def delete_section(project_id: UUID, section_id: str) -> dict:
+    def mutate(sections):
+        return ([s for s in sections if s.get("id") != section_id], None)
+
+    project, _ = await _mutate_sections(project_id, mutate)
+    return project
+
+
+async def reorder_sections(project_id: UUID, section_ids: list[str]) -> dict:
+    def mutate(sections):
+        section_map = {s["id"]: s for s in sections}
+        reordered = [section_map[sid] for sid in section_ids if sid in section_map]
+        seen = set(section_ids)
+        for s in sections:
+            if s["id"] not in seen:
+                reordered.append(s)
+        return (reordered, None)
+
+    project, _ = await _mutate_sections(project_id, mutate)
+    return project
+
+
+async def apply_blog_directives(
+    project_id: UUID,
+    outline: Optional[list] = None,
+    draft: Optional[dict] = None,
+    revision: Optional[dict] = None,
+    replace: Optional[list] = None,
+) -> tuple[dict, bool]:
+    """Apply AI blog directives under a single row lock.
+
+    Returns (project_dict, changed_bool).
+
+    - `outline` seeds sections only when the blog currently has zero sections.
+    - `draft` is a dict keyed by section_id → markdown content.
+    - `revision` is {section_id, content, change_summary?}.
+    - `replace` is the full new ordered list of sections:
+      [{id?, title, content?}, ...]. Replaces the entire sections list.
+      Items with an id matching an existing section preserve existing content
+      (and may update title). Items without id become new sections. Existing
+      sections whose id is not in `replace` are deleted. Rejected if empty.
+    """
+    import uuid as _uuid
+
+    def mutate(sections: list):
+        changed = False
+        new_sections = list(sections)
+
+        # Destructive restructure takes precedence. When replace is provided
+        # the AI intends to overwrite the section list wholesale. Skip outline
+        # seeding and treat draft/revision directives against the NEW section
+        # ids (after the replace).
+        if isinstance(replace, list) and replace:
+            existing_by_id = {s.get("id"): s for s in new_sections if s.get("id")}
+            replaced: list = []
+            for item in replace:
+                if not isinstance(item, dict):
+                    continue
+                title = (item.get("title") or "").strip()
+                raw_id = item.get("id")
+                if raw_id and raw_id in existing_by_id:
+                    base = existing_by_id[raw_id]
+                    merged = {**base}
+                    if title:
+                        merged["title"] = title
+                    if "content" in item:
+                        new_content = (item.get("content") or "").strip()
+                        if new_content:
+                            merged["content"] = new_content
+                    replaced.append(merged)
+                else:
+                    if not title:
+                        continue
+                    content = (item.get("content") or "").strip()
+                    replaced.append({
+                        "id": _uuid.uuid4().hex[:12],
+                        "title": title,
+                        "content": content,
+                        "content_source": "ai",
+                        "content_updated_at": _now_iso(),
+                        "history": [],
+                    })
+            # Guard: never allow an empty replacement to silently wipe the blog.
+            if replaced:
+                new_sections = replaced
+                changed = True
+
+        if outline and not new_sections:
+            seeded = []
+            for item in outline:
+                if not isinstance(item, dict):
+                    continue
+                title = (item.get("title") or "").strip()
+                if not title:
+                    continue
+                bullets = item.get("bullets") or []
+                bullets = [str(b).strip() for b in bullets if isinstance(b, (str, int, float)) and str(b).strip()]
+                content = "\n".join(f"- {b}" for b in bullets) if bullets else ""
+                seeded.append({
+                    "id": _uuid.uuid4().hex[:12],
+                    "title": title,
+                    "content": content,
+                    "content_source": "ai",
+                    "content_updated_at": _now_iso(),
+                    "history": [],
+                })
+            if seeded:
+                new_sections = seeded
+                changed = True
+
+        by_id = {s.get("id"): i for i, s in enumerate(new_sections) if s.get("id")}
+
+        # AI drafts/revisions on sections the user has edited land as
+        # pending_revision — never overwrite user content silently. First-time
+        # drafts on empty/AI-seeded sections write directly.
+        if isinstance(draft, dict):
+            for sid, content in draft.items():
+                if not isinstance(content, str) or not content.strip():
+                    continue
+                idx = by_id.get(sid)
+                if idx is None:
+                    continue
+                sec = new_sections[idx]
+                existing = (sec.get("content") or "").strip()
+                source = sec.get("content_source") or ("user" if existing else "ai")
+                if existing and source == "user":
+                    new_sections[idx] = {
+                        **sec,
+                        "pending_revision": content.strip(),
+                        "pending_change_summary": "AI draft (review before applying)",
+                    }
+                else:
+                    new_sections[idx] = {
+                        **sec,
+                        "history": _maybe_append_history(sec, existing, source),
+                        "content": content.strip(),
+                        "content_source": "ai",
+                        "content_updated_at": _now_iso(),
+                    }
+                changed = True
+
+        if isinstance(revision, dict):
+            rsid = revision.get("section_id")
+            rcontent = (revision.get("content") or "").strip()
+            rsummary = (revision.get("change_summary") or "").strip() or "AI revision (review before applying)"
+            if rsid and rcontent:
+                idx = by_id.get(rsid)
+                if idx is not None:
+                    sec = new_sections[idx]
+                    # Revisions ALWAYS stage as pending — user explicitly accepts.
+                    new_sections[idx] = {
+                        **sec,
+                        "pending_revision": rcontent,
+                        "pending_change_summary": rsummary,
+                    }
+                    changed = True
+
+        if not changed:
+            # Signal no-op so _mutate_sections skips the write.
+            return (sections, False)
+        return (new_sections, True)
+
+    project, changed_flag = await _mutate_sections(project_id, mutate)
+    return project, bool(changed_flag)
+
+
+async def create_project_chat(project_id: UUID, company_id: UUID, user_id: UUID, title: str | None = None) -> dict:
+    async with get_connection() as conn:
+        # Count existing chats to generate title
+        if not title:
+            count = await conn.fetchval(
+                "SELECT COUNT(*) FROM mw_threads WHERE project_id = $1", project_id
+            )
+            title = f"Chat {count + 1}"
+
+        # Seed initial thread state for recruiting projects so the AI
+        # infers skill="project" from the first message instead of "chat"
+        project_row = await conn.fetchrow(
+            "SELECT project_type, title FROM mw_projects WHERE id = $1", project_id
+        )
+        initial_state = '{}'
+        if project_row and project_row["project_type"] == 'recruiting':
+            initial_state = json.dumps({
+                "project_title": project_row["title"],
+                "project_sections": [],
+            })
+        elif project_row and project_row["project_type"] == 'presentation':
+            initial_state = json.dumps({
+                "presentation_title": "",
+                "slides": [],
+            })
+
+        row = await conn.fetchrow(
+            f"""
+            INSERT INTO mw_threads (company_id, created_by, title, project_id, current_state)
+            VALUES ($1, $2, $3, $4, $5::jsonb)
+            RETURNING id, title, status, version, created_at, updated_at, is_pinned,
+                      {', '.join(MODE_COLUMNS)}, project_id
+            """,
+            company_id, user_id, title, project_id, initial_state,
+        )
+        # Update project timestamp
+        await conn.execute(
+            "UPDATE mw_projects SET updated_at = NOW() WHERE id = $1", project_id
+        )
+    return dict(row)
+
+
+async def list_project_chats(project_id: UUID, company_id: UUID, user_id: UUID) -> list[dict]:
+    """List AI chat threads scoped to a project, private-per-person.
+
+    A user sees threads they created in this project plus any project thread
+    explicitly shared with them (via mw_thread_collaborators). Threads created
+    by other collaborators that haven't been shared are hidden. `company_id` is
+    accepted for signature parity / future tenant filtering; access is already
+    gated by _verify_project_access at the route.
+    """
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            f"""
+            SELECT t.id, t.title, t.task_type, t.status, t.version, t.is_pinned,
+                   {', '.join(f't.{c}' for c in MODE_COLUMNS)},
+                   t.created_by, t.created_at, t.updated_at,
+                   (SELECT COUNT(*) FROM mw_thread_collaborators c WHERE c.thread_id = t.id)
+                       AS collaborator_count
+            FROM mw_threads t
+            WHERE t.project_id = $1 AND (
+                t.created_by = $2
+                OR EXISTS (
+                    SELECT 1 FROM mw_thread_collaborators c
+                    WHERE c.thread_id = t.id AND c.user_id = $2
+                )
+            )
+            ORDER BY t.is_pinned DESC, t.updated_at DESC
+            """,
+            project_id, user_id,
+        )
+    return [dict(r) for r in rows]
+
+
+# ── Recruiting-specific operations ──
+
+
+async def update_project_data(project_id: UUID, updates: dict) -> dict:
+    """Merge updates into project_data JSONB with row lock."""
+    async with get_connection() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                "SELECT project_data FROM mw_projects WHERE id = $1 FOR UPDATE", project_id
+            )
+            data = row["project_data"] if isinstance(row["project_data"], dict) else json.loads(row["project_data"] or "{}")
+            data.update(updates)
+            result = await conn.fetchrow(
+                "UPDATE mw_projects SET project_data = $1::jsonb, updated_at = NOW() WHERE id = $2 RETURNING *",
+                json.dumps(data), project_id,
+            )
+    return _parse_project(result)
+
+
+async def add_candidates_to_project(project_id: UUID, new_candidates: list[dict]) -> dict:
+    """Append candidates to project_data.candidates with row lock."""
+    async with get_connection() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                "SELECT project_data FROM mw_projects WHERE id = $1 FOR UPDATE", project_id
+            )
+            data = row["project_data"] if isinstance(row["project_data"], dict) else json.loads(row["project_data"] or "{}")
+            existing = data.get("candidates") or []
+            data["candidates"] = existing + new_candidates
+            result = await conn.fetchrow(
+                "UPDATE mw_projects SET project_data = $1::jsonb, updated_at = NOW() WHERE id = $2 RETURNING *",
+                json.dumps(data), project_id,
+            )
+    return _parse_project(result)
+
+
+async def toggle_shortlist(project_id: UUID, candidate_id: str) -> dict:
+    """Add or remove a candidate from the shortlist with row lock."""
+    async with get_connection() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                "SELECT project_data FROM mw_projects WHERE id = $1 FOR UPDATE", project_id
+            )
+            data = row["project_data"] if isinstance(row["project_data"], dict) else json.loads(row["project_data"] or "{}")
+            shortlist = set(data.get("shortlist_ids") or [])
+            if candidate_id in shortlist:
+                shortlist.discard(candidate_id)
+            else:
+                shortlist.add(candidate_id)
+            data["shortlist_ids"] = list(shortlist)
+            result = await conn.fetchrow(
+                "UPDATE mw_projects SET project_data = $1::jsonb, updated_at = NOW() WHERE id = $2 RETURNING *",
+                json.dumps(data), project_id,
+            )
+    return _parse_project(result)
+
+
+async def toggle_dismiss(project_id: UUID, candidate_id: str) -> dict:
+    """Add or remove a candidate from the dismissed list with row lock."""
+    async with get_connection() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                "SELECT project_data FROM mw_projects WHERE id = $1 FOR UPDATE", project_id
+            )
+            data = row["project_data"] if isinstance(row["project_data"], dict) else json.loads(row["project_data"] or "{}")
+            dismissed = set(data.get("dismissed_ids") or [])
+            if candidate_id in dismissed:
+                dismissed.discard(candidate_id)
+            else:
+                dismissed.add(candidate_id)
+            data["dismissed_ids"] = list(dismissed)
+            result = await conn.fetchrow(
+                "UPDATE mw_projects SET project_data = $1::jsonb, updated_at = NOW() WHERE id = $2 RETURNING *",
+                json.dumps(data), project_id,
+            )
+    return _parse_project(result)
+
+
+
+
+async def _load_and_lock_data(conn, project_id: UUID) -> dict:
+    row = await conn.fetchrow(
+        "SELECT project_data FROM mw_projects WHERE id = $1 FOR UPDATE", project_id
+    )
+    if row is None:
+        raise ValueError("Project not found")
+    raw = row["project_data"]
+    if isinstance(raw, dict):
+        return raw
+    return json.loads(raw or "{}")
+
+
+async def _persist_data(conn, project_id: UUID, data: dict) -> dict:
+    result = await conn.fetchrow(
+        "UPDATE mw_projects SET project_data = $1::jsonb, updated_at = NOW() WHERE id = $2 RETURNING *",
+        json.dumps(data), project_id,
+    )
+    return _parse_project(result)
+
+
+async def get_project_raw(project_id: UUID) -> Optional[dict]:
+    """Fetch a single project row by id with no auth scoping.
+
+    Caller is responsible for authorization (typically via
+    `_verify_project_access` in the route layer). Returns None when
+    the row doesn't exist.
+    """
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            "SELECT * FROM mw_projects WHERE id = $1", project_id,
+        )
+    if not row:
+        return None
+    return _parse_project(row)
+
+
+async def patch_discipline(project_id: UUID, patch: dict) -> dict:
+    """Deep-merge employee + infraction; replace level when provided.
+
+    Used by the Quick Setup tab and by AI directives that emit discipline_setup updates.
+    """
+    async with get_connection() as conn:
+        async with conn.transaction():
+            data = await _load_and_lock_data(conn, project_id)
+            if "employee" in patch and isinstance(patch["employee"], dict):
+                emp = dict(data.get("employee") or {})
+                emp.update(patch["employee"])
+                data["employee"] = emp
+            if "infraction" in patch and isinstance(patch["infraction"], dict):
+                infr = dict(data.get("infraction") or {})
+                category = patch["infraction"].get("category")
+                severity = patch["infraction"].get("severity")
+                if category is not None and category not in _ALLOWED_DISCIPLINE_CATEGORIES:
+                    raise ValueError(f"Unknown infraction category '{category}'")
+                if severity is not None and severity not in _ALLOWED_DISCIPLINE_SEVERITIES:
+                    raise ValueError(f"Unknown infraction severity '{severity}'")
+                infr.update(patch["infraction"])
+                data["infraction"] = infr
+            if "level" in patch:
+                if patch["level"] not in _ALLOWED_DISCIPLINE_LEVELS:
+                    raise ValueError(f"Unknown discipline level '{patch['level']}'")
+                data["level"] = patch["level"]
+            return await _persist_data(conn, project_id, data)
+
+
+async def mark_discipline_meeting_held(project_id: UUID) -> dict:
+    """Stamp meeting_held_at. Required gate before signature can be requested."""
+    async with get_connection() as conn:
+        async with conn.transaction():
+            data = await _load_and_lock_data(conn, project_id)
+            if not data.get("meeting_held_at"):
+                data["meeting_held_at"] = _now_iso()
+            return await _persist_data(conn, project_id, data)
+
+
+async def record_discipline_signature_request(
+    project_id: UUID,
+    *,
+    envelope_id: str,
+    method: str,
+    recipient_email: str,
+) -> dict:
+    """Record that a signature request was sent (digital path).
+
+    Sets the signature blob and flips draft_status to pending_signature
+    so the UI shows the awaiting-signature state.
+    """
+    async with get_connection() as conn:
+        async with conn.transaction():
+            data = await _load_and_lock_data(conn, project_id)
+            sig = dict(data.get("signature") or {})
+            sig.update({
+                "method": method,
+                "envelope_id": envelope_id,
+                "requested_at": _now_iso(),
+                "recipient_email": recipient_email,
+            })
+            data["signature"] = sig
+            data["draft_status"] = "pending_signature"
+            data["delivered_status"] = "active"
+            return await _persist_data(conn, project_id, data)
+
+
+async def record_discipline_signed(
+    project_id: UUID,
+    *,
+    signed_pdf_storage_path: Optional[str] = None,
+    method: Optional[str] = None,
+) -> dict:
+    """Mark a discipline project as signed (digital webhook OR physical upload)."""
+    async with get_connection() as conn:
+        async with conn.transaction():
+            data = await _load_and_lock_data(conn, project_id)
+            sig = dict(data.get("signature") or {})
+            sig["signed_at"] = _now_iso()
+            if signed_pdf_storage_path:
+                sig["signed_pdf_storage_path"] = signed_pdf_storage_path
+            if method:
+                sig["method"] = method
+            data["signature"] = sig
+            data["draft_status"] = "physically_signed" if method == "physical" else "signed"
+            data["delivered_status"] = "closed"
+            return await _persist_data(conn, project_id, data)
+
+
+async def record_discipline_refused(project_id: UUID, *, notes: str) -> dict:
+    """Mark a discipline project as refused-to-sign. Closes the workflow."""
+    async with get_connection() as conn:
+        async with conn.transaction():
+            data = await _load_and_lock_data(conn, project_id)
+            sig = dict(data.get("signature") or {})
+            sig["refused_at"] = _now_iso()
+            sig["refusal_notes"] = notes
+            data["signature"] = sig
+            data["draft_status"] = "refused"
+            data["delivered_status"] = "closed"
+            return await _persist_data(conn, project_id, data)
+
+
+# ── Collaborator operations ──
+
+
+async def get_project_as_collaborator(project_id: UUID, user_id: UUID) -> Optional[tuple[dict, str]]:
+    """Get a project if the user is an active collaborator. Returns (project, role) or None."""
+    async with get_connection() as conn:
+        collab = await conn.fetchrow(
+            """
+            SELECT role FROM mw_project_collaborators
+            WHERE project_id = $1 AND user_id = $2 AND status = 'active'
+            """,
+            project_id, user_id,
+        )
+        if not collab:
+            return None
+        row = await conn.fetchrow("SELECT * FROM mw_projects WHERE id = $1", project_id)
+        if not row:
+            return None
+        project = _parse_project(row)
+        chats = await conn.fetch(
+            """
+            SELECT id, title, status, version, created_at, updated_at, is_pinned
+            FROM mw_threads
+            WHERE project_id = $1
+            ORDER BY created_at ASC
+            """,
+            project_id,
+        )
+        project["chats"] = [dict(c) for c in chats]
+        project["chat_count"] = len(chats)
+        project["collaborator_role"] = collab["role"]
+    return project, collab["role"]
+
+
+async def list_collaborators(project_id: UUID) -> list[dict]:
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT pc.user_id, pc.role, pc.created_at,
+                   COALESCE(a.name, u.email) AS name,
+                   u.email, u.avatar_url
+            FROM mw_project_collaborators pc
+            JOIN users u ON u.id = pc.user_id
+            LEFT JOIN admins a ON a.user_id = pc.user_id
+            WHERE pc.project_id = $1 AND pc.status = 'active'
+            ORDER BY pc.created_at ASC
+            """,
+            project_id,
+        )
+    return [dict(r) for r in rows]
+
+
+async def set_project_pin(user_id: UUID, project_id: UUID, pinned: bool) -> bool:
+    """Toggle a per-user star/pin on a project. Returns the new state.
+
+    The pin is stored in `mw_project_pins(user_id, project_id)`. Anyone
+    can pin a project they can already see (caller-side authorisation
+    happens in the route).
+    """
+    async with get_connection() as conn:
+        if pinned:
+            await conn.execute(
+                """
+                INSERT INTO mw_project_pins (user_id, project_id)
+                VALUES ($1, $2)
+                ON CONFLICT (user_id, project_id) DO NOTHING
+                """,
+                user_id, project_id,
+            )
+        else:
+            await conn.execute(
+                "DELETE FROM mw_project_pins WHERE user_id = $1 AND project_id = $2",
+                user_id, project_id,
+            )
+    return pinned
+
+
+async def ensure_discussion_channel(project_id: UUID, current_user_id: UUID) -> Optional[UUID]:
+    """Get or create a private channel for a collab project's discussion.
+
+    The channel id is stored at `project_data.discussion_channel_id`. All
+    active collaborators are added as channel members on creation.
+    Idempotent — returns the existing channel id if already linked.
+    """
+    async with get_connection() as conn:
+        async with conn.transaction():
+            project = await conn.fetchrow(
+                "SELECT id, company_id, title, project_type, project_data FROM mw_projects WHERE id = $1 FOR UPDATE",
+                project_id,
+            )
+            if not project:
+                return None
+            if project["project_type"] != "collab":
+                return None
+
+            data = project["project_data"]
+            if isinstance(data, str):
+                try:
+                    data = json.loads(data or "{}")
+                except (json.JSONDecodeError, ValueError):
+                    data = {}
+            data = data or {}
+
+            title = (project["title"] or "Project").strip() or "Project"
+
+            existing_id = data.get("discussion_channel_id")
+            if existing_id:
+                chan_uuid = UUID(existing_id) if isinstance(existing_id, str) else existing_id
+                # Self-heal the channel name to the current project title, so a
+                # project renamed before this sync existed (or via any path that
+                # skipped propagation) gets a legible sidebar name on next open.
+                # No-op when already in sync (IS DISTINCT FROM guard).
+                await conn.execute(
+                    "UPDATE channels SET name = $1 WHERE id = $2 AND name IS DISTINCT FROM $1",
+                    title, chan_uuid,
+                )
+                return chan_uuid
+
+            company_id = project["company_id"]
+
+            base_slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:60] or "project"
+            slug = f"proj-{base_slug}"
+            suffix = 0
+            while await conn.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM channels WHERE company_id = $1 AND slug = $2)",
+                company_id, slug,
+            ):
+                suffix += 1
+                slug = f"proj-{base_slug}-{suffix}"
+
+            channel = await conn.fetchrow(
+                """
+                INSERT INTO channels (company_id, name, slug, description, created_by, visibility,
+                    is_paid, currency, inactivity_warning_days)
+                VALUES ($1, $2, $3, $4, $5, 'private', FALSE, 'usd', 3)
+                RETURNING id
+                """,
+                company_id,
+                title,
+                slug,
+                f"Discussion channel for collab project: {title}",
+                current_user_id,
+            )
+            channel_id = channel["id"]
+
+            await conn.execute(
+                "INSERT INTO channel_members (channel_id, user_id, role, last_contributed_at) VALUES ($1, $2, 'owner', NOW())",
+                channel_id, current_user_id,
+            )
+
+            collab_rows = await conn.fetch(
+                """
+                SELECT user_id FROM mw_project_collaborators
+                WHERE project_id = $1 AND status = 'active' AND user_id != $2
+                """,
+                project_id, current_user_id,
+            )
+            for row in collab_rows:
+                await conn.execute(
+                    """
+                    INSERT INTO channel_members (channel_id, user_id, role, last_contributed_at)
+                    VALUES ($1, $2, 'member', NOW())
+                    ON CONFLICT (channel_id, user_id) DO NOTHING
+                    """,
+                    channel_id, row["user_id"],
+                )
+
+            data["discussion_channel_id"] = str(channel_id)
+            await conn.execute(
+                "UPDATE mw_projects SET project_data = $1::jsonb, updated_at = NOW() WHERE id = $2",
+                json.dumps(data), project_id,
+            )
+            return channel_id
+
+
+# Match bare http(s) URLs; stop at whitespace and common trailing delimiters.
+_URL_RE = re.compile(r'https?://[^\s<>"\')\]]+', re.IGNORECASE)
+# Trailing punctuation that's usually sentence/markup, not part of the URL.
+_URL_TRAILING = '.,;:!?)]}\'"'
+
+
+async def list_project_links(project_id: UUID) -> list[dict]:
+    """Links shared in the project's collab chat: extract http(s) URLs from the
+    discussion channel's messages. Deduped on URL, newest first. Returns
+    [{url, sender_name, created_at}]. Empty when the project has no chat."""
+    async with get_connection() as conn:
+        channel_id = await conn.fetchval(
+            "SELECT (project_data->>'discussion_channel_id')::uuid FROM mw_projects WHERE id = $1",
+            project_id,
+        )
+        if not channel_id:
+            return []
+        rows = await conn.fetch(
+            """
+            SELECT m.content, m.created_at,
+                   COALESCE(c.name, CONCAT(e.first_name, ' ', e.last_name), a.name, u.email) AS sender_name
+            FROM channel_messages m
+            JOIN users u ON u.id = m.sender_id
+            LEFT JOIN clients c ON c.user_id = u.id
+            LEFT JOIN employees e ON e.user_id = u.id
+            LEFT JOIN admins a ON a.user_id = u.id
+            WHERE m.channel_id = $1
+              AND m.deleted_at IS NULL
+              AND m.content ~* 'https?://'
+            ORDER BY m.created_at DESC
+            LIMIT 500
+            """,
+            channel_id,
+        )
+    seen: set[str] = set()
+    out: list[dict] = []
+    for r in rows:
+        for raw in _URL_RE.findall(r["content"] or ""):
+            url = raw.rstrip(_URL_TRAILING)
+            if not url or url in seen:
+                continue
+            seen.add(url)
+            out.append({
+                "url": url,
+                "sender_name": r["sender_name"],
+                "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+            })
+    return out
+
+
+async def add_collaborator(project_id: UUID, user_id: UUID, invited_by: UUID) -> list[dict]:
+    """Invite a user as a PENDING collaborator: send an inbox message + a bell
+    notification, but do NOT grant access. They join only when they accept
+    (accept_project_invite flips them to active and adds them to the chat).
+    Returns the (still active-only) collaborator list — the invitee won't appear
+    until they accept, which is the point."""
+    async with get_connection() as conn:
+        target = await conn.fetchrow(
+            "SELECT id FROM users WHERE id = $1 AND is_active = true",
+            user_id,
+        )
+        if not target:
+            raise ValueError("User not found")
+        if user_id == invited_by:
+            raise ValueError("You cannot invite yourself")
+        existing = await conn.fetchrow(
+            "SELECT status FROM mw_project_collaborators WHERE project_id = $1 AND user_id = $2",
+            project_id, user_id,
+        )
+        if existing and existing["status"] == "active":
+            raise ValueError("User is already a collaborator")
+        # Pending — not active. A prior pending/removed row is re-armed.
+        await conn.execute(
+            """
+            INSERT INTO mw_project_collaborators (project_id, user_id, invited_by, role, status)
+            VALUES ($1, $2, $3, 'collaborator', 'pending')
+            ON CONFLICT (project_id, user_id)
+            DO UPDATE SET status = 'pending', invited_by = $3, created_at = NOW()
+            """,
+            project_id, user_id, invited_by,
+        )
+
+        project = await conn.fetchrow("SELECT title, company_id FROM mw_projects WHERE id = $1", project_id)
+        inviter = await conn.fetchrow("SELECT email FROM users WHERE id = $1", invited_by)
+        inviter_client = await conn.fetchrow("SELECT name FROM clients WHERE user_id = $1", invited_by)
+        inviter_name = (inviter_client["name"] if inviter_client and inviter_client["name"] else None) or inviter["email"].split("@")[0]
+        project_title = project["title"] if project else "a project"
+
+        msg_content = f"**{inviter_name}** invited you to join the project **{project_title}**. Open your projects to accept or decline."
+        conversation = await conn.fetchrow(
+            """INSERT INTO inbox_conversations (title, is_group, created_by, last_message_at, last_message_preview)
+               VALUES ($1, false, $2, NOW(), $3)
+               RETURNING id""",
+            f"Project Invite: {project_title}", invited_by, msg_content[:100],
+        )
+        conv_id = conversation["id"]
+        await conn.execute("INSERT INTO inbox_participants (conversation_id, user_id) VALUES ($1, $2)", conv_id, invited_by)
+        await conn.execute("INSERT INTO inbox_participants (conversation_id, user_id) VALUES ($1, $2)", conv_id, user_id)
+        await conn.execute("INSERT INTO inbox_messages (conversation_id, sender_id, content) VALUES ($1, $2, $3)", conv_id, invited_by, msg_content)
+
+    # Bell notification for the invitee (own connection; best-effort — never
+    # fail the invite over a notification hiccup).
+    if project and project["company_id"]:
+        try:
+            from .. import notification_service as notif_svc
+            await notif_svc.create_notification(
+                user_id=user_id,
+                company_id=project["company_id"],
+                type="project_invite",
+                title=f"Project invite from {inviter_name}",
+                body=f"You've been invited to join \"{project_title}\"",
+                link="/work",
+                metadata={"project_id": str(project_id), "invited_by": str(invited_by)},
+            )
+        except Exception as exc:
+            logger.warning("Failed to create invite notification: %s", exc)
+
+    return await list_collaborators(project_id)
+
+
+async def ensure_collaborator_in_discussion_channel(project_id: UUID, user_id: UUID) -> None:
+    """Add one user to the project's discussion channel (if it exists). Called
+    when an invite is accepted — the chat is the collab surface, so a new active
+    collaborator joins it. No-op for non-collab projects or before the channel
+    is created."""
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            "SELECT project_type, project_data FROM mw_projects WHERE id = $1",
+            project_id,
+        )
+        if not row or row["project_type"] != "collab":
+            return
+        data = row["project_data"]
+        if isinstance(data, str):
+            try:
+                data = json.loads(data or "{}")
+            except (json.JSONDecodeError, ValueError):
+                data = {}
+        data = data or {}
+        chan_id = data.get("discussion_channel_id")
+        if not chan_id:
+            return
+        await conn.execute(
+            """
+            INSERT INTO channel_members (channel_id, user_id, role, last_contributed_at)
+            VALUES ($1, $2, 'member', NOW())
+            ON CONFLICT (channel_id, user_id) DO NOTHING
+            """,
+            UUID(chan_id) if isinstance(chan_id, str) else chan_id,
+            user_id,
+        )
+
+
+async def remove_collaborator(project_id: UUID, user_id: UUID, removed_by: UUID) -> list[dict]:
+    """Remove a collaborator. Only the owner can remove. Cannot remove the owner."""
+    async with get_connection() as conn:
+        # Check that remover is the owner
+        remover = await conn.fetchrow(
+            "SELECT role FROM mw_project_collaborators WHERE project_id = $1 AND user_id = $2 AND status = 'active'",
+            project_id, removed_by,
+        )
+        if not remover or remover["role"] != "owner":
+            raise PermissionError("Only the project owner can remove collaborators")
+        # Cannot remove the owner
+        target = await conn.fetchrow(
+            "SELECT role FROM mw_project_collaborators WHERE project_id = $1 AND user_id = $2 AND status = 'active'",
+            project_id, user_id,
+        )
+        if not target:
+            raise ValueError("User is not a collaborator on this project")
+        if target["role"] == "owner":
+            raise PermissionError("Cannot remove the project owner")
+        await conn.execute(
+            "UPDATE mw_project_collaborators SET status = 'removed' WHERE project_id = $1 AND user_id = $2",
+            project_id, user_id,
+        )
+    return await list_collaborators(project_id)
+
+
+async def search_admin_users(query: str, exclude_user_id: UUID) -> list[dict]:
+    """Search admin users by name or email for the invite picker."""
+    async with get_connection() as conn:
+        pattern = f"%{query}%"
+        rows = await conn.fetch(
+            """
+            SELECT u.id AS user_id, u.email, u.avatar_url,
+                   COALESCE(a.name, u.email) AS name
+            FROM users u
+            JOIN admins a ON a.user_id = u.id
+            WHERE u.id != $1
+              AND u.is_active = true
+              AND (a.name ILIKE $2 OR u.email ILIKE $2)
+            ORDER BY u.email
+            LIMIT 10
+            """,
+            exclude_user_id, pattern,
+        )
+    return [dict(r) for r in rows]

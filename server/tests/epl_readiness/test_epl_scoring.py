@@ -2,7 +2,7 @@
 DB-gathering half of ``compute_epl_readiness`` is exercised by manual
 integration on dev (per repo convention)."""
 
-from app.matcha.services import epl_readiness as epl
+from app.matcha.services.broker import epl_readiness as epl
 
 
 def _full_inputs(overrides: dict | None = None) -> dict:

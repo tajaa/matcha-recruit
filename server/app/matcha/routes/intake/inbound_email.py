@@ -22,7 +22,7 @@ from ....database import get_connection
 from app.core.services.redis_cache import check_rate_limit, client_ip
 from app.core.services.storage import get_storage
 from app.matcha.models.ir_incident import Witness
-from app.matcha.services.ir_voice_parser import parse_voice_incident
+from app.matcha.services.ir.ir_voice_parser import parse_voice_incident
 from ..ir_incidents import (
     MAX_INTAKE_FILES,
     MAX_INTAKE_FILE_BYTES,
@@ -881,7 +881,7 @@ async def submit_info_request(
 
             # No log_audit here — there is no user_id for an unauthenticated
             # submitter, matching /report/{token} and /intake/{token}.
-            from app.matcha.services.ir_ai_orchestrator import append_message
+            from app.matcha.services.ir.ir_ai_orchestrator import append_message
             await append_message(
                 conn,
                 incident_id=row["incident_id"],

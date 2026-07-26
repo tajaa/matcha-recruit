@@ -11,8 +11,8 @@ import json
 
 import pytest
 
-from app.matcha.services import risk_transfer as rt
-from app.matcha.services import limit_adequacy as la
+from app.matcha.services.insurance import risk_transfer as rt
+from app.matcha.services.insurance import limit_adequacy as la
 
 M = 1_000_000
 
@@ -582,7 +582,7 @@ def _review_with_clause(**over):
 def test_packet_renders_risk_transfer_even_with_no_limit_rows():
     """A contract can carry a likely-void indemnity while naming no insurance
     limits; a client with no coverage lines must still get that finding."""
-    from app.matcha.services import submission_packet as sp
+    from app.matcha.services.broker import submission_packet as sp
 
     html = sp._limit_section_html(_review_with_clause())
     assert "Indemnification" in html
@@ -591,7 +591,7 @@ def test_packet_renders_risk_transfer_even_with_no_limit_rows():
 
 
 def test_packet_still_omits_everything_when_there_is_nothing_to_say():
-    from app.matcha.services import submission_packet as sp
+    from app.matcha.services.broker import submission_packet as sp
 
     assert sp._limit_section_html({"lines": [], "contracts": []}) == ""
     assert sp._limit_section_html(None) == ""
@@ -603,7 +603,7 @@ def test_clause_records_get_their_own_corpus_source_not_the_platform_bucket():
     """The memo appendix dispatches on cid prefix — a `clause:` record inside the
     `platform` bucket would fall through to the native branch and duplicate the
     whole platform table."""
-    from app.matcha.services import broker_pilot as bp
+    from app.matcha.services.broker import broker_pilot as bp
 
     ctx = {"limits": _review_with_clause()}
     corpus = bp.build_corpus("Acme", ctx, docs=[], native=None)
@@ -615,7 +615,7 @@ def test_clause_records_get_their_own_corpus_source_not_the_platform_bucket():
 
 
 def test_clause_record_carries_the_verbatim_quote_and_verdict():
-    from app.matcha.services import broker_pilot as bp
+    from app.matcha.services.broker import broker_pilot as bp
 
     corpus = bp.build_corpus("Acme", {"limits": _review_with_clause()}, docs=[], native=None)
     summary = corpus["index"]["clause:c1"]["summary"]
@@ -625,7 +625,7 @@ def test_clause_record_carries_the_verbatim_quote_and_verdict():
 
 
 def test_provisional_clause_is_labelled_in_the_corpus():
-    from app.matcha.services import broker_pilot as bp
+    from app.matcha.services.broker import broker_pilot as bp
 
     corpus = bp.build_corpus("Acme", {"limits": _review_with_clause(provisional=True)},
                              docs=[], native=None)
@@ -633,7 +633,7 @@ def test_provisional_clause_is_labelled_in_the_corpus():
 
 
 def test_no_clauses_source_when_no_contract_has_an_indemnity():
-    from app.matcha.services import broker_pilot as bp
+    from app.matcha.services.broker import broker_pilot as bp
 
     ctx = {"limits": {"contracts": [{"id": "c1", "name": "Bare", "risk_transfer": None}]}}
     corpus = bp.build_corpus("Acme", ctx, docs=[], native=None)
@@ -641,8 +641,8 @@ def test_no_clauses_source_when_no_contract_has_an_indemnity():
 
 
 def test_validate_citations_admits_clause_namespace_and_drops_fakes():
-    from app.matcha.services import broker_pilot as bp
-    from app.matcha.services.legal_defense import validate_citations
+    from app.matcha.services.broker import broker_pilot as bp
+    from app.matcha.services.pilots.legal_defense import validate_citations
 
     corpus = bp.build_corpus("Acme", {"limits": _review_with_clause()}, docs=[], native=None)
     clean, dropped = validate_citations(

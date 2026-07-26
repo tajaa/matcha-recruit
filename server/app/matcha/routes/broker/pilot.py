@@ -27,11 +27,11 @@ from ....database import get_connection
 from ...dependencies import require_broker_pro
 from app.core.services.redis_cache import check_rate_limit, client_ip
 from app.core.services.storage import get_storage
-from ...services import broker_pilot as bp
-from ...services import broker_pilot_requirements as bpr
-from ...services import er_compliance_grounding as ecg
-from ...services import external_clients as ext
-from ...services.er_document_parser import ERDocumentParser
+from ...services.broker import broker_pilot as bp
+from ...services.broker import broker_pilot_requirements as bpr
+from ...services.er import er_compliance_grounding as ecg
+from ...services.broker import external_clients as ext
+from ...services.er.er_document_parser import ERDocumentParser
 from .portfolio import _assert_broker_owns_company
 from .external import _broker_id
 from .submission import _tenant_context, _external_context

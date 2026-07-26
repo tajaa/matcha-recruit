@@ -12,11 +12,11 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from ....database import get_connection
 from ...dependencies import require_admin_or_client, get_client_company_id
-from ...services import risk_index
-from ...services import risk_narrative
-from ...services import submission_readiness
-from ...services import venue_severity
-from ...services import exclusion_gap
+from ...services.broker import risk_index
+from ...services.broker import risk_narrative
+from ...services.broker import submission_readiness
+from ...services.insurance import venue_severity
+from ...services.insurance import exclusion_gap
 
 logger = logging.getLogger(__name__)
 

@@ -5,7 +5,7 @@ The DB-backed build_packet / new_state_summary are exercised manually on dev DB
 category set.
 """
 
-from app.matcha.services import new_hire_packet as nhp
+from app.matcha.services.onboarding import new_hire_packet as nhp
 
 
 def test_bucket_for_level():

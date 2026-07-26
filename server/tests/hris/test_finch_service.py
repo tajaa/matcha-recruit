@@ -17,12 +17,12 @@ exercised via the sandbox connection flow, not here.
 import asyncio
 from decimal import Decimal
 
-from app.matcha.services.finch_service import (
+from app.matcha.services.hris.finch_service import (
     FinchHRISService,
     _FINCH_MOCK_EMPLOYEES,
     _is_health_benefit,
 )
-from app.matcha.services.hris_service import (
+from app.matcha.services.hris.hris_service import (
     GustoHRISService,
     get_hris_service,
     normalize_hris_locations,

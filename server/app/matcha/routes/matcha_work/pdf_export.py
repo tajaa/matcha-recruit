@@ -17,7 +17,7 @@ from app.core.services.storage import get_storage
 from app.database import get_connection
 from app.matcha.dependencies import require_admin_or_client, get_client_company_id
 from app.matcha.routes.matcha_work._shared import _verify_project_access
-from app.matcha.services import matcha_work_document as doc_svc
+from app.matcha.services.matcha_work import matcha_work_document as doc_svc
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -150,7 +150,7 @@ async def export_project_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Export project as PDF, DOCX, or Markdown."""
-    from app.matcha.services import project_service as proj_svc
+    from app.matcha.services.matcha_work import project_service as proj_svc
     project, _role = await _verify_project_access(project_id, current_user)
     company_id = await get_client_company_id(current_user)
 

@@ -27,7 +27,7 @@ async def get_employee_leave_eligibility(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Get FMLA + state program eligibility for an employee with job protection summary."""
-    from app.matcha.services.leave_eligibility_service import LeaveEligibilityService
+    from app.matcha.services.leave.leave_eligibility_service import LeaveEligibilityService
 
     company_id = await get_client_company_id(current_user)
 
@@ -63,7 +63,7 @@ async def place_employee_on_leave(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Place an employee on leave directly (admin action, auto-approved). Updates employment_status."""
-    from app.matcha.services.leave_agent import get_leave_agent
+    from app.matcha.services.leave.leave_agent import get_leave_agent
 
     company_id = await get_client_company_id(current_user)
 

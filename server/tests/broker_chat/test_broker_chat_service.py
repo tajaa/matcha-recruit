@@ -10,7 +10,7 @@ a live link.
 
 import inspect
 
-from app.matcha.services import broker_chat_service as svc
+from app.matcha.services.broker import broker_chat_service as svc
 
 
 # --- preview -----------------------------------------------------------------

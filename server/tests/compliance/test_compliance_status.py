@@ -312,7 +312,7 @@ def test_compliance_risk_excludes_component_rows():
 
 def test_risk_index_compliance_component_excludes_component_rows():
     import inspect
-    from app.matcha.services import risk_index
+    from app.matcha.services.broker import risk_index
     src = inspect.getsource(risk_index._compliance_component)
     assert src.count("rcs.component_key IS NULL") == 2, (
         "risk_index._compliance_component's two requirement_compliance_status "

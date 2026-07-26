@@ -57,7 +57,7 @@ from app.core.services.platform_settings import (
     get_tenant_codified_only, prime_tenant_codified_only_cache,
     DEFAULT_ER_SIMILARITY_WEIGHTS, EXPECTED_WEIGHT_KEYS,
 )
-from app.matcha.services import billing_service as mw_billing_service
+from app.matcha.services.billing import billing_service as mw_billing_service
 from app.config import get_settings
 from app.core.services.stripe_service import StripeService, StripeServiceError
 from app.core.feature_flags import DEFAULT_COMPANY_FEATURES
@@ -212,7 +212,7 @@ async def patch_user_beta_flags(
 
     # Comp grants change the resolved Werk plan — drop the 60s plan cache so
     # the grant (or revocation) takes effect on the user's next request.
-    from app.matcha.services import entitlements_service
+    from app.matcha.services.billing import entitlements_service
     entitlements_service.invalidate_plan_cache(user_id)
 
     return {"beta_features": dict(row["beta_features"])}

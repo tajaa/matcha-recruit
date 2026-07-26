@@ -25,8 +25,8 @@ async def _analyze_interview(
     incident_id: Optional[str] = None,
 ) -> dict[str, Any]:
     """Run interview analysis and save results to database."""
-    from app.matcha.services.culture_analyzer import CultureAnalyzer
-    from app.matcha.services.conversation_analyzer import ConversationAnalyzer
+    from app.matcha.services.interviews.culture_analyzer import CultureAnalyzer
+    from app.matcha.services.interviews.conversation_analyzer import ConversationAnalyzer
     from app.config import load_settings
 
     settings = load_settings()

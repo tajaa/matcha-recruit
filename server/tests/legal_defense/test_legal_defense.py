@@ -10,7 +10,7 @@ import json
 import zipfile
 
 from app.core.compliance_registry import CATEGORY_KEYS
-from app.matcha.services import legal_defense as ld
+from app.matcha.services.pilots import legal_defense as ld
 
 
 # --- citation gate (anti-hallucination) ------------------------------------
@@ -280,7 +280,7 @@ def test_vocabularies_track_their_sources_of_truth():
     from typing import get_args
     from app.matcha.models.er_case import ERCaseCategory
     from app.matcha.models.ir_incident import IRIncidentType
-    from app.matcha.services.discipline_engine import DEFAULT_INFRACTION_TYPES
+    from app.matcha.services.discipline.discipline_engine import DEFAULT_INFRACTION_TYPES
 
     assert set(ld._INCIDENT_TYPES) == set(get_args(IRIncidentType))
     assert set(ld._ER_CATEGORIES) == set(get_args(ERCaseCategory))
@@ -937,7 +937,7 @@ def test_dt_date_normalizes_str_and_date():
 # --- intake parser coercion ---------------------------------------------------
 
 def test_coerce_draft_clamps_garbage():
-    from app.matcha.services.legal_intake_parser import coerce_draft
+    from app.matcha.services.pilots.legal_intake_parser import coerce_draft
     d = coerce_draft({
         "matter_type": "lawsuit-of-doom", "title": "  T  " + "x" * 300,
         "allegation": None, "jurisdiction_state": "Nevada",
@@ -954,7 +954,7 @@ def test_coerce_draft_clamps_garbage():
 
 
 def test_coerce_draft_swaps_inverted_window_and_uppercases_state():
-    from app.matcha.services.legal_intake_parser import coerce_draft
+    from app.matcha.services.pilots.legal_intake_parser import coerce_draft
     d = coerce_draft({
         "matter_type": "eeoc_charge", "jurisdiction_state": "nv",
         "evidence_start": "2025-12-01", "evidence_end": "2025-01-01",
@@ -1032,7 +1032,9 @@ def test_intake_gaps_skips_sources_the_company_does_not_run():
 def _turn(monkeypatch, payload, corpus=None):
     async def fake_generate(matter, history, corpus_, latest):
         return payload
-    monkeypatch.setattr(ld, "_generate", fake_generate)
+    # Patch the submodule: run_chat_turn resolves _generate from ld.chat's
+    # globals, so a patch on the package attribute would not be seen.
+    monkeypatch.setattr(ld.chat, "_generate", fake_generate)
     evs = []
 
     async def drain():
@@ -1086,7 +1088,8 @@ def _fake_model(monkeypatch, payload, captured=None):
     class _Client:
         aio = type("_Aio", (), {"models": _Models()})
 
-    monkeypatch.setattr(ld, "_genai", lambda: _Client())
+    # ld.chat._generate calls _genai from ld.chat's globals — patch there.
+    monkeypatch.setattr(ld.chat, "_genai", lambda: _Client())
 
 
 def test_missing_ready_flag_defaults_to_analyzing(monkeypatch):

@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from app.config import load_settings
 from app.core.services.storage import get_storage
 from app.database import close_pool, get_connection, init_pool
-from app.matcha.services import matcha_work_document as doc_svc
+from app.matcha.services.matcha_work import matcha_work_document as doc_svc
 
 
 async def migrate_thread_assets() -> tuple[int, int]:

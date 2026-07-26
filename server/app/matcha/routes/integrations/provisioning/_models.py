@@ -7,11 +7,11 @@ from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field
 
-from app.matcha.services.onboarding_orchestrator import (
+from app.matcha.services.onboarding.onboarding_orchestrator import (
     PROVIDER_GOOGLE_WORKSPACE,
     PROVIDER_SLACK,
 )
-from app.matcha.services.hris_service import PROVIDER_HRIS
+from app.matcha.services.hris.hris_service import PROVIDER_HRIS
 
 
 class GoogleWorkspaceConnectionRequest(BaseModel):

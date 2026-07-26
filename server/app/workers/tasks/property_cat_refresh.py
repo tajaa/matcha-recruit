@@ -22,7 +22,7 @@ _DEFAULT_CAP = 20
 
 
 async def _refresh(building_id=None, cap: int = _DEFAULT_CAP) -> dict:
-    from app.matcha.services import property_cat
+    from app.matcha.services.property import property_cat
 
     conn = await get_db_connection()
     try:

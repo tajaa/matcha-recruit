@@ -5,7 +5,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
 
-from app.matcha.services.analysis_packs.mapping import CANONICAL_ROLES
+from app.matcha.services.pilots.analysis_packs.mapping import CANONICAL_ROLES
 
 # Sentinels a caller may use to clear a heuristic role assignment.
 _ROLE_CLEARERS = {"", "none", "ignore"}

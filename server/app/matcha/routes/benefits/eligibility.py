@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFil
 from app.core.models.auth import CurrentUser
 from app.database import get_connection
 from app.matcha.dependencies import require_admin_or_client, get_client_company_id
-from app.matcha.services import benefits_eligibility as be
+from app.matcha.services.benefits import benefits_eligibility as be
 
 logger = logging.getLogger(__name__)
 

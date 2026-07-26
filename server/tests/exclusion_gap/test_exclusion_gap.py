@@ -1,6 +1,6 @@
 """Pure tests for grounded exclusion-gap matcher (DB gather smoke-tested vs dev)."""
 
-from app.matcha.services import exclusion_gap as eg
+from app.matcha.services.insurance import exclusion_gap as eg
 
 NO_SIGNALS = {
     "biometric_present": False, "biometric_consented": False, "abuse_program": False,

@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, Query
 from app.database import get_connection
 from ...dependencies import require_admin_or_client
 from ...models.employee_schedule import AssignmentCreate
-from ...services.training_assignment import evaluate_scheduled_role_rules, assign_training
+from ...services.training.training_assignment import evaluate_scheduled_role_rules, assign_training
 from ._shared import (
     require_company_id, log_audit, fetch_shift_by_id, fetch_shift_for_write,
     assert_employee_in_company, assert_shift_open_for_assignment,

@@ -34,7 +34,7 @@ from app.matcha.models.ask_hr import (
     AskHrSessionCreate,
     AskHrSessionResponse,
 )
-from app.matcha.services import ask_hr as svc
+from app.matcha.services.pilots import ask_hr as svc
 
 logger = logging.getLogger(__name__)
 
@@ -172,8 +172,8 @@ async def chat(session_id: UUID, body: AskHrChatIn, employee=Depends(require_emp
     # a training, what happened at the site. An employee asking about PTO must
     # not be able to pull those out, so they are removed from BOTH the prompt
     # and the citation index before the turn runs.
-    from app.matcha.services.hr_pilot_corpus import redact_for_employee
-    from app.matcha.services.matcha_work_mode_contexts import get_hr_pilot_corpus
+    from app.matcha.services.pilots.hr_pilot_corpus import redact_for_employee
+    from app.matcha.services.matcha_work.matcha_work_mode_contexts import get_hr_pilot_corpus
     corpus = redact_for_employee(await get_hr_pilot_corpus(company_id))
     subject = {**employee, "job_title": job_title}
 
@@ -257,7 +257,7 @@ async def _handle_hard_stop(verdict, session_id: UUID, company_id, question: str
     # Filing the escalation is the whole point of the refusal — log loudly if it
     # fails, because the employee has already been told HR was notified.
     try:
-        from app.matcha.services.escalation_service import (
+        from app.matcha.services.matcha_work.escalation_service import (
             create_ask_hr_escalation,
             send_hr_pilot_hard_stop_notifications,
         )

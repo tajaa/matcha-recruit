@@ -6,7 +6,7 @@ orchestrator is a thin DB-fetch wrapper around this function.
 
 from datetime import date, timedelta
 
-from app.matcha.services.training_assignment import rule_matches_scheduled_role
+from app.matcha.services.training.training_assignment import rule_matches_scheduled_role
 
 
 def _rule(**overrides):

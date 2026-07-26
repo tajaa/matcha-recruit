@@ -35,7 +35,7 @@ from app.matcha.routes.ir_incidents._shared import (
     build_root_cause_text_card,
     compose_root_cause_text,
 )
-from app.matcha.services.ir_ai_orchestrator import IR_ACTION_TYPES
+from app.matcha.services.ir.ir_ai_orchestrator import IR_ACTION_TYPES
 
 
 # ============================================================

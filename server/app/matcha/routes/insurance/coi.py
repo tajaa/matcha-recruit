@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 
 from ....database import get_connection
 from ...dependencies import require_admin_or_client, get_client_company_id
-from ...services import coi_parser, coi_service
+from ...services.insurance import coi_parser, coi_service
 
 router = APIRouter()
 

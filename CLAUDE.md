@@ -49,7 +49,7 @@ Sidebar dispatch in `client/src/components/sidebars/TenantSidebar.tsx`. Tier-che
 **Naming convention**: the **web** workspace surface (this section) is referred to as **matcha-work**; the **macOS desktop** workspace is referred to as **Espresso** (formerly "Werk" — renamed to avoid confusion with matcha-work; `platforms/desktop/Espresso/`). Both share the same backend (`server/app/matcha/routes/matcha_work/` package) and `mw_*` tables — only the client differs. When asked to ship a feature, confirm which surface is meant before editing files.
 
 - Surface: `client/src/work/pages/*` + `client/src/work/layout/WorkLayout.tsx`. Mounted at `/work/*` in `App.tsx`.
-- Backend: `server/app/matcha/routes/matcha_work/` (package, split 2026-07-03), `server/app/matcha/services/project_service.py`. Tables prefixed `mw_*`.
+- Backend: `server/app/matcha/routes/matcha_work/` (package, split 2026-07-03), `server/app/matcha/services/matcha_work/project_service.py`. Tables prefixed `mw_*`.
 - macOS desktop client (**Espresso**): `platforms/desktop/Espresso/` (SwiftUI). Xcode project name is still `Matcha.xcodeproj` and bundle ID `com.ahnimal.matcha` — App Store identity is unchanged; only the working directory and conceptual product name differ. `AppState.isPlusActive` from `Subscription.isPersonalPlus` controls Plus features.
 - **Personal mode**: user `role='individual'`. Signup via `BetaRegister.tsx` (`/auth/beta?token=…`) → redirected to `/work`. Stripe sub `matcha_work_personal` ($20/mo) via `POST /api/checkout/personal` (`server/app/matcha/routes/billing.py`).
 - **Business mode**: user `role='client'` inside a Matcha company. Token packs purchased via `POST /api/checkout`. Sidebar entry in `ClientSidebar.tsx` AI group → `/work`.
@@ -87,7 +87,7 @@ Which frontend pairs with which backend package (don't re-derive this):
 | **MatchaTutor** (iOS) | `platforms/ios/` (SwiftUI, dormant) | matcha-work language-tutor endpoints | — | Language tutor |
 | **Ops agent** | `agent-ui/` (Preact; build copied into `server/agent/static/` by `build-and-push.sh`) | `server/agent/` — standalone service :9100 (not part of `app/`) | — | Internal leads/ops console |
 
-Cross-product import rule: `cappe/` and `tellus/` import only from `app/core/*` (shared db pool, email, storage, auth, redis). One documented exception: `tellus/services/geo.py` reuses `matcha.services.property_cat.geocode` (single US Census geocoder — keep its signature stable).
+Cross-product import rule: `cappe/` and `tellus/` import only from `app/core/*` (shared db pool, email, storage, auth, redis). One documented exception: `tellus/services/geo.py` reuses `matcha.services.property.property_cat.geocode` (single US Census geocoder — keep its signature stable).
 
 ## Stack
 
@@ -458,7 +458,7 @@ Quick lookup for frequently-touched code. Saves grepping the same things repeate
 ### IR (Incident Reporting)
 
 - Backend package overview → `server/app/matcha/routes/ir_incidents/CLAUDE.md`
-- IR orchestrator (Gemini prompt + intent detection) → `server/app/matcha/services/ir_ai_orchestrator.py:generate_guidance`
+- IR orchestrator (Gemini prompt + intent detection) → `server/app/matcha/services/ir/ir_ai_orchestrator.py:generate_guidance`
 - IR Copilot panel (frontend) → `client/src/components/ir/IRCopilotPanel.tsx`
 - IR Copilot card schema → `client/src/components/ir/IRCopilotCard.tsx:5` (`CopilotCardAction.type` union)
 - IR Copilot close-incident helper (server) → `server/app/matcha/routes/ir_incidents/copilot.py:_close_incident_via_copilot`
@@ -503,8 +503,8 @@ Quick lookup for frequently-touched code. Saves grepping the same things repeate
 - Web surface → `client/src/work/pages/*` + `client/src/work/layout/WorkLayout.tsx`
 - macOS desktop client (Espresso, formerly Werk) → `platforms/desktop/Espresso/` (SwiftUI, bundle `com.ahnimal.matcha`)
 - Backend routes → `server/app/matcha/routes/matcha_work/` (package, split 2026-07-03 — see its CLAUDE.md; 203 routes)
-- Project service → `server/app/matcha/services/project_service.py`
-- AI directives → `server/app/matcha/services/matcha_work_ai.py`
+- Project service → `server/app/matcha/services/matcha_work/project_service.py`
+- AI directives → `server/app/matcha/services/matcha_work/matcha_work_ai.py`
 - Channels (WS) → `server/app/matcha/services/channels_service.py` + `mw_channels*` tables
 
 ### Database access

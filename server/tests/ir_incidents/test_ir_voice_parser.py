@@ -5,7 +5,7 @@ Gemini's raw JSON into a safe create-form prefill). The Gemini audio call itself
 exercised by a manual dev mic smoke.
 """
 
-from app.matcha.services.ir_voice_parser import _coerce_voice_fields, MAX_WITNESSES
+from app.matcha.services.ir.ir_voice_parser import _coerce_voice_fields, MAX_WITNESSES
 
 LOCS = {"11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"}
 TYPES = {"safety", "behavioral", "property", "near_miss", "other"}

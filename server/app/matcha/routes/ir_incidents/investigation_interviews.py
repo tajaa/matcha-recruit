@@ -38,7 +38,7 @@ async def create_investigation_interview(
 
     Generates questions, creates interview + junction row, returns ws_auth_token.
     """
-    from app.matcha.services.ir_interview_questions import generate_investigation_questions
+    from app.matcha.services.ir.ir_interview_questions import generate_investigation_questions
     from app.core.services.auth import create_interview_ws_token
 
     company_id = await get_client_company_id(current_user)
@@ -195,7 +195,7 @@ async def batch_create_investigation_interviews(
     current_user=Depends(require_admin_or_client),
 ):
     """Batch-create investigation interviews for an IR incident (max 20)."""
-    from app.matcha.services.ir_interview_questions import generate_investigation_questions
+    from app.matcha.services.ir.ir_interview_questions import generate_investigation_questions
     from app.core.services.auth import create_interview_ws_token
 
     if len(request_body) == 0:

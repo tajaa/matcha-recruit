@@ -1,9 +1,9 @@
 """Pure-logic tests for the SOV parser's coercion (no Gemini / no network).
 
-Only app.matcha.services.property_sov_parser pure helpers.
+Only app.matcha.services.property.property_sov_parser pure helpers.
 """
 
-from app.matcha.services import property_sov_parser as p
+from app.matcha.services.property import property_sov_parser as p
 
 
 # --- construction normalization --------------------------------------------

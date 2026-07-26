@@ -12,7 +12,7 @@ from ..utils import get_db_connection, scheduler_settings_row
 
 async def _run_leave_agent_orchestration() -> dict:
     """Run the LeaveAgent periodic orchestration cycle."""
-    from app.matcha.services.leave_agent import get_leave_agent
+    from app.matcha.services.leave.leave_agent import get_leave_agent
 
     conn = await get_db_connection()
     try:
