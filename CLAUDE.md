@@ -46,11 +46,11 @@ Sidebar dispatch in `client/src/components/sidebars/TenantSidebar.tsx`. Tier-che
 - Per-company access via `companies.enabled_features` JSONB. When a user URL-hops to a feature they don't have, `<FeatureGate>` (`client/src/components/shared/FeatureGate.tsx`) renders `<UpgradeUpsellCard>` instead of a 403.
 
 ### Matcha-work — collaborative AI workspace
-**Naming convention**: the **web** workspace surface (this section) is referred to as **matcha-work**; the **macOS desktop** workspace is referred to as **werk** (`platforms/desktop/Werk/`). Both share the same backend (`server/app/matcha/routes/matcha_work/` package) and `mw_*` tables — only the client differs. When asked to ship a feature, confirm which surface is meant before editing files.
+**Naming convention**: the **web** workspace surface (this section) is referred to as **matcha-work**; the **macOS desktop** workspace is referred to as **Espresso** (formerly "Werk" — renamed to avoid confusion with matcha-work; `platforms/desktop/Espresso/`). Both share the same backend (`server/app/matcha/routes/matcha_work/` package) and `mw_*` tables — only the client differs. When asked to ship a feature, confirm which surface is meant before editing files.
 
 - Surface: `client/src/work/pages/*` + `client/src/work/layout/WorkLayout.tsx`. Mounted at `/work/*` in `App.tsx`.
 - Backend: `server/app/matcha/routes/matcha_work/` (package, split 2026-07-03), `server/app/matcha/services/project_service.py`. Tables prefixed `mw_*`.
-- macOS desktop client (**werk**): `platforms/desktop/Werk/` (SwiftUI). Xcode project name is still `Matcha.xcodeproj` and bundle ID `com.ahnimal.matcha` — App Store identity is unchanged; only the working directory and conceptual product name differ. `AppState.isPlusActive` from `Subscription.isPersonalPlus` controls Plus features.
+- macOS desktop client (**Espresso**): `platforms/desktop/Espresso/` (SwiftUI). Xcode project name is still `Matcha.xcodeproj` and bundle ID `com.ahnimal.matcha` — App Store identity is unchanged; only the working directory and conceptual product name differ. `AppState.isPlusActive` from `Subscription.isPersonalPlus` controls Plus features.
 - **Personal mode**: user `role='individual'`. Signup via `BetaRegister.tsx` (`/auth/beta?token=…`) → redirected to `/work`. Stripe sub `matcha_work_personal` ($20/mo) via `POST /api/checkout/personal` (`server/app/matcha/routes/billing.py`).
 - **Business mode**: user `role='client'` inside a Matcha company. Token packs purchased via `POST /api/checkout`. Sidebar entry in `ClientSidebar.tsx` AI group → `/work`.
 - Surfaces inside: projects, threads, channels (real-time WebSocket), inbox (DMs), people/connections, anonymous incident report intake.
@@ -81,7 +81,7 @@ Which frontend pairs with which backend package (don't re-derive this):
 |---|---|---|---|---|
 | **Matcha** (Free / Lite / Essentials / X / Compliance / Pro) | `client/` — main SPA (hey-matcha.com) | `server/app/core/` + `server/app/matcha/` at `/api` | `users` + `companies` (`signup_source`, `enabled_features`) | HR compliance, IR/OSHA, ER, employees, broker risk tooling |
 | **Matcha-work** (web) | `client/src/work/*` at `/work/*` (+ `/werk`, `/werk-lite` route trees over the same pages) | `server/app/matcha/routes/matcha_work/` | `mw_*` tables | Collaborative AI workspace |
-| **Werk** (macOS) | `platforms/desktop/Werk/` (SwiftUI; project still `Matcha.xcodeproj`) | same matcha-work backend | `mw_*` tables | Desktop surface of matcha-work — confirm which surface (web vs desktop) before editing |
+| **Espresso** (macOS, formerly Werk) | `platforms/desktop/Espresso/` (SwiftUI; project still `Matcha.xcodeproj`) | same matcha-work backend | `mw_*` tables | Desktop surface of matcha-work — confirm which surface (web vs desktop) before editing |
 | **Cappe** | inside `client/` — host-routed on gummfit.com (`client/src/cappe/host.ts`, pages in `client/src/cappe/pages/`) | `server/app/cappe/` at `/api/cappe` (+ unprefixed tenant renderer on `*.gummfit.com`) | `cappe_accounts`, JWT `scope=cappe`, `cappe_*` tables (no matcha tenant model) | Website builder + domain reselling |
 | **Tell-Us** | `client/tellus/` — separate Vite app (React 19), served by the same frontend nginx at `/tellus/` | `server/app/tellus/` at `/api/tellus` | `tellus_accounts` (consumer + brand), JWT `scope=tellus`, `tellus_*` tables | Rewards-for-feedback |
 | **MatchaTutor** (iOS) | `platforms/ios/` (SwiftUI, dormant) | matcha-work language-tutor endpoints | — | Language tutor |
@@ -280,7 +280,7 @@ Defined in `server/app/core/feature_flags.py` as `DEFAULT_COMPANY_FEATURES`. Per
 - **Lite** (`matcha_lite`) = `incidents` (paid) + `employees` + `handbooks` (generation). `training`/`discipline` force-asserted **off** here; no `handbook_audit`/`credential_templates`.
 - **Lite Essentials** (`matcha_lite_essentials`) = a signup-time choice on the *same* `/lite/signup` page/checkout as standard Lite (not a separate product/route) — `incidents` (paid) + `handbooks`, but `employees` and `osha_logs` force-asserted **off** (no employee roster: no CSV/HRIS import, no roster picker on the incident form, no OSHA 300 logs — reporter/witness capture still works via the no-roster `ir_people` index). Priced as its own row in `matcha_lite_pricing` (`product_code='matcha_lite_essentials'`), cheaper than standard Lite. Chosen via a checkbox on `MatchaLiteSignup.tsx` → `lite_essentials` on the registration request → routes to this signup_source instead of `matcha_lite`.
 - **Matcha-X** (`matcha_x`) = Lite + `training` + `discipline` + `handbook_audit` + `credential_templates` + `compliance_lite` (read-only Compliance taste) + `handbook_pilot` + `workforce_compliance` (employment-practices trackers + real pay-equity gap) — all forced on via overlay.
-- **Pro** (`bespoke`/`invite`/`broker`) = full `DEFAULT_COMPANY_FEATURES` + `incidents` + `handbook_audit` + `credential_templates`, stored at signup (toggleable per-company; not an overlay, so it doesn't leak to personal Werk which shares `signup_source='bespoke'`).
+- **Pro** (`bespoke`/`invite`/`broker`) = full `DEFAULT_COMPANY_FEATURES` + `incidents` + `handbook_audit` + `credential_templates`, stored at signup (toggleable per-company; not an overlay, so it doesn't leak to personal Espresso/matcha-work which shares `signup_source='bespoke'`).
 - **Matcha Compliance** (`matcha_compliance`) = full `compliance` only, nothing else bundled. `compliance` is **not** in any overlay — it's the Stripe-gated paid flag (flipped by `checkout.session.completed`), exactly like `incidents` gates Lite/X. Onboarding reuses `MatchaXOnboardingWizard`.
 
 ## Key Modules
@@ -501,7 +501,7 @@ Quick lookup for frequently-touched code. Saves grepping the same things repeate
 ### Matcha-work (collaborative AI workspace)
 
 - Web surface → `client/src/work/pages/*` + `client/src/work/layout/WorkLayout.tsx`
-- macOS desktop client → `platforms/desktop/Werk/` (SwiftUI, bundle `com.ahnimal.matcha`)
+- macOS desktop client (Espresso, formerly Werk) → `platforms/desktop/Espresso/` (SwiftUI, bundle `com.ahnimal.matcha`)
 - Backend routes → `server/app/matcha/routes/matcha_work/` (package, split 2026-07-03 — see its CLAUDE.md; 203 routes)
 - Project service → `server/app/matcha/services/project_service.py`
 - AI directives → `server/app/matcha/services/matcha_work_ai.py`

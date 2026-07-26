@@ -527,9 +527,9 @@
 		G1G2G3000000000000000008 /* JournalStylePopover.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JournalStylePopover.swift; sourceTree = "<group>"; };
 		G1G2G300000000000000000A /* MarkdownWebView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownWebView.swift; sourceTree = "<group>"; };
 		G1G2G3000000000000000010 /* JournalPreview */ = {isa = PBXFileReference; lastKnownFileType = folder; path = JournalPreview; sourceTree = "<group>"; };
-		PRDV000000000000000000B2 /* ProductivityModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ProductivityModels.swift; path = Matcha/Models/MatchaWork/ProductivityModels.swift; sourceTree = SOURCE_ROOT; };
-		PRDV000000000000000000B4 /* MatchaWorkService+Productivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "MatchaWorkService+Productivity.swift"; path = "Matcha/Services/MatchaWorkService+Productivity.swift"; sourceTree = SOURCE_ROOT; };
-		PRDV000000000000000000B6 /* ProductivityWorkspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ProductivityWorkspace.swift; path = Matcha/Views/Productivity/ProductivityWorkspace.swift; sourceTree = SOURCE_ROOT; };
+		PRDV000000000000000000B2 /* ProductivityModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ProductivityModels.swift; path = Espresso/Models/MatchaWork/ProductivityModels.swift; sourceTree = SOURCE_ROOT; };
+		PRDV000000000000000000B4 /* MatchaWorkService+Productivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "MatchaWorkService+Productivity.swift"; path = "Espresso/Services/MatchaWorkService+Productivity.swift"; sourceTree = SOURCE_ROOT; };
+		PRDV000000000000000000B6 /* ProductivityWorkspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ProductivityWorkspace.swift; path = Espresso/Views/Productivity/ProductivityWorkspace.swift; sourceTree = SOURCE_ROOT; };
 		BC01DD22EE33FF44551100B0 /* ServiceCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServiceCacheTests.swift; sourceTree = "<group>"; };
 		BC01DD22EE33FF44551100B1 /* WorkDetailVMStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkDetailVMStoreTests.swift; sourceTree = "<group>"; };
 		BC01DD22EE33FF44551100B2 /* APIErrorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIErrorTests.swift; sourceTree = "<group>"; };
@@ -919,7 +919,7 @@
 				D4D70C04C5C45B4D7F098D3A /* Views */,
 				42FC58810D42613300564031 /* Resources */,
 			);
-			path = Matcha;
+			path = Espresso;
 			sourceTree = "<group>";
 		};
 		AA11BB22CC33DD44EE770001 /* Inbox */ = {

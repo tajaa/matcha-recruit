@@ -1838,7 +1838,7 @@
     ],
     "howToUse": [
       "Admin \u2192 Business Features \u2192 find the company \u2192 turn ON \"Werk Lite\" AND \"Matcha Work\" (Werk Lite needs both). Optionally turn on \"Werk Lite \u2014 any member can start calls\".",
-      "Build the WerkiOS scheme in Xcode (desktop/Werk/Matcha.xcodeproj) onto a simulator or device.",
+      "Build the WerkiOS scheme in Xcode (desktop/Espresso/Matcha.xcodeproj) onto a simulator or device.",
       "Log into the app as a business admin or employee of that company \u2014 channels and DMs work immediately."
     ],
     "setup": [
