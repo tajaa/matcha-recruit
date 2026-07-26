@@ -4,7 +4,7 @@
 
 Loose single-file routers sit at top level; related ones are collected into **grouping folders** (`broker/`, `insurance/`, `pilots/`, `onboarding/`, `intake/`, `employee_lifecycle/`, `work/`, `integrations/` — see below).
 
-**Naming trap:** a grouping folder must not share a name with a top-level module in the same directory — in Python the package shadows the module, so the module silently becomes unimportable. This is why the Coterie carrier router lives at `insurance/carrier.py` rather than staying `insurance.py` beside the `insurance/` package, and why `broker_insurance.py` became `broker/insurance.py`. Check for a same-named `.py` before adding a grouping folder. Grouping folders differ from the split-router packages (`employees/`, `ir_incidents/`, `er_copilot/`, `matcha_work/`, `employee_schedule/`, `labor_relations/`): a split-router package is **one** router carved into submodules; a grouping folder namespaces **several independent** routers, each still self-mounted + self-gated in `__init__.py`. Its `folder/__init__.py` only re-exports the sub-routers under their historical `*_router` names, so the top aggregator's mount block is unchanged by the grouping.
+**Naming trap:** a grouping folder must not share a name with a top-level module in the same directory — in Python the package shadows the module, so the module silently becomes unimportable. This is why the Coterie carrier router lives at `insurance/carrier.py` rather than staying `insurance.py` beside the `insurance/` package, and why `broker_insurance.py` became `broker/insurance.py`. Check for a same-named `.py` before adding a grouping folder. Grouping folders differ from the split-router packages (`employees/`, `ir_incidents/`, `er_copilot/`, `matcha_work/`, `employee_schedule/`, `labor_relations/`, `employee_portal/`, `dashboard/`): a split-router package is **one** router carved into submodules; a grouping folder namespaces **several independent** routers, each still self-mounted + self-gated in `__init__.py`. Its `folder/__init__.py` only re-exports the sub-routers under their historical `*_router` names, so the top aggregator's mount block is unchanged by the grouping.
 
 ## Router map (by domain)
 
@@ -12,7 +12,7 @@ Loose single-file routers sit at top level; related ones are collected into **gr
 |---|---|---|
 | `companies.py` | `/companies` | Company CRUD + admin tooling |
 | `employees/` | `/employees` (+ `/employees/pto`, `/employees/leave`) | Employee CRUD, bulk upload, invitations, onboarding, offboarding, credentials, OIG, leave, incidents, pto/leave admin — **package** (split 2026-05-16; see `employees/CLAUDE.md`) |
-| `employee_portal.py` | `/v1/portal` | Employee-facing self-service portal (incl. `/me/schedule*` — view published shifts + file swap/drop/unavailability requests, gated `employee_schedule`) |
+| `employee_portal/` | `/v1/portal` | Employee-facing self-service portal (incl. `/me/schedule*` — view published shifts + file swap/drop/unavailability requests, gated `employee_schedule`) — **package** (split 2026-07-26, 33 routes; see `employee_portal/CLAUDE.md`) |
 | `portal_ask_hr.py` | `/v1/portal/ask-hr` | Employee "Ask HR" — grounded, citation-gated policy Q&A (SSE chat + sessions/messages CRUD). Reuses the HR Pilot corpus + the `hr_pilot_escalation` hard stop, which runs **in the route before any model call**. `require_employee_record` per endpoint; `require_feature("ask_hr")` at the mount |
 | `employee_schedule/` | `/employee-schedule` | Employee shift scheduling — shift CRUD + publish + weekly view (`shifts.py`), assignment (`assignments.py`), templates + recurrence generation (`templates.py`), admin request review (`requests.py`). **Package**; `require_feature("employee_schedule")` |
 | `onboarding/new_hire.py` | `/onboarding` | New-hire onboarding tasks + notification settings |
@@ -34,7 +34,7 @@ Loose single-file routers sit at top level; related ones are collected into **gr
 | `employee_lifecycle/training.py` | `/training` | Training programs + completions (1,138 lines) |
 | `employee_lifecycle/i9.py` | `/i9` | I-9 verification |
 | `employee_lifecycle/cobra.py` | `/cobra` | COBRA admin |
-| `dashboard.py` | `/dashboard` | Cross-feature dashboard aggregation (2,141 lines) |
+| `dashboard/` | `/dashboard` | Cross-feature dashboard aggregation — **package** (split 2026-07-26, 14 routes; see `dashboard/CLAUDE.md`). `matcha_work/workspace.py` lazily re-imports `_UPCOMING_SOURCES` / `_apply_company_filter` / `_severity_from_days` / `UpcomingItem` from it |
 | `broker/brokers.py` | `/brokers` | HR broker admin (1,605 lines) |
 | `broker/brokers/` | `/brokers` | HR broker admin — **split-router package** (J7, 2026-07-20): `_models.py` (9 models), `_shared.py` (15 helpers + status consts, `__all__`-gated), `client_setups.py` / `reporting.py` / `tokens.py` / `team.py` / `risk_alerts.py`; `__init__.py` aggregates into `router` (re-exported as `brokers_router`). 25 routes |
 | `broker/portfolio.py` | `/broker-portfolio` | Per-broker client roster + cross-client metrics |
@@ -89,7 +89,7 @@ Use the `ir_incidents/` package (see `ir_incidents/CLAUDE.md`) as the template. 
 - Owns 4+ unrelated concerns AND
 - Edits regularly require reading unrelated sections
 
-Completed splits: `ir_incidents/` (2026-05-16), `employees/` (2026-05-16), `matcha_work/` (2026-07-03), `er_copilot/` (2026-07-06).
+Completed splits: `ir_incidents/` (2026-05-16), `employees/` (2026-05-16), `matcha_work/` (2026-07-03), `er_copilot/` (2026-07-06), `employee_portal/` + `dashboard/` (2026-07-26, both fresh-aggregator).
 
 Reuse the IR pattern: `git mv` to `_legacy.py`, split into per-domain submodules, flip package router to the one owning empty-path collection routes, delete `_legacy.py`. **Variant used by `matcha_work/`**: if no submodule declares an empty-path route (check first — grep `@router\.\w+\("")`), skip the crud-owns-router step and just use a fresh `APIRouter()` aggregator in `__init__.py` instead; `_legacy.py` becomes the last remaining domain submodule (renamed to its real name, e.g. `threads.py`) rather than being deleted.
 

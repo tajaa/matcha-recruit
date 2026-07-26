@@ -155,7 +155,9 @@ server/
 │   │   │   ├── employees/          # 13-file package (split 2026-05-16) — see employees/CLAUDE.md
 │   │   │   ├── er_copilot/         # Package (split 2026-07-06) — see er_copilot/CLAUDE.md
 │   │   │   ├── matcha_work/        # Package (split 2026-07-03) — see matcha_work/CLAUDE.md
-│   │   │   └── … 25 others
+│   │   │   ├── employee_portal/    # Package (split 2026-07-26) — see employee_portal/CLAUDE.md
+│   │   │   ├── dashboard/          # Package (split 2026-07-26) — see dashboard/CLAUDE.md
+│   │   │   └── … 23 others
 │   │   ├── services/
 │   │   └── workers/
 │   ├── workers/                    # Celery app + scheduled tasks
@@ -532,6 +534,8 @@ This repo is configured for Claude Code with subtree docs, hooks, and project sl
 | `server/CLAUDE.md` | `server/**` |
 | `server/app/matcha/routes/CLAUDE.md` | `server/app/matcha/routes/**` — the router-zoo index |
 | `server/app/matcha/routes/ir_incidents/CLAUDE.md` | inside the IR package — captures the 2026-05-16 split |
+| `server/app/matcha/routes/employee_portal/CLAUDE.md` | inside the portal package — captures the 2026-07-26 split |
+| `server/app/matcha/routes/dashboard/CLAUDE.md` | inside the dashboard package — captures the 2026-07-26 split |
 | `server/app/core/routes/CLAUDE.md` | `server/app/core/routes/**` — the core router-zoo index, captures the 2026-07-25 split |
 | `client/CLAUDE.md` | `client/**` |
 
