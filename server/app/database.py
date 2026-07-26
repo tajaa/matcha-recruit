@@ -5259,6 +5259,58 @@ async def init_db():
         await conn.execute("""
             ALTER TABLE mw_threads ADD COLUMN IF NOT EXISTS hr_pilot_mode BOOLEAN NOT NULL DEFAULT false;
         """)
+        # Huume agentic onboarding thread mode — migration huume02
+        await conn.execute("""
+            ALTER TABLE mw_threads ADD COLUMN IF NOT EXISTS huume_mode BOOLEAN NOT NULL DEFAULT false;
+        """)
+        # Huume offer-letter sign/accept columns — migration huume01
+        # (offer->thread linkage reuses the existing mw_threads.linked_offer_letter_id,
+        # not a new column here)
+        await conn.execute("""
+            ALTER TABLE offer_letters
+                ADD COLUMN IF NOT EXISTS signed_name VARCHAR(255),
+                ADD COLUMN IF NOT EXISTS signed_at TIMESTAMPTZ,
+                ADD COLUMN IF NOT EXISTS signer_ip VARCHAR(64),
+                ADD COLUMN IF NOT EXISTS declined_at TIMESTAMPTZ,
+                ADD COLUMN IF NOT EXISTS decline_reason TEXT,
+                ADD COLUMN IF NOT EXISTS signed_pdf_storage_path TEXT,
+                ADD COLUMN IF NOT EXISTS employee_id UUID REFERENCES employees(id) ON DELETE SET NULL;
+        """)
+        # Huume agent run/step audit tables — migration huume03
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS huume_runs (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+                thread_id UUID NOT NULL REFERENCES mw_threads(id) ON DELETE CASCADE,
+                user_id UUID,
+                trigger TEXT NOT NULL DEFAULT 'user_turn',
+                status TEXT NOT NULL DEFAULT 'running',
+                model_calls INTEGER NOT NULL DEFAULT 0,
+                token_usage JSONB,
+                started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                completed_at TIMESTAMPTZ,
+                error TEXT,
+                CONSTRAINT huume_runs_trigger_check CHECK (trigger IN ('user_turn', 'plan_execution')),
+                CONSTRAINT huume_runs_status_check CHECK (status IN ('running', 'completed', 'force_finished', 'failed'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_huume_runs_thread ON huume_runs(thread_id, started_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_huume_runs_company ON huume_runs(company_id);
+            CREATE TABLE IF NOT EXISTS huume_steps (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                run_id UUID NOT NULL REFERENCES huume_runs(id) ON DELETE CASCADE,
+                seq INTEGER NOT NULL,
+                tool TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                label TEXT NOT NULL,
+                args JSONB,
+                result JSONB,
+                status TEXT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT huume_steps_kind_check CHECK (kind IN ('read', 'staged', 'write', 'finish')),
+                CONSTRAINT huume_steps_status_check CHECK (status IN ('ok', 'rejected', 'error', 'skipped'))
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_huume_steps_run_seq ON huume_steps(run_id, seq);
+        """)
         await conn.execute("""
             DO $$
             DECLARE

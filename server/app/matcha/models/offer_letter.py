@@ -132,6 +132,12 @@ class OfferLetter(OfferLetterBase):
     matched_salary: Optional[float] = None
     range_match_status: Optional[str] = None
     negotiation_round: int = 1
+    signed_name: Optional[str] = None
+    signed_at: Optional[datetime] = None
+    declined_at: Optional[datetime] = None
+    decline_reason: Optional[str] = None
+    signed_pdf_storage_path: Optional[str] = None
+    employee_id: Optional[UUID] = None
 
 
 class CandidateOfferView(BaseModel):
@@ -199,3 +205,63 @@ class RangeNegotiateResult(BaseModel):
 class ReNegotiateRequest(BaseModel):
     salary_range_min: Optional[float] = None
     salary_range_max: Optional[float] = None
+
+
+class CandidateOfferDocumentView(BaseModel):
+    """Public sign-flow view — the offer as the candidate sees it at /offer/:token.
+
+    Distinct from `CandidateOfferView` (the range-negotiation view, which
+    400s without a salary range set). `mode` tells the client which form to
+    render: a signed offer has a fixed salary/terms to accept, a range
+    offer collects the candidate's desired range instead.
+    """
+    id: UUID
+    mode: str  # 'sign' | 'range'
+    status: str
+    position_title: str
+    company_name: str
+    company_logo_url: Optional[str] = None
+    employment_type: Optional[str] = None
+    location: Optional[str] = None
+    salary: Optional[str] = None
+    bonus: Optional[str] = None
+    stock_options: Optional[str] = None
+    start_date: Optional[datetime] = None
+    expiration_date: Optional[datetime] = None
+    manager_name: Optional[str] = None
+    manager_title: Optional[str] = None
+    benefits_medical: bool = False
+    benefits_dental: bool = False
+    benefits_vision: bool = False
+    benefits_401k: bool = False
+    benefits_401k_match: Optional[str] = None
+    benefits_pto_vacation: bool = False
+    benefits_pto_sick: bool = False
+    benefits_holidays: bool = False
+    benefits_other: Optional[str] = None
+    signed_name: Optional[str] = None
+    signed_at: Optional[datetime] = None
+    declined_at: Optional[datetime] = None
+    # range mode only
+    salary_range_min: Optional[float] = None
+    salary_range_max: Optional[float] = None
+    range_match_status: Optional[str] = None
+    negotiation_round: Optional[int] = None
+    max_negotiation_rounds: Optional[int] = None
+    matched_salary: Optional[float] = None
+
+
+class OfferAcceptRequest(BaseModel):
+    signed_name: str = Field(..., min_length=1, max_length=255)
+
+    @field_validator("signed_name")
+    @classmethod
+    def validate_signed_name(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("signed_name cannot be blank")
+        return v
+
+
+class OfferDeclineRequest(BaseModel):
+    reason: Optional[str] = Field(default=None, max_length=2000)

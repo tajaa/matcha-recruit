@@ -3,6 +3,7 @@ import { FileText, Package, PlusCircle } from 'lucide-react'
 import Markdown from 'react-markdown'
 import type { MWMessage } from '../../types'
 import ComplianceReasoningPanel from './ComplianceReasoningPanel'
+import HuumeStepTimeline from './HuumeStepTimeline'
 import CitationSources, { numberCitations } from '../../../components/ui/CitationSources'
 import { safeUrl } from './markdownToHtml'
 
@@ -270,6 +271,9 @@ const MessageBubble = React.memo(function MessageBubble({ message: m, lightMode,
               dropped={m.metadata?.dropped_citations}
               lightMode={isProjectThread ? false : lm}
             />
+            {m.metadata?.huume_steps && (
+              <HuumeStepTimeline steps={m.metadata.huume_steps} lightMode={isProjectThread ? false : lm} />
+            )}
           </>
         ) : (
           m.content

@@ -95,4 +95,8 @@ from .threads import router as _threads_router, public_router as _threads_public
 router.include_router(_threads_router)
 public_router.include_router(_threads_public)
 
+from .huume import router as _huume_router
+
+router.include_router(_huume_router)
+
 __all__ = ["router", "public_router", "presence_router"]

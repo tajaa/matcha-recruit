@@ -25,7 +25,8 @@ export default function MatchaWorkThread() {
   const showProjectPanel = !!(isProject && thread?.current_state)
   const isLanguageTutor = thread?.task_type === 'language_tutor'
   const showLanguageTutorPanel = !tutorDismissed && (isLanguageTutor || showTutorSetup)
-  const hasRightPanel = !!(pdfUrl || showPresentationPanel || showResumeBatchPanel || showInventoryPanel || showProjectPanel || showLanguageTutorPanel || agentMode)
+  const showHuumePanel = !!(thread?.huume_mode && thread?.current_state && (thread.current_state.huume_plan || thread.current_state.huume_offer))
+  const hasRightPanel = !!(pdfUrl || showPresentationPanel || showResumeBatchPanel || showInventoryPanel || showProjectPanel || showLanguageTutorPanel || showHuumePanel || agentMode)
   const isFinalized = thread?.status === 'finalized'
   const isArchived = thread?.status === 'archived'
   const inputDisabled = !!(streaming || isFinalized || isArchived)
@@ -80,6 +81,7 @@ export default function MatchaWorkThread() {
           showInventoryPanel={showInventoryPanel}
           showProjectPanel={showProjectPanel}
           showLanguageTutorPanel={showLanguageTutorPanel}
+          showHuumePanel={showHuumePanel}
         />
       )}
     </div>

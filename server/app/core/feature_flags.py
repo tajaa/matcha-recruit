@@ -211,6 +211,23 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     # supervisor tool, this is a whole-company benefit, and they are sold
     # independently. Default off; admin-toggle; NOT bundled.
     "ask_hr": False,
+    # Huume — Matcha's agentic harness inside matcha-work threads (the Matcha
+    # analog of cappe's Merlin: a bounded Gemini tool-calling loop over a
+    # validated tool registry, streamed as SSE step frames, distinct from the
+    # single-shot skill-engine JSON envelope every other thread mode uses).
+    # Skill #1 is end-to-end new-hire onboarding: draft an offer letter, send
+    # the candidate a sign link (/offer/:token, gated on the offer_letters
+    # flag — re-asserted per-tool since the skill engine gates nothing
+    # itself), and once accepted, stage a full onboarding plan (employee
+    # record, portal invite, onboarding tasks, training, credentials, Google
+    # Workspace + Slack provisioning, schedule/benefits notes) that an admin
+    # must explicitly approve — plan-then-approve, never auto-executed.
+    # Confirm-first mirrors hr_pilot_actions.evaluate_hr_action: a pure
+    # verdict function re-checks role/features/integration state before any
+    # write, and a staged step with a record_id can't be re-run. Gates the
+    # huume thread-mode toggle (column mw_threads.huume_mode) + the plan
+    # approve/execute routes. Default off; admin-toggle; NOT bundled.
+    "huume": False,
     # Analysis Pilot (full Matcha / Pro). A company-facing, GENERAL-PURPOSE
     # bring-your-own-data analysis engine in a chat UI: the business uploads any
     # dataset (CSV / XLSX / financial-document PDF — 10-Ks, P&Ls, balance sheets,

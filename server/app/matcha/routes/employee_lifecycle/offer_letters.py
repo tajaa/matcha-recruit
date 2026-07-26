@@ -21,6 +21,9 @@ from app.matcha.models.offer_letter import (
     OfferLetterCreate,
     OfferLetterUpdate,
     CandidateOfferView,
+    CandidateOfferDocumentView,
+    OfferAcceptRequest,
+    OfferDeclineRequest,
     SendRangeRequest,
     CandidateRangeSubmit,
     RangeNegotiateResult,
@@ -31,7 +34,10 @@ from app.core.models.auth import CurrentUser
 from app.core.services.storage import get_storage
 from app.core.services.email import EmailService
 from app.config import get_settings
-from app.core.services.redis_cache import get_redis_cache, cache_get, cache_set, cache_delete, offer_letters_key
+from app.core.services.redis_cache import (
+    get_redis_cache, cache_get, cache_set, cache_delete, offer_letters_key,
+    check_rate_limit,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -398,6 +404,59 @@ async def get_offer_package_recommendation(
     )
 
 
+# ──────────────────────────────────────────────────────────────────────
+# Pure helpers for the public sign-flow (/offer/:token) — DB-free so they
+# can be unit tested directly. See tests/huume/test_offer_accept_validation.py
+# ──────────────────────────────────────────────────────────────────────
+
+def _token_expired(expires_at, now: dt | None = None) -> bool:
+    """True if a candidate_token_expires_at timestamp is in the past.
+
+    Tolerates naive timestamps (older rows / sqlite-style test fixtures) by
+    treating them as UTC, matching the tz-aware comparisons already used by
+    get_candidate_offer / submit_candidate_range.
+    """
+    if not expires_at:
+        return False
+    now = now or dt.now(timezone.utc)
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    return now > expires_at
+
+
+def _validate_signed_name(name: str) -> str:
+    """Normalize + validate a typed-name signature. Raises ValueError."""
+    cleaned = (name or "").strip()
+    if not cleaned:
+        raise ValueError("signed_name cannot be blank")
+    if len(cleaned) > 255:
+        raise ValueError("signed_name is too long")
+    return cleaned
+
+
+def _acceptable_transition(status: str | None, *, to: str) -> bool:
+    """Whether an offer in `status` may transition to accepted/declined.
+
+    Only a 'sent' offer can be signed or declined — draft offers haven't
+    been sent to a candidate yet, and accepted/rejected/expired are
+    terminal. `to` is accepted for symmetry/readability at call sites even
+    though the source-state check is identical for both directions today.
+    """
+    del to  # both directions require the same source state
+    return status == "sent"
+
+
+def _first_forwarded_ip(request: Request) -> str:
+    """Best-effort client IP for the signer_ip audit stamp (first hop of
+    X-Forwarded-For behind nginx; falls back to the direct peer)."""
+    fwd = request.headers.get("x-forwarded-for")
+    if fwd:
+        parts = [p.strip() for p in fwd.split(",") if p.strip()]
+        if parts:
+            return parts[0]
+    return request.client.host if request.client else "unknown"
+
+
 def _match_ranges(emp_min, emp_max, cand_min, cand_max):
     overlap_low = max(emp_min, cand_min)
     overlap_high = min(emp_max, cand_max)
@@ -660,6 +719,320 @@ async def submit_candidate_range(token: str, payload: CandidateRangeSubmit):
     return RangeNegotiateResult(result=result, matched_salary=matched_salary)
 
 
+async def _notify_huume_thread_of_offer_event(
+    offer: dict, *, event: str, detail: str,
+) -> None:
+    """Best-effort: post a system notice into the matcha-work thread that
+    originated this offer (reuses `mw_threads.linked_offer_letter_id` — the
+    same offer<->thread link the classic `offer_letter` skill sets via
+    `save_offer_letter_draft`, so this fires for any thread that drafted the
+    offer, Huume or not), and bell-notify the thread's creator. Never raises
+    — a candidate's click must not 500 because a thread got deleted or a WS
+    push hiccuped.
+
+    `event` is 'accepted' | 'declined'.
+    """
+    try:
+        from app.matcha.services.matcha_work.matcha_work_document import (
+            add_message, apply_update,
+        )
+        from app.matcha.services.notification_service import create_notification
+
+        async with get_connection() as conn:
+            thread = await conn.fetchrow(
+                "SELECT id, created_by FROM mw_threads WHERE linked_offer_letter_id = $1 AND company_id = $2",
+                offer["id"], offer["company_id"],
+            )
+        if not thread:
+            return
+        thread_id = thread["id"]
+
+        await apply_update(
+            thread_id,
+            {"huume_offer": {
+                "offer_id": str(offer["id"]),
+                "status": offer.get("status"),
+                "event": event,
+                "signed_name": offer.get("signed_name"),
+            }},
+            diff_summary=f"Offer {event} by candidate",
+        )
+        assistant_msg = await add_message(
+            thread_id, "assistant", detail,
+            metadata={"huume_event": f"offer_{event}", "offer_id": str(offer["id"])},
+        )
+        try:
+            from app.matcha.routes.work.thread_ws import thread_manager
+            from app.matcha.routes.matcha_work._shared import _row_to_message
+            await thread_manager.broadcast_new_message(
+                str(thread_id),
+                [_row_to_message(assistant_msg).model_dump(mode="json")],
+            )
+        except Exception:
+            logger.debug("[Huume] thread broadcast skipped for %s", thread_id, exc_info=True)
+
+        creator_id = thread["created_by"]
+        if creator_id:
+            await create_notification(
+                user_id=creator_id,
+                company_id=offer["company_id"],
+                type="huume_offer",
+                title=f"Offer {event}",
+                body=detail,
+                link=f"/work/threads/{thread_id}",
+                metadata={"offer_id": str(offer["id"]), "event": event},
+            )
+    except Exception:
+        logger.exception(
+            "[Huume] failed to notify thread %s of offer %s event=%s",
+            thread_id, offer.get("id"), event,
+        )
+
+
+@candidate_router.get("/candidate/{token}/document", response_model=CandidateOfferDocumentView)
+async def get_candidate_offer_document(token: str, request: Request):
+    """Public endpoint — the sign-flow view of an offer at /offer/:token.
+
+    Works for both a fixed-terms offer (mode='sign', typed-name accept) and
+    a salary-range offer (mode='range', existing submit-range flow) so the
+    one public page can render either. Unlike get_candidate_offer, this
+    does NOT require a salary range to be set.
+    """
+    await check_rate_limit(_first_forwarded_ip(request), "offer_document", 60, 3600)
+    async with get_connection() as conn:
+        row = await conn.fetchrow("SELECT * FROM offer_letters WHERE candidate_token = $1", token)
+        if not row:
+            raise HTTPException(status_code=404, detail="Offer not found")
+        offer = dict(row)
+        if _token_expired(offer.get("candidate_token_expires_at")) and offer.get("status") == "sent":
+            raise HTTPException(status_code=410, detail="This offer link has expired")
+
+        is_range = bool(offer.get("salary_range_min") and offer.get("salary_range_max")) and not offer.get("signed_name")
+        return CandidateOfferDocumentView(
+            id=offer["id"],
+            mode="range" if is_range else "sign",
+            status=offer["status"],
+            position_title=offer["position_title"],
+            company_name=offer["company_name"],
+            company_logo_url=offer.get("company_logo_url"),
+            employment_type=offer.get("employment_type"),
+            location=offer.get("location"),
+            salary=offer.get("salary"),
+            bonus=offer.get("bonus"),
+            stock_options=offer.get("stock_options"),
+            start_date=offer.get("start_date"),
+            expiration_date=offer.get("expiration_date"),
+            manager_name=offer.get("manager_name"),
+            manager_title=offer.get("manager_title"),
+            benefits_medical=offer.get("benefits_medical") or False,
+            benefits_dental=offer.get("benefits_dental") or False,
+            benefits_vision=offer.get("benefits_vision") or False,
+            benefits_401k=offer.get("benefits_401k") or False,
+            benefits_401k_match=offer.get("benefits_401k_match"),
+            benefits_pto_vacation=offer.get("benefits_pto_vacation") or False,
+            benefits_pto_sick=offer.get("benefits_pto_sick") or False,
+            benefits_holidays=offer.get("benefits_holidays") or False,
+            benefits_other=offer.get("benefits_other"),
+            signed_name=offer.get("signed_name"),
+            signed_at=offer.get("signed_at"),
+            declined_at=offer.get("declined_at"),
+            salary_range_min=float(offer["salary_range_min"]) if offer.get("salary_range_min") else None,
+            salary_range_max=float(offer["salary_range_max"]) if offer.get("salary_range_max") else None,
+            range_match_status=offer.get("range_match_status"),
+            negotiation_round=offer.get("negotiation_round"),
+            max_negotiation_rounds=offer.get("max_negotiation_rounds"),
+            matched_salary=float(offer["matched_salary"]) if offer.get("matched_salary") else None,
+        )
+
+
+@candidate_router.get("/candidate/{token}/pdf")
+async def download_candidate_offer_pdf(token: str, request: Request):
+    """Public endpoint — the rendered offer PDF, signed if already accepted."""
+    await check_rate_limit(_first_forwarded_ip(request), "offer_pdf", 30, 3600)
+    async with get_connection() as conn:
+        row = await conn.fetchrow("SELECT * FROM offer_letters WHERE candidate_token = $1", token)
+        if not row:
+            raise HTTPException(status_code=404, detail="Offer not found")
+        offer = dict(row)
+
+    logo_src = await _build_logo_data_uri(offer.get("company_logo_url"))
+    signature = None
+    if offer.get("signed_name") and offer.get("signed_at"):
+        signature = {
+            "name": offer["signed_name"],
+            "signed_at": offer["signed_at"],
+            "ip": offer.get("signer_ip"),
+        }
+    html_content = _generate_offer_letter_html(offer, logo_src=logo_src, signature=signature)
+    try:
+        from app.core.services.pdf import render_pdf
+        pdf_bytes = render_pdf(html_content)
+    except ImportError as e:
+        logger.error(f"WeasyPrint not installed - cannot generate PDF: {e}")
+        raise HTTPException(status_code=500, detail="PDF generation not available.")
+    except Exception as e:
+        logger.error(f"Failed to generate candidate PDF for offer {offer['id']}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to generate PDF. Please try again.")
+    return StreamingResponse(
+        BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="offer-letter-{(offer.get("candidate_name") or "offer").replace(" ", "-")}.pdf"'},
+    )
+
+
+@candidate_router.post("/candidate/{token}/accept", response_model=OfferLetter)
+async def accept_candidate_offer(token: str, payload: OfferAcceptRequest, request: Request):
+    """Public endpoint — candidate types their name and accepts the offer.
+
+    Guarded UPDATE (`AND status = 'sent'`) makes a double-click / replay
+    safe: a second call sees 0 rows updated and 409s rather than
+    re-stamping signed_at or double-firing notifications.
+    """
+    await check_rate_limit(_first_forwarded_ip(request), "offer_accept", 10, 3600)
+    signed_name = _validate_signed_name(payload.signed_name)
+    signer_ip = _first_forwarded_ip(request)
+
+    async with get_connection() as conn:
+        row = await conn.fetchrow("SELECT * FROM offer_letters WHERE candidate_token = $1", token)
+        if not row:
+            raise HTTPException(status_code=404, detail="Offer not found")
+        offer = dict(row)
+        if _token_expired(offer.get("candidate_token_expires_at")):
+            raise HTTPException(status_code=410, detail="This offer link has expired")
+        if not _acceptable_transition(offer.get("status"), to="accepted"):
+            if offer.get("status") == "accepted":
+                raise HTTPException(status_code=409, detail="This offer has already been accepted")
+            raise HTTPException(status_code=409, detail="This offer is not awaiting a response")
+
+        updated = await conn.fetchrow(
+            """
+            UPDATE offer_letters
+            SET signed_name = $1, signed_at = NOW(), signer_ip = $2,
+                status = 'accepted', updated_at = NOW()
+            WHERE candidate_token = $3 AND status = 'sent'
+            RETURNING *
+            """,
+            signed_name, signer_ip, token,
+        )
+        if not updated:
+            raise HTTPException(status_code=409, detail="This offer is not awaiting a response")
+        updated = dict(updated)
+
+    redis = get_redis_cache()
+    if redis:
+        await cache_delete(redis, offer_letters_key(updated["company_id"]))
+
+    # Render + store the signed PDF. Best-effort — a storage hiccup must not
+    # fail the candidate's acceptance; the unsigned terms are already saved.
+    try:
+        logo_src = await _build_logo_data_uri(updated.get("company_logo_url"))
+        signature = {"name": signed_name, "signed_at": updated["signed_at"], "ip": signer_ip}
+        html_content = _generate_offer_letter_html(updated, logo_src=logo_src, signature=signature)
+        from app.core.services.pdf import render_pdf
+        pdf_bytes = render_pdf(html_content)
+        storage_path = await get_storage().upload_private_file(
+            pdf_bytes,
+            filename=f"offer-signed-{updated['id']}.pdf",
+            prefix="offer-letters/signed",
+            content_type="application/pdf",
+        )
+        async with get_connection() as conn:
+            await conn.execute(
+                "UPDATE offer_letters SET signed_pdf_storage_path = $1 WHERE id = $2",
+                storage_path, updated["id"],
+            )
+        updated["signed_pdf_storage_path"] = storage_path
+    except Exception:
+        logger.exception("[OfferLetters] failed to render/store signed PDF for offer %s", updated["id"])
+
+    await _notify_huume_thread_of_offer_event(
+        updated, event="accepted",
+        detail=f"**{updated.get('candidate_name') or 'The candidate'}** accepted the offer for "
+               f"**{updated.get('position_title') or 'the role'}** — signed {signed_name} just now. "
+               f"Say \"build the onboarding plan\" when you're ready to start onboarding.",
+    )
+
+    try:
+        async with get_connection() as conn:
+            employer_row = await conn.fetchrow(
+                "SELECT u.email FROM users u JOIN companies c ON u.id = c.owner_id WHERE c.id = $1",
+                updated.get("company_id"),
+            )
+        if employer_row and employer_row["email"]:
+            await _send_employer_result_email(
+                employer_email=employer_row["email"],
+                candidate_name=updated.get("candidate_name") or "Candidate",
+                position_title=updated.get("position_title") or "",
+                result="matched",
+                matched_salary=None,
+                rounds_remaining=0,
+            )
+    except Exception:
+        logger.warning("[OfferLetters] Failed to send offer-accepted employer email", exc_info=True)
+
+    return OfferLetter(**updated)
+
+
+@candidate_router.post("/candidate/{token}/decline")
+async def decline_candidate_offer(token: str, payload: OfferDeclineRequest, request: Request):
+    """Public endpoint — candidate declines the offer."""
+    await check_rate_limit(_first_forwarded_ip(request), "offer_accept", 10, 3600)
+
+    async with get_connection() as conn:
+        row = await conn.fetchrow("SELECT * FROM offer_letters WHERE candidate_token = $1", token)
+        if not row:
+            raise HTTPException(status_code=404, detail="Offer not found")
+        offer = dict(row)
+        if not _acceptable_transition(offer.get("status"), to="declined"):
+            if offer.get("status") == "rejected":
+                raise HTTPException(status_code=409, detail="This offer has already been declined")
+            raise HTTPException(status_code=409, detail="This offer is not awaiting a response")
+
+        updated = await conn.fetchrow(
+            """
+            UPDATE offer_letters
+            SET status = 'rejected', declined_at = NOW(), decline_reason = $1, updated_at = NOW()
+            WHERE candidate_token = $2 AND status = 'sent'
+            RETURNING *
+            """,
+            payload.reason, token,
+        )
+        if not updated:
+            raise HTTPException(status_code=409, detail="This offer is not awaiting a response")
+        updated = dict(updated)
+
+    redis = get_redis_cache()
+    if redis:
+        await cache_delete(redis, offer_letters_key(updated["company_id"]))
+
+    await _notify_huume_thread_of_offer_event(
+        updated, event="declined",
+        detail=f"**{updated.get('candidate_name') or 'The candidate'}** declined the offer for "
+               f"**{updated.get('position_title') or 'the role'}**"
+               + (f" — reason given: “{payload.reason}”" if payload.reason else "") + ".",
+    )
+
+    try:
+        async with get_connection() as conn:
+            employer_row = await conn.fetchrow(
+                "SELECT u.email FROM users u JOIN companies c ON u.id = c.owner_id WHERE c.id = $1",
+                updated.get("company_id"),
+            )
+        if employer_row and employer_row["email"]:
+            await _send_employer_result_email(
+                employer_email=employer_row["email"],
+                candidate_name=updated.get("candidate_name") or "Candidate",
+                position_title=updated.get("position_title") or "",
+                result="no_match_low",
+                matched_salary=None,
+                rounds_remaining=0,
+            )
+    except Exception:
+        logger.warning("[OfferLetters] Failed to send offer-declined employer email", exc_info=True)
+
+    return {"status": "declined"}
+
+
 @router.post("/{offer_id}/re-negotiate", response_model=OfferLetter)
 async def re_negotiate_offer(
     offer_id: UUID,
@@ -916,8 +1289,15 @@ async def _build_logo_data_uri(logo_path: str | None) -> str | None:
         return None
 
 
-def _generate_offer_letter_html(offer: dict, logo_src: str | None = None) -> str:
-    """Generate HTML for the offer letter PDF."""
+def _generate_offer_letter_html(
+    offer: dict, logo_src: str | None = None, signature: dict | None = None,
+) -> str:
+    """Generate HTML for the offer letter PDF.
+
+    `signature`, when provided (typed-name acceptance via /offer/:token),
+    renders the candidate block as an electronic-signature record instead
+    of a blank line — {"name": str, "signed_at": datetime, "ip": str}.
+    """
     # Format dates
     created_date = offer["created_at"].strftime("%B %d, %Y") if offer.get("created_at") else ""
     start_date = offer["start_date"].strftime("%B %d, %Y") if offer.get("start_date") else "TBD"
@@ -954,6 +1334,30 @@ def _generate_offer_letter_html(offer: dict, logo_src: str | None = None) -> str
     if logo_src:
         safe_url = quote(logo_src, safe=":/?#[]@!$&'()*+,;=,%")
         logo_html = f'<img src="{safe_url}" alt="Company Logo" style="max-height: 60px; max-width: 200px;" />'
+
+    # Candidate signature block — blank line pre-signing, electronic record after
+    if signature and signature.get("name"):
+        signed_name = _safe(signature.get("name"))
+        signed_at_val = signature.get("signed_at")
+        signed_at_str = signed_at_val.strftime("%B %d, %Y %I:%M %p UTC") if signed_at_val else ""
+        signer_ip = _safe(signature.get("ip"))
+        candidate_signature_html = f"""
+                <div class="signature-name" style="font-style: italic; border-bottom: 1px solid #333; padding-bottom: 8px;">{signed_name}</div>
+                <div class="signature-title">Candidate Acceptance (Electronic Signature)</div>
+        """
+        signature_disclosure_html = f"""
+        <p style="margin-top: 40px; font-size: 8pt; color: #999;">
+            Electronically signed by {signed_name} on {signed_at_str}{f" from IP {signer_ip}" if signer_ip else ""}.
+            This constitutes acceptance of the offer above.
+        </p>
+        """
+    else:
+        candidate_signature_html = f"""
+                <div class="signature-line"></div>
+                <div class="signature-name">{candidate_name}</div>
+                <div class="signature-title">Candidate Acceptance</div>
+        """
+        signature_disclosure_html = ""
 
     html = f"""
     <!DOCTYPE html>
@@ -1151,11 +1555,10 @@ def _generate_offer_letter_html(offer: dict, logo_src: str | None = None) -> str
                 <div class="signature-title">Authorized Signature</div>
             </div>
             <div class="signature-block">
-                <div class="signature-line"></div>
-                <div class="signature-name">{candidate_name}</div>
-                <div class="signature-title">Candidate Acceptance</div>
+                {candidate_signature_html}
             </div>
         </div>
+        {signature_disclosure_html}
     </body>
     </html>
     """

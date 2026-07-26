@@ -100,6 +100,7 @@ const MatchaXOnboardingWizard = lazy(
   () => import("./components/matcha-x/onboarding/MatchaXOnboardingWizard"),
 );
 const AnonymousReport = lazy(() => import("./pages/shared/AnonymousReport"));
+const OfferSign = lazy(() => import("./pages/shared/OfferSign"));
 const LocationIntake = lazy(() => import("./pages/shared/LocationIntake"));
 const ExternalIntake = lazy(() => import("./pages/shared/ExternalIntake"));
 const RequestInfoForm = lazy(() => import("./pages/shared/RequestInfoForm"));
@@ -234,6 +235,7 @@ export default function App() {
           element={<MatchaXOnboardingWizard />}
         />
         <Route path="/report/:token" element={<AnonymousReport />} />
+        <Route path="/offer/:token" element={<OfferSign />} />
         <Route path="/intake/:token" element={<LocationIntake />} />
         <Route path="/intake/external/:token" element={<ExternalIntake />} />
         <Route path="/request-info/:token" element={<RequestInfoForm />} />

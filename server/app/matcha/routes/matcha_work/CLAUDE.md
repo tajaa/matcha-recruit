@@ -2,7 +2,7 @@
 
 Backend routes for Matcha Work (collaborative AI workspace — projects, threads, tasks, recruiting, AI turns). Package was split from an 11,572-line flat `matcha_work.py` into per-domain submodules on 2026-07-03. URL surface unchanged at the split; external import path `app.matcha.routes.matcha_work` stable.
 
-**Route count (recounted 2026-07-19, from source):** **202** gated routes on `router` + **4** on `public_router` = 206 endpoints. Reproduce with:
+**Route count (recounted 2026-07-19, from source; +2 for `huume.py`'s plan approve/execute routes added since):** **204** gated routes on `router` + **4** on `public_router` = 208 endpoints. Reproduce with:
 
 ```bash
 cd server && grep -c "^@router\."        app/matcha/routes/matcha_work/*.py   # per file
@@ -37,7 +37,8 @@ The "204 routes / 203 after the 2026-07-09 deletion of the dead non-streaming `P
 | `tutor.py` | Language tutor voice sessions (Gemini Live) + EN/ES/FR utterance-check prompts | 3 |
 | `messaging.py` | The core AI-turn surface: `send_message_stream` (the biggest handler; its non-streaming twin was deleted 2026-07-09 — quota-bypass/wrong-tenant/crash-after-billing drift, zero callers) + RAG-context/compliance-gap-detection/thread-file-attachment-meta helpers. Mode dispatch is registry-driven: a generic loop over `services/matcha_work_modes.THREAD_MODES` injects each active mode's context (node, benefits, legal, risk, training); compliance + payer are `custom_dispatch=True` and keep bespoke blocks (reasoning-chain statuses + conditional RAG; payer prompt-swap path) | 1 |
 | `threads.py` | Remainder: create/logo/handbook-upload, list/get, versions/revert/finalize/save-draft, PDF/proxy, archive/unarchive, review-requests + signatures + presentation, title/pin, mode toggles — the registry-driven `POST /threads/{id}/modes/{mode_key}` + 3 legacy aliases (`/node-mode`, `/compliance-mode`, `/payer-mode`) (**owns `public_router`** for public review routes) | 25 + 2 public |
-| **Total** | | **202 routes** (+ 4 public) |
+| `huume.py` | Huume plan approve/execute — `POST /threads/{id}/huume/plan/approve` (flip named/all `proposed` steps to `approved`) + `.../plan/execute` (run every `approved` step, idempotent). `require_feature("huume")` on top of the package gate. See root CLAUDE.md's `huume` flag row for the full picture — the agent loop itself lives in `services/huume/`, not this package (only the REST counterpart to its chat-driven `execute_approved_steps` tool does) | 2 |
+| **Total** | | **204 routes** (+ 4 public) |
 
 ## Three routers
 

@@ -5,6 +5,7 @@ import InventoryPanel from '../../components/panels/InventoryPanel'
 import ProjectPanel from '../../components/panels/ProjectPanel'
 import LanguageTutorPanel from '../../components/panels/LanguageTutorPanel'
 import AgentPanel from '../../components/panels/AgentPanel'
+import HuumePlanCard from '../../components/panels/HuumePlanCard'
 import { getThread, sendCandidateInterviews, syncInterviewStatuses } from '../../api/matchaWork'
 import type { ThreadController } from './useThreadController'
 
@@ -15,11 +16,12 @@ interface RightPanelsProps {
   showInventoryPanel: boolean
   showProjectPanel: boolean
   showLanguageTutorPanel: boolean
+  showHuumePanel: boolean
 }
 
 // Right panels — visible on desktop always, on mobile via toggle
 export default function RightPanels({
-  c, showPresentationPanel, showResumeBatchPanel, showInventoryPanel, showProjectPanel, showLanguageTutorPanel,
+  c, showPresentationPanel, showResumeBatchPanel, showInventoryPanel, showProjectPanel, showLanguageTutorPanel, showHuumePanel,
 }: RightPanelsProps) {
   const {
     mobileView, thread, threadId, handleEditSlide, lightMode, streaming,
@@ -105,11 +107,22 @@ export default function RightPanels({
         </div>
       )}
 
-      {agentMode && !showPresentationPanel && !showResumeBatchPanel && !showInventoryPanel && !showProjectPanel && !showLanguageTutorPanel && (
+      {showHuumePanel && (
+        <HuumePlanCard
+          state={thread!.current_state}
+          threadId={threadId!}
+          lightMode={lightMode}
+          onStateUpdate={(plan) => {
+            setThread((prev) => prev ? { ...prev, current_state: { ...prev.current_state, huume_plan: plan } } : prev)
+          }}
+        />
+      )}
+
+      {agentMode && !showPresentationPanel && !showResumeBatchPanel && !showInventoryPanel && !showProjectPanel && !showLanguageTutorPanel && !showHuumePanel && (
         <AgentPanel />
       )}
 
-      {pdfUrl && !showPresentationPanel && !showResumeBatchPanel && !showInventoryPanel && !showProjectPanel && !showLanguageTutorPanel && !agentMode && (
+      {pdfUrl && !showPresentationPanel && !showResumeBatchPanel && !showInventoryPanel && !showProjectPanel && !showLanguageTutorPanel && !showHuumePanel && !agentMode && (
         <div className={`${mobileView === 'panel' ? 'block w-full' : 'hidden md:block'} flex-1 bg-zinc-900`}>
           <iframe
             src={pdfUrl}

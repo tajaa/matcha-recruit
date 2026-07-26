@@ -157,6 +157,19 @@ THREAD_MODES: tuple[ThreadMode, ...] = (
         # or any model call — not as part of build_context. See messaging.py.
         required_feature="hr_pilot",
     ),
+    ThreadMode(
+        key="huume",
+        column="huume_mode",
+        label="Huume",
+        status_loading="Huume is working...",
+        status_unavailable="Huume is unavailable — continuing without it...",
+        # Huume runs a bounded multi-step tool-calling loop (services/huume/
+        # agent.py) in place of the normal single-shot skill engine for the
+        # whole turn, not just an injected context block — always
+        # custom_dispatch. See messaging.py's _run_huume_dispatch.
+        custom_dispatch=True,
+        required_feature="huume",
+    ),
 )
 
 MODES_BY_KEY: dict[str, ThreadMode] = {m.key: m for m in THREAD_MODES}

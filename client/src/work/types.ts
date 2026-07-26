@@ -351,6 +351,7 @@ export type MWModeKey =
   | 'risk'
   | 'training'
   | 'hr_pilot'
+  | 'huume'
 
 export interface MWThread {
   id: string
@@ -366,6 +367,7 @@ export interface MWThread {
   risk_mode: boolean
   training_mode: boolean
   hr_pilot_mode: boolean
+  huume_mode: boolean
   collaborator_count: number
   version: number
   created_at: string
@@ -481,6 +483,47 @@ export interface MWMessageMetadata {
   /** HR Pilot cited answers — sources that resolved, and the ids that didn't. */
   citations?: HrPilotCitation[]
   dropped_citations?: string[]
+  /** Huume agent-run tool-call timeline for this turn, if huume_mode was on. */
+  huume_steps?: HuumeStep[]
+  huume_run_id?: string
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Huume — agentic onboarding harness (matcha-work thread mode "huume")
+// ──────────────────────────────────────────────────────────────────────
+
+export interface HuumeStep {
+  seq: number
+  tool: string
+  kind: 'read' | 'staged' | 'write' | 'finish'
+  label: string
+  status: 'ok' | 'rejected' | 'error' | 'skipped'
+  detail?: string
+}
+
+export interface HuumeOffer {
+  offer_id: string
+  status: string
+  event?: 'accepted' | 'declined'
+  signed_name?: string | null
+}
+
+export interface HuumePlanStep {
+  key: string
+  label: string
+  status: 'proposed' | 'approved' | 'skipped' | 'executing' | 'done' | 'failed'
+  requires?: string | null
+  reason?: string | null
+  record_id?: string | null
+  error?: string | null
+}
+
+export interface HuumePlan {
+  status: 'proposed' | 'approved' | 'executing' | 'done' | 'cancelled'
+  offer_id: string
+  employee: { first_name?: string; last_name?: string; email?: string; position_title?: string }
+  employee_id: string | null
+  steps: HuumePlanStep[]
 }
 
 export interface MWMessage {
@@ -534,6 +577,7 @@ export interface MWCreateResponse {
   risk_mode: boolean
   training_mode: boolean
   hr_pilot_mode: boolean
+  huume_mode: boolean
   created_at: string
   assistant_reply: string | null
   pdf_url: string | null
@@ -543,6 +587,7 @@ export interface MWCreateResponse {
 export type MWStreamEvent =
   | { type: 'usage'; data: MWTokenUsage & { stage: 'estimate' | 'final' } }
   | { type: 'status'; message: string }
+  | { type: 'step'; data: HuumeStep }
   | { type: 'complete'; data: MWSendResponse }
   | { type: 'error'; message: string }
   | { type: 'keepalive' }

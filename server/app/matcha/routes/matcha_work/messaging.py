@@ -819,6 +819,141 @@ async def _run_hard_stop_gates(tc: TurnContext):
                 return
 
 
+async def _run_huume_dispatch(tc: TurnContext):
+    """Huume's turn handler — replaces the rest of the pipeline entirely when
+    the thread's `huume_mode` is on, the same way the file-only guard in
+    `_run_hard_stop_gates` short-circuits: it emits its own terminal
+    `complete` event and sets `tc.terminated = True`.
+
+    Unlike every other thread mode (which only injects a context block —
+    see `_inject_mode_contexts`), Huume runs a bounded multi-step Gemini
+    tool-calling loop (`services/huume/agent.py`) in place of the normal
+    single-shot skill engine for the WHOLE turn — hence `custom_dispatch`
+    on its ThreadMode entry and its own dispatch stage here rather than a
+    `build_context` callback.
+    """
+    thread = tc.thread
+    thread_id = tc.thread_id
+    company_id = tc.company_id
+    current_user = tc.current_user
+
+    if not thread.get("huume_mode"):
+        return
+    if not (tc.body.content or "").strip():
+        return
+
+    # The toggle route gates on required_feature, but the column stays true
+    # if the flag is later revoked — re-check here, same as every other
+    # mode's re-check in _inject_mode_contexts, so a downgraded company
+    # falls through to the normal skill engine instead of keeping Huume.
+    features = await get_company_features(company_id)
+    if not features.get("huume"):
+        return
+
+    from app.matcha.services.huume import agent as huume_agent, store as huume_store
+
+    yield _sse_data({"type": "status", "message": "Huume is working…"})
+
+    run_id = await huume_store.create_run(
+        company_id=company_id, thread_id=thread_id, user_id=current_user.id, trigger="user_turn",
+    )
+
+    current_state = thread.get("current_state") or {}
+    final_result: dict | None = None
+    run_failed = False
+    try:
+        async for frame in huume_agent.run_huume_turn(
+            thread_id=thread_id, company_id=company_id, user_id=current_user.id,
+            user_role=current_user.role, history=tc.msg_dicts, current_state=current_state,
+            company_name=(tc.profile or {}).get("name") or "",
+        ):
+            if frame.get("type") == "huume_result":
+                final_result = frame.get("data")
+                continue
+            if frame.get("type") == "step":
+                step = frame.get("data") or {}
+                try:
+                    await huume_store.add_step(
+                        run_id=run_id, seq=step.get("seq", 0), tool=step.get("tool", ""),
+                        kind=step.get("kind", "write"), label=step.get("label", ""),
+                        status=step.get("status", "error"),
+                    )
+                except Exception:
+                    logger.warning("huume add_step failed for run %s", run_id, exc_info=True)
+            yield _sse_data(frame)
+    except Exception:
+        logger.exception("Huume turn crashed for thread %s", thread_id)
+        run_failed = True
+        yield _sse_data({"type": "error", "message": "Huume hit a problem mid-turn."})
+
+    if final_result is None:
+        final_result = {
+            "message": "Huume couldn't complete this turn — nothing was changed.",
+            "steps": [], "token_usage": None, "state_updates": {}, "model_calls": 0,
+        }
+
+    state_updates = final_result.get("state_updates") or {}
+    if state_updates:
+        try:
+            update_result = await doc_svc.apply_update(thread_id, state_updates, diff_summary="Huume turn")
+            tc.current_state = update_result["current_state"]
+            tc.current_version = update_result["version"]
+        except Exception:
+            logger.exception("Huume apply_update failed for thread %s", thread_id)
+            tc.current_state = thread.get("current_state")
+            tc.current_version = thread.get("version")
+    else:
+        tc.current_state = thread.get("current_state")
+        tc.current_version = thread.get("version")
+
+    assistant_msg = await doc_svc.add_message(
+        thread_id, "assistant", final_result["message"],
+        metadata={"huume_steps": final_result.get("steps") or [], "huume_run_id": str(run_id)},
+    )
+    tc.assistant_msg = assistant_msg
+
+    try:
+        await huume_store.complete_run(
+            run_id=run_id, status="failed" if run_failed else "completed",
+            model_calls=final_result.get("model_calls") or 0, token_usage=final_result.get("token_usage"),
+        )
+    except Exception:
+        logger.warning("huume complete_run failed for run %s", run_id, exc_info=True)
+
+    try:
+        from app.matcha.routes.work.thread_ws import thread_manager
+        _track_background_task(asyncio.create_task(
+            thread_manager.broadcast_new_message(
+                str(thread_id),
+                [_row_to_message(tc.user_msg).model_dump(mode="json"),
+                 _row_to_message(assistant_msg).model_dump(mode="json")],
+                exclude_user=current_user.id,
+            )
+        ))
+    except Exception:
+        logger.warning("Thread WS broadcast failed (huume) for thread %s", thread_id)
+
+    tc.final_usage = await _record_turn_usage(
+        thread_id=thread_id, company_id=company_id, user_id=current_user.id,
+        user_role=current_user.role, final_usage=final_result.get("token_usage"),
+        operation="huume_turn",
+    )
+    if tc.final_usage:
+        yield _sse_data({"type": "usage", "data": {**tc.final_usage, "stage": "final"}})
+
+    response = SendMessageResponse(
+        user_message=_row_to_message(tc.user_msg),
+        assistant_message=_row_to_message(assistant_msg),
+        current_state=tc.current_state,
+        version=tc.current_version,
+        task_type=_infer_skill_from_state(tc.current_state),
+        pdf_url=None,
+        token_usage=tc.final_usage,
+    )
+    yield _sse_data({"type": "complete", "data": response.model_dump(mode="json")})
+    tc.terminated = True
+
+
 async def _inject_mode_contexts(tc: TurnContext):
     """Build every active thread mode's grounding context, emitting a status
     event per mode. Registry-driven loop first, then the two custom_dispatch
@@ -1363,6 +1498,11 @@ async def send_message_stream(
     async def event_stream():
         try:
             async for _evt in _run_hard_stop_gates(tc):
+                yield _evt
+            if tc.terminated:
+                return
+
+            async for _evt in _run_huume_dispatch(tc):
                 yield _evt
             if tc.terminated:
                 return
