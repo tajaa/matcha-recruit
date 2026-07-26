@@ -260,8 +260,11 @@ def _build_audit_report_html(report: dict[str, Any]) -> str:
                 f"<span class='sev' style='color:{color};border-color:{color}'>{esc(sev or 'gap')}</span></div>"
                 f"{good}{meta}</div>"
             )
+        # Hoisted out of the f-string: a backslash escape inside an f-string
+        # expression is Python 3.12+ (PEP 701) syntax, and CI compiles on 3.11.
+        empty_note = '<p class="empty">No gaps flagged.</p>'
         sections.append(
-            f"<section><h2>{esc(state)}</h2>{''.join(rows) or '<p class=\"empty\">No gaps flagged.</p>'}</section>"
+            f"<section><h2>{esc(state)}</h2>{''.join(rows) or empty_note}</section>"
         )
 
     completed_str = ""
