@@ -96,7 +96,7 @@ def test_public_report_honeypot_is_not_autofillable():
 # ---------------------------------------------------------------------------
 
 def test_invite_expiry_boundaries():
-    from app.core.routes.investigation_invite import (
+    from app.core.routes.identity.investigation_invite import (
         INVITE_TOKEN_TTL_DAYS,
         _invite_expired,
     )

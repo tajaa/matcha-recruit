@@ -29,7 +29,7 @@ class _FakeConnContext:
 
 
 def _set_fake_connection(monkeypatch, conn: _FakeConn):
-    monkeypatch.setattr(auth_routes, "get_connection", lambda: _FakeConnContext(conn))
+    monkeypatch.setattr(auth_routes.broker, "get_connection", lambda: _FakeConnContext(conn))
 
 
 def test_broker_branding_runtime_rejects_invalid_key(monkeypatch):

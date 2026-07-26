@@ -117,6 +117,15 @@ _SERVICES_DOMAINS = {
     "pilots", "broker", "insurance", "property", "interviews",
 }
 
+# A domain service occasionally splits further into its own subpackage
+# (services/pilots/legal_defense.py -> services/pilots/legal_defense/{chat,law,...}.py,
+# core-reorg 2026-07-25). The leaf module name is internal organization, not a
+# distinct feature, so it must collapse back out the same way the domain
+# folder does above — otherwise "matcha.legal_defense.chat" and
+# "matcha.legal_defense.law" fragment what used to roll up as one
+# "matcha.legal_defense" label.
+_SPLIT_SERVICE_PACKAGES = {"legal_defense"}
+
 
 def _feature_label() -> str:
     """Best-effort caller attribution via stack inspection.
@@ -148,6 +157,9 @@ def _feature_label() -> str:
                 if (len(segs) > 3 and segs[1] == "matcha" and segs[2] == "services"
                         and segs[3] in _SERVICES_DOMAINS):
                     del segs[3]
+                if (len(segs) > 4 and segs[1] == "matcha" and segs[2] == "services"
+                        and segs[3] in _SPLIT_SERVICE_PACKAGES):
+                    del segs[4]
                 parts = [p for p in segs if p not in _LABEL_STOPWORDS]
                 label = ".".join(parts) if parts else name
                 return label[:100]

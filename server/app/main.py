@@ -527,7 +527,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 # Import and include domain routers
 from .core.routes import core_router, chat_ws_router
 from .werk.routes import werk_router, channels_ws_router
-from .core.routes.stripe_webhook import router as stripe_webhook_router
+from .core.routes.billing.stripe_webhook import router as stripe_webhook_router
 from .matcha.routes import matcha_router
 from .cappe.routes import cappe_router
 from .tellus.routes import tellus_router
@@ -559,7 +559,7 @@ from .matcha.routes.work.project_ws import router as project_ws_router
 app.include_router(project_ws_router, prefix="/ws/projects", tags=["projects-websocket"])
 
 # SEO routes — served at root, no /api prefix (crawlers expect /sitemap.xml + /robots.txt)
-from .core.routes.sitemap import router as sitemap_router
+from .core.routes.content.sitemap import router as sitemap_router
 app.include_router(sitemap_router, tags=["seo"])
 
 # Cappe public-site renderer — served at root, host-gated to tenant subdomains

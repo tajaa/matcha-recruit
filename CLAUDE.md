@@ -19,12 +19,12 @@ Sidebar dispatch in `client/src/components/sidebars/TenantSidebar.tsx`. Tier-che
 ### Free — resources hub
 - Marketing/upgrade landing for self-serve signups. No paid features.
 - All `enabled_features` off; gated by `<RequireBusinessAccount>` (`client/src/components/`).
-- Backend: `server/app/core/routes/resources.py`. Public landing pages + business-gated tools (templates, state guides, calculators, audit, glossary, job descriptions).
+- Backend: `server/app/core/routes/resources/`. Public landing pages + business-gated tools (templates, state guides, calculators, audit, glossary, job descriptions).
 - Free→paid path: `<UpgradeUpsellCard>` ("Talk to sales") posts to `/api/resources/upgrade/inquiry`.
 
 ### Matcha-lite — paid IR + HR records (entry tier)
 - Stripe-purchasable, headcount-based (max 300 employees).
-- Checkout: `POST /resources/checkout/lite` (`server/app/core/routes/resources.py`). Stripe webhook `checkout.session.completed` flips `enabled_features.incidents=true` — until then `MatchaLitePendingSidebar` shows the Subscribe CTA.
+- Checkout: `POST /resources/checkout/lite` (`server/app/core/routes/resources/checkout.py`). Stripe webhook `checkout.session.completed` flips `enabled_features.incidents=true` — until then `MatchaLitePendingSidebar` shows the Subscribe CTA.
 - Once paid: `incidents` + `employees` + `handbooks` (handbook **generation**) on; `IrSidebar` exposes incidents, risk insights, OSHA, handbooks, employees, company. **No** handbook audit, training, discipline, or credentialing — those moved up to **Matcha-X** (the `matcha_lite` tier overlay force-asserts `training`/`discipline` off). See the tier-bundle note under Feature Flags.
 - Backend routers: `ir_incidents_router` (`/ir/incidents/*`), `ir_onboarding_router` (`/ir-onboarding/*`) in `server/app/matcha/routes/__init__.py`.
 - Onboarding: `client/src/components/ir/onboarding/IrOnboardingWizard.tsx`; completion stamps `companies.ir_onboarding_completed_at`.
@@ -33,7 +33,7 @@ Sidebar dispatch in `client/src/components/sidebars/TenantSidebar.tsx`. Tier-che
 ### Matcha Compliance — standalone self-serve compliance product
 - Self-serve, Stripe-purchasable product that grants the **full** `compliance` feature and nothing else. Modeled on Matcha-lite/Matcha-X: signup page → pending sidebar → Stripe checkout → webhook flips a flag → active sidebar.
 - Signup: `pages/auth/ComplianceSignup.tsx` at `/compliance/signup` (`tier='matcha_compliance'`, `signup_source='matcha_compliance'`); collects headcount **+ jurisdiction count**.
-- Checkout: `POST /resources/checkout/compliance` (`server/app/core/routes/resources.py`). Pricing = headcount component + per-jurisdiction surcharge (`matcha_compliance_price_cents`, `stripe_service.py` — placeholder, see TODO). Stripe webhook `checkout.session.completed` (`type='matcha_compliance'`) flips `enabled_features.compliance=true`; until then `CompliancePendingSidebar` shows the Subscribe CTA.
+- Checkout: `POST /resources/checkout/compliance` (`server/app/core/routes/resources/checkout.py`). Pricing = headcount component + per-jurisdiction surcharge (`matcha_compliance_price_cents`, `stripe_service.py` — placeholder, see TODO). Stripe webhook `checkout.session.completed` (`type='matcha_compliance'`) flips `enabled_features.compliance=true`; until then `CompliancePendingSidebar` shows the Subscribe CTA.
 - Once paid: `ComplianceSidebar` (Compliance, Compliance Calendar, Company, Compliance Setup); `/app/compliance` renders the full `ComplianceFull` view (not the lite taste — `compliance` is true).
 - Onboarding **reuses** `MatchaXOnboardingWizard` at `/compliance/onboarding` (locations → policies → people → build).
 - Jurisdiction count persists in `company_handbook_profiles.compliance_jurisdiction_count` (migration `compljuris01`); surfaced on `/auth/me` as `profile.jurisdiction_count`.
@@ -123,7 +123,7 @@ Cross-product import rule: `cappe/` and `tellus/` import only from `app/core/*` 
 
 ### Schema + data flow — keep dev and prod in sync (both directions)
 
-Schema is managed via Alembic migrations in `server/alembic/versions/`; `server/app/database.py:init_db()` only bootstraps a fresh DB (it does **not** run migrations). The two DBs drift unless synced deliberately:
+Schema is managed via Alembic migrations in `server/alembic/versions/`; `server/app/database/bootstrap/__init__.py:init_db()` only bootstraps a fresh DB (it does **not** run migrations). The two DBs drift unless synced deliberately:
 
 - **Schema, dev → prod:** author migration → `./scripts/migrate-dev.sh` (applies to dev :5432) → test → `./scripts/migrate-prod.sh` (applies the same revision to RDS prod via app-EC2 tunnel; ignore `--legacy`, it targets the retired container). Applying to dev only is the drift that caused real `UndefinedColumnError` 500s. `alembic_version` must match afterward. Five gates guard the prod path (dirty-tree, pending-revision preview, RDS snapshot **+ a status check that the snapshot actually exists**, a rehearsal that runs every revision against live rows then rolls back, typed confirm) — each one is a bug that already shipped. The snapshot is initiated but **not waited on**: an RDS snapshot's point-in-time is fixed at initiation, so waiting for completion buys nothing; the status check is what proves the rollback path is real.
 - **Data, prod → dev:** `./scripts/refresh-dev-from-prod.sh` — **anonymized** clone of RDS prod into dev. `--dry-run` previews into a staging DB without swapping. After a scrubbed run, **every dev user's password becomes `devpass123`**; PII is scrubbed by `scripts/sql/anonymize_dev.sql`.
@@ -141,7 +141,7 @@ server/
 ├── app/
 │   ├── main.py                     # App init, router mounting, lifespan
 │   ├── config.py                   # Pydantic settings from env
-│   ├── database.py                 # asyncpg pool + init_db()
+│   ├── database/                   # asyncpg pool + init_db() bootstrap (package)
 │   ├── dependencies.py             # Shared auth dependencies
 │   ├── protocol.py                 # AI WS / streaming protocol shapes
 │   ├── core/                       # Auth, admin, compliance, AI chat, policies, resources
@@ -287,7 +287,7 @@ Defined in `server/app/core/feature_flags.py` as `DEFAULT_COMPANY_FEATURES`. Per
 ## Key Modules
 
 - **Compliance** (`core/services/compliance_service.py`) — Jurisdiction-aware compliance checking with Gemini AI; preemption rules, tiered data (structured → repository → Gemini research).
-- **Vertical coverage** (`core/services/vertical_coverage.py`, migration `vertcov01`) — auto-scopes **any** US industry, not just the ones hand-authored into `compliance_registry.py`. A tenant *triggers* a fill; the result is shared. Flow (all four pieces already existed — this wires them and gives them memory): `resolve_vertical` (company's sub-specialty, else the healthcare facility-inference `entity_type`, else **the industry itself** — a hotel's vertical is `hospitality`) → `ensure_specialty` (`industry_specialties.discover`+`confirm` if the vertical has no `compliance_categories` rows yet) → `missing_cells` (ledger diff) → `fill` (`research_specialization_for_jurisdiction`, one call per cell). Runs synchronously in the Matcha-X onboarding build (`matcha_x_onboarding.py` `POST /build/stream`), emitting `vertical_scoping` / `vertical_researching` / `vertical_codified` / `vertical_complete`.
+- **Vertical coverage** (`core/services/vertical_coverage.py`, migration `vertcov01`) — auto-scopes **any** US industry, not just the ones hand-authored into `compliance_registry/`. A tenant *triggers* a fill; the result is shared. Flow (all four pieces already existed — this wires them and gives them memory): `resolve_vertical` (company's sub-specialty, else the healthcare facility-inference `entity_type`, else **the industry itself** — a hotel's vertical is `hospitality`) → `ensure_specialty` (`industry_specialties.discover`+`confirm` if the vertical has no `compliance_categories` rows yet) → `missing_cells` (ledger diff) → `fill` (`research_specialization_for_jurisdiction`, one call per cell). Runs synchronously in the Matcha-X onboarding build (`matcha_x_onboarding.py` `POST /build/stream`), emitting `vertical_scoping` / `vertical_researching` / `vertical_codified` / `vertical_complete`.
   - **The ledger is the point.** `jurisdiction_vertical_coverage` is keyed `(jurisdiction_id, industry_tag, category)` — **not** per tenant/location — so federal research runs once nationally and state once per state, and the *second* dental office in a city makes **zero** Gemini calls. `empty` (researched, genuinely nothing) is a distinct status from `failed` (retry) — the coverage check it replaces (`skip_existing`, "are there rows already") structurally cannot express that, so empty cells were re-researched forever. `backfill_ledger` reconciles the ledger against catalog rows that already exist **before** anything is researched; without it a cold ledger over a seeded vertical (`healthcare` = 17 categories, 300+ rows) re-researches the whole thing on the next tenant's onboarding.
   - **A cell is a CHAIN NODE × category, and it owns exactly one level.** Cells come from `expand_to_chains` (federal → state → county → city), never from the tenant's leaf: keyed on the leaf, federal law is re-researched once per city and a California row Los Angeles paid for is unreadable by San Francisco (the chain walk only finds rows on its own ancestors). Two invariants keep that honest: each cell keeps only rows stamped with **its own** level (`only_levels`) — otherwise the city, county, state and federal passes each volunteer California's amalgam rule, all four land on the California node, and the model titles it differently every time, so no deterministic dedupe can collapse them — and writes are **routed by stamped level** (`route_by_level=True`, `_upsert_requirements_routed_additive`), because researching a city hands back federal and state obligations and filing them on the city is exactly the misparenting `jparent01` exists to undo. The routed helper has **no delete pass**: the sibling `_upsert_jurisdiction_requirements_routed` deletes leaf city rows the run didn't re-emit, which for a one-industry pass would delete every *other* industry's city rows.
   - **Three invariants, each a bug that shipped silently:** (1) **the category vocabulary is the DB, not a constant** — `gemini_compliance` gated categories on the frozen `CATEGORY_KEYS`, so a runtime-discovered category was "invalid", the requested list emptied, and the research call **fell back to `DEFAULT_RESEARCH_CATEGORIES`** — returning wage law that the specialty path then force-tagged `healthcare:dental` (153 rows of it). Now `refresh_dynamic_categories(conn)` unions `compliance_categories` in, and an all-unknown list returns `[]` rather than researching a different subject under the caller's label. (2) **a top-level industry's tag is bare** — `hospitality:hospitality` matches no company (`_get_company_industry_tags` yields `hospitality`), so `_filter_requirements_for_company` would hide every row from the tenant that paid to research it; `industry_tag()` collapses `(x, x)` → `x`. (3) **one obligation, one row** — `requirement_key` is `<category>:<regulation_key>`, so a catch-all category (`dental_practice_act_scope`) returning the whole corpus files each statute twice; the fill names each category's siblings in-prompt and dedupes on `regulation_key` **or** normalized title (the key is model-generated and drifts between runs).
@@ -480,8 +480,8 @@ Quick lookup for frequently-touched code. Saves grepping the same things repeate
 
 ### Billing + Stripe
 
-- Stripe checkout endpoints → `server/app/core/routes/resources.py` (matcha-lite: `POST /resources/checkout/lite` + `/compliance` + `/lite-addon` + `/lite-upgrade`) + `server/app/matcha/routes/billing.py` (matcha-work)
-- Stripe webhook handler → `server/app/core/routes/stripe_webhook.py:stripe_webhook` mounted at `POST /api/webhooks/stripe` (NOT billing.py). Routes on `event_type` + `metadata.type`; `checkout.session.completed` w/ `type='matcha_lite'` flips `enabled_features.incidents=true`; `customer.subscription.deleted` flips it back. Top-level dedupe via `stripe_webhook_events` (fail-closed).
+- Stripe checkout endpoints → `server/app/core/routes/resources/checkout.py` (matcha-lite: `POST /resources/checkout/lite` + `/compliance` + `/lite-addon` + `/lite-upgrade`) + `server/app/matcha/routes/billing.py` (matcha-work)
+- Stripe webhook handler → `server/app/core/routes/billing/stripe_webhook.py:stripe_webhook` mounted at `POST /api/webhooks/stripe` (NOT billing.py). Routes on `event_type` + `metadata.type`; `checkout.session.completed` w/ `type='matcha_lite'` flips `enabled_features.incidents=true`; `customer.subscription.deleted` flips it back. Top-level dedupe via `stripe_webhook_events` (fail-closed).
 - Personal Matcha-work checkout → `server/app/matcha/routes/billing.py:POST /api/checkout/personal`
 - Token packs → `server/app/matcha/routes/billing.py:POST /api/checkout`
 - Lite checkout redirect is **URL-based** — backend returns `checkout_url`, FE does `window.location.href = checkout_url` (`TenantSidebar.tsx`); **no `loadStripe`/publishable key/`redirectToCheckout` anywhere**, so swapping Stripe keys needs no frontend rebuild. Lite pricing = DB table `matcha_lite_pricing` (`services/matcha_lite_pricing.py`, admin-configurable; code fallback `$50/block-of-10`, min 1/max 300).
@@ -510,8 +510,8 @@ Quick lookup for frequently-touched code. Saves grepping the same things repeate
 
 ### Database access
 
-- Connection pool helper → `server/app/database.py:get_connection`
-- Schema bootstrap (reference only — use Alembic for changes) → `server/app/database.py:init_db`
+- Connection pool helper → `server/app/database/pool.py:get_connection` (re-exported as `app.database.get_connection`)
+- Schema bootstrap (reference only — use Alembic for changes) → `server/app/database/bootstrap/__init__.py:init_db`
 - Alembic migrations → `server/alembic/versions/*`
 
 ### Routing assembly
@@ -532,6 +532,7 @@ This repo is configured for Claude Code with subtree docs, hooks, and project sl
 | `server/CLAUDE.md` | `server/**` |
 | `server/app/matcha/routes/CLAUDE.md` | `server/app/matcha/routes/**` — the router-zoo index |
 | `server/app/matcha/routes/ir_incidents/CLAUDE.md` | inside the IR package — captures the 2026-05-16 split |
+| `server/app/core/routes/CLAUDE.md` | `server/app/core/routes/**` — the core router-zoo index, captures the 2026-07-25 split |
 | `client/CLAUDE.md` | `client/**` |
 
 Subtree docs compose with this root file. When working in a subtree, the nearer doc has the specific conventions; this root has the cross-cutting product/database/test-data rules.

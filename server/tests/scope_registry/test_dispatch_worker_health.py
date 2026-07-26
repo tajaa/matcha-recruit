@@ -9,7 +9,7 @@ broken. (Whether a worker is running is environment-dependent —
 """
 import pytest
 
-import app.core.routes.scope_registry as sr
+import app.core.routes.admin_tools.scope_registry as sr
 
 
 @pytest.mark.asyncio

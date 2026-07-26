@@ -33,7 +33,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 # Employment-relations categories worth pulling for an ER matter. Every slug here
-# is a REAL catalog category key (`compliance_registry.py:CATEGORY_KEYS`) — an
+# is a REAL catalog category key (`compliance_registry/:CATEGORY_KEYS`) — an
 # invented slug (e.g. "termination", "retaliation", "harassment_prevention") is a
 # regulation key or nothing at all and would silently match zero rows while
 # hiding the real ones. Kept small to protect the prompt budget; filtered in SQL.
