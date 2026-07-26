@@ -4,7 +4,7 @@
 Usage:
     python3 scripts/generate_compliance_ts.py
 
-Reads the canonical compliance registry (server/app/core/compliance_registry.py)
+Reads the canonical compliance registry (server/app/core/compliance_registry/)
 and emits a TypeScript file so the frontend stays in sync without manual edits.
 """
 
@@ -41,7 +41,7 @@ try:
 except ImportError as exc:
     print(
         f"ERROR: Could not import from app.core.compliance_registry.\n"
-        f"  Make sure server/app/core/compliance_registry.py exists and is valid.\n"
+        f"  Make sure server/app/core/compliance_registry/ exists and is valid.\n"
         f"  Import error: {exc}",
         file=sys.stderr,
     )
