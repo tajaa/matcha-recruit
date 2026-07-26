@@ -15,7 +15,7 @@ import pytest
 from fastapi import HTTPException
 
 # ── Stub heavyweight optional deps before importing app code — importing
-# app.core.routes.matcha_lite_pricing_admin pulls in app.core.routes.__init__,
+# app.core.routes.billing.matcha_lite_pricing_admin pulls in app.core.routes.__init__,
 # which imports every other router (incl. Gemini-backed ones). ──
 for _name in ("bleach",
               "audioop_lts", "audioop", "stripe"):
@@ -27,13 +27,13 @@ _bleach = sys.modules["bleach"]
 _bleach.clean = lambda text, **kw: text
 _bleach.linkify = lambda text, **kw: text
 
-from app.core.routes.matcha_lite_pricing_admin import (  # noqa: E402
+from app.core.routes.billing.matcha_lite_pricing_admin import (  # noqa: E402
     MatchaLitePricingUpdate,
     get_matcha_lite_pricing_admin,
     update_matcha_lite_pricing,
 )
 
-MOD = "app.core.routes.matcha_lite_pricing_admin"
+MOD = "app.core.routes.billing.matcha_lite_pricing_admin"
 
 
 def _conn_ctx(conn):

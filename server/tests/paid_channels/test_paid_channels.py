@@ -802,10 +802,10 @@ class TestWebhookDedupeRelease:
 
     @pytest.mark.asyncio
     async def test_release_event_deletes_row(self):
-        from app.core.routes.stripe_webhook import _release_event
+        from app.core.routes.billing.stripe_webhook import _release_event
         mock_conn = AsyncMock()
         mock_conn.execute = AsyncMock()
-        with patch("app.core.routes.stripe_webhook.get_connection") as mock_gc:
+        with patch("app.core.routes.billing.stripe_webhook.get_connection") as mock_gc:
             mock_gc.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
             mock_gc.return_value.__aexit__ = AsyncMock(return_value=False)
             await _release_event("evt_test_123")
@@ -816,17 +816,17 @@ class TestWebhookDedupeRelease:
 
     @pytest.mark.asyncio
     async def test_release_event_with_empty_id_is_noop(self):
-        from app.core.routes.stripe_webhook import _release_event
+        from app.core.routes.billing.stripe_webhook import _release_event
         # Should not raise, should not connect
-        with patch("app.core.routes.stripe_webhook.get_connection") as mock_gc:
+        with patch("app.core.routes.billing.stripe_webhook.get_connection") as mock_gc:
             await _release_event("")
             mock_gc.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_release_swallows_db_errors(self):
         """If the dedupe table itself is broken, release shouldn't blow up."""
-        from app.core.routes.stripe_webhook import _release_event
-        with patch("app.core.routes.stripe_webhook.get_connection") as mock_gc:
+        from app.core.routes.billing.stripe_webhook import _release_event
+        with patch("app.core.routes.billing.stripe_webhook.get_connection") as mock_gc:
             mock_gc.return_value.__aenter__ = AsyncMock(side_effect=RuntimeError("db down"))
             # Should log warning but not propagate
             await _release_event("evt_db_broken")
@@ -836,7 +836,7 @@ class TestWebhookDedupeRelease:
         """End-to-end: handler raises → outer wrapper releases the dedupe
         row → exception propagates to FastAPI (which returns 500 → Stripe
         retries). Without this glue, paid customers stay stranded."""
-        from app.core.routes import stripe_webhook as wh
+        from app.core.routes.billing import stripe_webhook as wh
 
         # Fake event from verify_webhook
         class _Data:
@@ -863,7 +863,7 @@ class TestWebhookDedupeRelease:
 
     def test_extract_period_end_new_api_items_schema(self):
         """Stripe API ≥ 2025-04-30 puts current_period_end on items[0]."""
-        from app.core.routes.stripe_webhook import _extract_current_period_end
+        from app.core.routes.billing.stripe_webhook import _extract_current_period_end
         sub = {
             "id": "sub_x", "object": "subscription",
             "items": {"data": [{"current_period_end": 1780000000}]},
@@ -872,7 +872,7 @@ class TestWebhookDedupeRelease:
 
     def test_extract_period_end_legacy_top_level(self):
         """Stripe API ≤ 2024-04-10 keeps it on the Subscription object."""
-        from app.core.routes.stripe_webhook import _extract_current_period_end
+        from app.core.routes.billing.stripe_webhook import _extract_current_period_end
         sub = {
             "id": "sub_y", "object": "subscription",
             "current_period_end": 1779999999,
@@ -883,7 +883,7 @@ class TestWebhookDedupeRelease:
     def test_extract_period_end_stripe_object_via_to_dict(self):
         """Live Stripe SDK object — the one from Subscription.retrieve —
         no longer exposes dict.get on items, so we go through to_dict()."""
-        from app.core.routes.stripe_webhook import _extract_current_period_end
+        from app.core.routes.billing.stripe_webhook import _extract_current_period_end
         fake_sub = MagicMock()
         fake_sub.to_dict = lambda: {
             "id": "sub_live",
@@ -892,7 +892,7 @@ class TestWebhookDedupeRelease:
         assert _extract_current_period_end(fake_sub) == 1780100000
 
     def test_extract_period_end_missing_raises(self):
-        from app.core.routes.stripe_webhook import _extract_current_period_end
+        from app.core.routes.billing.stripe_webhook import _extract_current_period_end
         sub = {"id": "sub_broken", "items": {"data": [{}]}}
         with pytest.raises(ValueError, match="Cannot extract"):
             _extract_current_period_end(sub)
@@ -901,7 +901,7 @@ class TestWebhookDedupeRelease:
     async def test_wrapper_does_not_release_on_duplicate(self):
         """Duplicate event short-circuits before _route_event runs;
         no spurious release call should happen."""
-        from app.core.routes import stripe_webhook as wh
+        from app.core.routes.billing import stripe_webhook as wh
 
         class _Data:
             object = MagicMock(to_dict=lambda: {})
@@ -1398,7 +1398,7 @@ class TestTipHandlerSuccessPath:
 
     @pytest.mark.asyncio
     async def test_tip_logs_events_and_notifies(self):
-        from app.core.routes import stripe_webhook as wh
+        from app.core.routes.billing import stripe_webhook as wh
 
         mock_conn = AsyncMock()
         # fetchval returns: company_id (notification), channel_name, sender_name

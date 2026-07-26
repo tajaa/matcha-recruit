@@ -21,7 +21,7 @@ sys.modules.setdefault("google", google_module)
 sys.modules.setdefault("google.genai", genai_module)
 sys.modules.setdefault("google.genai.types", types_module)
 
-from app.core.routes.handbook_gap_analyzer import _build_audit_report_html
+from app.core.routes.documents.handbook_gap_analyzer import _build_audit_report_html
 
 
 def _report():

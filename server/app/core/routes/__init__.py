@@ -4,46 +4,63 @@ from fastapi import APIRouter, Depends
 
 from .auth import router as auth_router
 from .admin import router as admin_router
-from .admin_onboarding import router as admin_onboarding_router
-from .admin_compliance_pilot import router as compliance_pilot_router
-from .blog import router as blog_router
-from .policies import router as policies_router
-from .handbooks import router as handbooks_router
-from .handbooks import public_router as handbooks_public_router
-from .public_signatures import router as public_signatures_router
-from .public_employee_documents import router as public_employee_documents_router
+from .admin_tools import (
+    admin_onboarding_router,
+    compliance_pilot_router,
+    scope_registry_router,
+    legislative_tracker_router,
+    ai_usage_admin_router,
+    bulk_import_router,
+    leads_agent_router,
+)
+from .content import (
+    blog_router,
+    hr_news_router,
+    hr_news_public_router,
+    newsletter_public_router,
+    newsletter_admin_router,
+    landing_media_public_router,
+    landing_media_admin_router,
+    sitemap_router,
+    expert_advice_router,
+    posters_router,
+    contact_router,
+)
+from .documents import (
+    handbooks_router,
+    handbooks_public_router,
+    policies_router,
+    handbook_gap_analyzer_router,
+    admin_handbook_references_router,
+    public_signatures_router,
+    public_employee_documents_router,
+    credential_templates_router,
+)
 from .compliance import (
     router as compliance_router,
     lite_router as compliance_lite_router,
     shared_router as compliance_shared_router,
 )
-from .bulk_import import router as bulk_import_router
 from .chat import router as chat_router, ws_router as chat_ws_router
-from .contact import router as contact_router
-from .leads_agent import router as leads_agent_router
-from .posters import router as posters_router
-from .hr_news import router as hr_news_router, public_router as hr_news_public_router
-from .admin_handbook_references import router as admin_handbook_references_router
-from .legislative_tracker import router as legislative_tracker_router
-from .scope_registry import router as scope_registry_router
-from .investigation_invite import router as investigation_invite_router
-from .candidate_invite import router as candidate_invite_router
-from .sso import router as sso_router
-from .credential_templates import router as credential_templates_router
-from .push import router as push_router
-from .profile_resume import router as profile_resume_router
-from .newsletter import public_router as newsletter_public_router, admin_router as newsletter_admin_router
-from .client_errors import router as client_errors_router
-from .server_errors import router as server_errors_router
-from .ai_usage_admin import router as ai_usage_admin_router
-from .traffic import router as traffic_router
-from .usage import router as usage_router
-from .landing_media import public_router as landing_media_public_router, admin_router as landing_media_admin_router
+from .identity import (
+    sso_router,
+    profile_resume_router,
+    push_router,
+    candidate_invite_router,
+    investigation_invite_router,
+)
+from .telemetry import (
+    client_errors_router,
+    server_errors_router,
+    traffic_router,
+    usage_router,
+)
 from .resources import router as resources_router
-from .matcha_lite_pricing_admin import router as matcha_lite_pricing_admin_router
-from .handbook_gap_analyzer import router as handbook_gap_analyzer_router
-from .expert_advice import router as expert_advice_router
-from .products import router as products_public_router
+from .billing import (
+    stripe_webhook_router,
+    matcha_lite_pricing_admin_router,
+    products_public_router,
+)
 from ...matcha.dependencies import require_feature, require_any_feature
 from ..feature_flags import COMPLIANCE_READ_FEATURES, COMPLIANCE_SHARED_FEATURES
 
@@ -125,28 +142,4 @@ core_router.include_router(ai_usage_admin_router, tags=["ai-usage"])
 core_router.include_router(traffic_router, tags=["traffic"])
 core_router.include_router(usage_router, tags=["usage"])
 
-# Export individual routers for backwards compatibility
-__all__ = [
-    "core_router",
-    "auth_router",
-    "admin_router",
-    "blog_router",
-    "policies_router",
-    "handbooks_router",
-    "public_signatures_router",
-    "public_employee_documents_router",
-    "compliance_router",
-    "bulk_import_router",
-    "chat_router",
-    "chat_ws_router",
-    "contact_router",
-    "leads_agent_router",
-    "posters_router",
-    "hr_news_router",
-    "legislative_tracker_router",
-    "scope_registry_router",
-    "sso_router",
-    "credential_templates_router",
-    "push_router",
-    "profile_resume_router",
-]
+__all__ = ["core_router", "chat_ws_router"]

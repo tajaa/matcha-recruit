@@ -19,12 +19,12 @@ Sidebar dispatch in `client/src/components/sidebars/TenantSidebar.tsx`. Tier-che
 ### Free — resources hub
 - Marketing/upgrade landing for self-serve signups. No paid features.
 - All `enabled_features` off; gated by `<RequireBusinessAccount>` (`client/src/components/`).
-- Backend: `server/app/core/routes/resources.py`. Public landing pages + business-gated tools (templates, state guides, calculators, audit, glossary, job descriptions).
+- Backend: `server/app/core/routes/resources/`. Public landing pages + business-gated tools (templates, state guides, calculators, audit, glossary, job descriptions).
 - Free→paid path: `<UpgradeUpsellCard>` ("Talk to sales") posts to `/api/resources/upgrade/inquiry`.
 
 ### Matcha-lite — paid IR + HR records (entry tier)
 - Stripe-purchasable, headcount-based (max 300 employees).
-- Checkout: `POST /resources/checkout/lite` (`server/app/core/routes/resources.py`). Stripe webhook `checkout.session.completed` flips `enabled_features.incidents=true` — until then `MatchaLitePendingSidebar` shows the Subscribe CTA.
+- Checkout: `POST /resources/checkout/lite` (`server/app/core/routes/resources/checkout.py`). Stripe webhook `checkout.session.completed` flips `enabled_features.incidents=true` — until then `MatchaLitePendingSidebar` shows the Subscribe CTA.
 - Once paid: `incidents` + `employees` + `handbooks` (handbook **generation**) on; `IrSidebar` exposes incidents, risk insights, OSHA, handbooks, employees, company. **No** handbook audit, training, discipline, or credentialing — those moved up to **Matcha-X** (the `matcha_lite` tier overlay force-asserts `training`/`discipline` off). See the tier-bundle note under Feature Flags.
 - Backend routers: `ir_incidents_router` (`/ir/incidents/*`), `ir_onboarding_router` (`/ir-onboarding/*`) in `server/app/matcha/routes/__init__.py`.
 - Onboarding: `client/src/components/ir/onboarding/IrOnboardingWizard.tsx`; completion stamps `companies.ir_onboarding_completed_at`.
@@ -33,7 +33,7 @@ Sidebar dispatch in `client/src/components/sidebars/TenantSidebar.tsx`. Tier-che
 ### Matcha Compliance — standalone self-serve compliance product
 - Self-serve, Stripe-purchasable product that grants the **full** `compliance` feature and nothing else. Modeled on Matcha-lite/Matcha-X: signup page → pending sidebar → Stripe checkout → webhook flips a flag → active sidebar.
 - Signup: `pages/auth/ComplianceSignup.tsx` at `/compliance/signup` (`tier='matcha_compliance'`, `signup_source='matcha_compliance'`); collects headcount **+ jurisdiction count**.
-- Checkout: `POST /resources/checkout/compliance` (`server/app/core/routes/resources.py`). Pricing = headcount component + per-jurisdiction surcharge (`matcha_compliance_price_cents`, `stripe_service.py` — placeholder, see TODO). Stripe webhook `checkout.session.completed` (`type='matcha_compliance'`) flips `enabled_features.compliance=true`; until then `CompliancePendingSidebar` shows the Subscribe CTA.
+- Checkout: `POST /resources/checkout/compliance` (`server/app/core/routes/resources/checkout.py`). Pricing = headcount component + per-jurisdiction surcharge (`matcha_compliance_price_cents`, `stripe_service.py` — placeholder, see TODO). Stripe webhook `checkout.session.completed` (`type='matcha_compliance'`) flips `enabled_features.compliance=true`; until then `CompliancePendingSidebar` shows the Subscribe CTA.
 - Once paid: `ComplianceSidebar` (Compliance, Compliance Calendar, Company, Compliance Setup); `/app/compliance` renders the full `ComplianceFull` view (not the lite taste — `compliance` is true).
 - Onboarding **reuses** `MatchaXOnboardingWizard` at `/compliance/onboarding` (locations → policies → people → build).
 - Jurisdiction count persists in `company_handbook_profiles.compliance_jurisdiction_count` (migration `compljuris01`); surfaced on `/auth/me` as `profile.jurisdiction_count`.
@@ -479,8 +479,8 @@ Quick lookup for frequently-touched code. Saves grepping the same things repeate
 
 ### Billing + Stripe
 
-- Stripe checkout endpoints → `server/app/core/routes/resources.py` (matcha-lite: `POST /resources/checkout/lite` + `/compliance` + `/lite-addon` + `/lite-upgrade`) + `server/app/matcha/routes/billing.py` (matcha-work)
-- Stripe webhook handler → `server/app/core/routes/stripe_webhook.py:stripe_webhook` mounted at `POST /api/webhooks/stripe` (NOT billing.py). Routes on `event_type` + `metadata.type`; `checkout.session.completed` w/ `type='matcha_lite'` flips `enabled_features.incidents=true`; `customer.subscription.deleted` flips it back. Top-level dedupe via `stripe_webhook_events` (fail-closed).
+- Stripe checkout endpoints → `server/app/core/routes/resources/checkout.py` (matcha-lite: `POST /resources/checkout/lite` + `/compliance` + `/lite-addon` + `/lite-upgrade`) + `server/app/matcha/routes/billing.py` (matcha-work)
+- Stripe webhook handler → `server/app/core/routes/billing/stripe_webhook.py:stripe_webhook` mounted at `POST /api/webhooks/stripe` (NOT billing.py). Routes on `event_type` + `metadata.type`; `checkout.session.completed` w/ `type='matcha_lite'` flips `enabled_features.incidents=true`; `customer.subscription.deleted` flips it back. Top-level dedupe via `stripe_webhook_events` (fail-closed).
 - Personal Matcha-work checkout → `server/app/matcha/routes/billing.py:POST /api/checkout/personal`
 - Token packs → `server/app/matcha/routes/billing.py:POST /api/checkout`
 - Lite checkout redirect is **URL-based** — backend returns `checkout_url`, FE does `window.location.href = checkout_url` (`TenantSidebar.tsx`); **no `loadStripe`/publishable key/`redirectToCheckout` anywhere**, so swapping Stripe keys needs no frontend rebuild. Lite pricing = DB table `matcha_lite_pricing` (`services/matcha_lite_pricing.py`, admin-configurable; code fallback `$50/block-of-10`, min 1/max 300).
@@ -531,6 +531,7 @@ This repo is configured for Claude Code with subtree docs, hooks, and project sl
 | `server/CLAUDE.md` | `server/**` |
 | `server/app/matcha/routes/CLAUDE.md` | `server/app/matcha/routes/**` — the router-zoo index |
 | `server/app/matcha/routes/ir_incidents/CLAUDE.md` | inside the IR package — captures the 2026-05-16 split |
+| `server/app/core/routes/CLAUDE.md` | `server/app/core/routes/**` — the core router-zoo index, captures the 2026-07-25 split |
 | `client/CLAUDE.md` | `client/**` |
 
 Subtree docs compose with this root file. When working in a subtree, the nearer doc has the specific conventions; this root has the cross-cutting product/database/test-data rules.
