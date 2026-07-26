@@ -1,0 +1,448 @@
+import SwiftUI
+
+/// The Channels section inside the app sidebar.
+///
+/// Sibling surfaces that used to share this file:
+///   • CreateChannelSheet.swift    — the create-channel modal
+///   • ChannelsLibraryView.swift   — the full-pane Channels hub
+struct ChannelsSidebarView: View {
+    @Environment(AppState.self) private var appState
+    @Environment(\.openWindow) private var openWindow
+    var showHeader: Bool = true
+    var searchText: String = ""
+    /// When false, the section is collapsed in the sidebar: only **starred**
+    /// channels render (a pinned strip), and the "Show N more" pager is hidden.
+    /// Non-starred channels are revealed only when the user expands the header.
+    var expanded: Bool = true
+    @State private var channels: [ChannelSummary] = []
+    @State private var isLoading = true
+    @State private var showCreate = false
+    @State private var showDiscover = false
+    @State private var errorMessage: String?
+    @State private var channelPendingDelete: ChannelSummary?
+    @State private var channelPendingLeave: ChannelSummary?
+    @State private var isDeleting = false
+    @State private var visibleCount = 3
+    private let pageSize = 3
+    @State private var isLeaving = false
+    @AppStorage("channel-admin-wizard-shown-v1") private var hasSeenWizard = false
+
+    var body: some View {
+        content
+            .background(Color.clear)
+            .task { await load() }
+            .onReceive(NotificationCenter.default.publisher(for: .mwChannelCreated)) { note in
+                // Selection-only side effect. The reload is driven by the
+                // `channelsListGeneration` bump that fires alongside this
+                // notification — duplicating it here caused two concurrent
+                // GET /channels calls on every channel create.
+                if let newId = note.object as? String {
+                    appState.selectedChannelId = newId
+                    appState.selectedThreadId = nil
+                    appState.selectedProjectId = nil
+                    appState.selectedJournalId = nil
+                }
+            }
+            .onChange(of: appState.channelsListGeneration) { _, _ in
+                Task { await load() }
+            }
+            .sheet(isPresented: $showCreate) {
+                CreateChannelSheet { newChannel in
+                    appState.channelsListGeneration &+= 1
+                    NotificationCenter.default.post(name: .mwChannelCreated, object: newChannel.id)
+                }
+            }
+            .sheet(isPresented: $showDiscover) {
+                DiscoverChannelsSheet { joinedId in
+                    appState.channelsListGeneration &+= 1
+                    appState.selectedChannelId = joinedId
+                    appState.selectedThreadId = nil
+                    appState.selectedProjectId = nil
+                    appState.selectedJournalId = nil
+                }
+            }
+            .confirmationDialog(
+                channelPendingDelete.map { "Delete #\($0.name)?" } ?? "Delete channel?",
+                isPresented: deleteDialogBinding,
+                titleVisibility: .visible,
+                presenting: channelPendingDelete
+            ) { channel in
+                Button("Delete", role: .destructive) {
+                    Task { await delete(channel) }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: { channel in
+                Text(channel.isPaid
+                    ? "This will archive the channel, cancel all active paid subscriptions, and notify members. This cannot be undone."
+                    : "This will archive the channel and notify members. This cannot be undone.")
+            }
+            .confirmationDialog(
+                channelPendingLeave.map { "Leave #\($0.name)?" } ?? "Leave channel?",
+                isPresented: leaveDialogBinding,
+                titleVisibility: .visible,
+                presenting: channelPendingLeave
+            ) { channel in
+                Button("Leave", role: .destructive) {
+                    Task { await leave(channel) }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: { channel in
+                Text(channel.isPaid
+                    ? "You'll stop receiving messages in this channel and your paid subscription will be canceled at the period end."
+                    : "You'll stop receiving messages in this channel. Rejoining later requires a re-invite if it's private.")
+            }
+    }
+
+    private var leaveDialogBinding: Binding<Bool> {
+        Binding(
+            get: { channelPendingLeave != nil },
+            set: { if !$0 { channelPendingLeave = nil } }
+        )
+    }
+
+    private var deleteDialogBinding: Binding<Bool> {
+        Binding(
+            get: { channelPendingDelete != nil },
+            set: { if !$0 { channelPendingDelete = nil } }
+        )
+    }
+
+    // MARK: - Layout
+
+    @ViewBuilder
+    private var content: some View {
+        // Observe the star store so the pinned strip recomputes when a star is
+        // toggled (membership of `displayChannels` depends on it).
+        let _ = ChannelStarStore.shared.generation
+        VStack(spacing: 0) {
+            if showHeader {
+                header
+                Divider().opacity(0.3)
+            }
+            if isLoading {
+                // No "Loading…" placeholder in a collapsed pinned strip.
+                if expanded { loadingView }
+            } else if displayChannels.isEmpty {
+                // Collapsed + nothing starred → render nothing (stays collapsed).
+                if expanded { emptyView }
+            } else {
+                channelList
+            }
+        }
+    }
+
+    /// Channels shown right now: everything when expanded, only starred when the
+    /// section is collapsed (the pinned strip).
+    private var displayChannels: [ChannelSummary] {
+        guard !expanded else { return channels }
+        let stars = ChannelStarStore.shared
+        return channels.filter { stars.isStarred($0.id) }
+    }
+
+    private var loadingView: some View {
+        Text("Loading…")
+            .font(.system(size: 11))
+            .foregroundColor(.secondary)
+            .frame(maxWidth: .infinity, alignment: .center)
+            .padding(.vertical, 16)
+    }
+
+    private var emptyView: some View {
+        VStack(spacing: 8) {
+            Text("No channels yet")
+                .font(.system(size: 11))
+                .foregroundColor(.secondary)
+            Button {
+                showCreate = true
+            } label: {
+                Text("Create one")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(appState.themeAccent)
+            }
+            .buttonStyle(.plain)
+        }
+        .frame(maxWidth: .infinity, alignment: .center)
+        .padding(.vertical, 16)
+    }
+
+    private var channelList: some View {
+        let filtered = displayChannels.filter {
+            searchText.isEmpty || $0.name.localizedCaseInsensitiveContains(searchText)
+        }
+        // Collapsed strip shows every starred channel (few); pager only paginates
+        // the full expanded list.
+        let paginate = expanded && searchText.isEmpty
+        let limit = paginate ? visibleCount : filtered.count
+        return LazyVStack(spacing: 0) {
+            ForEach(filtered.prefix(limit), id: \.id) { channel in
+                row(for: channel)
+            }
+            if paginate && filtered.count > visibleCount {
+                SidebarShowMoreButton(remaining: filtered.count - visibleCount, pageSize: pageSize) {
+                    visibleCount += pageSize
+                }
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private var header: some View {
+        HStack(spacing: 6) {
+            Text("Channels")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(.secondary)
+            Spacer()
+            Button {
+                showDiscover = true
+            } label: {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.secondary)
+                    .frame(width: 24, height: 24)
+                    .background(Color.zinc800)
+                    .cornerRadius(6)
+            }
+            .buttonStyle(.plain)
+            .help("Discover public channels")
+            Button {
+                showCreate = true
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.secondary)
+                    .frame(width: 24, height: 24)
+                    .background(Color.zinc800)
+                    .cornerRadius(6)
+            }
+            .buttonStyle(.plain)
+            .help("Create a channel")
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+    }
+
+    // MARK: - Row
+
+    private func row(for channel: ChannelSummary) -> some View {
+        let selected = appState.selectedChannelId == channel.id
+        let unread = channel.unreadCount + (appState.channelUnreadOverrides[channel.id] ?? 0)
+        // Observe ChannelStarStore.generation so the row redraws when the
+        // user toggles a star elsewhere (context menu, etc).
+        _ = ChannelStarStore.shared.generation
+        let isStarred = ChannelStarStore.shared.isStarred(channel.id)
+        return Button {
+            select(channel)
+        } label: {
+            HStack(alignment: .center, spacing: 8) {
+                Image(systemName: isStarred ? "star.fill" : "number")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(isStarred ? .yellow : (selected ? appState.themeAccent : appState.themeTextSecondary))
+                    .frame(width: 14)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(channel.name)
+                            .font(.system(size: 13, weight: selected ? .bold : (unread > 0 ? .semibold : .regular)))
+                            .foregroundColor(selected ? appState.themeText : appState.themeText.opacity(0.9))
+                            .lineLimit(1)
+                        if channel.projectId != nil {
+                            Text("collab")
+                                .font(.system(size: 8, weight: .semibold))
+                                .foregroundColor(appState.themeAccent)
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 1)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 3)
+                                        .fill(appState.themeAccent.opacity(0.15))
+                                )
+                        }
+                        Spacer(minLength: 4)
+                        if unread > 0 {
+                            Text(unread > 99 ? "99+" : "\(unread)")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 2)
+                                .background(Capsule().fill(appState.themeAccent))
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .sidebarRowStyle(isSelected: selected)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .contextMenu { rowContextMenu(channel, isStarred: isStarred) }
+    }
+
+    @ViewBuilder
+    private func rowContextMenu(_ channel: ChannelSummary, isStarred: Bool) -> some View {
+        Button {
+            openWindow(id: "aux", value: AuxWindowTarget.channel(channel.id))
+        } label: {
+            Label("Open in new window", systemImage: "macwindow.on.rectangle")
+        }
+        Button {
+            appState.splitTarget = .channel(channel.id)
+        } label: {
+            Label("Open in split", systemImage: "rectangle.split.2x1")
+        }
+        Button {
+            appState.bottomSplitTarget = .channel(channel.id)
+        } label: {
+            Label("Open in bottom split", systemImage: "rectangle.split.1x2")
+        }
+        Divider()
+        // Jump to the linked collab project even when it isn't starred —
+        // the project loads via getProjectDetail regardless of pinning.
+        // Mirrors the project-open in ContentView.starredProjectRow.
+        if let pid = channel.projectId {
+            Button {
+                appState.selectedProjectId = pid
+                appState.selectedThreadId = nil
+                appState.selectedJournalId = nil
+                appState.selectedChannelId = nil
+                appState.showInbox = false
+                appState.showSkills = false
+            } label: {
+                Label("Open collab workspace", systemImage: "square.grid.2x2")
+            }
+            Divider()
+        }
+        // Star toggle — drives macOS push notifications + sort. Per-user
+        // local state so it can't be shared across devices in v1.
+        Button {
+            ChannelStarStore.shared.toggle(channel.id)
+            Task { await load() }   // re-sort starred-first immediately
+        } label: {
+            Label(
+                isStarred ? "Unstar channel" : "Star channel",
+                systemImage: isStarred ? "star.slash" : "star",
+            )
+        }
+        let role = channel.myRole ?? ""
+        let isAdmin = (appState.currentUser?.role ?? "") == "admin"
+        // Members (and owners after they transfer) can leave. Owners
+        // see Delete instead — leaving while owning the channel is
+        // rejected server-side anyway.
+        if !role.isEmpty && role != "owner" {
+            Divider()
+            Button(role: .destructive) {
+                channelPendingLeave = channel
+            } label: {
+                Label("Leave channel", systemImage: "arrow.right.square")
+            }
+        }
+        if role == "owner" || isAdmin {
+            Divider()
+            Button(role: .destructive) {
+                channelPendingDelete = channel
+            } label: {
+                Label("Delete channel", systemImage: "trash")
+            }
+        }
+    }
+
+    // MARK: - Actions
+
+    private func select(_ channel: ChannelSummary) {
+        appState.selectedChannelId = channel.id
+        appState.showChannelBrowse = false
+        appState.clearChannelUnread(channel.id)
+        // Zero the API-sourced count locally so the badge stays cleared
+        // after the user clicks elsewhere. Backend marks last_read_at on
+        // getChannel; next listChannels() refetch returns 0 too.
+        if let idx = channels.firstIndex(where: { $0.id == channel.id }) {
+            channels[idx].unreadCount = 0
+        }
+        appState.selectedThreadId = nil
+        appState.selectedProjectId = nil
+        appState.selectedJournalId = nil
+        appState.showInbox = false
+        appState.showSkills = false
+    }
+
+    private func leave(_ channel: ChannelSummary) async {
+        isLeaving = true
+        defer { isLeaving = false }
+        do {
+            try await ChannelsService.shared.leaveChannel(id: channel.id)
+            if appState.selectedChannelId == channel.id {
+                appState.selectedChannelId = nil
+            }
+            appState.channelsListGeneration &+= 1
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func delete(_ channel: ChannelSummary) async {
+        isDeleting = true
+        defer { isDeleting = false }
+        do {
+            try await ChannelsService.shared.deleteChannel(id: channel.id)
+            if appState.selectedChannelId == channel.id {
+                appState.selectedChannelId = nil
+            }
+            // Bumping the generation counter triggers `.onChange` -> load().
+            // Don't call load() inline here too; it would fire a duplicate GET.
+            appState.channelsListGeneration &+= 1
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func isRecentlyActive(_ dateString: String?, days: Int = 7) -> Bool {
+        guard let ds = dateString, let date = parseMWDate(ds) else { return true }
+        return Date().timeIntervalSince(date) < Double(days) * 86_400
+    }
+
+    private func load() async {
+        do {
+            let list = try await ChannelsService.shared.listChannels()
+            // Starred channels float to the top, then by last activity
+            // (`sortedStarredFirst`, shared with the hub rail + cards).
+            // Star state is per-user UserDefaults — bound at login by AppState.
+            // Channels with no activity in 7+ days are hidden (starred bypass this).
+            let stars = ChannelStarStore.shared
+            channels = list
+                .filter { ch in stars.isStarred(ch.id) || isRecentlyActive(ch.lastMessageAt) }
+                .sortedStarredFirst()
+            // Subscribe to all member channels so background messages arrive.
+            ChannelsWebSocket.shared.joinBackgroundRooms(list.map { (id: $0.id, name: $0.name) })
+            // API returned fresh unread counts — local overrides are now stale.
+            appState.channelUnreadOverrides = [:]
+            // Mirror server unread into AppState so channel *tabs* can badge
+            // without the sidebar's local list in scope.
+            appState.channelUnreadCounts = Dictionary(
+                list.map { ($0.id, $0.unreadCount) }, uniquingKeysWith: { a, _ in a }
+            )
+            isLoading = false
+            maybeAutoShowAdminWizard(list)
+        } catch {
+            errorMessage = error.localizedDescription
+            isLoading = false
+        }
+    }
+
+    /// Show the channel admin wizard once on first launch for likely admins:
+    /// personal/individual users (creator track) OR users who already own a
+    /// channel. Single-shot — `hasSeenWizard` flips true after the user
+    /// closes the wizard.
+    private func maybeAutoShowAdminWizard(_ list: [ChannelSummary]) {
+        guard !hasSeenWizard else { return }
+        guard !appState.showChannelAdminWizard else { return }
+        let role = appState.currentUser?.role ?? ""
+        let isCreatorTrack = role == "individual" || role == "admin"
+        let ownsChannel = list.contains { ($0.myRole ?? "") == "owner" }
+        guard isCreatorTrack || ownsChannel else { return }
+        appState.channelAdminWizardMode = .create
+        appState.showChannelAdminWizard = true
+    }
+}
+
+extension Notification.Name {
+    static let mwChannelCreated = Notification.Name("mwChannelCreated")
+}
