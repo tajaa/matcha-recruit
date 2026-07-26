@@ -38,7 +38,9 @@ jobs:
           cache-dependency-path: client/package-lock.json
 
       - name: Install frontend deps
-        run: npm ci
+        # --legacy-peer-deps mirrors client/Dockerfile's npm ci: react 19 vs
+        # react-simple-maps@3's react<=18 peer range ERESOLVEs otherwise.
+        run: npm ci --legacy-peer-deps
         working-directory: client
 
       - name: Frontend typecheck
