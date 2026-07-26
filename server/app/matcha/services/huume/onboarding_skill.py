@@ -83,6 +83,7 @@ def build_onboarding_plan(
             "position_title": offer.get("position_title"),
             "start_date": offer.get("start_date").isoformat() if isinstance(offer.get("start_date"), (date, datetime)) else offer.get("start_date"),
             "location": offer.get("location"),
+            "employment_type": offer.get("employment_type"),
         },
         "employee_id": None,
         "steps": steps,
@@ -112,7 +113,26 @@ _TOPIC_REQUIRED_FEATURE: dict[str, str] = {
     "employee": "employees",
     "schedule": "employee_schedule",
     "incidents": "incidents",
+    "pto_leave": "employees",
+    "policies": "handbooks",
+    "discipline": "discipline",
 }
+
+# compliance is gated on either of two flags (Matcha-X's read-only taste or
+# full Compliance) — handled separately from the single-flag dict above.
+_COMPLIANCE_TOPIC_FLAGS = ("compliance", "compliance_lite")
+
+# A leave that has already started is `active`, not `approved` — filtering on
+# `approved` alone reports "nobody is out" for exactly the people who are out
+# right now. Same pair `hr_proactive_push` and `discipline_compliance`'s
+# PROTECTED_LEAVE_STATUSES use ('completed' is excluded here: this topic is
+# about who is out NOW, not leave history).
+_OPEN_LEAVE_STATUSES = ("approved", "active")
+
+# `dismissed` is a closed alert (the admin looked and decided no action) —
+# counting it as open overstates what's outstanding. `actioned` and
+# `dismissed` are both terminal; `unread`/`read` are the open set.
+_OPEN_ALERT_STATUSES = ("unread", "read")
 
 
 async def _lookup_context_impl(
@@ -126,6 +146,8 @@ async def _lookup_context_impl(
     required = _TOPIC_REQUIRED_FEATURE.get(topic)
     if required and not (features or {}).get(required):
         return {"topic": topic, "module": "off", "note": f"'{required}' isn't enabled for this company."}
+    if topic == "compliance" and not any((features or {}).get(f) for f in _COMPLIANCE_TOPIC_FLAGS):
+        return {"topic": topic, "module": "off", "note": "Compliance isn't enabled for this company."}
     try:
         if topic == "roster":
             rows = await conn.fetch(
@@ -240,6 +262,80 @@ async def _lookup_context_impl(
                 company_id,
             )
             return {"topic": "incidents", "last_90_days_by_type_and_severity": [dict(r) for r in rows]}
+        if topic == "pto_leave":
+            pto_rows = await conn.fetch(
+                """
+                SELECT e.first_name, e.last_name, pr.request_type, pr.start_date, pr.end_date
+                FROM pto_requests pr JOIN employees e ON e.id = pr.employee_id
+                WHERE e.org_id = $1 AND pr.status = 'approved' AND pr.end_date >= CURRENT_DATE
+                ORDER BY pr.start_date LIMIT 10
+                """,
+                company_id,
+            )
+            leave_rows = await conn.fetch(
+                """
+                SELECT e.first_name, e.last_name, lr.leave_type, lr.start_date, lr.expected_return_date
+                FROM leave_requests lr JOIN employees e ON e.id = lr.employee_id
+                WHERE lr.org_id = $1 AND lr.status = ANY($2::text[])
+                  AND (lr.actual_return_date IS NULL) AND (lr.expected_return_date IS NULL OR lr.expected_return_date >= CURRENT_DATE)
+                ORDER BY lr.start_date LIMIT 10
+                """,
+                company_id, list(_OPEN_LEAVE_STATUSES),
+            )
+            return {
+                "topic": "pto_leave",
+                "upcoming_pto": [dict(r) for r in pto_rows],
+                "active_leave": [dict(r) for r in leave_rows],
+            }
+        if topic == "policies":
+            rows = await conn.fetch(
+                """
+                SELECT title, category FROM policies
+                WHERE company_id = $1 AND status = 'active'
+                  AND ($2::text IS NULL OR title ILIKE '%' || $2 || '%')
+                ORDER BY title LIMIT 20
+                """,
+                company_id, query,
+            )
+            return {"topic": "policies", "active_policies": [dict(r) for r in rows]}
+        if topic == "discipline":
+            # Counts + review dates only — never description/outcome_notes,
+            # same rule as the incidents topic: this grounds a status
+            # question, it never surfaces a legal narrative.
+            counts = await conn.fetch(
+                "SELECT status, COUNT(*) FROM progressive_discipline WHERE company_id = $1 GROUP BY status",
+                company_id,
+            )
+            upcoming_reviews = await conn.fetch(
+                """
+                SELECT discipline_type, review_date FROM progressive_discipline
+                WHERE company_id = $1 AND status = 'active' AND review_date IS NOT NULL
+                  AND review_date >= CURRENT_DATE
+                ORDER BY review_date LIMIT 10
+                """,
+                company_id,
+            )
+            return {
+                "topic": "discipline",
+                "counts_by_status": {r["status"]: r["count"] for r in counts},
+                "upcoming_reviews": [dict(r) for r in upcoming_reviews],
+            }
+        if topic == "compliance":
+            rows = await conn.fetch(
+                """
+                SELECT ca.category, COUNT(*) AS count
+                FROM compliance_alerts ca
+                WHERE ca.company_id = $1 AND ca.status = ANY($2::text[])
+                GROUP BY ca.category
+                ORDER BY count DESC
+                """,
+                company_id, list(_OPEN_ALERT_STATUSES),
+            )
+            # Named "alerts", not "requirements": these are the open compliance
+            # ALERTS raised against this company's locations, which is what a
+            # "what's outstanding?" question actually means here — the
+            # jurisdiction requirement catalog itself is a different corpus.
+            return {"topic": "compliance", "open_alerts_by_category": [dict(r) for r in rows]}
         if topic == "offers":
             rows = await conn.fetch(
                 "SELECT id, candidate_name, candidate_email, position_title, status, created_at "
@@ -326,7 +422,19 @@ async def _draft_offer_letter_impl(
             row["id"], thread_id,
         )
 
-    return {"status": "ok", "offer_id": str(row["id"]), "offer": {k: v for k, v in dict(row).items() if k not in ("id",)}}
+    # Whitelisted view, not the whole row — the row also carries company_id,
+    # candidate_token/expiry (NULL pre-send), and other internals the model
+    # has no use for and shouldn't be re-echoing as context.
+    _OFFER_FIELDS = (
+        "candidate_name", "candidate_email", "position_title", "salary",
+        "start_date", "employment_type", "location", "status",
+    )
+    offer_out = dict(row)
+    return {
+        "status": "ok",
+        "offer_id": str(row["id"]),
+        "offer": {k: offer_out.get(k) for k in _OFFER_FIELDS},
+    }
 
 
 async def check_offer_status(*, company_id: UUID, offer_id: str) -> dict[str, Any]:
@@ -477,7 +585,7 @@ async def _step_create_employee(conn, *, company_id, actor_user_id, plan, employ
 
     cols = ["org_id", "email", "first_name", "last_name", "work_state", "employment_type", "start_date"]
     vals = [company_id, email, emp.get("first_name") or "New", emp.get("last_name") or "Hire",
-            work_state, "Full-Time Exempt", start_date]
+            work_state, emp.get("employment_type") or "Full-Time Exempt", start_date]
     if org_available and emp.get("position_title"):
         cols.append("job_title")
         vals.append(emp["position_title"])

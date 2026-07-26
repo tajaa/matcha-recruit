@@ -13,7 +13,7 @@ from datetime import date, datetime, timezone
 from app.matcha.services.pilots.hr_pilot_actions import (
     _parse_iso_dates,
     _slim_compliance_snapshot,
-    _validate_discipline_fields,
+    validate_discipline_fields,
     _validate_pto_fields,
     _derive_er_title,
     filter_model_staged_hr_action,
@@ -335,12 +335,12 @@ def test_pto_fmla_in_reason_hard_stops():
 # --- Pure field validators + snapshot ------------------------------------
 
 def test_validate_discipline_fields_parity():
-    normalized, msg = _validate_discipline_fields(_proposed())
+    normalized, msg = validate_discipline_fields(_proposed())
     assert msg is None
     assert normalized["type"] == "discipline_draft"
     assert normalized["occurrence_dates"] == ["2026-07-10", "2026-07-11"]
 
-    _, missing_msg = _validate_discipline_fields(_proposed(employee_name=""))
+    _, missing_msg = validate_discipline_fields(_proposed(employee_name=""))
     assert missing_msg
 
 

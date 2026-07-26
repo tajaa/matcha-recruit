@@ -27,8 +27,11 @@ def _staged(**overrides):
 
 class TestEvaluateHuumeAction:
     def test_new_stage_is_stage_kind(self):
+        # Real callers always pass a freshly-built staged dict (with `type`
+        # already set) even on the very first stage — action_type now drives
+        # which feature flag gets checked, so it must be resolvable here too.
         v = evaluate_huume_action(
-            staged_action=None, features=FEATURES_ON, role="client",
+            staged_action=_staged(), features=FEATURES_ON, role="client",
             thread_huume_mode=True, this_turn_staged_new=True,
         )
         assert v.kind == "stage"

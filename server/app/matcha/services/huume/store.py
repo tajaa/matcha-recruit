@@ -164,6 +164,17 @@ async def execute_plan_locked(
             await conn.execute("SELECT pg_advisory_unlock(hashtext($1), hashtext($2))", str(thread_id), offer_id)
 
 
+async def get_thread_integrations(company_id: UUID) -> dict[str, bool]:
+    """Just the integrations half of `get_thread_features_and_integrations` —
+    for callers (e.g. the Huume dispatcher) that already have a fresh
+    features dict from elsewhere and would otherwise re-fetch it."""
+    async with get_connection() as conn:
+        integ_rows = await conn.fetch(
+            "SELECT provider FROM integration_connections WHERE company_id = $1", company_id,
+        )
+    return {r["provider"]: True for r in integ_rows}
+
+
 async def get_thread_features_and_integrations(company_id: UUID) -> tuple[dict[str, Any], dict[str, bool]]:
     """Live-reload company features + connected integrations — called at
     every plan-step evaluation/execute so a flag flip or a newly-connected

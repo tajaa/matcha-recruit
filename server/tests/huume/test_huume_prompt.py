@@ -55,6 +55,18 @@ class TestBuildStateBlock:
         assert "portal_invitation=skipped (employees isn't enabled)" in block
         assert "create_employee=done" in block
 
+    def test_staged_discipline_draft_carries_confirm_id(self):
+        state = {
+            "huume_action": {
+                "type": "discipline_draft", "status": "proposed", "confirm_id": "ab12cd34",
+                "employee_name": "Jane Doe", "infraction_type": "attendance",
+            }
+        }
+        block = build_state_block(state)
+        assert "ab12cd34" in block
+        assert "Jane Doe" in block
+        assert "draft_discipline" in block
+
     def test_all_present_but_terminal_is_still_nothing_staged(self):
         state = {
             "huume_action": {"type": "send_offer", "offer_id": "x", "status": "sent"},

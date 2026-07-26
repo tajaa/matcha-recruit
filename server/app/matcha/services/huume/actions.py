@@ -8,7 +8,7 @@ role-gate execution on its own — every guard a normal record write would get
 must be re-asserted here.
 
 Staged things live in `mw_threads.current_state`:
-  - `huume_action` — a single staged action (currently only `send_offer`).
+  - `huume_action` — a single staged action (`send_offer` or `discipline_draft`).
   - `huume_plans`  — onboarding plans staged after an offer is accepted,
     keyed by `offer_id` (a thread can be onboarding several candidates at
     once — each plan is independent).
@@ -67,11 +67,16 @@ _STEP_INTEGRATION_PROVIDER = {
 @dataclass(frozen=True)
 class HuumeVerdict:
     """Result of the pure safety envelope for a staged `huume_action`
-    (currently only `send_offer`). Mirrors HrActionVerdict.
+    (`send_offer` or `discipline_draft`). Mirrors HrActionVerdict — a
+    would-be "clarify" (missing/invalid fields) collapses into "refuse"
+    here since Huume's callers already treat `not verdict.ok` uniformly as
+    a refusal message relayed to the model; a distinct kind would be
+    unused.
 
     kind: "proceed" — cleared for the executor (see `action`).
           "stage"   — staged this turn; tell the admin to confirm.
-          "refuse"  — a guard blocked it.
+          "refuse"  — a guard blocked it (includes field-validation and
+                      hard-stop failures on the confirm turn).
     """
     kind: str
     message: str
@@ -80,6 +85,14 @@ class HuumeVerdict:
     @property
     def ok(self) -> bool:
         return self.kind == "proceed"
+
+
+# Feature flag each staged huume_action type requires beyond `huume` +
+# `matcha_work` + role. Mirrors PILOT_TOOL_REQUIRED_FEATURE/STEP_REQUIRED_FEATURE.
+_HUUME_ACTION_REQUIRED_FEATURE: dict[str, str] = {
+    "send_offer": "offer_letters",
+    "discipline_draft": "discipline",
+}
 
 
 def evaluate_huume_action(
@@ -91,22 +104,19 @@ def evaluate_huume_action(
     this_turn_staged_new: bool,
 ) -> HuumeVerdict:
     """Pure, DB-free safety envelope for executing a staged `huume_action`
-    (e.g. send_offer). Order: confirm-first → something staged → authz."""
+    (`send_offer` or `discipline_draft`). Order: authz → confirm-first →
+    something staged → per-type validation.
+
+    Authz runs BEFORE the confirm-first stage branch — a caller who will
+    ultimately fail the role/flag gate is refused immediately, not told
+    "reply confirm" and only refused on the later confirm turn."""
     features = features or {}
 
-    if this_turn_staged_new:
-        return HuumeVerdict(
-            kind="stage",
-            message="I've drafted this for your review above. Reply \"confirm\" (or tell me what to change) and I'll do it.",
-        )
     if not isinstance(staged_action, dict):
         return HuumeVerdict(kind="refuse", message="There's nothing staged to confirm yet.")
-
-    if staged_action.get("status") != "proposed":
-        return HuumeVerdict(kind="refuse", message="That action isn't awaiting confirmation (it may already be done).")
-
     action_type = str(staged_action.get("type") or "").strip()
-    if action_type not in {"send_offer"}:
+    required_feature = _HUUME_ACTION_REQUIRED_FEATURE.get(action_type)
+    if required_feature is None:
         return HuumeVerdict(kind="refuse", message="That action type isn't something I can execute.")
 
     if not thread_huume_mode:
@@ -115,16 +125,53 @@ def evaluate_huume_action(
         return HuumeVerdict(kind="refuse", message="Huume isn't enabled for this company.")
     if not features.get("matcha_work"):
         return HuumeVerdict(kind="refuse", message="Matcha Work isn't enabled for this company.")
-    if not features.get("offer_letters"):
-        return HuumeVerdict(kind="refuse", message="Offer letters aren't enabled for this company.")
+    if not features.get(required_feature):
+        return HuumeVerdict(
+            kind="refuse",
+            message=f"This action needs the {required_feature} feature, which isn't enabled for this company.",
+        )
     if (role or "").strip().lower() not in _ALLOWED_ROLES:
-        return HuumeVerdict(kind="refuse", message="Only a business admin can send an offer.")
+        return HuumeVerdict(kind="refuse", message="Only a business admin can do this.")
 
-    offer_id = staged_action.get("offer_id")
-    if not offer_id:
-        return HuumeVerdict(kind="refuse", message="There's no offer to send.")
+    if this_turn_staged_new:
+        return HuumeVerdict(
+            kind="stage",
+            message="I've drafted this for your review above. Reply \"confirm\" (or tell me what to change) and I'll do it.",
+        )
 
-    return HuumeVerdict(kind="proceed", message="", action=dict(staged_action))
+    if staged_action.get("status") != "proposed":
+        return HuumeVerdict(kind="refuse", message="That action isn't awaiting confirmation (it may already be done).")
+
+    if action_type == "send_offer":
+        offer_id = staged_action.get("offer_id")
+        if not offer_id:
+            return HuumeVerdict(kind="refuse", message="There's no offer to send.")
+        return HuumeVerdict(kind="proceed", message="", action=dict(staged_action))
+
+    if action_type == "discipline_draft":
+        # Field validation + the hard-stop re-check only run on the CONFIRM
+        # turn (mirrors hr_pilot_actions.evaluate_hr_action, which validates
+        # discipline_draft fields the same way) — the stage turn above
+        # already returned before reaching here.
+        from app.matcha.services.pilots.hr_pilot_actions import validate_discipline_fields
+        from app.matcha.services.pilots.hr_pilot_escalation import classify_message
+
+        normalized, clarify_msg = validate_discipline_fields(staged_action)
+        if clarify_msg:
+            return HuumeVerdict(kind="refuse", message=clarify_msg)
+        gate_text = " ".join([
+            normalized["employee_name"], normalized["infraction_type"],
+            normalized["description"], str(normalized.get("expected_improvement") or ""),
+        ])
+        gate = classify_message(gate_text)
+        if gate.hard_stop:
+            return HuumeVerdict(
+                kind="refuse",
+                message=gate.notice or "This needs to go to corporate HR rather than being filed here.",
+            )
+        return HuumeVerdict(kind="proceed", message="", action=normalized)
+
+    return HuumeVerdict(kind="refuse", message="That action type isn't something I can execute.")
 
 
 def evaluate_plan_execution(*, role: Optional[str], features: dict[str, Any]) -> Optional[str]:
@@ -331,6 +378,14 @@ async def execute_huume_action(*, company_id: UUID, actor_user_id: Optional[UUID
         return await onboarding_skill.execute_send_offer(
             company_id=company_id, actor_user_id=actor_user_id, offer_id=action["offer_id"],
         )
+    if action.get("type") == "discipline_draft":
+        # Delegates to the SAME executor HR Pilot uses — employee resolution,
+        # the deterministic discipline_compliance gate (a statutory block
+        # refuses, no override), and the status='draft' write. Its
+        # "clarify"/"blocked"/"escalate" statuses all read as a plain refusal
+        # to this caller; the message still explains why.
+        from app.matcha.services.pilots.hr_pilot_actions import execute_hr_action
+        return await execute_hr_action(company_id=company_id, actor_user_id=actor_user_id, action=action)
     return {"status": "error", "message": "Unsupported action."}
 
 

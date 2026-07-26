@@ -49,6 +49,40 @@ class TestLookupGating:
         result = _run(_lookup_context_impl(None, company_id="c1", topic="training_status", features=None))
         assert result["module"] == "off"
 
+    def test_pto_leave_off_returns_module_off_without_conn(self):
+        result = _run(_lookup_context_impl(
+            None, company_id="c1", topic="pto_leave", features={"employees": False},
+        ))
+        assert result["module"] == "off"
+
+    def test_policies_off_returns_module_off_without_conn(self):
+        result = _run(_lookup_context_impl(
+            None, company_id="c1", topic="policies", features={"handbooks": False},
+        ))
+        assert result["module"] == "off"
+
+    def test_discipline_off_returns_module_off_without_conn(self):
+        result = _run(_lookup_context_impl(
+            None, company_id="c1", topic="discipline", features={"discipline": False},
+        ))
+        assert result["module"] == "off"
+
+    def test_compliance_off_returns_module_off_without_conn(self):
+        # Neither of the two flags that gate this topic is on.
+        result = _run(_lookup_context_impl(
+            None, company_id="c1", topic="compliance", features={"compliance": False, "compliance_lite": False},
+        ))
+        assert result["module"] == "off"
+
+    def test_compliance_lite_alone_is_sufficient(self):
+        # any-of gate: compliance_lite on its own should pass the gate check
+        # and attempt the DB path (conn=None -> "lookup failed", not "off").
+        result = _run(_lookup_context_impl(
+            None, company_id="c1", topic="compliance", features={"compliance": False, "compliance_lite": True},
+        ))
+        assert "module" not in result
+        assert result.get("error") == "lookup failed"
+
     def test_ungated_topic_ignores_features(self):
         # roster has no required feature — it should proceed past the gate
         # check and attempt the DB path, hitting conn=None. The function's

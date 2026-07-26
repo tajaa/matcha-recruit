@@ -26,6 +26,7 @@ from google.genai import types
 LOOKUP_TOPICS = (
     "roster", "templates", "integrations", "training", "credentials", "offers",
     "employee", "training_status", "schedule", "incidents",
+    "pto_leave", "policies", "discipline", "compliance",
 )
 
 
@@ -57,10 +58,13 @@ TOOLS: tuple[HuumeTool, ...] = (
         "training rules, prior offers, one employee's detail record, "
         "company-wide training completion/overdue status, the published "
         "schedule for the next 7 days, recent incident counts by type/severity "
-        "(never named individuals — that's a legal record), or credential/"
-        "license expirations. Call this before drafting an offer if you're "
-        "unsure whether the candidate already has one, or before building a "
-        "plan to check what integrations are actually connected.",
+        "(never named individuals — that's a legal record), credential/license "
+        "expirations, upcoming approved PTO/leave, active policy titles, "
+        "discipline record counts by status (never narrative details), or "
+        "open compliance requirement counts by category. Call this before "
+        "drafting an offer if you're unsure whether the candidate already has "
+        "one, or before building a plan to check what integrations are "
+        "actually connected.",
         properties={
             "topic": types.Schema(type=types.Type.STRING, enum=list(LOOKUP_TOPICS)),
             "query": types.Schema(type=types.Type.STRING, description="Optional free-text filter, e.g. a candidate/employee name or email."),
@@ -138,17 +142,44 @@ TOOLS: tuple[HuumeTool, ...] = (
     _tool(
         "cancel_staged", "write",
         "Cancel a staged action or discard a staged onboarding plan when the "
-        "admin changes their mind. target='action' voids the pending "
-        "send_offer (it will no longer execute even if confirmed). "
-        "target='plan' discards the onboarding plan for offer_id — refused "
-        "once it's already executing or done, since steps that already ran "
-        "can't be undone from here. Pass offer_id whenever more than one "
-        "plan is active.",
+        "admin changes their mind. target='action' voids whatever's pending "
+        "— a send_offer or a draft_discipline write-up (it will no longer "
+        "execute even if confirmed). target='plan' discards the onboarding "
+        "plan for offer_id — refused once it's already executing or done, "
+        "since steps that already ran can't be undone from here. Pass "
+        "offer_id whenever more than one plan is active.",
         properties={
             "target": types.Schema(type=types.Type.STRING, enum=["action", "plan"]),
             "offer_id": types.Schema(type=types.Type.STRING, description="Required for target='plan' when more than one plan is active."),
         },
         required=["target"],
+    ),
+    _tool(
+        "draft_discipline", "staged",
+        "Draft a progressive-discipline write-up for an attendance, "
+        "performance, or policy-violation issue. This STAGES the write-up "
+        "for the admin's confirmation — nothing is filed until they confirm "
+        "on a LATER turn (pass confirm_id back exactly as given). NEVER for "
+        "safety, harassment, discrimination, or other legal/leave topics — "
+        "route those to corporate HR instead of drafting them. Needs "
+        "specific occurrence date(s), not a vague timeframe — ask if the "
+        "admin didn't give one.",
+        properties={
+            "employee_name": types.Schema(type=types.Type.STRING),
+            "infraction_type": types.Schema(type=types.Type.STRING, enum=["attendance", "performance", "policy_violation"]),
+            "severity": types.Schema(type=types.Type.STRING, enum=["minor", "moderate", "severe"], description="Defaults to 'moderate' if omitted."),
+            "occurrence_dates": types.Schema(
+                type=types.Type.ARRAY, items=types.Schema(type=types.Type.STRING),
+                description="ISO date(s) YYYY-MM-DD when the conduct occurred.",
+            ),
+            "description": types.Schema(type=types.Type.STRING, description="Brief factual account of what happened, in the admin's words."),
+            "expected_improvement": types.Schema(type=types.Type.STRING, description="Optional — what improvement is expected going forward."),
+            "confirm_id": types.Schema(
+                type=types.Type.STRING,
+                description="Omit on the first (staging) call. On the confirm turn, pass back EXACTLY the confirm_id from 'Current staged state' to file it.",
+            ),
+        },
+        required=["employee_name", "infraction_type", "occurrence_dates", "description"],
     ),
     # ---- Legal Pilot skill (feature `legal_defense`) -------------------------
     _tool(

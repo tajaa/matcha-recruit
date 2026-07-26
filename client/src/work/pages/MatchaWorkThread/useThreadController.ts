@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams } from 'react-router-dom'
-import type { MWMessage, MWModeKey, MWThreadDetail, MWSendResponse, MWStreamEvent } from '../../types'
+import type { MWMessage, MWModeKey, MWThreadDetail, MWSendResponse, MWStreamEvent, HuumeStep } from '../../types'
 import { getThread, sendMessageStream, uploadResumes, uploadInventory, updateTitle, getPdfProxyUrl, setThreadMode, fetchUsageSummary, fetchUsageSummary24h } from '../../api/matchaWork'
 import type { UsageSummary } from '../../api/matchaWork'
 import { fetchLocations } from '../../../api/compliance/compliance'
@@ -91,6 +91,11 @@ export function useThreadController() {
 
   // Stream status
   const [statusMessage, setStatusMessage] = useState('')
+  // Huume 'step' frames, accumulated live during a turn so the tool-call
+  // timeline renders in the pending bubble while streaming — previously
+  // parsed and dropped, only appearing post-hoc from the persisted
+  // assistant message's metadata once the turn had already completed.
+  const [pendingHuumeSteps, setPendingHuumeSteps] = useState<HuumeStep[]>([])
 
   // Title editing
   const [editingTitle, setEditingTitle] = useState(false)
@@ -155,12 +160,15 @@ export function useThreadController() {
     if (slideIndex != null) streamOpts.slide_index = slideIndex
     if (selectedModel) streamOpts.model = selectedModel
 
+    setPendingHuumeSteps([])
     abortRef.current = sendMessageStream(threadId, content, {
       onEvent: (event: MWStreamEvent) => {
         if (event.type === 'status') setStatusMessage(event.message)
+        if (event.type === 'step') setPendingHuumeSteps((prev) => [...prev, event.data])
       },
       onComplete: (data: MWSendResponse) => {
         setStatusMessage('')
+        setPendingHuumeSteps([])
         // Replace temp user message + add assistant message
         reconcileById(tempUserMsg.id, data.user_message, data.assistant_message)
         // Update thread state
@@ -187,6 +195,7 @@ export function useThreadController() {
       },
       onError: (err) => {
         setStatusMessage('')
+        setPendingHuumeSteps([])
         setError(err)
         setStreaming(false)
       },
@@ -380,7 +389,7 @@ export function useThreadController() {
     onlineUsers, typingUsers, threadSocketRef, lastTypingSentRef,
     togglingMode, modeValue, complianceMode,
     locations, locationsUnavailable,
-    statusMessage,
+    statusMessage, pendingHuumeSteps,
     editingTitle, setEditingTitle,
     titleDraft, setTitleDraft,
     messagesEndRef, textareaRef,

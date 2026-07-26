@@ -853,11 +853,29 @@ async def _run_huume_dispatch(tc: TurnContext):
 
     from app.matcha.services.huume import agent as huume_agent, store as huume_store
 
+    # Per-company turn cap — GeminiRateLimiter guards the platform's Gemini
+    # quota, not a tenant's own usage. A Huume turn costs up to 8 model calls
+    # plus whatever the pilot tools spend, and (unlike handbook_pilot_chat's
+    # 40/hr) previously had no tenant limit at all.
+    try:
+        from app.core.services.redis_cache import check_rate_limit
+        await check_rate_limit(str(company_id), "huume_turn", 60, 3600)
+    except HTTPException:
+        yield _sse_data({"type": "error", "message": "Huume is being used a lot right now — try again in a bit."})
+        tc.terminated = True
+        return
+
     yield _sse_data({"type": "status", "message": "Huume is working…"})
 
     run_id = await huume_store.create_run(
         company_id=company_id, thread_id=thread_id, user_id=current_user.id, trigger="user_turn",
     )
+
+    # `features` was already fetched above for the `huume` flag re-check —
+    # reuse it (it's the identical merge `get_thread_features_and_integrations`
+    # would otherwise re-fetch) and only pull the integrations half here, so
+    # a Huume turn no longer queries `companies` for feature flags twice.
+    integrations = await huume_store.get_thread_integrations(company_id)
 
     current_state = thread.get("current_state") or {}
     final_result: dict | None = None
@@ -868,6 +886,7 @@ async def _run_huume_dispatch(tc: TurnContext):
             user_role=current_user.role, history=tc.msg_dicts, current_state=current_state,
             company_name=(tc.profile or {}).get("name") or "",
             attachment_texts=tc.file_context_parts,
+            features=features, integrations=integrations,
         ):
             if frame.get("type") == "huume_result":
                 final_result = frame.get("data")
@@ -879,6 +898,7 @@ async def _run_huume_dispatch(tc: TurnContext):
                         run_id=run_id, seq=step.get("seq", 0), tool=step.get("tool", ""),
                         kind=step.get("kind", "write"), label=step.get("label", ""),
                         status=step.get("status", "error"),
+                        args=step.get("args"), result=step.get("result"),
                     )
                 except Exception:
                     logger.warning("huume add_step failed for run %s", run_id, exc_info=True)
@@ -935,9 +955,11 @@ async def _run_huume_dispatch(tc: TurnContext):
     tc.assistant_msg = assistant_msg
 
     try:
+        turn_error = final_result.get("error")
         await huume_store.complete_run(
-            run_id=run_id, status="failed" if run_failed else "completed",
+            run_id=run_id, status="failed" if (run_failed or turn_error) else "completed",
             model_calls=final_result.get("model_calls") or 0, token_usage=final_result.get("token_usage"),
+            error=turn_error,
         )
     except Exception:
         logger.warning("huume complete_run failed for run %s", run_id, exc_info=True)

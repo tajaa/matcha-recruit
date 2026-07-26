@@ -176,7 +176,7 @@ def should_stage_handoff(
     return handoff_type
 
 
-def _validate_discipline_fields(staged: dict) -> tuple[Optional[dict], Optional[str]]:
+def validate_discipline_fields(staged: dict) -> tuple[Optional[dict], Optional[str]]:
     """Validate + normalize a discipline_draft proposal. Returns
     (normalized, None) when valid, else (None, clarify_message). Does NOT run
     the hard-stop re-check (a distinct verdict) — the caller does. Pure."""
@@ -367,7 +367,7 @@ def evaluate_hr_action(
 
     # --- Per-type validation.
     if action_type == "discipline_draft":
-        normalized, clarify_msg = _validate_discipline_fields(staged_action)
+        normalized, clarify_msg = validate_discipline_fields(staged_action)
         if clarify_msg:
             return HrActionVerdict(kind="clarify", message=clarify_msg)
         return _apply_hard_stop_recheck(
@@ -537,7 +537,7 @@ async def precheck_discipline_proposal(*, company_id: UUID, staged_action: Any) 
 
     if not isinstance(staged_action, dict) or staged_action.get("type") != "discipline_draft":
         return {"outcome": "skip"}
-    normalized, clarify_msg = _validate_discipline_fields(staged_action)
+    normalized, clarify_msg = validate_discipline_fields(staged_action)
     if clarify_msg or not normalized:
         return {"outcome": "skip"}
 

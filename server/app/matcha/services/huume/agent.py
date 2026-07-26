@@ -32,11 +32,12 @@ was accomplished even if the loop failed partway.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from datetime import date, datetime, timezone
 from typing import Any, AsyncIterator, Optional
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from google.genai import types
 
@@ -60,6 +61,18 @@ _MAX_MODEL_CALLS = 8
 _WALL_CLOCK_SECONDS = 240.0
 _CALL_TIMEOUT = 60.0
 _MAX_HISTORY_MESSAGES = 20
+# Per-message cap in history — one long pilot answer in an earlier turn
+# shouldn't inflate the prompt of every subsequent model call this turn (and
+# every later turn, since it stays in history until it ages out).
+_MAX_MESSAGE_CHARS = 6_000
+# Cap on a tool's args/result before it lands in the huume_steps audit row —
+# a large pilot payload (citation records, evidence maps) shouldn't balloon
+# the table indefinitely.
+_STEP_PAYLOAD_CAP_CHARS = 4_000
+# How often to emit a heartbeat status frame while a single tool call is
+# still pending (ask_legal_pilot/draft_handbook_content/generate_legal_packet
+# each embed their own ~90s-capped Gemini call with no frames of their own).
+_TOOL_HEARTBEAT_SECONDS = 15.0
 
 
 class _StepRecorder:
@@ -69,10 +82,15 @@ class _StepRecorder:
     def __init__(self) -> None:
         self.steps: list[dict[str, Any]] = []
 
-    def record(self, *, tool: str, kind: str, label: str, status: str, detail: Optional[str] = None) -> dict[str, Any]:
+    def record(
+        self, *, tool: str, kind: str, label: str, status: str, detail: Optional[str] = None,
+        args: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
         step = {"seq": len(self.steps) + 1, "tool": tool, "kind": kind, "label": label, "status": status}
         if detail:
             step["detail"] = detail
+        if args is not None:
+            step["args"] = _cap_payload(args)
         self.steps.append(step)
         return step
 
@@ -80,22 +98,71 @@ class _StepRecorder:
 _ATTACHMENT_TEXT_CAP = 20_000
 
 
+def is_sole_finish(call_names: list[str]) -> bool:
+    """True when `finish` is the ONLY call in a batch — the only case where it
+    may end the turn. Batched alongside other tools it must be deferred: those
+    tools still run, and their results have to reach the model before it
+    summarizes, or the summary describes work whose outcome it never saw. Pure."""
+    return len(call_names) == 1 and call_names[0] == "finish"
+
+
+def _cap_payload(value: Any) -> Any:
+    """Bound a value before it's stored on a step's args/result — returns it
+    unchanged when already small, else a truncated preview. Pure."""
+    if value is None:
+        return None
+    safe = _json_safe(value)
+    try:
+        encoded = json.dumps(safe, default=str)
+    except Exception:
+        return {"_note": "unserializable"}
+    if len(encoded) <= _STEP_PAYLOAD_CAP_CHARS:
+        return safe
+    return {"_truncated": True, "preview": encoded[:_STEP_PAYLOAD_CAP_CHARS]}
+
+
+_MAX_IMAGE_PARTS = 6
+_MAX_IMAGE_BYTES_TOTAL = 4 * 1024 * 1024
+
+
 def _to_contents(history: list[dict[str, Any]], attachment_texts: Optional[list[str]] = None) -> list[types.Content]:
     contents: list[types.Content] = []
+    image_budget = _MAX_IMAGE_PARTS
+    image_bytes_used = 0
     for msg in history[-_MAX_HISTORY_MESSAGES:]:
         role = "model" if msg.get("role") == "assistant" else "user"
         text = str(msg.get("content") or "").strip()
-        if not text:
+        if len(text) > _MAX_MESSAGE_CHARS:
+            text = text[:_MAX_MESSAGE_CHARS] + "\n…[truncated]"
+
+        parts: list[types.Part] = []
+        # Multimodal: attach any pre-fetched image bytes on user turns only
+        # (messaging.py's fetch_image_parts_for_messages already fetched
+        # these before dispatch — same convention as matcha_work_ai's
+        # non-Huume prompt builder). Capped so one attachment-heavy turn
+        # can't blow the loop's per-call token/size budget.
+        if role == "user" and image_budget > 0:
+            for image_bytes, mime in (msg.get("image_parts") or []):
+                if not image_bytes or image_budget <= 0:
+                    continue
+                if image_bytes_used + len(image_bytes) > _MAX_IMAGE_BYTES_TOTAL:
+                    continue
+                parts.append(types.Part.from_bytes(data=image_bytes, mime_type=mime))
+                image_budget -= 1
+                image_bytes_used += len(image_bytes)
+
+        if not text and not parts:
             continue
-        contents.append(types.Content(role=role, parts=[types.Part(text=text)]))
+        if text or not parts:
+            parts.append(types.Part(text=text))
+        contents.append(types.Content(role=role, parts=parts))
     if not contents:
         contents.append(types.Content(role="user", parts=[types.Part(text="Hello.")]))
 
-    # Attached file text (from `messaging.py`'s file_context_parts) rides as
-    # an extra Part on the final user turn — images are out of scope here
-    # (unlike the normal skill engine, which gets multimodal image parts via
-    # fetch_image_parts_for_messages; Huume's tool-calling loop doesn't wire
-    # that path yet).
+    # Attached file TEXT (from `messaging.py`'s file_context_parts, e.g. an
+    # uploaded PDF/doc's extracted text) rides as an extra Part on the final
+    # user turn. Distinct from image_parts above, which is inline image
+    # bytes on the messages that carried them, not just the last one.
     if attachment_texts:
         joined = "\n\n".join(t for t in attachment_texts if t)[:_ATTACHMENT_TEXT_CAP]
         if joined:
@@ -129,6 +196,8 @@ async def run_huume_turn(
     current_state: dict[str, Any],
     company_name: str,
     attachment_texts: Optional[list[str]] = None,
+    features: Optional[dict[str, Any]] = None,
+    integrations: Optional[dict[str, bool]] = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """Run one Huume turn. Yields `status`/`step`/`error` frames, then
     exactly one final `huume_result` frame:
@@ -139,11 +208,16 @@ async def run_huume_turn(
     `store.execute_plan_locked` mid-turn instead — see the module docstring
     for why. The caller re-reads `current_state` after the turn to pick up
     those mid-turn writes.
+
+    `features`/`integrations`: pass the dispatcher's already-fetched values
+    to skip a second identical `get_thread_features_and_integrations` query
+    every turn. Omit only for callers (e.g. tests) with no cheaper source.
     """
     rate_limiter = GeminiRateLimiter()
     recorder = _StepRecorder()
     state_updates: dict[str, Any] = {}
     final_message: Optional[str] = None
+    turn_error: Optional[str] = None
     model_calls = 0
     started = time.monotonic()
     total_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
@@ -151,7 +225,8 @@ async def run_huume_turn(
     def elapsed() -> float:
         return time.monotonic() - started
 
-    features, integrations = await store.get_thread_features_and_integrations(company_id)
+    if features is None or integrations is None:
+        features, integrations = await store.get_thread_features_and_integrations(company_id)
 
     # Frozen at turn start — the two-turn confirm check for `send_offer`
     # compares against THIS snapshot, never against state a tool call in
@@ -243,6 +318,59 @@ async def run_huume_turn(
                 )
                 return _json_safe(result), step
 
+            if name == "draft_discipline":
+                # No natural persisted id like offer_id exists at stage time
+                # (nothing is written to the DB until confirm) — a server-
+                # minted confirm_id plays that role instead, echoed to the
+                # model via the state block and the staged response.
+                existing = pre_turn_action
+                confirm_id = str(args.get("confirm_id") or "").strip() or None
+                confirming = (
+                    isinstance(existing, dict) and existing.get("type") == "discipline_draft"
+                    and existing.get("status") == "proposed"
+                    and confirm_id is not None and existing.get("confirm_id") == confirm_id
+                )
+                if confirming:
+                    staged = existing
+                else:
+                    staged = {
+                        "type": "discipline_draft", "status": "proposed", "confirm_id": uuid4().hex[:8],
+                        "employee_name": args.get("employee_name"), "infraction_type": args.get("infraction_type"),
+                        "severity": args.get("severity"), "occurrence_dates": list(args.get("occurrence_dates") or []),
+                        "description": args.get("description"), "expected_improvement": args.get("expected_improvement"),
+                    }
+                verdict = actions.evaluate_huume_action(
+                    staged_action=staged, features=features, role=user_role,
+                    thread_huume_mode=True, this_turn_staged_new=not confirming,
+                )
+                if verdict.kind == "stage":
+                    state_updates["huume_action"] = staged
+                    step = recorder.record(tool=name, kind="staged", label="Staged: discipline write-up", status="ok", detail=verdict.message)
+                    return {"status": "staged", "confirm_id": staged["confirm_id"], "message": verdict.message}, step
+                if not verdict.ok:
+                    step = recorder.record(tool=name, kind="staged", label="Discipline draft refused", status="rejected", detail=verdict.message)
+                    return {"status": "refused", "message": verdict.message}, step
+                result = await actions.execute_huume_action(company_id=company_id, actor_user_id=user_id, action=verdict.action)
+                filed = result.get("status") == "created"
+                state_updates["huume_action"] = {**staged, "status": "filed" if filed else "failed"}
+                # hr_pilot_actions' executors hand back post-commit enrichment
+                # work as (fn, args, kwargs) tuples for the caller to schedule
+                # (the HR Pilot route does the same in ai_turn.py). Pop them
+                # before the payload goes to the model — they're callables, not
+                # data — and run them best-effort: enrichment failing must not
+                # fail a write that already committed.
+                for _bg in (result.pop("bg_tasks", None) or []):
+                    try:
+                        _fn, _args, _kwargs = _bg
+                        await _fn(*_args, **_kwargs)
+                    except Exception:
+                        logger.warning("huume: discipline_draft bg task failed", exc_info=True)
+                step = recorder.record(
+                    tool=name, kind="write", label="Filed discipline write-up" if filed else "Discipline write-up not filed",
+                    status="ok" if filed else "error", detail=result.get("message"),
+                )
+                return _json_safe(result), step
+
             if name == "build_onboarding_plan":
                 result = await onboarding_skill.build_plan_for_offer(company_id=company_id, offer_id=str(args.get("offer_id") or ""))
                 ok = result.get("status") == "ok"
@@ -289,8 +417,12 @@ async def run_huume_turn(
                         step = recorder.record(tool=name, kind="staged", label="Nothing to cancel", status="rejected")
                         return {"status": "refused", "message": "There's nothing staged to cancel."}, step
                     state_updates["huume_action"] = {**staged, "status": "cancelled"}
-                    step = recorder.record(tool=name, kind="staged", label="Cancelled staged send", status="ok")
-                    return {"status": "ok", "message": "Cancelled — that offer will not be sent."}, step
+                    step = recorder.record(tool=name, kind="staged", label="Cancelled staged action", status="ok")
+                    cancel_msg = (
+                        "Cancelled — that offer will not be sent." if staged.get("type") == "send_offer"
+                        else "Cancelled — that write-up will not be filed."
+                    )
+                    return {"status": "ok", "message": cancel_msg}, step
 
                 if target == "plan":
                     offer_id, err = actions.resolve_plan_offer_id(pre_turn_plans, args.get("offer_id"), built_this_turn)
@@ -485,31 +617,54 @@ async def run_huume_turn(
                 total_usage["completion_tokens"] += getattr(usage, "candidates_token_count", 0) or 0
                 total_usage["total_tokens"] += getattr(usage, "total_token_count", 0) or 0
 
-            call_parts = [
+            all_parts = [
                 part
                 for candidate in (response.candidates or [])
                 for part in (candidate.content.parts or [] if candidate.content else [])
-                if getattr(part, "function_call", None)
             ]
+            call_parts = [part for part in all_parts if getattr(part, "function_call", None)]
             calls = [p.function_call for p in call_parts]
 
             if not calls:
                 final_message = (getattr(response, "text", None) or "").strip() or None
                 break
 
-            contents.append(types.Content(role="model", parts=call_parts))
+            # ALL parts, not just the function-call ones — a response mixing
+            # reasoning text with tool calls used to drop the text from
+            # history between iterations.
+            contents.append(types.Content(role="model", parts=all_parts))
 
             response_parts: list[types.Part] = []
             finished = False
             finish_message: Optional[str] = None
+            # `finish` only ends the turn when it's the SOLE call in this
+            # batch. If the model calls finish alongside other tools, those
+            # tools still need to run and their results still need to reach
+            # the model before it actually finishes — otherwise the summary
+            # describes work whose outcome the model never saw.
+            sole_finish_call = is_sole_finish([c.name for c in calls])
 
             for call in calls:
                 name = call.name
                 args = dict(call.args or {})
                 if name == "finish":
+                    if not sole_finish_call:
+                        recorder.record(
+                            tool="finish", kind="finish", label="Finish deferred (other tools pending)",
+                            status="ok", args=args,
+                        )
+                        response_parts.append(types.Part.from_function_response(
+                            name=name,
+                            response={
+                                "status": "deferred",
+                                "message": "Other tool calls this turn haven't reported back yet — "
+                                           "call finish again once you've reviewed their results.",
+                            },
+                        ))
+                        continue
                     finish_message = str(args.get("message") or "").strip() or None
                     finished = True
-                    recorder.record(tool="finish", kind="finish", label="Done", status="ok")
+                    recorder.record(tool="finish", kind="finish", label="Done", status="ok", args=args)
                     continue
 
                 tool = TOOLS_BY_NAME.get(name)
@@ -518,7 +673,38 @@ async def run_huume_turn(
                 elif tool and tool.kind == "write":
                     yield {"type": "status", "message": f"Working on: {name.replace('_', ' ')}…"}
 
-                payload, step = await call_tool(name, args)
+                # Bounded by whatever's left of the overall wall clock — a
+                # hung provisioning call or pilot Gemini call can no longer
+                # stall the stream past the turn's own bound. A heartbeat
+                # status frame ticks every _TOOL_HEARTBEAT_SECONDS so the
+                # client (and any proxy) sees the connection is still alive.
+                task = asyncio.ensure_future(call_tool(name, args))
+                remaining = max(1.0, _WALL_CLOCK_SECONDS - elapsed())
+                timed_out = False
+                while True:
+                    wait_for = min(_TOOL_HEARTBEAT_SECONDS, remaining)
+                    done, _pending = await asyncio.wait({task}, timeout=wait_for)
+                    if task in done:
+                        break
+                    remaining -= wait_for
+                    if remaining <= 0:
+                        timed_out = True
+                        task.cancel()
+                        break
+                    yield {"type": "status", "message": f"Still working on: {name.replace('_', ' ')}…"}
+
+                if timed_out:
+                    step = recorder.record(
+                        tool=name, kind=(tool.kind if tool else "write"),
+                        label=f"{name.replace('_', ' ')} timed out", status="error",
+                        detail="Timed out waiting for a response.", args=args,
+                    )
+                    payload = {"error": "timed out"}
+                else:
+                    payload, step = task.result()
+                    if step is not None:
+                        step.setdefault("args", _cap_payload(args))
+                        step.setdefault("result", _cap_payload(payload))
                 if step:
                     yield {"type": "step", "data": step}
                 response_parts.append(types.Part.from_function_response(name=name, response=payload))
@@ -533,7 +719,8 @@ async def run_huume_turn(
         raise
     except Exception as exc:
         logger.warning("Huume agent turn failed: %s", exc, exc_info=True)
-        yield {"type": "error", "message": "Huume hit a problem mid-turn — keeping what worked."}
+        turn_error = "Huume hit a problem mid-turn — keeping what worked."
+        yield {"type": "error", "message": turn_error}
 
     if not final_message:
         final_message = "I wasn't able to finish that — nothing was changed." if not recorder.steps else "Done for now — see the steps above."
@@ -548,6 +735,11 @@ async def run_huume_turn(
         "state_updates": state_updates,
         "model_calls": model_calls,
     }
+    # Set when the turn crashed mid-loop — the dispatcher marks the run
+    # `failed` (with this reason) instead of `completed`, which the bare
+    # `error` SSE frame above never surfaced to huume_runs on its own.
+    if turn_error:
+        result_data["error"] = turn_error
     # Citation records the pilot tools resolved this turn — the dispatcher
     # stores them on the assistant message metadata, where MessageBubble's
     # CitationSources renders them (same shape HR Pilot uses). Only ids that

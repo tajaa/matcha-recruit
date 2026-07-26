@@ -39,7 +39,18 @@ export function sendMessageStream(
   // "user cancelled", leaving the composer stuck on "Thinking…". That is the
   // exact state the `settled` flag below exists to prevent.
   let timedOut = false
-  const timeout = setTimeout(() => { timedOut = true; ctrl.abort('timeout') }, 180_000)
+  // Inactivity timeout, not a fixed total-duration one: Huume turns can run
+  // up to the backend's 240s wall clock (longer with pilot-tool heartbeat
+  // frames), and a fixed 180s cutoff killed those client-side while the
+  // backend finished and persisted the reply anyway. Reset on every SSE
+  // event instead — a genuinely stalled stream still fails fast, a healthy
+  // long-running one doesn't.
+  const INACTIVITY_TIMEOUT_MS = 90_000
+  let timeout = setTimeout(() => { timedOut = true; ctrl.abort('timeout') }, INACTIVITY_TIMEOUT_MS)
+  const resetTimeout = () => {
+    clearTimeout(timeout)
+    timeout = setTimeout(() => { timedOut = true; ctrl.abort('timeout') }, INACTIVITY_TIMEOUT_MS)
+  }
 
   // A turn is only "settled" once complete or error fires. Anything else that
   // ends the stream — [DONE] with no result, a drained reader, a proxy cutting
@@ -53,6 +64,7 @@ export function sendMessageStream(
         endpoint,
         { content, ...options },
         (data) => {
+          resetTimeout()
           const event = data as MWStreamEvent
           callbacks.onEvent(event)
           if (event.type === 'complete') {
@@ -76,7 +88,7 @@ export function sendMessageStream(
     } catch (e) {
       if (ctrl.signal.aborted) {
         if (timedOut) {
-          reportApiError({ endpoint, status: 0, message: 'SSE stream timed out after 180s' })
+          reportApiError({ endpoint, status: 0, message: `SSE stream idle for ${INACTIVITY_TIMEOUT_MS / 1000}s, aborted` })
           callbacks.onError('Request timed out. Please try again.')
         }
         // else: user-initiated abort (navigated away), do nothing

@@ -1,5 +1,6 @@
 import { Loader2 } from 'lucide-react'
 import MessageBubble from '../../components/panels/MessageBubble'
+import HuumeStepTimeline from '../../components/panels/HuumeStepTimeline'
 import { addProjectSection } from '../../api/matchaWork'
 import SkillGrid from './SkillGrid'
 import type { ThreadTheme } from './theme'
@@ -15,7 +16,7 @@ interface ChatMessagesProps {
 export default function ChatMessages({ c, th, isProject }: ChatMessagesProps) {
   const {
     streaming, setIsDragOver, isDragOver, handleFileUpload, lightMode, messages,
-    statusMessage, typingUsers, messagesEndRef, threadId, setThread,
+    statusMessage, pendingHuumeSteps, typingUsers, messagesEndRef, threadId, setThread,
     isIndividual, setInput, textareaRef, setShowTutorSetup, setTutorDismissed,
   } = c
 
@@ -70,9 +71,14 @@ export default function ChatMessages({ c, th, isProject }: ChatMessagesProps) {
 
       {streaming && (
         <div className="flex justify-start">
-          <div className={`${th.streamBg} rounded-lg px-4 py-2.5 flex items-center gap-2`}>
-            <Loader2 size={14} className={`animate-spin ${th.streamText}`} />
-            <span className={`text-sm ${th.streamText}`}>{statusMessage || 'Thinking...'}</span>
+          <div className={`${th.streamBg} rounded-lg px-4 py-2.5 max-w-[85%]`}>
+            <div className="flex items-center gap-2">
+              <Loader2 size={14} className={`animate-spin ${th.streamText}`} />
+              <span className={`text-sm ${th.streamText}`}>{statusMessage || 'Thinking...'}</span>
+            </div>
+            {pendingHuumeSteps.length > 0 && (
+              <HuumeStepTimeline steps={pendingHuumeSteps} lightMode={lightMode} />
+            )}
           </div>
         </div>
       )}
