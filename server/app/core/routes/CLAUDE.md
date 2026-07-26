@@ -13,7 +13,7 @@ A split-router package is **one** router carved into submodules (`_shared.py` ow
 | Router | Prefix(es) | Owns |
 |---|---|---|
 | `auth/` | `/auth` | Login/refresh/logout, Google OAuth, all `/register/*` flows, broker branding + invites, `/me` + profile, password/email change, admin candidate tooling, beta invites — **split-router package** (12 submodules, split 2026-07-25 from the 3,699-line `auth.py` monolith; see below) |
-| `admin/` | `/admin` | Platform admin: brokers, companies, deal flow, invites, jurisdictions, platform settings, posters, products, research, schedule rules — **split-router package** |
+| `admin/` | `/admin` | Platform admin: brokers, companies, deal flow, invites, jurisdictions, platform settings, posters, products, research, schedule rules — **split-router package**. `jurisdictions` is itself a nested package (`admin/jurisdictions/`, 9 files, split from a 4,558-line monolith) — include order in its `__init__.py` is load-bearing (reproduces original route registration order). |
 | `chat/` | `/chat` (+ `/ws/chat`) | AI chat CRUD + WebSocket — **split-router package** |
 | `compliance/` | `/compliance` | Full compliance engine (3 gate tiers: `router`/`lite_router`/`shared_router`) — **split-router package** |
 | `resources/` | `/resources` | Free-tier resources hub: checkout, lead-gen, lite add-ons, pins, state guides, upgrade — **split-router package** |
