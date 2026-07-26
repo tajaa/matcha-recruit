@@ -512,7 +512,7 @@ async def create_company(
             )
 
         # Provision new company. companies table has only created_at —
-        # no updated_at column (verified in app/database.py:764).
+        # no updated_at column (verified in app/database/bootstrap/identity.py:174).
         company_row = await conn.fetchrow(
             """
             INSERT INTO companies (name, signup_source, status, approved_at, approved_by, created_at)

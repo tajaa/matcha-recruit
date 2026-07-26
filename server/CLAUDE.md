@@ -15,7 +15,7 @@ server/
 └── app/
     ├── main.py                  App init, lifespan, CORS, mount /api
     ├── config.py                Pydantic settings from .env
-    ├── database.py              asyncpg pool + init_db() bootstrap (5,649 lines — schema reference)
+    ├── database/                asyncpg pool + init_db() bootstrap (package — schema reference)
     ├── dependencies.py          Shared auth deps (require_admin etc.)
     ├── protocol.py              AI WebSocket / streaming shapes
     ├── core/                    Auth, admin, compliance, AI chat, policies, resources
@@ -33,7 +33,7 @@ server/
 
 **Database**:
 - asyncpg pool via `async with get_connection() as conn:`.
-- All schema changes go through Alembic (`alembic/versions/`). `database.py:init_db()` bootstraps a fresh DB but should not be relied on for schema evolution.
+- All schema changes go through Alembic (`alembic/versions/`). `database/bootstrap/__init__.py:init_db()` bootstraps a fresh DB but should not be relied on for schema evolution.
 - Use parameterized queries. Never f-string user input into SQL.
 - Tenant isolation: filter by `company_id` (or `org_id` for employees-related tables) on every multi-tenant table.
 

@@ -123,7 +123,7 @@ Cross-product import rule: `cappe/` and `tellus/` import only from `app/core/*` 
 
 ### Schema + data flow — keep dev and prod in sync (both directions)
 
-Schema is managed via Alembic migrations in `server/alembic/versions/`; `server/app/database.py:init_db()` only bootstraps a fresh DB (it does **not** run migrations). The two DBs drift unless synced deliberately:
+Schema is managed via Alembic migrations in `server/alembic/versions/`; `server/app/database/bootstrap/__init__.py:init_db()` only bootstraps a fresh DB (it does **not** run migrations). The two DBs drift unless synced deliberately:
 
 - **Schema, dev → prod:** author migration → `./scripts/migrate-dev.sh` (applies to dev :5432) → test → `./scripts/migrate-prod.sh` (applies the same revision to RDS prod via app-EC2 tunnel; ignore `--legacy`, it targets the retired container). Applying to dev only is the drift that caused real `UndefinedColumnError` 500s. `alembic_version` must match afterward. Five gates guard the prod path (dirty-tree, pending-revision preview, RDS snapshot **+ a status check that the snapshot actually exists**, a rehearsal that runs every revision against live rows then rolls back, typed confirm) — each one is a bug that already shipped. The snapshot is initiated but **not waited on**: an RDS snapshot's point-in-time is fixed at initiation, so waiting for completion buys nothing; the status check is what proves the rollback path is real.
 - **Data, prod → dev:** `./scripts/refresh-dev-from-prod.sh` — **anonymized** clone of RDS prod into dev. `--dry-run` previews into a staging DB without swapping. After a scrubbed run, **every dev user's password becomes `devpass123`**; PII is scrubbed by `scripts/sql/anonymize_dev.sql`.
@@ -141,7 +141,7 @@ server/
 ├── app/
 │   ├── main.py                     # App init, router mounting, lifespan
 │   ├── config.py                   # Pydantic settings from env
-│   ├── database.py                 # asyncpg pool + init_db()
+│   ├── database/                   # asyncpg pool + init_db() bootstrap (package)
 │   ├── dependencies.py             # Shared auth dependencies
 │   ├── protocol.py                 # AI WS / streaming protocol shapes
 │   ├── core/                       # Auth, admin, compliance, AI chat, policies, resources
@@ -509,8 +509,8 @@ Quick lookup for frequently-touched code. Saves grepping the same things repeate
 
 ### Database access
 
-- Connection pool helper → `server/app/database.py:get_connection`
-- Schema bootstrap (reference only — use Alembic for changes) → `server/app/database.py:init_db`
+- Connection pool helper → `server/app/database/pool.py:get_connection` (re-exported as `app.database.get_connection`)
+- Schema bootstrap (reference only — use Alembic for changes) → `server/app/database/bootstrap/__init__.py:init_db`
 - Alembic migrations → `server/alembic/versions/*`
 
 ### Routing assembly
