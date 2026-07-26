@@ -488,6 +488,7 @@ class TurnContext:
     ctx: str = ""
     dyn_ctx: str = ""
     msg_dicts: list = field(default_factory=list)
+    file_context_parts: list = field(default_factory=list)
     context_summary: str | None = None
     summary_at_count: int | None = None
     project_meta: dict | None = None
@@ -866,6 +867,7 @@ async def _run_huume_dispatch(tc: TurnContext):
             thread_id=thread_id, company_id=company_id, user_id=current_user.id,
             user_role=current_user.role, history=tc.msg_dicts, current_state=current_state,
             company_name=(tc.profile or {}).get("name") or "",
+            attachment_texts=tc.file_context_parts,
         ):
             if frame.get("type") == "huume_result":
                 final_result = frame.get("data")
@@ -905,6 +907,18 @@ async def _run_huume_dispatch(tc: TurnContext):
     else:
         tc.current_state = thread.get("current_state")
         tc.current_version = thread.get("version")
+
+    # The loop may have written huume_plans mid-turn (build/execute/cancel,
+    # via `store.update_huume_plan`/`execute_plan_locked`) rather than
+    # through state_updates/apply_update above — re-read so the `complete`
+    # frame (and the plan card it drives) reflects those writes too.
+    try:
+        fresh = await doc_svc.get_thread(thread_id, company_id, user_id=current_user.id)
+        if fresh:
+            tc.current_state = fresh.get("current_state")
+            tc.current_version = fresh.get("version")
+    except Exception:
+        logger.warning("Huume post-turn state re-read failed for thread %s", thread_id, exc_info=True)
 
     assistant_msg = await doc_svc.add_message(
         thread_id, "assistant", final_result["message"],
@@ -1461,6 +1475,7 @@ async def send_message_stream(
                     )
         msg_dicts.append(entry)
     tc.msg_dicts = msg_dicts
+    tc.file_context_parts = file_context_parts
 
     # Inject selected slide content into the AI-facing message (not saved to DB)
     _inject_slide_context(msg_dicts, thread["current_state"], body.slide_index)

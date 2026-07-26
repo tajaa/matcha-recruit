@@ -23,7 +23,10 @@ from typing import Optional
 
 from google.genai import types
 
-LOOKUP_TOPICS = ("roster", "templates", "integrations", "training", "credentials", "offers")
+LOOKUP_TOPICS = (
+    "roster", "templates", "integrations", "training", "credentials", "offers",
+    "employee", "training_status", "schedule", "incidents",
+)
 
 
 @dataclass(frozen=True)
@@ -48,15 +51,19 @@ def _tool(name: str, kind: str, description: str, *, properties: dict | None = N
 TOOLS: tuple[HuumeTool, ...] = (
     _tool(
         "lookup_context", "read",
-        "Look up read-only grounding data before drafting or acting: the "
-        "existing roster, onboarding task templates, connected integrations "
-        "(Google Workspace/Slack), new-hire training rules, or prior offers. "
-        "Call this before drafting an offer if you're unsure whether the "
-        "candidate already has one, or before building a plan to check what "
-        "integrations are actually connected.",
+        "Look up read-only grounding data before drafting or acting, or to "
+        "answer a general HR question: the existing roster, onboarding task "
+        "templates, connected integrations (Google Workspace/Slack), new-hire "
+        "training rules, prior offers, one employee's detail record, "
+        "company-wide training completion/overdue status, the published "
+        "schedule for the next 7 days, recent incident counts by type/severity "
+        "(never named individuals — that's a legal record), or credential/"
+        "license expirations. Call this before drafting an offer if you're "
+        "unsure whether the candidate already has one, or before building a "
+        "plan to check what integrations are actually connected.",
         properties={
             "topic": types.Schema(type=types.Type.STRING, enum=list(LOOKUP_TOPICS)),
-            "query": types.Schema(type=types.Type.STRING, description="Optional free-text filter, e.g. a candidate name or email."),
+            "query": types.Schema(type=types.Type.STRING, description="Optional free-text filter, e.g. a candidate/employee name or email."),
         },
         required=["topic"],
     ),
@@ -109,20 +116,39 @@ TOOLS: tuple[HuumeTool, ...] = (
     ),
     _tool(
         "execute_approved_steps", "write",
-        "Approve and run steps of the currently staged onboarding plan. "
-        "Only call this after the admin has explicitly said to go ahead — "
-        "either with all of it ('approve everything', 'go ahead') or "
-        "specific steps by name ('just create the employee and send the "
-        "invite'). Pass step_keys naming exactly which steps they approved, "
-        "or omit it / pass an empty list to mean all remaining proposed "
-        "steps. Steps missing a required feature or integration are "
-        "skipped and reported, not executed — that's not an error.",
+        "Approve and run steps of a staged onboarding plan. Only call this "
+        "after the admin has explicitly said to go ahead on a LATER message "
+        "than the one that built the plan — either with all of it "
+        "('approve everything', 'go ahead') or specific steps by name "
+        "('just create the employee and send the invite'). Pass step_keys "
+        "naming exactly which steps they approved, or omit it / pass an "
+        "empty list to mean all remaining proposed steps. Pass offer_id "
+        "when more than one plan is active (see Current staged state); it "
+        "may be omitted only when exactly one plan is active. Steps missing "
+        "a required feature or integration are skipped and reported, not "
+        "executed — that's not an error.",
         properties={
+            "offer_id": types.Schema(type=types.Type.STRING, description="Which candidate's plan. Omit only if exactly one plan is active."),
             "step_keys": types.Schema(
                 type=types.Type.ARRAY, items=types.Schema(type=types.Type.STRING),
                 description="Plan step keys to approve+run, e.g. ['create_employee','portal_invitation']. Omit for all remaining proposed steps.",
             ),
         },
+    ),
+    _tool(
+        "cancel_staged", "write",
+        "Cancel a staged action or discard a staged onboarding plan when the "
+        "admin changes their mind. target='action' voids the pending "
+        "send_offer (it will no longer execute even if confirmed). "
+        "target='plan' discards the onboarding plan for offer_id — refused "
+        "once it's already executing or done, since steps that already ran "
+        "can't be undone from here. Pass offer_id whenever more than one "
+        "plan is active.",
+        properties={
+            "target": types.Schema(type=types.Type.STRING, enum=["action", "plan"]),
+            "offer_id": types.Schema(type=types.Type.STRING, description="Required for target='plan' when more than one plan is active."),
+        },
+        required=["target"],
     ),
     _tool(
         "finish", "finish",

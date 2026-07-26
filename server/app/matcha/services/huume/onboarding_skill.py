@@ -93,17 +93,39 @@ def build_onboarding_plan(
 # DB-bound: tool handlers (called from agent.py's function-calling loop)
 # ---------------------------------------------------------------------------
 
-async def lookup_context(*, company_id: UUID, topic: str, query: Optional[str] = None) -> dict[str, Any]:
+async def lookup_context(
+    *, company_id: UUID, topic: str, query: Optional[str] = None, features: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
     """Agent-facing tool wrapper — opens its own connection."""
     from app.database import get_connection
     async with get_connection() as conn:
-        return await _lookup_context_impl(conn, company_id=company_id, topic=topic, query=query)
+        return await _lookup_context_impl(conn, company_id=company_id, topic=topic, query=query, features=features)
 
 
-async def _lookup_context_impl(conn, *, company_id: UUID, topic: str, query: Optional[str] = None) -> dict[str, Any]:
+# topic -> feature flag gating it. Absent from this dict = no extra gate
+# (roster/templates/integrations/offers, which predate this and ride only
+# `huume` + the mode's own gate).
+_TOPIC_REQUIRED_FEATURE: dict[str, str] = {
+    "training": "training",
+    "training_status": "training",
+    "credentials": "credential_templates",
+    "employee": "employees",
+    "schedule": "employee_schedule",
+    "incidents": "incidents",
+}
+
+
+async def _lookup_context_impl(
+    conn, *, company_id: UUID, topic: str, query: Optional[str] = None, features: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
     """Read-only grounding lookup for a handful of topics. Never raises —
     degrades to an empty/estimate result so a lookup failure doesn't kill
-    the turn."""
+    the turn. Gate check runs BEFORE any SQL (three-state idiom from
+    `hr_pilot_corpus`: flag off -> {"module": "off"}, distinct from
+    on-but-empty -> an empty list)."""
+    required = _TOPIC_REQUIRED_FEATURE.get(topic)
+    if required and not (features or {}).get(required):
+        return {"topic": topic, "module": "off", "note": f"'{required}' isn't enabled for this company."}
     try:
         if topic == "roster":
             rows = await conn.fetch(
@@ -141,7 +163,83 @@ async def _lookup_context_impl(conn, *, company_id: UUID, topic: str, query: Opt
             )
             return {"topic": "training", "new_hire_rule_count": count or 0}
         if topic == "credentials":
-            return {"topic": "credentials", "note": "Credential requirements are resolved per employee from job title + work state when the plan is built."}
+            rows = await conn.fetch(
+                """
+                SELECT e.first_name, e.last_name, ct.label AS credential_label, ecr.status, ecr.due_date
+                FROM employee_credential_requirements ecr
+                JOIN employees e ON e.id = ecr.employee_id
+                JOIN credential_types ct ON ct.id = ecr.credential_type_id
+                WHERE e.org_id = $1 AND ecr.waived_at IS NULL
+                  AND ecr.status != 'verified'
+                  AND ecr.due_date IS NOT NULL AND ecr.due_date < CURRENT_DATE + INTERVAL '60 days'
+                ORDER BY ecr.due_date LIMIT 10
+                """,
+                company_id,
+            )
+            return {"topic": "credentials", "expiring_or_overdue": [dict(r) for r in rows]}
+        if topic == "employee":
+            row = await conn.fetchrow(
+                """
+                SELECT id, first_name, last_name, email, job_title, employment_status, start_date, work_state
+                FROM employees
+                WHERE org_id = $1 AND (($2::text IS NOT NULL AND (
+                    (first_name || ' ' || last_name) ILIKE '%' || $2 || '%' OR email ILIKE $2
+                )))
+                ORDER BY first_name LIMIT 1
+                """,
+                company_id, query,
+            )
+            if not row:
+                return {"topic": "employee", "match": None, "note": "No employee matched that name/email."}
+            return {"topic": "employee", "match": dict(row)}
+        if topic == "training_status":
+            counts = await conn.fetch(
+                "SELECT status, COUNT(*) FROM training_records WHERE company_id = $1 GROUP BY status",
+                company_id,
+            )
+            overdue = await conn.fetch(
+                """
+                SELECT e.first_name, e.last_name, tr.title, tr.due_date
+                FROM training_records tr JOIN employees e ON e.id = tr.employee_id
+                WHERE tr.company_id = $1 AND tr.status NOT IN ('completed', 'waived')
+                  AND tr.due_date IS NOT NULL AND tr.due_date < CURRENT_DATE
+                ORDER BY tr.due_date LIMIT 10
+                """,
+                company_id,
+            )
+            return {
+                "topic": "training_status",
+                "counts_by_status": {r["status"]: r["count"] for r in counts},
+                "overdue": [dict(r) for r in overdue],
+            }
+        if topic == "schedule":
+            rows = await conn.fetch(
+                """
+                SELECT s.id, s.role, s.starts_at, s.ends_at, s.required_staff,
+                       COUNT(a.id) AS assigned_count
+                FROM schedule_shifts s
+                LEFT JOIN schedule_shift_assignments a ON a.shift_id = s.id AND a.status != 'declined'
+                WHERE s.company_id = $1 AND s.status = 'published'
+                  AND s.starts_at > NOW() AND s.starts_at < NOW() + INTERVAL '7 days'
+                GROUP BY s.id ORDER BY s.starts_at LIMIT 20
+                """,
+                company_id,
+            )
+            return {"topic": "schedule", "upcoming_shifts": [dict(r) for r in rows]}
+        if topic == "incidents":
+            # Counts only — never select involved_employee_ids or free-text
+            # fields; this is a legal record, same rule as hr_pilot_corpus's
+            # incident: group.
+            rows = await conn.fetch(
+                """
+                SELECT incident_type, severity, COUNT(*) AS count
+                FROM ir_incidents
+                WHERE company_id = $1 AND occurred_at > NOW() - INTERVAL '90 days'
+                GROUP BY incident_type, severity
+                """,
+                company_id,
+            )
+            return {"topic": "incidents", "last_90_days_by_type_and_severity": [dict(r) for r in rows]}
         if topic == "offers":
             rows = await conn.fetch(
                 "SELECT id, candidate_name, candidate_email, position_title, status, created_at "

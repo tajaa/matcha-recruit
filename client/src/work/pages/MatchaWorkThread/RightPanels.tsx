@@ -112,8 +112,14 @@ export default function RightPanels({
           state={thread!.current_state}
           threadId={threadId!}
           lightMode={lightMode}
-          onStateUpdate={(plan) => {
-            setThread((prev) => prev ? { ...prev, current_state: { ...prev.current_state, huume_plan: plan } } : prev)
+          onStateUpdate={(offerId, plan) => {
+            setThread((prev) => prev ? {
+              ...prev,
+              current_state: {
+                ...prev.current_state,
+                huume_plans: { ...(prev.current_state.huume_plans as Record<string, unknown> | undefined), [offerId]: plan },
+              },
+            } : prev)
           }}
         />
       )}

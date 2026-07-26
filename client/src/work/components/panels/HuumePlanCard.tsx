@@ -7,7 +7,7 @@ interface HuumePlanCardProps {
   state: Record<string, unknown>
   threadId: string
   lightMode?: boolean
-  onStateUpdate: (plan: HuumePlan) => void
+  onStateUpdate: (offerId: string, plan: HuumePlan) => void
 }
 
 function StepRow({
@@ -17,7 +17,7 @@ function StepRow({
   const muted = lightMode ? 'text-zinc-500' : 'text-zinc-500'
 
   let icon = <Circle size={14} className={lightMode ? 'text-zinc-400' : 'text-zinc-600'} />
-  let interactive = step.status === 'proposed'
+  const interactive = step.status === 'proposed'
   if (step.status === 'approved') icon = <CheckCircle2 size={14} className="text-emerald-500" />
   else if (step.status === 'executing') icon = <Loader2 size={14} className="animate-spin text-amber-500" />
   else if (step.status === 'done') icon = <CheckCircle2 size={14} className="text-emerald-500" />
@@ -74,33 +74,19 @@ function OfferChip({ offer, lightMode }: { offer: HuumeOffer; lightMode?: boolea
   )
 }
 
-/** Right-panel card for a Huume thread — offer status chip + the staged
- * onboarding plan checklist. Mirrors InventoryPanel/ProjectPanel's shape:
- * reads straight off `thread.current_state`, calls back into the thread's
- * own state setter on a successful write (same pattern ProjectPanel uses
- * for its `onStateUpdate`). */
-export default function HuumePlanCard({ state, threadId, lightMode, onStateUpdate }: HuumePlanCardProps) {
-  const plan = state.huume_plan as HuumePlan | undefined
-  const offer = state.huume_offer as HuumeOffer | undefined
+/** One candidate's plan section — its own selection/busy/error state so
+ * approving/executing one candidate never disturbs another's UI. */
+function PlanSection({
+  offerId, plan, threadId, lightMode, onStateUpdate,
+}: { offerId: string; plan: HuumePlan; threadId: string; lightMode?: boolean; onStateUpdate: (offerId: string, plan: HuumePlan) => void }) {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [busy, setBusy] = useState<'approve' | 'execute' | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [lastSummary, setLastSummary] = useState<string | null>(null)
 
-  const th = { bg: lightMode ? 'bg-white' : 'bg-zinc-900', border: lightMode ? 'border-zinc-200' : 'border-zinc-800' }
-
-  if (!plan && !offer) {
-    return (
-      <div className={`flex w-full flex-1 min-w-0 items-center justify-center ${th.bg}`}>
-        <p className={`text-sm px-4 text-center ${lightMode ? 'text-zinc-500' : 'text-zinc-500'}`}>
-          Ask Huume to draft an offer or build an onboarding plan to see it here.
-        </p>
-      </div>
-    )
-  }
-
-  const proposedSteps = (plan?.steps ?? []).filter((s) => s.status === 'proposed')
-  const hasApproved = (plan?.steps ?? []).some((s) => s.status === 'approved')
+  const border = lightMode ? 'border-zinc-200' : 'border-zinc-800'
+  const proposedSteps = plan.steps.filter((s) => s.status === 'proposed')
+  const hasApproved = plan.steps.some((s) => s.status === 'approved')
 
   function toggle(key: string) {
     setSelected((prev) => {
@@ -112,12 +98,11 @@ export default function HuumePlanCard({ state, threadId, lightMode, onStateUpdat
   }
 
   async function handleApprove(all: boolean) {
-    if (!plan) return
     setBusy('approve'); setError(null)
     try {
       const keys = all ? undefined : Array.from(selected)
-      const { plan: updated } = await approveHuumePlan(threadId, keys)
-      onStateUpdate(updated)
+      const { plan: updated } = await approveHuumePlan(threadId, offerId, keys)
+      onStateUpdate(offerId, updated)
       setSelected(new Set())
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to approve steps')
@@ -129,8 +114,8 @@ export default function HuumePlanCard({ state, threadId, lightMode, onStateUpdat
   async function handleExecute() {
     setBusy('execute'); setError(null)
     try {
-      const { plan: updated, summary } = await executeHuumePlan(threadId)
-      onStateUpdate(updated)
+      const { plan: updated, summary } = await executeHuumePlan(threadId, offerId)
+      onStateUpdate(offerId, updated)
       setLastSummary(summary)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to execute plan')
@@ -140,61 +125,89 @@ export default function HuumePlanCard({ state, threadId, lightMode, onStateUpdat
   }
 
   return (
+    <div className={`border-b ${border}`}>
+      <div className={`px-3 py-2 border-b ${border}`}>
+        <div className={`text-xs font-medium ${lightMode ? 'text-zinc-800' : 'text-zinc-200'}`}>
+          Onboarding plan {plan.employee.first_name ? `— ${plan.employee.first_name}${plan.employee.last_name ? ' ' + plan.employee.last_name : ''}` : ''}
+        </div>
+        <div className={`text-[10px] ${lightMode ? 'text-zinc-500' : 'text-zinc-500'}`}>
+          Status: {plan.status}
+        </div>
+      </div>
+
+      <div>
+        {plan.steps.map((s) => (
+          <StepRow key={s.key} step={s} selected={selected.has(s.key)} onToggle={() => toggle(s.key)} lightMode={lightMode} />
+        ))}
+      </div>
+
+      <div className={`px-3 py-2.5 flex flex-col gap-1.5`}>
+        {error && <p className="text-[11px] text-red-500">{error}</p>}
+        {lastSummary && !error && <p className={`text-[11px] ${lightMode ? 'text-zinc-500' : 'text-zinc-500'}`}>{lastSummary}</p>}
+        <div className="flex gap-1.5">
+          <button
+            type="button"
+            disabled={busy !== null || proposedSteps.length === 0}
+            onClick={() => handleApprove(true)}
+            className="flex-1 flex items-center justify-center gap-1 text-xs font-medium px-2 py-1.5 rounded bg-orange-600 hover:bg-orange-500 disabled:bg-zinc-700 disabled:text-zinc-500 text-white"
+          >
+            {busy === 'approve' ? <Loader2 size={12} className="animate-spin" /> : 'Approve all'}
+          </button>
+          <button
+            type="button"
+            disabled={busy !== null || selected.size === 0}
+            onClick={() => handleApprove(false)}
+            className="flex-1 text-xs font-medium px-2 py-1.5 rounded border border-orange-700 text-orange-400 hover:bg-orange-950/40 disabled:opacity-40"
+          >
+            Approve selected
+          </button>
+        </div>
+        <button
+          type="button"
+          disabled={busy !== null || !hasApproved}
+          onClick={handleExecute}
+          className="flex items-center justify-center gap-1.5 text-xs font-medium px-2 py-1.5 rounded bg-emerald-600 hover:bg-emerald-500 disabled:bg-zinc-700 disabled:text-zinc-500 text-white"
+        >
+          {busy === 'execute' ? <Loader2 size={12} className="animate-spin" /> : <><PlayCircle size={13} /> Execute approved steps</>}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+/** Right-panel card for a Huume thread — offer status chip + one plan
+ * section per active candidate (plans are keyed by offer_id, since a
+ * thread can be onboarding several candidates at once). Mirrors
+ * InventoryPanel/ProjectPanel's shape: reads straight off
+ * `thread.current_state`, calls back into the thread's own state setter on
+ * a successful write. */
+export default function HuumePlanCard({ state, threadId, lightMode, onStateUpdate }: HuumePlanCardProps) {
+  const plans = (state.huume_plans as Record<string, HuumePlan> | undefined) ?? {}
+  const offer = state.huume_offer as HuumeOffer | undefined
+  const planEntries = Object.entries(plans)
+
+  const th = { bg: lightMode ? 'bg-white' : 'bg-zinc-900', border: lightMode ? 'border-zinc-200' : 'border-zinc-800' }
+
+  if (planEntries.length === 0 && !offer) {
+    return (
+      <div className={`flex w-full flex-1 min-w-0 items-center justify-center ${th.bg}`}>
+        <p className={`text-sm px-4 text-center ${lightMode ? 'text-zinc-500' : 'text-zinc-500'}`}>
+          Ask Huume to draft an offer or build an onboarding plan to see it here.
+        </p>
+      </div>
+    )
+  }
+
+  return (
     <div className={`flex w-full flex-1 min-w-0 flex-col ${th.bg} overflow-y-auto`}>
       <div className={`px-3 py-2.5 border-b ${th.border}`}>
         <div className={`text-xs font-medium uppercase tracking-wide ${lightMode ? 'text-zinc-500' : 'text-zinc-500'}`}>Huume</div>
         {offer && <div className="mt-1.5"><OfferChip offer={offer} lightMode={lightMode} /></div>}
       </div>
 
-      {plan && (
-        <>
-          <div className={`px-3 py-2 border-b ${th.border}`}>
-            <div className={`text-xs font-medium ${lightMode ? 'text-zinc-800' : 'text-zinc-200'}`}>
-              Onboarding plan {plan.employee.first_name ? `— ${plan.employee.first_name}${plan.employee.last_name ? ' ' + plan.employee.last_name : ''}` : ''}
-            </div>
-            <div className={`text-[10px] ${lightMode ? 'text-zinc-500' : 'text-zinc-500'}`}>
-              Status: {plan.status}
-            </div>
-          </div>
-
-          <div className="flex-1 min-h-0 overflow-y-auto">
-            {plan.steps.map((s) => (
-              <StepRow key={s.key} step={s} selected={selected.has(s.key)} onToggle={() => toggle(s.key)} lightMode={lightMode} />
-            ))}
-          </div>
-
-          <div className={`px-3 py-2.5 border-t ${th.border} flex flex-col gap-1.5`}>
-            {error && <p className="text-[11px] text-red-500">{error}</p>}
-            {lastSummary && !error && <p className={`text-[11px] ${lightMode ? 'text-zinc-500' : 'text-zinc-500'}`}>{lastSummary}</p>}
-            <div className="flex gap-1.5">
-              <button
-                type="button"
-                disabled={busy !== null || proposedSteps.length === 0}
-                onClick={() => handleApprove(true)}
-                className="flex-1 flex items-center justify-center gap-1 text-xs font-medium px-2 py-1.5 rounded bg-orange-600 hover:bg-orange-500 disabled:bg-zinc-700 disabled:text-zinc-500 text-white"
-              >
-                {busy === 'approve' ? <Loader2 size={12} className="animate-spin" /> : 'Approve all'}
-              </button>
-              <button
-                type="button"
-                disabled={busy !== null || selected.size === 0}
-                onClick={() => handleApprove(false)}
-                className="flex-1 text-xs font-medium px-2 py-1.5 rounded border border-orange-700 text-orange-400 hover:bg-orange-950/40 disabled:opacity-40"
-              >
-                Approve selected
-              </button>
-            </div>
-            <button
-              type="button"
-              disabled={busy !== null || !hasApproved}
-              onClick={handleExecute}
-              className="flex items-center justify-center gap-1.5 text-xs font-medium px-2 py-1.5 rounded bg-emerald-600 hover:bg-emerald-500 disabled:bg-zinc-700 disabled:text-zinc-500 text-white"
-            >
-              {busy === 'execute' ? <Loader2 size={12} className="animate-spin" /> : <><PlayCircle size={13} /> Execute approved steps</>}
-            </button>
-          </div>
-        </>
-      )}
+      {planEntries.map(([offerId, plan]) => (
+        <PlanSection key={offerId} offerId={offerId} plan={plan} threadId={threadId} lightMode={lightMode} onStateUpdate={onStateUpdate} />
+      ))}
     </div>
   )
 }

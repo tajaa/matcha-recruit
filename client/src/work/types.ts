@@ -526,6 +526,11 @@ export interface HuumePlan {
   steps: HuumePlanStep[]
 }
 
+/** `current_state.huume_plans` — keyed by offer_id so a thread can be
+ * onboarding several candidates at once. Replaces the old singular
+ * `huume_plan` key (pre-release feature, no back-compat needed). */
+export type HuumePlans = Record<string, HuumePlan>
+
 export interface MWMessage {
   id: string
   thread_id: string

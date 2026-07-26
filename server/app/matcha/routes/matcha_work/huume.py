@@ -1,7 +1,14 @@
 """Huume's plan approve/execute REST surface — the UI-button counterpart to
 approving/executing an onboarding plan from chat (agent.py's
-`execute_approved_steps` tool). Both paths funnel through the same pure
-verdict (`actions.evaluate_plan_step`) and executor (`actions.execute_plan_steps`).
+`execute_approved_steps` tool). Both paths funnel through the same locked
+executor (`store.execute_plan_locked`, which wraps `actions.execute_plan_steps`
+under a per-(thread, offer) advisory lock — see that function's docstring).
+
+Plans are keyed by offer_id (`current_state.huume_plans`) since a thread can
+be onboarding several candidates at once — both routes accept an optional
+`offer_id` and fall back to "the sole active plan" when omitted (`actions.
+resolve_plan_offer_id`, the same resolver the chat tool path uses), 400ing
+with the candidate list when more than one plan is active and no id was given.
 
 Mounted at `/matcha-work` (this package's prefix) alongside every other
 matcha_work route — `require_feature("huume")` on top of the package's own
@@ -28,9 +35,20 @@ router = APIRouter(dependencies=[Depends(require_feature("huume"))])
 
 
 class ApprovePlanRequest(BaseModel):
+    offer_id: Optional[str] = Field(
+        default=None,
+        description="Which candidate's plan. Required unless the thread has exactly one active plan.",
+    )
     step_keys: Optional[list[str]] = Field(
         default=None,
         description="Plan step keys to approve. Omit or empty for every step still 'proposed'.",
+    )
+
+
+class ExecutePlanRequest(BaseModel):
+    offer_id: Optional[str] = Field(
+        default=None,
+        description="Which candidate's plan. Required unless the thread has exactly one active plan.",
     )
 
 
@@ -44,6 +62,17 @@ async def _get_owned_thread(thread_id: UUID, current_user: CurrentUser) -> dict:
     return thread
 
 
+def _resolve_offer_id(current_state: dict, requested: Optional[str]) -> str:
+    """Plans are keyed by offer_id (a thread may be onboarding several
+    candidates at once) — resolve which one this call means, the same rule
+    the chat tool path uses via `actions.resolve_plan_offer_id`."""
+    plans = (current_state or {}).get("huume_plans") or {}
+    offer_id, err = huume_actions.resolve_plan_offer_id(plans, requested, built_this_turn=set())
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+    return offer_id
+
+
 @router.post("/threads/{thread_id}/huume/plan/approve")
 async def approve_huume_plan(
     thread_id: UUID,
@@ -52,71 +81,56 @@ async def approve_huume_plan(
 ):
     """Flip named (or all proposed) plan steps to `approved`. Does not
     execute anything — see /plan/execute."""
-    await _get_owned_thread(thread_id, current_user)
+    thread = await _get_owned_thread(thread_id, current_user)
+    offer_id = _resolve_offer_id(thread.get("current_state") or {}, payload.offer_id)
 
     def mutator(current_plan):
         if not isinstance(current_plan, dict) or not current_plan.get("steps"):
-            raise HTTPException(status_code=400, detail="No onboarding plan is staged on this thread yet.")
+            raise HTTPException(status_code=400, detail="No onboarding plan is staged for that offer.")
         return huume_actions.mark_steps_approved(current_plan, payload.step_keys)
 
     try:
-        plan = await huume_store.update_huume_plan(thread_id, mutator)
+        plan = await huume_store.update_huume_plan(thread_id, offer_id, mutator)
     except ValueError:
         raise HTTPException(status_code=404, detail="Thread not found")
-    return {"plan": plan}
+    return {"plan": plan, "offer_id": offer_id}
 
 
 @router.post("/threads/{thread_id}/huume/plan/execute")
 async def execute_huume_plan(
     thread_id: UUID,
+    payload: ExecutePlanRequest,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Run every `approved` step in the staged plan. Steps missing a
     required feature/integration are skipped and reported, not executed —
     that isn't an error. Idempotent: a step with a `record_id` already set
-    is refused as "already done" rather than re-run."""
+    is refused as "already done" rather than re-run.
+
+    Delegates to `store.execute_plan_locked` — the SAME path the chat tool's
+    execute_approved_steps handler uses, under a per-(thread, offer)
+    advisory lock, so a chat-driven execute and a UI-button execute for the
+    same candidate can never race and clobber each other's results."""
     thread = await _get_owned_thread(thread_id, current_user)
     company_id = thread["company_id"]
-
-    current_plan = (thread.get("current_state") or {}).get("huume_plan")
-    if not isinstance(current_plan, dict) or not current_plan.get("steps"):
-        raise HTTPException(status_code=400, detail="No onboarding plan is staged on this thread yet.")
+    offer_id = _resolve_offer_id(thread.get("current_state") or {}, payload.offer_id)
 
     features, integrations = await huume_store.get_thread_features_and_integrations(company_id)
-    exec_result = await huume_actions.execute_plan_steps(
-        company_id=company_id, actor_user_id=current_user.id, plan=current_plan,
-        features=features, integrations=integrations,
-    )
-    executed_by_key = {s["key"]: s for s in exec_result.plan.get("steps", [])}
-
-    def mutator(latest_plan):
-        # Merge the just-executed step results onto whatever the plan looks
-        # like right now (a concurrent approve click may have landed between
-        # our unlocked read above and this locked write) — overlay only the
-        # steps THIS call actually touched, by key, rather than overwriting
-        # the whole plan wholesale.
-        base = latest_plan if isinstance(latest_plan, dict) and latest_plan.get("steps") else current_plan
-        merged_steps = []
-        for step in base.get("steps", []):
-            touched = executed_by_key.get(step.get("key"))
-            merged_steps.append(touched if touched else step)
-        merged = {**base, "steps": merged_steps, "employee_id": exec_result.plan.get("employee_id") or base.get("employee_id")}
-        if all(s.get("status") in ("done", "skipped", "failed") for s in merged_steps):
-            merged["status"] = "done"
-        return merged
-
     try:
-        saved_plan = await huume_store.update_huume_plan(thread_id, mutator)
-    except ValueError:
-        raise HTTPException(status_code=404, detail="Thread not found")
+        exec_result = await huume_store.execute_plan_locked(
+            thread_id=thread_id, company_id=company_id, actor_user_id=current_user.id, offer_id=offer_id,
+            features=features, integrations=integrations, approve_steps=None,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
     summary = "; ".join(exec_result.summaries) if exec_result.summaries else "No approved steps were ready to run."
     try:
         await doc_svc.add_message(
             thread_id, "assistant", f"Ran the approved onboarding steps: {summary}",
-            metadata={"huume_event": "plan_executed"},
+            metadata={"huume_event": "plan_executed", "offer_id": offer_id},
         )
     except Exception:
         logger.warning("huume: failed to post plan-execution summary message for thread %s", thread_id, exc_info=True)
 
-    return {"plan": saved_plan, "summary": summary}
+    return {"plan": exec_result.plan, "summary": summary, "offer_id": offer_id}

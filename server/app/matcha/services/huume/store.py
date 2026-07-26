@@ -3,8 +3,12 @@ audit timeline) and the row-locked plan mutator used by the approve/execute
 routes.
 
 `huume_runs`/`huume_steps` are distinct from `mw_threads.current_state`,
-which holds the PENDING intent (`huume_action`/`huume_plan`) — see the
+which holds the PENDING intent (`huume_action`/`huume_plans`) — see the
 huume03 migration docstring for the full justification.
+
+Plans are keyed by `offer_id` in `current_state.huume_plans` (a thread can be
+onboarding more than one candidate at once — each candidate's plan is its own
+key, so building/approving/executing one never touches another's).
 """
 
 from __future__ import annotations
@@ -49,15 +53,20 @@ async def complete_run(*, run_id: UUID, status: str, model_calls: int, token_usa
         )
 
 
-async def update_huume_plan(thread_id: UUID, mutator: Callable[[Optional[dict]], dict]) -> dict:
-    """Row-locked read-modify-write of `current_state.huume_plan`.
+async def update_huume_plan(
+    thread_id: UUID, offer_id: str, mutator: Callable[[Optional[dict]], Optional[dict]],
+) -> Optional[dict]:
+    """Row-locked read-modify-write of `current_state.huume_plans[offer_id]`.
 
     `apply_update` (matcha_work_document) merges top-level keys only — two
-    concurrent approve calls each doing their own `apply_update({"huume_plan":
-    ...})` would race on a read-then-write with no lock in between. This
-    holds `mw_threads` FOR UPDATE for the whole read-mutate-write so the
-    approve and execute routes (and the agent loop's own plan-building tool)
-    can't clobber each other's step-status edits.
+    concurrent writers each doing their own `apply_update({"huume_plans": {...}})`
+    would race on a read-then-write with no lock in between. This holds
+    `mw_threads` FOR UPDATE for the whole read-mutate-write so the approve
+    and execute routes (and the agent loop's own plan-building tool) can't
+    clobber each other's step-status edits, and only ever touch the one
+    offer's key — never the whole `huume_plans` dict.
+
+    `mutator` returning `None` deletes the key (used by cancel_staged).
     """
     async with get_connection() as conn:
         async with conn.transaction():
@@ -73,9 +82,14 @@ async def update_huume_plan(thread_id: UUID, mutator: Callable[[Optional[dict]],
             else:
                 state = dict(raw_state or {})
 
-            current_plan = state.get("huume_plan")
+            plans = dict(state.get("huume_plans") or {})
+            current_plan = plans.get(offer_id)
             new_plan = mutator(current_plan)
-            state["huume_plan"] = new_plan
+            if new_plan is None:
+                plans.pop(offer_id, None)
+            else:
+                plans[offer_id] = new_plan
+            state["huume_plans"] = plans
             new_version = row["version"] + 1
 
             await conn.execute(
@@ -88,6 +102,66 @@ async def update_huume_plan(thread_id: UUID, mutator: Callable[[Optional[dict]],
                 thread_id, new_version, json.dumps(state, default=str), "Huume plan updated",
             )
             return new_plan
+
+
+async def execute_plan_locked(
+    *,
+    thread_id: UUID,
+    company_id: UUID,
+    actor_user_id: Optional[UUID],
+    offer_id: str,
+    features: dict[str, Any],
+    integrations: dict[str, bool],
+    approve_steps: Optional[list[str]] = None,
+) -> "actions.PlanExecutionResult":
+    """THE single plan-execution path — both the REST route
+    (`routes/matcha_work/huume.py`) and the chat tool
+    (`agent.py`'s execute_approved_steps handler) call this, so two callers
+    can never run the same plan's steps concurrently and clobber each
+    other's `record_id`s (gap 6 in the Huume hardening review).
+
+    Takes a Postgres SESSION advisory lock keyed on (thread_id, offer_id) —
+    deliberately NOT a row lock/transaction, because plan steps call slow
+    external provisioning (Google Workspace/Slack) and must not hold a
+    transaction open for that long. The lock is scoped to its own dedicated
+    connection so it isn't released early by pool connection reuse.
+
+    `approve_steps`: None means "don't newly approve anything, just run
+    whatever is already `approved`" (the REST execute route's contract —
+    approval is a separate call). A list (possibly empty) means "approve
+    these step keys first" (empty = approve all still-`proposed` steps) —
+    the chat tool's `execute_approved_steps(step_keys=...)` contract, which
+    folds approve+execute into one turn.
+    """
+    from . import actions
+
+    async with get_connection() as conn:
+        await conn.execute("SELECT pg_advisory_lock(hashtext($1), hashtext($2))", str(thread_id), offer_id)
+        try:
+            row = await conn.fetchrow("SELECT current_state FROM mw_threads WHERE id = $1", thread_id)
+            if row is None:
+                raise ValueError("Thread not found")
+            raw_state = row["current_state"]
+            state = json.loads(raw_state) if isinstance(raw_state, str) else dict(raw_state or {})
+            plan = (state.get("huume_plans") or {}).get(offer_id)
+            if not isinstance(plan, dict) or not plan.get("steps"):
+                raise ValueError(f"No onboarding plan is staged for offer {offer_id}.")
+
+            if approve_steps is not None:
+                plan = actions.mark_steps_approved(plan, approve_steps or None)
+
+            exec_result = await actions.execute_plan_steps(
+                company_id=company_id, actor_user_id=actor_user_id, plan=plan,
+                features=features, integrations=integrations,
+            )
+
+            merged = await update_huume_plan(
+                thread_id, offer_id,
+                lambda current: actions.merge_executed_steps(current, exec_result.plan),
+            )
+            return actions.PlanExecutionResult(plan=merged, summaries=exec_result.summaries)
+        finally:
+            await conn.execute("SELECT pg_advisory_unlock(hashtext($1), hashtext($2))", str(thread_id), offer_id)
 
 
 async def get_thread_features_and_integrations(company_id: UUID) -> tuple[dict[str, Any], dict[str, bool]]:

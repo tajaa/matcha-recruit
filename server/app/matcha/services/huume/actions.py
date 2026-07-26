@@ -7,13 +7,16 @@ executors do the writes. The matcha-work skill engine does not feature- or
 role-gate execution on its own — every guard a normal record write would get
 must be re-asserted here.
 
-Two staged things live in `mw_threads.current_state`:
+Staged things live in `mw_threads.current_state`:
   - `huume_action` — a single staged action (currently only `send_offer`).
-  - `huume_plan`   — the onboarding plan staged after an offer is accepted.
+  - `huume_plans`  — onboarding plans staged after an offer is accepted,
+    keyed by `offer_id` (a thread can be onboarding several candidates at
+    once — each plan is independent).
 
 Both follow the same two-turn rule: the model stages a proposal on one turn
 and the loop executes it only after an explicit confirmation on a LATER turn
-(never within the same turn that staged it).
+(never within the same turn that staged it) — see `resolve_plan_offer_id`'s
+`built_this_turn` guard below for how that's enforced for plans specifically.
 """
 
 from __future__ import annotations
@@ -122,6 +125,99 @@ def evaluate_huume_action(
         return HuumeVerdict(kind="refuse", message="There's no offer to send.")
 
     return HuumeVerdict(kind="proceed", message="", action=dict(staged_action))
+
+
+def evaluate_plan_execution(*, role: Optional[str], features: dict[str, Any]) -> Optional[str]:
+    """Pure. None if the caller may execute plan steps at all (independent of
+    which plan/offer), else a refusal reason. Re-asserted on the chat tool
+    path (`agent.py`'s execute_approved_steps handler) since the skill engine
+    gates nothing itself — the REST route already has this via
+    `require_admin_or_client`, so this mirrors that check for parity."""
+    features = features or {}
+    if (role or "").strip().lower() not in _ALLOWED_ROLES:
+        return "Only a business admin can run onboarding plan steps."
+    if not features.get("huume"):
+        return "Huume isn't enabled for this company."
+    if not features.get("matcha_work"):
+        return "Matcha Work isn't enabled for this company."
+    return None
+
+
+_ACTIVE_PLAN_STATUSES = {"proposed", "approved", "executing"}
+
+
+def resolve_plan_offer_id(
+    pre_turn_plans: dict[str, dict[str, Any]],
+    requested: Optional[str],
+    built_this_turn: set[str],
+) -> tuple[Optional[str], Optional[str]]:
+    """Pure. Returns (offer_id, error). `pre_turn_plans` is the turn-start
+    snapshot (frozen before any tool call ran) — a plan built earlier in
+    THIS turn is deliberately absent from it, so requesting execution of one
+    always fails the lookup here rather than needing a separate check. This
+    mirrors send_offer's `pre_turn_action` freeze: nothing staged this turn
+    can be executed this turn.
+    """
+    if requested:
+        if requested in built_this_turn:
+            return None, (
+                "That plan was just built this turn — review the steps and "
+                "approve/execute on your next message."
+            )
+        if requested not in pre_turn_plans:
+            return None, f"No onboarding plan is staged for offer {requested}."
+        return requested, None
+
+    active = [
+        oid for oid, plan in pre_turn_plans.items()
+        if isinstance(plan, dict) and plan.get("status") in _ACTIVE_PLAN_STATUSES
+    ]
+    if not active:
+        return None, "There's no onboarding plan staged yet — build one first."
+    if len(active) > 1:
+        names = ", ".join(
+            f"{oid} ({(pre_turn_plans[oid].get('employee') or {}).get('first_name') or 'candidate'})"
+            for oid in active
+        )
+        return None, f"More than one plan is active — say which offer: {names}."
+    return active[0], None
+
+
+def evaluate_cancel_plan(plan: Optional[dict[str, Any]]) -> Optional[str]:
+    """Pure. None if `plan` may be discarded, else a refusal reason."""
+    if not isinstance(plan, dict):
+        return "There's no plan staged for that offer."
+    if plan.get("status") in ("executing", "done"):
+        return "That plan has already run (in full or in part) — there's nothing left to cancel."
+    return None
+
+
+def merge_executed_steps(base_plan: Optional[dict[str, Any]], executed_plan: dict[str, Any]) -> dict[str, Any]:
+    """Pure. Overlay `executed_plan`'s steps onto whatever `base_plan` looks
+    like RIGHT NOW, by step key — but keep the base copy of any step the
+    executed run left `proposed` (untouched by this execution), so a
+    concurrent approve that landed between the unlocked read and this
+    locked write isn't clobbered. This is the merge both the REST route and
+    the chat tool path share via `store.execute_plan_locked`."""
+    base = dict(base_plan) if isinstance(base_plan, dict) and base_plan.get("steps") else executed_plan
+    executed_by_key = {s.get("key"): s for s in executed_plan.get("steps", [])}
+    merged_steps = []
+    for step in base.get("steps", []):
+        touched = executed_by_key.get(step.get("key"))
+        if touched and touched.get("status") != "proposed":
+            merged_steps.append(touched)
+        else:
+            merged_steps.append(step)
+    merged = {
+        **base,
+        "steps": merged_steps,
+        "employee_id": executed_plan.get("employee_id") or base.get("employee_id"),
+    }
+    if all(s.get("status") in ("done", "skipped", "failed") for s in merged_steps):
+        merged["status"] = "done"
+    else:
+        merged["status"] = "executing"
+    return merged
 
 
 def evaluate_plan_step(

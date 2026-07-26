@@ -12,6 +12,17 @@ record, and every action with real consequences (`send_offer`,
 `actions.py` before it does anything. The loop itself never decides
 authorization — it calls `actions.evaluate_*` and reports the verdict.
 
+Onboarding plans are keyed by `offer_id` (`current_state.huume_plans`), so a
+thread can be mid-onboarding for several candidates at once. Plan writes
+(`build_onboarding_plan`, `execute_approved_steps`, `cancel_staged` on a
+plan) go through `store.update_huume_plan`/`store.execute_plan_locked`
+directly — NOT through `state_updates` — because `state_updates` is merged
+into `current_state` wholesale at the END of the turn (see
+`_run_huume_dispatch`'s `apply_update` call), which would let two plans (or
+a plan build racing a plan execute) clobber each other. Everything else
+(`huume_action`, `huume_offer`) still flows through `state_updates` as
+before.
+
 Contract with the caller (messaging.py's `_run_huume_dispatch`): this is an
 async generator of dicts, `{"type": "status"|"step"|"error"|"huume_result"}`.
 Exactly one `huume_result` frame is always emitted last, carrying whatever
@@ -34,7 +45,7 @@ from app.core.services.genai_client import get_genai_client
 from app.core.services.rate_limiter import GeminiRateLimiter, RateLimitExceeded
 
 from . import actions, onboarding_skill, store
-from .prompt import build_system_prompt
+from .prompt import build_state_block, build_system_prompt
 from .tools import TOOLS_BY_NAME, tool_declarations
 
 logger = logging.getLogger(__name__)
@@ -61,7 +72,10 @@ class _StepRecorder:
         return step
 
 
-def _to_contents(history: list[dict[str, Any]]) -> list[types.Content]:
+_ATTACHMENT_TEXT_CAP = 20_000
+
+
+def _to_contents(history: list[dict[str, Any]], attachment_texts: Optional[list[str]] = None) -> list[types.Content]:
     contents: list[types.Content] = []
     for msg in history[-_MAX_HISTORY_MESSAGES:]:
         role = "model" if msg.get("role") == "assistant" else "user"
@@ -71,6 +85,20 @@ def _to_contents(history: list[dict[str, Any]]) -> list[types.Content]:
         contents.append(types.Content(role=role, parts=[types.Part(text=text)]))
     if not contents:
         contents.append(types.Content(role="user", parts=[types.Part(text="Hello.")]))
+
+    # Attached file text (from `messaging.py`'s file_context_parts) rides as
+    # an extra Part on the final user turn — images are out of scope here
+    # (unlike the normal skill engine, which gets multimodal image parts via
+    # fetch_image_parts_for_messages; Huume's tool-calling loop doesn't wire
+    # that path yet).
+    if attachment_texts:
+        joined = "\n\n".join(t for t in attachment_texts if t)[:_ATTACHMENT_TEXT_CAP]
+        if joined:
+            last = contents[-1]
+            if last.role == "user":
+                last.parts.append(types.Part(text=f"[Attached file(s)]\n{joined}"))
+            else:
+                contents.append(types.Content(role="user", parts=[types.Part(text=f"[Attached file(s)]\n{joined}")]))
     return contents
 
 
@@ -95,12 +123,17 @@ async def run_huume_turn(
     history: list[dict[str, Any]],
     current_state: dict[str, Any],
     company_name: str,
+    attachment_texts: Optional[list[str]] = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """Run one Huume turn. Yields `status`/`step`/`error` frames, then
     exactly one final `huume_result` frame:
         {"message": str, "steps": [...], "token_usage": {...}, "state_updates": {...}}
-    `state_updates` is applied by the caller via matcha_work_document.apply_update
-    — this module never writes mw_threads itself.
+    `state_updates` (only ever `huume_action`/`huume_offer`) is applied by
+    the caller via matcha_work_document.apply_update. Onboarding plan writes
+    (`huume_plans[offer_id]`) go straight through `store.update_huume_plan`/
+    `store.execute_plan_locked` mid-turn instead — see the module docstring
+    for why. The caller re-reads `current_state` after the turn to pick up
+    those mid-turn writes.
     """
     rate_limiter = GeminiRateLimiter()
     recorder = _StepRecorder()
@@ -117,9 +150,13 @@ async def run_huume_turn(
 
     # Frozen at turn start — the two-turn confirm check for `send_offer`
     # compares against THIS snapshot, never against state a tool call in
-    # this same turn just wrote.
+    # this same turn just wrote. `pre_turn_plans` gives the same guarantee
+    # for execute_approved_steps: a plan built earlier in this same turn is
+    # absent here, so `actions.resolve_plan_offer_id` structurally can't
+    # resolve it to something executable this turn.
     pre_turn_action = current_state.get("huume_action")
-    pre_turn_plan = current_state.get("huume_plan")
+    pre_turn_plans: dict[str, dict[str, Any]] = dict(current_state.get("huume_plans") or {})
+    built_this_turn: set[str] = set()
 
     async def call_tool(name: str, args: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
         """Returns (function_response payload, step dict)."""
@@ -127,6 +164,7 @@ async def run_huume_turn(
             if name == "lookup_context":
                 result = await onboarding_skill.lookup_context(
                     company_id=company_id, topic=str(args.get("topic") or ""), query=args.get("query"),
+                    features=features,
                 )
                 step = recorder.record(tool=name, kind="read", label=f"Looked up {args.get('topic')}", status="ok")
                 return _json_safe(result), step
@@ -182,7 +220,15 @@ async def run_huume_turn(
                 result = await onboarding_skill.build_plan_for_offer(company_id=company_id, offer_id=str(args.get("offer_id") or ""))
                 ok = result.get("status") == "ok"
                 if ok:
-                    state_updates["huume_plan"] = result["plan"]
+                    plan = result["plan"]
+                    offer_id = plan["offer_id"]
+                    # Locked per-offer write, NOT state_updates — a second
+                    # candidate's plan (built later this same turn or by a
+                    # concurrent turn) must never clobber this one via the
+                    # turn-end wholesale apply_update merge.
+                    await store.update_huume_plan(thread_id, offer_id, lambda _cur, _plan=plan: _plan)
+                    built_this_turn.add(offer_id)
+                    state_updates["huume_offer"] = {"offer_id": offer_id, "status": "accepted"}
                 step = recorder.record(
                     tool=name, kind="staged", label="Built onboarding plan" if ok else "Could not build onboarding plan",
                     status="ok" if ok else "error", detail=result.get("message"),
@@ -190,20 +236,60 @@ async def run_huume_turn(
                 return _json_safe(result), step
 
             if name == "execute_approved_steps":
-                plan = state_updates.get("huume_plan") or pre_turn_plan
-                if not isinstance(plan, dict) or not plan.get("steps"):
-                    step = recorder.record(tool=name, kind="write", label="No onboarding plan is staged", status="rejected")
-                    return {"status": "refused", "message": "There's no onboarding plan staged yet — build one first."}, step
-                step_keys = args.get("step_keys") or None
-                approved_plan = actions.mark_steps_approved(plan, step_keys)
-                exec_result = await actions.execute_plan_steps(
-                    company_id=company_id, actor_user_id=user_id, plan=approved_plan,
-                    features=features, integrations=integrations,
+                reason = actions.evaluate_plan_execution(role=user_role, features=features)
+                if reason:
+                    step = recorder.record(tool=name, kind="staged", label="Execute refused", status="rejected", detail=reason)
+                    return {"status": "refused", "message": reason}, step
+
+                offer_id, err = actions.resolve_plan_offer_id(pre_turn_plans, args.get("offer_id"), built_this_turn)
+                if err:
+                    step = recorder.record(tool=name, kind="staged", label="Execute refused", status="rejected", detail=err)
+                    return {"status": "refused", "message": err}, step
+
+                exec_result = await store.execute_plan_locked(
+                    thread_id=thread_id, company_id=company_id, actor_user_id=user_id, offer_id=offer_id,
+                    features=features, integrations=integrations, approve_steps=(args.get("step_keys") or []),
                 )
-                state_updates["huume_plan"] = exec_result.plan
                 summary = "; ".join(exec_result.summaries) if exec_result.summaries else "No steps were approved to run."
                 step = recorder.record(tool=name, kind="write", label="Executed onboarding plan steps", status="ok", detail=summary)
-                return {"status": "ok", "summary": summary, "plan": _json_safe(exec_result.plan)}, step
+                return {"status": "ok", "summary": summary, "offer_id": offer_id, "plan": _json_safe(exec_result.plan)}, step
+
+            if name == "cancel_staged":
+                target = str(args.get("target") or "")
+                if target == "action":
+                    staged = state_updates.get("huume_action") or pre_turn_action
+                    if not isinstance(staged, dict) or staged.get("status") != "proposed":
+                        step = recorder.record(tool=name, kind="staged", label="Nothing to cancel", status="rejected")
+                        return {"status": "refused", "message": "There's nothing staged to cancel."}, step
+                    state_updates["huume_action"] = {**staged, "status": "cancelled"}
+                    step = recorder.record(tool=name, kind="staged", label="Cancelled staged send", status="ok")
+                    return {"status": "ok", "message": "Cancelled — that offer will not be sent."}, step
+
+                if target == "plan":
+                    offer_id, err = actions.resolve_plan_offer_id(pre_turn_plans, args.get("offer_id"), built_this_turn)
+                    if err:
+                        step = recorder.record(tool=name, kind="staged", label="Cancel refused", status="rejected", detail=err)
+                        return {"status": "refused", "message": err}, step
+
+                    refusal: Optional[str] = None
+
+                    def _mutator(current, _offer_id=offer_id):
+                        nonlocal refusal
+                        reason = actions.evaluate_cancel_plan(current)
+                        if reason:
+                            refusal = reason
+                            return current
+                        return None
+
+                    await store.update_huume_plan(thread_id, offer_id, _mutator)
+                    if refusal:
+                        step = recorder.record(tool=name, kind="staged", label="Cancel refused", status="rejected", detail=refusal)
+                        return {"status": "refused", "message": refusal}, step
+                    step = recorder.record(tool=name, kind="staged", label="Cancelled onboarding plan", status="ok")
+                    return {"status": "ok", "message": "Discarded that onboarding plan."}, step
+
+                step = recorder.record(tool=name, kind="write", label=f"Unknown cancel target '{target}'", status="error")
+                return {"error": f"unknown target '{target}'"}, step
 
             step = recorder.record(tool=name, kind="write", label=f"Unknown tool '{name}'", status="error")
             return {"error": f"unknown tool '{name}'"}, step
@@ -215,9 +301,12 @@ async def run_huume_turn(
     client = get_genai_client()
     config = types.GenerateContentConfig(
         tools=[types.Tool(function_declarations=tool_declarations())],
-        system_instruction=build_system_prompt(company_name=company_name or "your company", today=date.today().isoformat()),
+        system_instruction=build_system_prompt(
+            company_name=company_name or "your company", today=date.today().isoformat(),
+            state_block=build_state_block(current_state),
+        ),
     )
-    contents = _to_contents(history)
+    contents = _to_contents(history, attachment_texts)
 
     try:
         while True:

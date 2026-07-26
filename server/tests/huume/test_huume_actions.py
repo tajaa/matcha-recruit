@@ -7,9 +7,13 @@ tests/matcha_work/test_hr_pilot_actions.py for the sibling hr_pilot envelope.
 """
 
 from app.matcha.services.huume.actions import (
+    evaluate_cancel_plan,
     evaluate_huume_action,
+    evaluate_plan_execution,
     evaluate_plan_step,
     mark_steps_approved,
+    merge_executed_steps,
+    resolve_plan_offer_id,
 )
 
 FEATURES_ON = {"huume": True, "matcha_work": True, "offer_letters": True, "employees": True}
@@ -191,3 +195,138 @@ class TestMarkStepsApproved:
         original = self._plan()
         mark_steps_approved(original, None)
         assert original["steps"][0]["status"] == "proposed"
+
+
+class TestEvaluatePlanExecution:
+    def test_role_client_with_flags_ok(self):
+        assert evaluate_plan_execution(role="client", features=FEATURES_ON) is None
+
+    def test_role_admin_ok(self):
+        assert evaluate_plan_execution(role="admin", features=FEATURES_ON) is None
+
+    def test_employee_role_refused(self):
+        reason = evaluate_plan_execution(role="employee", features=FEATURES_ON)
+        assert reason is not None and "admin" in reason.lower()
+
+    def test_none_role_refused(self):
+        assert evaluate_plan_execution(role=None, features=FEATURES_ON) is not None
+
+    def test_huume_flag_off_refused(self):
+        reason = evaluate_plan_execution(role="client", features={**FEATURES_ON, "huume": False})
+        assert reason is not None and "huume" in reason.lower()
+
+    def test_matcha_work_flag_off_refused(self):
+        reason = evaluate_plan_execution(role="client", features={**FEATURES_ON, "matcha_work": False})
+        assert reason is not None and "matcha work" in reason.lower()
+
+
+class TestResolvePlanOfferId:
+    def _plans(self, **statuses):
+        return {
+            oid: {"status": status, "employee": {"first_name": oid}}
+            for oid, status in statuses.items()
+        }
+
+    def test_explicit_hit(self):
+        plans = self._plans(o1="proposed")
+        oid, err = resolve_plan_offer_id(plans, "o1", built_this_turn=set())
+        assert oid == "o1" and err is None
+
+    def test_explicit_missing_errors(self):
+        plans = self._plans(o1="proposed")
+        oid, err = resolve_plan_offer_id(plans, "o2", built_this_turn=set())
+        assert oid is None
+        assert "o2" in err
+
+    def test_explicit_built_this_turn_refused_distinctly(self):
+        plans = self._plans(o1="proposed")
+        oid, err = resolve_plan_offer_id(plans, "o1", built_this_turn={"o1"})
+        assert oid is None
+        assert "this turn" in err
+
+    def test_sole_active_resolved_when_omitted(self):
+        plans = self._plans(o1="proposed")
+        oid, err = resolve_plan_offer_id(plans, None, built_this_turn=set())
+        assert oid == "o1" and err is None
+
+    def test_no_active_plans_errors(self):
+        plans = self._plans(o1="done")
+        oid, err = resolve_plan_offer_id(plans, None, built_this_turn=set())
+        assert oid is None
+        assert "no onboarding plan" in err.lower()
+
+    def test_ambiguous_multiple_active_lists_candidates(self):
+        plans = self._plans(o1="proposed", o2="approved")
+        oid, err = resolve_plan_offer_id(plans, None, built_this_turn=set())
+        assert oid is None
+        assert "o1" in err and "o2" in err
+
+    def test_done_and_failed_plans_are_not_active(self):
+        plans = self._plans(o1="done", o2="executing")
+        oid, err = resolve_plan_offer_id(plans, None, built_this_turn=set())
+        assert oid == "o2" and err is None
+
+
+class TestEvaluateCancelPlan:
+    def test_no_plan_refused(self):
+        assert evaluate_cancel_plan(None) is not None
+
+    def test_proposed_allowed(self):
+        assert evaluate_cancel_plan({"status": "proposed"}) is None
+
+    def test_approved_allowed(self):
+        assert evaluate_cancel_plan({"status": "approved"}) is None
+
+    def test_executing_refused(self):
+        assert evaluate_cancel_plan({"status": "executing"}) is not None
+
+    def test_done_refused(self):
+        assert evaluate_cancel_plan({"status": "done"}) is not None
+
+
+class TestMergeExecutedSteps:
+    def _base(self, statuses):
+        return {
+            "status": "executing", "employee_id": "emp-1",
+            "steps": [{"key": k, "status": s} for k, s in statuses.items()],
+        }
+
+    def test_preserves_concurrent_approval_left_untouched(self):
+        base = self._base({"create_employee": "done", "portal_invitation": "approved"})
+        executed = self._base({"create_employee": "done", "portal_invitation": "proposed"})
+        merged = merge_executed_steps(base, executed)
+        by_key = {s["key"]: s["status"] for s in merged["steps"]}
+        assert by_key["portal_invitation"] == "approved"
+
+    def test_overlays_done_with_record_id(self):
+        base = self._base({"create_employee": "approved"})
+        executed = {"status": "executing", "employee_id": "emp-1",
+                    "steps": [{"key": "create_employee", "status": "done", "record_id": "emp-1"}]}
+        merged = merge_executed_steps(base, executed)
+        assert merged["steps"][0]["status"] == "done"
+        assert merged["steps"][0]["record_id"] == "emp-1"
+
+    def test_sets_plan_done_when_all_terminal(self):
+        base = self._base({"create_employee": "approved"})
+        executed = {"status": "executing", "employee_id": "emp-1",
+                    "steps": [{"key": "create_employee", "status": "done"}]}
+        merged = merge_executed_steps(base, executed)
+        assert merged["status"] == "done"
+
+    def test_stays_executing_when_a_step_is_still_approved(self):
+        base = self._base({"create_employee": "done", "portal_invitation": "approved"})
+        executed = self._base({"create_employee": "done", "portal_invitation": "proposed"})
+        merged = merge_executed_steps(base, executed)
+        assert merged["status"] == "executing"
+
+    def test_carries_employee_id_from_executed(self):
+        base = {"status": "proposed", "employee_id": None, "steps": []}
+        executed = {"status": "executing", "employee_id": "emp-9", "steps": []}
+        merged = merge_executed_steps(base, executed)
+        assert merged["employee_id"] == "emp-9"
+
+    def test_no_base_plan_falls_back_to_executed(self):
+        executed = {"status": "executing", "employee_id": "emp-1",
+                    "steps": [{"key": "create_employee", "status": "done"}]}
+        merged = merge_executed_steps(None, executed)
+        assert merged["steps"][0]["status"] == "done"
