@@ -668,9 +668,9 @@ async def ensure_location_for_employee(
 
         if background_tasks is not None:
             async def _safe_compliance_bg(lid=location_id, cid=company_id):
-                # Lazy import: _checks imports _locations, so importing it at
+                # Lazy import: _run imports _locations, so importing it at
                 # module top would be circular. Deferred to call time.
-                from app.core.services.compliance_service._checks import (
+                from app.core.services.compliance_service._run import (
                     run_compliance_check_background,
                 )
                 try:

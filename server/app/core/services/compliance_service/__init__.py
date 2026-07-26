@@ -188,17 +188,23 @@ from app.core.services.compliance_service._locations import (  # noqa: F401
     update_location,
     verify_location_ownership,
 )
-from app.core.services.compliance_service._checks import (  # noqa: F401
-    get_check_log,
-    get_compliance_dashboard,
-    get_compliance_summary,
+from app.core.services.compliance_service._run import (  # noqa: F401
+    run_compliance_check_background,
+    run_compliance_check_stream,
+)
+from app.core.services.compliance_service._reads import (  # noqa: F401
     get_employee_impact_for_location,
     get_hierarchical_requirements,
     get_location_requirements,
-    get_pinned_requirements,
-    run_compliance_check_background,
-    run_compliance_check_stream,
     search_company_requirements,
+)
+from app.core.services.compliance_service._dashboards import (  # noqa: F401
+    get_compliance_dashboard,
+    get_compliance_summary,
+)
+from app.core.services.compliance_service._settings import (  # noqa: F401
+    get_check_log,
+    get_pinned_requirements,
     set_requirement_pinned,
     update_auto_check_settings,
 )
