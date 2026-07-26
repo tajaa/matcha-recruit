@@ -77,8 +77,8 @@ async def register_beta(request: BetaRegisterRequest, http_request: Request):
     """Register a new individual account via beta invitation token."""
     ip = client_ip(http_request)
     await check_rate_limit(ip, "register_beta", 10, 3600)
-    from ..feature_flags import DEFAULT_COMPANY_FEATURES
-    from ...matcha.services.billing.token_budget_service import FREE_TOKEN_GRANT
+    from app.core.feature_flags import DEFAULT_COMPANY_FEATURES
+    from app.matcha.services.billing.token_budget_service import FREE_TOKEN_GRANT
 
     async with get_connection() as conn:
         async with conn.transaction():

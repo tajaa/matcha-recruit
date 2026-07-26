@@ -57,8 +57,8 @@ async def change_password(
     current_user: CurrentUser = Depends(get_current_user)
 ):
     """Change password for current user."""
-    from ..services.email import get_email_service
-    from ...config import get_settings
+    from app.core.services.email import get_email_service
+    from app.config import get_settings
 
     async with get_connection() as conn:
         # Get current password hash
@@ -196,8 +196,8 @@ async def forgot_password(request: ForgotPasswordRequest, http_request: Request)
     """Send a password reset email. Always returns 200 to avoid email enumeration."""
     ip = client_ip(http_request)
     await check_rate_limit(ip, "forgot_password", 5, 3600)
-    from ..services.email import get_email_service
-    from ...config import get_settings
+    from app.core.services.email import get_email_service
+    from app.config import get_settings
 
     async with get_connection() as conn:
         user = await conn.fetchrow(

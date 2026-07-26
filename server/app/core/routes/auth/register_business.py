@@ -69,7 +69,7 @@ async def register_business(request: BusinessRegister, http_request: Request):
     """
     ip = client_ip(http_request)
     await check_rate_limit(ip, "register_business", 10, 3600)
-    from ..services.email import get_email_service
+    from app.core.services.email import get_email_service
 
     # ---- resources_free deferred-create path -----------------------------
     # We do NOT touch users/companies until the user confirms their email.
@@ -196,7 +196,7 @@ async def register_business(request: BusinessRegister, http_request: Request):
             is_custom_product = request.tier == "custom_product"
             custom_product = None
             if is_custom_product:
-                from ..services.product_definitions import get_product_by_slug
+                from app.core.services.product_definitions import get_product_by_slug
                 custom_product = await get_product_by_slug(
                     conn, (request.product_slug or "").strip().lower(), published_only=True
                 )
@@ -222,7 +222,7 @@ async def register_business(request: BusinessRegister, http_request: Request):
                     # its max_headcount rather than a hardcoded 300, so the
                     # cap here can't drift from what /checkout/lite and
                     # /checkout/compliance actually enforce.
-                    from ..services.matcha_lite_pricing import get_matcha_lite_pricing
+                    from app.core.services.matcha_lite_pricing import get_matcha_lite_pricing
                     product_code = (
                         "matcha_compliance" if is_matcha_compliance
                         else "matcha_lite_essentials" if request.lite_essentials
@@ -252,7 +252,7 @@ async def register_business(request: BusinessRegister, http_request: Request):
                 # admin invite) activate immediately. `contact_sales` also
                 # starts off — it has no self-serve payment path, so an admin
                 # activates it via /admin/products/{id}/activate-tenant.
-                from ..services.product_definitions import (
+                from app.core.services.product_definitions import (
                     materialize_features as _materialize_product_features,
                     pending_features as _pending_product_features,
                 )
@@ -413,7 +413,7 @@ async def register_business(request: BusinessRegister, http_request: Request):
             company_id = company["id"]
 
             # Grant free token budget (1M tokens)
-            from ...matcha.services.billing.token_budget_service import FREE_TOKEN_GRANT
+            from app.matcha.services.billing.token_budget_service import FREE_TOKEN_GRANT
             await conn.execute(
                 """INSERT INTO mw_token_budgets (company_id, free_tokens_used, free_token_limit)
                    VALUES ($1, 0, $2)

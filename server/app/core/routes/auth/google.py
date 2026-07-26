@@ -63,8 +63,8 @@ async def google_auth(request: GoogleAuthRequest, http_request: Request):
     await check_rate_limit(ip, "google_auth", 15, 3600)
     from google.oauth2 import id_token as google_id_token
     from google.auth.transport import requests as google_requests
-    from ..feature_flags import DEFAULT_COMPANY_FEATURES
-    from ...matcha.services.billing.token_budget_service import FREE_TOKEN_GRANT
+    from app.core.feature_flags import DEFAULT_COMPANY_FEATURES
+    from app.matcha.services.billing.token_budget_service import FREE_TOKEN_GRANT
 
     try:
         idinfo = google_id_token.verify_oauth2_token(

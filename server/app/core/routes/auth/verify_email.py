@@ -67,7 +67,7 @@ async def verify_email(request: EmailVerifyRequest, http_request: Request):
     """
     ip = client_ip(http_request)
     await check_rate_limit(ip, "verify_email", 20, 3600)
-    from ..services.email import get_email_service
+    from app.core.services.email import get_email_service
 
     payload = decode_email_verify_token(request.token)
     if not payload:
@@ -115,7 +115,7 @@ async def verify_email(request: EmailVerifyRequest, http_request: Request):
             )
             company_id = company["id"]
 
-            from ...matcha.services.billing.token_budget_service import FREE_TOKEN_GRANT
+            from app.matcha.services.billing.token_budget_service import FREE_TOKEN_GRANT
             await conn.execute(
                 """INSERT INTO mw_token_budgets (company_id, free_tokens_used, free_token_limit)
                    VALUES ($1, 0, $2)

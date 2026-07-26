@@ -136,7 +136,7 @@ async def get_current_user_profile(token_payload: TokenPayload = Depends(get_tok
             # after we stop selling it.
             product_payload = None
             if profile:
-                from ..services.product_definitions import get_product_by_signup_source
+                from app.core.services.product_definitions import get_product_by_signup_source
                 _product = await get_product_by_signup_source(
                     conn, profile["signup_source"], published_only=False
                 )
@@ -381,7 +381,7 @@ async def upload_avatar(
     if len(data) > _AVATAR_MAX_SIZE:
         raise HTTPException(status_code=400, detail="Image must be under 5 MB")
 
-    from ..services.storage import get_storage
+    from app.core.services.storage import get_storage
     storage = get_storage()
     url = await storage.upload_file(data, file.filename or "avatar.jpg", prefix="avatars", content_type=file.content_type)
 
@@ -392,7 +392,7 @@ async def upload_avatar(
     # carry the new avatar without a reconnect — the broadcast reads the
     # in-memory ChannelUser, which would otherwise stay stale until reconnect.
     try:
-        from ...werk.routes.channels_ws import manager
+        from app.werk.routes.channels_ws import manager
         if current_user.id in manager.users:
             manager.users[current_user.id].avatar_url = url
     except Exception:
