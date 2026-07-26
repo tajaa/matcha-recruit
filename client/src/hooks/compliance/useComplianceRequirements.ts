@@ -7,12 +7,15 @@ import {
 
 type SectionId = CategoryGroup
 
-const SECTION_ORDER: SectionId[] = ['labor', 'supplementary', 'healthcare', 'behavioral_health', 'oncology', 'medical_compliance', 'life_sciences', 'manufacturing']
+// behavioral_health is no longer a CATEGORY_GROUPS group (its categories were
+// re-homed under healthcare in the regenerated catalog), so it can't occur as
+// a section id — the behavioral-health surface survives as the cross-cutting
+// industry-tag lens in ComplianceRequirementsTab, not as a section here.
+const SECTION_ORDER: SectionId[] = ['labor', 'supplementary', 'healthcare', 'oncology', 'medical_compliance', 'life_sciences', 'manufacturing']
 const SECTION_LABELS: Record<SectionId, string> = {
   labor: 'Core Labor',
   supplementary: 'Supplementary',
   healthcare: 'Healthcare',
-  behavioral_health: 'Behavioral Health',
   oncology: 'Oncology',
   medical_compliance: 'Medical Compliance',
   life_sciences: 'Life Sciences',

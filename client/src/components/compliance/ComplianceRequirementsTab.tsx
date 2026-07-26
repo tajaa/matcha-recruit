@@ -19,9 +19,15 @@ import type { CategoryRowShared, GroupBy, Props } from './ComplianceRequirements
 // business. Picking one showed an empty page, or (worse) another industry's
 // obligations, on a page whose entire job is "what am I responsible for".
 
+// The behavioral-health lens is cross-cutting (keyed on the row's
+// `healthcare:behavioral_health` industry tag, not on a category group — see
+// `hasBehavioralHealth` below), so it isn't part of the generated
+// CategoryGroup union. It's a filter value only this component knows about.
+type LensGroup = CategoryGroup | 'behavioral_health'
+
 export function ComplianceRequirementsTab({ requirements, loading, onPin, checkMessages, readOnly, previewCategoryLimit, targetReq, onTargetConsumed, onOpenAudit }: Props) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
-  const [groupFilter, setGroupFilter] = useState<'all' | CategoryGroup>('all')
+  const [groupFilter, setGroupFilter] = useState<'all' | LensGroup>('all')
   const [searchQuery, setSearchQuery] = useState('')
   const [highlightId, setHighlightId] = useState<string | null>(null)
   const [groupBy, setGroupBy] = useState<GroupBy>(() =>
@@ -101,7 +107,7 @@ export function ComplianceRequirementsTab({ requirements, loading, onPin, checkM
     // Behavioral health is a cross-cutting lens (it pulls categories out of
     // several sections), so it isn't a section of its own — offer it only when
     // the tenant genuinely has such rows.
-    if (hasBehavioralHealth && !allSections.some((s) => s.id === 'behavioral_health')) {
+    if (hasBehavioralHealth) {
       opts.push({ value: 'behavioral_health', label: 'Behavioral Health' })
     }
     return opts
@@ -109,7 +115,7 @@ export function ComplianceRequirementsTab({ requirements, loading, onPin, checkM
 
   // A group the tenant no longer has (data re-synced, or the last row of that
   // group was filtered out) must not leave the page stuck on an empty lens.
-  const activeGroup: 'all' | CategoryGroup = groupOptions.some((o) => o.value === groupFilter)
+  const activeGroup: 'all' | LensGroup = groupOptions.some((o) => o.value === groupFilter)
     ? groupFilter
     : 'all'
 
