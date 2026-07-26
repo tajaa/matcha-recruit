@@ -15,7 +15,7 @@ interface ChatMessagesProps {
 // Messages — drop zone for resumes
 export default function ChatMessages({ c, th, isProject }: ChatMessagesProps) {
   const {
-    streaming, setIsDragOver, isDragOver, handleFileUpload, lightMode, messages,
+    streaming, setIsDragOver, isDragOver, handleFileUpload, lightMode, messages, thread,
     statusMessage, pendingHuumeSteps, typingUsers, messagesEndRef, threadId, setThread,
     isIndividual, setInput, textareaRef, setShowTutorSetup, setTutorDismissed,
   } = c
@@ -50,6 +50,7 @@ export default function ChatMessages({ c, th, isProject }: ChatMessagesProps) {
           isProject={isProject}
           lightMode={lightMode}
           th={th}
+          huumeMode={!!thread?.huume_mode}
           setInput={setInput}
           textareaRef={textareaRef}
           setShowTutorSetup={setShowTutorSetup}

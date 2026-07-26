@@ -10,9 +10,11 @@ import { useWorkBase } from '../../routes/WorkSurfaceContext'
 import { RESUME_EXTENSIONS, RESUME_MAX_SIZE, INVENTORY_EXTENSIONS } from './constants'
 import { useThreadCollaboration } from './useThreadCollaboration'
 import { useOptimisticMessages, makeTempId } from '../../hooks/useOptimisticMessages'
+import { useToast } from '../../../components/ui'
 
 export function useThreadController() {
   const { me, hasFeature } = useMe()
+  const { toast } = useToast()
   const isIndividual = me?.user?.role === 'individual'
   const { threadId } = useParams<{ threadId: string }>()
   const base = useWorkBase()
@@ -47,8 +49,21 @@ export function useThreadController() {
   const [isDragOver, setIsDragOver] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
+  // Refetch current_state/version only — merge, don't replace: keeps local
+  // title edits and never touches `messages` (a WS push already appended the
+  // new message; replacing messages here could drop an in-flight optimistic
+  // one). Used when a pushed message signals current_state changed
+  // server-side without a normal send/complete cycle (offer accept/decline).
+  const refreshThreadState = useCallback(() => {
+    if (!threadId) return
+    getThread(threadId)
+      .then(t => setThread(prev => prev ? { ...prev, current_state: t.current_state, version: t.version } : t))
+      .catch(() => {})
+  }, [threadId])
+
   // Real-time collaboration
-  const { onlineUsers, typingUsers, threadSocketRef, lastTypingSentRef } = useThreadCollaboration(threadId, setMessages)
+  const { onlineUsers, typingUsers, threadSocketRef, lastTypingSentRef } =
+    useThreadCollaboration(threadId, setMessages, refreshThreadState)
 
   // Mode toggles — derived from thread, only toggling state is local
   const [togglingMode, setTogglingMode] = useState<MWModeKey | null>(null)
@@ -346,6 +361,7 @@ export function useThreadController() {
       // A silently-failed toggle leaves the user believing the mode is on
       // while the backend answers without it.
       console.error(`Failed to toggle ${mode} mode`, e)
+      toast(`Couldn't toggle ${mode} mode`, 'error')
     }
     setTogglingMode(null)
   }
@@ -393,7 +409,7 @@ export function useThreadController() {
     editingTitle, setEditingTitle,
     titleDraft, setTitleDraft,
     messagesEndRef, textareaRef,
-    refreshUsage,
+    refreshUsage, refreshThreadState,
     handleSend, handleFileUpload, handleKeyDown, handleTitleSave, handleModeToggle, handleEditSlide,
     toggleLightMode,
   }

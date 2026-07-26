@@ -1,4 +1,4 @@
-import { HR_SKILLS, PERSONAL_SKILLS } from './constants'
+import { HR_SKILLS, PERSONAL_SKILLS, HUUME_SKILLS } from './constants'
 import type { ThreadTheme } from './theme'
 
 interface SkillGridProps {
@@ -6,6 +6,7 @@ interface SkillGridProps {
   isProject: boolean
   lightMode: boolean
   th: ThreadTheme
+  huumeMode: boolean
   setInput: (v: string) => void
   textareaRef: React.RefObject<HTMLTextAreaElement | null>
   setShowTutorSetup: (v: boolean) => void
@@ -13,15 +14,16 @@ interface SkillGridProps {
 }
 
 export default function SkillGrid({
-  isIndividual, isProject, lightMode, th, setInput, textareaRef, setShowTutorSetup, setTutorDismissed,
+  isIndividual, isProject, lightMode, th, huumeMode, setInput, textareaRef, setShowTutorSetup, setTutorDismissed,
 }: SkillGridProps) {
+  const skills = huumeMode && !isIndividual ? HUUME_SKILLS : isIndividual ? PERSONAL_SKILLS : HR_SKILLS
   return (
     <div className="flex flex-col items-center justify-center h-full px-4">
       <p className={`text-sm font-medium mb-4 ${isProject ? 'text-[#e8e8e8]' : th.emptyText}`}>
         What would you like to work on?
       </p>
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-w-md w-full">
-        {(isIndividual ? PERSONAL_SKILLS : HR_SKILLS).filter((s) => !s.requiresCompany || !isIndividual).map((skill) => {
+        {skills.filter((s) => !s.requiresCompany || !isIndividual).map((skill) => {
           const Icon = skill.icon
           return (
             <button

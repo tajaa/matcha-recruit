@@ -486,6 +486,10 @@ export interface MWMessageMetadata {
   /** Huume agent-run tool-call timeline for this turn, if huume_mode was on. */
   huume_steps?: HuumeStep[]
   huume_run_id?: string
+  /** Backend-authored Huume lifecycle notices (offer accept/decline routes,
+   * REST plan-execute). Unknown future values must render as a plain bubble. */
+  huume_event?: 'offer_accepted' | 'offer_declined' | 'plan_executed'
+  offer_id?: string
 }
 
 // ──────────────────────────────────────────────────────────────────────
@@ -499,6 +503,11 @@ export interface HuumeStep {
   label: string
   status: 'ok' | 'rejected' | 'error' | 'skipped'
   detail?: string
+  /** Tool-call input/output, capped server-side at ~4KB each (agent.py's
+   * _cap_payload — an oversized value arrives as {_truncated, preview}).
+   * Absent on messages persisted before the harness started recording them. */
+  args?: unknown
+  result?: unknown
 }
 
 export interface HuumeOffer {
@@ -530,6 +539,37 @@ export interface HuumePlan {
  * onboarding several candidates at once. Replaces the old singular
  * `huume_plan` key (pre-release feature, no back-compat needed). */
 export type HuumePlans = Record<string, HuumePlan>
+
+export interface HuumeActionSendOffer {
+  type: 'send_offer'
+  offer_id: string
+  status: 'proposed' | 'sent' | 'failed' | 'cancelled'
+}
+
+export interface HuumeActionDiscipline {
+  type: 'discipline_draft'
+  status: 'proposed' | 'filed' | 'failed' | 'cancelled'
+  confirm_id: string
+  employee_name?: string
+  infraction_type?: string
+  severity?: string
+  occurrence_dates?: string[]
+  description?: string
+  expected_improvement?: string
+}
+
+/** `current_state.huume_action` — the single staged confirm-first action.
+ * Confirm/cancel are chat-only tools; the UI's buttons send the literal
+ * words through the normal message path (a separate user turn, so the
+ * backend's structural two-turn rule is untouched — see services/huume/actions.py). */
+export type HuumeAction = HuumeActionSendOffer | HuumeActionDiscipline
+
+export interface HuumeLegal { matter_id: string; title?: string | null }
+
+export interface HuumeHandbook {
+  session_id: string
+  pending_drafts: { draft_id: string; kind?: string; title?: string }[]
+}
 
 export interface MWMessage {
   id: string

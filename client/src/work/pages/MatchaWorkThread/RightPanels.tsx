@@ -25,7 +25,7 @@ export default function RightPanels({
 }: RightPanelsProps) {
   const {
     mobileView, thread, threadId, handleEditSlide, lightMode, streaming,
-    setThread, setError, setMessages, agentMode, pdfUrl, setShowTutorSetup, setTutorDismissed,
+    setThread, setError, setMessages, agentMode, pdfUrl, setShowTutorSetup, setTutorDismissed, handleSend,
   } = c
 
   return (
@@ -112,6 +112,8 @@ export default function RightPanels({
           state={thread!.current_state}
           threadId={threadId!}
           lightMode={lightMode}
+          streaming={streaming}
+          onSendChat={(text) => handleSend(text)}
           onStateUpdate={(offerId, plan) => {
             setThread((prev) => prev ? {
               ...prev,
@@ -120,6 +122,14 @@ export default function RightPanels({
                 huume_plans: { ...(prev.current_state.huume_plans as Record<string, unknown> | undefined), [offerId]: plan },
               },
             } : prev)
+          }}
+          onExecuted={() => {
+            // The REST execute posts an assistant summary message
+            // (metadata.huume_event = plan_executed) but does NOT broadcast
+            // it — a full refetch is how it appears without a reload. Safe
+            // to replace `messages` because execute is disabled while
+            // streaming (see HuumePlanCard's streaming prop).
+            if (threadId) getThread(threadId).then(t => { setThread(t); setMessages(t.messages ?? []) }).catch(() => {})
           }}
         />
       )}

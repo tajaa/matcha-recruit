@@ -7,12 +7,20 @@ import { ThreadSocket } from '../../api/threadSocket'
 export function useThreadCollaboration(
   threadId: string | undefined,
   setMessages: React.Dispatch<React.SetStateAction<MWMessage[]>>,
+  /** Fired when a pushed message carries metadata.huume_event (offer
+   * accepted/declined, plan executed) — the push only appends the message;
+   * current_state (offer chip, plan statuses) needs a refetch to follow. */
+  onHuumeEvent?: () => void,
 ) {
   const [onlineUsers, setOnlineUsers] = useState<{ id: string; name: string }[]>([])
   const [typingUsers, setTypingUsers] = useState<Map<string, string>>(new Map())
   const threadSocketRef = useRef<ThreadSocket | null>(null)
   const typingTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
   const lastTypingSentRef = useRef(0)
+  // Ref, not a dep: the connect effect below runs on [threadId] only —
+  // capturing the callback directly would freeze its first render's closure.
+  const onHuumeEventRef = useRef(onHuumeEvent)
+  onHuumeEventRef.current = onHuumeEvent
 
   useEffect(() => {
     if (!threadId) return
@@ -26,6 +34,7 @@ export function useThreadCollaboration(
         const deduped = newMessages.filter(m => !existingIds.has(m.id))
         return deduped.length > 0 ? [...prev, ...deduped] : prev
       })
+      if (newMessages.some(m => m.metadata?.huume_event)) onHuumeEventRef.current?.()
     }
 
     sock.onTyping = (user) => {

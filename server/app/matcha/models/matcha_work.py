@@ -405,6 +405,11 @@ class ThreadListItem(BaseModel):
     risk_mode: bool = False
     training_mode: bool = False
     hr_pilot_mode: bool = False
+    # Every THREAD_MODES column must be declared here — Pydantic v2's
+    # extra="ignore" silently drops any undeclared field (huume_mode shipped
+    # missing and was invisible to the client after a reload for months).
+    # Guarded by tests/matcha_work/test_thread_response_mode_fields.py.
+    huume_mode: bool = False
     collaborator_count: int = 0
     created_at: datetime
     updated_at: datetime
@@ -438,6 +443,7 @@ class ThreadDetailResponse(BaseModel):
     risk_mode: bool = False
     training_mode: bool = False
     hr_pilot_mode: bool = False
+    huume_mode: bool = False
     linked_offer_letter_id: Optional[UUID] = None
     created_at: datetime
     updated_at: datetime

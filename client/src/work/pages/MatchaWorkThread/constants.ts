@@ -1,4 +1,4 @@
-import { FileText, Users, Presentation, Package, ClipboardList, Scale, BookOpen, FileCheck, MessageSquare, Briefcase, Languages } from 'lucide-react'
+import { FileText, Users, Presentation, Package, ClipboardList, Scale, BookOpen, FileCheck, MessageSquare, Briefcase, Languages, CalendarClock, ShieldAlert } from 'lucide-react'
 
 export const RESUME_EXTENSIONS = ['.pdf', '.doc', '.docx', '.txt']
 export const RESUME_MAX_SIZE = 10 * 1024 * 1024
@@ -18,6 +18,20 @@ export const HR_SKILLS = [
   { id: 'onboarding', icon: Users, label: 'Onboarding', desc: 'Create employee records', prompt: 'Onboard a new employee', requiresCompany: true },
   { id: 'review', icon: Briefcase, label: 'Review', desc: 'Run performance reviews', prompt: 'Create a performance review for ', requiresCompany: true },
   { id: 'language_tutor', icon: Languages, label: 'Language Tutor', desc: 'Practice English, Spanish, or French', prompt: '', requiresCompany: false },
+] as const
+
+// Shown in the empty-state grid when the thread has huume_mode on. Same
+// field shape as HR_SKILLS (SkillGrid unions the lists). Prompts map to
+// Huume's registry tools; "Open a legal matter" is deliberately omitted —
+// it hard-requires legal_defense, while these degrade to a polite refusal
+// when their own feature is off.
+export const HUUME_SKILLS = [
+  { id: 'huume_offer', icon: FileCheck, label: 'Draft an offer', desc: 'Offer letter → signature link', prompt: 'Draft an offer letter for ', requiresCompany: true },
+  { id: 'huume_status', icon: MessageSquare, label: 'Offer status', desc: 'Where are my offers?', prompt: 'What is the status of the offers in this thread?', requiresCompany: true },
+  { id: 'huume_plan', icon: Users, label: 'Onboarding plan', desc: 'Stage the full new-hire plan', prompt: 'Build the onboarding plan for the accepted offer', requiresCompany: true },
+  { id: 'huume_whos_out', icon: CalendarClock, label: "Who's out", desc: 'PTO & leave this week', prompt: "Who's out on PTO or leave this week?", requiresCompany: true },
+  { id: 'huume_writeup', icon: ShieldAlert, label: 'Write-up', desc: 'Stage a discipline draft', prompt: 'Draft a discipline write-up for ', requiresCompany: true },
+  { id: 'huume_handbook', icon: BookOpen, label: 'Handbook draft', desc: 'Draft a policy via Handbook Pilot', prompt: 'Draft a handbook policy about ', requiresCompany: true },
 ] as const
 
 export const PERSONAL_SKILLS = [

@@ -1,11 +1,20 @@
 import React, { useMemo } from 'react'
-import { FileText, Package, PlusCircle } from 'lucide-react'
+import { FileText, Package, PlusCircle, FileSignature, PlayCircle } from 'lucide-react'
 import Markdown from 'react-markdown'
 import type { MWMessage } from '../../types'
 import ComplianceReasoningPanel from './ComplianceReasoningPanel'
 import HuumeStepTimeline from './HuumeStepTimeline'
 import CitationSources, { numberCitations } from '../../../components/ui/CitationSources'
 import { safeUrl } from './markdownToHtml'
+
+// Backend-authored Huume lifecycle notices (offer accept/decline routes,
+// REST plan-execute). A metadata.huume_event value not in this map renders
+// as a plain bubble — forward-compatible with a future event type.
+const HUUME_EVENT_STRIP: Record<string, { icon: typeof FileSignature; label: string; light: string; dark: string }> = {
+  offer_accepted: { icon: FileSignature, label: 'Offer accepted', light: 'bg-emerald-50 text-emerald-700 border-emerald-300', dark: 'bg-emerald-950/40 text-emerald-300 border-emerald-800' },
+  offer_declined: { icon: FileSignature, label: 'Offer declined', light: 'bg-amber-50 text-amber-700 border-amber-300', dark: 'bg-amber-950/40 text-amber-300 border-amber-800' },
+  plan_executed: { icon: PlayCircle, label: 'Onboarding steps executed', light: 'bg-zinc-100 text-zinc-600 border-zinc-300', dark: 'bg-zinc-800/40 text-zinc-400 border-zinc-700' },
+}
 
 function extractPenalties(reasoning: MWMessage['metadata']): { category: string; summary: string; agency: string }[] {
   if (!reasoning?.compliance_reasoning) return []
@@ -107,6 +116,15 @@ const MessageBubble = React.memo(function MessageBubble({ message: m, lightMode,
           })()
         ) : m.role === 'assistant' ? (
           <>
+            {m.metadata?.huume_event && HUUME_EVENT_STRIP[m.metadata.huume_event] && (() => {
+              const ev = HUUME_EVENT_STRIP[m.metadata.huume_event]!
+              const Icon = ev.icon
+              return (
+                <div className={`not-prose mb-2 flex items-center gap-1.5 text-[11px] font-medium px-2 py-1 rounded border w-fit ${lm ? ev.light : ev.dark}`}>
+                  <Icon size={12} /> {ev.label}
+                </div>
+              )
+            })()}
             {markdownContent}
             {isProjectThread && onAddToProject && (
               <button
