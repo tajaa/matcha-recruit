@@ -2,7 +2,7 @@
 
 > **Status (verified 2026-07-26): NOT IMPLEMENTED.** No `huume_code` flag anywhere in
 > `feature_flags.py` or the codebase; no draft-PR tooling. Build order: **must follow
-> `1-REFACTOR_PLAN_ROUND2.md`** — this adds `services/huume_code/` and
+> `docs/implemented/REFACTOR_PLAN_ROUND2.md`, which shipped 2026-07-27** — this adds `services/huume_code/` and
 > `services/matcha_work/github_write.py` and edits `project_task_service.py`, all inside
 > that refactor's Stage 3/6 blast radius, so building first means paying the migration
 > twice. Also the highest-risk item here (model-driven GitHub **write** surface,

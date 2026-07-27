@@ -82,16 +82,25 @@ cd server && ./venv/bin/python run.py     # :8001
 cd server && ./venv/bin/python -m pytest tests/<domain>/ -q
 ```
 
-Some pre-existing tests use `importlib.util.spec_from_file_location(...)` with hard-coded relative paths and fail at collection time. Known set:
-- `tests/employees/test_employee_invites_and_compliance.py`
-- `tests/employees/test_internal_mobility_routes.py`
-- `tests/er_copilot/test_er_copilot_risk_refresh.py`
-- `tests/matcha_work/test_language_tutor.py`
-- `tests/offers/test_offer_letters_plus_guidance.py`
-- `tests/pre_termination/test_pre_termination.py`
-- `tests/training/test_employee_create_supervisor.py`
+Some tests load a route module through `importlib.util.spec_from_file_location(...)` with a hard-coded relative path. That form breaks **silently** on any file move, so it is the pattern to avoid — import the module normally, or `inspect.getsource()` off the imported symbol if you need its text.
 
-These are pre-existing on `main`; don't try to fix them as part of unrelated work. The IR-incidents tests (132 passing) are the model to follow.
+The old seven-file "known broken" list was re-measured on 2026-07-27 and was almost entirely stale. Actual state:
+
+| File | Status |
+|---|---|
+| `tests/employees/test_internal_mobility_routes.py` | **still errors at collection** — the only real one left |
+| `tests/employees/test_employee_invites_and_compliance.py` | fixed (rewritten to normal imports, refactor round 2 stage 4); 2 pass + 1 `xfail(strict)` pinning a genuine `NameError` in `employees/crud.py` |
+| `tests/er_copilot/test_er_copilot_risk_refresh.py` | fixed the same way; 2 pass |
+| `tests/matcha_work/test_language_tutor.py` | passes (24) |
+| `tests/offers/test_offer_letters_plus_guidance.py` | passes (2) |
+| `tests/training/test_employee_create_supervisor.py` | passes (3) |
+| `tests/pre_termination/test_pre_termination.py` | **the file does not exist** |
+
+Don't fix unrelated failures as part of other work — but don't trust a stale list either. Re-measure before citing one.
+
+**A test that patches a collaborator must patch the module that DEFINES the caller, not a facade that re-exports it.** `monkeypatch.setattr(pkg, "helper", fake)` is silently ignored when the function using `helper` lives in `pkg.submodule` — the call then reaches the real collaborator, often a live DB or Gemini client, and the test still looks like it ran. The 2026-07 service-package splits turned five such patches into no-ops; each is now pointed at its submodule with a comment saying why. Grep for `setattr(` / `patch("` against any module you are about to split.
+
+The IR-incidents tests (445 passing) are the model to follow.
 
 ## Migration authoring rules
 

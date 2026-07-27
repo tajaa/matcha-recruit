@@ -1,10 +1,99 @@
 # `server/app/matcha` — refactor round 2
 
-> **Status (verified 2026-07-26): NOT IMPLEMENTED.** Stage 0's quota-bug fix is still
-> unfixed — `matcha_work_document/_tokens.py:101` still reads `from . import
-> entitlements_service`. Build order: do Stage 0 immediately (live billing bug); the rest
-> of this doc should land before `4-HUUME_CODE_PLAN.md`, which adds files inside its
-> Stage 3/6 blast radius. See `docs/implemented/` for round 1, which shipped.
+> **Status (2026-07-27): IMPLEMENTED — Stages 0-8, with three documented exceptions.**
+> Move this file to `docs/implemented/` once the branch merges. See the Progress
+> section immediately below for what landed, what didn't, and why.
+
+## Progress (round 2)
+
+Mirrors round 1's format. Every stage: `py_compile`, app boot pinned at **1957
+routes**, a bytecode-level undefined-name scan over each touched module, and the full
+suite's `FAILED`/`ERROR` set diffed against a pre-stage-0 baseline (**93/93 identical**
+at every commit).
+
+- [x] **Stage 0** — the live billing bug. `_tokens.py:101` now imports from
+  `services/billing`. Paid plans get their real quota again.
+- [x] **Stage 1** — dead code: 17 unused imports, `app/dependencies.py`, `matcha/workers/`,
+  2 unmounted routers, a 30-name phantom `__all__`.
+- [x] **Stage 2** — `services/_shared/` leaf package (`pdf`, `citations`, `gemini`, `text`);
+  killed the two import cycles that forced pilots to import each other for PDF chrome.
+- [x] **Stage 3** — the layering fix, all 7 rows. Business logic moved routes → services:
+  `create_incident_core`, `compute_wc_metrics`, `create_case_core`, PTO/invitations/state
+  lookup, offer-letter HTML, `broadcast_task_event`, the IR card builders.
+- [x] **Stage 4** — 6 straggler `git mv`s into domain folders, a double-applied feature
+  gate removed, 2 brittle `spec_from_file_location` tests rewritten.
+- [x] **Stage 5** — route package splits: `messaging.py`/`ai_turn.py` → `turn_pipeline.py`
+  + `ai_apply.py`; `copilot.py` → `services/ir/ir_copilot_flow.py`; `osha.py` → `osha/`
+  package; `/tutor/*` co-located into `matcha_work/tutor_sessions.py`; plus the three
+  cheap extractions.
+- [x] **Stage 6** — all 7 facade packages: `matcha_work_ai/`, `broker_pilot/`,
+  `handbook_pilot/`, `hr_pilot_corpus/`, `risk_assessment_service/`, `project_service/`,
+  the `project_task_notifications` extraction, and `claims_readiness` split by domain.
+- [x] **Stage 7** — `models/` mirrors `services/` subdirs; `ir_incident.py` split 10 ways;
+  the 2 real name collisions deduped.
+- [x] **Stage 8** — this refresh.
+
+### What the plan asked for and did NOT get done, with reasons
+
+1. **Stage 7 item 3 — the 198 route-inline models.** Deferred. It is the documented
+   convention, but it moves Pydantic classes out of ~70 route files, and co-locating them
+   is exactly what turns latent name collisions into OpenAPI schema conflicts. Wants its
+   own change and its own review.
+2. **Stage 5 item 2's `copilot/` package.** Not built, and shouldn't be: after the state
+   machine moved to services, `copilot.py` is 1,071 lines across 5 routes of one concern —
+   below `routes/CLAUDE.md`'s own ~2,000-line + 4-unrelated-concerns bar. Stage 5's
+   preamble predicted exactly this ("several stop qualifying").
+3. **Stage 5 item 4's prefix change.** The `/tutor/*` code moved; the URLs did not.
+   `platforms/ios/MatchaTutor` hard-codes `/tutor/sessions` and `/api/ws/interview`, and
+   the `matcha_work` mount's `require_feature` gate would 403 callers these routes never
+   gated. Re-prefixing needs an iOS release in lockstep.
+
+### Where the plan's premises turned out to be wrong
+
+Worth recording, because each was asserted confidently and each dissolved on reading the
+code:
+
+- **"Shared pilot scaffolding … in `_shared/` once rather than twice" (Stage 6 #2).**
+  `_corpus_text` and `_build_prompt` are same-name, different-behavior in the two pilots
+  (different signatures; one inlines raw uploaded document text, the other inlines the
+  tenant's real policy bodies). Merging them would be a behavior change to two
+  citation-gated surfaces dressed as a dedup. What WAS genuinely duplicated — `_genai`,
+  `_slug`, `_hum` — got deduped.
+- **"Dedupe `ChatIn` ×4, `SessionCreate`/`SessionUpdate` ×3, `EmployeeListResponse` ×2,
+  `ManagerHotspot` ×2, `MarkReadRequest` ×2" (Stage 7 #4).** Only 2 of the 5 are real
+  duplicates. `EmployeeListResponse` is a list envelope in one place and a 24-field row in
+  the other; `MarkReadRequest` takes different fields in different domains; the `Session*`
+  triad shares only `title`.
+- **"Fold `_is_model_unavailable_error`/`_parse_json_response` into `_shared/gemini.py`"
+  (Stage 6 #5).** The first is byte-identical and was folded. The second is not — the
+  `_shared` version swallows a parse failure and returns `{}`, this one raises. Swapping it
+  in would turn a malformed Gemini reply into a silently empty recommendation set.
+- **"Layering metric: 18 → 0."** Not achieved and not achievable as scoped. The count is
+  **~20 `services → routes` edges and 1 `workers → routes`**, and every one is the
+  deliberate lazy-import-back pattern for a helper that legitimately lives in routes
+  (`_sse_data`, `_build_thread_detail_response`, `thread_manager`, `project_manager`, the
+  `ir_incidents/_shared` vocabulary, `log_audit`). Driving it to 0 means moving
+  `_shared.py`/`_cards.py`/`thread_manager` into services, which was never in scope. What
+  Stage 3 actually achieved is that no *business logic* is left in routes; the residual
+  edges are references, not implementations.
+
+### The recurring hazard this round surfaced
+
+Five test patches became silent no-ops. `monkeypatch.setattr(pkg, "helper", fake)` does
+nothing when the function calling `helper` lives in `pkg.submodule` — and the test still
+looks like it passed, while the real DB or Gemini client gets hit. Every service split in
+Stages 5-7 produced at least one. All five are repointed with a comment; the rule is now
+in `server/CLAUDE.md`. **The full-suite diff is what caught them** — three surfaced only
+after an earlier one was fixed, and would otherwise have read as pre-existing noise.
+
+Also note: PEP 562 module `__getattr__` does **not** satisfy a function's `LOAD_GLOBAL`.
+It resolves attribute access from outside the module only. An attempt to use it to defer a
+cycle-causing import in `ir_copilot_flow.py` imported and booted cleanly, then raised
+`NameError` on every call. The working form is an explicit proxy object.
+
+---
+
+## Original plan (below, unchanged)
 
 ## Context
 

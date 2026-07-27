@@ -5,7 +5,7 @@
 > present, `_shared.py` dep lists, pure-re-export facade `__init__.py`, no `_legacy.py`
 > anywhere, `routes/__init__.py` unchanged as specified, all 3 smoke tests exist, all 4
 > CLAUDE.md updates landed. Round 2 lives at
-> `docs/not-implemented/1-REFACTOR_PLAN_ROUND2.md`. Kept for history.
+> `docs/implemented/REFACTOR_PLAN_ROUND2.md`. Kept for history.
 
 > Working plan doc — mirrors `/Users/finch/.claude/plans/functional-finding-cat.md`. Update the Progress section as work lands.
 
