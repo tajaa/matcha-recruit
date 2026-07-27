@@ -26,6 +26,8 @@ import logging
 from typing import Any, Optional
 from uuid import UUID
 
+from app.matcha.services.ir.ir_incident_create import create_incident_core
+
 logger = logging.getLogger(__name__)
 
 # An ER case title derived from the narrative — the admin can rename it on the
@@ -61,7 +63,6 @@ async def _execute_ir_report(company_id, actor_user_id, action) -> dict[str, Any
     from datetime import datetime, timezone
 
     from app.database import get_connection
-    from app.matcha.routes.ir_incidents import create_incident_core
     from app.matcha.services.huume.actions import _parse_iso_datetime
     from app.matcha.services.pilots.hr_pilot_actions import _actor_identity
 

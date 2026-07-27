@@ -36,6 +36,7 @@ from datetime import date
 from typing import Any, Optional
 from uuid import UUID
 
+from app.matcha.services.ir.ir_incident_create import create_incident_core
 from app.matcha.services.pilots.hr_pilot_escalation import classify_message
 
 logger = logging.getLogger(__name__)
@@ -716,7 +717,6 @@ async def _execute_pto_request(company_id, actor_user_id, action) -> dict:
 async def _execute_ir_report(company_id, actor_user_id, action) -> dict:
     from datetime import datetime, timezone
     from app.database import get_connection
-    from app.matcha.routes.ir_incidents import create_incident_core
 
     narrative = action["narrative"]
     escalation_id = action.get("escalation_id")
