@@ -20,7 +20,7 @@ from app.config import get_settings
 from app.core.models.auth import CurrentUser
 from app.core.services.storage import get_storage
 from app.database import get_connection
-from app.matcha.models.matcha_work import SendMessageRequest, SendMessageResponse
+from app.matcha.models.matcha_work.matcha_work import SendMessageRequest, SendMessageResponse
 from app.matcha.services.matcha_work.ai_apply import (
     _apply_ai_updates_and_operations,
     _blog_mode_state_from_meta,

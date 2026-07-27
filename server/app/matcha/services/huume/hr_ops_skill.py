@@ -105,7 +105,7 @@ async def _execute_ir_report(company_id, actor_user_id, action) -> dict[str, Any
 
 async def _execute_er_case(company_id, actor_user_id, action) -> dict[str, Any]:
     from app.database import get_connection
-    from app.matcha.models.er_case import ERCaseCreate
+    from app.matcha.models.er.case import ERCaseCreate
 
     description = action["description"]
     case = ERCaseCreate(

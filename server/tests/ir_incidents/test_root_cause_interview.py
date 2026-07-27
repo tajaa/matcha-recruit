@@ -25,7 +25,7 @@ from uuid import uuid4
 
 import pytest
 
-from app.matcha.models.ir_incident import IRCopilotAcceptRequest
+from app.matcha.models.ir.copilot import IRCopilotAcceptRequest
 from app.matcha.routes.ir_incidents._shared import (
     ROOT_CAUSE_INTERVIEW_STEPS,
     ROOT_CAUSE_PLAINTEXT_LABELS,

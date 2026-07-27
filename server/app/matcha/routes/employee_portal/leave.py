@@ -6,7 +6,7 @@ from uuid import UUID
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 
 from app.database import get_connection
-from app.matcha.models.employee import (
+from app.matcha.models.employees.employee import (
     LeaveRequestCreate, LeaveRequestResponse, LeaveRequestListResponse,
 )
 from app.matcha.dependencies import require_employee_record

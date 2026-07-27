@@ -22,7 +22,7 @@ from pydantic import BaseModel
 from app.core.feature_flags import get_company_features
 from app.database import get_connection
 from app.matcha.dependencies import get_client_company_id, require_admin_or_client, require_feature
-from app.matcha.models.ir_incident import (
+from app.matcha.models.ir.capa import (
     CorrectiveAction,
     CorrectiveActionCreate,
     CorrectiveActionListResponse,

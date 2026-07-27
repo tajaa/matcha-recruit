@@ -20,7 +20,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 
 from ....database import get_connection
 from ...dependencies import get_client_company_id, require_client
-from ...models.broker_chat import (
+from app.matcha.models.broker.chat import (
     ConversationCreate,
     ConversationListOut,
     ConversationOut,

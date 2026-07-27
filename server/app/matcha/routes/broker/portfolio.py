@@ -28,7 +28,7 @@ from ...services.broker import external_clients as ext
 from ...services.property import property_sov
 from ...services.property import property_cat
 from ...services.insurance import wc_classmap
-from ...models.broker_action_center import MilestonesResponse, OutreachResponse
+from app.matcha.models.broker.action_center import MilestonesResponse, OutreachResponse
 
 logger = logging.getLogger(__name__)
 

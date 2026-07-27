@@ -40,11 +40,7 @@ from fastapi import HTTPException
 from app.database import get_connection
 from app.matcha.services.ir import ir_flow
 from app.core.services.osha_privacy import compose_clinical_description
-from app.matcha.models.ir_incident import (
-    IRCopilotAcceptRequest,
-    IRCopilotCard,
-    IRCopilotMessage,
-)
+from app.matcha.models.ir.copilot import IRCopilotAcceptRequest, IRCopilotCard, IRCopilotMessage
 
 
 

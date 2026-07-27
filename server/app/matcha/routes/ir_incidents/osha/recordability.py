@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from app.config import get_settings
 from app.database import get_connection
 from app.matcha.dependencies import require_admin_or_client, get_client_company_id
-from app.matcha.models.ir_incident import OshaRecordabilityUpdate
+from app.matcha.models.ir.osha import OshaRecordabilityUpdate
 from app.core.services.genai_client import get_genai_client
 from ._shared import _safe_json_loads
 

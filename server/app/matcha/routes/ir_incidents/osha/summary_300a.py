@@ -11,10 +11,7 @@ from fastapi.responses import Response, StreamingResponse
 
 from app.database import get_connection
 from app.matcha.dependencies import require_admin_or_client, get_client_company_id
-from app.matcha.models.ir_incident import (
-    Osha300ASummary,
-    Osha300ASaveRequest,
-)
+from app.matcha.models.ir.osha import Osha300ASaveRequest, Osha300ASummary
 from app.matcha.routes.ir_incidents._shared import log_audit
 from app.matcha.services.ir.naics_titles import naics_industry_description
 from ._shared import _active_headcount, _aggregate_300a, _attest_export

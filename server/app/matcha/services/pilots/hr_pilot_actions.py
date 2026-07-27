@@ -750,7 +750,7 @@ async def _execute_ir_report(company_id, actor_user_id, action) -> dict:
 
 async def _execute_er_case(company_id, actor_user_id, action) -> dict:
     from app.database import get_connection
-    from app.matcha.models.er_case import ERCaseCreate
+    from app.matcha.models.er.case import ERCaseCreate
 
     narrative = action["narrative"]
     escalation_id = action.get("escalation_id")

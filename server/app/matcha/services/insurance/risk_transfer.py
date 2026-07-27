@@ -43,7 +43,7 @@ from fastapi import HTTPException, UploadFile
 from app.config import get_settings
 from app.core.services.pdf import render_pdf
 from app.core.services.storage import get_storage
-from app.matcha.models import limit_adequacy as _models
+from app.matcha.models.insurance import limit_adequacy as _models
 
 from . import contract_parser
 from . import limit_adequacy as la

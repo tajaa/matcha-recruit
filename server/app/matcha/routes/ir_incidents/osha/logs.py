@@ -13,10 +13,7 @@ from fastapi.responses import StreamingResponse
 
 from app.database import get_connection
 from app.matcha.dependencies import require_admin_or_client, get_client_company_id
-from app.matcha.models.ir_incident import (
-    Osha300LogEntry,
-    OshaPrivacyCaseEntry,
-)
+from app.matcha.models.ir.osha import Osha300LogEntry, OshaPrivacyCaseEntry
 from app.matcha.routes.ir_incidents._shared import (
     log_audit,
     _hydrate_involved_employees,

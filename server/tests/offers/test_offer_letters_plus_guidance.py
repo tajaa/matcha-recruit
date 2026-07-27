@@ -1,5 +1,5 @@
 import asyncio
-from app.matcha.models.offer_letter import OfferGuidanceRequest
+from app.matcha.models.offer_letters.offer_letter import OfferGuidanceRequest
 from app.matcha.routes.employee_lifecycle.offer_letters import (
     _normalize_city,
     get_offer_package_recommendation,

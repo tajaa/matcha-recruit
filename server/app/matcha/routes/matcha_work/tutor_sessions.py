@@ -38,7 +38,7 @@ from app.core.dependencies import get_current_user, require_admin
 from app.core.models.auth import CurrentUser
 
 from app.database import get_connection
-from app.matcha.models.interview import InterviewStart, TutorSessionCreate, TutorSessionSummary, TutorSessionDetail, TutorMetricsAggregate, TutorProgressResponse, TutorProgressDataPoint, TutorSessionComparison, TutorVocabularyStats, VocabularyWord, VocabularySuggestion
+from app.matcha.models.interviews.interview import InterviewStart, TutorSessionCreate, TutorSessionSummary, TutorSessionDetail, TutorMetricsAggregate, TutorProgressResponse, TutorProgressDataPoint, TutorSessionComparison, TutorVocabularyStats, VocabularyWord, VocabularySuggestion
 from app.core.services.auth import create_interview_ws_token
 
 router = APIRouter()

@@ -31,7 +31,7 @@ from fastapi.responses import StreamingResponse
 
 from app.database import get_connection
 from app.matcha.dependencies import require_admin_or_client, get_client_company_id
-from app.matcha.models.ir_incident import (
+from app.matcha.models.ir.incident import (
     IRIncidentCreate,
     IRIncidentListResponse,
     IRIncidentResponse,

@@ -359,7 +359,7 @@ def test_card_model_roundtrip_preserves_prefilled():
     # IRCopilotCard before sending to the FE. If the action model omits
     # `prefilled`, Pydantic drops it and the textarea renders blank. Guard it.
     from app.matcha.routes.ir_incidents._shared import build_osha_clean_description_card
-    from app.matcha.models.ir_incident import IRCopilotCard
+    from app.matcha.models.ir.copilot import IRCopilotCard
     card = build_osha_clean_description_card("An employee slipped and fell.")
     validated = IRCopilotCard.model_validate(card)
     assert validated.action.prefilled == "An employee slipped and fell."

@@ -32,7 +32,7 @@ from ...services.pilots import analysis_pilot as ap
 from ...services.pilots import analysis_packs as packs
 from ...services.pilots import analysis_platform_sources as platform_sources
 from ...services.er.er_document_parser import ERDocumentParser
-from ...models.analysis_pilot import (
+from app.matcha.models.pilots.analysis_pilot import (
     SessionCreate, SessionUpdate, DatasetPatch, ComparisonCreate, ChatIn, ReportIn, DemoDatasetIn,
     PlatformDatasetIn,
 )

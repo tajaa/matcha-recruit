@@ -16,7 +16,7 @@ from ....database import get_connection
 from ...dependencies import require_broker, require_broker_pro
 from ...services.insurance import loss_development as ld, loss_run_parser
 from ...services.broker import external_clients as ext
-from ...models.loss_development import LossRunValuationCommit, LossPremiumUpsert
+from app.matcha.models.insurance.loss_development import LossRunValuationCommit, LossPremiumUpsert
 from .portfolio import _assert_broker_owns_company
 from .external import _broker_id
 

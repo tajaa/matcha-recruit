@@ -8,7 +8,7 @@ huume_mode shipped undeclared and the client could never see the mode after
 a reload — this test makes that failure loud for the next mode too.
 """
 
-from app.matcha.models.matcha_work import ThreadDetailResponse, ThreadListItem
+from app.matcha.models.matcha_work.matcha_work import ThreadDetailResponse, ThreadListItem
 from app.matcha.services.matcha_work.matcha_work_modes import THREAD_MODES
 
 

@@ -28,7 +28,7 @@ from fastapi.responses import StreamingResponse
 from app.core.services.redis_cache import check_rate_limit
 from app.database import get_connection
 from app.matcha.dependencies import require_employee_record
-from app.matcha.models.ask_hr import (
+from app.matcha.models.pilots.ask_hr import (
     AskHrChatIn,
     AskHrMessageResponse,
     AskHrSessionCreate,

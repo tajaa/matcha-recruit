@@ -7,7 +7,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.database import get_connection
-from app.matcha.models.benefits import ElectionUpsert, LifeEventCreate
+from app.matcha.models.benefits.benefits import ElectionUpsert, LifeEventCreate
 from app.matcha.dependencies import require_employee_record
 from app.matcha.services.benefits.benefits_enrollment import log_benefit_audit, resolve_active_window
 

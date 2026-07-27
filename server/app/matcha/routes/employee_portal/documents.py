@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from app.database import get_connection
 from app.core.models.handbook import HandbookVersionContent
 from app.core.services.policy_service import SignatureService
-from app.matcha.models.employee import (
+from app.matcha.models.employees.employee import (
     EmployeeDocumentResponse, EmployeeDocumentListResponse, SignDocumentRequest,
 )
 from app.matcha.dependencies import require_employee_record

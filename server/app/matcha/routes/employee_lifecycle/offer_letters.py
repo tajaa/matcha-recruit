@@ -12,7 +12,7 @@ from fastapi import APIRouter, HTTPException, Depends, File, UploadFile, Request
 from fastapi.responses import StreamingResponse
 
 from app.database import get_connection
-from app.matcha.models.offer_letter import (
+from app.matcha.models.offer_letters.offer_letter import (
     OfferGuidanceRequest,
     OfferGuidanceResponse,
     OfferLetter,

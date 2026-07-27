@@ -21,7 +21,7 @@ from app.config import get_settings
 from app.core.models.auth import CurrentUser
 from app.database import get_connection
 from app.matcha.dependencies import require_admin_or_client, get_client_company_id
-from app.matcha.models.matcha_work import UsageSummaryResponse
+from app.matcha.models.matcha_work.matcha_work import UsageSummaryResponse
 from app.matcha.services.matcha_work import matcha_work_document as doc_svc
 from app.matcha.services.matcha_work.matcha_work_ai import get_ai_provider
 

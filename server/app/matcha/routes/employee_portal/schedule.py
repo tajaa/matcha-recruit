@@ -5,7 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.database import get_connection
-from app.matcha.models.employee_schedule import ScheduleRequestCreate
+from app.matcha.models.scheduling.employee_schedule import ScheduleRequestCreate
 from app.matcha.dependencies import require_employee_record
 
 from ._shared import _schedule_dep

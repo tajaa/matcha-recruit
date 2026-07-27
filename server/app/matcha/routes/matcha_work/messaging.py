@@ -20,7 +20,7 @@ from fastapi.responses import StreamingResponse
 
 from app.core.models.auth import CurrentUser
 from app.matcha.dependencies import require_admin_or_client, get_client_company_id
-from app.matcha.models.matcha_work import SendMessageRequest, SendMessageResponse
+from app.matcha.models.matcha_work.matcha_work import SendMessageRequest, SendMessageResponse
 from app.matcha.routes.matcha_work._shared import _row_to_message, _sse_data
 from app.matcha.services.matcha_work import matcha_work_document as doc_svc
 from app.matcha.services.matcha_work.ai_apply import (

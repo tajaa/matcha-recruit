@@ -15,7 +15,7 @@ from fastapi import HTTPException
 
 from app.matcha.routes.broker import insurance as bi
 from app.matcha.services.insurance import coterie_service as cs
-from app.matcha.models.insurance import FnolRequest
+from app.matcha.models.insurance.insurance import FnolRequest
 
 
 INCIDENT = {"id": uuid4(), "incident_number": "IR-2026-014"}

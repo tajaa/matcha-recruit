@@ -23,7 +23,7 @@ from app.database import get_connection
 from app.matcha.dependencies import require_admin_or_client, get_client_company_id
 # Safe at module level: ir_flow's own imports of this package are function-local.
 from app.matcha.services.ir import ir_flow
-from app.matcha.models.ir_incident import IRCopilotAcceptRequest, IRCopilotStreamRequest, IRCopilotTranscript
+from app.matcha.models.ir.copilot import IRCopilotAcceptRequest, IRCopilotStreamRequest, IRCopilotTranscript
 
 # Helpers that still live in _legacy.py; will move to _shared.py in step 10.
 from ._shared import ROOT_CAUSE_INTERVIEW_STEPS, _get_incident_with_company_check, _safe_json_loads, _sse, _utc_now_naive, parse_witnesses, build_assign_training_card, log_audit

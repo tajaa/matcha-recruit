@@ -22,6 +22,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+from app.matcha.models.pilots.chat import PilotChatIn as ChatIn
 
 from ....database import get_connection
 from ...dependencies import require_admin_or_client, get_client_company_id
@@ -50,8 +51,6 @@ class SessionUpdate(BaseModel):
     status: Optional[Literal["active", "closed"]] = None
 
 
-class ChatIn(BaseModel):
-    message: str = Field(..., min_length=1, max_length=5_000)
 
 
 class DraftUpdate(BaseModel):

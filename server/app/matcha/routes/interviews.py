@@ -9,7 +9,7 @@ from ..dependencies import require_admin_or_client, get_client_company_id
 from ...core.models.auth import CurrentUser
 
 from ...database import get_connection
-from ..models.interview import InterviewCreate, InterviewResponse, InterviewStart
+from app.matcha.models.interviews.interview import InterviewCreate, InterviewResponse, InterviewStart
 from ...core.services.gemini_session import GeminiLiveSession
 from ...core.services.auth import (
     create_interview_ws_token,

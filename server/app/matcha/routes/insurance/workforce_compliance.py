@@ -18,7 +18,7 @@ from ...services.workforce import workforce_suggest
 from ...services.workforce import workforce_compliance as wf
 from ...services.workforce import workforce_requirement_gate
 from ....core.feature_flags import get_company_features
-from ...models.workforce_compliance import (
+from app.matcha.models.workforce.workforce_compliance import (
     HiringAiAuditCreate, HiringAiAuditUpdate, HiringAiAuditResponse,
     BiometricPointCreate, BiometricPointUpdate, BiometricPointResponse,
     PayTransparencyStateRow, PayTransparencyUpdate,

@@ -420,7 +420,7 @@ def test_is_provisional_predicate():
 
 def test_enum_lists_track_the_pydantic_literals():
     from typing import get_args
-    from app.matcha.models import limit_adequacy as m
+    from app.matcha.models.insurance import limit_adequacy as m
 
     assert rt.CONTRACT_TYPES == list(get_args(m.ContractType))
     assert rt.INDEMNITY_FORMS == list(get_args(m.IndemnityForm))
@@ -474,7 +474,7 @@ def _update(body, stored=None) -> _UpdateConn:
 
 
 def _body(**kw):
-    from app.matcha.models.limit_adequacy import ContractUpdate
+    from app.matcha.models.insurance.limit_adequacy import ContractUpdate
     return ContractUpdate(**kw)
 
 
@@ -527,14 +527,14 @@ def test_states_are_normalized_on_write():
 
 
 def test_update_resets_confirmation_when_risk_transfer_changes():
-    from app.matcha.models.limit_adequacy import Indemnity, RiskTransfer
+    from app.matcha.models.insurance.limit_adequacy import Indemnity, RiskTransfer
 
     body = _body(risk_transfer=RiskTransfer(indemnity=Indemnity(present=True, form="broad")))
     assert _update(body).reset is True
 
 
 def test_resending_an_identical_risk_transfer_does_not_reset():
-    from app.matcha.models.limit_adequacy import Indemnity, RiskTransfer
+    from app.matcha.models.insurance.limit_adequacy import Indemnity, RiskTransfer
 
     clause = RiskTransfer(indemnity=Indemnity(present=True, form="broad"))
     stored = dict(_UpdateConn().stored, risk_transfer=json.dumps(clause.model_dump()))

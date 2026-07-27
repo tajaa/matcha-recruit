@@ -16,7 +16,7 @@ from pydantic import BaseModel
 from ....database import get_connection
 from ....core.feature_flags import merge_company_features
 from ...dependencies import require_broker, require_broker_pro
-from ...models.limit_adequacy import ContractUpdate
+from app.matcha.models.insurance.limit_adequacy import ContractUpdate
 from ...services import claims_readiness as cr
 from ...services.broker import (
     epl_readiness, external_clients as ext, submission_packet as sp,

@@ -18,7 +18,7 @@ from uuid import UUID
 from app.core.services.email import get_email_service
 from app.core.services.handbook_service import HandbookService
 from app.database import get_connection
-from app.matcha.models.matcha_work import (
+from app.matcha.models.matcha_work.matcha_work import (
     HandbookDocument,
     InventoryDocument,
     OfferLetterDocument,

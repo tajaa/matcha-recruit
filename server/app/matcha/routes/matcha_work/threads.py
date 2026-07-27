@@ -32,7 +32,7 @@ from app.core.feature_flags import get_company_features
 from app.core.services.storage import get_storage
 from app.database import get_connection
 from app.matcha.dependencies import require_admin_or_client, get_client_company_id
-from app.matcha.models.matcha_work import (
+from app.matcha.models.matcha_work.matcha_work import (
     CreateThreadRequest,
     CreateThreadResponse,
     DocumentVersionResponse,

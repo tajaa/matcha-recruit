@@ -21,6 +21,7 @@ from uuid import UUID
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Request, Response, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
+from app.matcha.models.pilots.chat import PilotChatIn as ChatIn
 
 from ....database import get_connection
 from ...dependencies import require_admin_or_client, get_client_company_id
@@ -99,8 +100,6 @@ class ResearchOptions(BaseModel):
     include_guidance: bool = True
 
 
-class ChatIn(BaseModel):
-    message: str = Field(..., min_length=1, max_length=5_000)
 
 
 class PacketIn(BaseModel):

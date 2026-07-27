@@ -6,7 +6,7 @@ import pytest
 from fastapi import BackgroundTasks
 
 from app.core.models.auth import CurrentUser
-from app.matcha.models.er_case import ERCaseCreate, ERCaseUpdate
+from app.matcha.models.er.case import ERCaseCreate, ERCaseUpdate
 from app.matcha.routes.er_copilot import _shared as er_copilot_shared
 from app.matcha.routes.er_copilot import crud as er_copilot_routes
 

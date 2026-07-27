@@ -13,7 +13,7 @@ from app.core.models.auth import CurrentUser
 from app.core.services.storage import get_storage
 from app.database import get_connection
 from app.matcha.dependencies import get_client_company_id
-from app.matcha.models.matcha_work import MWMessageOut, ThreadDetailResponse
+from app.matcha.models.matcha_work.matcha_work import MWMessageOut, ThreadDetailResponse
 from app.matcha.services.matcha_work import matcha_work_document as doc_svc
 from app.matcha.services.matcha_work.matcha_work_ai import _infer_skill_from_state
 

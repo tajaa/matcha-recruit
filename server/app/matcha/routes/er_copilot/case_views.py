@@ -10,7 +10,7 @@ from ....database import get_connection
 from ...dependencies import require_admin_or_client, get_client_company_id
 from ....core.models.auth import CurrentUser
 from ...services import claims_readiness
-from ...models.er_case import (
+from app.matcha.models.er.case import (
     AuditLogEntry,
     AuditLogResponse,
 )

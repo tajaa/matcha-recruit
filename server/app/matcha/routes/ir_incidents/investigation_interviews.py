@@ -15,7 +15,7 @@ from app.config import get_settings
 from app.core.services.email import get_email_service
 from app.database import get_connection
 from app.matcha.dependencies import require_admin_or_client, get_client_company_id
-from app.matcha.models.interview import (
+from app.matcha.models.interviews.interview import (
     InvestigationInterviewCreate,
     InvestigationInterviewResponse,
     InvestigationInterviewStart,

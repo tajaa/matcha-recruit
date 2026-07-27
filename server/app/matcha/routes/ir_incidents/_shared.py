@@ -16,7 +16,7 @@ from fastapi import HTTPException, Request, UploadFile
 
 from app.database import get_connection
 from app.matcha.dependencies import get_client_company_id
-from app.matcha.models.ir_incident import IRIncidentResponse, Witness
+from app.matcha.models.ir.incident import IRIncidentResponse, Witness
 from app.core.services.osha_privacy import (  # noqa: F401  (re-export: copilot.py)
     PRIVACY_CASE_REASONS,
     PRIVACY_CASE_REASON_LABELS,

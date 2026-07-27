@@ -24,9 +24,9 @@ from fastapi.responses import StreamingResponse
 from app.config import get_settings
 from app.database import get_connection
 from app.matcha.dependencies import require_admin_or_client, get_client_company_id
-from app.matcha.models.ir_incident import (
+from app.matcha.models.ir.analysis import ConsistencyAnalytics
+from app.matcha.models.ir.analytics import (
     AnalyticsSummary,
-    ConsistencyAnalytics,
     LeadingIndicators,
     LocationAnalysis,
     LocationHotspot,

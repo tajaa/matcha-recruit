@@ -5,6 +5,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
 
+from .chat import PilotChatIn
+
 from app.matcha.services.pilots.analysis_packs.mapping import CANONICAL_ROLES
 
 # Sentinels a caller may use to clear a heuristic role assignment.
@@ -75,8 +77,9 @@ class ComparisonCreate(BaseModel):
     spec: Optional[dict] = None
 
 
-class ChatIn(BaseModel):
-    message: str = Field(..., min_length=1, max_length=5000)
+class ChatIn(PilotChatIn):
+    """Analysis Pilot's turn: the shared message plus highlight-to-chat."""
+
     # Highlighted-record cids the turn should focus on (validated against the
     # corpus index server-side; unknown ids are dropped, not errored).
     focus: Optional[list[str]] = Field(None, max_length=10)

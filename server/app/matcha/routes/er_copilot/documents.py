@@ -8,7 +8,7 @@ from ....database import get_connection
 from ...dependencies import require_admin_or_client, get_client_company_id
 from ....core.models.auth import CurrentUser
 from ....core.services.storage import get_storage
-from ...models.er_case import (
+from app.matcha.models.er.case import (
     ERDocumentResponse,
     ERDocumentUploadResponse,
     TaskStatusResponse,

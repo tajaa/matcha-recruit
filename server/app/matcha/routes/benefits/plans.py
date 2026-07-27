@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from app.core.models.auth import CurrentUser
 from app.database import get_connection
 from app.matcha.dependencies import require_admin_or_client, get_client_company_id
-from app.matcha.models.benefits import PlanCreate, PlanUpdate, TierInput
+from app.matcha.models.benefits.benefits import PlanCreate, PlanUpdate, TierInput
 from app.matcha.services.benefits.benefits_enrollment import log_benefit_audit
 
 logger = logging.getLogger(__name__)

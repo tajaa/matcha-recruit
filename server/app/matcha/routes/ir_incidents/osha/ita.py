@@ -13,13 +13,13 @@ from fastapi.responses import StreamingResponse
 
 from app.database import get_connection
 from app.matcha.dependencies import require_admin_or_client, get_client_company_id
-from app.matcha.models.ir_incident import (
-    ItaCredentialUpdate,
+from app.matcha.models.ir.osha import (
     ItaCredentialStatus,
-    ItaSubmitRequest,
-    ItaSubmitResponse,
+    ItaCredentialUpdate,
     ItaSubmission,
     ItaSubmissionListResponse,
+    ItaSubmitRequest,
+    ItaSubmitResponse,
 )
 from app.matcha.routes.ir_incidents._shared import log_audit
 from app.matcha.services.ir.naics_titles import naics_industry_description

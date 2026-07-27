@@ -22,6 +22,7 @@ from fastapi import (APIRouter, Depends, File, HTTPException, Query, Request, Re
                      UploadFile)
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+from app.matcha.models.pilots.chat import PilotChatIn as ChatIn
 
 from ....database import get_connection
 from ...dependencies import require_broker_pro
@@ -66,8 +67,6 @@ class SessionUpdate(BaseModel):
     status: Optional[Literal["active", "closed"]] = None
 
 
-class ChatIn(BaseModel):
-    message: str = Field(..., min_length=1, max_length=5_000)
 
 
 # --------------------------------------------------------------------------- #

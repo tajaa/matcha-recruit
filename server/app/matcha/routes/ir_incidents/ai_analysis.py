@@ -30,7 +30,7 @@ from fastapi.responses import StreamingResponse
 from app.config import get_settings
 from app.database import get_connection
 from app.matcha.dependencies import require_admin_or_client, get_client_company_id
-from app.matcha.models.ir_incident import (
+from app.matcha.models.ir.analysis import (
     ActionProbability,
     CategorizationAnalysis,
     ConsistencyGuidance,
@@ -488,7 +488,7 @@ async def run_recommendations_inline(
     ``IRAnalysisError`` if the LLM fails AND no cached row exists.
     """
     from app.matcha.services.ir.ir_analysis import get_ir_analyzer, IRAnalysisError
-    from app.matcha.models.ir_incident import RecommendationItem
+    from app.matcha.models.ir.analysis import RecommendationItem
 
     async with get_connection() as conn:
         row = await _get_incident_with_company_check(conn, incident_id, current_user)
@@ -597,7 +597,7 @@ async def analyze_recommendations(
 ):
     """Generate corrective action recommendations using AI (SSE stream)."""
     from app.matcha.services.ir.ir_analysis import get_ir_analyzer, IRAnalysisError
-    from app.matcha.models.ir_incident import RecommendationItem
+    from app.matcha.models.ir.analysis import RecommendationItem
 
     # Pre-fetch all data before starting the stream
     async with get_connection() as conn:
