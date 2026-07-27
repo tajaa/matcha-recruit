@@ -338,19 +338,32 @@ TOOLS: tuple[HuumeTool, ...] = (
     _tool(
         "promote_handbook_drafts", "write",
         "Promote reviewed pending drafts into the real tables: handbook-"
-        "section drafts become ONE new draft handbook, policy drafts become "
+        "section drafts become ONE new draft handbook (or amend an existing "
+        "handbook when target_handbook_id is given), policy drafts become "
         "draft policies. Only call this when the admin explicitly asks to "
         "promote, on a LATER message than the one that drafted them. Pass "
         "draft_ids naming exactly which drafts (see Current staged state), "
         "or omit it to promote all pending drafts from earlier turns. "
-        "Everything promoted still lands as a DRAFT handbook/policy the "
-        "admin publishes through the normal flow.",
+        "Without a target, everything promoted still lands as a DRAFT "
+        "handbook/policy the admin publishes through the normal flow; "
+        "amending an existing handbook edits its live sections in place and "
+        "auto-resolves any pending change requests raised by freshness "
+        "findings the promoted drafts cite.",
         properties={
             "draft_ids": types.Schema(
                 type=types.Type.ARRAY, items=types.Schema(type=types.Type.STRING),
                 description="Pending draft ids to promote. Omit for all pending drafts from earlier turns.",
             ),
             "handbook_title": types.Schema(type=types.Type.STRING, description="Title for the new draft handbook when promoting section drafts."),
+            "target_handbook_id": types.Schema(
+                type=types.Type.STRING,
+                description=(
+                    "Existing handbook id to amend INSTEAD of creating a new "
+                    "draft handbook: matching sections update in place, new "
+                    "ones append. Only pass an id the admin explicitly chose. "
+                    "Omit to create a new draft handbook."
+                ),
+            ),
         },
     ),
     _tool(

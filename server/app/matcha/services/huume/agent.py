@@ -681,6 +681,7 @@ async def run_huume_turn(
                     company_id=company_id, actor_user_id=user_id, thread_id=thread_id,
                     session_id=session_id, draft_ids=requested,
                     exclude_ids=handbook_drafts_this_turn, handbook_title=args.get("handbook_title"),
+                    target_handbook_id=args.get("target_handbook_id") or None,
                 )
                 ok = result.get("status") == "ok"
                 if ok:
@@ -689,9 +690,12 @@ async def run_huume_turn(
                         "pending_drafts": result.get("pending_drafts") or [],
                     }
                 n = result.get("promoted") or 0
+                amended = bool((result.get("handbook") or {}).get("amended"))
                 step = recorder.record(
                     tool=name, kind="write",
-                    label=(f"Promoted {n} draft{'s' if n != 1 else ''}" if ok else "Promote refused"),
+                    label=(("Amended handbook" if amended
+                            else f"Promoted {n} draft{'s' if n != 1 else ''}") if ok
+                           else "Promote refused"),
                     status="ok" if ok else ("rejected" if result.get("status") == "refused" else "error"),
                     detail=result.get("message"),
                 )

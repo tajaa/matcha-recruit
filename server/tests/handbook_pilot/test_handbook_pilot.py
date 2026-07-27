@@ -793,7 +793,8 @@ def _audit(days_ago: int = 10, n_extra: int = 0):
 
 def _freshness(n: int = 2, change_request: bool = False):
     from datetime import datetime, timezone
-    return [{"id": f"f{i}", "section_key": f"section_{i}", "finding_type": "outdated",
+    return [{"id": f"f{i}", "handbook_id": "hb1", "section_key": f"section_{i}",
+             "finding_type": "outdated",
              "summary": f"Finding {i}: the meal-break rule changed.",
              "source_url": "https://example.com/law", "effective_date": "2026-01-01",
              "age_days": 400, "change_request_id": ("cr1" if change_request else None),
@@ -851,6 +852,21 @@ def test_freshness_records_and_change_request_flag():
 
     withcr, _ = hp._freshness_records(_freshness(n=1, change_request=True))
     assert "already been raised" in withcr[0]["summary"]
+
+
+def test_freshness_records_carry_structured_linkage():
+    # The fresh→change-request linkage must survive as real fields, not just
+    # prose — the promote path resolves change requests through them.
+    rec = hp._freshness_records(_freshness(n=1, change_request=True))[0][0]
+    assert rec["handbook_id"] == "hb1"
+    assert rec["section_key"] == "section_0"
+    assert rec["change_request_id"] == "cr1"
+
+    no_cr = hp._freshness_records(_freshness(n=1))[0][0]
+    assert no_cr["change_request_id"] is None
+    bare = hp._freshness_records([{"id": "f9", "finding_type": "outdated",
+                                   "summary": "x", "checked_at": None}])[0][0]
+    assert bare["handbook_id"] is None and bare["section_key"] is None
 
 
 def test_freshness_records_cap_notes_and_empties():
@@ -922,3 +938,37 @@ def test_employee_redaction_covers_the_new_finding_groups():
     assert "handbook_audit" not in red["sources"] and "handbook_freshness" not in red["sources"]
     # cids leave the index too, so a guessed citation can't resolve either
     assert not any(c.startswith(("audit:", "fresh:")) for c in red["index"])
+
+
+# --------------------------------------------------------------------------- #
+# _fresh_cids_from_drafts — the promote path's fresh-citation extractor
+# --------------------------------------------------------------------------- #
+
+def test_fresh_cids_from_drafts_parses_json_and_list_forms():
+    import json as _json
+    u1 = "11111111-1111-1111-1111-111111111111"
+    u2 = "22222222-2222-2222-2222-222222222222"
+    drafts = [
+        # asyncpg row shape: citations is a JSON string
+        {"kind": "handbook_section",
+         "citations": _json.dumps([f"fresh:{u1}", "law:ca-wage-x", "audit:ca-y"])},
+        # in-memory shape: already a list
+        {"kind": "handbook_section", "citations": [f"fresh:{u2}", f"fresh:{u1}"]},
+    ]
+    out = hp._fresh_cids_from_drafts(drafts)
+    assert [str(u) for u in out] == [u1, u2]  # deduped, order-preserving
+
+
+def test_fresh_cids_from_drafts_skips_junk_and_non_sections():
+    u1 = "11111111-1111-1111-1111-111111111111"
+    drafts = [
+        {"kind": "policy", "citations": [f"fresh:{u1}"]},        # policies never resolve CRs
+        {"kind": "handbook_section", "citations": None},
+        {"kind": "handbook_section", "citations": "not json"},
+        {"kind": "handbook_section", "citations": ["fresh:not-a-uuid", 42, None]},
+        {"kind": "handbook_section"},
+        "junk",
+    ]
+    assert hp._fresh_cids_from_drafts(drafts) == []
+    assert hp._fresh_cids_from_drafts([]) == []
+    assert hp._fresh_cids_from_drafts(None) == []

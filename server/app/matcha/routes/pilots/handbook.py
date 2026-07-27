@@ -63,6 +63,9 @@ class DraftUpdate(BaseModel):
 class PromoteIn(BaseModel):
     draft_ids: list[UUID] = Field(..., min_length=1)
     handbook_title: Optional[str] = Field(None, max_length=300)
+    # Existing handbook to amend in place instead of creating a new draft
+    # handbook: matching section keys update, the rest append.
+    target_handbook_id: Optional[UUID] = None
 
 
 # --------------------------------------------------------------------------- #
@@ -434,6 +437,17 @@ async def promote(session_id: UUID, body: PromoteIn, request: Request,
     async with get_connection() as conn:
         session = await _load_session(conn, session_id, company_id)
         await _assert_paid(conn, company_id)
+        if body.target_handbook_id:
+            # Crisp HTTP errors for the web UI; the service re-defends for the
+            # non-HTTP (Huume) caller.
+            hb = await conn.fetchrow(
+                "SELECT id, status FROM handbooks WHERE id = $1 AND company_id = $2",
+                body.target_handbook_id, company_id,
+            )
+            if not hb:
+                raise HTTPException(status_code=404, detail="Target handbook not found")
+            if hb["status"] == "archived":
+                raise HTTPException(status_code=400, detail="Cannot amend an archived handbook")
         try:
             from app.core.services.handbook_service import derive_handbook_scopes_from_employees
             scopes = await derive_handbook_scopes_from_employees(conn, str(company_id))
@@ -454,15 +468,23 @@ async def promote(session_id: UUID, body: PromoteIn, request: Request,
     # used by the Huume chat skill. Partial success stays first-class.
     result = await hp.promote_drafts(
         company_id, session, drafts, scopes=scopes,
-        handbook_title=body.handbook_title, user_id=user_id,
+        handbook_title=body.handbook_title,
+        target_handbook_id=str(body.target_handbook_id) if body.target_handbook_id else None,
+        user_id=user_id,
     )
     async with get_connection() as conn:
         await _audit(conn, session_id, current_user, request, "promote",
                      {"promoted": list(result["promoted_refs"].keys()),
-                      "failed": [f["draft_id"] for f in result["failed"]]})
+                      "failed": [f["draft_id"] for f in result["failed"]],
+                      "target_handbook_id": (str(body.target_handbook_id)
+                                             if body.target_handbook_id else None),
+                      "resolved_change_requests": [
+                          c["change_request_id"]
+                          for c in result["resolved_change_requests"]]})
     return {
         "promoted": len(result["promoted_refs"]),
         "handbook": result["handbook"],
         "policies": result["policies"],
         "failed": result["failed"],
+        "resolved_change_requests": result["resolved_change_requests"],
     }

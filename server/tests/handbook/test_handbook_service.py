@@ -798,3 +798,23 @@ def test_list_distribution_recipients_includes_assignment_status(monkeypatch):
     assert result[0].already_assigned is True
     assert result[1].employee_id == UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
     assert result[1].already_assigned is False
+
+
+# --------------------------------------------------------------------------- #
+# _dedupe_section_key — shared collision suffixer (create + amend paths)
+# --------------------------------------------------------------------------- #
+
+def test_dedupe_section_key_passthrough_and_suffixing():
+    from app.core.services.handbook_service import _dedupe_section_key
+
+    assert _dedupe_section_key("pto", set()) == "pto"
+    assert _dedupe_section_key("pto", {"pto"}) == "pto_2"
+    assert _dedupe_section_key("pto", {"pto", "pto_2"}) == "pto_3"
+
+
+def test_dedupe_section_key_respects_length_cap():
+    from app.core.services.handbook_service import _dedupe_section_key
+
+    base = "k" * 120
+    key = _dedupe_section_key(base, {base})
+    assert key != base and key.endswith("_2") and len(key) <= 120

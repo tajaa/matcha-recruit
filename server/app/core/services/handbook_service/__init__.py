@@ -957,16 +957,7 @@ class HandbookService:
                             section.get("section_key") or section.get("title") or f"section_{order}",
                             max_len=110,
                         ) or f"section_{order}"
-                        # UNIQUE(handbook_version_id, section_key) — disambiguate
-                        # collisions the way _normalize_custom_sections does:
-                        # shrink the base so the suffix always fits (no infinite
-                        # loop when base_key is already at the length cap).
-                        key = base_key
-                        suffix = 2
-                        while key in seen_keys:
-                            suffix_token = f"_{suffix}"
-                            key = f"{base_key[: max(1, 120 - len(suffix_token))]}{suffix_token}"
-                            suffix += 1
+                        key = _dedupe_section_key(base_key, seen_keys)
                         seen_keys.add(key)
                         await conn.execute(
                             """
@@ -993,6 +984,120 @@ class HandbookService:
         if handbook is None:
             raise ValueError("Failed to create handbook")
         return handbook
+
+    @staticmethod
+    async def amend_handbook_sections(
+        handbook_id: str,
+        company_id: str,
+        sections: list[dict[str, Any]],
+        updated_by: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Upsert pre-authored sections into an EXISTING handbook's active
+        version — the Handbook Pilot amend-mode promotion target. A section
+        whose slugified key matches an existing section updates it in place;
+        the rest append at the end. Edits the active version directly, like
+        `update_handbook` and `resolve_change_request` (there is no version-
+        bump machinery in this product — `active_version` is a live pointer).
+
+        Returns ``{"handbook_id", "title", "updated": [...], "added": [...]}``
+        where each entry is ``{"section_key", "title"}``. Raises ``ValueError``
+        on any refusal (missing/cross-tenant target, archived, no version).
+        """
+        try:
+            async with get_connection() as conn:
+                async with conn.transaction():
+                    handbook = await conn.fetchrow(
+                        """
+                        SELECT id, title, status, active_version
+                        FROM handbooks
+                        WHERE id = $1 AND company_id = $2
+                        """,
+                        handbook_id, company_id,
+                    )
+                    if not handbook:
+                        raise ValueError("Target handbook not found")
+                    if handbook["status"] == "archived":
+                        raise ValueError("Cannot amend an archived handbook")
+                    version_id = await HandbookService._get_active_version_id(
+                        conn, handbook_id, handbook["active_version"]
+                    )
+                    if version_id is None:
+                        raise ValueError("Target handbook has no active version")
+
+                    existing_keys: set[str] = {
+                        r["section_key"] for r in await conn.fetch(
+                            "SELECT section_key FROM handbook_sections WHERE handbook_version_id = $1",
+                            version_id,
+                        )
+                    }
+                    next_order = await conn.fetchval(
+                        "SELECT COALESCE(MAX(section_order), 0) FROM handbook_sections "
+                        "WHERE handbook_version_id = $1",
+                        version_id,
+                    )
+
+                    updated: list[dict[str, str]] = []
+                    added: list[dict[str, str]] = []
+                    for n, section in enumerate(sections or [], start=1):
+                        base_key = _slugify_key(
+                            section.get("section_key") or section.get("title") or f"section_{n}",
+                            max_len=110,
+                        ) or f"section_{n}"
+                        title = str(section.get("title") or "Untitled Section")[:255]
+                        content = str(section.get("content") or "")
+                        if base_key in existing_keys:
+                            # In-place update — deliberately does not touch
+                            # last_reviewed_at (resolve_change_request doesn't
+                            # either; keep the active-version writers consistent).
+                            await conn.execute(
+                                """
+                                UPDATE handbook_sections
+                                SET content = $1, title = $2, updated_at = NOW()
+                                WHERE handbook_version_id = $3 AND section_key = $4
+                                """,
+                                content, title, version_id, base_key,
+                            )
+                            updated.append({"section_key": base_key, "title": title})
+                        else:
+                            key = _dedupe_section_key(base_key, existing_keys)
+                            existing_keys.add(key)
+                            next_order += 1
+                            await conn.execute(
+                                """
+                                INSERT INTO handbook_sections (
+                                    handbook_version_id, section_key, title, section_order,
+                                    section_type, jurisdiction_scope, content, created_at, updated_at
+                                )
+                                VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, NOW(), NOW())
+                                """,
+                                version_id, key, title, next_order,
+                                str(section.get("section_type") or "custom"),
+                                json.dumps(section.get("jurisdiction_scope") or {}),
+                                content,
+                            )
+                            added.append({"section_key": key, "title": title})
+
+                    # Content changed — bust the cached PDF, same as
+                    # update_handbook / resolve_change_request.
+                    await conn.execute(
+                        "UPDATE handbooks SET updated_at = NOW(), file_url = NULL, "
+                        "file_name = NULL WHERE id = $1",
+                        handbook_id,
+                    )
+        except ValueError:
+            raise
+        except Exception as exc:
+            translated = _translate_handbook_db_error(exc)
+            if translated:
+                raise ValueError(translated) from exc
+            raise
+
+        return {
+            "handbook_id": str(handbook["id"]),
+            "title": handbook["title"],
+            "updated": updated,
+            "added": added,
+        }
 
     @staticmethod
     async def _get_active_version_id(conn, handbook_id: str, active_version: int) -> Optional[UUID]:

@@ -265,8 +265,8 @@ async def _fetch_freshness_findings(conn, company_id) -> list[dict]:
                 WHERE company_id = $1 AND status = 'completed'
                 ORDER BY handbook_id, created_at DESC
             )
-            SELECT f.id, f.section_key, f.finding_type, f.summary, f.source_url,
-                   f.effective_date, f.age_days, f.change_request_id,
+            SELECT f.id, f.handbook_id, f.section_key, f.finding_type, f.summary,
+                   f.source_url, f.effective_date, f.age_days, f.change_request_id,
                    l.created_at AS checked_at, h.title AS handbook_title
             FROM latest l
             JOIN handbook_freshness_findings f ON f.freshness_check_id = l.id
@@ -617,6 +617,12 @@ def _freshness_records(findings: list[dict] | None) -> tuple[list[dict], list[st
             "summary": "; ".join(bits) + ".",
             "when": (checked.date().isoformat() if hasattr(checked, "date")
                      else str(checked or "")[:10] or "current"),
+            # Structured linkage (not just prose) so a promoted draft citing
+            # this finding can be traced to its handbook + change request.
+            "handbook_id": str(f["handbook_id"]) if f.get("handbook_id") else None,
+            "section_key": f.get("section_key") or None,
+            "change_request_id": (str(f["change_request_id"])
+                                  if f.get("change_request_id") else None),
         })
     return recs, notes
 
@@ -1463,21 +1469,67 @@ async def persist_turn(session_id, company_id, result_payload: dict, user_id) ->
     return draft_ids
 
 
+def _fresh_cids_from_drafts(drafts: list[dict]) -> list:
+    """Finding UUIDs cited via `fresh:` cids by the given section drafts. Pure.
+
+    `citations` arrives as a JSONB value — a JSON string from asyncpg rows, or
+    already a list from in-memory callers; anything malformed is skipped, as is
+    any `fresh:` cid whose suffix isn't a UUID. Deduped, order-preserving."""
+    from uuid import UUID as _UUID
+
+    out: list = []
+    seen: set[str] = set()
+    for d in drafts or []:
+        if not isinstance(d, dict) or d.get("kind") != "handbook_section":
+            continue
+        raw = d.get("citations")
+        if isinstance(raw, str):
+            try:
+                raw = json.loads(raw)
+            except (json.JSONDecodeError, TypeError):
+                continue
+        if not isinstance(raw, list):
+            continue
+        for cid in raw:
+            if not isinstance(cid, str) or not cid.startswith("fresh:"):
+                continue
+            token = cid[len("fresh:"):].strip()
+            if token in seen:
+                continue
+            try:
+                parsed = _UUID(token)
+            except (ValueError, AttributeError, TypeError):
+                continue
+            seen.add(token)
+            out.append(parsed)
+    return out
+
+
 async def promote_drafts(company_id, session: dict, drafts: list[dict], *,
                          scopes: list, handbook_title: str | None = None,
+                         target_handbook_id: str | None = None,
                          user_id=None) -> dict:
     """Push reviewed pending drafts into the real handbooks / policies tables.
 
     Section drafts become ONE new draft handbook (atomic —
-    create_handbook_from_sections runs in a single transaction); policy drafts
-    become one draft policy each (independent; a failure doesn't block the
-    rest). Partial success is first-class: successes are marked
-    `status='promoted'` with a `promoted_ref` pointing at the real record (so a
-    re-promote of the rest never re-creates them), failures return in
-    `failed[]` rather than raising.
+    create_handbook_from_sections runs in a single transaction) — or, when
+    `target_handbook_id` names an existing handbook, they AMEND it in place
+    (matching section keys update, the rest append; `amend_handbook_sections`
+    is equally atomic). Policy drafts become one draft policy each
+    (independent; a failure doesn't block the rest). Partial success is
+    first-class: successes are marked `status='promoted'` with a
+    `promoted_ref` pointing at the real record (so a re-promote of the rest
+    never re-creates them), failures return in `failed[]` rather than raising.
+
+    Amend-mode promotions also close the freshness loop: any pending
+    `handbook_change_requests` row raised by a freshness finding that a
+    promoted section draft cites (`fresh:` cid) — and that belongs to the
+    target handbook — is marked accepted (status-only; the promoted draft is
+    the applied content, never the CR's own `proposed_content`).
 
     Returns {"promoted_refs": {draft_id: ref}, "handbook": {...}|None,
-             "policies": [...], "failed": [{draft_id, title, error}]}.
+             "policies": [...], "failed": [{draft_id, title, error}],
+             "resolved_change_requests": [{change_request_id, section_key}]}.
     """
     from uuid import UUID as _UUID
 
@@ -1490,6 +1542,7 @@ async def promote_drafts(company_id, session: dict, drafts: list[dict], *,
     handbook_result: dict | None = None
     policy_results: list[dict] = []
     failed: list[dict] = []             # {draft_id, title, error}
+    resolved_crs: list[dict] = []       # {change_request_id, section_key}
 
     if section_drafts:
         from app.core.services.handbook_service import HandbookService
@@ -1504,11 +1557,24 @@ async def promote_drafts(company_id, session: dict, drafts: list[dict], *,
         } for d in section_drafts]
         title = (handbook_title or session.get("title") or "Handbook Pilot draft")[:300]
         try:
-            handbook = await HandbookService.create_handbook_from_sections(
-                str(company_id), title, scopes, sections, str(user_id) if user_id else None,
-            )
-            hb_id = str(handbook.id)
-            handbook_result = {"id": hb_id, "title": title}
+            if target_handbook_id:
+                amend = await HandbookService.amend_handbook_sections(
+                    str(target_handbook_id), str(company_id), sections,
+                    str(user_id) if user_id else None,
+                )
+                hb_id = str(amend["handbook_id"])
+                handbook_result = {
+                    "id": hb_id, "title": amend["title"], "amended": True,
+                    "updated_sections": amend["updated"],
+                    "added_sections": amend["added"],
+                }
+            else:
+                handbook = await HandbookService.create_handbook_from_sections(
+                    str(company_id), title, scopes, sections,
+                    str(user_id) if user_id else None,
+                )
+                hb_id = str(handbook.id)
+                handbook_result = {"id": hb_id, "title": title}
             for d in section_drafts:
                 promoted[str(d["id"])] = {"kind": "handbook", "handbook_id": hb_id}
         except Exception as exc:  # noqa: BLE001 - surface as a per-draft failure, not a 500
@@ -1548,9 +1614,47 @@ async def promote_drafts(company_id, session: dict, drafts: list[dict], *,
             "UPDATE handbook_pilot_sessions SET updated_at = NOW() WHERE id = $1", session["id"]
         )
 
+        # Freshness-loop close-out — amend mode only. Promoting to a NEW
+        # handbook never resolves change requests: the CR's handbook still
+        # carries the stale section. Best-effort; never fails the promote.
+        if target_handbook_id and handbook_result:
+            try:
+                fresh_ids = _fresh_cids_from_drafts(
+                    [d for d in section_drafts if str(d["id"]) in promoted])
+                if fresh_ids:
+                    cr_ids = [r["change_request_id"] for r in await conn.fetch(
+                        """
+                        SELECT DISTINCT f.change_request_id
+                        FROM handbook_freshness_findings f
+                        JOIN handbooks h ON h.id = f.handbook_id
+                        WHERE f.id = ANY($1::uuid[])
+                          AND h.company_id = $2
+                          AND f.handbook_id = $3
+                          AND f.change_request_id IS NOT NULL
+                        """,
+                        fresh_ids, company_id, _UUID(str(target_handbook_id)))]
+                    if cr_ids:
+                        # Status-only accept: the promoted draft is the applied
+                        # content — resolve_change_request would overwrite it
+                        # with the CR's own proposed_content.
+                        rows = await conn.fetch(
+                            """
+                            UPDATE handbook_change_requests
+                            SET status = 'accepted', resolved_by = $2, resolved_at = NOW()
+                            WHERE id = ANY($1::uuid[]) AND status = 'pending'
+                            RETURNING id, section_key
+                            """,
+                            cr_ids, user_id)
+                        resolved_crs = [{"change_request_id": str(r["id"]),
+                                         "section_key": r["section_key"]} for r in rows]
+            except Exception:  # noqa: BLE001
+                logger.warning("handbook_pilot: change-request auto-resolve failed",
+                               exc_info=True)
+
     return {
         "promoted_refs": promoted,
         "handbook": handbook_result,
         "policies": policy_results,
         "failed": failed,
+        "resolved_change_requests": resolved_crs,
     }
