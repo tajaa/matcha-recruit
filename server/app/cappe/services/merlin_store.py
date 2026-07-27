@@ -17,7 +17,7 @@ import logging
 from typing import Any, Optional
 from uuid import UUID
 
-from ..routes._shared import loads_list
+from .common import loads_list
 
 logger = logging.getLogger(__name__)
 
