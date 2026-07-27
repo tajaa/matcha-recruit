@@ -46,13 +46,14 @@ from ..models.cappe import (
     CappeMerlinConversationUpdate,
     CappeMerlinResultsUpdate,
 )
-from ..services import cappe_assets, merlin_store
+from ..services import cappe_assets
 from ..services.design_gate import gate_content, gate_theme, is_premium_plan
-from ..services.merlin import run_merlin_turn
-from ..services.merlin_agent import AGENT_TIERS, run_merlin_agent
-from ..services.merlin_attachments import load_attachments
-from ..services.merlin_ops import build_merlin_schema
-from ..services.merlin_router import route_tier
+from ..services.merlin import store as merlin_store
+from ..services.merlin.turn import run_merlin_turn
+from ..services.merlin.agent import AGENT_TIERS, run_merlin_agent
+from ..services.merlin.attachments import load_attachments
+from ..services.merlin.ops import build_merlin_schema
+from ..services.merlin.routing import route_tier
 from ..services.render import render_site_html
 from ._shared import get_owned_site, loads
 

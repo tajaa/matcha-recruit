@@ -29,8 +29,8 @@ from app.config import load_settings  # noqa: E402
 
 load_settings()
 
-from app.cappe.services import merlin_agent  # noqa: E402
-from app.cappe.services.merlin_agent import run_merlin_agent  # noqa: E402
+from app.cappe.services.merlin import agent as merlin_agent  # noqa: E402
+from app.cappe.services.merlin.agent import run_merlin_agent  # noqa: E402
 
 _BLOCKS = [{"id": "b1", "type": "hero", "heading": "Old", "subheading": "Sub"}]
 

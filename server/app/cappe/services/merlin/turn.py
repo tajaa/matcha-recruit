@@ -25,12 +25,12 @@ from typing import Any, Optional
 
 from google.genai import types
 
-from ...config import get_settings
-from ...core.services.genai_client import get_genai_client
-from ...core.services.rate_limiter import GeminiRateLimiter
-from .design_gate import is_premium_plan
-from .merlin_attachments import caption_lines
-from .merlin_catalog import (
+from ....config import get_settings
+from ....core.services.genai_client import get_genai_client
+from ....core.services.rate_limiter import GeminiRateLimiter
+from ..design_gate import is_premium_plan
+from .attachments import caption_lines
+from .catalog import (
     BLOCK_FIELDS,
     BLOCK_LABELS,
     BLOCK_TYPES,
@@ -43,7 +43,7 @@ from .merlin_catalog import (
 )
 # Op validation lives in the registry module now; re-exported here so existing
 # importers (routes, tests) keep resolving `merlin.validate_ops`.
-from .merlin_ops import MERLIN_OPS, OP_NAMES, validate_ops  # noqa: F401
+from .ops import MERLIN_OPS, OP_NAMES, validate_ops  # noqa: F401
 
 logger = logging.getLogger(__name__)
 

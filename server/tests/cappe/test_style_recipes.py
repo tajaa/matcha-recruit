@@ -18,7 +18,7 @@ os.environ.setdefault("DATABASE_URL", "postgresql://test:test@localhost/test")
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret-key-cappe")
 
 from app.cappe.services.design_registry import DESIGN_COLOR_TOKENS  # noqa: E402
-from app.cappe.services.merlin_ops import validate_ops  # noqa: E402
+from app.cappe.services.merlin.ops import validate_ops  # noqa: E402
 from app.cappe.services.render import render_site_html  # noqa: E402
 from app.cappe.services.style_recipes import RECIPES_BY_KEY, STYLE_RECIPES  # noqa: E402
 

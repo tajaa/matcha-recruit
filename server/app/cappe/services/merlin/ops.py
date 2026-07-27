@@ -24,7 +24,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
-from .merlin_catalog import (
+from .catalog import (
     AI_ASPECT_RATIOS,
     AI_IMAGE_PROMPT_MAX,
     AI_IMAGE_SIZES,
@@ -49,9 +49,9 @@ from .merlin_catalog import (
     THEME_MODE_VALUES,
 )
 
-from .section_presets import PRESETS_BY_KEY, SECTION_PRESETS
-from .style_recipes import RECIPES_BY_KEY, STYLE_RECIPES
-from .theme_presets import PRESET_IDS, THEME_PRESETS, font_pairings_text, preset_catalog_text
+from ..section_presets import PRESETS_BY_KEY, SECTION_PRESETS
+from ..style_recipes import RECIPES_BY_KEY, STYLE_RECIPES
+from ..theme_presets import PRESET_IDS, THEME_PRESETS, font_pairings_text, preset_catalog_text
 
 _HEX_COLOR_RE = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
 
@@ -872,7 +872,7 @@ def _spec_json(spec: Any) -> Any:
 def build_merlin_schema() -> dict[str, Any]:
     """Assemble the full Merlin schema from the registries + catalog. Pure and
     JSON-serializable."""
-    from .merlin_catalog import (
+    from .catalog import (
         BLOCK_LABELS,
         CANVAS_ELEMENT_KINDS,
         CANVAS_GRID_COLS,

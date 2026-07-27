@@ -171,7 +171,7 @@ AI_IMAGE_SIZE_COST_ESTIMATE: dict[str, str] = {"1K": "~$0.03", "2K": "~$0.05", "
 # tests/cappe/test_design_registry.py. Value spec per key: a frozenset is a
 # closed enum; "bool"/"color"/"text"/(min, max) int ranges are checked by kind
 # in merlin_ops.py.
-from .design_registry import DESIGN_COLOR_TOKENS, build_design_groups  # noqa: F401
+from ..design_registry import DESIGN_COLOR_TOKENS, build_design_groups  # noqa: F401
 
 DESIGN_GROUPS: dict[str, dict[str, Any]] = build_design_groups()
 

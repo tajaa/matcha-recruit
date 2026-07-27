@@ -17,7 +17,7 @@ os.environ.setdefault("LIVE_API", "test-key")
 os.environ.setdefault("DATABASE_URL", "postgresql://test:test@localhost/test")
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret-key-cappe")
 
-from app.cappe.services.merlin_ops import _v_set_theme, ValidationCtx  # noqa: E402
+from app.cappe.services.merlin.ops import _v_set_theme, ValidationCtx  # noqa: E402
 from app.cappe.services.theme_presets import (  # noqa: E402
     FONT_PAIRINGS,
     PRESET_IDS,

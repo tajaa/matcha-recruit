@@ -37,13 +37,13 @@ import re
 import uuid
 from typing import Any, Optional
 
-from .merlin_catalog import (
+from .catalog import (
     BLOCK_FIELDS,
     BLOCK_LABELS,
     CANVAS_MAX_ELEMENTS,
     LIST_KINDS,
 )
-from .theme_presets import PRESETS_BY_ID
+from ..theme_presets import PRESETS_BY_ID
 
 
 class ApplyResult:

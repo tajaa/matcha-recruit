@@ -26,10 +26,10 @@ from typing import Any, Optional
 
 from google.genai import types
 
-from ...core.services.genai_client import get_genai_client
-from ...core.services.rate_limiter import GeminiRateLimiter, RateLimitExceeded
-from .design_gate import is_premium_plan
-from .merlin_catalog import DEFAULT_MODEL_TIER, MODEL_TIERS
+from ....core.services.genai_client import get_genai_client
+from ....core.services.rate_limiter import GeminiRateLimiter, RateLimitExceeded
+from ..design_gate import is_premium_plan
+from .catalog import DEFAULT_MODEL_TIER, MODEL_TIERS
 
 logger = logging.getLogger(__name__)
 
@@ -171,7 +171,7 @@ async def route_tier(
     A pinned (non-auto) tier is clamped exactly as before, so this is safe to
     put in front of every request.
     """
-    from .merlin import resolve_model_tier
+    from .turn import resolve_model_tier
 
     if requested != AUTO_TIER:
         return resolve_model_tier(requested, plan), False

@@ -1,7 +1,7 @@
 {
   "_comment": [
     "Parity fixture for the two Merlin op appliers.",
-    "server/app/cappe/services/merlin_apply.py (used by the agent loop to build the",
+    "server/app/cappe/services/merlin/apply.py (used by the agent loop to build the",
     "page it screenshots) must agree with",
     "client/src/cappe/pages/site/PageEditor/merlinOps.ts (which mutates the real",
     "editor state). If they diverge, the model critiques a page the user will never",
