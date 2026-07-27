@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends
 
 from .companies import router as companies_router
 from .interviews import router as interviews_router
+from .matcha_work import tutor_sessions_router
 from .employees import router as employees_router, pto_admin_router, leave_admin_router
 from .employee_portal import router as employee_portal_router, portal_ask_hr_router
 from .employee_lifecycle import (
@@ -91,6 +92,12 @@ matcha_router = APIRouter()
 # Mount sub-routers
 matcha_router.include_router(companies_router, prefix="/companies", tags=["companies"])
 matcha_router.include_router(interviews_router, tags=["interviews"])
+# The /tutor/* session + admin-metrics routes live in matcha_work/tutor_sessions.py
+# (same `interviews` table as the thread-scoped voice tutor) but are mounted HERE,
+# not on the matcha_work router: no prefix and no feature gate, preserving the URL
+# surface platforms/ios/MatchaTutor hard-codes. Do not fold this into the
+# matcha_work mount without shipping an iOS release in lockstep.
+matcha_router.include_router(tutor_sessions_router, tags=["tutor"])
 matcha_router.include_router(employees_router, prefix="/employees", tags=["employees"],
                              dependencies=[Depends(require_feature("employees"))])
 matcha_router.include_router(pto_admin_router, prefix="/employees/pto", tags=["pto-admin"],

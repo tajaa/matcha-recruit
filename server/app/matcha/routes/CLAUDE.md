@@ -18,7 +18,7 @@ Loose single-file routers sit at top level; related ones are collected into **gr
 | `onboarding/new_hire.py` | `/onboarding` | New-hire onboarding tasks + notification settings |
 | `onboarding/invitations.py` | `/invitations` | Token-based invite acceptance |
 | `employee_lifecycle/offer_letters.py` | `/offer-letters` | Offer letter creation, signing, candidate portal (1,288 lines) |
-| `interviews.py` | — | Live interview WS + transcript handling (1,522 lines) |
+| `interviews.py` | — (no prefix, no gate) | Recruiting interviews (create/get/list/analysis) + the voice-interview WS handler. The 8 `/tutor/*` session + admin-metrics routes moved to `matcha_work/tutor_sessions.py` (2026-07-27) — same `interviews` table as the thread-scoped voice tutor — but are still mounted **here-style**: as a sibling of this router, unprefixed and ungated. `platforms/ios/MatchaTutor` hard-codes `/tutor/sessions` + `/api/ws/interview`, and the `matcha_work` mount's `require_feature` gate would 403 callers these routes never gated; re-prefixing needs an iOS release in lockstep |
 | `er_copilot/` | `/er/cases` (+ `/shared/er-export`) | Employee Relations case mgmt + AI — **package** (split 2026-07-06, 43 routes; see `er_copilot/CLAUDE.md`) |
 | `ir_incidents/` | `/ir/incidents` | Incident reporting (matcha-lite) — **already a package** (50 routes incl. no-roster people index), see `ir_incidents/CLAUDE.md` |
 | `onboarding/ir.py` | `/ir-onboarding` | IR-only onboarding wizard backend |
@@ -40,7 +40,7 @@ Loose single-file routers sit at top level; related ones are collected into **gr
 | `broker/portfolio.py` | `/broker-portfolio` | Per-broker client roster + cross-client metrics |
 | `fractional_hr.py` | `/fractional-hr` | Fractional HR engagement tooling — internal master-admin only (`require_admin` at mount, **not** feature-gated). Clients/scope/tasks/time + aggregate book-of-business overview. `fractional_*` tables; `company_id` nullable (client may have no tenant) |
 | `integrations/provisioning/` | `/provisioning` | Google Workspace + Slack + HRIS (Gusto/Finch) auto-provision — **split-router package** (J7, 2026-07-20): `_models.py` (16 Pydantic models), `_shared.py` (json/bool/comma + `_run_payload`), `google.py`, `slack.py`, `runs.py`, `hris.py`; `__init__.py` aggregates the four sub-routers into one `router`. All routes carry full paths so mount order is cosmetic. 29 routes |
-| `matcha_work/` | (multiple: `/matcha-work`, `/matcha-work/public`, `/matcha-work/presence`) | Matcha-work projects/threads/tasks/recruiting/AI turns — **package** (split 2026-07-03, 204 routes; see `matcha_work/CLAUDE.md`) |
+| `matcha_work/` | (multiple: `/matcha-work`, `/matcha-work/public`, `/matcha-work/presence`; plus the unprefixed `tutor_sessions_router` sibling it exports but does not include) | Matcha-work projects/threads/tasks/recruiting/AI turns — **package** (split 2026-07-03, 204 routes; see `matcha_work/CLAUDE.md`) |
 | `work/journals.py` | `/journals` | Matcha-work journals |
 | `billing.py` | (multiple) | Stripe billing + token packs |
 | `work/notifications.py` | `/notifications` | Matcha-work notifications |

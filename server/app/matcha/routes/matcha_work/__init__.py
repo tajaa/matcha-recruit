@@ -86,6 +86,13 @@ from .tutor import router as _tutor_router
 
 router.include_router(_tutor_router)
 
+# Sibling, NOT included above: tutor_sessions owns the legacy ungated /tutor/*
+# session + admin-metrics surface. It is mounted directly in
+# app/matcha/routes/__init__.py with no prefix and no feature gate, because
+# including it here would inherit /matcha-work + require_feature("matcha_work")
+# and break platforms/ios/MatchaTutor. See tutor_sessions.py's docstring.
+from .tutor_sessions import router as tutor_sessions_router  # noqa: F401
+
 from .messaging import router as _messaging_router
 
 router.include_router(_messaging_router)
