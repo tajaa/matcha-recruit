@@ -10,21 +10,24 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field
 
-from ...core.models.auth import CurrentUser
-from ...core.dependencies import require_admin as require_platform_admin
-from ...core.services.stripe_service import StripeService, StripeServiceError
-from ...database import get_connection
-from ..dependencies import get_client_company_id, require_admin_or_client, require_feature
-from ..services.billing import billing_service
-from ..services.billing import entitlements_service
-from ..services.billing import token_budget_service
-from ..services.billing.token_budget_service import (
+from app.core.models.auth import CurrentUser
+from app.core.dependencies import require_admin as require_platform_admin
+from app.core.services.stripe_service import StripeService, StripeServiceError
+from app.database import get_connection
+from app.matcha.dependencies import get_client_company_id, require_admin_or_client
+from app.matcha.services.billing import billing_service
+from app.matcha.services.billing import entitlements_service
+from app.matcha.services.billing import token_budget_service
+from app.matcha.services.billing.token_budget_service import (
     SUBSCRIPTION_AMOUNT_CENTS,
     SUBSCRIPTION_PACK_ID,
     SUBSCRIPTION_TOKENS,
 )
 
-router = APIRouter(dependencies=[Depends(require_feature("matcha_work"))])
+# require_feature("matcha_work") is applied at the mount in routes/__init__.py,
+# not here — this router used to declare it twice (both here and at the
+# mount), so the dependency ran on every request.
+router = APIRouter()
 admin_router = APIRouter()
 
 

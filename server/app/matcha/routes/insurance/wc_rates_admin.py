@@ -13,8 +13,8 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
 
-from ...database import get_connection
-from ...core.dependencies import require_admin
+from ....database import get_connection
+from ....core.dependencies import require_admin
 
 router = APIRouter()
 

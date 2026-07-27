@@ -9,14 +9,19 @@ project-fanout start/stop hooks) imported directly by module path
 stage 3); ``project_ws.py`` re-exports it for backward compatibility.
 """
 
+from .billing import router as matcha_work_billing_router, admin_router as matcha_work_billing_admin_router
 from .journals import router as journals_router
 from .notifications import router as mw_notifications_router
+from .productivity import router as productivity_router
 from .project_ws import router as project_ws_router
 from .thread_ws import router as thread_ws_router
 
 __all__ = [
+    "matcha_work_billing_router",
+    "matcha_work_billing_admin_router",
     "journals_router",
     "mw_notifications_router",
+    "productivity_router",
     "project_ws_router",
     "thread_ws_router",
 ]

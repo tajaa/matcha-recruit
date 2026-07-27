@@ -18,9 +18,9 @@ from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 
-from ...database import get_connection
-from ..dependencies import get_client_company_id, require_client
-from ..models.broker_chat import (
+from ....database import get_connection
+from ...dependencies import get_client_company_id, require_client
+from ...models.broker_chat import (
     ConversationCreate,
     ConversationListOut,
     ConversationOut,
@@ -29,8 +29,8 @@ from ..models.broker_chat import (
     MessageEdit,
     MessageOut,
 )
-from ..services.broker import broker_chat_service as svc
-from ...core.models.auth import CurrentUser
+from ...services.broker import broker_chat_service as svc
+from ....core.models.auth import CurrentUser
 
 router = APIRouter()
 

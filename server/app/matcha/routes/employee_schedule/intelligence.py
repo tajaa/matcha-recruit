@@ -17,10 +17,10 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from ...database import get_connection
-from ...core.feature_flags import get_company_features
-from ..dependencies import require_admin_or_client, get_client_company_id
-from ..services.scheduling import schedule_intelligence as si
+from app.database import get_connection
+from app.core.feature_flags import get_company_features
+from ...dependencies import require_admin_or_client, get_client_company_id
+from ...services.scheduling import schedule_intelligence as si
 
 router = APIRouter()
 

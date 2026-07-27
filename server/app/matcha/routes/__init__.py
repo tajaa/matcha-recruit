@@ -5,8 +5,7 @@ from fastapi import APIRouter, Depends
 from .companies import router as companies_router
 from .interviews import router as interviews_router
 from .employees import router as employees_router, pto_admin_router, leave_admin_router
-from .employee_portal import router as employee_portal_router
-from .portal_ask_hr import router as portal_ask_hr_router
+from .employee_portal import router as employee_portal_router, portal_ask_hr_router
 from .employee_lifecycle import (
     accommodations_router,
     cobra_router,
@@ -23,6 +22,9 @@ from .employee_lifecycle import (
 from .work import (
     journals_router,
     mw_notifications_router,
+    matcha_work_billing_router,
+    matcha_work_billing_admin_router,
+    productivity_router,
 )
 from .integrations import (
     fake_hris_router,
@@ -32,16 +34,12 @@ from .integrations import (
 from .er_copilot import router as er_copilot_router, public_router as er_copilot_public_router
 from .help_assistant import router as help_assistant_router
 from .ir_incidents import router as ir_incidents_router
-from .employee_schedule import router as employee_schedule_router
-from .schedule_intelligence import router as schedule_intelligence_router
+from .employee_schedule import router as employee_schedule_router, schedule_intelligence_router
 from .ir_surveys import router as ir_surveys_router
 from .dashboard import router as dashboard_router
 from .fractional_hr import router as fractional_hr_router
 from .matcha_work import router as matcha_work_router, public_router as matcha_work_public_router, presence_router as matcha_work_presence_router
-from .productivity import router as productivity_router
-from .billing import router as matcha_work_billing_router, admin_router as matcha_work_billing_admin_router
 from .risk_assessment import router as risk_assessment_router
-from .wc_rates_admin import router as wc_rates_admin_router
 from .benefits import router as benefits_router
 from .labor_relations import router as labor_relations_router
 from ..dependencies import require_feature, require_any_feature
@@ -51,6 +49,7 @@ from ...core.dependencies import require_admin
 from .broker import (
     brokers_router,
     broker_chat_router,
+    broker_chat_company_router,
     broker_external_router,
     broker_insurance_router,
     broker_loss_runs_router,
@@ -58,7 +57,6 @@ from .broker import (
     broker_portfolio_router,
     broker_submission_router,
 )
-from .broker_chat_company import router as broker_chat_company_router
 from .insurance import (
     acord_router,
     coi_router,
@@ -71,6 +69,7 @@ from .insurance import (
     resident_care_router,
     risk_profile_router,
     tcor_router,
+    wc_rates_admin_router,
     workforce_compliance_router,
 )
 from .pilots import (
@@ -241,6 +240,12 @@ matcha_router.include_router(
     prefix="/matcha-work/billing",
     tags=["matcha-work-billing-admin"],
 )
+# Deliberately ungated: the only /matcha-work/* surface with no
+# require_feature("matcha_work"). All 6 routes are get_current_user-authed
+# and scoped to the caller's own notification rows (not company-scoped), so
+# a matcha_work-disabled tenant can't reach anyone else's data through this —
+# it's a per-user inbox, not a feature surface. Gating by omission, written
+# down per the round-2 refactor review rather than left implicit.
 matcha_router.include_router(
     mw_notifications_router,
     prefix="/matcha-work",

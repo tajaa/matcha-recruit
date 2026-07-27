@@ -38,3 +38,8 @@ from .credential_documents import router as _credential_documents_router
 router.include_router(_credential_documents_router)
 from .benefits import router as _benefits_router
 router.include_router(_benefits_router)
+
+# Sibling router — own prefix (/v1/portal/ask-hr) + gate (ask_hr), mounted
+# separately in routes/__init__.py rather than folded into this package's
+# aggregator `router`.
+from .ask_hr import router as portal_ask_hr_router  # noqa: F401,E402
