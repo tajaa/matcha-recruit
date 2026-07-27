@@ -98,7 +98,7 @@ async def check_token_quota(user_id: UUID, company_id: Optional[UUID] = None) ->
         # quota, never the higher _DEFAULT_TOKEN_LIMIT — a transient resolver
         # error must not hand a free user a paid budget.
         try:
-            from . import entitlements_service
+            from app.matcha.services.billing import entitlements_service
 
             token_limit, window_hours = entitlements_service.PLAN_QUOTAS[
                 entitlements_service.PLAN_FREE
@@ -108,7 +108,8 @@ async def check_token_quota(user_id: UUID, company_id: Optional[UUID] = None) ->
         except Exception:
             token_limit, window_hours = _DEFAULT_TOKEN_LIMIT, _DEFAULT_WINDOW_HOURS
             logger.warning(
-                "Plan quota resolution failed for user %s; using free-tier quota",
+                "Plan quota resolution failed for user %s; using free-tier quota "
+                "(resolver error, not a permanent import failure)",
                 user_id,
                 exc_info=True,
             )
