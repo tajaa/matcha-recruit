@@ -4,6 +4,7 @@ citation validation, and the SSE chat generator."""
 import asyncio
 import logging
 
+from ..._shared.citations import validate_citations  # noqa: F401 — re-export, see Stage 6
 from ._shared import (
     _GEMINI_TIMEOUT,
     _HISTORY_TURNS,
@@ -183,22 +184,6 @@ CONVERSATION (oldest first):
 LATEST USER MESSAGE:
 {latest}
 """
-
-
-def validate_citations(evidence_map, index: dict):
-    """Anti-hallucination gate: keep only cited IDs that exist in the corpus.
-
-    Pure function (unit-tested). Returns ``(clean_map, dropped_ids)``."""
-    clean, dropped = [], []
-    for item in evidence_map or []:
-        if not isinstance(item, dict):
-            continue
-        raw = item.get("cited_ids")
-        ids = [c for c in raw if isinstance(c, str)] if isinstance(raw, list) else []
-        keep = [c for c in ids if c in index]
-        dropped.extend(c for c in ids if c not in index)
-        clean.append({"point": str(item.get("point", "")), "cited_ids": keep})
-    return clean, dropped
 
 
 async def _generate(matter: dict, history: list[dict], corpus: dict, latest: str) -> dict:

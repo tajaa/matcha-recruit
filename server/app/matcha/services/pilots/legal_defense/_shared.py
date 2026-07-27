@@ -1,10 +1,9 @@
 """Shared constants + tiny display/parse helpers used across the package."""
 
-import json
-
 from app.core.services.genai_client import get_genai_client
 
-from ...claims_readiness import _fmt_dt
+from ..._shared.citations import _parse_json  # noqa: F401 — re-export, see Stage 6
+from ..._shared.pdf import _fmt_dt
 
 
 MODEL = "gemini-3-flash-preview"
@@ -31,26 +30,6 @@ def _genai():
     return _client
 
 
-def _parse_json(text: str) -> dict:
-    """Parse a Gemini JSON reply, tolerating ```json fences / surrounding prose."""
-    if not text:
-        return {}
-    t = text.strip()
-    if t.startswith("```"):
-        t = t.split("```", 2)[1] if t.count("```") >= 2 else t.strip("`")
-        if t.lstrip().lower().startswith("json"):
-            t = t.lstrip()[4:]
-    t = t.strip()
-    # Fall back to the outermost {...} if there's leading/trailing prose.
-    if not t.startswith("{"):
-        i, j = t.find("{"), t.rfind("}")
-        if i != -1 and j != -1 and j > i:
-            t = t[i : j + 1]
-    try:
-        out = json.loads(t)
-        return out if isinstance(out, dict) else {}
-    except Exception:
-        return {}
 def _dt(v) -> str:
     return _fmt_dt(v)
 

@@ -34,7 +34,7 @@ from app.core.services.pdf import render_pdf
 from . import analysis_packs as packs
 from .analysis_packs.base import to_float
 from .analysis_packs.corpus import validate_edit_proposals  # pure gate, unit-tested
-from ..claims_readiness import _PDF_CSS, _esc, _fmt_dt
+from .._shared.pdf import _PDF_CSS, _esc, _fmt_dt
 from .legal_defense import validate_citations, _parse_json  # pure, unit-tested
 
 logger = logging.getLogger(__name__)

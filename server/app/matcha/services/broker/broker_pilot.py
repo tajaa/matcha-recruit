@@ -34,8 +34,8 @@ from datetime import datetime, timezone
 from app.core.services.genai_client import get_genai_client
 from app.core.services.pdf import render_pdf
 
-from ..claims_readiness import _PDF_CSS, _esc, _fmt_dt
-from ..pilots.legal_defense import validate_citations, _parse_json  # pure, unit-tested
+from .._shared.pdf import _PDF_CSS, _esc, _fmt_dt
+from .._shared.citations import validate_citations, _parse_json  # pure, unit-tested
 
 logger = logging.getLogger(__name__)
 

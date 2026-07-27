@@ -44,7 +44,7 @@ from uuid import UUID
 from app.core.services.genai_client import get_genai_client
 
 from . import discipline_compliance, discipline_engine
-from ..pilots.legal_defense import _parse_json, validate_citations  # pure, unit-tested
+from .._shared.citations import _parse_json, validate_citations  # pure, unit-tested
 
 logger = logging.getLogger(__name__)
 
