@@ -45,9 +45,9 @@ import logging
 import re
 from datetime import datetime, timezone
 
-from app.core.services.genai_client import get_genai_client
-
 from .legal_defense import _parse_json  # pure, unit-tested
+from .._shared.gemini import _genai
+from .._shared.text import _hum, _slug  # re-exported: hr_pilot_corpus imports _slug from here
 
 logger = logging.getLogger(__name__)
 
@@ -66,25 +66,6 @@ _MAX_FRESHNESS_FINDINGS = 40     # findings from the latest freshness check per 
 _AUDIT_STALE_DAYS = 180
 
 DRAFT_KINDS = ("handbook_section", "policy")
-
-_client = None
-
-
-def _genai():
-    global _client
-    if _client is None:
-        _client = get_genai_client()
-    return _client
-
-
-def _slug(s) -> str:
-    return re.sub(r"[^a-z0-9]+", "-", str(s or "").lower()).strip("-") or "x"
-
-
-def _hum(s) -> str:
-    if not s:
-        return ""
-    return str(s).replace("_", " ").replace("-", " ").strip().title()
 
 
 # --------------------------------------------------------------------------- #

@@ -44,6 +44,7 @@ import logging
 import re
 
 from .handbook_pilot import _slug, _floor_records, build_corpus
+from .._shared.text import _hum
 
 logger = logging.getLogger(__name__)
 
@@ -149,11 +150,6 @@ _LADDER_STEPS = [
      "the supervisor must be routed to corporate HR."),
 ]
 
-
-def _hum(s) -> str:
-    if not s:
-        return ""
-    return str(s).replace("_", " ").replace("-", " ").strip().title()
 
 
 # --------------------------------------------------------------------------- #

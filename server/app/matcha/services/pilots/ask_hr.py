@@ -25,26 +25,15 @@ the style of the other grounded pilots ("groundedness over token-streaming" —
 import asyncio
 import logging
 
-from app.core.services.genai_client import get_genai_client
-
 from .hr_pilot_escalation import EMPLOYEE, classify_message
 from .legal_defense import _parse_json, validate_citations
+from .._shared.gemini import _genai
 
 logger = logging.getLogger(__name__)
 
 MODEL = "gemini-3-flash-preview"
 _GEMINI_TIMEOUT = 60
 _HISTORY_TURNS = 10
-
-_client = None
-
-
-def _genai():
-    global _client
-    if _client is None:
-        _client = get_genai_client()
-    return _client
-
 
 # --------------------------------------------------------------------------- #
 # The hard stop — pure, runs before any model call.

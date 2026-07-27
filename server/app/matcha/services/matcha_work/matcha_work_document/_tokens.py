@@ -94,9 +94,9 @@ async def check_token_quota(user_id: UUID, company_id: Optional[UUID] = None) ->
     else:
         # Plan-based default (resolved outside the connection block — the
         # resolver opens its own connection; don't hold two pool slots).
-        # Fail CLOSED: if plan resolution throws, fall back to the FREE-tier
-        # quota, never the higher _DEFAULT_TOKEN_LIMIT — a transient resolver
-        # error must not hand a free user a paid budget.
+        # Fail CLOSED: if plan resolution throws, fall back to
+        # _DEFAULT_TOKEN_LIMIT, which is itself the FREE-tier quota — a
+        # transient resolver error must not hand a free user a paid budget.
         try:
             from app.matcha.services.billing import entitlements_service
 
@@ -105,11 +105,21 @@ async def check_token_quota(user_id: UUID, company_id: Optional[UUID] = None) ->
             ]
             plan = await entitlements_service.resolve_plan_for_user(user_id)
             token_limit, window_hours = entitlements_service.PLAN_QUOTAS[plan]
+        except ImportError:
+            # A permanent break (module moved/renamed again), not a transient
+            # resolver hiccup — every user silently caps at the free quota
+            # until this is fixed. Log loud so it can't hide for months again.
+            token_limit, window_hours = _DEFAULT_TOKEN_LIMIT, _DEFAULT_WINDOW_HOURS
+            logger.error(
+                "Plan quota resolver import broken for user %s; ALL users are "
+                "capped at the free-tier quota until this is fixed",
+                user_id,
+                exc_info=True,
+            )
         except Exception:
             token_limit, window_hours = _DEFAULT_TOKEN_LIMIT, _DEFAULT_WINDOW_HOURS
             logger.warning(
-                "Plan quota resolution failed for user %s; using free-tier quota "
-                "(resolver error, not a permanent import failure)",
+                "Plan quota resolution failed for user %s; using free-tier quota",
                 user_id,
                 exc_info=True,
             )

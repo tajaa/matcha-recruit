@@ -142,7 +142,6 @@ server/
 │   ├── main.py                     # App init, router mounting, lifespan
 │   ├── config.py                   # Pydantic settings from env
 │   ├── database/                   # asyncpg pool + init_db() bootstrap (package)
-│   ├── dependencies.py             # Shared auth dependencies
 │   ├── protocol.py                 # AI WS / streaming protocol shapes
 │   ├── core/                       # Auth, admin, compliance, AI chat, policies, resources
 │   │   ├── models/
@@ -158,8 +157,7 @@ server/
 │   │   │   ├── employee_portal/    # Package (split 2026-07-26) — see employee_portal/CLAUDE.md
 │   │   │   ├── dashboard/          # Package (split 2026-07-26) — see dashboard/CLAUDE.md
 │   │   │   └── … 23 others
-│   │   ├── services/
-│   │   └── workers/
+│   │   └── services/
 │   ├── workers/                    # Celery app + scheduled tasks
 │   ├── orm/                        # SQLAlchemy helpers (limited use)
 │   └── uploads/                    # Local-only upload temp dir

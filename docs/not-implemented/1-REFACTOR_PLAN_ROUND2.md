@@ -1,10 +1,10 @@
 # `server/app/matcha` — refactor round 2
 
-> **Status (verified 2026-07-26): NOT IMPLEMENTED.** Stage 0's quota-bug fix is still
-> unfixed — `matcha_work_document/_tokens.py:101` still reads `from . import
-> entitlements_service`. Build order: do Stage 0 immediately (live billing bug); the rest
-> of this doc should land before `4-HUUME_CODE_PLAN.md`, which adds files inside its
-> Stage 3/6 blast radius. See `docs/implemented/` for round 1, which shipped.
+> **Status (updated 2026-07-27): Stages 0–2 shipped** (`816c83a` quota-bug fix,
+> `bb62446` dead-code delete, `e48fe3c` `services/_shared/` leaf package). Stages 3+
+> (layering-inversion untangle, `models/` reorg, doc refresh) are still open — do them
+> before `4-HUUME_CODE_PLAN.md`, which adds files inside the Stage 3/6 blast radius.
+> See `docs/implemented/` for round 1, which shipped.
 
 ## Context
 
@@ -24,7 +24,7 @@ Round 1 (committed `3b7bc84` + `57a6d2c`) split three monoliths into packages an
 
 ---
 
-## Stage 0 — the quota bug (1 line, do first)
+## Stage 0 — the quota bug (1 line, do first) — ✅ shipped `816c83a`
 
 `server/app/matcha/services/matcha_work/matcha_work_document/_tokens.py:101`
 
@@ -41,7 +41,7 @@ Commit alone. Do not bundle — this is a user-facing fix and wants its own reve
 
 ---
 
-## Stage 1 — delete dead code (zero risk, all verified 0 importers)
+## Stage 1 — delete dead code (zero risk, all verified 0 importers) — ✅ shipped `bb62446`
 
 | Target | Evidence |
 |---|---|
@@ -57,7 +57,7 @@ Cuts `core → matcha` edges from 50 files to ~33 with zero behavior change.
 
 ---
 
-## Stage 2 — `services/_shared/` leaf package (breaks 2 cycles outright)
+## Stage 2 — `services/_shared/` leaf package (breaks 2 cycles outright) — ✅ shipped `e48fe3c`
 
 New leaf package that imports nothing from `services/` — that property is what dissolves the cycles.
 

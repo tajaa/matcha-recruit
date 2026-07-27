@@ -31,11 +31,12 @@ import logging
 import re
 from datetime import datetime, timezone
 
-from app.core.services.genai_client import get_genai_client
 from app.core.services.pdf import render_pdf
 
 from .._shared.pdf import _PDF_CSS, _esc, _fmt_dt
 from .._shared.citations import validate_citations, _parse_json  # pure, unit-tested
+from .._shared.gemini import _genai
+from .._shared.text import _hum, _slug
 
 logger = logging.getLogger(__name__)
 
@@ -380,21 +381,6 @@ def _mode_focus(key: str | None) -> str:
     return f"SESSION MODE — {t['label']}. {t['focus']}" if t else ""
 
 
-_client = None
-
-
-def _genai():
-    global _client
-    if _client is None:
-        _client = get_genai_client()
-    return _client
-
-
-def _hum(s) -> str:
-    if not s:
-        return ""
-    return str(s).replace("_", " ").replace("-", " ").strip().title()
-
 
 # --------------------------------------------------------------------------- #
 # Document extraction — one Gemini pass at upload time (classify + summarize
@@ -512,9 +498,6 @@ async def extract_document(data: bytes | None, text: str | None, *, is_pdf: bool
 # Corpus build — platform context sections + uploaded documents, one flat
 # index of {cid, ref, summary, when} records. Pure (no DB) — unit-tested.
 # --------------------------------------------------------------------------- #
-
-def _slug(s) -> str:
-    return re.sub(r"[^a-z0-9]+", "-", str(s or "").lower()).strip("-") or "x"
 
 
 def _fmt_num(v) -> str:
