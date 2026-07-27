@@ -293,10 +293,13 @@ async def generate_packet(
         )
         company = await conn.fetchrow("SELECT name FROM companies WHERE id = $1", company_id)
 
-        with feature_scope("matcha.huume.legal_pilot"):
-            packet = await ld.build_defense_packet(
-                conn, matter, corpus, memo, company_name=company["name"] if company else None,
-            )
+        # No feature_scope here: build_defense_packet is deterministic —
+        # DB fetches, WeasyPrint render, S3 reads for the ZIP, zero Gemini
+        # calls (the `research` page it can render is compiled by the Legal
+        # Pilot page action, not here). Wrap it if that ever changes.
+        packet = await ld.build_defense_packet(
+            conn, matter, corpus, memo, company_name=company["name"] if company else None,
+        )
 
         storage = get_storage()
         base = ld.safe_name(matter.get("title"))
