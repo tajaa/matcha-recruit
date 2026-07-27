@@ -23,8 +23,6 @@ from .employee_lifecycle import (
 from .work import (
     journals_router,
     mw_notifications_router,
-    project_ws_router,
-    thread_ws_router,
 )
 from .integrations import (
     fake_hris_router,
@@ -317,36 +315,3 @@ matcha_router.include_router(wc_rates_admin_router, prefix="/admin/wc-rates", ta
 # Fake HRIS (simulates ADP Workforce Now API) — no auth gate
 matcha_router.include_router(fake_hris_router, prefix="/fake-hris", tags=["fake-hris"])
 matcha_router.include_router(twilio_webhook_router, prefix="/twilio", tags=["twilio"])
-
-# Export individual routers for backwards compatibility
-__all__ = [
-    "matcha_router",
-    "companies_router",
-    "interviews_router",
-    "employees_router",
-    "pto_admin_router",
-    "leave_admin_router",
-    "employee_portal_router",
-    "onboarding_router",
-    "invitations_router",
-    "offer_letters_router",
-    "er_copilot_router",
-    "er_copilot_public_router",
-    "ir_incidents_router",
-    "dashboard_router",
-    "accommodations_router",
-    "brokers_router",
-    "broker_chat_router",
-    "broker_chat_company_router",
-    "provisioning_router",
-    "matcha_work_router",
-    "matcha_work_public_router",
-    "matcha_work_billing_router",
-    "pre_termination_router",
-    "flight_risk_router",
-    "training_router",
-    "i9_router",
-    "cobra_router",
-    "separation_router",
-    "fake_hris_router",
-]
