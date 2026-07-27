@@ -19,6 +19,7 @@ from uuid import UUID
 
 from ...services.er.er_guidance import _guidance_card_id, _normalize_guidance_cards
 from ...services.ir.ir_analysis import get_ir_analyzer
+from ...services.ir.ir_cards import build_log_root_cause_query_card
 from ....core.services.rate_limiter import get_rate_limiter
 from ....database import get_connection
 
@@ -686,7 +687,6 @@ async def generate_guidance(
         # change ("system shouldn't be running root cause") is preserved
         # even when the AI doesn't comply with prompt instructions.
         if raw_type == "run_analysis" and canonical_analysis == "root_cause":
-            from app.matcha.routes.ir_incidents._shared import build_log_root_cause_query_card
             if suppress_root_cause_card:
                 # Already logged or user already declined — drop entirely,
                 # do not re-prompt. Prevents the No-then-AI-re-emits loop.
@@ -736,7 +736,6 @@ async def generate_guidance(
                     card["id"], incident_type_lower, severity_lower,
                 )
                 continue
-            from app.matcha.routes.ir_incidents._shared import build_log_root_cause_query_card
             replacement = build_log_root_cause_query_card()
             card["id"] = replacement["id"]
             card["title"] = replacement["title"]
@@ -786,7 +785,6 @@ async def generate_guidance(
                             card["id"],
                         )
                         continue
-                    from app.matcha.routes.ir_incidents._shared import build_log_root_cause_query_card
                     replacement = build_log_root_cause_query_card()
                     card["id"] = replacement["id"]
                     card["title"] = replacement["title"]
@@ -950,7 +948,6 @@ async def generate_guidance(
             # incident 0d4fc4d6 on 2026-05-19 — fallback fired on a
             # safety/high incident and surfaced close before root cause.
             if root_cause_required_before_close:
-                from app.matcha.routes.ir_incidents._shared import build_log_root_cause_query_card
                 cards.append(build_log_root_cause_query_card())
             else:
                 cards.append({

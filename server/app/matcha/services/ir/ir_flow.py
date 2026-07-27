@@ -38,6 +38,12 @@ import re
 from datetime import datetime, timezone
 from typing import Any, Optional
 
+from app.matcha.services.ir.ir_cards import (
+    build_osha_emergency_alert_card,
+    build_osha_recordable_query_card,
+    build_treatment_query_card,
+)
+
 logger = logging.getLogger(__name__)
 
 VALID_INCIDENT_TYPES = {"safety", "behavioral", "property", "near_miss", "other"}
@@ -532,7 +538,6 @@ def resolve_next_step(
     # at intake. Freeze immediately — a legal 8/24-hour reporting duty trumps
     # any conversational triage.
     if osha_emergency_blocking(category_data):
-        from app.matcha.routes.ir_incidents._shared import build_osha_emergency_alert_card
         return _payload(
             "This incident may require immediate OSHA reporting.",
             [build_osha_emergency_alert_card()],
@@ -556,7 +561,6 @@ def resolve_next_step(
         and treatment is None
         and "treatment" not in flow_skipped
     ):
-        from app.matcha.routes.ir_incidents._shared import build_treatment_query_card
         return _payload(
             "Let's assess the injury for OSHA recordability.",
             [build_treatment_query_card()],
@@ -569,7 +573,6 @@ def resolve_next_step(
     if needs_osha_recordable(
         category_data=category_data, osha_recordable=incident.get("osha_recordable"),
     ) and "osha" not in flow_skipped:
-        from app.matcha.routes.ir_incidents._shared import build_osha_recordable_query_card
         return _payload(
             "Let's capture the OSHA recordable details.",
             [build_osha_recordable_query_card()],
