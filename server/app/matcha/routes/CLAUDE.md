@@ -89,7 +89,7 @@ Use the `ir_incidents/` package (see `ir_incidents/CLAUDE.md`) as the template. 
 - Owns 4+ unrelated concerns AND
 - Edits regularly require reading unrelated sections
 
-Completed splits: `ir_incidents/` (2026-05-16), `employees/` (2026-05-16), `matcha_work/` (2026-07-03), `er_copilot/` (2026-07-06), `employee_portal/` + `dashboard/` (2026-07-26, both fresh-aggregator).
+Completed splits: `ir_incidents/` (2026-05-16), `employees/` (2026-05-16), `matcha_work/` (2026-07-03), `er_copilot/` (2026-07-06), `employee_portal/` + `dashboard/` (2026-07-26, both fresh-aggregator), `ir_incidents/osha/` (2026-07-27, fresh-aggregator — a nested split *inside* an already-split package).
 
 Reuse the IR pattern: `git mv` to `_legacy.py`, split into per-domain submodules, flip package router to the one owning empty-path collection routes, delete `_legacy.py`. **Variant used by `matcha_work/`**: if no submodule declares an empty-path route (check first — grep `@router\.\w+\("")`), skip the crud-owns-router step and just use a fresh `APIRouter()` aggregator in `__init__.py` instead; `_legacy.py` becomes the last remaining domain submodule (renamed to its real name, e.g. `threads.py`) rather than being deleted.
 

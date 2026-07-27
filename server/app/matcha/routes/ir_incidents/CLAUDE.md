@@ -9,19 +9,22 @@ Backend routes for matcha-lite's Incident Reporting product. Package was split f
 | `__init__.py` | Routing assembly + external re-exports | — |
 | `_shared.py` | Cross-cutting helpers + shared constants (DB-backed card dispatchers `next_case_step` / `ensure_osha_case_rows` / `_persist_osha_emergency_alert` stay here and import the builders from `_cards`) | — |
 | `_cards.py` | Pure IR Copilot card builders (`build_*_card`) + their constants (`OSHA_INJURY_TYPES/_LABELS`, `OSHA_EMERGENCY_*`, `ROOT_CAUSE_*`) + `compose_root_cause_text`. Self-contained (stdlib + `osha_privacy` only); `_shared` **re-exports every name**, so `from ._shared import build_osha_...` keeps working (L5 split 2026-07-20) | — |
-| `crud.py` | Collection root + per-incident lifecycle | 7 |
+| `crud.py` | Collection root + per-incident lifecycle (+ `_report_html.py`, the pure single-incident PDF HTML builder, lifted out 2026-07-27) | 8 |
 | `copilot.py` | IR Copilot transcript, stream, accept, skip, close | 5 |
-| `analytics.py` | Summary, trends, locations, WC metrics, risk-matrix, risk-insights, consistency | 7 |
+| `analytics.py` | Summary, trends, locations, WC metrics, risk-matrix, risk-insights, consistency | 9 |
 | `ai_analysis.py` | Categorize, severity, root-cause, recommendations, similar, policy-mapping, clear-cache | 9 |
 | `investigation_interviews.py` | Create, batch, resend, generate-link, list, cancel witness interviews | 6 |
 | `people.py` | Per-person identity (no-roster): search + per-person role-aware history | 2 |
-| `capa.py` | Structured corrective actions (CAPA): per-incident list/create + per-action update/delete + company-wide open/overdue list. Table `ir_corrective_actions` (migration `ircapa01`); accountable layer over the free-text `corrective_actions` column. Owner/due-date/status/effectiveness. The deadline worker (`ir_deadline_alerts`) chases these. | 5 |
-| `osha.py` | 300/301/300A logs + CSV + **300A PDF + save** + recordability + AI determine + **ITA bulk export/validate** (per-establishment; `_osha_pdf.py` holds the WeasyPrint Form 300A template) | 11 |
-| `documents.py` | Upload, list, delete incident documents | 3 |
-| `anonymous_reporting.py` | Token mgmt: company-wide `/report/:token` + per-location `/intake/:token` magic links | 6 |
+| `capa.py` | Structured corrective actions (CAPA): per-incident list/create + per-action update/delete + company-wide open/overdue list. Table `ir_corrective_actions` (migration `ircapa01`); accountable layer over the free-text `corrective_actions` column. Owner/due-date/status/effectiveness. The deadline worker (`ir_deadline_alerts`) chases these. | 7 |
+| `osha/` | 300/301/300A logs + CSV + **300A PDF + save** + recordability + AI determine + **ITA bulk export/validate** (per-establishment) — **package** (split 2026-07-27, fresh-aggregator): `logs.py` (300 log + CSV + privacy cases + 301), `summary_300a.py` (300A view/save/PDF/CSV), `ita.py` (validate/CSV/credentials/submit/history), `recordability.py` (manual update + AI determine), `_shared.py` (attestation gate + 300A aggregation + headcount), `_pdf.py` (WeasyPrint Form 300A template, was `_osha_pdf.py`). The 4 groups share no state beyond `_shared.py`. `__init__.py` re-exports `_missing_ita_fields` / `_mask_from_reason` / `_resolve_osha_description` / `_injured_persons` / `_osha_case_views` / `_attest_export` / `EXPORT_DISCLAIMER` so `from …ir_incidents.osha import X` is unchanged | 16 |
+| `documents.py` | Upload, list, delete incident documents | 4 |
+| `anonymous_reporting.py` | Token mgmt: company-wide `/report/:token` + per-location `/intake/:token` magic links | 11 |
 | `info_requests.py` | IR Copilot "Request More Info": admin-side token create/list/resend/revoke for the public `/request-info/:token` form (public GET/POST live in `inbound_email.py`) | 4 |
 | `audit_log.py` | Get audit trail for an incident | 1 |
-| **Total** | | **61 routes** |
+| `broker_sharing.py` | Broker visibility opt-in for an incident | 3 |
+| `claims_readiness.py` | Claims-readiness packet for an incident | 1 |
+| `voice.py` | `POST /voice/parse` — Gemini dictation intake (`ir_voice_intake`) | 1 |
+| **Total** | | **87 routes** (per-file counts re-derived from the live route table 2026-07-27; the previous numbers had drifted) |
 
 **No-roster people index** (`people.py` + `ir_people` / `ir_incident_people` tables, migration `irp1a2b3c4d5e`): people named in incidents (reporter / involved / witness / interviewee) are auto-indexed for per-person history WITHOUT a managed employee roster. Identity = the typed name, normalized for dedup (`_normalize_person_name`, `_gather_incident_people`, `_sync_incident_people` in `_shared.py`). Wired into `crud.create_incident` / `update_incident` (roles reporter/involved/witness, re-synced on edit) and `investigation_interviews` (role interviewee, managed separately so an incident edit's re-sync won't drop it). Distinct from `involved_employee_ids`, which targets the real `employees` roster. The truly-anonymous `/report/:token` intake (`inbound_email.py`) intentionally does NOT auto-mint people; the attributed per-location `/intake/:token` magic link DOES, since it shares `create_incident_core` with the authed create. Endpoints use 2+ segment paths (`/people/search`, `/people/{id}/incidents`) to avoid the `/{incident_id}` shadow.
 
@@ -84,7 +87,7 @@ Safe because `/{incident_id}` (1-segment) cannot match any 2+segment submodule p
 
 - **Circular imports between `_legacy`-era modules**: ai_analysis.py, crud.py, and `_shared.py` all reference `_auto_map_policy_violations`. To avoid a circular module-level import it's a **lazy** `from .ai_analysis import _auto_map_policy_violations` inside function bodies (callsites: `_shared.create_incident_core` — the shared create tail, now used by both `crud.create_incident` and the public location intake — `crud.update_incident`, and an inline copilot path). Keep this pattern if any submodule needs to call functions defined in a later-loaded submodule.
 - **Absolute imports throughout**: every submodule uses `from app.X import …`, not `from ..X` or `from ...X`. The relative-imports-to-absolute conversion was pre-step-0 of the split; new code should keep using absolute paths so the file can be moved without breaking imports.
-- **Don't define `_safe_json_loads` again**: it's in `_shared.py` (singular definition — the original flat file had two duplicate defs that got deduped during the migration). Same for `_sse`, `log_audit`, `parse_witnesses`, `row_to_response`.
+- **Don't define `_safe_json_loads` again**: it's in `_shared.py` (singular definition — the original flat file had two duplicate defs that got deduped during the migration). Same for `_sse`, `log_audit`, `parse_witnesses`, `row_to_response`. **One live exception**: `osha/_shared.py` carries its own `_safe_json_loads` with different semantics — package `_shared` returns `{}` when `default` is None, the OSHA copy returns `None`, and every OSHA caller is written against the `None` shape. Deliberately NOT unified during the 2026-07-27 split; unifying it is a behavior change, not a cleanup.
 
 ## Tests
 

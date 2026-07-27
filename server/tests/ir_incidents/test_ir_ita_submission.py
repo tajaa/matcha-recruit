@@ -39,12 +39,16 @@ def _missing_ita_fields(est: dict) -> list[str]:
 
 def test_missing_ita_fields_reference_matches_source():
     """Guard: the reference impl above must stay identical to the route's logic.
-    Compares against the source text so a change to one side fails loudly."""
-    import os
-    src = os.path.join(os.path.dirname(__file__), "..", "..",
-                       "app", "matcha", "routes", "ir_incidents", "osha.py")
-    with open(src) as f:
-        text = f.read()
+    Compares against the source text so a change to one side fails loudly.
+
+    Reads the source off the imported function rather than a hard-coded path —
+    the flat `osha.py` became the `osha/` package in the round-2 refactor, and
+    a path literal here silently turns this guard into a FileNotFoundError."""
+    import inspect
+
+    from app.matcha.routes.ir_incidents.osha import _missing_ita_fields
+
+    text = inspect.getsource(_missing_ita_fields)
     # Key invariants of the source function, asserted structurally.
     assert '"ein", "naics", "street_address", "city", "state", "zip_code"' in text
     assert 'if not (est.get("total_hours_worked") or 0) > 0:' in text
