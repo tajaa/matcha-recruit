@@ -1,5 +1,12 @@
 # Split three server/app/matcha monoliths into packages
 
+> **Status (verified 2026-07-26): IMPLEMENTED — shipped in `3b7bc84` + `57a6d2c`.** Every
+> deliverable confirmed: flat `employee_portal.py`/`dashboard.py` gone, 10+7+11 submodules
+> present, `_shared.py` dep lists, pure-re-export facade `__init__.py`, no `_legacy.py`
+> anywhere, `routes/__init__.py` unchanged as specified, all 3 smoke tests exist, all 4
+> CLAUDE.md updates landed. Round 2 lives at
+> `docs/not-implemented/1-REFACTOR_PLAN_ROUND2.md`. Kept for history.
+
 > Working plan doc — mirrors `/Users/finch/.claude/plans/functional-finding-cat.md`. Update the Progress section as work lands.
 
 ## Progress

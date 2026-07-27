@@ -1,5 +1,13 @@
 # Huume × Pilots — Technical Plan
 
+> **Status (verified 2026-07-26): IMPLEMENTED and MERGED.** All deliverables confirmed by
+> symbol: 6 tools registered (`tools.py:268-339`), 6 handlers (`agent.py:601-695`),
+> `evaluate_pilot_tool` + `filter_promotable_drafts`, the shared lifts
+> (`legal_defense/matters.py`, `handbook_pilot.persist_turn`/`promote_drafts`/`unpaid_x_reason`),
+> `_WALL_CLOCK_SECONDS = 240.0`, and `tests/huume/test_huume_pilot_tools.py`. Shipped via
+> PR #71 (`78c8de3`), **merged** to `main` 2026-07-26 — the "PR #71, unmerged" note below is
+> stale. Kept for history.
+
 **Feature:** Legal Pilot + Handbook Pilot capabilities inside Huume chat ("@huume let's …") in matcha-work, replacing the need to open the dedicated pilot UIs for conversational work.
 
 **Status note:** this plan is implemented on branch `claude/huume-chat-pilot-features-oh99pg` (PR #71, unmerged). Each section cites where. Review the plan; anything you reject gets amended in (or dropped from) the PR before merge.

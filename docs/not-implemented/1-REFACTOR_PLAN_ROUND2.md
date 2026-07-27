@@ -1,8 +1,14 @@
 # `server/app/matcha` — refactor round 2
 
+> **Status (verified 2026-07-26): NOT IMPLEMENTED.** Stage 0's quota-bug fix is still
+> unfixed — `matcha_work_document/_tokens.py:101` still reads `from . import
+> entitlements_service`. Build order: do Stage 0 immediately (live billing bug); the rest
+> of this doc should land before `4-HUUME_CODE_PLAN.md`, which adds files inside its
+> Stage 3/6 blast radius. See `docs/implemented/` for round 1, which shipped.
+
 ## Context
 
-Round 1 (`REFACTOR_PLAN.md`, committed `3b7bc84` + `57a6d2c`) split three monoliths into packages and grouped `routes/` + `services/` into domain subdirs. That reorg fixed *file size* but left four things behind, found by a fresh survey of the 155k-line package:
+Round 1 (committed `3b7bc84` + `57a6d2c`) split three monoliths into packages and grouped `routes/` + `services/` into domain subdirs. That reorg fixed *file size* but left four things behind, found by a fresh survey of the 155k-line package:
 
 1. **A live billing bug.** `matcha_work_document/_tokens.py:101` does `from . import entitlements_service` — that package has no such module (it lives in `services/billing/`). Reorg fallout: the sibling call in `matcha_work_ai.py:726` was updated to `from ..billing import …`, this one wasn't. It's inside `except Exception`, so it fails silently on **every** call, and the fallback `(_DEFAULT_TOKEN_LIMIT, _DEFAULT_WINDOW_HOURS) = (25_000, 12)` is byte-identical to `PLAN_QUOTAS[PLAN_FREE]`. Any user without an explicit `mw_token_quotas` row gets the free quota regardless of plan: **Lite loses 100k→25k, Pro/Business lose 500k→25k**. Fails closed, so no security leak — but paid users are being under-served today.
 
@@ -161,7 +167,7 @@ The last un-reorged layer. `models/__init__.py` is **0 bytes**, so there is no f
 - **`ir_incidents/CLAUDE.md`**: claims 61 routes, actual 87; missing rows for `broker_sharing.py`, `claims_readiness.py`, `voice.py`.
 - **`server/CLAUDE.md`**: stale `tests/pre_termination/test_pre_termination.py`.
 - **New rule to write down:** the `cappe`/`tellus` boundary rule (root `CLAUDE.md:90`) holds exactly as written — `cappe → matcha` is 0 violations, `tellus → matcha` is the 1 documented `geo.py` exception. But **`app/werk/` is a fourth backend app the rule never names**, and it reaches into matcha at 4 sites (`channels_ws.py` ×3, `channels.py:18`). Undocumented means nobody can distinguish an intentional edge from drift. State werk's allowed direction explicitly.
-- Update `REFACTOR_PLAN.md` with a round-2 progress section mirroring round 1's format.
+- Update this doc with a round-2 progress section mirroring round 1's format (round 1 doc now at `docs/implemented/REFACTOR_PLAN.md`).
 
 **Deferred, with reasons:** `matcha/dependencies.py` is 576 lines and `resolve_accessible_company_scope` alone is ~245 of them (L67–311) — a tenant-resolution engine, not a FastAPI dependency, with 24 `core/` importers plus werk. Extracting it to `core/services/tenant_scope.py` would shrink the file 42%, give werk a legal import target, and dissolve most of the remaining `core → matcha` edge. It touches `core/` broadly, so it wants its own plan rather than a stage here.
 
@@ -195,4 +201,4 @@ No migrations, no schema, no data. Every stage is `git revert` of one commit. Th
 - `routes/ir_incidents/{copilot,osha,analytics}.py`
 - `routes/employees/_shared.py`, `routes/er_copilot/_shared.py`, `routes/employee_lifecycle/offer_letters.py`, `routes/work/project_ws.py` (Stage 3 sources)
 - `services/claims_readiness.py`, `services/pilots/legal_defense/`, `services/precedent_common.py` (Stage 2 sources)
-- `routes/__init__.py`, `routes/CLAUDE.md`, root `CLAUDE.md`, `REFACTOR_PLAN.md`
+- `routes/__init__.py`, `routes/CLAUDE.md`, root `CLAUDE.md`, this doc

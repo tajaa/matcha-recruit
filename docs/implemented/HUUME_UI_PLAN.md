@@ -1,3 +1,10 @@
+> **Status (verified 2026-07-26): IMPLEMENTED and MERGED.** All 10 phases confirmed present
+> by symbol in the current tree — P0 `huume_mode` on both response models
+> (`models/matcha_work.py:412,446`) plus its guard test, P1 types + `utils/huumeState.ts`,
+> P2–P9 components/props/toasts. Shipped via PR #71 (`dda54d1`, `79b574f`), merged to `main`
+> 2026-07-26; commits confirmed ancestors of HEAD. The original note below said the work sat
+> on an unmerged branch — that is stale. Kept for history.
+
 **Status: Implemented** (all 10 phases below landed on `claude/huume-chat-pilot-features-oh99pg`).
 
 # Huume Agent UI Improvements — matcha-work web thread (technical plan)

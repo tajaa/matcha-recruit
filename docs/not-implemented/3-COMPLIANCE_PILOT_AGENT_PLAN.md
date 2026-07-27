@@ -1,5 +1,11 @@
 # Agentic Compliance Pilot — Huume-style loop in the Compliance Studio
 
+> **Status (verified 2026-07-26): NOT IMPLEMENTED.** `server/app/core/services/compliance_pilot.py`
+> is still one flat ~34KB file — no `compliance_pilot/` package, and no
+> `compilot02_agent_confirm` migration exists. Build order: zero conflicts with any other
+> pending plan (writes nothing under `server/app/matcha/`; Huume is a read-only structural
+> template), self-contained, best leverage-per-effort — can start any time.
+
 ## Context
 
 The admin Compliance Studio "Pilot" (`server/app/core/services/compliance_pilot.py` + `admin_tools/admin_compliance_pilot.py`) is single-shot: one Gemini JSON turn per message, mode-locked sessions (research/ask/check_sources/scope), corpus pre-built from a coordinate-guessing heuristic, and the model never sees what its own research runs produced. It has zero access to the Gen-2 scope registry (backlog, readiness, authority status). Per COMPLIANCE_SYSTEM.md: the codification engine is correct but **starved on authoring throughput**.

@@ -1,5 +1,12 @@
 # client/src/api — Core Hygiene Refactor (full technical plan)
 
+> **Status (verified 2026-07-26): NOT IMPLEMENTED.** The nested
+> `client/src/api/compliance/compliance/` folder this plan dissolves is still present (15
+> files), and none of its 7 new files exist. Build order: **no fixed slot** — touches only
+> `client/src/api/` (plus single-line import edits in `client/src/work/`), conflicts with
+> nothing, and its 10 steps are each commit-sized and leave `tsc` green. Use as filler
+> between the server-side items. Numbered last for neutrality, not low value.
+
 ## Context
 
 `client/src/api` (71 files, ~6,940 lines) surveyed for efficiency/refactoring/organization. Layer is fundamentally healthy — every domain module uses the shared `api` helper from `client.ts`, all SSE goes through `sse.ts`, zero dead files — but it accumulated: ~145 lines of domain code bolted onto `client.ts`, the API base URL redeclared 36× in 4 spellings, two structurally-identical error classes forcing callers to know the transport, pilot types redeclared 3–4×, a triple-nested `api/compliance/compliance/` folder, a fragile re-export shim, ambiguous duplicate basenames, one misfiled root module, and 8 call sites outside the layer hand-rolling what helpers already do.

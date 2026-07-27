@@ -1,5 +1,12 @@
 # Huume Harness — Review Findings & Extension Plan
 
+> **Status (verified 2026-07-26): IMPLEMENTED — shipped in `d8833d1`.** All 15 findings and
+> 4 extensions confirmed present in the current tree by symbol, and `d8833d1`'s file stat
+> matches this doc's own file table with nothing left untouched; the 4 prescribed test files
+> exist. Findings 13 and 14 were dispositioned "documented, not fixed" by design — both
+> rationales survive as docstrings (`store.py:126-127`, `legal_skill.py:189-190`). Kept for
+> history.
+
 **Scope:** the Huume agentic harness — `server/app/matcha/services/huume/` (`agent.py`, `actions.py`, `store.py`, `tools.py`, `prompt.py`, `onboarding_skill.py`, `legal_skill.py`, `handbook_skill.py`), the REST counterpart `server/app/matcha/routes/matcha_work/huume.py`, and the dispatcher `_run_huume_dispatch` in `server/app/matcha/routes/matcha_work/messaging.py`.
 
 **Reviewed on:** branch `claude/huume-chat-pilot-features-oh99pg` (PR #71), 2026-07-26.

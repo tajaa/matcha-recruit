@@ -1,5 +1,13 @@
 # Huume spend tracking in /admin/ai-usage (technical plan)
 
+> **Status (verified 2026-07-26): IMPLEMENTED — shipped in `71ee40b`.** All 4 changes
+> confirmed at their named lines: `feature_scope` wraps (`legal_skill.py:220`,
+> `handbook_skill.py:171`), `_accumulate_usage` (`agent.py:124,753`), `gemini-3.6-flash`
+> pricing (`model_pricing.py:27-30`), `HUUME_FEATURE_PREFIX` rollup (`AiUsage.tsx:471-503`);
+> `tests/huume/test_usage_accounting.py` matches. One deliberate deviation: Edit B's
+> `generate_packet` scope wrap was skipped because `build_defense_packet` makes no Gemini
+> calls — rationale preserved as a code comment at `legal_skill.py:296`. Kept for history.
+
 ## Context
 
 Ask: make sure `/admin/ai-usage` tracks Huume spend — calls, thinking, context/cached tokens.

@@ -1,5 +1,12 @@
 # Port Espresso's collab project system to the iOS app (WerkiOS)
 
+> **Status (verified 2026-07-26): NOT IMPLEMENTED.** `WerkiOS/Views/` still holds only
+> Calls, Channels, Components, Inbox, LoginView, MainTabView; `ViewModels/` has 2 files.
+> No Projects/Kanban/AI-Threads/Files/Media/Notes. Build order: M0 (unbreak the WerkiOS
+> build — it does not compile today) has no dependency, do it early; M1–M5 is the largest
+> standalone user-facing win. Touches `server/` zero times, so it conflicts with nothing
+> else in this directory.
+
 ## Context
 
 Espresso (macOS, `platforms/desktop/Espresso/Espresso/`) has the full matcha-work collab project system — projects, per-project chat, AI threads, kanban with a deep ticket viewer, files/media, notes. The iOS side of the same codebase (`WerkiOS` target in the same Xcode project) only has channels + DMs + calls, so a user who lives in a collab project on the Mac has no phone client for it.
