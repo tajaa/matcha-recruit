@@ -21,8 +21,12 @@ SUBSCRIPTION_TOKENS = 5_000_000
 SUBSCRIPTION_AMOUNT_CENTS = 4000  # $40/month
 SUBSCRIPTION_PACK_ID = "matcha_work_pro"
 
-# Per-user rolling-window rate-limit defaults — MUST match
-# matcha_work_document.check_token_quota's _DEFAULT_TOKEN_LIMIT / _DEFAULT_WINDOW_HOURS.
+# Per-user rolling-window rate-limit seed for the business-mode grant path
+# below (_grant_quota_for_company) — deliberately NOT the same value as
+# matcha_work_document.check_token_quota's personal-plan fail-closed fallback
+# (_DEFAULT_TOKEN_LIMIT, 25k). A business admin grant is itself the signal
+# that the company is paying for tokens, so the row it seeds starts at a
+# business-tier baseline rather than the personal free-tier one.
 # The chat send gate enforces BOTH the company budget (this service) and this
 # per-user quota (mw_token_quotas). Admin grants must lift both, or the grant
 # raises the budget while the quota wall still blocks the user.
