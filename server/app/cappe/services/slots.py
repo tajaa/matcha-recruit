@@ -132,4 +132,3 @@ def merge_any_staff_slots(per_staff: Sequence[tuple]) -> list[dict]:
             if sp is not None and (m.get("price_cents") is None or sp < m["price_cents"]):
                 m["price_cents"] = sp
     return [by_start[k] for k in sorted(by_start)]
-
