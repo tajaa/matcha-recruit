@@ -16,6 +16,8 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any, Optional
 from uuid import UUID
 
+from app.matcha.services.employees.invitations import _send_invitation_with_conn
+
 logger = logging.getLogger(__name__)
 
 # The full v1 onboarding plan, in execution order. `create_employee` always
@@ -691,7 +693,6 @@ async def _step_create_employee(conn, *, company_id, actor_user_id, plan, employ
 
 
 async def _step_portal_invitation(conn, *, company_id, actor_user_id, employee_id, **_) -> dict[str, Any]:
-    from app.matcha.routes.employees._shared import _send_invitation_with_conn
 
     try:
         result = await _send_invitation_with_conn(

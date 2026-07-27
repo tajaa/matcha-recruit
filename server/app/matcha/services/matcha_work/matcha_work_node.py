@@ -19,6 +19,7 @@ from ....core.services.compliance_service import (
 )
 from ....core.services.platform_settings import get_tenant_codified_only
 from ....core.services.redis_cache import cache_get, cache_set, get_redis_cache
+from ...services.employees.us_states import _STATE_NAME_TO_CODE
 
 logger = logging.getLogger(__name__)
 
@@ -161,8 +162,6 @@ def _norm_state(value: Any) -> Optional[str]:
     if len(s) == 2:
         return s.upper()
     try:
-        # Lazy import — repo convention for cross-module reuse without cycles.
-        from app.matcha.routes.employees._shared import _STATE_NAME_TO_CODE
         return _STATE_NAME_TO_CODE.get(s.lower(), s.upper())
     except Exception:
         return s.upper()

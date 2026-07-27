@@ -26,6 +26,7 @@ import logging
 from typing import Any, Optional
 from uuid import UUID
 
+from app.matcha.services.employees.pto_decisions import decide_pto_request_core
 from app.matcha.services.er.er_case_create import create_case_core
 from app.matcha.services.ir.ir_incident_create import create_incident_core
 
@@ -203,7 +204,6 @@ async def _execute_training_assign(company_id, actor_user_id, action) -> dict[st
 
 async def _execute_pto_decision(company_id, actor_user_id, action) -> dict[str, Any]:
     from app.database import get_connection
-    from app.matcha.routes.employees._shared import decide_pto_request_core
 
     request_id = UUID(action["request_id"])
     async with get_connection() as conn:
