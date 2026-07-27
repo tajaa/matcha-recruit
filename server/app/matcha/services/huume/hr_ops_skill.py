@@ -26,6 +26,7 @@ import logging
 from typing import Any, Optional
 from uuid import UUID
 
+from app.matcha.services.er.er_case_create import create_case_core
 from app.matcha.services.ir.ir_incident_create import create_incident_core
 
 logger = logging.getLogger(__name__)
@@ -104,7 +105,6 @@ async def _execute_ir_report(company_id, actor_user_id, action) -> dict[str, Any
 async def _execute_er_case(company_id, actor_user_id, action) -> dict[str, Any]:
     from app.database import get_connection
     from app.matcha.models.er_case import ERCaseCreate
-    from app.matcha.routes.er_copilot import create_case_core
 
     description = action["description"]
     case = ERCaseCreate(
