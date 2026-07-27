@@ -1,5 +1,5 @@
 """Huume's agent loop — a bounded Gemini tool-calling loop, structurally
-mirroring cappe's Merlin (`cappe/services/merlin_agent.py`): fixed bounds on
+mirroring cappe's Merlin (`cappe/services/merlin/agent.py`): fixed bounds on
 model calls and wall clock, force-finish with partial work on a bound hit,
 a never-raises contract (only `RateLimitExceeded` escapes), and an async
 generator of SSE-shaped frames the caller streams straight through.

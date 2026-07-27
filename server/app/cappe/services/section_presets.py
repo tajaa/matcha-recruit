@@ -7,14 +7,14 @@ responsive pads). Merlin applies one via:
 
     {"op":"apply_section_preset","preset":"<key>","at":<index>}
 
-which `merlin_ops._v_apply_section_preset` REWRITES at validation time into a
+which `merlin.ops._v_apply_section_preset` REWRITES at validation time into a
 fully-populated `add_block` op — the client never needs this library (no
 Python/TS mirror; the expanded op is ordinary and fully editable afterwards).
 
 Authoring rules (enforced by tests/cappe/test_section_presets.py — the
 drift-gate runs every preset through the real add_block validation and a
 render smoke test):
-  - `content` keys/values must satisfy `merlin_catalog.BLOCK_FIELDS` kinds
+  - `content` keys/values must satisfy `merlin.catalog.BLOCK_FIELDS` kinds
     (+ SELECT_OPTIONS for selects).
   - `design` groups/keys/values must satisfy the AI-facing DESIGN_GROUPS specs
     (so e.g. no `layout.gap` — that key is a renderer-only px override).

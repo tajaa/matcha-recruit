@@ -3,7 +3,7 @@
 One `DesignKey` per per-section design setting. An entry has two facets that
 used to live in two files and drift:
 
-  - `merlin_spec` — the value-spec the AI (`merlin_ops`) is allowed to emit for
+  - `merlin_spec` — the value-spec the AI (`merlin.ops`) is allowed to emit for
     this key (a frozenset enum / (min,max) int range / "bool"/"color"/"text"),
     or `None` if the key is renderer-only and not AI-settable. `DESIGN_GROUPS`
     (the catalog Merlin validates + prompts against) is DERIVED from these, so
@@ -235,7 +235,7 @@ DESIGN_KEYS_BY_GROUP: dict[str, tuple[DesignKey, ...]] = _group_design_keys()
 
 
 def build_design_groups() -> dict[str, dict[str, Any]]:
-    """Derive the AI-facing `DESIGN_GROUPS` catalog (merlin_catalog imports this).
+    """Derive the AI-facing `DESIGN_GROUPS` catalog (merlin.catalog imports this).
 
     Only `merlin_settable` keys, grouped, mapping key→merlin_spec — byte-equal
     to the historical hand-written dict (guarded by test)."""

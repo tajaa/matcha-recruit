@@ -1,6 +1,6 @@
 """Merlin's agent loop — the version of Merlin that can SEE its own work.
 
-The single-shot path (`services/merlin.py`) asks Gemini for an op plan and
+The single-shot path (`services/merlin/turn.py`) asks Gemini for an op plan and
 returns it. That model has never looked at the page: it reasons over a JSON
 block tree and a theme dict, which is exactly how the 2026-07-21 incidents
 happened (a dark-on-dark gradient that rendered invisible; a "make it look
@@ -95,13 +95,13 @@ _BOUNDS: dict[str, _Bounds] = {
 # can't consume the whole turn.
 _CALL_TIMEOUT = 75.0
 
-# MESSAGES, not turns — matches merlin_store.HISTORY_MESSAGES / merlin.py's
+# MESSAGES, not turns — matches merlin/store.py's HISTORY_MESSAGES / merlin/turn.py's
 # own constant of the same corrected name (see that file's comment: named
 # _MAX_HISTORY_TURNS at 10 while already meaning messages, this slice never
 # actually trimmed anything since the store query already capped there first).
 _MAX_HISTORY_MESSAGES = 20
 
-# `MERLIN_OPS`' MAX_OPS_PER_TURN (merlin_ops.py) caps a single apply_ops CALL —
+# `MERLIN_OPS`' MAX_OPS_PER_TURN (merlin/ops.py) caps a single apply_ops CALL —
 # the single-shot path's only call. The agent loop can call apply_ops several
 # times in one turn (fix, screenshot, fix again), and op_log accumulates
 # across all of them uncapped — a `max` turn could legitimately reach ~180 ops

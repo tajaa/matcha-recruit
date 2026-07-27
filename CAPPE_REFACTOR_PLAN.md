@@ -1,6 +1,6 @@
 # Cappe refactor — technical implementation plan
 
-**Status: proposed, not yet implemented.** This document lays out a commit-by-commit plan for refactoring `server/app/cappe/`. No code in `server/app/cappe/` has been changed as part of this PR — this is the plan only, for review before implementation begins.
+**Status: implemented.** All 8 commits below landed on `claude/cappe-refactoring-review-nf7irf`; each commit's message documents where it deviated from the plan text and why (all forced by the layering rule or import cycles, none behavior-changing). Route table, rendered HTML, and all extracted CSS/JS blobs were verified byte-identical to `main`; `tests/cappe/` passes (545 tests).
 
 ## Context
 

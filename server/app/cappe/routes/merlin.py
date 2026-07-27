@@ -12,9 +12,9 @@ Cappe's first Gemini integration. The PAGE is still never written here — the
 client applies the returned ops to its own editor state and persists via the
 existing page/site PUT routes when the user hits Save. What is written is the
 TRANSCRIPT (`cappe_merlin_conversations` / `_messages`, migration zzzzcappe22,
-owned by `services/merlin_store.py`), so a conversation survives a reload and a
-page can hold several of them. See `services/merlin.py` for the op validation
-and prompt logic.
+owned by `services/merlin/store.py`), so a conversation survives a reload and a
+page can hold several of them. See `services/merlin/turn.py` for the op
+validation and prompt logic.
 
 `/merlin/chat` (single-shot) and `/merlin/agent` (the loop, falling back to
 single-shot on a non-agentic tier/plan) share one preamble — size gate, tier
@@ -182,7 +182,7 @@ async def delete_merlin_conversation(
 
 def _recent_history_tail(history: list, n: int = 2) -> Optional[str]:
     """A short recap of the last few turns for the auto-router's classifier
-    (`merlin_router.route_tier`'s `history_tail` — previously never passed by
+    (`merlin.routing.route_tier`'s `history_tail` — previously never passed by
     either caller, so an ambiguous follow-up like "make it match the others"
     was classified with no idea what "it" or "the others" refers to).
 
@@ -315,7 +315,7 @@ async def _prepare_turn(
     page_uuid = _parse_page_id(body.page_id)
     # Fetched before the DB block: it's an S3 round trip, not a DB one, and
     # doesn't need the connection. Never fetches an arbitrary URL — see
-    # merlin_attachments._is_own_storage.
+    # merlin/attachments.py:_is_own_storage.
     attachments = await load_attachments([a.model_dump() for a in body.attachments])
     attachment_meta = [{"url": a["url"], "mime": a["mime"]} for a in attachments]
 
@@ -413,7 +413,7 @@ async def merlin_agent(
     Same inputs and same output contract as `/merlin/chat` — a validated op list
     the client applies — but the model gets tools: it folds ops onto a
     server-side working copy of the snapshot, renders and screenshots that copy,
-    critiques what it sees, and revises. See `services/merlin_agent.py`.
+    critiques what it sees, and revises. See `services/merlin/agent.py`.
 
     Non-premium (or Lite) callers fall through to the single-shot path and get
     its result as one `result` frame, so the client has exactly one code path.

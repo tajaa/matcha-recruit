@@ -1,4 +1,4 @@
-"""Pydantic shapes — Merlin AI chat editing (see services/merlin.py + merlin_catalog.py)."""
+"""Pydantic shapes — Merlin AI chat editing (see services/merlin/turn.py + merlin/catalog.py)."""
 from datetime import datetime
 from typing import Any, Literal, Optional
 from uuid import UUID
@@ -15,7 +15,7 @@ class CappeMerlinHistoryTurn(BaseModel):
 
 class CappeMerlinAttachment(BaseModel):
     """One user-attached image. `url` must be this deployment's own storage —
-    `services/merlin_attachments.py:_is_own_storage` enforces that server-side;
+    `services/merlin/attachments.py:_is_own_storage` enforces that server-side;
     an arbitrary URL is dropped rather than fetched (SSRF guard)."""
     url: str = Field(max_length=2000)
     mime: Optional[str] = None
@@ -48,13 +48,13 @@ class CappeMerlinChatRequest(BaseModel):
     # Clamped server-side to what the plan allows — an unknown or over-plan
     # tier degrades to 'lite' rather than 403ing (see merlin.resolve_model_tier).
     # 'auto' (the client default) is resolved per request by
-    # `services/merlin_router.route_tier`.
+    # `services/merlin/routing.py:route_tier`.
     model_tier: Literal["auto", "lite", "regular", "max"] = "auto"
     # The block the user currently has selected in the editor, so "this
     # section" resolves to something instead of being guessed at.
     selected_block: Optional[str] = Field(default=None, max_length=100)
     # Images the user attached to THIS message. Capped well above
-    # merlin_attachments.MAX_ATTACHMENTS (4) — the module drops the excess
+    # merlin.attachments.MAX_ATTACHMENTS (4) — the module drops the excess
     # rather than 422ing a slightly-over request.
     attachments: list[CappeMerlinAttachment] = Field(default_factory=list, max_length=8)
 

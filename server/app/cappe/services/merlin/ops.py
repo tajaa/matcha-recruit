@@ -62,7 +62,7 @@ _HEX_COLOR_RE = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
 _COLUMN_DESIGN_KEYS = frozenset({"columns", "columnsMd", "columnsSm"})
 
 # ---------------------------------------------------------------------------
-# Low-level value helpers (moved verbatim from merlin.py — behavior-preserving)
+# Low-level value helpers (moved verbatim from merlin/turn.py — behavior-preserving)
 # ---------------------------------------------------------------------------
 
 def _sid(value: Any) -> Optional[str]:
@@ -849,7 +849,7 @@ OP_NAMES: frozenset[str] = frozenset(OPS_BY_NAME)
 # One JSON view of the whole registry-derived surface, so a consumer (the editor,
 # tooling, a drift test) can read the op/block/design/theme vocabulary from the
 # server's single source of truth instead of hand-mirroring it. This is the
-# mechanism that retires merlin_catalog.py's "hand-maintained mirror" role;
+# mechanism that retires merlin/catalog.py's "hand-maintained mirror" role;
 # wiring the frontend to consume it is a separate (client) stage.
 
 def _spec_json(spec: Any) -> Any:
@@ -992,7 +992,7 @@ def validate_ops(
         # real op's validator (see _v_apply_style_recipe / _v_apply_section_
         # preset). Snapshot BEFORE validating, not just the op name after: if
         # the delegate rejects, the rejection (and the retry feedback
-        # _rejection_feedback in merlin.py builds from it) must describe the
+        # _rejection_feedback in merlin/turn.py builds from it) must describe the
         # op the model actually sent, not the expanded shape a rewritten "op"
         # alone would still leave behind.
         original_raw = dict(raw)

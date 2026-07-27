@@ -3,7 +3,7 @@
 A per-site catalog over image URLs the account has already generated or
 uploaded — nothing here touches storage. Recording a row is deliberately
 best-effort everywhere it's called from (`record()` swallows its own
-failures via the caller, not here — see routes/uploads.py and merlin.py):
+failures via the caller, not here — see routes/uploads.py and routes/merlin.py):
 a broken catalog insert must never turn a successful generation/upload into
 a user-facing failure.
 """

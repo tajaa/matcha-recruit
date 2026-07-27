@@ -1,6 +1,6 @@
 """Merlin's server-side mirror of the page-builder catalog.
 
-Merlin (AI chat editing, see `services/merlin.py`) needs to know what block
+Merlin (AI chat editing, see `services/merlin/turn.py`) needs to know what block
 types exist, what fields each accepts, and what theme keys are legal — the
 same knowledge the frontend already encodes in
 `client/src/cappe/pages/site/PageEditor/blockSchemas.ts`. There is no shared
@@ -143,7 +143,7 @@ AI_IMAGE_PROMPT_MAX = 1000  # matches CappeImageGenRequest.prompt max_length
 
 # Output resolutions Merlin's generate_image op/tool may request. Mirror of
 # `core/services/image_gen.py:IMAGE_SIZES` — kept here so op validation/prompt/
-# schema don't drag the google SDK into merlin_ops. "2K" is the default we pass
+# schema don't drag the google SDK into merlin/ops.py. "2K" is the default we pass
 # when the caller omits it: section backgrounds render at `background-size:
 # cover` full-bleed (render.py), and the model's own default (1K) reads soft
 # once stretched across a section.
@@ -170,7 +170,7 @@ AI_IMAGE_SIZE_COST_ESTIMATE: dict[str, str] = {"1K": "~$0.03", "2K": "~$0.05", "
 # derivation is asserted byte-equal to the historical hand-written dict in
 # tests/cappe/test_design_registry.py. Value spec per key: a frozenset is a
 # closed enum; "bool"/"color"/"text"/(min, max) int ranges are checked by kind
-# in merlin_ops.py.
+# in merlin/ops.py.
 from ..design_registry import DESIGN_COLOR_TOKENS, build_design_groups  # noqa: F401
 
 DESIGN_GROUPS: dict[str, dict[str, Any]] = build_design_groups()

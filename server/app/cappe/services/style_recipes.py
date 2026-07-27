@@ -15,7 +15,7 @@ Merlin applies one via:
 
     {"op":"apply_style_recipe","blocks":["<id>",...]|"all","recipe":"<key>"}
 
-which `merlin_ops._v_apply_style_recipe` REWRITES at validation time into a
+which `merlin.ops._v_apply_style_recipe` REWRITES at validation time into a
 `set_design_bulk` op (recipe's `design` bag verbatim, deep-copied) — the
 client never needs this library; it sees an ordinary, fully-editable
 `set_design_bulk`. Same trick as `_v_apply_section_preset` → `add_block`.

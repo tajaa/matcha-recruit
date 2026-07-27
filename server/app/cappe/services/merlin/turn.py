@@ -2,10 +2,10 @@
 
 The user chats ("make the hero darker and add an FAQ"); Gemini returns a short
 JSON envelope `{message, ops}` where each op is one of a small, whitelisted
-set (the `MERLIN_OPS` registry in `merlin_ops.py`; catalog data in
-`merlin_catalog.py`). The client applies ops to its own in-memory editor state
+set (the `MERLIN_OPS` registry in `merlin/ops.py`; catalog data in
+`merlin/catalog.py`). The client applies ops to its own in-memory editor state
 (auto-apply + undo — nothing persists here); this module's job is to build the
-prompt and run the Gemini turn, delegating op validation to `merlin_ops`.
+prompt and run the Gemini turn, delegating op validation to `merlin/ops.py`.
 
 Validation philosophy — skip-and-report, never reject a whole turn: one bad
 op (stale block id, hallucinated field) drops that op into `rejected` with a
@@ -47,7 +47,7 @@ from .ops import MERLIN_OPS, OP_NAMES, validate_ops  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
-# Per-turn call timeout now lives on ModelTier (merlin_catalog.py) — a
+# Per-turn call timeout now lives on ModelTier (merlin/catalog.py) — a
 # thinking tier is slower than a non-thinking one, so it isn't one flat
 # constant anymore. Same order of magnitude as ir_analysis.GEMINI_CALL_TIMEOUT.
 # A theme swap replaces brand/fonts/radius/mode site-wide, so it only fires when
@@ -61,7 +61,7 @@ logger = logging.getLogger(__name__)
 _THEME_INTENT_RE = re.compile(
     r"\b(theme|preset|palette|colou?r scheme|restyle|redesign)\b", re.I
 )
-# MESSAGES, not turns — matches merlin_store.HISTORY_MESSAGES, the actual size
+# MESSAGES, not turns — matches merlin/store.py's HISTORY_MESSAGES, the actual size
 # of what `load_history` already returns. Named _MAX_HISTORY_TURNS at the same
 # value (10) as that constant used to be, this slice was a silent no-op —
 # never trimming anything since the query itself already capped the same way.
@@ -260,7 +260,7 @@ def _strip_prompt_noise(block: dict[str, Any]) -> dict[str, Any]:
 def build_shared_prompt_sections() -> list[str]:
     """Op vocabulary + rules + catalogs — the part of the prompt that is the
     same whether Merlin runs single-shot or as the agent loop
-    (`merlin_agent.py`). Shared so a rule can't apply on one path only."""
+    (`merlin/agent.py`). Shared so a rule can't apply on one path only."""
     return [
         _op_shapes_text(),
         _rules_text(),
@@ -389,7 +389,7 @@ async def run_merlin_turn(
         )
         # Attached images ride alongside the text as Parts (never fetched from a
         # user-given URL — `attachments` here already carries fetched bytes, see
-        # merlin_attachments.load_attachments and the route that calls it).
+        # merlin/attachments.py:load_attachments and the route that calls it).
         contents: Any = prompt
         if attachments:
             contents = [
