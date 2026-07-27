@@ -7,8 +7,8 @@
  * SVG presentation attributes in places, so no CSS-variable indirection.
  */
 
-export const CREAM = "#F5F2ED";
-export const CREAM_HI = "#FBFAF7";
+export const CREAM = "#EFEAE0";
+export const CREAM_HI = "#F7F4EC";
 export const INK = "#14150F";
 export const INK_SOFT = "#5E6055";
 export const MATCHA = "#3F5C26";

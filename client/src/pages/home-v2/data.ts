@@ -59,19 +59,16 @@ export const HERO_LINE_2 = "before your risk manages you.";
 export const HERO_DECK =
   "Incident reporting, employee relations, and compliance in one system.";
 
-// The furniture row under the hairline — three parallel capabilities, not a
-// sequence, so no 01/02/03 numbering (that would be decoration, not
-// information). Mirrors the mega-menu's own vocabulary on purpose: nav and
-// hero should teach the same words.
+// The hero's right column — three parallel capabilities, not a sequence, so
+// no 01/02/03 numbering (that would be decoration, not information). Mirrors
+// the mega-menu's own vocabulary on purpose: nav and hero should teach the
+// same words. Captions stay under ~5 words so the column reads as an index,
+// not a feature list.
 export const HERO_DOMAINS = [
-  "Incident Reporting",
-  "Employee Relations",
-  "Compliance",
+  { label: "Incident Reporting", caption: "Intake, investigation, OSHA logs." },
+  { label: "Employee Relations", caption: "Cases documented start to finish." },
+  { label: "Compliance", caption: "Every state you operate in." },
 ];
-// No invented founding date/metric here — see root CLAUDE.md's rule against
-// unsupportable marketing claims. A plain right-aligned label is enough to
-// balance the row optically (that's EYEBROW_END's whole job).
-export const HERO_FOLIO = "One system, not a point solution";
 
 export const HOME_V2_JSON_LD = {
   "@context": "https://schema.org",

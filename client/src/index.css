@@ -106,7 +106,7 @@ html[data-marketing-noir] {
    white/black flash on overscroll, smooth in-page anchor jumps), opposite
    ground. Set by useMarketingCream() in pages/home-v2/index.tsx. */
 html[data-marketing-cream] {
-  background-color: #f5f2ed;
+  background-color: #efeae0;
 }
 
 @media (prefers-reduced-motion: no-preference) {

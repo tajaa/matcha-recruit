@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { ChevronDown, Menu, X } from "lucide-react";
 import { CREAM, CREAM_HI, INK, INK_SOFT, LINE, MATCHA, MATCHA_MID, MATCHA_WASH, SANS } from "./theme";
+import { paperSurface } from "./PaperGrain";
 import { NAV_LINKS, PLATFORM_MENU, PLATFORM_MENU_FOOTER } from "./data";
 
 interface Props {
@@ -53,7 +54,7 @@ export default function HomeV2Nav({ onDemoClick }: Props) {
       <nav
         className="sticky left-0 right-0 top-0 z-50"
         style={{
-          backgroundColor: CREAM,
+          ...paperSurface(CREAM),
           borderBottom: `1px solid ${LINE}`,
         }}
       >
@@ -205,7 +206,7 @@ export default function HomeV2Nav({ onDemoClick }: Props) {
       </nav>
 
       {mobileOpen && (
-        <div className="fixed inset-0 z-40 md:hidden overflow-y-auto" style={{ backgroundColor: CREAM }}>
+        <div className="fixed inset-0 z-40 md:hidden overflow-y-auto" style={paperSurface(CREAM)}>
           <div className="pt-24 px-6 pb-12 flex flex-col gap-1">
             <div
               className="mb-1 text-[11px] uppercase tracking-[0.18em] font-mk-mono"
