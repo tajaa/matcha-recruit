@@ -1,9 +1,9 @@
 """Shared constants + tiny display/parse helpers used across the package."""
 
-from app.core.services.genai_client import get_genai_client
-
 from ..._shared.citations import _parse_json  # noqa: F401 — re-export, see Stage 6
 from ..._shared.pdf import _fmt_dt
+from ..._shared.gemini import _genai  # noqa: F401 — re-export, package imports it from here
+from ..._shared.text import _hum  # noqa: F401 — re-export, package imports it from here
 
 
 MODEL = "gemini-3-flash-preview"
@@ -20,16 +20,6 @@ DISCLAIMER = (
     "legal conclusion; attorney review is required."
 )
 
-_client = None
-
-
-def _genai():
-    global _client
-    if _client is None:
-        _client = get_genai_client()
-    return _client
-
-
 def _dt(v) -> str:
     return _fmt_dt(v)
 
@@ -45,14 +35,10 @@ def _iso(v) -> str | None:
         return str(v) or None
 
 
-def _hum(s) -> str:
-    """Humanize a raw db enum/snake_case value for display — 'in_review' ->
-    'In Review'. Feeds both the AI corpus text and the PDF, so the model's
-    own summaries read cleanly too, not just the deterministic rendering."""
-    if not s:
-        return ""
-    return str(s).replace("_", " ").replace("-", " ").strip().title()
-# `_hum` title-cases, which turns statutory acronyms into "Fmla" / "Eeoc" — fine
+# `_hum` (imported above) humanizes a raw db enum/snake_case value for display —
+# 'in_review' -> 'In Review'. It feeds both the AI corpus text and the PDF, so the
+# model's own summaries read cleanly too, not just the deterministic rendering.
+# It title-cases, which turns statutory acronyms into "Fmla" / "Eeoc" — fine
 # for a status enum, wrong in an attorney-facing record where the acronym IS the
 # statute's name. Only these closed vocabularies need the override.
 _ACRONYM_LABELS = {

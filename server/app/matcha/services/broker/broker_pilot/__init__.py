@@ -29,8 +29,6 @@ on its own `# ---` banners. `routes/broker/pilot.py` imports this as `bp` and
 reaches ~30 names by attribute, so everything is re-exported below.
 """
 import logging
-import re
-from app.core.services.genai_client import get_genai_client
 
 from ._config import (  # noqa: F401
     MODEL,

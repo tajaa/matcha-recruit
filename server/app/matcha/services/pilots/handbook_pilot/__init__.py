@@ -45,8 +45,6 @@ attribute, and hr_pilot_corpus.py imports `build_corpus` / `_floor_records` /
 `_slug` directly, so everything is re-exported below.
 """
 import logging
-import re
-from app.core.services.genai_client import get_genai_client
 
 from ._config import (  # noqa: F401
     MODEL,
