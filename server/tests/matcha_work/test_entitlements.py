@@ -214,8 +214,12 @@ class TestModelClamp:
     def _patches(self, plan, mode="normal"):
         return (
             patch.object(ent, "resolve_plan_for_user", AsyncMock(return_value=plan)),
+            # Patch `_models`, not the package: `_get_model` moved there when
+            # matcha_work_ai became a facade package, and it resolves this name
+            # in its own module globals. Patching the package re-export would
+            # be silently ignored and this would hit the DB.
             patch(
-                "app.matcha.services.matcha_work.matcha_work_ai.get_matcha_work_model_mode",
+                "app.matcha.services.matcha_work.matcha_work_ai._models.get_matcha_work_model_mode",
                 AsyncMock(return_value=mode),
             ),
         )
