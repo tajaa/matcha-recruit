@@ -235,20 +235,25 @@ async def get_matter(matter_id: str, current_user=Depends(require_admin_or_clien
             matter_id,
         )
         share_rows = await conn.fetch(
-            """SELECT packet_id, recipient_email, download_count, last_downloaded_at,
+            """SELECT id, packet_id, recipient_email, download_count, last_downloaded_at,
                       expires_at, revoked, created_at
                  FROM legal_matter_share_links
                 WHERE matter_id = $1 ORDER BY created_at DESC""",
             matter_id,
         )
-        # Most recent share link per packet — a packet can be re-shared, we
-        # only need the latest to answer "has counsel opened this".
+        # `share` is the most recent link per packet — it answers "has counsel
+        # opened this". `shares` is EVERY link, because a packet can be shared
+        # more than once and each one stays independently live: surfacing only
+        # the newest left older links working and invisible, with no way to
+        # revoke what you cannot see.
         shares_by_packet: dict = {}
         for s in share_rows:
-            pid = str(s["packet_id"])
-            shares_by_packet.setdefault(pid, dict(s))
+            shares_by_packet.setdefault(str(s["packet_id"]), []).append(dict(s))
         matter["packets"] = [
-            {**dict(p), "share": shares_by_packet.get(str(p["id"]))} for p in packets
+            {**dict(p),
+             "shares": shares_by_packet.get(str(p["id"]), []),
+             "share": (shares_by_packet.get(str(p["id"])) or [None])[0]}
+            for p in packets
         ]
     return matter
 
@@ -532,6 +537,45 @@ async def share_packet(matter_id: str, packet_id: str, body: ShareIn, request: R
         await _audit(conn, matter_id, current_user, request, "share",
                      {"packet_id": packet_id, "recipient": body.recipient_email})
     return {"token": token, "path": f"/legal-pilot/share/{token}", "expires_at": expires}
+
+
+@router.post("/matters/{matter_id}/shares/{share_id}/revoke")
+async def revoke_share(matter_id: str, share_id: str, request: Request,
+                       current_user=Depends(require_admin_or_client)):
+    """Kill a counsel share link. The public download path has always refused a
+    revoked link (410) and the UI has always had a "Link revoked" state — but
+    nothing ever set the column, so a packet mailed to the wrong address could
+    not be pulled back. This is the write that closes that.
+
+    Revocation is deliberately one-way and idempotent: re-issuing access means
+    minting a NEW token (so the audit trail shows two distinct grants), never
+    resurrecting a token that has already been out in the world. Re-revoking an
+    already-revoked link is a no-op rather than a 409 — the caller's intent is
+    already satisfied, and failing it would be noise on a safety action."""
+    company_id = await get_client_company_id(current_user)
+    async with get_connection() as conn:
+        # Tenant isolation through the matter, same shape as _owned_packet: a
+        # share_id from another company must 404, not reveal that it exists.
+        row = await conn.fetchrow(
+            """SELECT s.id, s.revoked, s.recipient_email, s.packet_id, s.download_count
+                 FROM legal_matter_share_links s
+                 JOIN legal_matters m ON m.id = s.matter_id
+                WHERE s.id = $1 AND s.matter_id = $2 AND m.company_id = $3""",
+            share_id, matter_id, company_id,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Share link not found")
+        if not row["revoked"]:
+            await conn.execute(
+                "UPDATE legal_matter_share_links SET revoked = TRUE WHERE id = $1", share_id,
+            )
+            # Downloads-before-revocation is the fact counsel will actually be
+            # asked about later, so it goes in the trail, not just the flag.
+            await _audit(conn, matter_id, current_user, request, "revoke_share",
+                         {"share_id": share_id, "packet_id": str(row["packet_id"]),
+                          "recipient": row["recipient_email"],
+                          "downloads_before_revoke": row["download_count"]})
+    return {"status": "revoked", "share_id": share_id}
 
 
 # --------------------------------------------------------------------------- #

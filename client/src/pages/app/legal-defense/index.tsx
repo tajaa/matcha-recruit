@@ -59,6 +59,20 @@ export default function LegalDefense() {
     setResearch(researchRows[0] ?? null)
   }
 
+  /** Re-fetch just the matter (packets + share links) without tearing down the
+   *  evidence/research panes the way openMatter does — used after a mutation
+   *  that only changes packet state, e.g. revoking a counsel share link. */
+  async function refreshMatter() {
+    const id = activeIdRef.current
+    if (!id) return
+    try {
+      const m = await getMatter(id)
+      if (activeIdRef.current === id) setMatter(m)
+    } catch {
+      /* the row keeps its last-known state; the next open re-syncs it */
+    }
+  }
+
   async function handleRunResearch(includeGuidance = true) {
     const id = selectedId
     if (!id || researching) return
@@ -151,7 +165,8 @@ export default function LegalDefense() {
         ) : (
           <MatterWorkbench
             matter={matter} evidence={evidence} research={research} researching={researching}
-            onRunResearch={handleRunResearch} onRefresh={() => openMatter(matter.id)} toast={toast}
+            onRunResearch={handleRunResearch} onRefresh={() => openMatter(matter.id)}
+            onRefreshMatter={() => void refreshMatter()} toast={toast}
             autoSeed={matter.id === justCreatedId}
           />
         )}
@@ -169,9 +184,14 @@ export default function LegalDefense() {
   )
 }
 
-function MatterWorkbench({ matter, evidence, research, researching, onRunResearch, onRefresh, toast, autoSeed }: {
+function MatterWorkbench({ matter, evidence, research, researching, onRunResearch, onRefresh,
+                          onRefreshMatter, toast, autoSeed }: {
   matter: Matter; evidence: EvidencePreview | null; research: ResearchRow | null; researching: boolean
   onRunResearch: (includeGuidance?: boolean) => void; onRefresh: () => void
+  /** Re-fetch only the matter (packets + share links). Distinct from
+   *  `onRefresh`, which re-opens the matter wholesale to pick up a new evidence
+   *  corpus — overkill, and a visible flash, for a packet-only change. */
+  onRefreshMatter: () => void
   toast: ReturnType<typeof useToast>['toast']
   autoSeed: boolean
 }) {
@@ -283,10 +303,12 @@ function MatterWorkbench({ matter, evidence, research, researching, onRunResearc
               override has to stay reachable either way. */}
           <SubjectScopeSetter matter={matter} theory={evidence?.theory} onRefresh={onRefresh} />
           <EvidencePanel evidence={evidence} />
-          <PacketsPanel matterId={matter.id} packets={matter.packets ?? []} toast={toast} onShare={setShareFor} />
+          <PacketsPanel matterId={matter.id} packets={matter.packets ?? []} toast={toast} onShare={setShareFor} onRevoked={onRefreshMatter} />
         </div>
       </div>
-      {shareFor && <ShareModal matterId={matter.id} packet={shareFor} onClose={() => setShareFor(null)} toast={toast} />}
+      {/* Refresh on close so a link just minted shows up in the packet row's
+          live-links list (and is therefore immediately revocable). */}
+      {shareFor && <ShareModal matterId={matter.id} packet={shareFor} onClose={() => { setShareFor(null); onRefreshMatter() }} toast={toast} />}
     </div>
   )
 }

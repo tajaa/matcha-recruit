@@ -1406,3 +1406,162 @@ def test_packet_audit_trails_are_fetched_in_one_query_per_kind():
     assert asyncio.run(ld._er_audit_by_case(_Conn(), [])) == {}
     assert asyncio.run(ld._discipline_audit_by_record(_Conn(), [])) == {}
     assert calls["er"] == 1 and calls["disc"] == 0
+
+
+# --- employment-practices registers (workforce_compliance) -------------------
+#
+# These four registers are the documentary answer to the claim types this pilot
+# already models (equal-pay class action, disparate-impact hiring charge, BIPA).
+# The repo rule is that a risk engine ships wired into the pilots that ground on
+# its domain; workforce_compliance landed without that, and these cover the fix.
+
+_WFC = {"workforce_compliance": True}
+
+
+class _RegisterConn:
+    """Returns one row per employment-practices register, and records the args
+    each query was called with so scoping can be asserted."""
+
+    def __init__(self, rows=None):
+        self.rows = rows or {}
+        self.args: dict[str, tuple] = {}
+        self.sql: dict[str, str] = {}
+
+    async def fetch(self, sql, *args):
+        for tbl in ("pay_equity_reviews", "hiring_ai_audits",
+                    "pay_transparency_status", "biometric_consent_points"):
+            if tbl in sql:
+                self.args[tbl] = args
+                self.sql[tbl] = sql
+                return self.rows.get(tbl, [])
+        return []
+
+    async def fetchrow(self, sql, *args):
+        return None
+
+
+def test_registers_are_gated_on_workforce_compliance():
+    """Off by default — a company without the trackers must not have four extra
+    'unavailable' shaped sources, and must not be queried for tables it has no
+    rows in."""
+    conn = _RegisterConn()
+    asyncio.run(ld.gather_evidence(conn, "cid", None, None, {}))
+    assert conn.args == {}
+
+    keys = {k for k, _l, _f, pred in ld._SOURCES if pred(_WFC)}
+    for k in ("pay_equity", "hiring_ai_audits", "pay_transparency", "biometric_consent"):
+        assert k in keys
+
+
+def test_registers_are_not_date_filtered():
+    """They are current posture, not events: the pay-equity study that predates
+    the evidence window is still the study the company operated under during it,
+    and windowing it out answers 'did you ever study this?' with a false no."""
+    conn = _RegisterConn()
+    asyncio.run(ld.gather_evidence(conn, "cid", "2025-01-01", "2025-06-30", _WFC))
+    # company_id only — no start/end bound into any of the three company-wide ones
+    assert conn.args["pay_equity_reviews"] == ("cid",)
+    assert conn.args["hiring_ai_audits"] == ("cid",)
+    for tbl in ("pay_equity_reviews", "hiring_ai_audits"):
+        assert "CURRENT_DATE" in conn.sql[tbl]   # overdue computed, not read stale
+
+
+def test_pay_equity_never_conflates_a_measured_gap_with_the_dispersion_screen():
+    """Migration payequity02 exists because these two numbers were merged and a
+    dispersion share got reported as a '40% gap'. In an attorney-facing exhibit
+    that is materially worse than a mislabeled broker metric."""
+    rows = {"pay_equity_reviews": [{
+        "id": "pe1", "review_date": None, "scope": "All roles",
+        "methodology": "regression", "gap_pct": 2.5, "dispersion_pct": 40.0,
+        "remediation": None, "next_due_date": None, "overdue": False,
+    }]}
+    recs = asyncio.run(ld._src_pay_equity(_RegisterConn(rows), "cid", None, None, None, None))
+    s = recs[0]["summary"]
+    assert recs[0]["cid"] == "payequity:pe1"
+    assert "measured adjusted pay gap 2.5%" in s
+    assert "40.0% of roles flagged by the pay-dispersion screen" in s
+    # the screen figure is never presented as a gap
+    assert "40.0% gap" not in s and "gap 40.0" not in s
+
+
+def test_an_unaudited_hiring_tool_is_surfaced_not_dropped():
+    """A tool with no audit on file is the most probative row in the register for
+    a disparate-impact charge — a NULL date must not make it vanish."""
+    rows = {"hiring_ai_audits": [{
+        "id": "ai1", "tool_name": "ResumeRanker", "vendor": "Acme",
+        "purpose": "resume screening", "last_audit_date": None,
+        "next_due_date": None, "overdue": True,
+    }]}
+    recs = asyncio.run(ld._src_hiring_ai_audits(_RegisterConn(rows), "cid", None, None, None, None))
+    assert len(recs) == 1
+    assert "no bias audit recorded" in recs[0]["summary"]
+    assert "ResumeRanker" in recs[0]["summary"]
+
+
+def test_biometric_points_without_a_location_survive_a_location_scope():
+    """`location_id` is nullable metadata here, not the row's identity. The
+    standard _scope_direct predicate would drop a company-wide fingerprint-clock
+    inventory row from a location-scoped BIPA corpus."""
+    conn = _RegisterConn()
+    asyncio.run(ld._src_biometric_consent(
+        conn, "cid", None, None, "22222222-2222-2222-2222-222222222222", "IL"))
+    sql = conn.sql["biometric_consent_points"]
+    assert "bc.location_id IS NULL" in sql
+
+
+def test_biometric_summary_states_missing_consent_flatly():
+    rows = {"biometric_consent_points": [{
+        "id": "b1", "collection_type": "fingerprint", "purpose": "time clock",
+        "consent_obtained": False, "consent_obtained_date": None,
+        "consent_method": None, "retention_policy": None, "is_active": True,
+        "location_name": None,
+    }]}
+    recs = asyncio.run(ld._src_biometric_consent(_RegisterConn(rows), "cid", None, None, None, None))
+    assert "no consent recorded" in recs[0]["summary"]
+    assert "(company-wide)" in recs[0]["summary"]
+
+
+def test_pay_transparency_scopes_to_the_matters_state():
+    conn = _RegisterConn()
+    asyncio.run(ld._src_pay_transparency(conn, "cid", None, None, None, "CA"))
+    assert conn.args["pay_transparency_status"] == ("cid", "CA")
+    assert "UPPER(pt.state) = UPPER($2)" in conn.sql["pay_transparency_status"]
+
+
+def test_dated_diligence_acts_reach_the_chronology_but_inventories_do_not():
+    """Running a study or an audit on a date IS a company act, and dating it is
+    most of its evidentiary value. Posting status and a consent inventory are
+    record edits and collection metadata, not acts on a timeline."""
+    index = {
+        "payequity:a": {"cid": "payequity:a", "summary": "study", "when_iso": "2025-03-01"},
+        "aiaudit:b": {"cid": "aiaudit:b", "summary": "audit", "when_iso": "2025-04-01"},
+        "paytransp:c": {"cid": "paytransp:c", "summary": "posture", "when_iso": "2025-05-01"},
+        "biometric:d": {"cid": "biometric:d", "summary": "inventory", "when_iso": "2025-06-01"},
+    }
+    assert [r["cid"] for r in ld._chronology_rows(index)] == ["payequity:a", "aiaudit:b"]
+
+
+def test_register_prompt_rules_reach_the_model():
+    """The two rules that keep a register from becoming a liability opinion:
+    never merge the gap with the screen, and read a missing audit as a gap in
+    the record rather than a violation."""
+    sys = ld._SYSTEM
+    for cid_kind in ("payequity:", "aiaudit:", "paytransp:", "biometric:"):
+        assert cid_kind in sys
+    assert "NEVER merge" in sys
+    assert "never a statement that the company violated anything" in sys
+
+
+def test_pay_transparency_na_state_is_not_reported_as_a_posting_failure():
+    """'na' means the state has no posting law to comply with. `_hum` would
+    render it "Na", and the ranges clause would assert a posting failure against
+    a rule that does not apply."""
+    rows = {"pay_transparency_status": [{
+        "id": "pt1", "state": "TX", "status": "na",
+        "postings_include_ranges": False, "note": None, "updated_at": None,
+    }]}
+    s = asyncio.run(ld._src_pay_transparency(
+        _RegisterConn(rows), "cid", None, None, None, None))[0]["summary"]
+    assert "not applicable in this state" in s
+    assert "Na" not in s
+    assert "do not include pay ranges" not in s

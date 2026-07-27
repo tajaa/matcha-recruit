@@ -1,7 +1,8 @@
 import type { LucideIcon } from 'lucide-react'
 import {
-  Accessibility, Bell, BookMarked, BookOpenCheck, CalendarClock, ClipboardCheck, FileSignature,
-  FileWarning, Gavel, GraduationCap, HardHat, Landmark, ScrollText, Scale, Users,
+  Accessibility, BadgeDollarSign, Bell, BookMarked, BookOpenCheck, Bot, CalendarClock,
+  ClipboardCheck, FileSignature, FileWarning, Fingerprint, Gavel, GraduationCap, HardHat,
+  Landmark, ScrollText, Scale, Users,
 } from 'lucide-react'
 import type { Matter, MatterType } from '../../../api/legal-defense/legalDefense'
 
@@ -98,6 +99,10 @@ export const CID_KIND_LABEL: Record<string, string> = {
   preterm: 'Pre-termination review',
   separation: 'Separation agreement',
   ptclaim: 'Post-termination claim',
+  payequity: 'Pay-equity study',
+  aiaudit: 'AI hiring-tool audit',
+  paytransp: 'Pay transparency',
+  biometric: 'Biometric consent',
 }
 
 /** The evidence subsystems the backend can gather from
@@ -116,6 +121,10 @@ export const SOURCE_META: { key: string; label: string; icon: LucideIcon }[] = [
   { key: 'pre_termination', label: 'Pre-term reviews', icon: ClipboardCheck },
   { key: 'separations', label: 'Separations', icon: FileWarning },
   { key: 'post_term_claims', label: 'Post-term claims', icon: Gavel },
+  { key: 'pay_equity', label: 'Pay-equity studies', icon: Scale },
+  { key: 'hiring_ai_audits', label: 'AI hiring audits', icon: Bot },
+  { key: 'pay_transparency', label: 'Pay transparency', icon: BadgeDollarSign },
+  { key: 'biometric_consent', label: 'Biometric consent', icon: Fingerprint },
   { key: 'law', label: 'Governing law', icon: Landmark },
   { key: 'legislation', label: 'Pending legislation', icon: ScrollText },
   { key: 'case_law', label: 'Case law', icon: BookMarked },

@@ -65,6 +65,7 @@ export type MatterMessage = {
 }
 
 export type PacketShareStatus = {
+  id: string
   recipient_email: string | null
   download_count: number
   last_downloaded_at: string | null
@@ -80,7 +81,12 @@ export type Packet = {
   citations?: string[]
   file_size: number | null
   generated_at: string
+  /** Most recent link — the "has counsel opened this" summary line. */
   share?: PacketShareStatus | null
+  /** EVERY link ever minted for this packet, newest first. A packet can be
+   *  shared more than once and each link stays independently live, so the UI
+   *  must list them all — an older link you can't see is one you can't revoke. */
+  shares?: PacketShareStatus[]
 }
 
 export type Matter = {
@@ -157,6 +163,13 @@ export const generatePacket = (id: string, kind: 'pdf' | 'zip' | 'both', include
 export const sharePacket = (matterId: string, packetId: string, body: { recipient_email?: string; expires_days?: number }) =>
   api.post<{ token: string; path: string; expires_at: string }>(
     `/legal-pilot/matters/${matterId}/packets/${packetId}/share`, body,
+  )
+
+/** Kill a counsel share link. One-way by design — restoring access means
+ *  minting a new link, so the audit trail shows two distinct grants. */
+export const revokeShare = (matterId: string, shareId: string) =>
+  api.post<{ status: string; share_id: string }>(
+    `/legal-pilot/matters/${matterId}/shares/${shareId}/revoke`, {},
   )
 
 // Authed blob download → browser save (keeps the server filename).

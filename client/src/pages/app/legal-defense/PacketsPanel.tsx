@@ -1,11 +1,15 @@
 import { useState } from 'react'
-import { ChevronDown, Download, FileArchive, FileText, Share2 } from 'lucide-react'
+import { ChevronDown, Download, FileArchive, FileText, Link2Off, Loader2, Share2 } from 'lucide-react'
 import { useToast } from '../../../components/ui'
 import { PacketsPanel as PilotPacketsPanel } from '../../../components/pilot/PacketsPanel'
-import { downloadPacket, type Packet } from '../../../api/legal-defense/legalDefense'
+import { downloadPacket, revokeShare, type Packet, type PacketShareStatus } from '../../../api/legal-defense/legalDefense'
 import { fmtSize } from './shared'
 
-function shareStatusText(share: Packet['share']): string | null {
+function isLive(share: PacketShareStatus): boolean {
+  return !share.revoked && !(share.expires_at && new Date(share.expires_at) < new Date())
+}
+
+function shareStatusText(share: PacketShareStatus | null | undefined): string | null {
   if (!share) return null
   if (share.revoked) return 'Link revoked'
   if (share.expires_at && new Date(share.expires_at) < new Date()) return 'Link expired'
@@ -17,11 +21,13 @@ function shareStatusText(share: Packet['share']): string | null {
 
 /** Work product: latest PDF/ZIP pinned, older versions collapsed. Rows keep
  *  a chain-of-custody line for anything already shared with counsel. */
-export function PacketsPanel({ matterId, packets, toast, onShare }: {
+export function PacketsPanel({ matterId, packets, toast, onShare, onRevoked }: {
   matterId: string
   packets: Packet[]
   toast: ReturnType<typeof useToast>['toast']
   onShare: (p: Packet) => void
+  /** Refresh the matter after a revoke so the row reflects the new state. */
+  onRevoked?: () => void
 }) {
   const [showOlder, setShowOlder] = useState(false)
 
@@ -42,7 +48,7 @@ export function PacketsPanel({ matterId, packets, toast, onShare }: {
       helpText="The PDF is a defense memo that cites only real records; the ZIP bundles the underlying source documents. Shared links are logged for chain of custody."
     >
       {latest.map((p) => (
-        <PacketRow key={p.id} matterId={matterId} packet={p} toast={toast} onShare={() => onShare(p)} />
+        <PacketRow key={p.id} matterId={matterId} packet={p} toast={toast} onShare={() => onShare(p)} onRevoked={onRevoked} />
       ))}
       {older.length > 0 && (
         <>
@@ -55,7 +61,7 @@ export function PacketsPanel({ matterId, packets, toast, onShare }: {
           </button>
           {showOlder && older.map((p) => (
             <div key={p.id} className="opacity-60">
-              <PacketRow matterId={matterId} packet={p} toast={toast} onShare={() => onShare(p)} />
+              <PacketRow matterId={matterId} packet={p} toast={toast} onShare={() => onShare(p)} onRevoked={onRevoked} />
             </div>
           ))}
         </>
@@ -64,12 +70,32 @@ export function PacketsPanel({ matterId, packets, toast, onShare }: {
   )
 }
 
-function PacketRow({ matterId, packet, toast, onShare }: {
+function PacketRow({ matterId, packet, toast, onShare, onRevoked }: {
   matterId: string; packet: Packet; onShare: () => void
   toast: ReturnType<typeof useToast>['toast']
+  onRevoked?: () => void
 }) {
+  const [revoking, setRevoking] = useState<string | null>(null)
   const shareText = shareStatusText(packet.share)
   const size = fmtSize(packet.file_size)
+  // Every link that still works, not just the newest. A packet re-shared with a
+  // second attorney leaves the first link live, and the row used to show only
+  // the latest — so the older one could neither be seen nor pulled back.
+  const liveShares = (packet.shares ?? []).filter(isLive)
+
+  async function revoke(shareId: string) {
+    setRevoking(shareId)
+    try {
+      await revokeShare(matterId, shareId)
+      toast('Share link revoked — that link no longer opens the packet.', 'success')
+      onRevoked?.()
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not revoke the link', 'error')
+    } finally {
+      setRevoking(null)
+    }
+  }
+
   return (
     <div className="border-t border-white/[0.04] px-4 py-2.5">
       <div className="flex items-center gap-2">
@@ -97,6 +123,30 @@ function PacketRow({ matterId, packet, toast, onShare }: {
         </button>
       </div>
       {shareText && <div className="mt-1.5 text-[10px] leading-snug text-zinc-500">{shareText}</div>}
+      {liveShares.length > 0 && (
+        <div className="mt-1.5 space-y-1">
+          {liveShares.map((s) => (
+            <div key={s.id} className="flex items-center gap-2 text-[10px] leading-snug text-zinc-500">
+              <span className="truncate">
+                Live link{s.recipient_email ? ` · ${s.recipient_email}` : ''}
+                {s.expires_at ? ` · expires ${new Date(s.expires_at).toLocaleDateString()}` : ''}
+                {` · ${s.download_count} download${s.download_count === 1 ? '' : 's'}`}
+              </span>
+              <button
+                onClick={() => void revoke(s.id)}
+                disabled={revoking === s.id}
+                title="Revoke this link. Restoring access means sending a new one."
+                className="ml-auto flex shrink-0 items-center gap-1 rounded border border-white/[0.08] px-1.5 py-0.5 text-[10px] text-zinc-400 transition-colors hover:border-red-500/40 hover:text-red-300 disabled:opacity-50"
+              >
+                {revoking === s.id
+                  ? <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                  : <Link2Off className="h-2.5 w-2.5" />}
+                Revoke
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
