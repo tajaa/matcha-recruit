@@ -2,9 +2,11 @@
 
 Namespace grouping: each module is an independent router with its own mount + gate in the
 parent ``routes/__init__.py``; this package only re-exports them under their historical names.
-The websocket modules also expose non-router symbols (``thread_manager``,
-``broadcast_task_event``, the project-fanout start/stop hooks) imported directly by module path
+The websocket modules also expose non-router symbols (``thread_manager``, the
+project-fanout start/stop hooks) imported directly by module path
 (``app.matcha.routes.work.thread_ws`` / ``.project_ws``) — this package does not front those.
+``broadcast_task_event`` moved to ``services/matcha_work/task_events.py`` (refactor round 2,
+stage 3); ``project_ws.py`` re-exports it for backward compatibility.
 """
 
 from .journals import router as journals_router

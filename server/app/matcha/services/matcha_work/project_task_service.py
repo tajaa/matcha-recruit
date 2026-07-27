@@ -25,6 +25,7 @@ from uuid import UUID
 from zoneinfo import ZoneInfo
 
 from ....database import get_connection
+from .task_events import broadcast_task_event
 
 logger = logging.getLogger(__name__)
 
@@ -125,12 +126,8 @@ _TRANSITION_TEMPLATES: dict[str, dict[str, str]] = {
 
 
 async def _broadcast_task_event_safe(project_id: UUID, event: str, payload: dict) -> None:
-    """Wrapped broadcast — never fails the caller; logs at warning level.
-
-    Lazy import dodges the routes→services circular at module load time.
-    """
+    """Wrapped broadcast — never fails the caller; logs at warning level."""
     try:
-        from ...routes.work.project_ws import broadcast_task_event
         logger.info("dispatching %s for project=%s", event, project_id)
         await broadcast_task_event(project_id, event, payload)
     except Exception as e:
