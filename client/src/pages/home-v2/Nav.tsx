@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { ChevronDown, Menu, X } from "lucide-react";
-import { CREAM, CREAM_HI, INK, INK_SOFT, LINE, MATCHA, MATCHA_MID } from "./theme";
+import { CREAM, CREAM_HI, INK, INK_SOFT, LINE, MATCHA, MATCHA_MID, MATCHA_WASH, SANS } from "./theme";
 import { NAV_LINKS, PLATFORM_MENU, PLATFORM_MENU_FOOTER } from "./data";
 
 interface Props {
@@ -57,7 +57,7 @@ export default function HomeV2Nav({ onDemoClick }: Props) {
           borderBottom: `1px solid ${LINE}`,
         }}
       >
-        <div className="relative max-w-[1440px] mx-auto flex items-center justify-between px-6 sm:px-10 h-16">
+        <div className="relative max-w-[1440px] mx-auto flex items-center justify-between px-6 sm:px-10 h-[72px]">
           <Link to="/home-v2" onClick={closeAll} className="group flex items-center gap-2.5">
             <LeafMark />
             <span
@@ -79,7 +79,7 @@ export default function HomeV2Nav({ onDemoClick }: Props) {
                 type="button"
                 onClick={() => setPlatformOpen((v) => !v)}
                 className="inline-flex items-center gap-1 text-[13.5px] transition-colors duration-200 cursor-pointer"
-                style={{ color: platformOpen ? INK : INK_SOFT }}
+                style={{ color: platformOpen ? INK : INK_SOFT, fontFamily: SANS }}
                 aria-expanded={platformOpen}
                 aria-haspopup="true"
               >
@@ -93,37 +93,42 @@ export default function HomeV2Nav({ onDemoClick }: Props) {
               {platformOpen && (
                 <div className="absolute left-1/2 -translate-x-1/2 top-full pt-3">
                   <div
-                    className="w-[520px] p-6 grid grid-cols-2 gap-x-8 gap-y-6"
+                    className="w-[520px] p-6 grid grid-cols-2 gap-x-0 gap-y-6"
                     style={{
                       backgroundColor: CREAM_HI,
                       border: `1px solid ${LINE}`,
-                      borderRadius: "12px 2px 12px 12px",
-                      boxShadow: "0 24px 48px -20px rgba(20,21,15,0.18)",
+                      borderRadius: "4px",
+                      boxShadow: "0 16px 32px -20px rgba(20,21,15,0.14)",
                     }}
                   >
-                    {PLATFORM_MENU.map((group) => (
-                      <div key={group.heading}>
+                    {PLATFORM_MENU.map((group, gi) => (
+                      <div
+                        key={group.heading}
+                        className={gi === 0 ? "pr-8" : "pl-8"}
+                        style={gi === 1 ? { borderLeft: `1px solid ${LINE}` } : undefined}
+                      >
                         <div
                           className="text-[10.5px] font-mk-mono uppercase tracking-[0.18em] mb-3"
                           style={{ color: INK_SOFT }}
                         >
                           {group.heading}
                         </div>
-                        <div className="flex flex-col gap-3.5">
+                        <div className="flex flex-col gap-1 -mx-2.5">
                           {group.rows.map((row) => (
                             <Link
                               key={row.label}
                               to={row.to}
                               onClick={closeAll}
-                              className="block group/row"
+                              className="block rounded-[4px] px-2.5 py-2 transition-colors duration-150 hover:[background-color:var(--hv2-row-hover)]"
+                              style={{ ["--hv2-row-hover" as string]: MATCHA_WASH }}
                             >
                               <div
-                                className="text-[15px] transition-colors duration-150"
+                                className="text-[15px]"
                                 style={{ fontFamily: "var(--font-display)", color: INK }}
                               >
                                 {row.label}
                               </div>
-                              <div className="mt-0.5 text-[12.5px] leading-snug" style={{ color: INK_SOFT }}>
+                              <div className="mt-0.5 text-[12.5px] leading-snug" style={{ color: INK_SOFT, fontFamily: SANS }}>
                                 {row.caption}
                               </div>
                             </Link>
@@ -160,7 +165,7 @@ export default function HomeV2Nav({ onDemoClick }: Props) {
                   key={link.to}
                   to={link.to}
                   className="text-[13.5px] transition-colors duration-200"
-                  style={{ color: active ? INK : INK_SOFT }}
+                  style={{ color: active ? INK : INK_SOFT, fontFamily: SANS }}
                 >
                   {link.label}
                 </Link>
@@ -182,7 +187,7 @@ export default function HomeV2Nav({ onDemoClick }: Props) {
               style={{
                 backgroundColor: MATCHA,
                 color: CREAM,
-                borderRadius: "999px 4px 999px 999px",
+                borderRadius: "6px",
               }}
             >
               Get a demo
@@ -247,7 +252,7 @@ export default function HomeV2Nav({ onDemoClick }: Props) {
                 onDemoClick?.();
               }}
               className="mt-4 inline-flex items-center justify-center px-6 h-12 text-base font-medium cursor-pointer"
-              style={{ backgroundColor: MATCHA, color: CREAM, borderRadius: "999px 4px 999px 999px" }}
+              style={{ backgroundColor: MATCHA, color: CREAM, borderRadius: "6px" }}
             >
               Get a demo
             </button>

@@ -18,3 +18,4 @@ export const MATCHA_WASH = "#EDF2E2";
 export const LINE = "rgba(20,21,15,0.12)";
 
 export const DISPLAY = "var(--font-display)";
+export const SANS = "var(--font-sans)";

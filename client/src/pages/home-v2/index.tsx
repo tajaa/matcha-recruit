@@ -5,6 +5,7 @@ import { HOME_V2_JSON_LD } from "./data";
 import { CREAM } from "./theme";
 import HomeV2Nav from "./Nav";
 import { Hero } from "./Hero";
+import { PaperGrain } from "./PaperGrain";
 
 // Same latched-lazy pattern as pages/home/index.tsx:16-20,59-78 — mount on
 // first open so a visitor who never clicks a demo CTA never pulls the chunk,
@@ -46,6 +47,7 @@ export default function HomeV2() {
 
   return (
     <div style={{ backgroundColor: CREAM }} className="min-h-screen">
+      <PaperGrain />
       {hasOpenedPricing && (
         <Suspense
           fallback={

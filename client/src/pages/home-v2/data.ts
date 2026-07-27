@@ -53,10 +53,25 @@ export const NAV_LINKS = [
   { to: "/resources", label: "Resources" },
 ];
 
+export const HERO_EYEBROW = "Risk & people, one system";
 export const HERO_LINE_1 = "Managing your risk,";
 export const HERO_LINE_2 = "before your risk manages you.";
 export const HERO_DECK =
   "Incident reporting, employee relations, and compliance in one system.";
+
+// The furniture row under the hairline — three parallel capabilities, not a
+// sequence, so no 01/02/03 numbering (that would be decoration, not
+// information). Mirrors the mega-menu's own vocabulary on purpose: nav and
+// hero should teach the same words.
+export const HERO_DOMAINS = [
+  "Incident Reporting",
+  "Employee Relations",
+  "Compliance",
+];
+// No invented founding date/metric here — see root CLAUDE.md's rule against
+// unsupportable marketing claims. A plain right-aligned label is enough to
+// balance the row optically (that's EYEBROW_END's whole job).
+export const HERO_FOLIO = "One system, not a point solution";
 
 export const HOME_V2_JSON_LD = {
   "@context": "https://schema.org",
