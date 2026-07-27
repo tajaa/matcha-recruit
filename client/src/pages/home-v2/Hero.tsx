@@ -97,11 +97,26 @@ export function Hero({ onDemoClick }: { onDemoClick?: () => void }) {
           style={{ fontFamily: DISPLAY, fontWeight: 300, lineHeight: 1.2, color: INK }}
         >
           <span className="block">{HERO_LINE_1}</span>
-          <span className={`relative ${BAND_BOX}`}>
-            {HERO_LINE_2}
+          {/*
+            Base and overlay are SIBLINGS under this plain `relative block`
+            wrapper, not parent/child — both must resolve BAND_BOX's
+            percentage-based bleed math (ml/pl-pr use %/vw together) against
+            the SAME containing block. Nesting the overlay inside the base
+            (the first version of this) made the overlay's containing block
+            the base's own already-bled padding box, so the identical %
+            values resolved to different pixels and the two rectangles
+            drifted apart — the green field rendered narrower than the real
+            text. `top-0 left-0` (not `inset-0`) on the overlay matters too:
+            with `right` left auto, sizing is driven by the same
+            margin+padding+width formula the base uses; `inset-0` would pin
+            all four edges AND fight the explicit width from `w-fit`,
+            over-constraining the box.
+          */}
+          <span className="relative block">
+            <span className={BAND_BOX}>{HERO_LINE_2}</span>
             <span
               aria-hidden
-              className={`absolute inset-0 ${BAND_BOX}`}
+              className={`absolute top-0 left-0 ${BAND_BOX}`}
               style={{
                 backgroundColor: MATCHA,
                 backgroundImage: `${paperLayers().backgroundImage}, linear-gradient(180deg, rgba(255,255,255,0.07), rgba(0,0,0,0.05))`,
